@@ -274,7 +274,7 @@ fn perspective_frustum_culls_all_six_planes_and_keeps_intersections() {
 #[test]
 fn projection_uses_f64_world_coordinates_and_reports_pixel_error() {
     let generation = generation(3, 0);
-    let world = 1_000_000_000_000.0;
+    let world = 1.0e308;
     let camera = Camera::perspective(
         [world, 0.0, 0.0],
         [world, 0.0, -1.0],
@@ -300,6 +300,32 @@ fn projection_uses_f64_world_coordinates_and_reports_pixel_error() {
             &camera,
             [100, 100],
             AvailableNodes::new(generation, &[node]),
+            GENEROUS_BUDGET,
+        )
+        .unwrap();
+
+    assert_eq!(plan.requests().len(), 1);
+    assert!((plan.requests()[0].screen_space_error_pixels() - 10.0).abs() < 0.001);
+}
+
+#[test]
+fn projection_handles_extreme_width_without_overflow() {
+    let node = node(
+        1,
+        None,
+        bounds([-1.0e308, 0.0, -10.0], [1.0e308, 0.0, -10.0]),
+        2.0,
+        1,
+        1,
+        1,
+        NodeStatus::Missing,
+    );
+
+    let plan = planner(20.0, 1.0)
+        .plan(
+            &camera(),
+            [100, 100],
+            AvailableNodes::new(generation(3, 2), &[node]),
             GENEROUS_BUDGET,
         )
         .unwrap();

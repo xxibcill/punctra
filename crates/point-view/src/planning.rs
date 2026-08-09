@@ -263,15 +263,27 @@ impl Projection {
     }
 
     fn screen_error(self, node: &AvailableNode) -> f64 {
-        let min = DVec3::from_array(node.bounds.min);
-        let max = DVec3::from_array(node.bounds.max);
-        let center = (min + max) * 0.5;
-        let half_extent = (max - min) * 0.5;
+        let min = node.bounds.min;
+        let max = node.bounds.max;
+        let center = DVec3::new(
+            min[0].midpoint(max[0]),
+            min[1].midpoint(max[1]),
+            min[2].midpoint(max[2]),
+        );
+        let half_extent = DVec3::new(
+            axis_half_extent(min[0], max[0]),
+            axis_half_extent(min[1], max[1]),
+            axis_half_extent(min[2], max[2]),
+        );
         let center_depth = self.forward.dot(center - self.eye);
         let depth_radius = self.forward.abs().dot(half_extent);
         let nearest_depth = (center_depth - depth_radius).max(self.near_distance);
         node.geometric_error * self.pixel_scale / nearest_depth
     }
+}
+
+fn axis_half_extent(min: f64, max: f64) -> f64 {
+    (-min).midpoint(max)
 }
 
 #[derive(Clone, Copy, Debug)]
