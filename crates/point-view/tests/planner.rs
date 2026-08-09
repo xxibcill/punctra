@@ -886,19 +886,19 @@ fn accounting_overflow_is_reported_without_updating_hysteresis() {
 }
 
 #[test]
-fn deep_hierarchies_use_a_bounded_call_stack() {
+fn deep_reverse_key_hierarchies_validate_in_linear_time() {
     const DEPTH: u64 = 25_000;
     let mut nodes = Vec::with_capacity(usize::try_from(DEPTH).unwrap());
     for key in 1..=DEPTH {
         nodes.push(node(
             key,
-            (key > 1).then_some(key - 1),
+            (key < DEPTH).then_some(key + 1),
             box_at(0.0, 0.0, -10.0),
             0.0,
             1,
             1,
             key,
-            if key == DEPTH {
+            if key == 1 {
                 resident(1)
             } else {
                 NodeStatus::Missing
@@ -915,8 +915,8 @@ fn deep_hierarchies_use_a_bounded_call_stack() {
         )
         .unwrap();
 
-    assert_eq!(request_keys(&plan), vec![node_key(1)]);
-    assert_eq!(retained_keys(&plan), vec![node_key(DEPTH)]);
+    assert_eq!(request_keys(&plan), vec![node_key(DEPTH)]);
+    assert_eq!(retained_keys(&plan), vec![node_key(1)]);
 }
 
 fn plan_error(

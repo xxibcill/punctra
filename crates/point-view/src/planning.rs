@@ -152,6 +152,7 @@ fn resolve_parents(
 
 fn validate_acyclic(nodes: &[AvailableNode], parents: &[Option<usize>]) -> Result<(), PlanError> {
     let mut finished = vec![false; nodes.len()];
+    let mut path_positions = vec![None; nodes.len()];
     for start in 0..nodes.len() {
         if finished[start] {
             continue;
@@ -163,7 +164,7 @@ fn validate_acyclic(nodes: &[AvailableNode], parents: &[Option<usize>]) -> Resul
             if finished[index] {
                 break;
             }
-            if let Some(cycle_start) = path.iter().position(|candidate| *candidate == index) {
+            if let Some(cycle_start) = path_positions[index] {
                 let key = path[cycle_start..]
                     .iter()
                     .map(|cycle_index| nodes[*cycle_index].key)
@@ -171,10 +172,12 @@ fn validate_acyclic(nodes: &[AvailableNode], parents: &[Option<usize>]) -> Resul
                     .expect("a repeated path index creates a non-empty cycle");
                 return Err(PlanError::ParentCycle { key });
             }
+            path_positions[index] = Some(path.len());
             path.push(index);
             cursor = parents[index];
         }
         for index in path {
+            path_positions[index] = None;
             finished[index] = true;
         }
     }
