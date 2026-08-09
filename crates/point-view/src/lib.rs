@@ -227,6 +227,11 @@ impl<'nodes> AvailableNodes<'nodes> {
 }
 
 /// Screen-error thresholds controlling level-of-detail transitions.
+///
+/// The default configuration centers transitions at `2.0` physical pixels
+/// with `0.25` pixels of hysteresis. Previously coarse nodes therefore refine
+/// above `2.25` pixels, while previously refined nodes coarsen below `1.75`
+/// pixels.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PlannerConfig {
     max_error_pixels: f64,
@@ -538,6 +543,8 @@ impl ViewPlan {
 }
 
 /// Stateful hysteresis around an otherwise pure planning operation.
+///
+/// The default planner uses [`PlannerConfig::default`].
 #[derive(Clone, Debug)]
 pub struct ViewPlanner {
     config: PlannerConfig,
