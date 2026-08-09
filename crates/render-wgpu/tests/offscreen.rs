@@ -221,6 +221,17 @@ fn assert_raster_and_pick_semantics(gpu: &GpuContext) {
         subject.pick_and_wait(&highlighted.recorded_frame, discarded_corner),
         None
     );
+
+    subject.apply(&RenderUpdate::SetHighlights {
+        view_generation,
+        point_ids: vec![transparent_id],
+    });
+    let transparent_highlighted = subject.render(&frame);
+    assert_pixel(transparent_highlighted.image.pixel(CENTER), RED);
+    let visible_hit = subject
+        .pick_and_wait(&transparent_highlighted.recorded_frame, CENTER)
+        .expect("highlighting a transparent point must not hide the visible point behind it");
+    assert_hit(visible_hit, view_generation, 1, 1, near_id);
 }
 
 fn assert_large_world_precision(gpu: &GpuContext) {

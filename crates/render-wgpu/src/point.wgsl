@@ -58,7 +58,11 @@ fn point_vertex(input: VertexInput, @builtin(vertex_index) vertex_index: u32) ->
 
     var output: VertexOutput;
     output.clip_position = clip_position;
-    output.color = select(input.color, camera.highlight_color, (input.flags & HIGHLIGHTED) != 0u);
+    let highlighted_color = vec4<f32>(
+        camera.highlight_color.rgb,
+        input.color.a * camera.highlight_color.a,
+    );
+    output.color = select(input.color, highlighted_color, (input.flags & HIGHLIGHTED) != 0u);
     output.corner = corner;
     output.pick_token = input.pick_token;
     return output;

@@ -8,7 +8,8 @@ use crate::Camera;
 ///
 /// The default style uses a 3.0-physical-pixel point diameter, the linear RGBA
 /// highlight color `[1.0, 0.8, 0.1, 1.0]`, and the linear RGBA clear color
-/// `[0.015, 0.02, 0.03, 1.0]`.
+/// `[0.015, 0.02, 0.03, 1.0]`. Highlight alpha multiplies each point's source
+/// alpha, so highlighting cannot make an excluded alpha-zero point visible.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PointStyle {
     default_size_pixels: f32,
@@ -48,6 +49,8 @@ impl PointStyle {
     }
 
     /// Returns the linear RGBA highlight color.
+    ///
+    /// Its alpha multiplies the highlighted point's source alpha.
     #[must_use]
     pub const fn highlight_color(self) -> [f32; 4] {
         self.highlight_color
