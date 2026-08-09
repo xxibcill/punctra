@@ -50,12 +50,12 @@
 //! ```
 
 mod camera;
-mod depth;
 mod frame;
 mod gpu;
 mod pick;
 mod pipeline;
 mod renderer;
+mod targets;
 
 pub use camera::{Camera, CameraError};
 pub use frame::{Frame, FrameError, PointStyle};

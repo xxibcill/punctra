@@ -335,6 +335,10 @@ fn assert_async_ticket_stability(gpu: &GpuContext) {
     };
     assert_hit(new_hit, new_view_generation, 8, 4, new_id);
     assert_eq!(no_hit_ticket.poll().unwrap(), PickPoll::Ready(None));
+    let retained_old_hit = subject
+        .pick_and_wait(&old_render.recorded_frame, CENTER)
+        .expect("switching targets back should preserve the retained frame");
+    assert_hit(retained_old_hit, old_view_generation, 7, 3, old_id);
     assert!(matches!(
         old_ticket.poll(),
         Err(PickError::AlreadyCompleted)

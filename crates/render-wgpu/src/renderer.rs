@@ -15,13 +15,13 @@ use wgpu::util::DeviceExt;
 
 use crate::{
     Frame,
-    depth::DepthTarget,
     gpu::{BatchUniform, CameraUniform, GpuPoint},
     pick::{
         PICK_READBACK_ROW_BYTES, PICK_TOKEN_BYTES, PickError, PickRecord, PickRequest, PickTable,
-        PickTarget, PickTicket,
+        PickTicket,
     },
     pipeline::PointPipelines,
+    targets::{DepthTarget, PickTarget, RenderTargets},
 };
 
 /// Immutable construction options for a [`WgpuRenderer`].
@@ -129,8 +129,7 @@ pub struct WgpuRenderer {
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
     batches: BTreeMap<BatchKey, GpuBatch>,
-    depth: Option<DepthTarget>,
-    pick_target: Option<PickTarget>,
+    targets: RenderTargets,
     pick_table: Option<Arc<PickTable>>,
 }
 
@@ -179,8 +178,7 @@ impl WgpuRenderer {
             camera_buffer,
             camera_bind_group,
             batches: BTreeMap::new(),
-            depth: None,
-            pick_target: None,
+            targets: RenderTargets::default(),
             pick_table: None,
         })
     }
@@ -266,7 +264,6 @@ impl WgpuRenderer {
         );
 
         let viewport = frame.viewport();
-        self.ensure_depth(viewport);
         self.record_frame_uniforms(encoder, frame, &batches)?;
 
         let clear = frame.style().clear_color();
@@ -285,10 +282,7 @@ impl WgpuRenderer {
             },
         });
         let color_attachments = [color_attachment];
-        let depth = self
-            .depth
-            .as_ref()
-            .ok_or(RendererError::DepthTargetUnavailable)?;
+        let depth = self.targets.depth(&self.device, viewport);
 
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -338,8 +332,8 @@ impl WgpuRenderer {
     ///
     /// # Errors
     ///
-    /// Returns an error when the frame belongs to another renderer, the pixel is
-    /// outside its viewport, or an internal render target is unavailable.
+    /// Returns an error when the frame belongs to another renderer or the pixel
+    /// is outside its viewport.
     pub fn pick(
         &mut self,
         encoder: &mut wgpu::CommandEncoder,
@@ -356,19 +350,18 @@ impl WgpuRenderer {
             return Err(RendererError::PickOutsideViewport { pixel, viewport });
         }
 
-        self.ensure_depth(viewport);
-        self.ensure_pick_target(viewport);
         self.record_frame_uniforms(encoder, &frame, &recorded_frame.batches)?;
-        let pick_target = self
-            .pick_target
-            .as_ref()
-            .ok_or(RendererError::PickTargetUnavailable)?;
-        let depth = self
-            .depth
-            .as_ref()
-            .ok_or(RendererError::DepthTargetUnavailable)?;
-        self.record_pick_pass(encoder, pick_target, depth, &recorded_frame.batches);
-        let (readback, receiver) = self.record_pick_readback(encoder, pick_target, pixel);
+        let (depth, pick_target) = self.targets.depth_and_pick(&self.device, viewport);
+        Self::record_pick_pass(
+            encoder,
+            pick_target,
+            depth,
+            &recorded_frame.batches,
+            &self.pipelines.pick,
+            &self.camera_bind_group,
+        );
+        let (readback, receiver) =
+            Self::record_pick_readback(&self.device, encoder, pick_target, pixel);
         Ok(PickTicket::new(
             frame.view_generation(),
             readback,
@@ -401,14 +394,15 @@ impl WgpuRenderer {
     }
 
     fn record_pick_pass(
-        &self,
         encoder: &mut wgpu::CommandEncoder,
         target: &PickTarget,
         depth: &DepthTarget,
         batches: &[RecordedBatch],
+        pipeline: &wgpu::RenderPipeline,
+        camera_bind_group: &wgpu::BindGroup,
     ) {
         let pick_attachments = [Some(wgpu::RenderPassColorAttachment {
-            view: &target.view,
+            view: target.view(),
             depth_slice: None,
             resolve_target: None,
             ops: wgpu::Operations {
@@ -431,16 +425,11 @@ impl WgpuRenderer {
             occlusion_query_set: None,
             multiview_mask: None,
         });
-        record_point_batches(
-            &mut pass,
-            &self.pipelines.pick,
-            &self.camera_bind_group,
-            batches,
-        );
+        record_point_batches(&mut pass, pipeline, camera_bind_group, batches);
     }
 
     fn record_pick_readback(
-        &self,
+        device: &wgpu::Device,
         encoder: &mut wgpu::CommandEncoder,
         target: &PickTarget,
         pixel: [u32; 2],
@@ -448,7 +437,7 @@ impl WgpuRenderer {
         wgpu::Buffer,
         mpsc::Receiver<Result<(), wgpu::BufferAsyncError>>,
     ) {
-        let readback = self.device.create_buffer(&wgpu::BufferDescriptor {
+        let readback = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("punctra pick readback"),
             size: PICK_READBACK_ROW_BYTES,
             usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
@@ -456,7 +445,7 @@ impl WgpuRenderer {
         });
         encoder.copy_texture_to_buffer(
             wgpu::TexelCopyTextureInfo {
-                texture: &target.texture,
+                texture: target.texture(),
                 mip_level: 0,
                 origin: wgpu::Origin3d {
                     x: pixel[0],
@@ -489,26 +478,6 @@ impl WgpuRenderer {
             },
         );
         (readback, receiver)
-    }
-
-    fn ensure_depth(&mut self, viewport: [u32; 2]) {
-        let matches = self
-            .depth
-            .as_ref()
-            .is_some_and(|depth| depth.viewport() == viewport);
-        if !matches {
-            self.depth = Some(DepthTarget::new(&self.device, viewport));
-        }
-    }
-
-    fn ensure_pick_target(&mut self, viewport: [u32; 2]) {
-        let matches = self
-            .pick_target
-            .as_ref()
-            .is_some_and(|target| target.viewport == viewport);
-        if !matches {
-            self.pick_target = Some(PickTarget::new(&self.device, viewport));
-        }
     }
 
     fn record_frame_uniforms(
@@ -784,12 +753,6 @@ pub enum RendererError {
     /// Internal generation pick metadata was unexpectedly absent.
     #[error("active View generation has no pick metadata")]
     PickMetadataUnavailable,
-    /// A lazily created depth target was unexpectedly absent.
-    #[error("renderer depth target is unavailable")]
-    DepthTargetUnavailable,
-    /// A lazily created pick target was unexpectedly absent.
-    #[error("renderer pick target is unavailable")]
-    PickTargetUnavailable,
     /// A batch origin is too far from the camera to fit the display model.
     #[error("batch {key:?} origin axis {axis} is outside finite f32 camera-relative range")]
     BatchOriginOutOfRange {

@@ -3,8 +3,6 @@ use std::sync::{Arc, Mutex, TryLockError, mpsc};
 use render_protocol::{BatchKey, BatchVersion, PointId, ViewGenerationKey};
 use thiserror::Error;
 
-use crate::pipeline::PICK_FORMAT;
-
 pub(crate) const PICK_READBACK_ROW_BYTES: u64 = 256;
 pub(crate) const PICK_TOKEN_BYTES: u64 = 4;
 
@@ -280,37 +278,6 @@ impl PickTable {
             version: record.version,
             point: record.point,
         }))
-    }
-}
-
-pub(crate) struct PickTarget {
-    pub(crate) texture: wgpu::Texture,
-    pub(crate) view: wgpu::TextureView,
-    pub(crate) viewport: [u32; 2],
-}
-
-impl PickTarget {
-    pub(crate) fn new(device: &wgpu::Device, viewport: [u32; 2]) -> Self {
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("punctra pick texture"),
-            size: wgpu::Extent3d {
-                width: viewport[0],
-                height: viewport[1],
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: PICK_FORMAT,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-            view_formats: &[],
-        });
-        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        Self {
-            texture,
-            view,
-            viewport,
-        }
     }
 }
 
