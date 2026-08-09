@@ -1,6 +1,7 @@
 # Cross-Module Contracts and Invariants
 
-Status: proposed v0.1
+Status: deferred platform proposal; render-engine v0.1 is defined in
+[the current design](../design/render-engine-v0.1.md)
 
 This document defines the semantics that every module must preserve. Rust names are illustrative; the behavior is normative.
 

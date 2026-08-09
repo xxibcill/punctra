@@ -1,0 +1,43 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        run: rustup toolchain install 1.90.0 --profile minimal --component clippy,rustfmt
+      - name: Check formatting
+        run: cargo fmt --all --check
+      - name: Lint
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+      - name: Test
+        run: cargo test --workspace --all-features
+      - name: Check documentation
+        run: RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps
+
+  gpu-software:
+    runs-on: ubuntu-24.04
+    env:
+      PUNCTRA_REQUIRE_GPU: "1"
+      VK_DRIVER_FILES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+      WGPU_BACKEND: vulkan
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        run: rustup toolchain install 1.90.0 --profile minimal
+      - name: Install software Vulkan adapter
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends mesa-vulkan-drivers vulkan-tools
+      - name: Verify software Vulkan adapter
+        run: vulkaninfo --summary
+      - name: Run GPU acceptance tests
+        run: cargo test -p render-wgpu --test offscreen -- --nocapture --test-threads=1

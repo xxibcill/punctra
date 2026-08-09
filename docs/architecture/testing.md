@@ -1,6 +1,7 @@
 # Verification Strategy
 
-Status: proposed v0.1
+Status: deferred platform proposal; render-engine v0.1 is defined in
+[the current design](../design/render-engine-v0.1.md)
 
 The interface is the test surface. Verification asks whether each module preserves its documented inputs, outputs, invariants, ordering, resource limits, errors, and effects. Tests do not lock private algorithms or file layouts unless the layout is itself a persisted contract.
 

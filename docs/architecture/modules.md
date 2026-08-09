@@ -1,6 +1,7 @@
 # Module Catalog
 
-Status: proposed v0.1
+Status: deferred platform proposal; render-engine v0.1 is defined in
+[the current design](../design/render-engine-v0.1.md)
 
 This document is the ownership map. Each crate below is one logical module with one job. The job sentence is normative: if new behavior does not fit it, that behavior does not belong in the module.
 

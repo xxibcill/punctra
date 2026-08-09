@@ -1,5 +1,10 @@
 # Architectural Decision Records
 
+Status: deferred platform proposals
+
+> These records describe the earlier broad platform concept. Punctra v0.1 is
+> scoped to the render engine in [the accepted design](../design/render-engine-v0.1.md).
+
 Only hard-to-reverse or surprising decisions are recorded here. Module details and routine implementation choices belong in [the architecture package](../architecture/README.md).
 
 | ADR | Status | Decision |

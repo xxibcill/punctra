@@ -1,6 +1,12 @@
 # Domain Context: Point-Cloud Foundation
 
-This glossary is the canonical language for the repository. Use these terms in interfaces, documentation, tests, and discussions.
+Status: renderer terms are active; broader platform terms are deferred
+
+Punctra v0.1 implements only the reusable render engine described in
+[the accepted design](docs/design/render-engine-v0.1.md). The definitions of
+Point, Point Identity, Point Batch, View, and View Batch below are canonical for
+v0.1. The remaining terms are retained as vocabulary research for possible host
+projects and do not imply current product scope.
 
 ## Artifact
 
