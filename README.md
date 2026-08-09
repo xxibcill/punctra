@@ -1,14 +1,21 @@
 # Punctra
 
-Punctra is an embeddable Rust and wgpu point-cloud rendering engine. It is for
-applications that need progressive display of very large point sets, precise
-large-world coordinates, bounded logical point residency, generation-safe
-streaming updates, and point picking without adopting a complete editor or data
-model.
+Punctra is an embeddable Rust point-cloud foundation with verified Source
+access, adaptive View planning, and wgpu rendering. It is for applications that
+need authoritative Point reads, progressive display of very large point sets,
+precise large-world coordinates, bounded logical residency, generation-safe
+streaming updates, and Point picking without adopting a complete editor or
+document model.
 
 Version 0.2.0 adds the adaptive planning scope and verification gates recorded
 in [the v0.2 design](docs/design/adaptive-view-planning-v0.2.md) on top of
 [the v0.1 renderer](docs/design/render-engine-v0.1.md).
+
+Version 0.3 development is active under the accepted
+[Real Sources design](docs/design/real-sources-v0.3.md). Its first delivery
+slice establishes canonical Source and Point contracts, runtime-neutral bounded
+work, a verified Source seam, and an in-memory conformance adapter before LAS
+and LAZ decoding are added through that same seam.
 
 Future direction is described in the [living roadmap](ROADMAP.md). Its release
 themes are adjustable and do not expand the accepted implementation scope by
@@ -58,15 +65,31 @@ no I/O and never mutates renderer state.
 
 ## Workspace
 
+- `point-contracts` defines lossless Source, Point, Attribute, coordinate, and
+  provenance values.
+- `foundation-runtime` provides runtime-neutral Jobs, progress, cancellation,
+  and bounded pull-stream control.
+- `point-source` verifies immutable Sources and exposes normalized bounded
+  reads through one caller-facing interface.
+- `source-memory` supplies deterministic in-memory Sources; its opt-in
+  `test-support` feature adds conformance faults.
 - `render-protocol` defines and validates renderer-neutral View updates.
 - `point-view` plans deterministic, budgeted hierarchy requests and retirement.
 - `render-wgpu` owns GPU resources, pipelines, drawing, and picking.
 - `renderer-demo` exercises the engine with generated point batches.
 
-File decoding, index construction and persistence, networking, editing, terrain
-construction, and application UI remain outside the workspace scope.
+LAS/LAZ decoding is the next v0.3 delivery slice. Index construction and
+persistence, networking, editing, terrain construction, and application UI
+remain outside the accepted workspace scope.
 
-## Demo
+## Examples
+
+Exercise the first v0.3 Source slice headlessly with the
+[in-memory Source example](crates/source-memory/examples/memory_source.rs):
+
+```bash
+cargo run -p source-memory --example memory_source
+```
 
 Run the deterministic adaptive-LOD demo with:
 
@@ -93,6 +116,8 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace --all-features
 cargo bench -p point-view --bench planner
+cargo bench -p source-memory --bench read
+cargo run -p source-memory --example memory_source
 cargo run -p renderer-demo
 ```
 

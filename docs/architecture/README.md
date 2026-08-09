@@ -1,13 +1,15 @@
 # Point-Cloud Foundation Architecture
 
 Status: broader platform proposal deferred; the v0.1 renderer and v0.2 adaptive
-View planner are implemented
+View planner are implemented, and v0.3 Real Sources is active
 
 > Punctra's accepted current contracts are the reusable
-> [v0.1 render engine](../design/render-engine-v0.1.md) and renderer-neutral
-> [v0.2 adaptive View planner](../design/adaptive-view-planning-v0.2.md). The
-> remaining broader document is research for possible host projects, not the
-> current implementation plan.
+> [v0.1 render engine](../design/render-engine-v0.1.md), renderer-neutral
+> [v0.2 adaptive View planner](../design/adaptive-view-planning-v0.2.md), and
+> active [v0.3 Real Sources path](../design/real-sources-v0.3.md). Where this
+> older proposal differs from the v0.3 Source interface, the accepted v0.3
+> design controls. The remaining broader document is research for possible host
+> projects, not the current implementation plan.
 
 This package defines a reusable, headless foundation for very large point-cloud documents. It is aimed at learning, experimentation, and reuse by desktop applications, command-line tools, language bindings, and future research code.
 

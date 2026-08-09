@@ -1,7 +1,7 @@
 # Runtime Workflows
 
-Status: deferred platform proposal; render-engine v0.1 is defined in
-[the current design](../design/render-engine-v0.1.md)
+Status: deferred platform proposal; current renderer, View, and Source
+contracts are defined by the accepted designs in [`docs/design`](../design)
 
 These workflows show composition without hidden reverse calls. A module invokes only an allowed dependency. Application adapters coordinate sibling modules when no lower module should own the whole workflow.
 
@@ -18,8 +18,8 @@ sequenceDiagram
     participant IDX as point-index
 
     APP->>WS: Engine::open(manifest, source adapter, verification policy)
-    WS->>SRC: verify(Recorded(SourceRecord), policy)
-    SRC-->>WS: VerifiedSource(reader, SourceRecord, level)
+    WS->>SRC: candidate.open(match_record(SourceRecord, policy))
+    SRC-->>WS: opaque verified Source
     WS->>REV: open_and_recover(target, Revision Source Contract)
     REV-->>WS: durable head Revision
     WS->>IDX: open_index(target, expected Source Identity)
@@ -55,11 +55,9 @@ An index tool can bypass **point-workspace**:
 
 ~~~rust
 let candidate = source_las::open_candidate(path)?;
-let verified = candidate
-    .verify(SourceExpectation::New, VerificationPolicy::Full)
-    .await?;
+let source = candidate.open(OpenOptions::identify()).await?;
 let index = point_index::IndexBuilder::build_or_resume(
-    verified.source,
+    source,
     index_target,
     index_options,
 ).await?;
@@ -75,7 +73,7 @@ sequenceDiagram
     participant IDX as point-index
     participant SRC as point-source
 
-    APP->>IDX: build_or_resume(verified PointSource, target, options)
+    APP->>IDX: build_or_resume(verified Source, target, options)
     IDX->>IDX: verify checkpoint frames
 
     loop bounded Source spans

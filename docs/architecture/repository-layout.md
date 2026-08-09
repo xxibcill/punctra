@@ -262,19 +262,14 @@ Examples of direct use:
 
 ~~~rust
 // Decode without a Workspace.
-let source = source_las::open_candidate(path)?;
-let verified = source
-    .verify(SourceExpectation::New, VerificationPolicy::Full)
-    .await?;
-let event = verified.source.read(spans, fields, budget).next(&cancel)?;
+let source = source_las::open(path).await?;
+let mut batches = source.read(request)?;
+let batch = batches.next()?;
 
 // Index generated Points through the memory adapter, without a Workspace.
-let source = source_memory::from_batches(generated_batches)?;
-let verified = source
-    .verify(SourceExpectation::New, VerificationPolicy::Full)
-    .await?;
+let source = source_memory::open(generated_memory_source).await?;
 let index = point_index::IndexBuilder::build_or_resume(
-    verified.source,
+    source,
     target,
     options,
 ).await?;
@@ -396,7 +391,7 @@ Build vertical evidence in this order:
 5. **point-revisions** with sparse classification Edits and fault-injected recovery.
 6. **point-query** and **point-workspace** with exact Snapshot Queries.
 7. **render-protocol**, **point-view**, **render-wgpu**, and a minimal desktop adapter.
-8. **source-copc** using the same PointSource and foundation-index path.
+8. **source-copc** using the same opaque verified Source and foundation-index path.
 9. **terrain-model** with complete TerrainLimits and deterministic fixtures.
 10. **landxml** with independent parsing and semantic fixtures.
 11. Bindings and additional adapters only after the Rust interfaces settle.

@@ -1,7 +1,7 @@
 # Punctra Roadmap
 
 Status: living guidance
-Last reviewed: 2026-08-09
+Last reviewed: 2026-08-10
 
 This roadmap communicates direction, not a delivery promise. It has no fixed
 dates. Candidate releases may be split, merged, reordered, renamed, or skipped
@@ -9,11 +9,11 @@ as technical and customer evidence changes. Milestone outcomes and dependency
 order matter more than version numbers.
 
 Only an **Active** release has committed scope. Punctra v0.1 and v0.2 are
-complete; all broader work below remains proposed until it receives an accepted
-design or architecture decision. In particular, the current repository is an
-embeddable renderer and adaptive View planner. File decoding, index persistence,
-editing, terrain, export, and application UI are not silently made current scope
-by appearing here.
+complete, and v0.3 is Active under its accepted design. All broader work below
+remains proposed until it receives an accepted design or architecture decision.
+In particular, Spatial Index persistence, Workspace behavior, editing, terrain,
+export, and application UI are not silently made current scope by appearing
+here.
 
 ## Working direction
 
@@ -112,9 +112,9 @@ Acceptance is recorded in the
 
 ### v0.3 — Real Sources
 
-Status: **Candidate**
+Status: **Active**
 
-Candidate outcome: read canonical point data through a bounded, reusable Source
+Accepted outcome: read canonical point data through a bounded, reusable Source
 interface without involving a Workspace or GPU.
 
 Likely scope:
@@ -134,6 +134,16 @@ Evidence of readiness:
   allocation;
 - source-scale decoding has a benchmark and enforced memory ceiling; and
 - each module has a directly usable example and a real caller.
+
+Exact scope and verification rules are recorded in the
+[v0.3 Real Sources design](docs/design/real-sources-v0.3.md).
+
+The first delivery slice is directly exercisable through the
+[in-memory Source example](crates/source-memory/examples/memory_source.rs):
+
+```bash
+cargo run -p source-memory --example memory_source
+```
 
 ### v0.4 — Out-of-core View
 

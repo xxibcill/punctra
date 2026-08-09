@@ -110,7 +110,7 @@ Test:
 - Job implements Future and blocking_wait with the same terminal result;
 - cancellation before and after a declared commit point follows the documented outcome;
 - progress phases and counters never move backward;
-- every successful stream emits exactly one Complete summary and then fused None;
+- every successfully exhausted stream makes exactly one summary available and then remains fused at `None`;
 - failed and cancelled streams return one terminal error and then fused None;
 - empty data batches are rejected;
 - hard batch, memory, and temporary-storage budgets are enforced; and
@@ -128,7 +128,7 @@ Run one shared Source conformance suite against **source-memory**, **source-las*
 - cancellation stops without persistent effects;
 - Fast and Full verification follow their documented threat models;
 - Full verification returns a serializable SourceRecord whose Recorded form reopens the same Source;
-- VerifiedSource reports the achieved VerificationLevel and never exposes a reader before verification completes;
+- successful opening returns one opaque verified Source and never exposes it before verification completes;
 - a changed Source is rejected before affected Point values are returned; and
 - malformed input yields a structured error without panic or unbounded allocation.
 

@@ -9,7 +9,8 @@ use point_view::{
 };
 use render_protocol::{
     BatchKey, BatchVersion, ESTIMATED_GPU_BYTES_PER_POINT as POINT_BYTES, PointBatch, PointId,
-    ProtocolError, RenderLimits, RenderPoint, RenderUpdate, UpdateKind, ViewGenerationKey, ViewId,
+    ProtocolError, RenderLimits, RenderPoint, RenderUpdate, SourceId, UpdateKind,
+    ViewGenerationKey, ViewId,
 };
 use render_wgpu::{Camera, Frame, FrameReport, RendererConfig, RendererError, WgpuRenderer};
 
@@ -24,6 +25,7 @@ const RIGHT_CHILD_KEY: u64 = 3;
 const TRANSITION_POINTS: u64 = 3;
 const TRANSITION_BYTES: u64 = TRANSITION_POINTS * POINT_BYTES;
 const TRANSITION_BATCHES: u64 = 3;
+const TEST_SOURCE: SourceId = SourceId::new([0x44; 32]);
 
 #[test]
 fn adaptive_plan_keeps_coverage_and_retires_exact_gpu_batches() {
@@ -298,8 +300,12 @@ fn point_batch(
     position: [f32; 3],
     point_id: u64,
 ) -> PointBatch {
-    let point = RenderPoint::new(position, [80, 180, 255, 255], PointId::new(point_id))
-        .expect("the acceptance point should be valid");
+    let point = RenderPoint::new(
+        position,
+        [80, 180, 255, 255],
+        PointId::new(TEST_SOURCE, point_id),
+    )
+    .expect("the acceptance point should be valid");
     PointBatch::new(
         view_generation,
         BatchKey::new(key),

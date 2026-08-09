@@ -1,7 +1,7 @@
 # Cross-Module Contracts and Invariants
 
-Status: deferred platform proposal; render-engine v0.1 is defined in
-[the current design](../design/render-engine-v0.1.md)
+Status: deferred platform proposal; current renderer, View, and Source
+contracts are defined by the accepted designs in [`docs/design`](../design)
 
 This document defines the semantics that every module must preserve. Rust names are illustrative; the behavior is normative.
 
@@ -115,7 +115,7 @@ LAS, LAZ, and COPC positions are quantized. Canonical Point Batches preserve tha
 
 ~~~rust
 pub struct QuantizedPositions {
-    pub origin: [f64; 3],
+    pub offset: [f64; 3],
     pub scale: [f64; 3],
     pub ticks: Column<[i64; 3]>,
 }
@@ -127,7 +127,7 @@ impl QuantizedPositions {
 
 Rules:
 
-- source ticks, scale, and origin are preserved exactly when the format permits;
+- source ticks, scale, and offset are preserved exactly when the format permits;
 - CPU geometry uses deterministic conversion to 64-bit floating-point world values or exact integer predicates where appropriate;
 - v0.1 does not silently reproject Sources;
 - the Workspace Source must use its declared Coordinate Reference, or opening fails;
@@ -180,17 +180,14 @@ Attribute values unknown to the foundation remain representable as typed extra c
 ## Bounded stream
 
 ~~~rust
-pub enum StreamEvent<T, S> {
-    Batch(T),
-    Progress(Progress),
-    Complete(S),
-}
+pub trait BatchStream: Send {
+    type Batch;
+    type Summary;
+    type Error;
 
-pub trait BatchStream<T, S> {
-    fn next(
-        &mut self,
-        cancel: &CancellationToken,
-    ) -> Result<Option<StreamEvent<T, S>>, Error>;
+    fn next(&mut self) -> Result<Option<Self::Batch>, Self::Error>;
+    fn summary(&self) -> Option<&Self::Summary>;
+    fn handle(&self) -> OperationHandle;
 }
 ~~~
 
@@ -200,8 +197,9 @@ All implementations guarantee:
 - a hard maximum batch size, including all columns;
 - a module-specific hard limit for concurrently active transient blocks;
 - cancellation checks between batches and within long-running phases;
-- exactly one Complete summary on success followed by fused None;
-- a cancellation or failure error followed by fused None; and
+- successful exhaustion returns `None`, makes exactly one immutable summary available through `summary`, and then remains fused;
+- a cancellation or failure error leaves no summary and is followed by fused `None`;
+- progress and cancellation are observed through a separate cloneable `OperationHandle`, never as data-stream events; and
 - no source-scale work in stream construction itself unless the interface returns a Job.
 
 Async adapters may expose the same semantics through an asynchronous stream. A synchronous reference path remains available for deterministic tests and simple CLI use.
@@ -209,29 +207,38 @@ Async adapters may expose the same semantics through an asynchronous stream. A s
 ## Job, progress, and cancellation
 
 ~~~rust
-pub struct Job<T> { /* opaque */ }
+pub struct Job<T, E> { /* opaque */ }
 
-impl<T> Job<T> {
-    pub fn progress(&self) -> ProgressSnapshot;
-    pub fn cancel(&self);
-    pub fn blocking_wait(self) -> Result<T>;
+impl<T, E> Job<T, E> {
+    pub fn handle(&self) -> OperationHandle;
+    pub fn blocking_wait(self) -> Result<T, E>;
 }
 
-impl<T> Future for Job<T> {
-    type Output = Result<T>;
+impl<T, E> Future for Job<T, E> {
+    type Output = Result<T, E>;
+}
+
+impl OperationHandle {
+    pub fn progress(&self) -> ProgressSnapshot;
+    pub fn cancel(&self);
 }
 ~~~
 
 A Job:
 
-- has one stable operation identity;
+- has one process-local operation identity;
 - reports an ordered phase and monotonic counters;
 - may coalesce progress events;
 - honors the caller's CPU, memory, and temporary-storage budgets;
 - exposes uncertain commit acknowledgement only as Indeterminate with an Operation Identity; and
 - records whether cancellation completed before or after a commit point.
 
-Job implements the standard Future contract without requiring a particular async runtime. CLI and foreign-language adapters use blocking_wait; Rust async callers use .await.
+`Job` implements the standard Future contract without requiring a particular
+async runtime. A cloneable `OperationHandle` is the caller capability for
+progress observation and cancellation. It cannot publish progress; producers
+receive a restricted reporter, while the unique operation owner alone can
+publish terminal progress. CLI and foreign-language adapters use
+`blocking_wait`; Rust async callers use `.await`.
 
 For a persistent commit, cancellation is accepted before the commit point. Once the commit is known durable, the Job returns Committed even if cancellation was requested concurrently. If acknowledgement fails after the commit point may have been crossed, it returns Indeterminate rather than reporting ordinary cancellation or rejection.
 
@@ -267,35 +274,52 @@ The Edit journal consumes Point Identities as bounded batches from the handle an
 ## Source interface
 
 ~~~rust
-pub trait SourceCandidate: Send + Sync {
-    fn preview(&self) -> &SourcePreview;
-    fn verify(
-        self: Arc<Self>,
-        expectation: SourceExpectation,
-        policy: VerificationPolicy,
-    ) -> Job<VerifiedSource>;
+pub struct SourceCandidate { /* opaque, unverified */ }
+
+impl SourceCandidate {
+    pub fn preview(&self) -> &SourcePreview;
+    pub fn open(self, options: OpenOptions) -> SourceJob;
 }
 
-pub struct VerifiedSource {
-    pub source: Arc<dyn PointSource>,
-    pub record: SourceRecord,
-    pub level: VerificationLevel,
+pub type SourceJob = Job<Source, SourceError>;
+
+pub struct Source { /* opaque, verified, cloneable */ }
+
+impl Source {
+    pub fn identity(&self) -> SourceId;
+    pub fn metadata(&self) -> &SourceMetadata;
+    pub fn provenance(&self) -> &SourceProvenance;
+    pub fn record(&self) -> &SourceRecord;
+    pub fn points(&self) -> Result<PointBatches, SourceError>;
+    pub fn read(&self, request: ReadRequest) -> Result<PointBatches, SourceError>;
 }
 
-pub trait PointSource: Send + Sync {
-    fn identity(&self) -> &SourceId;
-    fn metadata(&self) -> &SourceMetadata;
+impl PointBatches {
+    pub fn next(&mut self) -> Result<Option<PointBatch>, SourceError>;
+    pub fn summary(&self) -> Option<&SourceReadSummary>;
+    pub fn handle(&self) -> OperationHandle;
+}
 
-    fn read(
-        &self,
-        spans: &[SourceSpan],
-        fields: FieldMask,
-        budget: ReadBudget,
-    ) -> Box<dyn BatchStream<PointBatch, SourceReadSummary>>;
+impl OpenOptions {
+    pub fn identify() -> Self;
+    pub fn match_record(record: SourceRecord, policy: VerificationPolicy) -> Self;
 }
 ~~~
 
-SourceCandidate is unverified and cannot be placed in a Snapshot. PointSource is the verified read interface. SourceRecord is the versioned persistable verification record: it binds Source Identity, the Full content fingerprint, logical-order rule and adapter version, record count and schema digests, and the adapter-owned facts needed to evaluate Fast verification. SourceExpectation is New or Recorded(SourceRecord). VerifiedSource returns the reader, the record that may be persisted in the Workspace manifest, and the achieved VerificationLevel.
+`SourceCandidate` is unverified and cannot be placed in a Snapshot. Successful
+opening publishes one opaque, already verified `Source`; ordinary callers do
+not receive an adapter trait object or a separate verification witness.
+`SourceRecord` is the versioned persistable verification record: it binds
+Source Identity, the Full content fingerprint, logical-order rule and adapter
+version, record count and schema digests, and the adapter-owned facts needed to
+evaluate Fast verification. `OpenOptions::identify` forces Full verification;
+`OpenOptions::match_record` carries the recorded expectation and requested
+policy. Success returns the same caller-visible `Source` type for every
+adapter, with its record available for later persistence.
+
+Concrete adapter crates may expose convenience `open` functions that construct
+and identify their candidate, but those functions still return `SourceJob` and
+publish the same opaque `Source`.
 
 Required behavior:
 
@@ -320,10 +344,10 @@ pub struct SourceSpanBatch {
 
 impl IndexBuilder {
     pub fn build_or_resume(
-        source: Arc<dyn PointSource>,
+        source: Source,
         target: IndexTarget,
         options: IndexOptions,
-    ) -> Job<IndexArtifact>;
+    ) -> Job<IndexArtifact, IndexError>;
 }
 
 impl IndexArtifact {
@@ -332,7 +356,11 @@ impl IndexArtifact {
     pub fn exact_candidates(
         &self,
         region: &Region,
-    ) -> Result<Box<dyn BatchStream<SourceSpanBatch, ExactPlanSummary>>>;
+    ) -> Result<Box<dyn BatchStream<
+        Batch = SourceSpanBatch,
+        Summary = ExactPlanSummary,
+        Error = IndexError,
+    >>>;
 
     pub fn hierarchy(
         &self,
@@ -341,7 +369,12 @@ impl IndexArtifact {
 }
 ~~~
 
-Index construction reads the PointSource seam directly. A checkpoint records Source Identity, next logical ordinal, builder state, and checksums, so build_or_resume can seek to the next Source span after process restart. v0.1 builds the foundation index for LAS, LAZ, and COPC; native-hierarchy import is deferred until another real producer proves that seam.
+Index construction reads the opaque, verified `Source` seam directly. A
+checkpoint records Source Identity, next logical ordinal, builder state, and
+checksums, so `build_or_resume` can seek to the next Source span after process
+restart. The proposed foundation index covers LAS, LAZ, and COPC;
+native-hierarchy import is deferred until another real producer proves that
+seam.
 
 For exact candidates:
 
@@ -430,7 +463,10 @@ The initial history is linear. Every committed Revision remains addressable afte
 
 **point-revisions** owns RevisionView, which exposes immutable overlays and Breaklines. **point-query** requests a RevisionView by Revision Identity from its already validated RevisionStore and combines it with the verified Source and compatible-index state to create the public Snapshot. It does not accept a caller-supplied RevisionView. **point-workspace** returns that Snapshot without defining another Snapshot type.
 
-QueryEngine construction fails unless the verified PointSource metadata, optional complete Spatial Index, and RevisionSourceContract agree on Source Identity; Source point count, editable Attribute schema, and Coordinate Reference must also equal the RevisionSourceContract.
+QueryEngine construction fails unless the verified `Source` metadata, optional
+complete Spatial Index, and `RevisionSourceContract` agree on Source Identity;
+Source point count, editable Attribute schema, and Coordinate Reference must
+also equal the `RevisionSourceContract`.
 
 ## Query contract
 
@@ -529,8 +565,16 @@ pub struct TerrainRecipe {
 
 pub struct TerrainInput {
     pub provenance: DataProvenance,
-    pub points: Box<dyn BatchStream<PointBatch, ExactPointSummary>>,
-    pub breaklines: Box<dyn BatchStream<BreaklineBatch, ExactBreaklineSummary>>,
+    pub points: Box<dyn BatchStream<
+        Batch = PointBatch,
+        Summary = ExactPointSummary,
+        Error = QueryError,
+    >>,
+    pub breaklines: Box<dyn BatchStream<
+        Batch = BreaklineBatch,
+        Summary = ExactBreaklineSummary,
+        Error = QueryError,
+    >>,
 }
 
 pub struct SurfaceProvenance {

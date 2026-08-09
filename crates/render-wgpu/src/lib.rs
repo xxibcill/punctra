@@ -9,7 +9,7 @@
 //! ```no_run
 //! use render_protocol::{
 //!     BatchKey, BatchVersion, ESTIMATED_GPU_BYTES_PER_POINT, PointBatch, PointId,
-//!     RenderLimits, RenderPoint, RenderUpdate, ViewGenerationKey, ViewId,
+//!     RenderLimits, RenderPoint, RenderUpdate, SourceId, ViewGenerationKey, ViewId,
 //! };
 //! use render_wgpu::{Camera, Frame, RendererConfig, WgpuRenderer};
 //!
@@ -28,7 +28,12 @@
 //! let mut renderer = WgpuRenderer::new(device, RendererConfig::new(target_format, limits))?;
 //! renderer.apply(&RenderUpdate::Reset { view_generation })?;
 //!
-//! let point = RenderPoint::new([0.0, 0.0, 0.0], [80, 180, 255, 255], PointId::new(42))?;
+//! let source = SourceId::new([0x42; 32]);
+//! let point = RenderPoint::new(
+//!     [0.0, 0.0, 0.0],
+//!     [80, 180, 255, 255],
+//!     PointId::new(source, 42),
+//! )?;
 //! let batch = PointBatch::new(
 //!     view_generation,
 //!     BatchKey::new(3),

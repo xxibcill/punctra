@@ -159,6 +159,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b588b76d00fde79687d7646a9b5bdf3cc0f655e0bbd080335a95d7e96f3587da"
 
 [[package]]
+name = "blake3"
+version = "1.8.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "76ae7bad254120e9e4c63bafc385310756f90c484eac0e36b8317cf09cb92a77"
+dependencies = [
+ "arrayref",
+ "arrayvec",
+ "cc",
+ "cfg-if",
+ "constant_time_eq",
+ "cpufeatures",
+]
+
+[[package]]
 name = "block2"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -347,6 +361,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "constant_time_eq"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3d52eff69cd5e647efe296129160853a42795992097e8af39800e1060caeea9b"
+
+[[package]]
 name = "core-foundation"
 version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -383,6 +403,15 @@ checksum = "45390e6114f68f718cc7a830514a96f903cccd70d02a8f6d9f643ac4ba45afaf"
 dependencies = [
  "bitflags 1.3.2",
  "core-foundation",
+ "libc",
+]
+
+[[package]]
+name = "cpufeatures"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8b2a41393f66f16b0823bb79094d54ac5fbd34ab292ddafb9a0456ac9f87d201"
+dependencies = [
  "libc",
 ]
 
@@ -562,6 +591,14 @@ name = "foreign-types-shared"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "aa9a19cbb55df58761df49b23516a86d432839add4af60fc256da840f66ed35b"
+
+[[package]]
+name = "foundation-runtime"
+version = "0.3.0-alpha.1"
+dependencies = [
+ "pollster",
+ "thiserror 2.0.20",
+]
 
 [[package]]
 name = "futures-core"
@@ -1432,8 +1469,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "point-contracts"
+version = "0.3.0-alpha.1"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+]
+
+[[package]]
+name = "point-source"
+version = "0.3.0-alpha.1"
+dependencies = [
+ "blake3",
+ "foundation-runtime",
+ "point-contracts",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "point-view"
-version = "0.2.0"
+version = "0.3.0-alpha.1"
 dependencies = [
  "criterion",
  "glam",
@@ -1638,15 +1696,16 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
 name = "render-protocol"
-version = "0.2.0"
+version = "0.3.0-alpha.1"
 dependencies = [
  "glam",
+ "point-contracts",
  "thiserror 2.0.20",
 ]
 
 [[package]]
 name = "render-wgpu"
-version = "0.2.0"
+version = "0.3.0-alpha.1"
 dependencies = [
  "bytemuck",
  "glam",
@@ -1664,7 +1723,7 @@ checksum = "19b30a45b0cd0bcca8037f3d0dc3421eaf95327a17cad11964fb8179b4fc4832"
 
 [[package]]
 name = "renderer-demo"
-version = "0.2.0"
+version = "0.3.0-alpha.1"
 dependencies = [
  "point-view",
  "pollster",
@@ -1879,6 +1938,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dd538fb6910ac1099850255cf94a94df6551fbdd602454387d0adb2d1ca6dead"
 dependencies = [
  "serde",
+]
+
+[[package]]
+name = "source-memory"
+version = "0.3.0-alpha.1"
+dependencies = [
+ "blake3",
+ "criterion",
+ "foundation-runtime",
+ "point-contracts",
+ "point-source",
+ "thiserror 2.0.20",
 ]
 
 [[package]]

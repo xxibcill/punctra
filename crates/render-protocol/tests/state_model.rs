@@ -3,9 +3,10 @@
 use render_protocol::{
     BatchKey, BatchVersion, ESTIMATED_GPU_BYTES_PER_POINT as POINT_BYTES, PointBatch, PointId,
     ProtocolError, RenderLimits, RenderPoint, RenderStateModel, RenderUpdate, ResidentResource,
-    UpdateEffect, UpdateKind, ViewGenerationKey, ViewId,
+    SourceId, UpdateEffect, UpdateKind, ViewGenerationKey, ViewId,
 };
 
+const TEST_SOURCE: SourceId = SourceId::new([0x22; 32]);
 const ONE_POINT_TOO_FEW_BYTES: u64 = POINT_BYTES - 1;
 const TWO_POINT_BYTES: u64 = 2 * POINT_BYTES;
 const THREE_POINT_BYTES: u64 = 3 * POINT_BYTES;
@@ -60,7 +61,7 @@ fn accepted_updates_describe_their_renderer_effects() {
 
     let highlights = RenderUpdate::SetHighlights {
         view_generation,
-        point_ids: vec![PointId::new(10)],
+        point_ids: vec![point_id(10)],
     };
     assert_eq!(
         state.apply(&highlights).unwrap().effect(),
@@ -233,7 +234,7 @@ fn reset_requires_forward_progress_per_view_and_clears_generation_state() {
     state
         .apply(&RenderUpdate::SetHighlights {
             view_generation: first,
-            point_ids: vec![PointId::new(1)],
+            point_ids: vec![point_id(1)],
         })
         .unwrap();
 
@@ -289,17 +290,14 @@ fn highlights_are_a_sorted_distinct_replaceable_set() {
     let report = state
         .apply(&RenderUpdate::SetHighlights {
             view_generation,
-            point_ids: vec![PointId::new(9), PointId::new(2), PointId::new(9)],
+            point_ids: vec![point_id(9), point_id(2), point_id(9)],
         })
         .unwrap()
         .report();
 
     assert_eq!(report.kind(), UpdateKind::HighlightsSet);
     assert_eq!(report.highlight_count(), 2);
-    assert_eq!(
-        state.snapshot().highlights(),
-        &[PointId::new(2), PointId::new(9)]
-    );
+    assert_eq!(state.snapshot().highlights(), &[point_id(2), point_id(9)]);
 
     state
         .apply(&RenderUpdate::SetHighlights {
@@ -471,7 +469,7 @@ fn batch(
 ) -> PointBatch {
     let points = point_ids
         .iter()
-        .map(|id| RenderPoint::new([0.0; 3], [255; 4], PointId::new(*id)).unwrap())
+        .map(|id| RenderPoint::new([0.0; 3], [255; 4], point_id(*id)).unwrap())
         .collect();
     PointBatch::new(
         view_generation,
@@ -485,4 +483,8 @@ fn batch(
 
 fn view_generation(view: u64, generation: u64) -> ViewGenerationKey {
     ViewGenerationKey::new(ViewId::new(view), generation)
+}
+
+const fn point_id(ordinal: u64) -> PointId {
+    PointId::new(TEST_SOURCE, ordinal)
 }
