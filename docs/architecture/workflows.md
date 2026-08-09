@@ -1,7 +1,8 @@
 # Runtime Workflows
 
-Status: deferred platform proposal; current renderer, View, and Source
-contracts are defined by the accepted designs in [`docs/design`](../design)
+Status: deferred platform proposal; the v0.1 renderer, v0.2 adaptive View, and
+v0.3 Real Sources contracts are implemented under the accepted designs in
+[`docs/design`](../design)
 
 These workflows show composition without hidden reverse calls. A module invokes only an allowed dependency. Application adapters coordinate sibling modules when no lower module should own the whole workflow.
 
@@ -54,8 +55,7 @@ Creating a new Workspace has one additional gate: a complete content fingerprint
 An index tool can bypass **point-workspace**:
 
 ~~~rust
-let candidate = source_las::open_candidate(path)?;
-let source = candidate.open(OpenOptions::identify()).await?;
+let source = source_las::open(path).await?;
 let index = point_index::IndexBuilder::build_or_resume(
     source,
     index_target,
@@ -90,7 +90,9 @@ sequenceDiagram
 
 Cancellation leaves only verified checkpoints. Resume starts at the last verified checkpoint. Source record order remains the identity authority even if the index stores a different spatial order.
 
-v0.1 builds the same foundation index for LAS, LAZ, and COPC. Importing a native hierarchy is deferred until a second real producer proves that seam.
+The proposed Spatial Index would use the same canonical Source seam for the
+implemented LAS/LAZ adapter and a future COPC adapter. Native-hierarchy import
+remains deferred until a second real producer proves that seam.
 
 ## 3. Run an exact Query
 

@@ -1,7 +1,8 @@
 # Module Catalog
 
-Status: broader platform proposal deferred; current renderer, View, and Source
-modules are defined by the [v0.1 renderer](../design/render-engine-v0.1.md),
+Status: broader platform proposal deferred; the current renderer, View, and
+Source modules are implemented under the
+[v0.1 renderer](../design/render-engine-v0.1.md),
 [v0.2 planning](../design/adaptive-view-planning-v0.2.md), and
 [v0.3 Real Sources](../design/real-sources-v0.3.md) scopes
 
@@ -181,8 +182,12 @@ data batches, and callers cannot publish producer progress or terminal state.
 
 The module defines the proven Source seam and common validation. Format behavior lives in adapter crates:
 
-- **source-las** decodes LAS and LAZ record order, headers, VLRs, EVLRs, and Attributes;
-- **source-copc** decodes local COPC hierarchy order, byte ranges, and Attributes; and
+- **source-las** decodes LAS formats 0–10 and LAZ formats 0–8 in point-record
+  order, including headers, VLRs, EVLRs, and supported Attributes; LAZ formats
+  9 and 10 are explicitly unsupported pending exact layered WavePacket14 codec
+  support;
+- the proposed, deferred **source-copc** would decode local COPC hierarchy
+  order, byte ranges, and Attributes; and
 - **source-memory** supplies deterministic fixtures and fault injection.
 
 It owns:
@@ -256,7 +261,8 @@ publish the same opaque `Source`.
 The logical ordinal is part of the adapter contract:
 
 - LAS and LAZ use point-record order.
-- COPC uses canonical hierarchy-key order followed by record offset within the node.
+- A future COPC adapter would use canonical hierarchy-key order followed by
+  record offset within the node.
 
 An index may reorder storage for speed, but it must carry the original Point Identity.
 
@@ -952,7 +958,8 @@ The dependency allowlist is stricter than Cargo's ability to compile a graph:
 | point-contracts | standard library and narrow value-type dependencies |
 | foundation-runtime | standard library and narrow concurrency dependencies |
 | point-source | point-contracts, foundation-runtime |
-| source-las, source-copc, source-memory | point-source, point-contracts, foundation-runtime |
+| source-las, source-memory | point-source, point-contracts, foundation-runtime |
+| proposed source-copc | point-source, point-contracts, foundation-runtime |
 | point-index | point-contracts, foundation-runtime, point-source |
 | point-set | point-contracts, foundation-runtime |
 | point-revisions | point-contracts, foundation-runtime, point-set |

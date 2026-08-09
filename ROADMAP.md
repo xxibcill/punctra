@@ -8,9 +8,9 @@ dates. Candidate releases may be split, merged, reordered, renamed, or skipped
 as technical and customer evidence changes. Milestone outcomes and dependency
 order matter more than version numbers.
 
-Only an **Active** release has committed scope. Punctra v0.1 and v0.2 are
-complete, and v0.3 is Active under its accepted design. All broader work below
-remains proposed until it receives an accepted design or architecture decision.
+Only an **Active** release has committed scope. Punctra v0.1 through v0.3 are
+complete. All broader work below remains proposed until it receives an accepted
+design or architecture decision.
 In particular, Spatial Index persistence, Workspace behavior, editing, terrain,
 export, and application UI are not silently made current scope by appearing
 here.
@@ -63,9 +63,10 @@ Roadmap status labels are:
 
 Status: **Exploring**
 
-Before expanding the repository beyond the renderer and planner, decide whether
-the broader modules belong in Punctra, in a host application, or in separate
-projects. Record that decision in an accepted design or ADR.
+Before expanding the repository beyond the completed renderer, planner, and
+Source modules, decide whether the broader modules belong in Punctra, in a host
+application, or in separate projects. Record that decision in an accepted
+design or ADR.
 
 Useful evidence for proceeding includes:
 
@@ -85,8 +86,8 @@ module. The detailed discovery signals and pivot criteria live in the
 
 ## Candidate release sequence
 
-There are seven provisional pre-v1 release themes after v0.2. This is a working
-count, not a requirement to publish exactly seven releases.
+There are six provisional pre-v1 release themes after the completed v0.3. This
+is a working count, not a requirement to publish exactly six more releases.
 
 ### v0.1 — Renderer foundation
 
@@ -112,21 +113,23 @@ Acceptance is recorded in the
 
 ### v0.3 — Real Sources
 
-Status: **Active**
+Status: **Complete**
 
-Accepted outcome: read canonical point data through a bounded, reusable Source
+Implemented outcome: read canonical point data through a bounded, reusable Source
 interface without involving a Workspace or GPU.
 
-Likely scope:
+Delivered scope:
 
 - canonical Point, Point Identity, Attribute, coordinate, and provenance
   contracts;
 - runtime-neutral bounded Jobs, streams, progress, cancellation, and budgets;
-- an in-memory Source adapter for conformance and fault tests; and
-- LAS first, followed by bounded LAZ decoding with preserved metadata and
-  Attributes.
+- an in-memory Source adapter for conformance and fault tests;
+- LAS point-data record formats 0–10 and bounded LAZ formats 0–8 with preserved
+  metadata and Attributes; and
+- an explicit unsupported-format result for LAZ formats 9 and 10 until exact
+  layered WavePacket14 codec support is available.
 
-Evidence of readiness:
+Acceptance evidence:
 
 - adapters pass one shared Source conformance suite;
 - repeated and differently partitioned reads preserve Point Identity and values;
@@ -138,11 +141,19 @@ Evidence of readiness:
 Exact scope and verification rules are recorded in the
 [v0.3 Real Sources design](docs/design/real-sources-v0.3.md).
 
-The first delivery slice is directly exercisable through the
+The in-memory adapter is directly exercisable through the
 [in-memory Source example](crates/source-memory/examples/memory_source.rs):
 
 ```bash
 cargo run -p source-memory --example memory_source
+```
+
+The LAS/LAZ adapter includes a real file inspector and a source-scale
+benchmark:
+
+```bash
+cargo run --release -p source-las --example inspect -- survey.laz
+cargo bench -p source-las --bench read
 ```
 
 ### v0.4 — Out-of-core View

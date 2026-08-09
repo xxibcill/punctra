@@ -1,12 +1,15 @@
 # Real Sources v0.3
 
-Status: accepted implementation scope; implementation active
+Status: complete; accepted scope implemented and locally verified
 
 Punctra v0.3 adds a headless Source path for reading authoritative Point data
 without constructing a Workspace, Spatial Index, View, or renderer. The release
 establishes stable Source and Point Identity, lossless canonical Point values,
 runtime-neutral bounded execution, and interchangeable in-memory and LAS/LAZ
-adapters.
+adapters. `source-las` supports LAS point-data record formats 0–10 and LAZ
+formats 0–8. LAZ formats 9 and 10 fail with `UnsupportedFormat` before Source
+publication until an exact layered WavePacket14 codec is available; v0.3 does
+not publish waveform values that its pinned codec cannot preserve exactly.
 
 The Source seam is deliberately narrower than the earlier platform proposal.
 Ordinary callers receive one opaque, already verified `Source`; adapter traits,
@@ -20,7 +23,7 @@ Source type:
 
 ```rust,ignore
 let source = source_memory::open(input).blocking_wait()?;
-// Later in this release, the same consumer can use:
+// The same consumer can use:
 // let source = source_las::open("survey.laz").blocking_wait()?;
 
 println!("{} Points", source.metadata().point_count());
@@ -163,8 +166,10 @@ The implementation order keeps each module directly usable:
    Source interface.
 4. **source-memory** supplies the first concrete adapter, deterministic
    fixtures, and corruption/change fault injection.
-5. **source-las** adds bounded LAS reads first, then LAZ decoding through the
-   same interface and conformance suite.
+5. **source-las** adds bounded LAS 0–10 reads and LAZ 0–8 decoding through the
+   same interface and conformance suite. It explicitly rejects LAZ 9/10 at the
+   format boundary because their layered WavePacket14 path does not yet meet
+   the exact-value contract.
 
 The adapter-author seam is public only so workspace adapter crates can satisfy
 it. It is version-coupled to Punctra's official adapters and is not a stable
@@ -183,11 +188,11 @@ Implementation proceeds as vertical evidence rather than crate scaffolding:
 1. canonical contracts, Jobs, the verified Source seam, in-memory reads,
    conformance faults, and canonical Point Identity in the renderer;
 2. bounded LAS opening and reads with metadata and Attribute preservation;
-3. bounded LAZ decoding, source-scale benchmarks, memory ceilings, and a
-   directly usable file-inspection example.
+3. bounded LAZ 0–8 decoding, explicit LAZ 9/10 rejection, source-scale
+   benchmarks, memory ceilings, and a directly usable file-inspection example.
 
-The release remains Active until every acceptance gate below passes. Completing
-the first slice does not mark v0.3 complete.
+All three delivery slices are implemented. The conformance, benchmark,
+documentation, workspace, and required GPU gates below are the release record.
 
 ## Acceptance
 
@@ -200,6 +205,8 @@ Punctra v0.3 is complete only when:
 - overlapping spans produce no duplicate Point;
 - every requested supported Attribute and bounded metadata record round-trips
   without silent loss;
+- every unsupported compressed point format is rejected before a Source or
+  Point Batch is published;
 - corrupt, truncated, unsupported, cancelled, and changed inputs fail
   explicitly and leave their streams fused without a completion summary;
 - Point Batch point and byte limits and decoder working limits are enforced

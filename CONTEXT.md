@@ -1,9 +1,9 @@
 # Domain Context: Point-Cloud Foundation
 
-Status: renderer, adaptive View-planning, and Real Sources terms are active;
-broader Workspace and terrain terms are deferred
+Status: renderer, adaptive View-planning, and Real Sources terms are
+implemented; broader Workspace and terrain terms are deferred
 
-Punctra v0.3 is implementing the reusable render engine, renderer-neutral View
+Punctra v0.3 implements the reusable render engine, renderer-neutral View
 planner, and verified Source path described in the accepted [v0.1 renderer
 design](docs/design/render-engine-v0.1.md), [v0.2 planning
 design](docs/design/adaptive-view-planning-v0.2.md), and [v0.3 Real Sources

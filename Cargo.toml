@@ -7,23 +7,27 @@ members = [
     "crates/point-view",
     "crates/render-protocol",
     "crates/render-wgpu",
+    "crates/source-las",
     "crates/source-memory",
 ]
 resolver = "3"
 
 [workspace.package]
-version = "0.3.0-alpha.1"
+version = "0.3.0"
 edition = "2024"
 rust-version = "1.90"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/xxibcill/punctra"
 
 [workspace.dependencies]
+allocation-counter = "=0.8.1"
 blake3 = "1.8.6"
 bytemuck = { version = "1.25.2", features = ["derive"] }
 criterion = "0.7.0"
 foundation-runtime = { path = "crates/foundation-runtime" }
 glam = "0.33.3"
+las = { version = "=0.10.0", features = ["laz"] }
+laz = "=0.12.2"
 pollster = "1.0.1"
 point-contracts = { path = "crates/point-contracts" }
 point-source = { path = "crates/point-source" }
@@ -31,6 +35,7 @@ point-view = { path = "crates/point-view" }
 render-protocol = { path = "crates/render-protocol" }
 render-wgpu = { path = "crates/render-wgpu" }
 serde = { version = "1.0.229", features = ["derive", "rc"] }
+source-las = { path = "crates/source-las" }
 source-memory = { path = "crates/source-memory" }
 thiserror = "2.0.20"
 wgpu = "30.0.0"

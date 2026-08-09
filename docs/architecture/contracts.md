@@ -1,7 +1,8 @@
 # Cross-Module Contracts and Invariants
 
-Status: deferred platform proposal; current renderer, View, and Source
-contracts are defined by the accepted designs in [`docs/design`](../design)
+Status: deferred platform proposal; the v0.1 renderer, v0.2 adaptive View, and
+v0.3 Real Sources contracts are implemented under the accepted designs in
+[`docs/design`](../design)
 
 This document defines the semantics that every module must preserve. Rust names are illustrative; the behavior is normative.
 
@@ -61,7 +62,8 @@ Point Identity is stable across:
 The ordinal is logical Source order, never an index-node offset or GPU slot:
 
 - LAS and LAZ: point-record order.
-- COPC: canonical hierarchy-key order, then record offset within that node.
+- Proposed COPC adapter: canonical hierarchy-key order, then record offset
+  within that node.
 
 Equivalent-looking re-encoded files do not preserve Point Identity.
 
@@ -111,7 +113,8 @@ The canonical staging encoding and digest algorithm are versioned parts of the R
 
 ## Coordinate and precision contract
 
-LAS, LAZ, and COPC positions are quantized. Canonical Point Batches preserve that quantization:
+LAS and LAZ positions are quantized; a proposed COPC adapter would preserve the
+same property. Canonical Point Batches preserve that quantization:
 
 ~~~rust
 pub struct QuantizedPositions {
@@ -372,9 +375,9 @@ impl IndexArtifact {
 Index construction reads the opaque, verified `Source` seam directly. A
 checkpoint records Source Identity, next logical ordinal, builder state, and
 checksums, so `build_or_resume` can seek to the next Source span after process
-restart. The proposed foundation index covers LAS, LAZ, and COPC;
-native-hierarchy import is deferred until another real producer proves that
-seam.
+restart. The proposed foundation index covers the implemented LAS/LAZ adapter
+and would cover a future COPC adapter; native-hierarchy import is deferred until
+another real producer proves that seam.
 
 For exact candidates:
 
