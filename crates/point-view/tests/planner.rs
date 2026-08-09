@@ -272,6 +272,45 @@ fn perspective_frustum_culls_all_six_planes_and_keeps_intersections() {
 }
 
 #[test]
+fn frustum_culling_handles_opposite_extreme_coordinates() {
+    let camera = Camera::perspective(
+        [1.0e308, 1.0e308, 0.0],
+        [1.0e308, 1.0e308, -1.0],
+        [0.0, 1.0, 0.0],
+        std::f32::consts::FRAC_PI_2,
+        1.0,
+        100.0,
+    )
+    .unwrap();
+    let node = node(
+        1,
+        None,
+        bounds(
+            [-1.0e308, -1.0e308, -1.0e300],
+            [-1.0e308, -1.0e308, -1.0e300],
+        ),
+        1.0,
+        1,
+        1,
+        1,
+        resident(1),
+    );
+
+    let plan = planner(2.0, 0.25)
+        .plan(
+            &camera,
+            [100, 100],
+            AvailableNodes::new(generation(2, 1), &[node]),
+            GENEROUS_BUDGET,
+        )
+        .unwrap();
+
+    assert!(plan.requests().is_empty());
+    assert!(plan.retained_nodes().is_empty());
+    assert_eq!(retirement_batches(&plan), vec![BatchKey::new(1)]);
+}
+
+#[test]
 fn projection_uses_f64_world_coordinates_and_reports_pixel_error() {
     let generation = generation(3, 0);
     let world = 1.0e308;

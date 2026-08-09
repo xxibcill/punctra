@@ -295,10 +295,12 @@ struct Plane {
 
 impl Plane {
     fn from_camera(normal: DVec3, camera_origin: DVec3, offset: f64) -> Self {
+        let normal_length = normal.length();
+        debug_assert!(normal_length.is_finite() && normal_length > 0.0);
         Self {
-            normal,
+            normal: normal / normal_length,
             camera_origin,
-            offset,
+            offset: offset / normal_length,
         }
     }
 
@@ -320,9 +322,14 @@ impl Plane {
                 bounds.min[2]
             },
         );
-        self.normal.dot(support - self.camera_origin) + self.offset < 0.0
+        let scaled_support = support * PLANE_EVALUATION_SCALE;
+        let scaled_origin = self.camera_origin * PLANE_EVALUATION_SCALE;
+        self.normal.dot(scaled_support - scaled_origin) + self.offset * PLANE_EVALUATION_SCALE < 0.0
     }
 }
+
+// One eighth leaves headroom for opposite-sign subtraction and a three-axis unit-normal dot.
+const PLANE_EVALUATION_SCALE: f64 = 0.125;
 
 #[derive(Clone, Copy, Debug)]
 struct Frustum {
@@ -344,16 +351,8 @@ impl Frustum {
         let half_horizontal_tangent = half_vertical_tangent * aspect_ratio;
         Self {
             planes: [
-                Plane {
-                    normal: forward,
-                    camera_origin: eye,
-                    offset: -near_distance,
-                },
-                Plane {
-                    normal: -forward,
-                    camera_origin: eye,
-                    offset: far_distance,
-                },
+                Plane::from_camera(forward, eye, -near_distance),
+                Plane::from_camera(-forward, eye, far_distance),
                 Plane::from_camera(forward * half_horizontal_tangent + right, eye, 0.0),
                 Plane::from_camera(forward * half_horizontal_tangent - right, eye, 0.0),
                 Plane::from_camera(forward * half_vertical_tangent + up, eye, 0.0),
