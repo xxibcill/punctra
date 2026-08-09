@@ -1,10 +1,14 @@
 //! Public-interface tests for the protocol reference state model.
 
 use render_protocol::{
-    BatchKey, BatchVersion, PointBatch, PointId, ProtocolError, RenderLimits, RenderPoint,
-    RenderStateModel, RenderUpdate, ResidentResource, UpdateEffect, UpdateKind, ViewGenerationKey,
-    ViewId,
+    BatchKey, BatchVersion, ESTIMATED_GPU_BYTES_PER_POINT as POINT_BYTES, PointBatch, PointId,
+    ProtocolError, RenderLimits, RenderPoint, RenderStateModel, RenderUpdate, ResidentResource,
+    UpdateEffect, UpdateKind, ViewGenerationKey, ViewId,
 };
+
+const ONE_POINT_TOO_FEW_BYTES: u64 = POINT_BYTES - 1;
+const TWO_POINT_BYTES: u64 = 2 * POINT_BYTES;
+const THREE_POINT_BYTES: u64 = 3 * POINT_BYTES;
 
 #[test]
 fn reset_begins_exactly_one_generation_and_is_observable() {
@@ -90,12 +94,12 @@ fn upsert_inserts_and_strictly_newer_versions_replace_atomically() {
 
     assert_eq!(inserted.kind(), UpdateKind::BatchInserted);
     assert_eq!(inserted.uploaded_points(), 2);
-    assert_eq!(inserted.uploaded_bytes(), 64);
+    assert_eq!(inserted.uploaded_bytes(), TWO_POINT_BYTES);
     assert_eq!(inserted.removed_points(), 0);
     assert_eq!(inserted.resident().batch_count(), 1);
     assert_eq!(inserted.resident().point_count(), 2);
-    assert_eq!(inserted.resident().estimated_gpu_bytes(), 64);
-    assert_resident_batch(&state, view_generation, 8, 3, 2, 64);
+    assert_eq!(inserted.resident().estimated_gpu_bytes(), TWO_POINT_BYTES);
+    assert_resident_batch(&state, view_generation, 8, 3, 2, TWO_POINT_BYTES);
 
     let replaced = state
         .apply(&RenderUpdate::Upsert {
@@ -106,12 +110,12 @@ fn upsert_inserts_and_strictly_newer_versions_replace_atomically() {
 
     assert_eq!(replaced.kind(), UpdateKind::BatchReplaced);
     assert_eq!(replaced.uploaded_points(), 1);
-    assert_eq!(replaced.uploaded_bytes(), 32);
+    assert_eq!(replaced.uploaded_bytes(), POINT_BYTES);
     assert_eq!(replaced.removed_points(), 2);
-    assert_eq!(replaced.removed_bytes(), 64);
+    assert_eq!(replaced.removed_bytes(), TWO_POINT_BYTES);
     assert_eq!(replaced.resident().batch_count(), 1);
     assert_eq!(replaced.resident().point_count(), 1);
-    assert_resident_batch(&state, view_generation, 8, 4, 1, 32);
+    assert_resident_batch(&state, view_generation, 8, 4, 1, POINT_BYTES);
 
     let before = state.snapshot();
     assert_eq!(
@@ -125,7 +129,7 @@ fn upsert_inserts_and_strictly_newer_versions_replace_atomically() {
         })
     );
     assert_eq!(state.snapshot(), before);
-    assert_resident_batch(&state, view_generation, 8, 4, 1, 32);
+    assert_resident_batch(&state, view_generation, 8, 4, 1, POINT_BYTES);
 }
 
 #[test]
@@ -163,7 +167,7 @@ fn conditional_remove_preserves_newer_batches_and_versions_survive_removal() {
         .report();
     assert_eq!(removed.kind(), UpdateKind::BatchRemoved);
     assert_eq!(removed.removed_points(), 2);
-    assert_eq!(removed.removed_bytes(), 64);
+    assert_eq!(removed.removed_bytes(), TWO_POINT_BYTES);
     assert_eq!(removed.resident().batch_count(), 0);
 
     let empty = state.snapshot();
@@ -254,7 +258,7 @@ fn reset_requires_forward_progress_per_view_and_clears_generation_state() {
         .unwrap()
         .report();
     assert_eq!(report.removed_points(), 1);
-    assert_eq!(report.removed_bytes(), 32);
+    assert_eq!(report.removed_bytes(), POINT_BYTES);
     assert_eq!(report.resident().batch_count(), 0);
     assert_batch_not_resident(&state, next, 1);
     assert!(state.snapshot().highlights().is_empty());
@@ -309,11 +313,11 @@ fn highlights_are_a_sorted_distinct_replaceable_set() {
 #[test]
 fn byte_point_and_batch_limits_are_hard_and_transactional() {
     assert_limit_rejection(
-        RenderLimits::new(31, 10, 10),
+        RenderLimits::new(ONE_POINT_TOO_FEW_BYTES, 10, 10),
         &[1],
         ResidentResource::EstimatedGpuBytes,
-        31,
-        32,
+        ONE_POINT_TOO_FEW_BYTES,
+        POINT_BYTES,
     );
     assert_limit_rejection(
         RenderLimits::new(1_024, 1, 10),
@@ -342,13 +346,13 @@ fn byte_point_and_batch_limits_are_hard_and_transactional() {
         })
     );
     assert_eq!(state.snapshot(), before);
-    assert_resident_batch(&state, view_generation, 1, 0, 1, 32);
+    assert_resident_batch(&state, view_generation, 1, 0, 1, POINT_BYTES);
 }
 
 #[test]
 fn rejected_replacement_keeps_the_complete_previous_batch() {
     let view_generation = view_generation(7, 0);
-    let mut state = started_state(view_generation, RenderLimits::new(64, 2, 1));
+    let mut state = started_state(view_generation, RenderLimits::new(TWO_POINT_BYTES, 2, 1));
     state
         .apply(&RenderUpdate::Upsert {
             batch: batch(view_generation, 1, 1, &[1]),
@@ -362,12 +366,12 @@ fn rejected_replacement_keeps_the_complete_previous_batch() {
         }),
         Err(ProtocolError::ResidentLimitExceeded {
             resource: ResidentResource::EstimatedGpuBytes,
-            limit: 64,
-            attempted: 96,
+            limit: TWO_POINT_BYTES,
+            attempted: THREE_POINT_BYTES,
         })
     );
     assert_eq!(state.snapshot(), before);
-    assert_resident_batch(&state, view_generation, 1, 1, 1, 32);
+    assert_resident_batch(&state, view_generation, 1, 1, 1, POINT_BYTES);
 }
 
 #[test]

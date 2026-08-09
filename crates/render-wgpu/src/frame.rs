@@ -42,7 +42,7 @@ impl PointStyle {
         })
     }
 
-    /// Returns the diameter used when a point has no size override.
+    /// Returns the diameter used for every point in the frame.
     #[must_use]
     pub const fn default_size_pixels(self) -> f32 {
         self.default_size_pixels

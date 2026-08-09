@@ -14,13 +14,12 @@ use thiserror::Error;
 /// Estimated GPU bytes for one point in the protocol's residency model.
 ///
 /// The model matches the v0.1 fixed GPU vertex: 12 bytes for the three `f32`
-/// relative coordinates, four bytes for point size, four bytes for RGBA8
-/// color, four bytes for flags, a four-byte renderer pick token, and four bytes
-/// of alignment padding. Point size, flags, and pick token are
+/// relative coordinates, four bytes for RGBA8 color, four bytes for renderer
+/// flags, and a four-byte renderer pick token. Flags and the pick token are
 /// renderer-populated in v0.1. Per-batch metadata, allocation padding outside
 /// the vertex, render targets, and renderer bookkeeping are not protocol
 /// residency.
-pub const ESTIMATED_GPU_BYTES_PER_POINT: u64 = 32;
+pub const ESTIMATED_GPU_BYTES_PER_POINT: u64 = 24;
 
 /// Identifies a caller-owned view.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]

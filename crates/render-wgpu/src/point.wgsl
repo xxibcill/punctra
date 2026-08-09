@@ -19,10 +19,9 @@ var<uniform> batch: BatchUniform;
 
 struct VertexInput {
     @location(0) position: vec3<f32>,
-    @location(1) point_size: f32,
-    @location(2) color: vec4<f32>,
-    @location(3) flags: u32,
-    @location(4) pick_token: u32,
+    @location(1) color: vec4<f32>,
+    @location(2) flags: u32,
+    @location(3) pick_token: u32,
 }
 
 struct VertexOutput {
@@ -51,10 +50,9 @@ fn point_vertex(input: VertexInput, @builtin(vertex_index) vertex_index: u32) ->
     let corner = quad_corner(vertex_index);
     let camera_relative_position = input.position + batch.origin_from_camera.xyz;
     var clip_position = camera.view_projection * vec4<f32>(camera_relative_position, 1.0);
-    let configured_size = select(camera.default_point_size, input.point_size, input.point_size > 0.0);
     let pixel_to_clip = vec2<f32>(1.0) / camera.viewport_size;
     let displaced_xy =
-        clip_position.xy + corner * configured_size * pixel_to_clip * clip_position.w;
+        clip_position.xy + corner * camera.default_point_size * pixel_to_clip * clip_position.w;
     clip_position = vec4<f32>(displaced_xy, clip_position.zw);
 
     var output: VertexOutput;

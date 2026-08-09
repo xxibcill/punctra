@@ -608,11 +608,9 @@ impl GpuBatch {
             let point_id = point.point_id();
             let mut gpu_point = GpuPoint {
                 position: point.relative_position(),
-                point_size: 0.0,
                 color: point.color(),
                 flags: 0,
                 pick_token,
-                _padding: 0,
             };
             gpu_point.set_highlighted(highlights.contains(&point_id));
             point_ids.push(point_id);

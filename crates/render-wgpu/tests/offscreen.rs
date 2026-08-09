@@ -6,8 +6,9 @@ use std::{
 };
 
 use render_protocol::{
-    BatchKey, BatchVersion, PointBatch, PointId, ProtocolError, RenderLimits, RenderPoint,
-    RenderUpdate, ResidentResource, UpdateKind, UpdateReport, ViewGenerationKey, ViewId,
+    BatchKey, BatchVersion, ESTIMATED_GPU_BYTES_PER_POINT as POINT_BYTES, PointBatch, PointId,
+    ProtocolError, RenderLimits, RenderPoint, RenderUpdate, ResidentResource, UpdateKind,
+    UpdateReport, ViewGenerationKey, ViewId,
 };
 use render_wgpu::{
     Camera, Frame, FrameReport, PickError, PickHit, PickPoll, PickRequest, PickTicket, PointStyle,
@@ -25,6 +26,7 @@ const GREEN: [u8; 4] = [0, 255, 0, 255];
 const BLUE: [u8; 4] = [0, 0, 255, 255];
 const CYAN: [u8; 4] = [0, 255, 255, 255];
 const TRANSPARENT: [u8; 4] = [255, 255, 255, 0];
+const TWO_POINT_BYTES: u64 = 2 * POINT_BYTES;
 
 static GPU: OnceLock<Option<GpuContext>> = OnceLock::new();
 
@@ -69,7 +71,7 @@ fn recorded_frames_are_bound_to_the_renderer_that_created_them() {
 }
 
 fn assert_lifecycle_updates_are_atomic(gpu: &GpuContext) {
-    let limits = RenderLimits::new(32, 1, 1);
+    let limits = RenderLimits::new(POINT_BYTES, 1, 1);
     let mut subject = OffscreenRenderer::new(gpu, limits);
     let generation_one = ViewGenerationKey::new(ViewId::new(1), 1);
     let generation_two = ViewGenerationKey::new(ViewId::new(1), 2);
@@ -106,8 +108,8 @@ fn assert_lifecycle_updates_are_atomic(gpu: &GpuContext) {
         error,
         RendererError::Protocol(ProtocolError::ResidentLimitExceeded {
             resource: ResidentResource::EstimatedGpuBytes,
-            limit: 32,
-            attempted: 64,
+            limit: POINT_BYTES,
+            attempted: TWO_POINT_BYTES,
         })
     ));
 

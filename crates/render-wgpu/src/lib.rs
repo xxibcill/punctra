@@ -8,8 +8,8 @@
 //!
 //! ```no_run
 //! use render_protocol::{
-//!     BatchKey, BatchVersion, ViewGenerationKey, PointBatch, PointId, RenderLimits,
-//!     RenderPoint, RenderUpdate, ViewId,
+//!     BatchKey, BatchVersion, ESTIMATED_GPU_BYTES_PER_POINT, PointBatch, PointId,
+//!     RenderLimits, RenderPoint, RenderUpdate, ViewGenerationKey, ViewId,
 //! };
 //! use render_wgpu::{Camera, Frame, RendererConfig, WgpuRenderer};
 //!
@@ -20,7 +20,11 @@
 //! #     target_format: wgpu::TextureFormat,
 //! # ) -> Result<(), Box<dyn std::error::Error>> {
 //! let view_generation = ViewGenerationKey::new(ViewId::new(7), 1);
-//! let limits = RenderLimits::new(32 * 1_000_000, 1_000_000, 256);
+//! let limits = RenderLimits::new(
+//!     ESTIMATED_GPU_BYTES_PER_POINT * 1_000_000,
+//!     1_000_000,
+//!     256,
+//! );
 //! let mut renderer = WgpuRenderer::new(device, RendererConfig::new(target_format, limits))?;
 //! renderer.apply(&RenderUpdate::Reset { view_generation })?;
 //!

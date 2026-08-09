@@ -31,7 +31,7 @@ queue.submit([encoder.finish()]);
 Point positions use a finite 64-bit world origin plus finite 32-bit relative
 coordinates. Upserts replace complete batches atomically. Stale View
 generations and non-increasing batch versions are rejected before publication.
-The byte limit covers the fixed 32-byte GPU point vertices; per-batch uniforms,
+The byte limit covers the fixed 24-byte GPU point vertices; per-batch uniforms,
 render targets, allocator padding, and transient command uploads are outside
 that logical residency model.
 
