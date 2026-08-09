@@ -1,38 +1,43 @@
 //! Public-interface tests for the protocol reference state model.
 
 use render_protocol::{
-    BatchKey, BatchVersion, FrameKey, PointBatch, PointId, ProtocolError, RenderLimits,
-    RenderPoint, RenderStateModel, RenderUpdate, ResidentResource, UpdateKind, ViewId,
+    BatchKey, BatchVersion, PointBatch, PointId, ProtocolError, RenderLimits, RenderPoint,
+    RenderStateModel, RenderUpdate, ResidentResource, UpdateKind, ViewGenerationKey, ViewId,
 };
 
 #[test]
 fn reset_begins_exactly_one_generation_and_is_observable() {
     let mut state = RenderStateModel::new(RenderLimits::new(1_024, 32, 4));
-    let frame = FrameKey::new(ViewId::new(10), 4);
+    let view_generation = ViewGenerationKey::new(ViewId::new(10), 4);
 
-    let report = state.apply(&RenderUpdate::Reset { frame }).unwrap();
+    let report = state
+        .apply(&RenderUpdate::Reset { view_generation })
+        .unwrap();
 
     assert_eq!(report.kind(), UpdateKind::Reset);
-    assert_eq!(report.frame(), frame);
+    assert_eq!(report.view_generation(), view_generation);
     assert_eq!(report.resident().batch_count(), 0);
-    assert_eq!(state.snapshot().active_frame(), Some(frame));
+    assert_eq!(
+        state.snapshot().active_view_generation(),
+        Some(view_generation)
+    );
 
     let before = state.snapshot();
     assert_eq!(
-        state.apply(&RenderUpdate::Reset { frame }),
-        Err(ProtocolError::GenerationAlreadyStarted { frame })
+        state.apply(&RenderUpdate::Reset { view_generation }),
+        Err(ProtocolError::GenerationAlreadyStarted { view_generation })
     );
     assert_eq!(state.snapshot(), before);
 }
 
 #[test]
 fn upsert_inserts_and_strictly_newer_versions_replace_atomically() {
-    let frame = frame(1, 0);
-    let mut state = started_state(frame, RenderLimits::new(1_024, 32, 4));
+    let view_generation = view_generation(1, 0);
+    let mut state = started_state(view_generation, RenderLimits::new(1_024, 32, 4));
 
     let inserted = state
         .apply(&RenderUpdate::Upsert {
-            batch: batch(frame, 8, 3, &[10, 11]),
+            batch: batch(view_generation, 8, 3, &[10, 11]),
         })
         .unwrap();
 
@@ -51,7 +56,7 @@ fn upsert_inserts_and_strictly_newer_versions_replace_atomically() {
 
     let replaced = state
         .apply(&RenderUpdate::Upsert {
-            batch: batch(frame, 8, 4, &[12]),
+            batch: batch(view_generation, 8, 4, &[12]),
         })
         .unwrap();
 
@@ -66,7 +71,7 @@ fn upsert_inserts_and_strictly_newer_versions_replace_atomically() {
     let before = state.snapshot();
     assert_eq!(
         state.apply(&RenderUpdate::Upsert {
-            batch: batch(frame, 8, 4, &[13, 14]),
+            batch: batch(view_generation, 8, 4, &[13, 14]),
         }),
         Err(ProtocolError::BatchVersionNotIncreasing {
             key: BatchKey::new(8),
@@ -79,18 +84,18 @@ fn upsert_inserts_and_strictly_newer_versions_replace_atomically() {
 
 #[test]
 fn conditional_remove_preserves_newer_batches_and_versions_survive_removal() {
-    let frame = frame(2, 1);
-    let mut state = started_state(frame, RenderLimits::new(1_024, 32, 4));
+    let view_generation = view_generation(2, 1);
+    let mut state = started_state(view_generation, RenderLimits::new(1_024, 32, 4));
     state
         .apply(&RenderUpdate::Upsert {
-            batch: batch(frame, 5, 7, &[1, 2]),
+            batch: batch(view_generation, 5, 7, &[1, 2]),
         })
         .unwrap();
 
     let before = state.snapshot();
     assert_eq!(
         state.apply(&RenderUpdate::Remove {
-            frame,
+            view_generation,
             key: BatchKey::new(5),
             expected_version: BatchVersion::new(6),
         }),
@@ -104,7 +109,7 @@ fn conditional_remove_preserves_newer_batches_and_versions_survive_removal() {
 
     let removed = state
         .apply(&RenderUpdate::Remove {
-            frame,
+            view_generation,
             key: BatchKey::new(5),
             expected_version: BatchVersion::new(7),
         })
@@ -117,7 +122,7 @@ fn conditional_remove_preserves_newer_batches_and_versions_survive_removal() {
     let empty = state.snapshot();
     assert_eq!(
         state.apply(&RenderUpdate::Upsert {
-            batch: batch(frame, 5, 7, &[3]),
+            batch: batch(view_generation, 5, 7, &[3]),
         }),
         Err(ProtocolError::BatchVersionNotIncreasing {
             key: BatchKey::new(5),
@@ -129,15 +134,15 @@ fn conditional_remove_preserves_newer_batches_and_versions_survive_removal() {
 
     state
         .apply(&RenderUpdate::Upsert {
-            batch: batch(frame, 5, 8, &[3]),
+            batch: batch(view_generation, 5, 8, &[3]),
         })
         .unwrap();
 }
 
 #[test]
-fn every_non_reset_update_must_match_the_active_frame() {
-    let expected = frame(3, 4);
-    let received = frame(3, 3);
+fn every_non_reset_update_must_match_the_active_view_generation() {
+    let expected = view_generation(3, 4);
+    let received = view_generation(3, 3);
     let update = RenderUpdate::Upsert {
         batch: batch(received, 1, 0, &[1]),
     };
@@ -147,15 +152,17 @@ fn every_non_reset_update_must_match_the_active_frame() {
         state.apply(&update),
         Err(ProtocolError::GenerationNotStarted { received })
     );
-    assert_eq!(state.snapshot().active_frame(), None);
+    assert_eq!(state.snapshot().active_view_generation(), None);
 
     state
-        .apply(&RenderUpdate::Reset { frame: expected })
+        .apply(&RenderUpdate::Reset {
+            view_generation: expected,
+        })
         .unwrap();
     let before = state.snapshot();
     assert_eq!(
         state.apply(&update),
-        Err(ProtocolError::FrameMismatch {
+        Err(ProtocolError::ViewGenerationMismatch {
             active: expected,
             received,
         })
@@ -165,7 +172,7 @@ fn every_non_reset_update_must_match_the_active_frame() {
 
 #[test]
 fn reset_requires_forward_progress_per_view_and_clears_generation_state() {
-    let first = frame(4, 5);
+    let first = view_generation(4, 5);
     let mut state = started_state(first, RenderLimits::new(1_024, 32, 4));
     state
         .apply(&RenderUpdate::Upsert {
@@ -174,14 +181,16 @@ fn reset_requires_forward_progress_per_view_and_clears_generation_state() {
         .unwrap();
     state
         .apply(&RenderUpdate::SetHighlights {
-            frame: first,
+            view_generation: first,
             point_ids: vec![PointId::new(1)],
         })
         .unwrap();
 
     let before = state.snapshot();
     assert_eq!(
-        state.apply(&RenderUpdate::Reset { frame: frame(4, 4) }),
+        state.apply(&RenderUpdate::Reset {
+            view_generation: view_generation(4, 4),
+        }),
         Err(ProtocolError::StaleGeneration {
             view: ViewId::new(4),
             last_generation: 5,
@@ -190,33 +199,43 @@ fn reset_requires_forward_progress_per_view_and_clears_generation_state() {
     );
     assert_eq!(state.snapshot(), before);
 
-    let next = frame(4, 6);
-    let report = state.apply(&RenderUpdate::Reset { frame: next }).unwrap();
+    let next = view_generation(4, 6);
+    let report = state
+        .apply(&RenderUpdate::Reset {
+            view_generation: next,
+        })
+        .unwrap();
     assert_eq!(report.removed_points(), 1);
     assert_eq!(report.removed_bytes(), 32);
     assert!(state.snapshot().batches().is_empty());
     assert!(state.snapshot().highlights().is_empty());
-    assert_eq!(state.snapshot().active_frame(), Some(next));
+    assert_eq!(state.snapshot().active_view_generation(), Some(next));
 
-    let other_view = frame(40, 0);
+    let other_view = view_generation(40, 0);
     state
-        .apply(&RenderUpdate::Reset { frame: other_view })
+        .apply(&RenderUpdate::Reset {
+            view_generation: other_view,
+        })
         .unwrap();
-    assert_eq!(state.snapshot().active_frame(), Some(other_view));
+    assert_eq!(state.snapshot().active_view_generation(), Some(other_view));
     assert_eq!(
-        state.apply(&RenderUpdate::Reset { frame: next }),
-        Err(ProtocolError::GenerationAlreadyStarted { frame: next })
+        state.apply(&RenderUpdate::Reset {
+            view_generation: next,
+        }),
+        Err(ProtocolError::GenerationAlreadyStarted {
+            view_generation: next,
+        })
     );
 }
 
 #[test]
 fn highlights_are_a_sorted_distinct_replaceable_set() {
-    let frame = frame(5, 0);
-    let mut state = started_state(frame, RenderLimits::new(0, 0, 0));
+    let view_generation = view_generation(5, 0);
+    let mut state = started_state(view_generation, RenderLimits::new(0, 0, 0));
 
     let report = state
         .apply(&RenderUpdate::SetHighlights {
-            frame,
+            view_generation,
             point_ids: vec![PointId::new(9), PointId::new(2), PointId::new(9)],
         })
         .unwrap();
@@ -230,7 +249,7 @@ fn highlights_are_a_sorted_distinct_replaceable_set() {
 
     state
         .apply(&RenderUpdate::SetHighlights {
-            frame,
+            view_generation,
             point_ids: Vec::new(),
         })
         .unwrap();
@@ -254,17 +273,17 @@ fn byte_point_and_batch_limits_are_hard_and_transactional() {
         2,
     );
 
-    let frame = frame(6, 0);
-    let mut state = started_state(frame, RenderLimits::new(1_024, 10, 1));
+    let view_generation = view_generation(6, 0);
+    let mut state = started_state(view_generation, RenderLimits::new(1_024, 10, 1));
     state
         .apply(&RenderUpdate::Upsert {
-            batch: batch(frame, 1, 0, &[1]),
+            batch: batch(view_generation, 1, 0, &[1]),
         })
         .unwrap();
     let before = state.snapshot();
     assert_eq!(
         state.apply(&RenderUpdate::Upsert {
-            batch: batch(frame, 2, 0, &[2]),
+            batch: batch(view_generation, 2, 0, &[2]),
         }),
         Err(ProtocolError::ResidentLimitExceeded {
             resource: ResidentResource::Batches,
@@ -277,18 +296,18 @@ fn byte_point_and_batch_limits_are_hard_and_transactional() {
 
 #[test]
 fn rejected_replacement_keeps_the_complete_previous_batch() {
-    let frame = frame(7, 0);
-    let mut state = started_state(frame, RenderLimits::new(64, 2, 1));
+    let view_generation = view_generation(7, 0);
+    let mut state = started_state(view_generation, RenderLimits::new(64, 2, 1));
     state
         .apply(&RenderUpdate::Upsert {
-            batch: batch(frame, 1, 1, &[1]),
+            batch: batch(view_generation, 1, 1, &[1]),
         })
         .unwrap();
     let before = state.snapshot();
 
     assert_eq!(
         state.apply(&RenderUpdate::Upsert {
-            batch: batch(frame, 1, 2, &[2, 3, 4]),
+            batch: batch(view_generation, 1, 2, &[2, 3, 4]),
         }),
         Err(ProtocolError::ResidentLimitExceeded {
             resource: ResidentResource::EstimatedGpuBytes,
@@ -301,13 +320,13 @@ fn rejected_replacement_keeps_the_complete_previous_batch() {
 
 #[test]
 fn removing_a_missing_batch_is_rejected_without_side_effects() {
-    let frame = frame(8, 0);
-    let mut state = started_state(frame, RenderLimits::new(1_024, 32, 4));
+    let view_generation = view_generation(8, 0);
+    let mut state = started_state(view_generation, RenderLimits::new(1_024, 32, 4));
     let before = state.snapshot();
 
     assert_eq!(
         state.apply(&RenderUpdate::Remove {
-            frame,
+            view_generation,
             key: BatchKey::new(99),
             expected_version: BatchVersion::new(0),
         }),
@@ -325,12 +344,12 @@ fn assert_limit_rejection(
     limit: u64,
     attempted: u64,
 ) {
-    let frame = frame(50, 0);
-    let mut state = started_state(frame, limits);
+    let view_generation = view_generation(50, 0);
+    let mut state = started_state(view_generation, limits);
     let before = state.snapshot();
     assert_eq!(
         state.apply(&RenderUpdate::Upsert {
-            batch: batch(frame, 1, 0, point_ids),
+            batch: batch(view_generation, 1, 0, point_ids),
         }),
         Err(ProtocolError::ResidentLimitExceeded {
             resource,
@@ -341,19 +360,26 @@ fn assert_limit_rejection(
     assert_eq!(state.snapshot(), before);
 }
 
-fn started_state(frame: FrameKey, limits: RenderLimits) -> RenderStateModel {
+fn started_state(view_generation: ViewGenerationKey, limits: RenderLimits) -> RenderStateModel {
     let mut state = RenderStateModel::new(limits);
-    state.apply(&RenderUpdate::Reset { frame }).unwrap();
+    state
+        .apply(&RenderUpdate::Reset { view_generation })
+        .unwrap();
     state
 }
 
-fn batch(frame: FrameKey, key: u64, version: u64, point_ids: &[u64]) -> PointBatch {
+fn batch(
+    view_generation: ViewGenerationKey,
+    key: u64,
+    version: u64,
+    point_ids: &[u64],
+) -> PointBatch {
     let points = point_ids
         .iter()
         .map(|id| RenderPoint::new([0.0; 3], [255; 4], PointId::new(*id)).unwrap())
         .collect();
     PointBatch::new(
-        frame,
+        view_generation,
         BatchKey::new(key),
         BatchVersion::new(version),
         [0.0; 3],
@@ -362,6 +388,6 @@ fn batch(frame: FrameKey, key: u64, version: u64, point_ids: &[u64]) -> PointBat
     .unwrap()
 }
 
-fn frame(view: u64, generation: u64) -> FrameKey {
-    FrameKey::new(ViewId::new(view), generation)
+fn view_generation(view: u64, generation: u64) -> ViewGenerationKey {
+    ViewGenerationKey::new(ViewId::new(view), generation)
 }

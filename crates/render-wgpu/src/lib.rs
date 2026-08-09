@@ -8,7 +8,7 @@
 //!
 //! ```no_run
 //! use render_protocol::{
-//!     BatchKey, BatchVersion, FrameKey, PointBatch, PointId, RenderLimits,
+//!     BatchKey, BatchVersion, ViewGenerationKey, PointBatch, PointId, RenderLimits,
 //!     RenderPoint, RenderUpdate, ViewId,
 //! };
 //! use render_wgpu::{Camera, Frame, RendererConfig, WgpuRenderer};
@@ -19,14 +19,14 @@
 //! #     target: &wgpu::TextureView,
 //! #     target_format: wgpu::TextureFormat,
 //! # ) -> Result<(), Box<dyn std::error::Error>> {
-//! let key = FrameKey::new(ViewId::new(7), 1);
+//! let view_generation = ViewGenerationKey::new(ViewId::new(7), 1);
 //! let limits = RenderLimits::new(32 * 1_000_000, 1_000_000, 256);
 //! let mut renderer = WgpuRenderer::new(device, RendererConfig::new(target_format, limits))?;
-//! renderer.apply(&RenderUpdate::Reset { frame: key })?;
+//! renderer.apply(&RenderUpdate::Reset { view_generation })?;
 //!
 //! let point = RenderPoint::new([0.0, 0.0, 0.0], [80, 180, 255, 255], PointId::new(42))?;
 //! let batch = PointBatch::new(
-//!     key,
+//!     view_generation,
 //!     BatchKey::new(3),
 //!     BatchVersion::new(1),
 //!     [500_000.0, 6_000_000.0, 120.0],
@@ -42,7 +42,7 @@
 //!     0.1,
 //!     1_000.0,
 //! )?;
-//! let frame = Frame::new(key, camera, [1280, 720])?;
+//! let frame = Frame::new(view_generation, camera, [1280, 720])?;
 //! let report = renderer.render(encoder, target, &frame)?;
 //! assert_eq!(report.drawn_points(), 1);
 //! # Ok(())

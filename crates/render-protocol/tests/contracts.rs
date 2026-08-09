@@ -1,20 +1,20 @@
 //! Public-interface tests for owned renderer-neutral values.
 
 use render_protocol::{
-    BatchKey, BatchVersion, ESTIMATED_GPU_BYTES_PER_POINT, FrameKey, PointBatch, PointId,
-    ProtocolError, RenderPoint, ViewId,
+    BatchKey, BatchVersion, ESTIMATED_GPU_BYTES_PER_POINT, PointBatch, PointId, ProtocolError,
+    RenderPoint, ViewGenerationKey, ViewId,
 };
 
 #[test]
 fn point_batch_owns_valid_renderer_neutral_points() {
-    let frame = FrameKey::new(ViewId::new(7), 3);
+    let view_generation = ViewGenerationKey::new(ViewId::new(7), 3);
     let points = vec![
         RenderPoint::new([1.0, 2.0, 3.0], [10, 20, 30, 40], PointId::new(11)).unwrap(),
         RenderPoint::new([-4.0, 5.0, 0.25], [50, 60, 70, 80], PointId::new(12)).unwrap(),
     ];
 
     let batch = PointBatch::new(
-        frame,
+        view_generation,
         BatchKey::new(5),
         BatchVersion::new(9),
         [6_378_137.0, 1_000_000.0, -20.0],
@@ -22,7 +22,7 @@ fn point_batch_owns_valid_renderer_neutral_points() {
     )
     .unwrap();
 
-    assert_eq!(batch.frame(), frame);
+    assert_eq!(batch.view_generation(), view_generation);
     assert_eq!(batch.key(), BatchKey::new(5));
     assert_eq!(batch.version(), BatchVersion::new(9));
     assert_eq!(
@@ -49,10 +49,10 @@ fn point_contracts_reject_non_finite_and_empty_data() {
         Err(ProtocolError::NonFiniteRelativePosition { axis: 0 })
     );
 
-    let frame = FrameKey::new(ViewId::new(1), 0);
+    let view_generation = ViewGenerationKey::new(ViewId::new(1), 0);
     assert_eq!(
         PointBatch::new(
-            frame,
+            view_generation,
             BatchKey::new(1),
             BatchVersion::new(0),
             [0.0, f64::INFINITY, 0.0],
@@ -62,7 +62,7 @@ fn point_contracts_reject_non_finite_and_empty_data() {
     );
     assert_eq!(
         PointBatch::new(
-            frame,
+            view_generation,
             BatchKey::new(1),
             BatchVersion::new(0),
             [0.0; 3],

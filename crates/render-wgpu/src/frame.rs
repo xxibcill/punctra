@@ -1,4 +1,4 @@
-use render_protocol::FrameKey;
+use render_protocol::ViewGenerationKey;
 use thiserror::Error;
 
 use crate::Camera;
@@ -72,7 +72,7 @@ impl Default for PointStyle {
 /// All caller-controlled values used to record one frame.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Frame {
-    key: FrameKey,
+    view_generation: ViewGenerationKey,
     camera: Camera,
     viewport: [u32; 2],
     style: PointStyle,
@@ -84,13 +84,17 @@ impl Frame {
     /// # Errors
     ///
     /// Returns [`FrameError::EmptyViewport`] when either physical extent is zero.
-    pub fn new(key: FrameKey, camera: Camera, viewport: [u32; 2]) -> Result<Self, FrameError> {
+    pub fn new(
+        view_generation: ViewGenerationKey,
+        camera: Camera,
+        viewport: [u32; 2],
+    ) -> Result<Self, FrameError> {
         if viewport.into_iter().any(|extent| extent == 0) {
             return Err(FrameError::EmptyViewport { viewport });
         }
 
         Ok(Self {
-            key,
+            view_generation,
             camera,
             viewport,
             style: PointStyle::default(),
@@ -106,8 +110,8 @@ impl Frame {
 
     /// Returns the View generation to draw.
     #[must_use]
-    pub const fn key(self) -> FrameKey {
-        self.key
+    pub const fn view_generation(self) -> ViewGenerationKey {
+        self.view_generation
     }
 
     /// Returns the camera.
@@ -197,10 +201,10 @@ mod tests {
 
     #[test]
     fn frame_rejects_an_empty_viewport() {
-        let key = FrameKey::new(ViewId::new(1), 1);
+        let view_generation = ViewGenerationKey::new(ViewId::new(1), 1);
 
         assert_eq!(
-            Frame::new(key, camera(), [1920, 0]),
+            Frame::new(view_generation, camera(), [1920, 0]),
             Err(FrameError::EmptyViewport {
                 viewport: [1920, 0]
             })

@@ -19,10 +19,10 @@ let limits = RenderLimits::new(512 * 1024 * 1024, 20_000_000, 4096);
 let config = RendererConfig::new(surface_format, limits);
 let mut renderer = WgpuRenderer::new(&device, config)?;
 
-renderer.apply(&RenderUpdate::Reset { frame: frame_key })?;
+renderer.apply(&RenderUpdate::Reset { view_generation })?;
 renderer.apply(&RenderUpdate::Upsert { batch })?;
 
-let frame = Frame::new(frame_key, camera, [width, height])?;
+let frame = Frame::new(view_generation, camera, [width, height])?;
 let report = renderer.render(&mut encoder, &target, &frame)?;
 queue.submit([encoder.finish()]);
 ```

@@ -96,13 +96,13 @@ impl BatchVersion {
 
 /// Names one generation of one view.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct FrameKey {
+pub struct ViewGenerationKey {
     view: ViewId,
     generation: u64,
 }
 
-impl FrameKey {
-    /// Creates a frame key.
+impl ViewGenerationKey {
+    /// Creates a key for one generation of one view.
     #[must_use]
     pub const fn new(view: ViewId, generation: u64) -> Self {
         Self { view, generation }
@@ -174,10 +174,10 @@ impl RenderPoint {
     }
 }
 
-/// A non-empty, owned group of points for one frame and batch version.
+/// A non-empty, owned group of points for one view generation and batch version.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PointBatch {
-    frame: FrameKey,
+    view_generation: ViewGenerationKey,
     key: BatchKey,
     version: BatchVersion,
     world_origin: [f64; 3],
@@ -194,7 +194,7 @@ impl PointBatch {
     /// Returns an error when the world origin is non-finite, the batch is
     /// empty, or its size cannot be represented by the residency model.
     pub fn new(
-        frame: FrameKey,
+        view_generation: ViewGenerationKey,
         key: BatchKey,
         version: BatchVersion,
         world_origin: [f64; 3],
@@ -213,7 +213,7 @@ impl PointBatch {
             .ok_or(ProtocolError::SizeOverflow)?;
 
         Ok(Self {
-            frame,
+            view_generation,
             key,
             version,
             world_origin,
@@ -223,10 +223,10 @@ impl PointBatch {
         })
     }
 
-    /// Returns the frame this batch belongs to.
+    /// Returns the view generation this batch belongs to.
     #[must_use]
-    pub const fn frame(&self) -> FrameKey {
-        self.frame
+    pub const fn view_generation(&self) -> ViewGenerationKey {
+        self.view_generation
     }
 
     /// Returns the stable batch key.
@@ -269,10 +269,10 @@ impl PointBatch {
 /// One complete logical update to renderer state.
 #[derive(Clone, Debug, PartialEq)]
 pub enum RenderUpdate {
-    /// Begins a generation and clears all state from the previous active frame.
+    /// Begins a generation and clears all state from the previous active generation.
     Reset {
         /// The generation to begin.
-        frame: FrameKey,
+        view_generation: ViewGenerationKey,
     },
     /// Inserts a new batch or replaces an older version of the same batch key.
     Upsert {
@@ -281,8 +281,8 @@ pub enum RenderUpdate {
     },
     /// Removes a batch only if its resident version matches.
     Remove {
-        /// The frame the removal belongs to.
-        frame: FrameKey,
+        /// The view generation the removal belongs to.
+        view_generation: ViewGenerationKey,
         /// The batch to remove.
         key: BatchKey,
         /// The version the caller expects to be resident.
@@ -290,22 +290,26 @@ pub enum RenderUpdate {
     },
     /// Replaces the complete set of highlighted caller point identities.
     SetHighlights {
-        /// The frame the highlight set belongs to.
-        frame: FrameKey,
+        /// The view generation the highlight set belongs to.
+        view_generation: ViewGenerationKey,
         /// The complete highlight set. An empty vector clears highlighting.
         point_ids: Vec<PointId>,
     },
 }
 
 impl RenderUpdate {
-    /// Returns the frame this update belongs to.
+    /// Returns the view generation this update belongs to.
     #[must_use]
-    pub const fn frame(&self) -> FrameKey {
+    pub const fn view_generation(&self) -> ViewGenerationKey {
         match self {
-            Self::Reset { frame }
-            | Self::Remove { frame, .. }
-            | Self::SetHighlights { frame, .. } => *frame,
-            Self::Upsert { batch } => batch.frame(),
+            Self::Reset { view_generation }
+            | Self::Remove {
+                view_generation, ..
+            }
+            | Self::SetHighlights {
+                view_generation, ..
+            } => *view_generation,
+            Self::Upsert { batch } => batch.view_generation(),
         }
     }
 }
@@ -430,7 +434,7 @@ pub enum UpdateKind {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct UpdateReport {
     kind: UpdateKind,
-    frame: FrameKey,
+    view_generation: ViewGenerationKey,
     resident: ResidentStats,
     uploaded_points: u64,
     uploaded_bytes: u64,
@@ -446,10 +450,10 @@ impl UpdateReport {
         self.kind
     }
 
-    /// Returns the active frame after the update.
+    /// Returns the active view generation after the update.
     #[must_use]
-    pub const fn frame(self) -> FrameKey {
-        self.frame
+    pub const fn view_generation(self) -> ViewGenerationKey {
+        self.view_generation
     }
 
     /// Returns aggregate residency after the update.
@@ -492,17 +496,17 @@ impl UpdateReport {
 /// An immutable observable snapshot of protocol state.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct RenderSnapshot {
-    active_frame: Option<FrameKey>,
+    active_view_generation: Option<ViewGenerationKey>,
     resident: ResidentStats,
     batches: Vec<ResidentBatch>,
     highlights: Vec<PointId>,
 }
 
 impl RenderSnapshot {
-    /// Returns the active frame, or `None` before the first reset.
+    /// Returns the active view generation, or `None` before the first reset.
     #[must_use]
-    pub const fn active_frame(&self) -> Option<FrameKey> {
-        self.active_frame
+    pub const fn active_view_generation(&self) -> Option<ViewGenerationKey> {
+        self.active_view_generation
     }
 
     /// Returns aggregate residency.
@@ -541,7 +545,7 @@ pub enum ResidentResource {
 #[derive(Clone, Debug)]
 pub struct RenderStateModel {
     limits: RenderLimits,
-    active_frame: Option<FrameKey>,
+    active_view_generation: Option<ViewGenerationKey>,
     last_generations: BTreeMap<ViewId, u64>,
     batches: BTreeMap<BatchKey, ResidentBatch>,
     latest_versions: BTreeMap<BatchKey, BatchVersion>,
@@ -555,7 +559,7 @@ impl RenderStateModel {
     pub fn new(limits: RenderLimits) -> Self {
         Self {
             limits,
-            active_frame: None,
+            active_view_generation: None,
             last_generations: BTreeMap::new(),
             batches: BTreeMap::new(),
             latest_versions: BTreeMap::new(),
@@ -579,16 +583,17 @@ impl RenderStateModel {
     /// removal, overflows accounting, or exceeds a hard residency limit.
     pub fn apply(&mut self, update: &RenderUpdate) -> Result<UpdateReport, ProtocolError> {
         match update {
-            RenderUpdate::Reset { frame } => self.apply_reset(*frame),
+            RenderUpdate::Reset { view_generation } => self.apply_reset(*view_generation),
             RenderUpdate::Upsert { batch } => self.apply_upsert(batch),
             RenderUpdate::Remove {
-                frame,
+                view_generation,
                 key,
                 expected_version,
-            } => self.apply_remove(*frame, *key, *expected_version),
-            RenderUpdate::SetHighlights { frame, point_ids } => {
-                self.apply_highlights(*frame, point_ids)
-            }
+            } => self.apply_remove(*view_generation, *key, *expected_version),
+            RenderUpdate::SetHighlights {
+                view_generation,
+                point_ids,
+            } => self.apply_highlights(*view_generation, point_ids),
         }
     }
 
@@ -596,20 +601,23 @@ impl RenderStateModel {
     #[must_use]
     pub fn snapshot(&self) -> RenderSnapshot {
         RenderSnapshot {
-            active_frame: self.active_frame,
+            active_view_generation: self.active_view_generation,
             resident: self.resident,
             batches: self.batches.values().copied().collect(),
             highlights: self.highlights.iter().copied().collect(),
         }
     }
 
-    fn apply_reset(&mut self, frame: FrameKey) -> Result<UpdateReport, ProtocolError> {
-        self.validate_reset(frame)?;
+    fn apply_reset(
+        &mut self,
+        view_generation: ViewGenerationKey,
+    ) -> Result<UpdateReport, ProtocolError> {
+        self.validate_reset(view_generation)?;
         let removed = self.resident;
 
-        self.active_frame = Some(frame);
+        self.active_view_generation = Some(view_generation);
         self.last_generations
-            .insert(frame.view(), frame.generation());
+            .insert(view_generation.view(), view_generation.generation());
         self.batches.clear();
         self.latest_versions.clear();
         self.highlights.clear();
@@ -624,25 +632,26 @@ impl RenderStateModel {
         ))
     }
 
-    fn validate_reset(&self, frame: FrameKey) -> Result<(), ProtocolError> {
-        let Some(last_generation) = self.last_generations.get(&frame.view()).copied() else {
+    fn validate_reset(&self, view_generation: ViewGenerationKey) -> Result<(), ProtocolError> {
+        let Some(last_generation) = self.last_generations.get(&view_generation.view()).copied()
+        else {
             return Ok(());
         };
-        if frame.generation() < last_generation {
+        if view_generation.generation() < last_generation {
             return Err(ProtocolError::StaleGeneration {
-                view: frame.view(),
+                view: view_generation.view(),
                 last_generation,
-                received_generation: frame.generation(),
+                received_generation: view_generation.generation(),
             });
         }
-        if frame.generation() == last_generation {
-            return Err(ProtocolError::GenerationAlreadyStarted { frame });
+        if view_generation.generation() == last_generation {
+            return Err(ProtocolError::GenerationAlreadyStarted { view_generation });
         }
         Ok(())
     }
 
     fn apply_upsert(&mut self, batch: &PointBatch) -> Result<UpdateReport, ProtocolError> {
-        self.require_active_frame(batch.frame())?;
+        self.require_active_view_generation(batch.view_generation())?;
         self.require_increasing_version(batch)?;
 
         let replaced = self.batches.get(&batch.key()).copied();
@@ -733,11 +742,11 @@ impl RenderStateModel {
 
     fn apply_remove(
         &mut self,
-        frame: FrameKey,
+        view_generation: ViewGenerationKey,
         key: BatchKey,
         expected_version: BatchVersion,
     ) -> Result<UpdateReport, ProtocolError> {
-        self.require_active_frame(frame)?;
+        self.require_active_view_generation(view_generation)?;
         let resident = self
             .batches
             .get(&key)
@@ -769,10 +778,10 @@ impl RenderStateModel {
 
     fn apply_highlights(
         &mut self,
-        frame: FrameKey,
+        view_generation: ViewGenerationKey,
         point_ids: &[PointId],
     ) -> Result<UpdateReport, ProtocolError> {
-        self.require_active_frame(frame)?;
+        self.require_active_view_generation(view_generation)?;
         let next_highlights: BTreeSet<_> = point_ids.iter().copied().collect();
         u64::try_from(next_highlights.len()).map_err(|_| ProtocolError::SizeOverflow)?;
 
@@ -780,12 +789,15 @@ impl RenderStateModel {
         Ok(self.report(UpdateKind::HighlightsSet, 0, 0, 0, 0))
     }
 
-    fn require_active_frame(&self, received: FrameKey) -> Result<(), ProtocolError> {
+    fn require_active_view_generation(
+        &self,
+        received: ViewGenerationKey,
+    ) -> Result<(), ProtocolError> {
         let active = self
-            .active_frame
+            .active_view_generation
             .ok_or(ProtocolError::GenerationNotStarted { received })?;
         if active != received {
-            return Err(ProtocolError::FrameMismatch { active, received });
+            return Err(ProtocolError::ViewGenerationMismatch { active, received });
         }
         Ok(())
     }
@@ -800,9 +812,9 @@ impl RenderStateModel {
     ) -> UpdateReport {
         UpdateReport {
             kind,
-            frame: self
-                .active_frame
-                .expect("an accepted update always has an active frame"),
+            view_generation: self
+                .active_view_generation
+                .expect("an accepted update always has an active view generation"),
             resident: self.resident,
             uploaded_points,
             uploaded_bytes,
@@ -858,10 +870,10 @@ pub enum ProtocolError {
     #[error("point batch size exceeds the protocol accounting range")]
     SizeOverflow,
     /// This view generation was already begun by a reset.
-    #[error("frame {frame:?} was already started")]
+    #[error("view generation {view_generation:?} was already started")]
     GenerationAlreadyStarted {
-        /// The duplicate frame.
-        frame: FrameKey,
+        /// The duplicate view generation.
+        view_generation: ViewGenerationKey,
     },
     /// A reset attempted to return to an older generation of one view.
     #[error(
@@ -876,18 +888,18 @@ pub enum ProtocolError {
         received_generation: u64,
     },
     /// A non-reset update arrived before any generation began.
-    #[error("frame {received:?} has not been started by a reset")]
+    #[error("view generation {received:?} has not been started by a reset")]
     GenerationNotStarted {
-        /// The rejected update's frame.
-        received: FrameKey,
+        /// The rejected update's view generation.
+        received: ViewGenerationKey,
     },
-    /// An update did not belong to the active frame.
-    #[error("update frame {received:?} does not match active frame {active:?}")]
-    FrameMismatch {
-        /// The active frame.
-        active: FrameKey,
-        /// The rejected update's frame.
-        received: FrameKey,
+    /// An update did not belong to the active view generation.
+    #[error("update view generation {received:?} does not match active view generation {active:?}")]
+    ViewGenerationMismatch {
+        /// The active view generation.
+        active: ViewGenerationKey,
+        /// The rejected update's view generation.
+        received: ViewGenerationKey,
     },
     /// An upsert did not advance the version last seen for its batch key.
     #[error("batch {key:?} version {received:?} does not advance {previous:?}")]

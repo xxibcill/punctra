@@ -1,5 +1,5 @@
 use render_protocol::{
-    BatchKey, BatchVersion, FrameKey, PointBatch, PointId, ProtocolError, RenderPoint,
+    BatchKey, BatchVersion, PointBatch, PointId, ProtocolError, RenderPoint, ViewGenerationKey,
 };
 
 pub(crate) const TILE_COLUMNS: u32 = 16;
@@ -22,17 +22,17 @@ struct TileCoordinate {
 
 #[derive(Debug)]
 pub(crate) struct SyntheticScene {
-    frame: FrameKey,
+    view_generation: ViewGenerationKey,
     tile_order: Vec<TileCoordinate>,
     next_tile: usize,
 }
 
 impl SyntheticScene {
-    pub(crate) fn new(frame: FrameKey) -> Self {
+    pub(crate) fn new(view_generation: ViewGenerationKey) -> Self {
         let mut tile_order = all_tiles();
         tile_order.sort_by_key(|tile| tile_sort_key(*tile));
         Self {
-            frame,
+            view_generation,
             tile_order,
             next_tile: 0,
         }
@@ -43,7 +43,7 @@ impl SyntheticScene {
             return Ok(None);
         };
         self.next_tile += 1;
-        make_batch(self.frame, tile).map(Some)
+        make_batch(self.view_generation, tile).map(Some)
     }
 
     pub(crate) fn loaded_batches(&self) -> u64 {
@@ -72,7 +72,10 @@ fn tile_sort_key(tile: TileCoordinate) -> (i32, u32, u32) {
     (column * column + row * row, tile.row, tile.column)
 }
 
-fn make_batch(frame: FrameKey, tile: TileCoordinate) -> Result<PointBatch, ProtocolError> {
+fn make_batch(
+    view_generation: ViewGenerationKey,
+    tile: TileCoordinate,
+) -> Result<PointBatch, ProtocolError> {
     let point_capacity =
         usize::try_from(POINTS_PER_BATCH).expect("the points-per-batch count fits in usize");
     let mut points = Vec::with_capacity(point_capacity);
@@ -83,7 +86,7 @@ fn make_batch(frame: FrameKey, tile: TileCoordinate) -> Result<PointBatch, Proto
     }
 
     PointBatch::new(
-        frame,
+        view_generation,
         batch_key(tile),
         BatchVersion::new(1),
         tile_world_origin(tile),
@@ -191,13 +194,13 @@ mod tests {
 
     use super::*;
 
-    fn frame() -> FrameKey {
-        FrameKey::new(ViewId::new(1), 1)
+    fn view_generation() -> ViewGenerationKey {
+        ViewGenerationKey::new(ViewId::new(1), 1)
     }
 
     #[test]
     fn streams_every_tile_once_from_the_center_out() {
-        let mut scene = SyntheticScene::new(frame());
+        let mut scene = SyntheticScene::new(view_generation());
         let first = scene.next_batch().unwrap().unwrap();
 
         assert_eq!(first.point_count(), POINTS_PER_BATCH);
@@ -214,12 +217,15 @@ mod tests {
     fn generated_batches_are_deterministic() {
         let tile = TileCoordinate { column: 5, row: 9 };
 
-        assert_eq!(make_batch(frame(), tile), make_batch(frame(), tile));
+        assert_eq!(
+            make_batch(view_generation(), tile),
+            make_batch(view_generation(), tile)
+        );
     }
 
     #[test]
     fn highlight_identifiers_are_unique() {
-        let scene = SyntheticScene::new(frame());
+        let scene = SyntheticScene::new(view_generation());
         let highlights = scene.highlight_ids();
         let unique = highlights.iter().copied().collect::<BTreeSet<_>>();
 

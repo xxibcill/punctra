@@ -6,8 +6,8 @@ use std::{
 
 use bytemuck::Zeroable;
 use render_protocol::{
-    BatchKey, FrameKey, PointBatch, PointId, ProtocolError, RenderLimits, RenderStateModel,
-    RenderUpdate, UpdateReport,
+    BatchKey, PointBatch, PointId, ProtocolError, RenderLimits, RenderStateModel, RenderUpdate,
+    UpdateReport, ViewGenerationKey,
 };
 use thiserror::Error;
 use wgpu::util::DeviceExt;
@@ -56,7 +56,7 @@ impl RendererConfig {
 /// Observable work encoded for one frame.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FrameReport {
-    frame: FrameKey,
+    view_generation: ViewGenerationKey,
     drawn_points: u64,
     draw_calls: u64,
     resident_bytes: u64,
@@ -66,8 +66,8 @@ pub struct FrameReport {
 impl FrameReport {
     /// Returns the View generation that was drawn.
     #[must_use]
-    pub const fn frame(self) -> FrameKey {
-        self.frame
+    pub const fn view_generation(self) -> ViewGenerationKey {
+        self.view_generation
     }
 
     /// Returns the number of point instances encoded for drawing.
@@ -172,9 +172,9 @@ impl WgpuRenderer {
         let report = next_state.apply(update)?;
 
         match update {
-            RenderUpdate::Reset { frame } => {
+            RenderUpdate::Reset { view_generation } => {
                 self.batches.clear();
-                self.pick_table = Some(Arc::new(PickTable::new(*frame)));
+                self.pick_table = Some(Arc::new(PickTable::new(*view_generation)));
             }
             RenderUpdate::Upsert { batch } => {
                 let highlights = highlights(&next_state);
@@ -227,7 +227,8 @@ impl WgpuRenderer {
     ) -> Result<FrameReport, RendererError> {
         let started_at = Instant::now();
         let snapshot = self.state.snapshot();
-        let active = self.require_frame(frame.key())?;
+        let active_view_generation =
+            self.require_active_view_generation(frame.view_generation())?;
 
         let viewport = frame.viewport();
         self.ensure_depth(viewport);
@@ -280,7 +281,7 @@ impl WgpuRenderer {
         }
 
         Ok(FrameReport {
-            frame: active,
+            view_generation: active_view_generation,
             drawn_points: snapshot.resident().point_count(),
             draw_calls: snapshot.resident().batch_count(),
             resident_bytes: snapshot.resident().estimated_gpu_bytes(),
@@ -304,7 +305,8 @@ impl WgpuRenderer {
         frame: &Frame,
         request: PickRequest,
     ) -> Result<PickTicket, RendererError> {
-        let active = self.require_frame(frame.key())?;
+        let active_view_generation =
+            self.require_active_view_generation(frame.view_generation())?;
         let viewport = frame.viewport();
         let pixel = request.pixel();
         if pixel[0] >= viewport[0] || pixel[1] >= viewport[1] {
@@ -329,19 +331,27 @@ impl WgpuRenderer {
                 .as_ref()
                 .ok_or(RendererError::PickMetadataUnavailable)?,
         );
-        Ok(PickTicket::new(active, readback, receiver, table))
+        Ok(PickTicket::new(
+            active_view_generation,
+            readback,
+            receiver,
+            table,
+        ))
     }
 
-    fn require_frame(&self, requested: FrameKey) -> Result<FrameKey, RendererError> {
+    fn require_active_view_generation(
+        &self,
+        requested: ViewGenerationKey,
+    ) -> Result<ViewGenerationKey, RendererError> {
         let active = self
             .state
             .snapshot()
-            .active_frame()
-            .ok_or(RendererError::NoActiveFrame)?;
+            .active_view_generation()
+            .ok_or(RendererError::NoActiveViewGeneration)?;
         if active == requested {
             Ok(active)
         } else {
-            Err(RendererError::FrameMismatch { active, requested })
+            Err(RendererError::ViewGenerationMismatch { active, requested })
         }
     }
 
@@ -653,14 +663,14 @@ pub enum RendererError {
     },
     /// Rendering was requested before a reset began a View generation.
     #[error("rendering requires an active View generation")]
-    NoActiveFrame,
-    /// A frame requested a generation other than the active generation.
-    #[error("requested frame {requested:?} does not match active frame {active:?}")]
-    FrameMismatch {
-        /// The active frame.
-        active: FrameKey,
-        /// The requested frame.
-        requested: FrameKey,
+    NoActiveViewGeneration,
+    /// A frame requested a View generation other than the active generation.
+    #[error("requested View generation {requested:?} does not match active generation {active:?}")]
+    ViewGenerationMismatch {
+        /// The active View generation.
+        active: ViewGenerationKey,
+        /// The requested View generation.
+        requested: ViewGenerationKey,
     },
     /// A requested physical pixel lies outside the frame viewport.
     #[error("pick pixel {pixel:?} is outside viewport {viewport:?}")]

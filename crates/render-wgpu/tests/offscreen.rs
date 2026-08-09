@@ -6,8 +6,8 @@ use std::{
 };
 
 use render_protocol::{
-    BatchKey, BatchVersion, FrameKey, PointBatch, PointId, ProtocolError, RenderLimits,
-    RenderPoint, RenderUpdate, ResidentResource, UpdateKind, UpdateReport, ViewId,
+    BatchKey, BatchVersion, PointBatch, PointId, ProtocolError, RenderLimits, RenderPoint,
+    RenderUpdate, ResidentResource, UpdateKind, UpdateReport, ViewGenerationKey, ViewId,
 };
 use render_wgpu::{
     Camera, Frame, FrameReport, PickError, PickHit, PickPoll, PickRequest, PickTicket, PointStyle,
@@ -56,11 +56,11 @@ fn frames_recorded_before_one_submit_keep_their_exact_cameras() {
 fn assert_lifecycle_updates_are_atomic(gpu: &GpuContext) {
     let limits = RenderLimits::new(32, 1, 1);
     let mut subject = OffscreenRenderer::new(gpu, limits);
-    let generation_one = FrameKey::new(ViewId::new(1), 1);
-    let generation_two = FrameKey::new(ViewId::new(1), 2);
+    let generation_one = ViewGenerationKey::new(ViewId::new(1), 1);
+    let generation_two = ViewGenerationKey::new(ViewId::new(1), 2);
 
     let reset = subject.apply(&RenderUpdate::Reset {
-        frame: generation_one,
+        view_generation: generation_one,
     });
     assert_eq!(reset.kind(), UpdateKind::Reset);
 
@@ -114,7 +114,7 @@ fn assert_lifecycle_updates_are_atomic(gpu: &GpuContext) {
     assert_pixel(subject.render(&frame_one).image.pixel(CENTER), BLUE);
 
     let wrong_remove = RenderUpdate::Remove {
-        frame: generation_one,
+        view_generation: generation_one,
         key: BatchKey::new(1),
         expected_version: BatchVersion::new(1),
     };
@@ -125,7 +125,7 @@ fn assert_lifecycle_updates_are_atomic(gpu: &GpuContext) {
         ))
     ));
     let removed = subject.apply(&RenderUpdate::Remove {
-        frame: generation_one,
+        view_generation: generation_one,
         key: BatchKey::new(1),
         expected_version: BatchVersion::new(2),
     });
@@ -136,11 +136,11 @@ fn assert_lifecycle_updates_are_atomic(gpu: &GpuContext) {
     assert_pixel(empty.image.pixel(CENTER), BLACK);
 
     subject.apply(&RenderUpdate::Reset {
-        frame: generation_two,
+        view_generation: generation_two,
     });
     assert!(matches!(
         subject.try_apply(&RenderUpdate::Reset {
-            frame: generation_one,
+            view_generation: generation_one,
         }),
         Err(RendererError::Protocol(
             ProtocolError::StaleGeneration { .. }
@@ -148,7 +148,7 @@ fn assert_lifecycle_updates_are_atomic(gpu: &GpuContext) {
     ));
     assert!(matches!(
         subject.try_render(&frame_one),
-        Err(RendererError::FrameMismatch { .. })
+        Err(RendererError::ViewGenerationMismatch { .. })
     ));
     let frame_two = standard_frame(generation_two, VIEWPORT, 14.0, GREEN);
     assert_eq!(subject.render(&frame_two).report.drawn_points(), 0);
@@ -156,14 +156,14 @@ fn assert_lifecycle_updates_are_atomic(gpu: &GpuContext) {
 
 fn assert_raster_and_pick_semantics(gpu: &GpuContext) {
     let mut subject = OffscreenRenderer::new(gpu, roomy_limits());
-    let frame_key = FrameKey::new(ViewId::new(2), 1);
-    subject.apply(&RenderUpdate::Reset { frame: frame_key });
+    let view_generation = ViewGenerationKey::new(ViewId::new(2), 1);
+    subject.apply(&RenderUpdate::Reset { view_generation });
     let near_id = PointId::new(101);
     let far_id = PointId::new(202);
     let transparent_id = PointId::new(303);
     subject.apply(&RenderUpdate::Upsert {
         batch: batch(
-            frame_key,
+            view_generation,
             1,
             1,
             WORLD_ORIGIN,
@@ -172,7 +172,7 @@ fn assert_raster_and_pick_semantics(gpu: &GpuContext) {
     });
     subject.apply(&RenderUpdate::Upsert {
         batch: batch(
-            frame_key,
+            view_generation,
             2,
             1,
             WORLD_ORIGIN,
@@ -181,7 +181,7 @@ fn assert_raster_and_pick_semantics(gpu: &GpuContext) {
     });
     subject.apply(&RenderUpdate::Upsert {
         batch: batch(
-            frame_key,
+            view_generation,
             3,
             1,
             WORLD_ORIGIN,
@@ -189,7 +189,7 @@ fn assert_raster_and_pick_semantics(gpu: &GpuContext) {
         ),
     });
 
-    let frame = standard_frame(frame_key, VIEWPORT, 24.0, GREEN);
+    let frame = standard_frame(view_generation, VIEWPORT, 24.0, GREEN);
     let depth_result = subject.render(&frame);
     assert_eq!(depth_result.report.draw_calls(), 3);
     assert_pixel(depth_result.image.pixel(CENTER), RED);
@@ -197,7 +197,7 @@ fn assert_raster_and_pick_semantics(gpu: &GpuContext) {
     assert_pixel(depth_result.image.pixel(discarded_corner), BLACK);
 
     subject.apply(&RenderUpdate::SetHighlights {
-        frame: frame_key,
+        view_generation,
         point_ids: vec![near_id],
     });
     assert_pixel(subject.render(&frame).image.pixel(CENTER), GREEN);
@@ -205,19 +205,19 @@ fn assert_raster_and_pick_semantics(gpu: &GpuContext) {
     let hit = subject
         .pick_and_wait(&frame, CENTER)
         .expect("the center point should be picked");
-    assert_hit(hit, frame_key, 1, 1, near_id);
+    assert_hit(hit, view_generation, 1, 1, near_id);
     assert_eq!(subject.pick_and_wait(&frame, discarded_corner), None);
 }
 
 fn assert_large_world_precision(gpu: &GpuContext) {
     let mut subject = OffscreenRenderer::new(gpu, roomy_limits());
-    let frame_key = FrameKey::new(ViewId::new(3), 1);
-    subject.apply(&RenderUpdate::Reset { frame: frame_key });
+    let view_generation = ViewGenerationKey::new(ViewId::new(3), 1);
+    subject.apply(&RenderUpdate::Reset { view_generation });
     let red_id = PointId::new(301);
     let cyan_id = PointId::new(302);
     subject.apply(&RenderUpdate::Upsert {
         batch: batch(
-            frame_key,
+            view_generation,
             1,
             1,
             WORLD_ORIGIN,
@@ -228,7 +228,7 @@ fn assert_large_world_precision(gpu: &GpuContext) {
         ),
     });
 
-    let frame = precision_frame(frame_key);
+    let frame = precision_frame(view_generation);
     let rendered = subject.render(&frame);
     let red_pixel = rendered
         .image
@@ -255,29 +255,33 @@ fn assert_large_world_precision(gpu: &GpuContext) {
 
 fn assert_async_ticket_stability(gpu: &GpuContext) {
     let mut subject = OffscreenRenderer::new(gpu, roomy_limits());
-    let old_key = FrameKey::new(ViewId::new(4), 1);
-    let new_key = FrameKey::new(ViewId::new(4), 2);
+    let old_view_generation = ViewGenerationKey::new(ViewId::new(4), 1);
+    let new_view_generation = ViewGenerationKey::new(ViewId::new(4), 2);
     let old_id = PointId::new(401);
     let new_id = PointId::new(402);
-    subject.apply(&RenderUpdate::Reset { frame: old_key });
+    subject.apply(&RenderUpdate::Reset {
+        view_generation: old_view_generation,
+    });
     subject.apply(&RenderUpdate::Upsert {
         batch: batch(
-            old_key,
+            old_view_generation,
             7,
             3,
             WORLD_ORIGIN,
             vec![point([0.0; 3], RED, old_id.get())],
         ),
     });
-    let old_frame = standard_frame(old_key, VIEWPORT, 18.0, GREEN);
+    let old_frame = standard_frame(old_view_generation, VIEWPORT, 18.0, GREEN);
     let (mut old_ticket, old_commands) = subject.encode_pick(&old_frame, CENTER);
     assert_eq!(old_ticket.poll().unwrap(), PickPoll::Pending);
     gpu.queue.submit([old_commands]);
 
-    subject.apply(&RenderUpdate::Reset { frame: new_key });
+    subject.apply(&RenderUpdate::Reset {
+        view_generation: new_view_generation,
+    });
     subject.apply(&RenderUpdate::Upsert {
         batch: batch(
-            new_key,
+            new_view_generation,
             8,
             4,
             WORLD_ORIGIN,
@@ -285,7 +289,7 @@ fn assert_async_ticket_stability(gpu: &GpuContext) {
         ),
     });
     let new_center = [RESIZED_VIEWPORT[0] / 2, RESIZED_VIEWPORT[1] / 2];
-    let new_frame = standard_frame(new_key, RESIZED_VIEWPORT, 18.0, GREEN);
+    let new_frame = standard_frame(new_view_generation, RESIZED_VIEWPORT, 18.0, GREEN);
     let (mut new_ticket, new_commands) = subject.encode_pick(&new_frame, new_center);
     let (mut no_hit_ticket, no_hit_commands) = subject.encode_pick(&new_frame, [0, 0]);
     assert_eq!(new_ticket.poll().unwrap(), PickPoll::Pending);
@@ -296,11 +300,11 @@ fn assert_async_ticket_stability(gpu: &GpuContext) {
     let PickPoll::Ready(Some(old_hit)) = old_ticket.poll().unwrap() else {
         panic!("the old ticket should retain its submitted generation metadata");
     };
-    assert_hit(old_hit, old_key, 7, 3, old_id);
+    assert_hit(old_hit, old_view_generation, 7, 3, old_id);
     let PickPoll::Ready(Some(new_hit)) = new_ticket.poll().unwrap() else {
         panic!("the resized target should return the new point");
     };
-    assert_hit(new_hit, new_key, 8, 4, new_id);
+    assert_hit(new_hit, new_view_generation, 8, 4, new_id);
     assert_eq!(no_hit_ticket.poll().unwrap(), PickPoll::Ready(None));
     assert!(matches!(
         old_ticket.poll(),
@@ -310,19 +314,19 @@ fn assert_async_ticket_stability(gpu: &GpuContext) {
 
 fn assert_deferred_frame_camera_stability(gpu: &GpuContext) {
     let mut subject = OffscreenRenderer::new(gpu, roomy_limits());
-    let frame_key = FrameKey::new(ViewId::new(5), 1);
-    subject.apply(&RenderUpdate::Reset { frame: frame_key });
+    let view_generation = ViewGenerationKey::new(ViewId::new(5), 1);
+    subject.apply(&RenderUpdate::Reset { view_generation });
     subject.apply(&RenderUpdate::Upsert {
         batch: batch(
-            frame_key,
+            view_generation,
             1,
             1,
             WORLD_ORIGIN,
             vec![point([0.0; 3], RED, 501)],
         ),
     });
-    let centered = standard_frame(frame_key, VIEWPORT, 14.0, GREEN);
-    let translated = translated_frame(frame_key, 1.5);
+    let centered = standard_frame(view_generation, VIEWPORT, 14.0, GREEN);
+    let translated = translated_frame(view_generation, 1.5);
 
     let (centered_result, translated_result) =
         subject.render_pair_before_submit(&centered, &translated);
@@ -630,14 +634,14 @@ fn roomy_limits() -> RenderLimits {
 }
 
 fn batch(
-    frame: FrameKey,
+    view_generation: ViewGenerationKey,
     key: u64,
     version: u64,
     origin: [f64; 3],
     points: Vec<RenderPoint>,
 ) -> PointBatch {
     PointBatch::new(
-        frame,
+        view_generation,
         BatchKey::new(key),
         BatchVersion::new(version),
         origin,
@@ -652,7 +656,7 @@ fn point(position: [f32; 3], color: [u8; 4], id: u64) -> RenderPoint {
 }
 
 fn standard_frame(
-    key: FrameKey,
+    view_generation: ViewGenerationKey,
     viewport: [u32; 2],
     point_size: f32,
     highlight_color: [u8; 4],
@@ -669,12 +673,12 @@ fn standard_frame(
     let highlight = rgba8_to_linear(highlight_color);
     let style = PointStyle::new(point_size, highlight, [0.0, 0.0, 0.0, 1.0])
         .expect("the acceptance point style should be valid");
-    Frame::new(key, camera, viewport)
+    Frame::new(view_generation, camera, viewport)
         .expect("the acceptance frame should be valid")
         .with_style(style)
 }
 
-fn precision_frame(key: FrameKey) -> Frame {
+fn precision_frame(view_generation: ViewGenerationKey) -> Frame {
     let camera = Camera::perspective(
         [WORLD_ORIGIN[0], WORLD_ORIGIN[1] - 0.02, WORLD_ORIGIN[2]],
         WORLD_ORIGIN,
@@ -686,12 +690,12 @@ fn precision_frame(key: FrameKey) -> Frame {
     .expect("the precision camera should be valid");
     let style = PointStyle::new(5.0, [1.0; 4], [0.0, 0.0, 0.0, 1.0])
         .expect("the precision style should be valid");
-    Frame::new(key, camera, [128, 128])
+    Frame::new(view_generation, camera, [128, 128])
         .expect("the precision frame should be valid")
         .with_style(style)
 }
 
-fn translated_frame(key: FrameKey, horizontal_offset: f64) -> Frame {
+fn translated_frame(view_generation: ViewGenerationKey, horizontal_offset: f64) -> Frame {
     let target = [
         WORLD_ORIGIN[0] + horizontal_offset,
         WORLD_ORIGIN[1],
@@ -708,7 +712,7 @@ fn translated_frame(key: FrameKey, horizontal_offset: f64) -> Frame {
     .expect("the translated camera should be valid");
     let style = PointStyle::new(14.0, rgba8_to_linear(GREEN), [0.0, 0.0, 0.0, 1.0])
         .expect("the translated frame style should be valid");
-    Frame::new(key, camera, VIEWPORT)
+    Frame::new(view_generation, camera, VIEWPORT)
         .expect("the translated frame should be valid")
         .with_style(style)
 }
@@ -747,8 +751,14 @@ fn assert_pixel(actual: [u8; 4], expected: [u8; 4]) {
     }
 }
 
-fn assert_hit(hit: PickHit, frame: FrameKey, batch_key: u64, version: u64, point_id: PointId) {
-    assert_eq!(hit.frame(), frame);
+fn assert_hit(
+    hit: PickHit,
+    view_generation: ViewGenerationKey,
+    batch_key: u64,
+    version: u64,
+    point_id: PointId,
+) {
+    assert_eq!(hit.view_generation(), view_generation);
     assert_eq!(hit.batch(), BatchKey::new(batch_key));
     assert_eq!(hit.version(), BatchVersion::new(version));
     assert_eq!(hit.point(), point_id);

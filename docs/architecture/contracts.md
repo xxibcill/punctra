@@ -139,7 +139,7 @@ View Batches use a separate disposable representation:
 
 ~~~rust
 pub struct ViewBatch {
-    pub frame: FrameKey,
+    pub view_generation: ViewGenerationKey,
     pub key: ViewBatchKey,
     pub world_origin: [f64; 3],
     pub relative_positions: Column<[f32; 3]>,
@@ -480,7 +480,7 @@ pub struct FrameToken {
     pub viewport_pixels: [u32; 2],
 }
 
-pub struct FrameKey {
+pub struct ViewGenerationKey {
     pub view: ViewId,
     pub generation: u64,
     pub revision: RevisionId,
@@ -496,12 +496,12 @@ pub struct ViewSpec {
 pub enum ViewDelta {
     Reset { frame: FrameToken },
     Upsert {
-        frame: FrameKey,
+        view_generation: ViewGenerationKey,
         batch: ViewBatch,
         replaces: BoundedVec<ViewBatchKey>,
     },
     Remove {
-        frame: FrameKey,
+        view_generation: ViewGenerationKey,
         batches: BoundedVec<ViewBatchKey>,
         coverage_after: Coverage,
     },
@@ -529,9 +529,9 @@ A View:
 - may refine without invalidating authoritative state; and
 - never claims exact selection or analytical completeness.
 
-The renderer maintains no implicit “current camera.” It applies deltas only to the active FrameKey and renders only the explicitly requested FrameToken. A mixed View identity, generation, or Revision returns FrameMismatch.
+The renderer maintains no implicit “current camera.” It applies deltas only to the active ViewGenerationKey and renders only the explicitly requested FrameToken. A mixed View identity, generation, or Revision returns ViewGenerationMismatch.
 
-MeshBatch follows the same FrameKey and floating-origin rules as ViewBatch. Its bounded triangle indices reference only vertices in that batch, and its Artifact Identity lets the host replace or remove all batches from one Terrain Surface without inspecting GPU storage. Mesh display values are never fed back into terrain or export.
+MeshBatch follows the same ViewGenerationKey and floating-origin rules as ViewBatch. Its bounded triangle indices reference only vertices in that batch, and its Artifact Identity lets the host replace or remove all batches from one Terrain Surface without inspecting GPU storage. Mesh display values are never fed back into terrain or export.
 
 ## Terrain contract
 
@@ -648,7 +648,7 @@ pub enum ErrorClass {
 }
 ~~~
 
-**foundation-runtime** owns the bounded envelope and broad class. Each behavior module owns and versions its numeric codes. Required named codes include SourceMissing, SourceChanged, SourceContractMismatch, VerificationRequired, UnsupportedFormat, UnsupportedSchema, IndexIncomplete, IndexIncompatible, ExpiredPointSet, ProvenanceMismatch, StaleRevision, UnknownRevision, OperationIdentityConflict, InvalidGeometry, WorkspaceBusy, IndeterminateCommit, FrameMismatch, GpuUnavailable, and DeviceLost.
+**foundation-runtime** owns the bounded envelope and broad class. Each behavior module owns and versions its numeric codes. Required named codes include SourceMissing, SourceChanged, SourceContractMismatch, VerificationRequired, UnsupportedFormat, UnsupportedSchema, IndexIncomplete, IndexIncompatible, ExpiredPointSet, ProvenanceMismatch, StaleRevision, UnknownRevision, OperationIdentityConflict, InvalidGeometry, WorkspaceBusy, IndeterminateCommit, ViewGenerationMismatch, GpuUnavailable, and DeviceLost.
 
 Errors are actionable at the module's interface. Lower modules do not format dialogs, terminal text, or Python exceptions. Adapters translate the structured error while retaining module, numeric code, class, and context.
 

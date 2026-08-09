@@ -504,7 +504,7 @@ ViewInput is revision-pinned and opaque: it exposes immutable Snapshot provenanc
 
 It owns:
 
-- frozen FrameToken and FrameKey values;
+- frozen FrameToken and ViewGenerationKey values;
 - stable point-batch and mesh-batch keys;
 - origin-relative display columns;
 - Reset, Upsert, Remove, and replacement semantics;
@@ -524,7 +524,7 @@ Conceptual interface:
 
 ~~~rust
 pub struct MeshBatch {
-    pub frame: FrameKey,
+    pub view_generation: ViewGenerationKey,
     pub key: MeshBatchKey,
     pub artifact: ArtifactId,
     pub world_origin: [f64; 3],
@@ -535,11 +535,11 @@ pub struct MeshBatch {
 pub enum RenderDelta {
     Points(ViewDelta),
     UpsertMesh {
-        frame: FrameKey,
+        view_generation: ViewGenerationKey,
         batch: MeshBatch,
     },
     RemoveMesh {
-        frame: FrameKey,
+        view_generation: ViewGenerationKey,
         key: MeshBatchKey,
     },
 }

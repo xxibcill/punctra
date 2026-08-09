@@ -1,6 +1,6 @@
 //! Public-interface tests for renderer values that require no GPU adapter.
 
-use render_protocol::{FrameKey, ViewId};
+use render_protocol::{ViewGenerationKey, ViewId};
 use render_wgpu::{Camera, Frame, PointStyle};
 
 #[test]
@@ -19,7 +19,7 @@ fn frame_uses_the_documented_default_point_style() {
 
     let camera = Camera::perspective([0.0, -1.0, 0.0], [0.0; 3], [0.0, 0.0, 1.0], 1.0, 0.1, 100.0)
         .expect("the contract camera should be valid");
-    let frame = Frame::new(FrameKey::new(ViewId::new(1), 1), camera, [1, 1])
+    let frame = Frame::new(ViewGenerationKey::new(ViewId::new(1), 1), camera, [1, 1])
         .expect("the contract frame should be valid");
 
     assert_eq!(frame.style(), style);

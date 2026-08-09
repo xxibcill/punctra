@@ -12,7 +12,8 @@ use std::{
 
 use orbit_camera::OrbitCamera;
 use render_protocol::{
-    ESTIMATED_GPU_BYTES_PER_POINT, FrameKey, RenderLimits, RenderUpdate, UpdateReport, ViewId,
+    ESTIMATED_GPU_BYTES_PER_POINT, RenderLimits, RenderUpdate, UpdateReport, ViewGenerationKey,
+    ViewId,
 };
 use render_wgpu::{Frame, FrameReport, PointStyle, RendererConfig, WgpuRenderer};
 use synthetic::{SCENE_RADIUS, SCENE_TARGET, SyntheticScene, TOTAL_BATCHES, TOTAL_POINTS};
@@ -29,7 +30,7 @@ const BASE_TITLE: &str = "Punctra renderer v0.1";
 const INITIAL_WIDTH: f64 = 1_280.0;
 const INITIAL_HEIGHT: f64 = 800.0;
 const TITLE_REFRESH_INTERVAL: Duration = Duration::from_millis(500);
-const FRAME_KEY: FrameKey = FrameKey::new(ViewId::new(1), 1);
+const VIEW_GENERATION: ViewGenerationKey = ViewGenerationKey::new(ViewId::new(1), 1);
 
 type DemoResult<T> = Result<T, Box<dyn Error>>;
 
@@ -267,7 +268,9 @@ impl Graphics {
         );
         let mut renderer =
             WgpuRenderer::new(&device, RendererConfig::new(surface_config.format, limits))?;
-        let reset = RenderUpdate::Reset { frame: FRAME_KEY };
+        let reset = RenderUpdate::Reset {
+            view_generation: VIEW_GENERATION,
+        };
         renderer.apply(&reset)?;
         let style = PointStyle::new(2.4, [1.0, 0.24, 0.06, 1.0], [0.008, 0.012, 0.02, 1.0])?;
 
@@ -280,7 +283,7 @@ impl Graphics {
             surface_config,
             presentation: PresentationState::new(surface_configured),
             renderer,
-            scene: SyntheticScene::new(FRAME_KEY),
+            scene: SyntheticScene::new(VIEW_GENERATION),
             camera: OrbitCamera::new(SCENE_TARGET, SCENE_RADIUS),
             style,
             input: PointerInput::default(),
@@ -310,7 +313,7 @@ impl Graphics {
                 label: Some("punctra renderer demo frame"),
             });
         let frame = Frame::new(
-            FRAME_KEY,
+            VIEW_GENERATION,
             self.camera.as_render_camera()?,
             [self.surface_config.width, self.surface_config.height],
         )?
@@ -426,7 +429,7 @@ impl Graphics {
             Vec::new()
         };
         let update = RenderUpdate::SetHighlights {
-            frame: FRAME_KEY,
+            view_generation: VIEW_GENERATION,
             point_ids,
         };
         self.renderer.apply(&update)?;

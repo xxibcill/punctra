@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex, mpsc};
 
-use render_protocol::{BatchKey, BatchVersion, FrameKey, PointId};
+use render_protocol::{BatchKey, BatchVersion, PointId, ViewGenerationKey};
 use thiserror::Error;
 
 use crate::pipeline::PICK_FORMAT;
@@ -31,7 +31,7 @@ impl PickRequest {
 /// Stable caller metadata associated with one provisional GPU pick.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PickHit {
-    frame: FrameKey,
+    view_generation: ViewGenerationKey,
     batch: BatchKey,
     version: BatchVersion,
     point: PointId,
@@ -40,8 +40,8 @@ pub struct PickHit {
 impl PickHit {
     /// Returns the View generation that produced the hit.
     #[must_use]
-    pub const fn frame(self) -> FrameKey {
-        self.frame
+    pub const fn view_generation(self) -> ViewGenerationKey {
+        self.view_generation
     }
 
     /// Returns the producing point batch.
@@ -74,7 +74,7 @@ pub enum PickPoll {
 
 /// A nonblocking readback owned until one pick result is consumed.
 pub struct PickTicket {
-    frame: FrameKey,
+    view_generation: ViewGenerationKey,
     readback: wgpu::Buffer,
     receiver: mpsc::Receiver<Result<(), wgpu::BufferAsyncError>>,
     table: Arc<PickTable>,
@@ -83,13 +83,13 @@ pub struct PickTicket {
 
 impl PickTicket {
     pub(crate) fn new(
-        frame: FrameKey,
+        view_generation: ViewGenerationKey,
         readback: wgpu::Buffer,
         receiver: mpsc::Receiver<Result<(), wgpu::BufferAsyncError>>,
         table: Arc<PickTable>,
     ) -> Self {
         Self {
-            frame,
+            view_generation,
             readback,
             receiver,
             table,
@@ -99,8 +99,8 @@ impl PickTicket {
 
     /// Returns the View generation captured by this ticket.
     #[must_use]
-    pub const fn frame(&self) -> FrameKey {
-        self.frame
+    pub const fn view_generation(&self) -> ViewGenerationKey {
+        self.view_generation
     }
 
     /// Checks for completion without blocking.
@@ -168,12 +168,12 @@ pub enum PickError {
     #[error("pick ticket result was already consumed")]
     AlreadyCompleted,
     /// The GPU returned a token absent from the captured generation table.
-    #[error("pick token {token} is absent from frame {frame:?}")]
+    #[error("pick token {token} is absent from View generation {view_generation:?}")]
     UnknownToken {
         /// The returned nonzero token.
         token: u32,
-        /// The captured frame.
-        frame: FrameKey,
+        /// The captured View generation.
+        view_generation: ViewGenerationKey,
     },
     /// One View generation exceeded the nonzero 32-bit pick-token space.
     #[error("active View exhausted its 32-bit point-picking token space")]
@@ -191,14 +191,14 @@ pub(crate) struct PickRecord {
 }
 
 pub(crate) struct PickTable {
-    frame: FrameKey,
+    view_generation: ViewGenerationKey,
     records: Mutex<Vec<PickRecord>>,
 }
 
 impl PickTable {
-    pub(crate) fn new(frame: FrameKey) -> Self {
+    pub(crate) fn new(view_generation: ViewGenerationKey) -> Self {
         Self {
-            frame,
+            view_generation,
             records: Mutex::new(Vec::new()),
         }
     }
@@ -240,14 +240,14 @@ impl PickTable {
             .and_then(|index| usize::try_from(index).ok())
             .ok_or(PickError::UnknownToken {
                 token,
-                frame: self.frame,
+                view_generation: self.view_generation,
             })?;
         let record = table.get(index).ok_or(PickError::UnknownToken {
             token,
-            frame: self.frame,
+            view_generation: self.view_generation,
         })?;
         Ok(PickHit {
-            frame: self.frame,
+            view_generation: self.view_generation,
             batch: record.batch,
             version: record.version,
             point: record.point,
@@ -294,8 +294,8 @@ mod tests {
 
     #[test]
     fn tokens_preserve_zero_and_duplicate_caller_identities() {
-        let frame = FrameKey::new(ViewId::new(4), 2);
-        let table = PickTable::new(frame);
+        let view_generation = ViewGenerationKey::new(ViewId::new(4), 2);
+        let table = PickTable::new(view_generation);
         let records = [
             PickRecord {
                 batch: BatchKey::new(10),
