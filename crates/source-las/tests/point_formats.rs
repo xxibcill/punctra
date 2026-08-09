@@ -9,7 +9,7 @@ use las::point::{Classification, Format, ScanDirection};
 use las::raw::point::Waveform;
 use las::{Builder, Color, Point, Transform, Vector, Writer};
 use point_contracts::{AttributeDataType, AttributeId, AttributeValues, PointBatch};
-use point_source::SourceError;
+use point_source::{ReadBudget, ReadRequest, SourceError, SourceSpan};
 
 const EXTRA_BYTES_WIDTH: u16 = 2;
 const POINT_COUNT: usize = 2;
@@ -106,82 +106,115 @@ fn assert_source(source: &point_source::Source, point_format: u8, extension: &st
     let batch = batches.next().unwrap().unwrap();
     assert_eq!(batch.len(), POINT_COUNT);
     for row in 0..POINT_COUNT {
-        assert_row(&batch, format, row);
+        assert_row(&batch, format, row, row);
     }
     assert!(batches.next().unwrap().is_none());
     assert_eq!(batches.summary().unwrap().exact_count(), POINT_COUNT as u64);
+    assert_sparse_read(source, format);
 }
 
-fn assert_row(batch: &PointBatch, format: Format, row: usize) {
-    let small = u8::try_from(row).unwrap();
-    assert_eq!(batch.positions().ticks()[row], ticks(row));
-    assert_eq!(u16_value(batch, 1, row), 1_000 + u16::from(small));
-    assert_eq!(u8_value(batch, 2, row), 1);
-    assert_eq!(u8_value(batch, 3, row), 1);
-    assert_eq!(u8_value(batch, 4, row), 1);
-    assert_eq!(u8_value(batch, 5, row), 1);
-    assert_eq!(u8_value(batch, 6, row), 2);
-    assert_eq!(u8_value(batch, 7, row), 1);
-    assert_eq!(u8_value(batch, 8, row), 1);
-    assert_eq!(u8_value(batch, 9, row), 1);
-    assert_eq!(u8_value(batch, 10, row), 0);
+fn assert_sparse_read(source: &point_source::Source, format: Format) {
+    let span = SourceSpan::new(1, 1).unwrap();
+    let budget = ReadBudget::new(1, 16 * 1024)
+        .unwrap()
+        .with_max_spans(1)
+        .with_max_points(1)
+        .with_max_adapter_working_bytes(16 * 1024 * 1024);
+    let request = ReadRequest::all().spans([span]).budget(budget);
+    let mut batches = source.read(request.clone()).unwrap();
+    let batch = batches.next().unwrap().unwrap();
+    assert_eq!(batch.first_ordinal(), 1);
+    assert_eq!(batch.len(), 1);
+    assert_row(&batch, format, 0, 1);
+    assert!(batches.next().unwrap().is_none());
+    let summary = batches.summary().unwrap();
+    assert_eq!(summary.spans(), &[span]);
+    assert_eq!(summary.exact_count(), 1);
+    assert_eq!(summary.budget(), budget);
+
+    let mut cancelled = source.read(request).unwrap();
+    cancelled.handle().cancel();
+    assert!(matches!(cancelled.next(), Err(SourceError::Cancelled)));
+    assert!(cancelled.next().unwrap().is_none());
+    assert!(cancelled.summary().is_none());
+}
+
+fn assert_row(batch: &PointBatch, format: Format, batch_row: usize, ordinal: usize) {
+    let small = u8::try_from(ordinal).unwrap();
+    assert_eq!(batch.positions().ticks()[batch_row], ticks(ordinal));
+    assert_eq!(u16_value(batch, 1, batch_row), 1_000 + u16::from(small));
+    assert_eq!(u8_value(batch, 2, batch_row), 1);
+    assert_eq!(u8_value(batch, 3, batch_row), 1);
+    assert_eq!(u8_value(batch, 4, batch_row), 1);
+    assert_eq!(u8_value(batch, 5, batch_row), 1);
+    assert_eq!(u8_value(batch, 6, batch_row), 2);
+    assert_eq!(u8_value(batch, 7, batch_row), 1);
+    assert_eq!(u8_value(batch, 8, batch_row), 1);
+    assert_eq!(u8_value(batch, 9, batch_row), 1);
+    assert_eq!(u8_value(batch, 10, batch_row), 0);
     if format.is_extended {
-        assert_eq!(u8_value(batch, 11, row), small % 4);
-        assert_eq!(values(batch, 12).as_i16().unwrap()[row], 1_000);
+        assert_eq!(u8_value(batch, 11, batch_row), small % 4);
+        assert_eq!(values(batch, 12).as_i16().unwrap()[batch_row], 1_000);
     } else {
-        assert_eq!(values(batch, 12).as_i8().unwrap()[row], 6);
+        assert_eq!(values(batch, 12).as_i8().unwrap()[batch_row], 6);
     }
-    assert_eq!(u8_value(batch, 13, row), 20 + small);
-    assert_eq!(u16_value(batch, 14, row), 300 + u16::from(small));
-    assert_optional_values(batch, format, row, small);
+    assert_eq!(u8_value(batch, 13, batch_row), 20 + small);
+    assert_eq!(u16_value(batch, 14, batch_row), 300 + u16::from(small));
+    assert_optional_values(batch, format, batch_row, ordinal, small);
     let (width, payload) = values(batch, 4096).as_fixed_bytes().unwrap();
     assert_eq!(width, u32::from(EXTRA_BYTES_WIDTH));
-    assert_eq!(&payload[row * 2..row * 2 + 2], &[small, 0xa5]);
+    assert_eq!(&payload[batch_row * 2..batch_row * 2 + 2], &[small, 0xa5]);
 }
 
-fn assert_optional_values(batch: &PointBatch, format: Format, row: usize, small: u8) {
+fn assert_optional_values(
+    batch: &PointBatch,
+    format: Format,
+    batch_row: usize,
+    ordinal: usize,
+    small: u8,
+) {
     if format.has_gps_time {
         assert_eq!(
-            values(batch, 15).as_f64().unwrap()[row].to_bits(),
+            values(batch, 15).as_f64().unwrap()[batch_row].to_bits(),
             (1_000.25 + f64::from(small)).to_bits()
         );
     }
     if format.has_color {
-        assert_eq!(u16_value(batch, 16, row), 10_000 + u16::from(small));
-        assert_eq!(u16_value(batch, 17, row), 20_000 + u16::from(small));
-        assert_eq!(u16_value(batch, 18, row), 30_000 + u16::from(small));
+        assert_eq!(u16_value(batch, 16, batch_row), 10_000 + u16::from(small));
+        assert_eq!(u16_value(batch, 17, batch_row), 20_000 + u16::from(small));
+        assert_eq!(u16_value(batch, 18, batch_row), 30_000 + u16::from(small));
     }
     if format.has_nir {
-        assert_eq!(u16_value(batch, 26, row), 40_000 + u16::from(small));
+        assert_eq!(u16_value(batch, 26, batch_row), 40_000 + u16::from(small));
     }
     if format.has_waveform {
-        let waveform = waveform(row);
+        let waveform = waveform(ordinal);
         assert_eq!(
-            u8_value(batch, 19, row),
+            u8_value(batch, 19, batch_row),
             waveform.wave_packet_descriptor_index
         );
         assert_eq!(
-            values(batch, 20).as_u64().unwrap()[row],
+            values(batch, 20).as_u64().unwrap()[batch_row],
             waveform.byte_offset_to_waveform_data
         );
         assert_eq!(
-            values(batch, 21).as_u32().unwrap()[row],
+            values(batch, 21).as_u32().unwrap()[batch_row],
             waveform.waveform_packet_size_in_bytes
         );
         assert_eq!(
-            values(batch, 22).as_f32().unwrap()[row].to_bits(),
+            values(batch, 22).as_f32().unwrap()[batch_row].to_bits(),
             waveform.return_point_waveform_location.to_bits()
         );
         assert_eq!(
-            values(batch, 23).as_f32().unwrap()[row].to_bits(),
+            values(batch, 23).as_f32().unwrap()[batch_row].to_bits(),
             waveform.x_t.to_bits()
         );
         assert_eq!(
-            values(batch, 24).as_f32().unwrap()[row].to_bits(),
+            values(batch, 24).as_f32().unwrap()[batch_row].to_bits(),
             waveform.y_t.to_bits()
         );
         assert_eq!(
-            values(batch, 25).as_f32().unwrap()[row].to_bits(),
+            values(batch, 25).as_f32().unwrap()[batch_row].to_bits(),
             waveform.z_t.to_bits()
         );
     }

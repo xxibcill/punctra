@@ -13,12 +13,52 @@ use point_source::adapter::{AdapterRead, AdapterReadRequest, ReadAdapter};
 use point_source::{ReadBudget, SourceError, SourceSpan};
 
 use crate::format::{
-    AttributeKind, AttributePlan, Compression, FileWitness, LasLayout, classify_io,
+    AttributeKind, AttributePlan, Compression, FileWitness, LasLayout, LazSeekMode, classify_io,
 };
 
 const FIXED_DECODER_WORKING_BYTES: u64 = 64 * 1024;
 const VERIFICATION_WORKING_BYTES: u64 = 64 * 1024 * 1024;
 const VERIFICATION_ROWS: u64 = 16_384;
+
+#[cfg(not(test))]
+type DecoderInput = File;
+
+#[cfg(test)]
+struct DecoderInput {
+    file: File,
+    read_bytes: u64,
+}
+
+#[cfg(not(test))]
+fn decoder_input(file: &File) -> std::io::Result<DecoderInput> {
+    file.try_clone()
+}
+
+#[cfg(test)]
+fn decoder_input(file: &File) -> std::io::Result<DecoderInput> {
+    Ok(DecoderInput {
+        file: file.try_clone()?,
+        read_bytes: 0,
+    })
+}
+
+#[cfg(test)]
+impl Read for DecoderInput {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        let read = self.file.read(buffer)?;
+        self.read_bytes = self
+            .read_bytes
+            .saturating_add(u64::try_from(read).unwrap_or(u64::MAX));
+        Ok(read)
+    }
+}
+
+#[cfg(test)]
+impl Seek for DecoderInput {
+    fn seek(&mut self, position: SeekFrom) -> std::io::Result<u64> {
+        self.file.seek(position)
+    }
+}
 
 pub(crate) struct LasReadAdapter {
     file: Arc<File>,
@@ -176,7 +216,10 @@ impl AdapterRead for LasRead {
             &mut self.raw,
             &self.reporter,
         ) {
-            let error = self.decode_failure(&error);
+            let error = match error {
+                DecoderMoveError::Cancelled => SourceError::Cancelled,
+                DecoderMoveError::Decode(message) => self.decode_failure(&message),
+            };
             return self.fail(error);
         }
         let point_count = (span.end_ordinal() - self.next_ordinal).min(self.max_rows);
@@ -234,23 +277,32 @@ impl LasRead {
     }
 }
 
+type LazDecoder = LasZipDecompressor<'static, BufReader<DecoderInput>>;
+
 enum RecordDecoder {
     Las {
-        reader: BufReader<File>,
+        reader: BufReader<DecoderInput>,
         point_offset: u64,
         record_len: u64,
         current: u64,
     },
     Laz {
-        decoder: LasZipDecompressor<'static, BufReader<File>>,
+        decoder: LazDecoder,
         record_len: u64,
         current: u64,
+        seek_mode: LazSeekMode,
     },
+}
+
+#[derive(Debug)]
+enum DecoderMoveError {
+    Cancelled,
+    Decode(String),
 }
 
 impl RecordDecoder {
     fn new(file: &File, layout: &LasLayout) -> Result<Self, SourceError> {
-        let mut reader = BufReader::new(file.try_clone().map_err(classify_io)?);
+        let mut reader = BufReader::new(decoder_input(file).map_err(classify_io)?);
         reader
             .seek(SeekFrom::Start(layout.point_offset))
             .map_err(classify_io)?;
@@ -263,13 +315,14 @@ impl RecordDecoder {
                 record_len,
                 current: 0,
             }),
-            Compression::Laz { vlr, .. } => {
+            Compression::Laz { vlr, seek_mode, .. } => {
                 let decoder = LasZipDecompressor::new(reader, vlr.clone())
                     .map_err(|error| SourceError::corrupt(error.to_string()))?;
                 Ok(Self::Laz {
                     decoder,
                     record_len,
                     current: 0,
+                    seek_mode: *seek_mode,
                 })
             }
         }
@@ -281,79 +334,184 @@ impl RecordDecoder {
         quantum: u64,
         buffer: &mut Vec<u8>,
         reporter: &OperationReporter,
-    ) -> Result<(), String> {
-        if let Self::Las {
-            reader,
-            point_offset,
-            record_len,
-            current,
-        } = self
-        {
-            let offset = target
-                .checked_mul(*record_len)
-                .and_then(|bytes| point_offset.checked_add(bytes))
-                .ok_or_else(|| "LAS point seek offset overflow".to_owned())?;
-            reader
-                .seek(SeekFrom::Start(offset))
-                .map_err(|error| error.to_string())?;
-            *current = target;
-            return Ok(());
+    ) -> Result<(), DecoderMoveError> {
+        check_move_cancelled(reporter)?;
+        match self {
+            Self::Las {
+                reader,
+                point_offset,
+                record_len,
+                current,
+            } => move_las(reader, *point_offset, *record_len, current, target)
+                .map_err(DecoderMoveError::Decode)?,
+            Self::Laz {
+                decoder,
+                record_len,
+                current,
+                seek_mode,
+            } => move_laz(
+                decoder,
+                *record_len,
+                current,
+                *seek_mode,
+                target,
+                quantum,
+                buffer,
+                reporter,
+            )?,
         }
-
-        let current = match self {
-            Self::Laz { current, .. } => *current,
-            Self::Las { .. } => unreachable!("LAS reads returned above"),
-        };
-        if target < current {
-            return Err("LAZ decoder cannot move backward within one sorted read".to_owned());
-        }
-        while match self {
-            Self::Laz { current, .. } => *current < target,
-            Self::Las { .. } => false,
-        } {
-            reporter
-                .check_cancelled()
-                .map_err(|error| error.to_string())?;
-            let current = match self {
-                Self::Laz { current, .. } => *current,
-                Self::Las { .. } => unreachable!("LAS reads returned above"),
-            };
-            let count = (target - current).min(quantum);
-            self.read_records(count, buffer)?;
-        }
-        Ok(())
+        check_move_cancelled(reporter)
     }
 
     fn read_records(&mut self, point_count: u64, buffer: &mut Vec<u8>) -> Result<(), String> {
-        let record_len = match self {
-            Self::Las { record_len, .. } | Self::Laz { record_len, .. } => *record_len,
-        };
-        let bytes = point_count
-            .checked_mul(record_len)
-            .ok_or_else(|| "LAS decode buffer length overflow".to_owned())?;
-        let bytes = usize::try_from(bytes)
-            .map_err(|_| "LAS decode buffer does not fit the host address space".to_owned())?;
-        buffer.resize(bytes, 0);
         match self {
             Self::Las {
-                reader, current, ..
+                reader,
+                record_len,
+                current,
+                ..
             } => {
+                resize_record_buffer(buffer, point_count, *record_len)?;
                 reader
                     .read_exact(buffer)
                     .map_err(|error| error.to_string())?;
                 *current += point_count;
+                Ok(())
             }
             Self::Laz {
-                decoder, current, ..
-            } => {
-                decoder
-                    .decompress_many(buffer)
-                    .map_err(|error| error.to_string())?;
-                *current += point_count;
-            }
+                decoder,
+                record_len,
+                current,
+                ..
+            } => read_laz_records(decoder, *record_len, current, point_count, buffer),
         }
-        Ok(())
     }
+
+    #[cfg(test)]
+    fn read_bytes(&self) -> u64 {
+        match self {
+            Self::Las { reader, .. } => reader.get_ref().read_bytes,
+            Self::Laz { decoder, .. } => decoder.get().get_ref().read_bytes,
+        }
+    }
+
+    #[cfg(test)]
+    fn force_sequential_laz_seek(&mut self) {
+        let Self::Laz { seek_mode, .. } = self else {
+            panic!("test expected a LAZ decoder");
+        };
+        *seek_mode = LazSeekMode::Sequential;
+    }
+}
+
+fn move_las(
+    reader: &mut BufReader<DecoderInput>,
+    point_offset: u64,
+    record_len: u64,
+    current: &mut u64,
+    target: u64,
+) -> Result<(), String> {
+    let offset = target
+        .checked_mul(record_len)
+        .and_then(|bytes| point_offset.checked_add(bytes))
+        .ok_or_else(|| "LAS point seek offset overflow".to_owned())?;
+    reader
+        .seek(SeekFrom::Start(offset))
+        .map_err(|error| error.to_string())?;
+    *current = target;
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn move_laz(
+    decoder: &mut LazDecoder,
+    record_len: u64,
+    current: &mut u64,
+    seek_mode: LazSeekMode,
+    target: u64,
+    quantum: u64,
+    buffer: &mut Vec<u8>,
+    reporter: &OperationReporter,
+) -> Result<(), DecoderMoveError> {
+    if target < *current {
+        return Err(DecoderMoveError::Decode(
+            "LAZ decoder cannot move backward within one sorted read".to_owned(),
+        ));
+    }
+    if should_use_chunk_seek(seek_mode, *current, target) {
+        decoder.seek(target).map_err(|error| {
+            DecoderMoveError::Decode(format!(
+                "could not seek the LAZ decoder to ordinal {target}: {error}"
+            ))
+        })?;
+        *current = target;
+        return Ok(());
+    }
+    replay_laz_gap(
+        decoder, record_len, current, target, quantum, buffer, reporter,
+    )
+}
+
+fn should_use_chunk_seek(mode: LazSeekMode, current: u64, target: u64) -> bool {
+    match mode {
+        LazSeekMode::FixedChunks { points_per_chunk } => {
+            points_per_chunk != 0 && current / points_per_chunk != target / points_per_chunk
+        }
+        LazSeekMode::Sequential => false,
+    }
+}
+
+fn replay_laz_gap(
+    decoder: &mut LazDecoder,
+    record_len: u64,
+    current: &mut u64,
+    target: u64,
+    quantum: u64,
+    buffer: &mut Vec<u8>,
+    reporter: &OperationReporter,
+) -> Result<(), DecoderMoveError> {
+    while *current < target {
+        check_move_cancelled(reporter)?;
+        let count = (target - *current).min(quantum);
+        read_laz_records(decoder, record_len, current, count, buffer)
+            .map_err(DecoderMoveError::Decode)?;
+    }
+    Ok(())
+}
+
+fn read_laz_records(
+    decoder: &mut LazDecoder,
+    record_len: u64,
+    current: &mut u64,
+    point_count: u64,
+    buffer: &mut Vec<u8>,
+) -> Result<(), String> {
+    resize_record_buffer(buffer, point_count, record_len)?;
+    decoder
+        .decompress_many(buffer)
+        .map_err(|error| error.to_string())?;
+    *current += point_count;
+    Ok(())
+}
+
+fn resize_record_buffer(
+    buffer: &mut Vec<u8>,
+    point_count: u64,
+    record_len: u64,
+) -> Result<(), String> {
+    let bytes = point_count
+        .checked_mul(record_len)
+        .ok_or_else(|| "LAS decode buffer length overflow".to_owned())?;
+    let bytes = usize::try_from(bytes)
+        .map_err(|_| "LAS decode buffer does not fit the host address space".to_owned())?;
+    buffer.resize(bytes, 0);
+    Ok(())
+}
+
+fn check_move_cancelled(reporter: &OperationReporter) -> Result<(), DecoderMoveError> {
+    reporter
+        .check_cancelled()
+        .map_err(|_| DecoderMoveError::Cancelled)
 }
 
 pub(crate) fn scan_bounds(
@@ -835,4 +993,236 @@ fn read_f64(record: &[u8], offset: usize) -> Result<f64, SourceError> {
 
 fn slice_error(_: std::array::TryFromSliceError) -> SourceError {
     SourceError::corrupt("truncated LAS fixed-width point field")
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+    use std::path::{Path, PathBuf};
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use foundation_runtime::OperationControl;
+    use las::point::{Classification, Format, ScanDirection};
+    use las::raw::point::Waveform;
+    use las::{Builder, Color, Point, Transform, Vector, Writer};
+    use point_source::adapter::FullVerification;
+
+    use super::{DecoderMoveError, RecordDecoder, should_use_chunk_seek};
+    use crate::format::{Compression, LazSeekMode, verify_file};
+
+    const FIXTURE_POINTS: u64 = 50_003;
+    const LATER_CHUNK_ORDINAL: u64 = 50_001;
+    const MOVE_QUANTUM: u64 = 257;
+    static NEXT_DIRECTORY: AtomicU64 = AtomicU64::new(0);
+
+    #[test]
+    fn chunk_seek_is_used_only_across_validated_fixed_chunk_boundaries() {
+        let fixed = LazSeekMode::FixedChunks {
+            points_per_chunk: 50_000,
+        };
+        assert!(!should_use_chunk_seek(fixed, 0, 49_999));
+        assert!(!should_use_chunk_seek(fixed, 50_000, 50_001));
+        assert!(should_use_chunk_seek(fixed, 49_999, 50_001));
+        assert!(!should_use_chunk_seek(LazSeekMode::Sequential, 0, 50_001));
+    }
+
+    #[test]
+    fn fixed_chunk_seek_avoids_prior_chunk_io_and_preserves_exact_records() {
+        let directory = FixtureDirectory::new();
+        for point_format in [5_u8, 8] {
+            let path = directory
+                .path()
+                .join(format!("seek-format-{point_format}.laz"));
+            write_seek_fixture(&path, point_format);
+            assert_efficient_exact_seek(&path, point_format);
+        }
+    }
+
+    fn assert_efficient_exact_seek(path: &Path, point_format: u8) {
+        let verification = OperationControl::new();
+        let verified =
+            verify_file(path, FullVerification::Identify, &verification.reporter()).unwrap();
+        assert!(matches!(
+            &verified.layout.compression,
+            Compression::Laz {
+                seek_mode: LazSeekMode::FixedChunks {
+                    points_per_chunk: 50_000
+                },
+                ..
+            }
+        ));
+
+        let movement = OperationControl::new();
+        let reporter = movement.reporter();
+        let mut sequential = RecordDecoder::new(&verified.file, &verified.layout).unwrap();
+        sequential.force_sequential_laz_seek();
+        let sequential_start_bytes = sequential.read_bytes();
+        let mut sequential_buffer = Vec::new();
+        sequential
+            .move_to(
+                LATER_CHUNK_ORDINAL,
+                MOVE_QUANTUM,
+                &mut sequential_buffer,
+                &reporter,
+            )
+            .unwrap();
+        let sequential_move_bytes = sequential.read_bytes() - sequential_start_bytes;
+        sequential.read_records(2, &mut sequential_buffer).unwrap();
+        drop(sequential);
+
+        let mut chunk_seek = RecordDecoder::new(&verified.file, &verified.layout).unwrap();
+        let chunk_start_bytes = chunk_seek.read_bytes();
+        let mut chunk_buffer = Vec::new();
+        chunk_seek
+            .move_to(
+                LATER_CHUNK_ORDINAL,
+                MOVE_QUANTUM,
+                &mut chunk_buffer,
+                &reporter,
+            )
+            .unwrap();
+        let chunk_move_bytes = chunk_seek.read_bytes() - chunk_start_bytes;
+        assert!(
+            chunk_move_bytes.saturating_mul(2) < sequential_move_bytes,
+            "point format {point_format}: chunk seek read {chunk_move_bytes} bytes, sequential replay read {sequential_move_bytes}"
+        );
+
+        chunk_seek.read_records(2, &mut chunk_buffer).unwrap();
+        assert_eq!(
+            chunk_buffer, sequential_buffer,
+            "point format {point_format}"
+        );
+        assert_eq!(
+            raw_ticks(&chunk_buffer, verified.layout.record_len),
+            [
+                seek_ticks(LATER_CHUNK_ORDINAL),
+                seek_ticks(LATER_CHUNK_ORDINAL + 1)
+            ],
+            "point format {point_format}"
+        );
+
+        let cancelled = OperationControl::new();
+        cancelled.cancel();
+        let mut decoder = RecordDecoder::new(&verified.file, &verified.layout).unwrap();
+        assert!(matches!(
+            decoder.move_to(
+                LATER_CHUNK_ORDINAL,
+                MOVE_QUANTUM,
+                &mut Vec::new(),
+                &cancelled.reporter(),
+            ),
+            Err(DecoderMoveError::Cancelled)
+        ));
+    }
+
+    fn raw_ticks(records: &[u8], record_len: usize) -> [[i64; 3]; 2] {
+        let mut ticks = [[0_i64; 3]; 2];
+        for (row, record) in records.chunks_exact(record_len).enumerate() {
+            for axis in 0..3 {
+                let start = axis * 4;
+                ticks[row][axis] = i64::from(i32::from_le_bytes(
+                    record[start..start + 4].try_into().unwrap(),
+                ));
+            }
+        }
+        ticks
+    }
+
+    fn write_seek_fixture(path: &Path, point_format: u8) {
+        let format = Format::new(point_format).unwrap();
+        let mut builder = Builder::from((1, 4));
+        builder.point_format = format;
+        builder.transforms = Vector {
+            x: Transform {
+                scale: 1.0,
+                offset: 0.0,
+            },
+            y: Transform {
+                scale: 1.0,
+                offset: 0.0,
+            },
+            z: Transform {
+                scale: 1.0,
+                offset: 0.0,
+            },
+        };
+        let mut writer = Writer::from_path(path, builder.into_header().unwrap()).unwrap();
+        for ordinal in 0..FIXTURE_POINTS {
+            writer.write_point(seek_point(format, ordinal)).unwrap();
+        }
+        writer.close().unwrap();
+    }
+
+    fn seek_point(format: Format, ordinal: u64) -> Point {
+        let ticks = seek_ticks(ordinal);
+        let small = u8::try_from(ordinal % 251).unwrap();
+        Point {
+            x: f64::from(i32::try_from(ticks[0]).unwrap()),
+            y: f64::from(i32::try_from(ticks[1]).unwrap()),
+            z: f64::from(i32::try_from(ticks[2]).unwrap()),
+            intensity: u16::from(small) * 257,
+            return_number: 1,
+            number_of_returns: 1,
+            scan_direction: ScanDirection::LeftToRight,
+            classification: Classification::Ground,
+            gps_time: format
+                .has_gps_time
+                .then_some(f64::from(u32::try_from(ordinal).unwrap()) + 0.25),
+            color: format.has_color.then_some(Color::new(
+                u16::from(small),
+                u16::from(small) * 2,
+                u16::from(small) * 3,
+            )),
+            waveform: format.has_waveform.then(|| Waveform {
+                wave_packet_descriptor_index: small % 31 + 1,
+                byte_offset_to_waveform_data: ordinal * 13,
+                waveform_packet_size_in_bytes: u32::from(small) + 1,
+                return_point_waveform_location: f32::from(small) / 251.0,
+                x_t: f32::from(small) * 0.5,
+                y_t: -f32::from(small) * 0.25,
+                z_t: f32::from(small) * 0.125,
+            }),
+            nir: format.has_nir.then_some(u16::from(small) * 5),
+            ..Point::default()
+        }
+    }
+
+    fn seek_ticks(ordinal: u64) -> [i64; 3] {
+        let ordinal = i64::try_from(ordinal).unwrap();
+        let mixed = ordinal * 1_103_515_245 + 12_345;
+        [
+            ordinal * 7 - 200_000,
+            mixed % 1_000_003,
+            ordinal % 997 - 498,
+        ]
+    }
+
+    struct FixtureDirectory(PathBuf);
+
+    impl FixtureDirectory {
+        fn new() -> Self {
+            let counter = NEXT_DIRECTORY.fetch_add(1, Ordering::Relaxed);
+            let timestamp = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let path = std::env::temp_dir().join(format!(
+                "punctra-source-las-seek-{}-{timestamp}-{counter}",
+                std::process::id()
+            ));
+            fs::create_dir(&path).unwrap();
+            Self(path)
+        }
+
+        fn path(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl Drop for FixtureDirectory {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
 }

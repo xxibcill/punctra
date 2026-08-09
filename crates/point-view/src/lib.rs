@@ -493,6 +493,7 @@ impl Retirement {
 #[derive(Clone, Debug, PartialEq)]
 pub struct ViewPlan {
     view_generation: ViewGenerationKey,
+    demanded_nodes: Vec<NodeKey>,
     requests: Vec<NodeRequest>,
     retained: Vec<RetainedNode>,
     retirements: Vec<Retirement>,
@@ -504,6 +505,18 @@ impl ViewPlan {
     #[must_use]
     pub const fn view_generation(&self) -> ViewGenerationKey {
         self.view_generation
+    }
+
+    /// Returns every desired nonresident target by descending visual priority,
+    /// then node key.
+    ///
+    /// This includes both missing nodes and nodes whose host work is already
+    /// requested. Unlike [`Self::requests`], it describes current demand rather
+    /// than only newly required loading, so a host can cancel requested work
+    /// that is absent after a camera or viewport change.
+    #[must_use]
+    pub fn demanded_nodes(&self) -> &[NodeKey] {
+        &self.demanded_nodes
     }
 
     /// Returns missing targets by descending projected error, then node key.

@@ -15,6 +15,14 @@
 //! the exact file bytes, so equivalent LAS and LAZ encodings intentionally have
 //! different identities.
 //!
+//! # Sparse LAZ reads
+//!
+//! A later span in a validated fixed-size chunked LAZ stream seeks across
+//! chunks through its verified chunk table, then decodes only within the target
+//! chunk. Point-wise and variable-chunk LAZ organizations retain bounded
+//! sequential replay with cooperative cancellation; format support alone does
+//! not promise direct random access for every LAZ organization.
+//!
 //! # Canonical Attribute mapping
 //!
 //! Attributes appear only when their point format contains the corresponding

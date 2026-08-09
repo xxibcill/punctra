@@ -102,7 +102,14 @@ pub(crate) enum Compression {
     Laz {
         vlr: laz::LazVlr,
         decoder_bytes: u64,
+        seek_mode: LazSeekMode,
     },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum LazSeekMode {
+    FixedChunks { points_per_chunk: u64 },
+    Sequential,
 }
 
 impl Compression {
@@ -521,8 +528,34 @@ fn compression(
     let vlr = laz::LazVlr::from_buffer(&record.data)
         .map_err(|error| SourceError::corrupt(error.to_string()))?;
     validate_laz_items(&vlr, facts.format, facts.record_len)?;
-    let decoder_bytes = preflight_chunk_table(file, facts, &record.data, &vlr)?;
-    Ok(Compression::Laz { vlr, decoder_bytes })
+    let compressor = laz_compressor(&record.data)?;
+    let decoder_bytes = preflight_chunk_table(file, facts, compressor, &vlr)?;
+    let seek_mode = laz_seek_mode(compressor, &vlr);
+    Ok(Compression::Laz {
+        vlr,
+        decoder_bytes,
+        seek_mode,
+    })
+}
+
+fn laz_compressor(vlr_bytes: &[u8]) -> Result<u16, SourceError> {
+    let bytes = vlr_bytes
+        .get(0..2)
+        .ok_or_else(|| SourceError::corrupt("truncated LASzip VLR"))?;
+    bytes
+        .try_into()
+        .map(u16::from_le_bytes)
+        .map_err(slice_error)
+}
+
+fn laz_seek_mode(compressor: u16, vlr: &laz::LazVlr) -> LazSeekMode {
+    if matches!(compressor, 2 | 3) && !vlr.uses_variable_size_chunks() {
+        LazSeekMode::FixedChunks {
+            points_per_chunk: u64::from(vlr.chunk_size()),
+        }
+    } else {
+        LazSeekMode::Sequential
+    }
 }
 
 fn validate_laz_items(
@@ -570,13 +603,9 @@ fn validate_laz_items(
 fn preflight_chunk_table(
     file: &mut File,
     facts: FileLayoutFacts,
-    laz_vlr_bytes: &[u8],
+    compressor: u16,
     vlr: &laz::LazVlr,
 ) -> Result<u64, SourceError> {
-    let compressor = laz_vlr_bytes
-        .get(0..2)
-        .ok_or_else(|| SourceError::corrupt("truncated LASzip VLR"))?;
-    let compressor = u16::from_le_bytes(compressor.try_into().map_err(slice_error)?);
     let model_bytes = laz_decoder_model_bytes(vlr)?;
     if compressor == 1 {
         return Ok(model_bytes);
@@ -1129,5 +1158,29 @@ mod tests {
             budget.reserve_payload(1),
             Err(SourceError::CorruptSource { .. })
         ));
+    }
+
+    #[test]
+    fn codec_seek_mode_requires_a_fixed_chunked_organization() {
+        let fixed = laz::LazVlrBuilder::default()
+            .with_point_format(0, 0)
+            .unwrap()
+            .with_fixed_chunk_size(123)
+            .build();
+        assert_eq!(
+            laz_seek_mode(2, &fixed),
+            LazSeekMode::FixedChunks {
+                points_per_chunk: 123
+            }
+        );
+        assert_eq!(laz_seek_mode(1, &fixed), LazSeekMode::Sequential);
+
+        let variable = laz::LazVlrBuilder::default()
+            .with_point_format(0, 0)
+            .unwrap()
+            .with_variable_chunk_size()
+            .build();
+        assert_eq!(laz_seek_mode(2, &variable), LazSeekMode::Sequential);
+        assert_eq!(laz_seek_mode(3, &variable), LazSeekMode::Sequential);
     }
 }

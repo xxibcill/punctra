@@ -42,6 +42,7 @@ pub(super) fn plan(
         budget,
     )?;
     let retained_mask = required_residents(&hierarchy, &visibility, &target_cut);
+    let demanded_nodes = demanded_nodes(&hierarchy, &visibility, &target_cut);
     let requests = select_requests(
         &hierarchy,
         &visibility,
@@ -59,6 +60,7 @@ pub(super) fn plan(
 
     Ok(ViewPlan {
         view_generation: available_nodes.view_generation,
+        demanded_nodes,
         requests,
         retained,
         retirements,
@@ -684,19 +686,11 @@ fn select_request_indices(
         return Ok(None);
     }
 
-    let mut missing_targets = target_cut
-        .iter()
-        .copied()
-        .filter(|index| hierarchy.nodes[*index].status == NodeStatus::Missing)
-        .collect::<Vec<_>>();
-    missing_targets.sort_by(|left, right| {
-        request_screen_error(hierarchy, visibility, *right)
-            .total_cmp(&request_screen_error(hierarchy, visibility, *left))
-            .then_with(|| hierarchy.nodes[*left].key.cmp(&hierarchy.nodes[*right].key))
-    });
-
     let mut request_indices = Vec::new();
-    for index in missing_targets {
+    for index in ordered_nonresident_targets(hierarchy, visibility, target_cut) {
+        if hierarchy.nodes[index].status != NodeStatus::Missing {
+            continue;
+        }
         let mut proposed_usage = current_usage;
         add_node_usage(&mut proposed_usage, &hierarchy.nodes[index])?;
         if !proposed_usage.fits_within(budget) {
@@ -706,6 +700,35 @@ fn select_request_indices(
         request_indices.push(index);
     }
     Ok(Some(request_indices))
+}
+
+fn demanded_nodes(
+    hierarchy: &Hierarchy,
+    visibility: &[NodeProjection],
+    target_cut: &BTreeSet<usize>,
+) -> Vec<NodeKey> {
+    ordered_nonresident_targets(hierarchy, visibility, target_cut)
+        .into_iter()
+        .map(|index| hierarchy.nodes[index].key)
+        .collect()
+}
+
+fn ordered_nonresident_targets(
+    hierarchy: &Hierarchy,
+    visibility: &[NodeProjection],
+    target_cut: &BTreeSet<usize>,
+) -> Vec<usize> {
+    let mut targets = target_cut
+        .iter()
+        .copied()
+        .filter(|index| !matches!(hierarchy.nodes[*index].status, NodeStatus::Resident { .. }))
+        .collect::<Vec<_>>();
+    targets.sort_by(|left, right| {
+        request_screen_error(hierarchy, visibility, *right)
+            .total_cmp(&request_screen_error(hierarchy, visibility, *left))
+            .then_with(|| hierarchy.nodes[*left].key.cmp(&hierarchy.nodes[*right].key))
+    });
+    targets
 }
 
 fn request_screen_error(hierarchy: &Hierarchy, visibility: &[NodeProjection], index: usize) -> f64 {
