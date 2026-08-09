@@ -1,15 +1,16 @@
 # Point-Cloud Foundation Architecture
 
-Status: broader platform proposal deferred; the v0.1 renderer, v0.2 adaptive
-View planner, and v0.3 Real Sources are implemented
+Status: broader platform proposal deferred; v0.1 through v0.3 are implemented,
+and the narrow v0.4 Spatial Index and out-of-core View slice is active
 
 > Punctra's accepted current contracts are the reusable
 > [v0.1 render engine](../design/render-engine-v0.1.md), renderer-neutral
 > [v0.2 adaptive View planner](../design/adaptive-view-planning-v0.2.md), and
-> completed [v0.3 Real Sources path](../design/real-sources-v0.3.md). Where this
-> older proposal differs from the v0.3 Source interface, the accepted v0.3
-> design controls. The remaining broader document is research for possible host
-> projects, not the current implementation plan.
+> completed [v0.3 Real Sources path](../design/real-sources-v0.3.md), plus the
+> active [v0.4 Out-of-core View path](../design/out-of-core-view-v0.4.md). Where
+> this older proposal differs from those accepted interfaces and boundaries,
+> the versioned designs control. The remaining broader document is research for
+> possible host projects, not the current implementation plan.
 
 The implemented v0.3 adapters are `source-memory` and `source-las`.
 `source-las` supports LAS point-data record formats 0–10 and LAZ formats 0–8;

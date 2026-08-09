@@ -619,7 +619,7 @@ checksum = "aa9a19cbb55df58761df49b23516a86d432839add4af60fc256da840f66ed35b"
 
 [[package]]
 name = "foundation-runtime"
-version = "0.3.0"
+version = "0.4.0-alpha.1"
 dependencies = [
  "pollster",
  "thiserror 2.0.20",
@@ -1544,7 +1544,7 @@ dependencies = [
 
 [[package]]
 name = "point-contracts"
-version = "0.3.0"
+version = "0.4.0-alpha.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -1553,7 +1553,7 @@ dependencies = [
 
 [[package]]
 name = "point-source"
-version = "0.3.0"
+version = "0.4.0-alpha.1"
 dependencies = [
  "blake3",
  "foundation-runtime",
@@ -1565,7 +1565,7 @@ dependencies = [
 
 [[package]]
 name = "point-view"
-version = "0.3.0"
+version = "0.4.0-alpha.1"
 dependencies = [
  "criterion",
  "glam",
@@ -1770,7 +1770,7 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
 name = "render-protocol"
-version = "0.3.0"
+version = "0.4.0-alpha.1"
 dependencies = [
  "glam",
  "point-contracts",
@@ -1779,7 +1779,7 @@ dependencies = [
 
 [[package]]
 name = "render-wgpu"
-version = "0.3.0"
+version = "0.4.0-alpha.1"
 dependencies = [
  "bytemuck",
  "glam",
@@ -1797,7 +1797,7 @@ checksum = "19b30a45b0cd0bcca8037f3d0dc3421eaf95327a17cad11964fb8179b4fc4832"
 
 [[package]]
 name = "renderer-demo"
-version = "0.3.0"
+version = "0.4.0-alpha.1"
 dependencies = [
  "point-view",
  "pollster",
@@ -2016,7 +2016,7 @@ dependencies = [
 
 [[package]]
 name = "source-las"
-version = "0.3.0"
+version = "0.4.0-alpha.1"
 dependencies = [
  "allocation-counter",
  "blake3",
@@ -2032,7 +2032,7 @@ dependencies = [
 
 [[package]]
 name = "source-memory"
-version = "0.3.0"
+version = "0.4.0-alpha.1"
 dependencies = [
  "blake3",
  "criterion",

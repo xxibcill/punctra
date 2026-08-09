@@ -9,11 +9,10 @@ as technical and customer evidence changes. Milestone outcomes and dependency
 order matter more than version numbers.
 
 Only an **Active** release has committed scope. Punctra v0.1 through v0.3 are
-complete. All broader work below remains proposed until it receives an accepted
-design or architecture decision.
-In particular, Spatial Index persistence, Workspace behavior, editing, terrain,
-export, and application UI are not silently made current scope by appearing
-here.
+complete, and v0.4 is active under its accepted design. Work beyond that design
+remains proposed until it receives a separate accepted design or architecture
+decision. In particular, Workspace behavior, editing, terrain, export, and
+general application UI are not silently made current scope by appearing here.
 
 ## Working direction
 
@@ -61,12 +60,13 @@ Roadmap status labels are:
 
 ## Scope and evidence checkpoint
 
-Status: **Exploring**
+Status: **Active for the narrow v0.4 technical slice; external product evidence remains outstanding**
 
-Before expanding the repository beyond the completed renderer, planner, and
-Source modules, decide whether the broader modules belong in Punctra, in a host
-application, or in separate projects. Record that decision in an accepted
-design or ADR.
+The [accepted v0.4 design](docs/design/out-of-core-view-v0.4.md) places one
+rebuildable Spatial Index in Punctra and keeps View materialization in the host
+demo. It does not authorize the broader Workspace, Query, Edit, terrain, or
+product-application proposal. Those later boundaries still require their own
+evidence and accepted designs.
 
 Useful evidence for proceeding includes:
 
@@ -84,7 +84,7 @@ If the evidence points elsewhere, revise this roadmap before building the next
 module. The detailed discovery signals and pivot criteria live in the
 [market-validation research](docs/research/saas-point-cloud-market-validation.md#customer-tests-and-kill-criteria).
 
-## Candidate release sequence
+## Release sequence
 
 There are six provisional pre-v1 release themes after the completed v0.3. This
 is a working count, not a requirement to publish exactly six more releases.
@@ -158,12 +158,12 @@ cargo bench -p source-las --bench read
 
 ### v0.4 — Out-of-core View
 
-Status: **Candidate**
+Status: **Active**
 
-Candidate outcome: open a real large LAS/LAZ Source progressively and keep
+Accepted outcome: open a real large LAS/LAZ Source progressively and keep
 display residency bounded.
 
-Likely scope:
+Accepted scope:
 
 - persistent, rebuildable, resumable Spatial Index construction;
 - deterministic conservative spatial lookup and View hierarchy facts;
@@ -180,6 +180,9 @@ Evidence of readiness:
 - large real Sources stay inside point, byte, batch, and host-memory budgets;
   and
 - the real-cloud demo reports reproducible latency, throughput, and peak memory.
+
+Exact scope and verification rules are recorded in the
+[v0.4 Out-of-core View design](docs/design/out-of-core-view-v0.4.md).
 
 ### v0.5 — Durable document core
 

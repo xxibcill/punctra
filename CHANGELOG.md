@@ -5,6 +5,10 @@ All notable changes to Punctra are documented here. The project follows
 
 ## Unreleased
 
+- Started v0.4 Out-of-core View under an accepted design: one rebuildable
+  persistent Spatial Index, conservative Source-span lookup, bounded display
+  samples, and a private host-owned real-cloud materialization path.
+
 ## 0.3.0 - 2026-08-10
 
 - Added canonical Source and Point contracts, runtime-neutral bounded execution,

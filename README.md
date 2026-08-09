@@ -21,6 +21,12 @@ position ticks, supported Attributes, ordered VLR/EVLR metadata, and stable
 LAZ formats 9 and 10 are rejected explicitly until the layered WavePacket14
 codec can preserve waveform values exactly.
 
+Version 0.4.0 is now active under the accepted
+[Out-of-core View design](docs/design/out-of-core-view-v0.4.md). The narrow
+slice adds a rebuildable persistent Spatial Index, conservative Source-span
+lookup, bounded display samples, and a host-owned real-cloud materialization
+path without introducing Workspace or exact Query semantics.
+
 Future direction is described in the [living roadmap](ROADMAP.md). Its release
 themes are adjustable and do not expand the accepted implementation scope by
 themselves.
@@ -85,8 +91,10 @@ no I/O and never mutates renderer state.
 - `render-wgpu` owns GPU resources, pipelines, drawing, and picking.
 - `renderer-demo` exercises the engine with generated point batches.
 
-Index construction and persistence, networking, editing, terrain construction,
-and application UI remain outside the completed v0.3 scope.
+The accepted v0.4 implementation is adding narrow Spatial Index construction
+and a private demo bridge. Networking, editing, terrain construction, a
+Workspace, exact Query behavior, and general application UI remain outside the
+active scope.
 
 ## Examples
 
