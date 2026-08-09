@@ -625,6 +625,28 @@ fn refinement_budget_is_spent_on_the_highest_screen_error_first() {
         node(6, Some(4), high_bounds, 0.0, 1, 1, 6, NodeStatus::Missing),
     ];
 
+    let complete_plan = planner(2.0, 0.25)
+        .plan(
+            &camera(),
+            [100, 100],
+            AvailableNodes::new(generation, &nodes),
+            GENEROUS_BUDGET,
+        )
+        .unwrap();
+
+    assert_eq!(
+        request_keys(&complete_plan),
+        vec![node_key(5), node_key(6), node_key(2), node_key(3)]
+    );
+    let request_errors = complete_plan
+        .requests()
+        .iter()
+        .map(|request| request.screen_space_error_pixels())
+        .collect::<Vec<_>>();
+    assert_eq!(request_errors[0].to_bits(), request_errors[1].to_bits());
+    assert!(request_errors[1] > request_errors[2]);
+    assert_eq!(request_errors[2].to_bits(), request_errors[3].to_bits());
+
     let plan = planner(2.0, 0.25)
         .plan(
             &camera(),

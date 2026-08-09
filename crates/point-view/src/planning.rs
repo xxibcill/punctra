@@ -655,7 +655,7 @@ fn select_requests(
                 batch_key: node.batch_key,
                 point_count: node.point_count,
                 estimated_bytes: node.estimated_bytes,
-                screen_space_error_pixels: visibility[index].screen_error,
+                screen_space_error_pixels: request_screen_error(hierarchy, visibility, index),
             }
         })
         .collect())
@@ -679,9 +679,8 @@ fn select_request_indices(
         .filter(|index| hierarchy.nodes[*index].status == NodeStatus::Missing)
         .collect::<Vec<_>>();
     missing_targets.sort_by(|left, right| {
-        visibility[*right]
-            .screen_error
-            .total_cmp(&visibility[*left].screen_error)
+        request_screen_error(hierarchy, visibility, *right)
+            .total_cmp(&request_screen_error(hierarchy, visibility, *left))
             .then_with(|| hierarchy.nodes[*left].key.cmp(&hierarchy.nodes[*right].key))
     });
 
@@ -696,6 +695,11 @@ fn select_request_indices(
         request_indices.push(index);
     }
     Ok(Some(request_indices))
+}
+
+fn request_screen_error(hierarchy: &Hierarchy, visibility: &[NodeProjection], index: usize) -> f64 {
+    let priority_source = hierarchy.parents[index].unwrap_or(index);
+    visibility[priority_source].screen_error
 }
 
 fn actual_resource_usage(
