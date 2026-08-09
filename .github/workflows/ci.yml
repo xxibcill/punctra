@@ -27,7 +27,6 @@ jobs:
     runs-on: ubuntu-24.04
     env:
       PUNCTRA_REQUIRE_GPU: "1"
-      VK_DRIVER_FILES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
       WGPU_BACKEND: vulkan
     steps:
       - uses: actions/checkout@v4
@@ -37,6 +36,14 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends mesa-vulkan-drivers vulkan-tools
+      - name: Select software Vulkan adapter
+        run: |
+          lavapipe_manifest="$(dpkg-query --listfiles mesa-vulkan-drivers | sed -n '/\/lvp_icd.*\.json$/ { p; q; }')"
+          if [[ -z "$lavapipe_manifest" ]]; then
+            echo "Mesa Lavapipe ICD manifest was not installed" >&2
+            exit 1
+          fi
+          printf 'VK_DRIVER_FILES=%s\n' "$lavapipe_manifest" >> "$GITHUB_ENV"
       - name: Verify software Vulkan adapter
         run: vulkaninfo --summary
       - name: Run GPU acceptance tests
