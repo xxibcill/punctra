@@ -66,7 +66,7 @@ fn point_vertex(input: VertexInput, @builtin(vertex_index) vertex_index: u32) ->
 
 @fragment
 fn point_fragment(input: VertexOutput) -> @location(0) vec4<f32> {
-    if dot(input.corner, input.corner) > 1.0 {
+    if !splat_is_visible(input) {
         discard;
     }
     return input.color;
@@ -74,8 +74,12 @@ fn point_fragment(input: VertexOutput) -> @location(0) vec4<f32> {
 
 @fragment
 fn pick_fragment(input: VertexOutput) -> @location(0) u32 {
-    if dot(input.corner, input.corner) > 1.0 {
+    if !splat_is_visible(input) {
         discard;
     }
     return input.pick_token;
+}
+
+fn splat_is_visible(input: VertexOutput) -> bool {
+    return input.color.a > 0.0 && dot(input.corner, input.corner) <= 1.0;
 }

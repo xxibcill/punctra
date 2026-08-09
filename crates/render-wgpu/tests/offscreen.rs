@@ -24,6 +24,7 @@ const RED: [u8; 4] = [255, 0, 0, 255];
 const GREEN: [u8; 4] = [0, 255, 0, 255];
 const BLUE: [u8; 4] = [0, 0, 255, 255];
 const CYAN: [u8; 4] = [0, 255, 255, 255];
+const TRANSPARENT: [u8; 4] = [255, 255, 255, 0];
 
 static GPU: OnceLock<Option<GpuContext>> = OnceLock::new();
 
@@ -159,6 +160,7 @@ fn assert_raster_and_pick_semantics(gpu: &GpuContext) {
     subject.apply(&RenderUpdate::Reset { frame: frame_key });
     let near_id = PointId::new(101);
     let far_id = PointId::new(202);
+    let transparent_id = PointId::new(303);
     subject.apply(&RenderUpdate::Upsert {
         batch: batch(
             frame_key,
@@ -177,10 +179,19 @@ fn assert_raster_and_pick_semantics(gpu: &GpuContext) {
             vec![point([0.0, 1.0, 0.0], BLUE, far_id.get())],
         ),
     });
+    subject.apply(&RenderUpdate::Upsert {
+        batch: batch(
+            frame_key,
+            3,
+            1,
+            WORLD_ORIGIN,
+            vec![point([0.0, -2.0, 0.0], TRANSPARENT, transparent_id.get())],
+        ),
+    });
 
     let frame = standard_frame(frame_key, VIEWPORT, 24.0, GREEN);
     let depth_result = subject.render(&frame);
-    assert_eq!(depth_result.report.draw_calls(), 2);
+    assert_eq!(depth_result.report.draw_calls(), 3);
     assert_pixel(depth_result.image.pixel(CENTER), RED);
     let discarded_corner = [CENTER[0] + 10, CENTER[1] + 10];
     assert_pixel(depth_result.image.pixel(discarded_corner), BLACK);

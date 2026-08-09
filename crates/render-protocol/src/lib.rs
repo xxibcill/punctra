@@ -159,6 +159,9 @@ impl RenderPoint {
     }
 
     /// Returns the point's linear RGBA8 color.
+    ///
+    /// An alpha value of zero excludes the point from drawing and picking.
+    /// Nonzero alpha is blended while the splat participates in depth testing.
     #[must_use]
     pub const fn color(&self) -> [u8; 4] {
         self.color
