@@ -1,6 +1,6 @@
 [package]
 name = "renderer-demo"
-description = "Interactive synthetic point-cloud demonstration for Punctra."
+description = "Interactive synthetic or indexed LAS/LAZ point-cloud demonstration for Punctra."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,11 +10,18 @@ publish = false
 
 [dependencies]
 pollster.workspace = true
+point-contracts.workspace = true
+point-index.workspace = true
 point-view.workspace = true
 render-protocol.workspace = true
 render-wgpu.workspace = true
+source-las.workspace = true
 wgpu.workspace = true
 winit.workspace = true
+
+[dev-dependencies]
+las.workspace = true
+source-memory.workspace = true
 
 [lints]
 workspace = true

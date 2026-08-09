@@ -1,8 +1,8 @@
 # Cross-Module Contracts and Invariants
 
-Status: deferred platform proposal; the v0.1 renderer, v0.2 adaptive View, and
-v0.3 Real Sources contracts are implemented under the accepted designs in
-[`docs/design`](../design)
+Status: deferred platform proposal; the v0.1 renderer, v0.2 adaptive View,
+v0.3 Real Sources, and narrow v0.4 Spatial Index contracts are implemented
+under the accepted designs in [`docs/design`](../design)
 
 This document defines the semantics that every module must preserve. Rust names are illustrative; the behavior is normative.
 
@@ -340,59 +340,95 @@ Every official adapter runs the same Source conformance suite.
 ## Spatial Index contract
 
 ~~~rust
-pub struct SourceSpanBatch {
-    pub source: SourceId,
-    pub spans: BoundedVec<SourceSpan>,
-}
+pub fn prepare(
+    source: Source,
+    target: impl AsRef<Path>,
+    limits: PrepareLimits,
+) -> Job<PreparedIndex, IndexError>;
 
-impl IndexBuilder {
-    pub fn build_or_resume(
-        source: Source,
-        target: IndexTarget,
-        options: IndexOptions,
-    ) -> Job<IndexArtifact, IndexError>;
-}
-
-impl IndexArtifact {
+impl PreparedIndex {
     pub fn descriptor(&self) -> &IndexDescriptor;
+    pub fn hierarchy(&self) -> &IndexHierarchy;
+    pub fn prepare_report(&self) -> &PrepareReport;
 
-    pub fn exact_candidates(
+    pub fn candidates(
         &self,
-        region: &Region,
-    ) -> Result<Box<dyn BatchStream<
-        Batch = SourceSpanBatch,
-        Summary = ExactPlanSummary,
-        Error = IndexError,
-    >>>;
+        bounds: WorldBounds,
+        limits: CandidateLimits,
+    ) -> Result<CandidatePlan, IndexError>;
 
-    pub fn hierarchy(
+    pub fn read_node(
         &self,
-        request: HierarchyRequest,
-    ) -> Result<IndexNodeBatch>;
+        node: IndexNodeId,
+        budget: NodeReadBudget,
+    ) -> Result<IndexPointBatches, IndexError>;
+}
+
+impl CandidatePlan {
+    pub fn spans(&self) -> &[SourceSpan];
+    pub fn candidate_point_count(&self) -> u64;
+    pub fn visited_node_count(&self) -> u64;
 }
 ~~~
 
-Index construction reads the opaque, verified `Source` seam directly. A
-checkpoint records Source Identity, next logical ordinal, builder state, and
-checksums, so `build_or_resume` can seek to the next Source span after process
-restart. The proposed foundation index covers the implemented LAS/LAZ adapter
-and would cover a future COPC adapter; native-hierarchy import is deferred until
-another real producer proves that seam.
+`prepare` is the only public construction/opening operation. It reads the
+opaque verified `Source` directly and returns only a complete `PreparedIndex`:
 
-For exact candidates:
+- a compatible target is fully checked and opened without Source reads;
+- a missing target resumes a compatible checksummed work file or builds from
+  Source ordinal zero;
+- an existing incompatible or corrupt target fails and is never replaced; and
+- cancellation or failure before publication leaves no partial complete target.
+
+The returned handle retains the verified Source. `PrepareReport` records
+`Opened`, `Built`, or `Resumed`, durable Points reused, Source Points read by
+that call, and final artifact bytes. The deterministic work frames checkpoint
+consecutive Source blocks; recovery truncates only an invalid suffix and resumes
+from the last valid ordinal boundary.
+
+The v0.4 persisted recipe is fixed: consecutive Source blocks contain at most
+65,536 Points, a longest-centroid-extent median split builds one binary BVH,
+node identities are nonzero and root-first, and each internal node retains at
+most 4,096 deterministic exact `(ordinal, ticks)` display samples. The disk and
+recipe versions are separate from the Cargo version.
+
+`IndexDescriptor` exposes the bound Source Identity and point count, exact
+position transform and optional world bounds, recipe and disk versions,
+node/leaf counts, and checksum. `IndexHierarchy` is one complete resident
+snapshot. Its `IndexNode` values expose identity, optional parent, inclusive
+finite bounds, covered and displayed Point counts, conservative geometric
+error, and sampled or complete display Coverage. Persisted pages, work frames,
+child-sample merge buffers, and Source adapter details remain private.
+
+For candidate plans:
 
 - false positives are allowed and removed by **point-query**;
 - false negatives are forbidden;
 - Source spans refer to stable logical records;
-- result ordering is deterministic;
-- span batches obey a hard size limit; and
-- only a complete Index Artifact can produce the plan.
+- output spans are sorted, nonempty, disjoint, and deterministic;
+- `CandidateLimits` separately caps visited nodes, final spans, candidate Points,
+  and working bytes; and
+- the result is complete or an error, never partial Coverage.
 
-An incomplete or building index returns IndexIncomplete. A complete Query then falls back to a sequential Source scan.
+`IndexPointBatches` is a bounded fused batch stream. Internal nodes read their
+checksummed persisted samples; leaves read every Point in their one contiguous
+span from the retained verified Source. Each `IndexPointBatch` carries Source
+Identity, transform, node identity, and sorted unique `IndexSample` values.
+These sparse display values deliberately are not canonical `PointBatch` values
+and do not claim complete Query Coverage. The terminal `IndexReadSummary`
+reports emitted display count, covered Source count, Source provenance, and
+sampled or complete Coverage. Failure and cancellation publish no summary.
 
-The hierarchy interface exposes immutable facts: node keys, bounds, Source spans, point counts, children, and geometric error. HierarchyRequest carries a hard node limit, and IndexNodeBatch cannot exceed it. **point-view**, not **point-index**, owns camera culling, screen-error policy, budgets, priority, and refinement.
+`PrepareLimits`, `CandidateLimits`, and `NodeReadBudget` keep Source batch,
+adapter, builder, artifact, hierarchy, candidate, index-buffer, display-batch,
+and emitted-Point ceilings separate. **point-view**, not **point-index**, owns
+camera culling, screen-error policy, budgets, priority, and refinement.
 
-An index carries Artifact Identity, Source Identity, Source point count, format version, build options, and checksums. Its public immutable IndexDescriptor exposes those identities, count, options, and version needed for safe composition without exposing persisted nodes or pages. A mismatch causes rejection or rebuilding, never best-effort reuse.
+The complete artifact is checksummed and Source/version-bound. A synced
+temporary sibling is published with an atomic no-replace hard link; an existing
+or racing target is rejected rather than overwritten. The parent directory is
+synced before disposable work, sample-spool, and temporary files are removed.
+This is not rename-and-replace behavior.
 
 ## Revision and Snapshot contract
 

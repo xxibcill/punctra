@@ -5,9 +5,30 @@ All notable changes to Punctra are documented here. The project follows
 
 ## Unreleased
 
-- Started v0.4 Out-of-core View under an accepted design: one rebuildable
-  persistent Spatial Index, conservative Source-span lookup, bounded display
-  samples, and a private host-owned real-cloud materialization path.
+## 0.4.0 - 2026-08-10
+
+- Added `point-index` with one deterministic 65,536-Point fixed-block BVH,
+  conservative inclusive-box candidate plans, stable root-first node identities,
+  bounded exact-position display samples, and Source-backed complete leaves.
+- Added append-only checksummed work frames, valid-prefix recovery, deterministic
+  resume, complete artifact validation, and durable no-replace publication by
+  hard-linking a synced temporary artifact before removing disposable sidecars.
+- Added separate hard limits for Source reads, adapter and builder memory,
+  incomplete and complete files, resident hierarchy metadata, candidate plans,
+  and node materialization.
+- Added validated direct seeks across fixed-size LAZ chunk boundaries. Point-wise
+  and variable-chunk LAZ retain bounded cancellable sequential replay.
+- Added `ViewPlan::demanded_nodes()` so hosts can retain still-demanded Requested
+  work and cancel camera-stale queued work without inferring demand from an
+  absent request delta.
+- Added the private real-cloud `renderer-demo` bridge and CLI. Supported LAS/LAZ
+  files are Full-verified, built/resumed/opened through `point-index`, and
+  materialized into exact identity-preserving atomic renderer Upserts under
+  explicit staging, planning, hierarchy, and renderer budgets.
+- Added direct-use, oracle, persistence, interruption, corruption, cancellation,
+  process-level LAS/LAZ smoke, one-million-Point benchmark, measured heap, and
+  local GPU acceptance evidence. External licensed production-data and partner
+  validation remain outstanding.
 
 ## 0.3.0 - 2026-08-10
 

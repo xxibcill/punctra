@@ -21,11 +21,12 @@ position ticks, supported Attributes, ordered VLR/EVLR metadata, and stable
 LAZ formats 9 and 10 are rejected explicitly until the layered WavePacket14
 codec can preserve waveform values exactly.
 
-Version 0.4.0 is now active under the accepted
-[Out-of-core View design](docs/design/out-of-core-view-v0.4.md). The narrow
-slice adds a rebuildable persistent Spatial Index, conservative Source-span
-lookup, bounded display samples, and a host-owned real-cloud materialization
-path without introducing Workspace or exact Query semantics.
+Version 0.4.0 completes the accepted
+[Out-of-core View design](docs/design/out-of-core-view-v0.4.md): a rebuildable,
+resumable persistent Spatial Index, conservative Source-span lookup, bounded
+display-only hierarchy samples, efficient fixed-chunk LAZ seeks, and a private
+host-owned path from a verified real Source through View planning to atomic
+renderer updates. It does not introduce Workspace or exact Query semantics.
 
 Future direction is described in the [living roadmap](ROADMAP.md). Its release
 themes are adjustable and do not expand the accepted implementation scope by
@@ -86,15 +87,17 @@ no I/O and never mutates renderer state.
 - `source-las` opens local LAS formats 0–10 and LAZ formats 0–8 through the same
   verified, bounded Source interface; LAZ formats 9 and 10 are explicitly
   unsupported pending exact WavePacket14 codec support.
+- `point-index` prepares one deterministic checksummed fixed-block BVH, returns
+  conservative Source spans, and streams bounded display samples or complete
+  Source-backed leaves.
 - `render-protocol` defines and validates renderer-neutral View updates.
 - `point-view` plans deterministic, budgeted hierarchy requests and retirement.
 - `render-wgpu` owns GPU resources, pipelines, drawing, and picking.
-- `renderer-demo` exercises the engine with generated point batches.
+- `renderer-demo` exercises the engine with either generated point batches or
+  one Full-verified indexed LAS/LAZ Source.
 
-The accepted v0.4 implementation is adding narrow Spatial Index construction
-and a private demo bridge. Networking, editing, terrain construction, a
-Workspace, exact Query behavior, and general application UI remain outside the
-active scope.
+Networking, editing, terrain construction, a Workspace, exact Query behavior,
+and general application UI remain outside the completed v0.4 scope.
 
 ## Examples
 
@@ -113,10 +116,30 @@ metadata, bounds, and exact read throughput, with the
 cargo run --release -p source-las --example inspect -- survey.laz
 ```
 
+Build, query, and read an index directly over an in-memory Source with:
+
+```bash
+cargo run -p point-index --example direct_use
+```
+
 Run the deterministic adaptive-LOD demo with:
 
 ```bash
 cargo run --release -p renderer-demo
+```
+
+Pass a real Source to Full-verify it, build or open its index, and render it.
+The optional target defaults to `SOURCE.pidx`:
+
+```bash
+cargo run --release -p renderer-demo -- survey.laz survey.laz.pidx
+```
+
+The same Source/index/planner/materializer path has a GPU-free process smoke
+mode that accepts one atomic CPU-model Upsert:
+
+```bash
+cargo run --release -p renderer-demo -- --smoke survey.laz survey.laz.pidx
 ```
 
 - Left-drag orbits and the mouse wheel zooms.
@@ -126,8 +149,26 @@ cargo run --release -p renderer-demo
 
 The window title reports resident points and bytes, cumulative upload bytes,
 draw calls, FPS, frame time, encoding time, upload time, planner requests, and
-streaming progress. Its hierarchy represents more than 10 million logical
-Points while renderer residency stays at fixed point, byte, and batch limits.
+streaming progress. The synthetic hierarchy represents more than 10 million
+logical Points; both paths keep renderer residency at fixed point, byte, and
+batch limits. The real path additionally reports Full verification, index
+disposition and reuse, first accepted batch latency, queue depth, and staging
+peaks.
+
+## v0.4 benchmark evidence
+
+The checked-in `point-index` Criterion benchmark uses a deterministic
+one-million-Point in-memory Source. On the local Apple M5 Pro, 24 GiB,
+macOS 26.5.2 reference run with Rust 1.90.0, it produced a 1,971,528-byte
+artifact. Median times were 330.515 ms for a cold build, 20.567 ms for a warm
+verified open, 606 ns for whole-bounds candidate planning, 1.249 ms for the
+4,096-Point internal-root display read, and 122.100 µs for one complete
+65,536-Point memory-backed leaf read. The combined candidate/root/leaf
+synchronous path peaked at 3,671,504 measured heap bytes under its 32 MiB gate.
+
+These are one-machine generated-fixture baselines, not universal latency claims
+and not licensed production-data evidence. Licensed real-cloud and
+design-partner runs remain explicitly outstanding.
 
 ## Development
 
@@ -142,6 +183,9 @@ RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps
 cargo bench -p point-view --bench planner
 cargo bench -p source-memory --bench read
 cargo bench -p source-las --bench read
+cargo bench -p point-index --bench index
+cargo run -p point-index --example direct_use
+cargo test -p renderer-demo --test headless_smoke
 PUNCTRA_REQUIRE_GPU=1 cargo test -p render-wgpu --test offscreen
 PUNCTRA_REQUIRE_GPU=1 cargo test -p renderer-demo --test planner
 ```

@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::collections::{BTreeSet, VecDeque};
 
 use point_view::{AvailableNode, AxisAlignedBox, NodeKey, NodeRequest, NodeStatus, PlanError};
 use render_protocol::{
@@ -78,15 +78,39 @@ impl SyntheticScene {
         self.nodes.iter().map(|node| node.node).collect()
     }
 
-    pub(crate) fn enqueue_requests(&mut self, requests: &[NodeRequest]) {
-        for request in requests {
-            let index = node_index(request.node());
-            let node = &mut self.nodes[index].node;
-            if node.status() != NodeStatus::Missing {
+    pub(crate) fn reconcile_requests(
+        &mut self,
+        demanded_nodes: &[NodeKey],
+        requests: &[NodeRequest],
+    ) {
+        let previously_queued = self.pending.drain(..).collect::<BTreeSet<_>>();
+        let newly_requested = requests
+            .iter()
+            .map(|request| request.node())
+            .collect::<BTreeSet<_>>();
+        let mut retained_requests = BTreeSet::new();
+        for key in demanded_nodes.iter().copied() {
+            let was_queued = previously_queued.contains(&key);
+            let was_requested_now = newly_requested.contains(&key);
+            if !was_queued && !was_requested_now {
                 continue;
             }
-            *node = node.with_status(NodeStatus::Requested);
-            self.pending.push_back(request.node());
+            if was_queued {
+                retained_requests.insert(key);
+            }
+            let node = &mut self.nodes[node_index(key)].node;
+            if node.status() == NodeStatus::Missing && was_requested_now {
+                *node = node.with_status(NodeStatus::Requested);
+            }
+            if node.status() == NodeStatus::Requested && (was_queued || was_requested_now) {
+                self.pending.push_back(key);
+            }
+        }
+        for key in previously_queued.difference(&retained_requests).copied() {
+            let node = &mut self.nodes[node_index(key)].node;
+            if node.status() == NodeStatus::Requested {
+                *node = node.with_status(NodeStatus::Missing);
+            }
         }
     }
 
@@ -108,6 +132,7 @@ impl SyntheticScene {
                 node.layout,
                 BatchVersion::new(version),
             )?;
+            self.nodes[index].latest_version = version;
             return Ok(Some(batch));
         }
         Ok(None)
@@ -119,8 +144,7 @@ impl SyntheticScene {
         let index = node_index(key);
         let node = &mut self.nodes[index];
         debug_assert_eq!(node.node.status(), NodeStatus::Requested);
-        debug_assert_eq!(version.get(), node.latest_version + 1);
-        node.latest_version = version.get();
+        debug_assert_eq!(version.get(), node.latest_version);
         node.node = node.node.with_status(NodeStatus::Resident { version });
     }
 
@@ -136,6 +160,15 @@ impl SyntheticScene {
             }
         );
         *node = node.with_status(NodeStatus::Missing);
+    }
+
+    pub(crate) fn mark_rejected(&mut self, batch_key: BatchKey, version: BatchVersion) {
+        let key =
+            NodeKey::new(batch_key.get()).expect("synthetic batch keys are nonzero node keys");
+        let node = &mut self.nodes[node_index(key)];
+        debug_assert_eq!(node.node.status(), NodeStatus::Requested);
+        debug_assert_eq!(node.latest_version, version.get());
+        node.node = node.node.with_status(NodeStatus::Missing);
     }
 
     pub(crate) fn resident_batches(&self) -> u64 {
@@ -503,5 +536,22 @@ mod tests {
             .apply(&RenderUpdate::Upsert { batch: second })
             .expect("a rematerialized node must use a strictly newer version");
         scene.mark_resident(second_key, second_version);
+    }
+
+    #[test]
+    fn rejected_materialization_versions_are_not_reused() {
+        let mut scene = SyntheticScene::new(view_generation()).unwrap();
+        let root = scene.nodes[0].node;
+        scene.nodes[0].node = root.with_status(NodeStatus::Requested);
+        scene.pending.push_back(root.key());
+        let rejected = scene.next_batch().unwrap().unwrap();
+        scene.mark_rejected(rejected.key(), rejected.version());
+
+        scene.nodes[0].node = root.with_status(NodeStatus::Requested);
+        scene.pending.push_back(root.key());
+        let retry = scene.next_batch().unwrap().unwrap();
+
+        assert_eq!(rejected.version(), BatchVersion::new(1));
+        assert_eq!(retry.version(), BatchVersion::new(2));
     }
 }

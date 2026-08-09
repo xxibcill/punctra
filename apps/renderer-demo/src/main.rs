@@ -1,23 +1,29 @@
-//! Interactive, progressively streamed synthetic point-cloud renderer demo.
+//! Interactive progressive renderer for the synthetic fixture or one LAS/LAZ Source.
 
 mod orbit_camera;
+mod real_cloud;
+mod scene;
 mod synthetic;
 
 use std::{
     error::Error,
+    ffi::{OsStr, OsString},
     io,
+    path::{Path, PathBuf},
     sync::Arc,
     time::{Duration, Instant},
 };
 
 use orbit_camera::OrbitCamera;
+use point_index::{PrepareLimits, PreparedIndex};
 use point_view::{AvailableNodes, PlannerConfig, PlanningBudget, ResourceUsage, ViewPlanner};
-use render_protocol::{RenderLimits, RenderUpdate, UpdateReport, ViewGenerationKey, ViewId};
-use render_wgpu::{Camera, Frame, FrameReport, PointStyle, RendererConfig, WgpuRenderer};
-use synthetic::{
-    LOGICAL_POINT_COUNT, RESIDENT_BATCH_BUDGET, RESIDENT_BYTE_BUDGET, RESIDENT_POINT_BUDGET,
-    SCENE_RADIUS, SCENE_TARGET, SyntheticScene,
+use real_cloud::RealCloudScene;
+use render_protocol::{
+    RenderLimits, RenderStateModel, RenderUpdate, UpdateReport, ViewGenerationKey, ViewId,
 };
+use render_wgpu::{Camera, Frame, FrameReport, PointStyle, RendererConfig, WgpuRenderer};
+use scene::{Scene, SceneMetrics};
+use synthetic::{RESIDENT_BATCH_BUDGET, RESIDENT_BYTE_BUDGET, RESIDENT_POINT_BUDGET};
 use winit::{
     application::ApplicationHandler,
     dpi::{LogicalSize, PhysicalPosition, PhysicalSize},
@@ -27,7 +33,7 @@ use winit::{
     window::{Window, WindowId},
 };
 
-const BASE_TITLE: &str = "Punctra adaptive View v0.2";
+const BASE_TITLE: &str = "Punctra adaptive View v0.4";
 const INITIAL_WIDTH: f64 = 1_280.0;
 const INITIAL_HEIGHT: f64 = 800.0;
 const TITLE_REFRESH_INTERVAL: Duration = Duration::from_millis(500);
@@ -40,27 +46,207 @@ const PLANNING_BUDGET: PlanningBudget = PlanningBudget::new(
 
 type DemoResult<T> = Result<T, Box<dyn Error>>;
 
-fn main() -> DemoResult<()> {
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct Command {
+    show_help: bool,
+    headless_smoke: bool,
+    source: Option<PathBuf>,
+    index_target: Option<PathBuf>,
+}
+
+impl Command {
+    fn parse(arguments: impl IntoIterator<Item = OsString>) -> DemoResult<Self> {
+        let mut arguments = arguments.into_iter().collect::<Vec<_>>();
+        if arguments
+            .first()
+            .is_some_and(|value| value == OsStr::new("--help") || value == OsStr::new("-h"))
+        {
+            return Ok(Self {
+                show_help: true,
+                headless_smoke: false,
+                source: None,
+                index_target: None,
+            });
+        }
+        let headless_smoke = arguments
+            .first()
+            .is_some_and(|value| value == OsStr::new("--smoke"));
+        if headless_smoke {
+            arguments.remove(0);
+        }
+        let (source, index_target) = match arguments.as_slice() {
+            [] => (None, None),
+            [source] => (Some(PathBuf::from(source)), None),
+            [source, target] => (Some(PathBuf::from(source)), Some(PathBuf::from(target))),
+            _ => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "renderer-demo accepts at most SOURCE and INDEX_TARGET",
+                )
+                .into());
+            }
+        };
+        Ok(Self {
+            show_help: false,
+            headless_smoke,
+            source,
+            index_target,
+        })
+    }
+}
+
+fn load_scene(command: &Command) -> DemoResult<Scene> {
+    let Some(source_path) = command.source.as_deref() else {
+        return Scene::synthetic(VIEW_GENERATION);
+    };
+    let index_target = command
+        .index_target
+        .clone()
+        .unwrap_or_else(|| default_index_target(source_path));
+
+    let verification_started = Instant::now();
+    let source = source_las::open(source_path).blocking_wait()?;
+    let verification_elapsed = verification_started.elapsed();
     println!(
-        "Punctra adaptive View demo (16.7M logical Points, fixed residency)\n\
+        "Verified Source (Full)\n  path: {}\n  identity: {}\n  Points: {}\n  verification: {:.3} s\n  \
+         display: exact indexed positions with a neutral application color",
+        source_path.display(),
+        source.identity(),
+        source.metadata().point_count(),
+        verification_elapsed.as_secs_f64(),
+    );
+
+    let prepare_started = Instant::now();
+    let prepared =
+        point_index::prepare(source, &index_target, PrepareLimits::default()).blocking_wait()?;
+    let prepare_elapsed = prepare_started.elapsed();
+    print_prepare_report(&prepared, &index_target, prepare_elapsed);
+    Ok(Scene::real(RealCloudScene::new(VIEW_GENERATION, prepared)?))
+}
+
+fn print_prepare_report(index: &PreparedIndex, target: &Path, elapsed: Duration) {
+    let report = index.prepare_report();
+    println!(
+        "Point index prepare\n  target: {}\n  disposition: {:?}\n  durable Points reused: {}\n  \
+         Source Points read: {}\n  artifact bytes: {}\n  elapsed: {:.3} s",
+        target.display(),
+        report.disposition(),
+        report.durable_points_reused(),
+        report.source_points_read(),
+        report.artifact_bytes(),
+        elapsed.as_secs_f64(),
+    );
+}
+
+fn default_index_target(source: &Path) -> PathBuf {
+    let mut target = source.as_os_str().to_os_string();
+    target.push(".pidx");
+    PathBuf::from(target)
+}
+
+fn run_headless_smoke(mut scene: Scene) -> DemoResult<()> {
+    let mut renderer = RenderStateModel::new(RenderLimits::new(
+        RESIDENT_BYTE_BUDGET,
+        RESIDENT_POINT_BUDGET,
+        RESIDENT_BATCH_BUDGET,
+    ));
+    renderer.apply(&RenderUpdate::Reset {
+        view_generation: VIEW_GENERATION,
+    })?;
+    let camera =
+        OrbitCamera::new(scene.camera_target(), scene.camera_radius()).as_render_camera()?;
+    let mut planner = ViewPlanner::new(PlannerConfig::new(2.0, 0.25)?);
+    let plan = {
+        let nodes = scene.planning_nodes();
+        planner.plan(
+            &camera,
+            [1_280, 800],
+            AvailableNodes::new(VIEW_GENERATION, nodes.as_slice()),
+            PLANNING_BUDGET,
+        )?
+    };
+    scene.reconcile_requests(plan.demanded_nodes(), plan.requests());
+
+    let Some(batch) = scene.next_batch()? else {
+        if scene.metrics().logical_points == 0 {
+            println!("Headless bridge smoke: verified empty Source; no display batch exists");
+            return Ok(());
+        }
+        return Err(
+            io::Error::other("headless bridge smoke produced no requested root batch").into(),
+        );
+    };
+    let key = batch.key();
+    let version = batch.version();
+    let point_count = batch.point_count();
+    if let Err(error) = renderer.apply(&RenderUpdate::Upsert { batch }) {
+        scene.mark_rejected(key, version);
+        return Err(error.into());
+    }
+    scene.mark_resident(key, version);
+    let metrics = scene.metrics();
+    println!(
+        "Headless bridge smoke accepted one atomic Upsert\n  scene: {}\n  Points: {point_count}\n  \
+         resident batches: {}\n  queued batches: {}\n  peak staging: {} Points / {} bytes",
+        scene.label(),
+        metrics.resident_batches,
+        metrics.queued_batches,
+        metrics.peak_staged_points,
+        metrics.peak_staged_bytes,
+    );
+    Ok(())
+}
+
+fn print_usage() {
+    println!(
+        "Usage: renderer-demo [--smoke] [SOURCE [INDEX_TARGET]]\n\
+         With no SOURCE, runs the original synthetic scene. SOURCE must be LAS or LAZ; it is \
+         Full-verified before the index is opened, resumed, or built. If INDEX_TARGET is omitted, \
+         SOURCE.pidx is used. --smoke exercises one planned node and atomic CPU-model Upsert without a GPU."
+    );
+}
+
+fn main() -> DemoResult<()> {
+    let command = Command::parse(std::env::args_os().skip(1))?;
+    if command.show_help {
+        print_usage();
+        return Ok(());
+    }
+    let scene = load_scene(&command)?;
+    if command.headless_smoke {
+        return run_headless_smoke(scene);
+    }
+    let scene_metrics = scene.metrics();
+    println!(
+        "Punctra adaptive View demo ({} {}, fixed residency)\n\
          Left drag: orbit | Wheel: zoom | R: reset view | H: highlights | \
-         Space: pause loads | Escape: quit"
+         Space: pause loads | Escape: quit",
+        compact_count(scene_metrics.logical_points),
+        scene.label(),
     );
 
     let event_loop = EventLoop::new()?;
     event_loop.set_control_flow(ControlFlow::Wait);
-    let mut app = DemoApp::default();
+    let mut app = DemoApp::new(scene);
     event_loop.run_app(&mut app)?;
     Ok(())
 }
 
-#[derive(Default)]
 struct DemoApp {
+    scene: Option<Scene>,
     graphics: Option<Graphics>,
     failed: bool,
 }
 
 impl DemoApp {
+    const fn new(scene: Scene) -> Self {
+        Self {
+            scene: Some(scene),
+            graphics: None,
+            failed: false,
+        }
+    }
+
     fn initialize(&mut self, event_loop: &ActiveEventLoop) -> DemoResult<()> {
         let attributes = Window::default_attributes()
             .with_title(BASE_TITLE)
@@ -71,7 +257,11 @@ impl DemoApp {
             wgpu::Instance::new(wgpu::InstanceDescriptor::new_with_display_handle_from_env(
                 Box::new(event_loop.owned_display_handle()),
             ));
-        let graphics = pollster::block_on(Graphics::new(instance, window))?;
+        let scene = self
+            .scene
+            .take()
+            .ok_or_else(|| io::Error::other("demo scene was already consumed"))?;
+        let graphics = pollster::block_on(Graphics::new(instance, window, scene))?;
         graphics.window.set_visible(true);
         graphics.window.request_redraw();
         self.graphics = Some(graphics);
@@ -223,8 +413,9 @@ struct Graphics {
     presentation: PresentationState,
     renderer: WgpuRenderer,
     planner: ViewPlanner,
-    scene: SyntheticScene,
+    scene: Scene,
     camera: OrbitCamera,
+    camera_reset_radius: f64,
     style: PointStyle,
     input: PointerInput,
     loads_paused: bool,
@@ -233,7 +424,7 @@ struct Graphics {
 }
 
 impl Graphics {
-    async fn new(instance: wgpu::Instance, window: Arc<Window>) -> DemoResult<Self> {
+    async fn new(instance: wgpu::Instance, window: Arc<Window>, scene: Scene) -> DemoResult<Self> {
         let surface = instance.create_surface(Arc::clone(&window))?;
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
@@ -280,7 +471,8 @@ impl Graphics {
         };
         renderer.apply(&reset)?;
         let planner = ViewPlanner::new(PlannerConfig::new(2.0, 0.25)?);
-        let scene = SyntheticScene::new(VIEW_GENERATION)?;
+        let camera_target = scene.camera_target();
+        let camera_reset_radius = scene.camera_radius();
         let style = PointStyle::new(2.4, [1.0, 0.24, 0.06], [0.008, 0.012, 0.02, 1.0])?;
 
         Ok(Self {
@@ -294,7 +486,8 @@ impl Graphics {
             renderer,
             planner,
             scene,
-            camera: OrbitCamera::new(SCENE_TARGET, SCENE_RADIUS),
+            camera: OrbitCamera::new(camera_target, camera_reset_radius),
+            camera_reset_radius,
             style,
             input: PointerInput::default(),
             loads_paused: false,
@@ -311,8 +504,8 @@ impl Graphics {
         let frame_started = Instant::now();
         let viewport = [self.surface_config.width, self.surface_config.height];
         let camera = self.camera.as_render_camera()?;
-        self.stream_next_batch()?;
         self.plan_view(&camera, viewport)?;
+        self.stream_next_batch()?;
         let Some((surface_texture, reconfigure_after_present)) = self.acquire_surface_texture()?
         else {
             return Ok(());
@@ -338,8 +531,7 @@ impl Graphics {
             .record_frame(recorded_frame.report(), frame_started.elapsed());
         self.metrics.update_title(
             &self.window,
-            self.scene.resident_batches(),
-            self.scene.pending_batches(),
+            self.scene.metrics(),
             self.loads_paused,
             self.highlights_enabled,
         );
@@ -379,20 +571,28 @@ impl Graphics {
         let batch_version = batch.version();
         let update = RenderUpdate::Upsert { batch };
         let upload_started = Instant::now();
-        let report = self.renderer.apply(&update)?;
+        let report = match self.renderer.apply(&update) {
+            Ok(report) => report,
+            Err(error) => {
+                self.scene.mark_rejected(batch_key, batch_version);
+                return Err(error.into());
+            }
+        };
         self.scene.mark_resident(batch_key, batch_version);
         self.metrics.record_upload(report, upload_started.elapsed());
         Ok(())
     }
 
     fn plan_view(&mut self, camera: &Camera, viewport: [u32; 2]) -> DemoResult<()> {
-        let planning_nodes = self.scene.planning_nodes();
-        let plan = self.planner.plan(
-            camera,
-            viewport,
-            AvailableNodes::new(VIEW_GENERATION, &planning_nodes),
-            PLANNING_BUDGET,
-        )?;
+        let plan = {
+            let planning_nodes = self.scene.planning_nodes();
+            self.planner.plan(
+                camera,
+                viewport,
+                AvailableNodes::new(VIEW_GENERATION, planning_nodes.as_slice()),
+                PLANNING_BUDGET,
+            )?
+        };
 
         for retirement in plan.retirements().iter().copied() {
             let update = retirement.render_update();
@@ -400,9 +600,13 @@ impl Graphics {
             self.scene
                 .mark_retired(retirement.batch_key(), retirement.expected_version());
         }
-        if !self.loads_paused {
-            self.scene.enqueue_requests(plan.requests());
-        }
+        let requests = if self.loads_paused {
+            &[][..]
+        } else {
+            plan.requests()
+        };
+        self.scene
+            .reconcile_requests(plan.demanded_nodes(), requests);
         self.metrics.record_plan(
             u64::try_from(plan.requests().len()).expect("the request count fits in u64"),
             plan.resource_usage(),
@@ -450,7 +654,7 @@ impl Graphics {
 
     fn handle_key(&mut self, code: KeyCode) -> DemoResult<()> {
         match code {
-            KeyCode::KeyR => self.camera.reset(SCENE_RADIUS),
+            KeyCode::KeyR => self.camera.reset(self.camera_reset_radius),
             KeyCode::KeyH => self.toggle_highlights()?,
             KeyCode::Space => self.loads_paused = !self.loads_paused,
             _ => return Ok(()),
@@ -462,7 +666,7 @@ impl Graphics {
     fn toggle_highlights(&mut self) -> DemoResult<()> {
         self.highlights_enabled = !self.highlights_enabled;
         let point_ids = if self.highlights_enabled {
-            SyntheticScene::highlight_ids()
+            self.scene.highlight_ids()
         } else {
             Vec::new()
         };
@@ -577,8 +781,7 @@ impl Metrics {
     fn update_title(
         &mut self,
         window: &Window,
-        resident_batches: u64,
-        pending_batches: u64,
+        scene: SceneMetrics,
         loads_paused: bool,
         highlights_enabled: bool,
     ) {
@@ -593,7 +796,7 @@ impl Metrics {
         let frames_per_second = f64::from(self.interval_frames) / interval.as_secs_f64();
         let stream_state = if loads_paused {
             "loads-paused"
-        } else if pending_batches > 0 || self.latest_plan_requests > 0 {
+        } else if scene.queued_batches > 0 || self.latest_plan_requests > 0 {
             "streaming"
         } else {
             "steady"
@@ -603,9 +806,9 @@ impl Metrics {
             "{BASE_TITLE} | {} logical | {} / {} pts | {} MiB resident | {} MiB uploaded | \
              {} draws | \
              {:.0} fps | frame {:.2} ms | encode {:.2} ms | upload {:.2} ms | \
-             {} req | {} planned | {pending_batches} queued | \
-             {resident_batches} batches {stream_state} | H:{highlight_state}",
-            compact_count(LOGICAL_POINT_COUNT),
+             {} req | {} planned | {} queued (peak {}) | {} staged pts (peak {}) / {} MiB peak | \
+             {} resident batches | {} cancelled | {stream_state} | H:{highlight_state}",
+            compact_count(scene.logical_points),
             compact_count(report.drawn_points()),
             compact_count(RESIDENT_POINT_BUDGET),
             mebibytes(report.resident_bytes()),
@@ -617,6 +820,13 @@ impl Metrics {
             duration_milliseconds(self.latest_upload_time),
             self.latest_plan_requests,
             self.latest_plan_usage.batch_count(),
+            scene.queued_batches,
+            scene.peak_queued_batches,
+            scene.staged_points,
+            scene.peak_staged_points,
+            mebibytes(scene.peak_staged_bytes.max(scene.staged_bytes)),
+            scene.resident_batches,
+            scene.cancelled_requests,
         );
         window.set_title(&title);
         self.interval_started = Instant::now();
@@ -655,6 +865,47 @@ fn compact_count(count: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn command_preserves_synthetic_default_and_accepts_real_cloud_paths() {
+        let default = Command::parse(Vec::<OsString>::new()).unwrap();
+        assert!(!default.headless_smoke);
+        assert_eq!(default.source, None);
+
+        let real = Command::parse([
+            OsString::from("--smoke"),
+            OsString::from("survey.laz"),
+            OsString::from("cache/survey.pidx"),
+        ])
+        .unwrap();
+        assert!(real.headless_smoke);
+        assert_eq!(real.source, Some(PathBuf::from("survey.laz")));
+        assert_eq!(real.index_target, Some(PathBuf::from("cache/survey.pidx")));
+    }
+
+    #[test]
+    fn command_rejects_extra_positional_paths() {
+        let error = Command::parse([
+            OsString::from("one.las"),
+            OsString::from("two.pidx"),
+            OsString::from("unexpected"),
+        ])
+        .unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("at most SOURCE and INDEX_TARGET")
+        );
+    }
+
+    #[test]
+    fn default_index_target_preserves_the_complete_source_path() {
+        assert_eq!(
+            default_index_target(Path::new("survey.laz")),
+            PathBuf::from("survey.laz.pidx")
+        );
+    }
 
     #[test]
     fn metrics_format_counts_without_losing_integer_precision() {

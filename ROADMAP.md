@@ -8,11 +8,11 @@ dates. Candidate releases may be split, merged, reordered, renamed, or skipped
 as technical and customer evidence changes. Milestone outcomes and dependency
 order matter more than version numbers.
 
-Only an **Active** release has committed scope. Punctra v0.1 through v0.3 are
-complete, and v0.4 is active under its accepted design. Work beyond that design
-remains proposed until it receives a separate accepted design or architecture
-decision. In particular, Workspace behavior, editing, terrain, export, and
-general application UI are not silently made current scope by appearing here.
+Only an **Active** release has committed scope. Punctra v0.1 through v0.4 are
+complete. No later release is active until it receives a separate accepted
+design or architecture decision. In particular, Workspace behavior, editing,
+terrain, export, and general application UI are not silently made current scope
+by appearing here.
 
 ## Working direction
 
@@ -60,12 +60,14 @@ Roadmap status labels are:
 
 ## Scope and evidence checkpoint
 
-Status: **Active for the narrow v0.4 technical slice; external product evidence remains outstanding**
+Status: **v0.4 technical slice complete; external product evidence remains outstanding**
 
-The [accepted v0.4 design](docs/design/out-of-core-view-v0.4.md) places one
+The [implemented v0.4 design](docs/design/out-of-core-view-v0.4.md) places one
 rebuildable Spatial Index in Punctra and keeps View materialization in the host
-demo. It does not authorize the broader Workspace, Query, Edit, terrain, or
-product-application proposal. Those later boundaries still require their own
+demo. Repository tests and generated-source benchmarks close that technical
+slice. They do not authorize the broader Workspace, Query, Edit, terrain, or
+product-application proposal, and they are not a substitute for licensed field
+data or partner validation. Those later boundaries still require their own
 evidence and accepted designs.
 
 Useful evidence for proceeding includes:
@@ -86,8 +88,8 @@ module. The detailed discovery signals and pivot criteria live in the
 
 ## Release sequence
 
-There are six provisional pre-v1 release themes after the completed v0.3. This
-is a working count, not a requirement to publish exactly six more releases.
+There are five provisional pre-v1 release themes after the completed v0.4. This
+is a working count, not a requirement to publish exactly five more releases.
 
 ### v0.1 — Renderer foundation
 
@@ -158,28 +160,46 @@ cargo bench -p source-las --bench read
 
 ### v0.4 — Out-of-core View
 
-Status: **Active**
+Status: **Complete**
 
-Accepted outcome: open a real large LAS/LAZ Source progressively and keep
-display residency bounded.
+Implemented outcome: Full-verify a supported LAS/LAZ Source, prepare or open a
+complete persistent index, and progressively materialize planner demand while
+host staging and renderer residency remain bounded.
 
-Accepted scope:
+Delivered scope:
 
-- persistent, rebuildable, resumable Spatial Index construction;
-- deterministic conservative spatial lookup and View hierarchy facts;
+- deterministic fixed-block BVH construction with append-only resumable work
+  frames, checksummed complete artifacts, and no-replace atomic publication;
+- conservative inclusive-box lookup returning sorted disjoint Source Spans;
+- exact Source-backed leaf reads and checksummed bounded internal display
+  samples that preserve Source-aware Point Identity and ticks;
+- validated fixed-size LAZ chunk seeking across chunk boundaries, with bounded
+  sequential fallback for point-wise and variable-chunk streams;
 - an application-owned bridge that materializes planner requests and applies
   renderer updates without coupling Source, index, planner, or renderer
-  internals; and
-- real-data time-to-first-visible and steady-state residency measurements.
+  internals;
+- a real LAS/LAZ CLI path plus GPU-free build/open/Upsert smoke coverage; and
+- source-scale generated benchmarks and measured memory gates.
 
-Evidence of readiness:
+Repository acceptance evidence:
 
-- index lookup has no false negatives against a sequential reference oracle;
-- interruption and recovery produce the same completed index;
-- hierarchy output and View plans remain deterministic;
-- large real Sources stay inside point, byte, batch, and host-memory budgets;
-  and
-- the real-cloud demo reports reproducible latency, throughput, and peak memory.
+- candidate lookup has no false negatives against the sequential oracle;
+- interruption, valid-prefix recovery, and resumed completion reproduce the
+  same descriptor and artifact bytes;
+- corrupt, truncated, incompatible, cancelled, and over-budget cases fail
+  explicitly without exposing partial artifacts;
+- hierarchy output, display samples, View demand, and renderer update order are
+  deterministic;
+- the one-million-Point generated benchmark produced a 1,971,528-byte artifact
+  and a 3,671,504-byte measured peak for the combined candidate/root/leaf read
+  path under its 32 MiB gate; and
+- local package, documentation, process-smoke, benchmark, and required GPU
+  acceptance commands are documented in [CONTRIBUTING.md](CONTRIBUTING.md).
+
+The one-machine generated benchmark does not establish production-scale or
+customer value. Runs on licensed production LAS/LAZ datasets, including the
+above-500-million-Point evidence requested by the checkpoint, remain
+outstanding and must be reported separately rather than inferred from v0.4.
 
 Exact scope and verification rules are recorded in the
 [v0.4 Out-of-core View design](docs/design/out-of-core-view-v0.4.md).

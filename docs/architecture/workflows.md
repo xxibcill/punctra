@@ -1,14 +1,17 @@
 # Runtime Workflows
 
-Status: deferred platform proposal; the v0.1 renderer, v0.2 adaptive View, and
-v0.3 Real Sources contracts are implemented under the accepted designs in
-[`docs/design`](../design)
+Status: deferred platform proposal; the v0.1 renderer, v0.2 adaptive View,
+v0.3 Real Sources, and narrow v0.4 Spatial Index/View composition are
+implemented under the accepted designs in [`docs/design`](../design)
 
 These workflows show composition without hidden reverse calls. A module invokes only an allowed dependency. Application adapters coordinate sibling modules when no lower module should own the whole workflow.
 
 ## 1. Open a Workspace
 
-Opening an existing Workspace is a cancellable Job. It returns Opened after Source metadata, Source Identity verification at the requested policy, Revision recovery, and index compatibility are known. Opened contains the head Snapshot and an explicit IndexStatus.
+Opening an existing Workspace remains proposed. The future cancellable Job
+would return only after Source metadata, Source Identity verification at the
+requested policy, and Revision recovery are known. Index preparation remains an
+explicit host request through the implemented `point_index::prepare` operation.
 
 ~~~mermaid
 sequenceDiagram
@@ -23,18 +26,12 @@ sequenceDiagram
     SRC-->>WS: opaque verified Source
     WS->>REV: open_and_recover(target, Revision Source Contract)
     REV-->>WS: durable head Revision
-    WS->>IDX: open_index(target, expected Source Identity)
-
-    alt compatible Spatial Index exists
-        IDX-->>WS: complete index
-    else missing or incompatible index
-        IDX-->>WS: IndexStatus::Missing
-    end
-
-    WS-->>APP: Opened(Workspace, head Snapshot, IndexStatus)
+    WS-->>APP: Opened(Workspace, head Snapshot)
     opt host needs a View
         APP->>WS: prepare_index(options)
-        WS-->>APP: Job of IndexReady
+        WS->>IDX: prepare(verified Source, target, PrepareLimits)
+        IDX-->>WS: complete PreparedIndex
+        WS-->>APP: IndexReady
         APP->>WS: snapshot(head Revision)
         WS-->>APP: new index-ready Snapshot
     end
@@ -44,7 +41,8 @@ Rules:
 
 - a changed Source is rejected according to the requested Fast or Full verification policy before affected Point values are returned;
 - recovery exposes a complete prior or new Revision;
-- a missing derived index is not Workspace corruption;
+- a missing derived index is not Workspace corruption and is prepared only on
+  an explicit host request;
 - Fast reopen performs no total-Source scan; Full reopen does; and
 - no GPU or window is involved.
 
@@ -56,10 +54,10 @@ An index tool can bypass **point-workspace**:
 
 ~~~rust
 let source = source_las::open(path).await?;
-let index = point_index::IndexBuilder::build_or_resume(
+let index = point_index::prepare(
     source,
     index_target,
-    index_options,
+    PrepareLimits::default(),
 ).await?;
 ~~~
 
@@ -73,26 +71,39 @@ sequenceDiagram
     participant IDX as point-index
     participant SRC as point-source
 
-    APP->>IDX: build_or_resume(verified Source, target, options)
-    IDX->>IDX: verify checkpoint frames
+    APP->>IDX: prepare(verified Source, target, PrepareLimits)
 
-    loop bounded Source spans
-        IDX->>SRC: read(spans, position fields, budget)
-        SRC-->>IDX: Point Batches
-        IDX->>IDX: partition and summarize
-        IDX->>IDX: write checksummed checkpoint
-        IDX-->>APP: monotonic progress
+    alt compatible complete target exists
+        IDX->>IDX: verify Source/version binding, layout, topology, and checksums
+        IDX-->>APP: PreparedIndex(Opened, zero Source Points read)
+    else target is absent
+        IDX->>IDX: verify/create append-only work and recover valid frame prefix
+
+        loop missing 65,536-Point Source blocks
+            IDX->>SRC: read(one span, positions only, bounded budget)
+            SRC-->>IDX: exact Point Batches and terminal summary
+            IDX->>IDX: bounds + bounded hash-selected samples
+            IDX->>IDX: append and sync checksummed frame
+            IDX-->>APP: monotonic durable-Point progress
+        end
+
+        IDX->>IDX: deterministic BVH + bounded child-sample merges
+        IDX->>IDX: write and sync complete temporary artifact
+        IDX->>IDX: no-replace hard-link target + sync parent
+        IDX->>IDX: remove disposable siblings + sync parent
+        IDX-->>APP: PreparedIndex(Built or Resumed, report)
     end
-
-    IDX->>IDX: finalize hierarchy atomically
-    IDX-->>APP: Index Artifact and build report
 ~~~
 
-Cancellation leaves only verified checkpoints. Resume starts at the last verified checkpoint. Source record order remains the identity authority even if the index stores a different spatial order.
+Cancellation leaves only verified work frames and never a partial complete
+target. Resume starts at the last verified ordinal-contiguous frame. Existing,
+incompatible, corrupt, or racing targets fail without replacement. Source
+record order remains the identity authority even though the hierarchy groups
+Source blocks spatially.
 
-The proposed Spatial Index would use the same canonical Source seam for the
-implemented LAS/LAZ adapter and a future COPC adapter. Native-hierarchy import
-remains deferred until a second real producer proves that seam.
+The implemented Spatial Index uses the same canonical Source seam for memory
+and LAS/LAZ adapters. A future COPC adapter can use that seam, but native
+hierarchy import remains deferred until a second real producer proves it.
 
 ## 3. Run an exact Query
 
@@ -107,8 +118,8 @@ sequenceDiagram
     APP->>QRY: Snapshot.query(Point Query)
 
     alt complete compatible index
-        QRY->>IDX: exact_candidates(Region)
-        IDX-->>QRY: bounded conservative Source-span stream
+        QRY->>IDX: candidates(Region bounds, CandidateLimits)
+        IDX-->>QRY: complete conservative CandidatePlan
     else index missing or building
         QRY->>SRC: sequential all-Point scan
     end
@@ -134,30 +145,35 @@ Concurrent commits do not affect the pinned Snapshot.
 Adaptive planning is one synchronous, renderer-neutral CPU operation. The host
 owns hierarchy acquisition, node materialization, scheduling, renderer updates,
 command submission, and device polling. **point-view** does not require a
-Snapshot, Spatial Index, or `ViewInput`; a future host adapter may derive its
-`AvailableNodes` snapshot from those deferred platform capabilities.
+Snapshot, Spatial Index, or `ViewInput`. The implemented private real-cloud
+bridge derives its `AvailableNodes` snapshot from `PreparedIndex`; other hosts
+may continue to supply unrelated hierarchies.
 
 ~~~mermaid
 sequenceDiagram
     participant HOST as Host adapter
+    participant IDX as point-index
     participant VIEW as point-view
-    participant LOAD as Host loader
     participant GPU as render-wgpu
 
     HOST->>GPU: apply(RenderUpdate::Reset)
 
     loop camera, viewport, or residency change
         HOST->>VIEW: plan(Camera, viewport, AvailableNodes, PlanningBudget)
-        VIEW-->>HOST: ViewPlan(requests, retention, retirements)
+        VIEW-->>HOST: ViewPlan(demanded nodes, requests, retention, retirements)
+
+        HOST->>HOST: prune queued Requested nodes no longer demanded
 
         loop safe conditional retirements
             HOST->>GPU: apply(RenderUpdate::Remove)
         end
 
-        loop prioritized missing-node requests
-            HOST->>LOAD: request(node key)
-            LOAD-->>HOST: materialized PointBatch
-            HOST->>GPU: apply(RenderUpdate::Upsert)
+        opt one prioritized requested node fits host staging
+            HOST->>IDX: read_node(IndexNodeId, NodeReadBudget)
+            IDX-->>HOST: display batches + exact terminal summary
+            HOST->>HOST: exact ticks to origin-relative render points
+            HOST->>GPU: apply(one complete RenderUpdate::Upsert)
+            GPU-->>HOST: accepted or rejected
         end
 
         HOST->>GPU: render(encoder, target, Frame)
@@ -169,6 +185,8 @@ Rules:
 
 - **point-view** owns culling, screen-error LOD, hysteresis, budget planning,
   Coverage retention, and safe retirement decisions;
+- `ViewPlan::demanded_nodes()` includes current nonresident targets already
+  Requested, while `requests()` remains only the new-load delta;
 - the host owns Point Batch materialization, origin-relative display packing,
   request execution, and application of every renderer update;
 - **render-wgpu** owns bounded GPU point residency, command recording, and
@@ -180,14 +198,20 @@ Rules:
   generation; neither `ViewPlan` nor `Frame` claims that provenance;
 - one `PointBatch` uses one 64-bit world origin and 32-bit relative display
   positions; and
+- the real bridge marks a node Resident only after an accepted complete Upsert,
+  assigns monotonically increasing versions to retries, and retains parent
+  Coverage until the planner emits its exact conditional retirement; and
 - deleting all GPU resources cannot alter Workspace state.
 
 ### Standalone use
 
 **render-wgpu** can apply generated render-protocol updates and render them in
 an offscreen test. **point-view** can plan directly from generated hierarchy
-metadata and inspect `ViewPlan` without creating a GPU device. Neither requires
-the other at runtime to pass its own conformance tests.
+metadata and inspect `ViewPlan` without creating a GPU device.
+`renderer-demo --smoke SOURCE [INDEX_TARGET]` Full-verifies LAS/LAZ, prepares
+the index, plans one node, and accepts one atomic CPU-model Upsert without a
+GPU. The modules do not require each other at runtime to pass their own
+conformance tests.
 
 ## 5. Select Points and commit an Edit
 
@@ -303,7 +327,7 @@ The **landxml** module emits a bounded byte stream. Path replacement belongs to 
 | Operation | Safe cancellation point | Permitted residue | Durable state after failure |
 |---|---|---|---|
 | Source read | Between decode blocks or Point Batches | None | Unchanged |
-| Index build | After a checksummed checkpoint | Verified checkpoint | Previous complete index or no index |
+| Index prepare | After a synced checksummed work frame; before no-replace publication | Verified work prefix and disposable temporary/spool files | Existing target unchanged, or one complete newly linked target |
 | Query | Between Point Batches | Disposable read cache | Unchanged |
 | View preparation | Between View Batches | Disposable view cache | Unchanged |
 | Revision commit | Before the durable commit point | Caller-retained Operation Identity plus journal-owned canonical digest and staged payload | Rejected old head, Committed new head, or Indeterminate until reconciled |

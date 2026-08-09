@@ -1,6 +1,6 @@
 # Out-of-core View v0.4
 
-Status: accepted; implementation in progress
+Status: implemented and locally verified
 
 Punctra v0.4 adds one rebuildable persistent Spatial Index and one real-cloud
 application path. A verified local `Source` can be indexed once, reopened, and
@@ -95,6 +95,7 @@ pub fn prepare(
 impl PreparedIndex {
     pub fn descriptor(&self) -> &IndexDescriptor;
     pub fn hierarchy(&self) -> &IndexHierarchy;
+    pub fn prepare_report(&self) -> &PrepareReport;
 
     pub fn candidates(
         &self,
@@ -158,8 +159,9 @@ The v0.4 recipe is fixed and versioned rather than caller-tunable:
 - canonical Source order is divided into consecutive blocks of at most 65,536
   Points;
 - every block records its exact tick-derived world bounds and Source Span;
-- blocks are bulk-loaded into a binary BVH by deterministic longest-centroid-
-  extent median splits, with Source ordinal as the final tie-breaker;
+- blocks are bulk-loaded into a binary BVH by deterministic
+  longest-centroid-extent median splits, with Source ordinal as the final
+  tie-breaker;
 - node keys are assigned in deterministic root-first order;
 - internal bounds are exact child-bound unions and leaf bounds are exact Point
   bounds;
@@ -182,10 +184,14 @@ ticks; the opened index supplies their verified Source Identity and transform.
 They are checksummed, partial View Coverage, and never an exact Query result.
 Source Attributes are not copied into the index.
 
-The LAS/LAZ adapter uses the codec's validated chunk seek for a Source read that
-starts at a later LAZ ordinal. Leaf materialization therefore pays for the
-target chunk and bounded requested records instead of replaying every earlier
-Point.
+For LASzip compressor modes 2 and 3 with a validated fixed-size chunk table, the
+LAS/LAZ adapter uses the codec's seek when a sorted Source read crosses into a
+later chunk. Leaf materialization then pays for the target chunk and bounded
+requested records instead of replaying every earlier Point. Movement within the
+current chunk, point-wise compressor mode 1, and variable-size chunk streams
+retain bounded cancellable sequential replay. The exact PDRF 5 and 8 regression
+reads fewer than half the bytes of forced replay for its far-span fixture and
+compares the returned record bytes and ticks exactly.
 
 ## Conservative spatial lookup
 
@@ -224,9 +230,13 @@ Finalization loads only bounded leaf/node metadata, builds the deterministic
 BVH, merges child samples with fixed working buffers, and writes a new complete
 artifact. The artifact header records Source Identity, Source count, exact
 transform bits, recipe and disk versions, counts, offsets, and lengths. A final
-BLAKE3 checksum covers every prior byte. Data is flushed before an atomic rename
-publishes the complete target. The incomplete work file is removed only after
-the complete target is durable.
+BLAKE3 checksum covers every prior byte. The temporary artifact is written and
+`sync_all` completes before publication. Publication is an atomic, no-replace
+hard link from the temporary sibling to the requested target: an existing or
+racing target is rejected and is never overwritten. The parent directory is
+synced after publication; only then are the temporary artifact, work file, and
+sample spool removed, followed by a second parent-directory sync. This is
+deliberately not rename-and-replace behavior.
 
 Opening validates lengths, counts, versions, Source binding, checksum, node
 topology, nested bounds, Source-span coverage, and the caller's hierarchy and
@@ -289,7 +299,7 @@ batch that cannot fit fails explicitly instead of exceeding a ceiling. The
 implementation uses ordinary file reads and charged buffers rather than an
 unaccounted memory map.
 
-## Delivery slices
+## Delivered slices
 
 1. `point-index` contracts, deterministic block/BVH construction, conservative
    candidates, complete persistence, and public in-memory conformance.
@@ -298,16 +308,17 @@ unaccounted memory map.
 3. private real-cloud bridge, existing planner demand facts, renderer/GPU
    integration, runnable file path, and source-scale benchmarks.
 
-## Acceptance
+## Repository acceptance
 
-Punctra v0.4 is complete only when:
+The completed v0.4 repository evidence covers:
 
 - candidate lookup has zero false negatives against a sequential oracle and
   returns sorted duplicate-free Source Spans;
 - uninterrupted, cancelled, and fault-injected resumed builds produce the same
   descriptor, node/sample facts, and complete artifact bytes;
-- corrupt, truncated, incompatible, missing, changed, cancelled, disk-full,
-  and over-budget cases are explicit and never expose a partial complete index;
+- corrupt, truncated, incompatible, changed-Source, cancelled, and over-budget
+  cases are explicit and never expose a partial complete index; filesystem
+  publication errors retain their operating-system error and path;
 - hierarchy keys, bounds, samples, planner results, and renderer update order
   remain deterministic across Source batch sizes and restart points;
 - cached internal samples and Source-backed leaves preserve exact Source-aware
@@ -316,15 +327,59 @@ Punctra v0.4 is complete only when:
   accepted;
 - Source, index, staging, planner, and renderer limits are each enforced by
   interface tests and measured peak-memory gates;
-- a real-file demo accepts supported LAS or LAZ and reports cold build, warm
-  open, first-visible, steady-state residency, and throughput facts; and
+- a real-file demo accepts supported LAS or LAZ and reports Full verification,
+  cold/resumed/warm prepare disposition, reused/read Points, artifact size,
+  first accepted batch latency, queue depth, staging peaks, and renderer
+  residency; and
 - all local checks in `CONTRIBUTING.md`, including required GPU acceptance,
   pass.
 
-Automated source-scale evidence may use deterministic generated LAS/LAZ files.
-Any user-supplied licensed real-cloud run is reported separately with its
-Source Identity, format, Point count, limits, machine, and cold/warm cache
-qualification; the repository does not fabricate external field evidence.
+The process-level LAS/LAZ smoke test Full-verifies a generated file, exercises
+both Built and Opened paths, plans one node, and accepts one atomic Upsert in the
+CPU state model without requiring a GPU. Required GPU tests separately prove
+the renderer and planner-to-renderer Coverage transition on an available local
+adapter.
+
+### One-million-Point baseline
+
+`cargo bench -p point-index --bench index` uses a deterministic in-memory
+Source with 1,000,000 Points and default limits. On the 2026-08-10 local
+reference run (Apple M5 Pro, 24 GiB, macOS 26.5.2, Rust 1.90.0):
+
+| Measurement | Result |
+|---|---:|
+| Complete artifact | 1,971,528 bytes |
+| Resumed prepare | 65,536 durable Points reused; 934,464 Source Points read |
+| Cold build, Criterion median | 330.515 ms |
+| Warm verified open, Criterion median | 20.567 ms |
+| Whole-bounds candidate plan, Criterion median | 606 ns |
+| 4,096-Point internal-root read, Criterion median | 1.249 ms |
+| 65,536-Point complete memory-backed leaf read, Criterion median | 122.100 µs |
+| Candidate + root + leaf measured peak heap | 3,671,504 bytes (32 MiB ceiling) |
+
+The separate debug allocation correctness test uses 131,073 Points and measured
+1,737,922 peak heap bytes for cold prepare and 132,375 bytes for warm open,
+both under its 64 MiB ceiling and with zero retained measured bytes after the
+operation.
+
+These figures are reproducible generated-fixture baselines for one named local
+machine, not universal performance targets. No licensed production Source or
+design-partner result is checked into the repository. Such a run remains
+explicitly outstanding and must be reported separately with Source Identity,
+format, Point count, limits, machine, and cold/warm cache qualification; the
+repository does not fabricate external field evidence.
+
+### Direct verification commands
+
+```bash
+cargo test -p point-index --all-features
+RUSTDOCFLAGS="-D warnings" cargo doc -p point-index --all-features --no-deps
+cargo run -p point-index --example direct_use
+cargo bench -p point-index --bench index
+cargo test -p renderer-demo --test headless_smoke
+PUNCTRA_REQUIRE_GPU=1 cargo test -p render-wgpu --test offscreen
+PUNCTRA_REQUIRE_GPU=1 cargo test -p renderer-demo --test planner
+```
 
 ## Out of scope
 

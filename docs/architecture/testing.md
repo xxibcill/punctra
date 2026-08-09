@@ -3,7 +3,8 @@
 Status: deferred platform proposal; the implemented scopes are the
 [v0.1 render engine](../design/render-engine-v0.1.md),
 [v0.2 adaptive View planner](../design/adaptive-view-planning-v0.2.md), and
-[v0.3 Real Sources](../design/real-sources-v0.3.md)
+[v0.3 Real Sources](../design/real-sources-v0.3.md), and
+[v0.4 Out-of-core View](../design/out-of-core-view-v0.4.md)
 
 The interface is the test surface. Verification asks whether each module preserves its documented inputs, outputs, invariants, ordering, resource limits, errors, and effects. Tests do not lock private algorithms or file layouts unless the layout is itself a persisted contract.
 
@@ -120,7 +121,7 @@ Test:
 
 ### Source adapters
 
-The current v0.3 shared Source conformance suite runs against
+The implemented shared Source conformance suite runs against
 **source-memory** and **source-las**, exercising both LAS and LAZ encodings. A
 future **source-copc** adapter must pass the same suite before it is considered
 implemented:
@@ -142,37 +143,51 @@ Format coverage includes LAS point-data record formats 0–10 and LAZ formats
 an exact layered WavePacket14 codec is available; tests must not mask the
 boundary with constant waveform fixtures.
 
+Sparse-read coverage distinguishes codec organizations. Compressor modes 2 and
+3 use direct seeking only after a fixed-size chunk table has been validated and
+only when movement crosses a chunk boundary. Point-wise mode 1, variable-size
+chunks, and movement inside the current chunk use bounded cancellable sequential
+replay. PDRF 5 and 8 fixtures compare exact far-span bytes/ticks against forced
+replay and require direct-seek I/O to be less than half the replay I/O.
+
 Current cross-adapter semantic fixtures compare memory, LAS, and LAZ encodings
 of the same logical Points while accepting that re-encoding creates a different
 Source Identity. Add COPC equivalents when the proposed adapter is implemented.
 
 ### point-index
 
-The reference oracle is a brute-force scan over small canonical Point Batches.
+The implemented reference oracle brute-force scans canonical Source Points and
+uses the same inclusive finite world-box comparison. Public-interface tests
+cover:
 
-For randomly generated Regions:
+- random, boundary, degenerate, and extreme-coordinate boxes with zero false
+  negatives;
+- sorted nonempty disjoint Source spans, deterministic candidate counts, and
+  complete-or-error behavior for each `CandidateLimits` ceiling;
+- empty, one-block, and multi-block Sources, exact block boundaries, stable
+  root-first identities, parent nesting, child count/bounds aggregation, and
+  finite conservative geometric error;
+- byte-identical descriptors, hierarchies, samples, and complete artifacts
+  across different Source batch partitioning;
+- exact Source-aware identities and ticks for checksummed internal samples and
+  Source-backed complete leaves;
+- independent enforcement of Source batch, adapter, builder, incomplete file,
+  artifact, hierarchy, resident metadata, candidate, display batch, index
+  buffer, span, and emitted-Point limits;
+- fused cancellation and Source failures with no terminal summary;
+- warm opening, Source mismatch, corrupt/truncated complete targets, and
+  post-open sample mutation;
+- incompatible/corrupt work headers, invalid or incomplete suffix truncation,
+  durable-prefix resume, and cancellation followed by byte-identical completion;
+  and
+- no partial complete target after build cancellation or resource failure.
 
-- every exact Point is included in the candidate plan;
-- false positives are allowed and measured;
-- no false negatives are accepted;
-- candidate Source spans arrive in hard-bounded batches;
-- incomplete indexes return IndexIncomplete rather than a partial exact plan;
-- open_index reports Ready, Missing, or Incompatible without exposing partial persisted state;
-- hierarchy nodes expose stable bounds, counts, children, spans, and error facts within the hard request limit;
-- IndexDescriptor reports Artifact Identity, Source Identity, point count, build options, and schema version used to validate composition;
-- rebuilds produce equivalent exact plans and hierarchy facts;
-- Source Identity mismatch rejects the index;
-- build interruption at every checkpoint resumes to the same final index; and
-- corrupt pages are detected before use.
-
-Scaling tests record:
-
-- build throughput;
-- write amplification;
-- peak resident memory;
-- index bytes per Point;
-- candidate amplification by Region shape; and
-- resume work after an interrupted build.
+The direct-use example builds, plans candidates, and reads a node through the
+public API. The default Criterion benchmark generates 1,000,000 Points and
+records cold build, warm open, interrupted resume, whole-bounds candidates,
+internal-root reads, complete-leaf reads, artifact bytes, and measured
+candidate/read heap. A separate allocation correctness test gates cold and warm
+prepare and requires zero retained measured bytes.
 
 ### point-set
 
@@ -279,6 +294,15 @@ applies them to **render-wgpu**, and proves that coarse Coverage is retired only
 after its replacements render within the same fixed limits. The optimized
 planner benchmark uses the demo-scale 5,461-node hierarchy representing more
 than 10 million logical Points.
+
+The private real-cloud bridge additionally has interface tests for camera-stale
+Requested work, exact identity/position packing, renderer rejection and
+monotonic retry versions, safe retirement/rematerialization, terminal-summary
+validation, and hierarchy/staging preflights. Its process smoke test generates
+LAS and LAZ files, Full-verifies them, exercises Built then Opened index paths,
+and accepts one atomic CPU-model Upsert without a GPU. The required GPU test is
+kept separate because it verifies planner-to-`render-wgpu` behavior with a local
+adapter, not a licensed production file.
 
 ### terrain-model
 
@@ -401,7 +425,7 @@ Start with generated, reproducible scenarios; add public real Sources as licensi
 | Scenario | Sizes | Primary measurements |
 |---|---|---|
 | Sequential decode | 1M, 10M, 100M Points | Points/s, bytes/s, peak memory |
-| Index build and resume | 10M, 100M, 1B generated Points | time, bytes/Point, write amplification, resume work |
+| Index build and resume | 1M implemented baseline; 10M, 100M, 1B proposed scales | time, bytes/Point, write amplification, resume work |
 | Spatial Query | tiny box, corridor, polygon, full extent | first-batch time, total time, candidate amplification, memory |
 | Point Set materialization | 1K, 1M, 100M identities | memory, spill bytes, first/second iteration time |
 | Sparse Edits | 1K, 1M, 10M changed Points | commit time, journal growth, reopen time |
@@ -410,13 +434,42 @@ Start with generated, reproducible scenarios; add public real Sources as licensi
 | Terrain | 10K, 100K, 1M candidate vertices | time, peak memory, topology hash |
 | LandXML | 100K, 1M faces | encode time, validation time, output size |
 
-Do not claim universal latency targets. Establish a named reference workstation and SSD, commit baselines, and fail performance CI only on statistically meaningful regressions after the benchmark stabilizes.
+Do not claim universal latency targets. Establish a named reference workstation
+and SSD, commit baselines, and flag local performance regressions only on
+statistically meaningful changes after the benchmark stabilizes.
 
 Memory ceilings are correctness tests, not optional benchmark notes.
 
-## CI lanes
+The v0.4 1,000,000-Point generated baseline on an Apple M5 Pro with 24 GiB,
+macOS 26.5.2, and Rust 1.90.0 produced a 1,971,528-byte artifact. Criterion
+medians were 330.515 ms cold, 20.567 ms warm, 606 ns for whole-bounds
+candidates, 1.249 ms for the 4,096-Point root sample, and 122.100 µs for a
+65,536-Point memory-backed leaf. The combined candidate/root/leaf path measured
+3,671,504 peak heap bytes under 32 MiB. The separate 131,073-Point debug
+allocation test measured 1,737,922 bytes cold and 132,375 bytes warm under
+64 MiB.
 
-### Pull request
+These are generated-fixture, one-machine baselines. Licensed production LAS/LAZ
+stress runs and partner workflow evidence remain outstanding and must not be
+inferred from these numbers.
+
+The directly applicable local commands are:
+
+```bash
+cargo test -p point-index --all-features
+cargo run -p point-index --example direct_use
+cargo bench -p point-index --bench index
+cargo test -p renderer-demo --test headless_smoke
+PUNCTRA_REQUIRE_GPU=1 cargo test -p render-wgpu --test offscreen
+PUNCTRA_REQUIRE_GPU=1 cargo test -p renderer-demo --test planner
+```
+
+## Verification lanes
+
+The repository runs verification locally and has no hosted CI workflow. The
+following lanes describe test scope, not a hosted service configuration.
+
+### Change qualification
 
 - format and lint;
 - dependency-allowlist check;
