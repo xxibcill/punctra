@@ -194,6 +194,13 @@ impl AvailableNode {
     pub const fn status(self) -> NodeStatus {
         self.status
     }
+
+    /// Returns this metadata with updated host-observed state.
+    #[must_use]
+    pub const fn with_status(mut self, status: NodeStatus) -> Self {
+        self.status = status;
+        self
+    }
 }
 
 /// Generation-stamped borrowed node metadata supplied by the host.

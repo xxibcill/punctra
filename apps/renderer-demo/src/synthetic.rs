@@ -78,7 +78,7 @@ impl SyntheticScene {
             if self.nodes[index].status() != NodeStatus::Missing {
                 continue;
             }
-            self.replace_status(index, NodeStatus::Requested);
+            self.nodes[index] = self.nodes[index].with_status(NodeStatus::Requested);
             self.pending.push_back(request.node_key());
         }
     }
@@ -111,7 +111,7 @@ impl SyntheticScene {
         debug_assert_eq!(self.nodes[index].status(), NodeStatus::Requested);
         debug_assert_eq!(version.get(), self.latest_versions[index] + 1);
         self.latest_versions[index] = version.get();
-        self.replace_status(index, NodeStatus::Resident { version });
+        self.nodes[index] = self.nodes[index].with_status(NodeStatus::Resident { version });
     }
 
     pub(crate) fn mark_retired(&mut self, batch_key: BatchKey, expected_version: BatchVersion) {
@@ -124,7 +124,7 @@ impl SyntheticScene {
                 version: expected_version,
             }
         );
-        self.replace_status(index, NodeStatus::Missing);
+        self.nodes[index] = self.nodes[index].with_status(NodeStatus::Missing);
     }
 
     pub(crate) fn resident_batches(&self) -> u64 {
@@ -149,21 +149,6 @@ impl SyntheticScene {
             point_id(3 * quarter, 3 * quarter),
         ]
         .to_vec()
-    }
-
-    fn replace_status(&mut self, index: usize, status: NodeStatus) {
-        let node = self.nodes[index];
-        self.nodes[index] = AvailableNode::new(
-            node.key(),
-            node.parent(),
-            node.bounds(),
-            node.geometric_error(),
-            node.point_count(),
-            node.estimated_bytes(),
-            node.batch_key(),
-            status,
-        )
-        .expect("changing node status preserves validated metadata");
     }
 }
 
@@ -383,12 +368,12 @@ mod tests {
     fn requested_batches_are_deterministic_and_change_residency_explicitly() {
         let mut scene = SyntheticScene::new(view_generation()).unwrap();
         let root = scene.nodes[0];
-        scene.replace_status(0, NodeStatus::Requested);
+        scene.nodes[0] = scene.nodes[0].with_status(NodeStatus::Requested);
         scene.pending.push_back(root.key());
         let first = scene.next_batch().unwrap().unwrap();
         scene.mark_resident(first.key(), first.version());
         scene.mark_retired(first.key(), first.version());
-        scene.replace_status(0, NodeStatus::Requested);
+        scene.nodes[0] = scene.nodes[0].with_status(NodeStatus::Requested);
         scene.pending.push_back(root.key());
         let second = scene.next_batch().unwrap().unwrap();
         scene.mark_resident(second.key(), second.version());
@@ -468,7 +453,7 @@ mod tests {
             })
             .unwrap();
 
-        scene.replace_status(0, NodeStatus::Requested);
+        scene.nodes[0] = scene.nodes[0].with_status(NodeStatus::Requested);
         scene.pending.push_back(root.key());
         let first = scene.next_batch().unwrap().unwrap();
         let first_key = first.key();
@@ -486,7 +471,7 @@ mod tests {
             .unwrap();
         scene.mark_retired(first_key, first_version);
 
-        scene.replace_status(0, NodeStatus::Requested);
+        scene.nodes[0] = scene.nodes[0].with_status(NodeStatus::Requested);
         scene.pending.push_back(root.key());
         let second = scene.next_batch().unwrap().unwrap();
         assert_eq!(second.version(), BatchVersion::new(2));

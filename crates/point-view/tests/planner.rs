@@ -84,6 +84,14 @@ fn value_constructors_reject_invalid_keys_bounds_config_and_costs() {
 }
 
 #[test]
+fn status_updates_preserve_validated_node_metadata() {
+    let missing = node(1, None, root_bounds(), 2.0, 3, 4, 5, NodeStatus::Missing);
+    let expected = node(1, None, root_bounds(), 2.0, 3, 4, 5, resident(7));
+
+    assert_eq!(missing.with_status(resident(7)), expected);
+}
+
+#[test]
 fn hierarchy_validation_is_deterministic_and_atomic() {
     let generation = generation(1, 0);
     let valid = node(1, None, root_bounds(), 1.0, 1, 1, 11, NodeStatus::Missing);
