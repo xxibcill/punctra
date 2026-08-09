@@ -10,6 +10,8 @@ pub struct Camera {
     eye: [f64; 3],
     target: [f64; 3],
     up: [f64; 3],
+    view_direction: [f32; 3],
+    view_up: [f32; 3],
     vertical_field_of_view_radians: f32,
     near_distance: f32,
     far_distance: f32,
@@ -36,13 +38,21 @@ impl Camera {
 
         let forward = DVec3::from_array(target) - DVec3::from_array(eye);
         let up_vector = DVec3::from_array(up);
-        if forward.length_squared() == 0.0 {
+        if forward == DVec3::ZERO {
             return Err(CameraError::CoincidentEyeAndTarget);
         }
-        if up_vector.length_squared() == 0.0 {
+        if up_vector == DVec3::ZERO {
             return Err(CameraError::ZeroUpVector);
         }
-        if forward.cross(up_vector).length_squared() == 0.0 {
+        let view_direction =
+            normalize_for_gpu(forward).ok_or(CameraError::NonFiniteViewDirection)?;
+        let requested_up = normalize_for_gpu(up_vector).ok_or(CameraError::ZeroUpVector)?;
+        let view_right = view_direction
+            .cross(requested_up)
+            .try_normalize()
+            .ok_or(CameraError::ParallelUpVector)?;
+        let view_up = view_right.cross(view_direction);
+        if !view_up.is_finite() {
             return Err(CameraError::ParallelUpVector);
         }
         if !vertical_field_of_view_radians.is_finite()
@@ -66,6 +76,8 @@ impl Camera {
             eye,
             target,
             up,
+            view_direction: view_direction.to_array(),
+            view_up: view_up.to_array(),
             vertical_field_of_view_radians,
             near_distance,
             far_distance,
@@ -109,10 +121,11 @@ impl Camera {
     }
 
     pub(crate) fn view_projection(&self, aspect_ratio: f32) -> Mat4 {
-        let eye = DVec3::from_array(self.eye);
-        let relative_target = (DVec3::from_array(self.target) - eye).as_vec3();
-        let relative_up = DVec3::from_array(self.up).normalize().as_vec3();
-        let view = view::look_at_mat4(Vec3::ZERO, relative_target, relative_up);
+        let view = view::look_at_mat4(
+            Vec3::ZERO,
+            Vec3::from_array(self.view_direction),
+            Vec3::from_array(self.view_up),
+        );
         let projection = directx::perspective(
             self.vertical_field_of_view_radians,
             aspect_ratio,
@@ -135,6 +148,9 @@ pub enum CameraError {
     /// The camera position and target are identical.
     #[error("camera eye and target must differ")]
     CoincidentEyeAndTarget,
+    /// Subtracting the finite eye and target did not produce a finite direction.
+    #[error("camera eye-to-target direction must remain finite")]
+    NonFiniteViewDirection,
     /// The up vector has zero length.
     #[error("camera up vector must be non-zero")]
     ZeroUpVector,
@@ -163,6 +179,16 @@ fn validate_finite_vector(name: &'static str, vector: [f64; 3]) -> Result<(), Ca
     } else {
         Err(CameraError::NonFiniteVector { name })
     }
+}
+
+fn normalize_for_gpu(vector: DVec3) -> Option<Vec3> {
+    let scale = vector.abs().max_element();
+    if !scale.is_finite() || scale == 0.0 {
+        return None;
+    }
+
+    let normalized = (vector / scale).try_normalize()?.as_vec3();
+    normalized.is_finite().then_some(normalized)
 }
 
 #[cfg(test)]
@@ -210,5 +236,42 @@ mod tests {
         let matrix = valid_camera().view_projection(16.0 / 9.0);
 
         assert!(matrix.to_cols_array().into_iter().all(f32::is_finite));
+    }
+
+    #[test]
+    fn normalizes_view_directions_before_narrowing_to_f32() {
+        for distance in [1.0e-50, 1.0e40] {
+            let camera = Camera::perspective(
+                [0.0; 3],
+                [distance, 0.0, 0.0],
+                [0.0, 0.0, 1.0],
+                1.0,
+                0.1,
+                100.0,
+            )
+            .expect("finite view directions should be normalized before narrowing");
+
+            assert!(
+                camera
+                    .view_projection(1.0)
+                    .to_cols_array()
+                    .into_iter()
+                    .all(f32::is_finite)
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_directions_that_become_parallel_after_narrowing() {
+        let result = Camera::perspective(
+            [0.0; 3],
+            [1.0, 0.0, 0.0],
+            [1.0, 1.0e-50, 0.0],
+            1.0,
+            0.1,
+            100.0,
+        );
+
+        assert_eq!(result, Err(CameraError::ParallelUpVector));
     }
 }
