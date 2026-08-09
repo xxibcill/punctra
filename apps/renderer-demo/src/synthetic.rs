@@ -32,12 +32,17 @@ struct NodeLayout {
     row: u32,
 }
 
+#[derive(Clone, Copy, Debug)]
+struct SyntheticNode {
+    node: AvailableNode,
+    layout: NodeLayout,
+    latest_version: u64,
+}
+
 #[derive(Debug)]
 pub(crate) struct SyntheticScene {
     view_generation: ViewGenerationKey,
-    nodes: Vec<AvailableNode>,
-    layouts: Vec<NodeLayout>,
-    latest_versions: Vec<u64>,
+    nodes: Vec<SyntheticNode>,
     pending: VecDeque<NodeKey>,
 }
 
@@ -45,15 +50,17 @@ impl SyntheticScene {
     pub(crate) fn new(view_generation: ViewGenerationKey) -> Result<Self, PlanError> {
         let capacity = usize::try_from(TOTAL_NODE_COUNT).expect("the node count fits in usize");
         let mut nodes = Vec::with_capacity(capacity);
-        let mut layouts = Vec::with_capacity(capacity);
 
         for level in 0..=QUADTREE_DEPTH {
             let cells_per_axis = 1_u32 << level;
             for row in 0..cells_per_axis {
                 for column in 0..cells_per_axis {
                     let layout = NodeLayout { level, column, row };
-                    nodes.push(make_node(layout)?);
-                    layouts.push(layout);
+                    nodes.push(SyntheticNode {
+                        node: make_node(layout)?,
+                        layout,
+                        latest_version: 0,
+                    });
                 }
             }
         }
@@ -62,23 +69,22 @@ impl SyntheticScene {
         Ok(Self {
             view_generation,
             nodes,
-            layouts,
-            latest_versions: vec![0; capacity],
             pending: VecDeque::new(),
         })
     }
 
-    pub(crate) fn nodes(&self) -> &[AvailableNode] {
-        &self.nodes
+    pub(crate) fn planning_nodes(&self) -> Vec<AvailableNode> {
+        self.nodes.iter().map(|node| node.node).collect()
     }
 
     pub(crate) fn enqueue_requests(&mut self, requests: &[NodeRequest]) {
         for request in requests {
             let index = node_index(request.node());
-            if self.nodes[index].status() != NodeStatus::Missing {
+            let node = &mut self.nodes[index].node;
+            if node.status() != NodeStatus::Missing {
                 continue;
             }
-            self.nodes[index] = self.nodes[index].with_status(NodeStatus::Requested);
+            *node = node.with_status(NodeStatus::Requested);
             self.pending.push_back(request.node());
         }
     }
@@ -86,17 +92,19 @@ impl SyntheticScene {
     pub(crate) fn next_batch(&mut self) -> Result<Option<PointBatch>, ProtocolError> {
         while let Some(key) = self.pending.pop_front() {
             let index = node_index(key);
-            if self.nodes[index].status() != NodeStatus::Requested {
+            let node = self.nodes[index];
+            if node.node.status() != NodeStatus::Requested {
                 continue;
             }
 
-            let version = self.latest_versions[index]
+            let version = node
+                .latest_version
                 .checked_add(1)
                 .expect("the interactive demo cannot exhaust batch versions");
             let batch = make_batch(
                 self.view_generation,
-                self.nodes[index],
-                self.layouts[index],
+                node.node,
+                node.layout,
                 BatchVersion::new(version),
             )?;
             return Ok(Some(batch));
@@ -108,30 +116,32 @@ impl SyntheticScene {
         let key =
             NodeKey::new(batch_key.get()).expect("synthetic batch keys are nonzero node keys");
         let index = node_index(key);
-        debug_assert_eq!(self.nodes[index].status(), NodeStatus::Requested);
-        debug_assert_eq!(version.get(), self.latest_versions[index] + 1);
-        self.latest_versions[index] = version.get();
-        self.nodes[index] = self.nodes[index].with_status(NodeStatus::Resident { version });
+        let node = &mut self.nodes[index];
+        debug_assert_eq!(node.node.status(), NodeStatus::Requested);
+        debug_assert_eq!(version.get(), node.latest_version + 1);
+        node.latest_version = version.get();
+        node.node = node.node.with_status(NodeStatus::Resident { version });
     }
 
     pub(crate) fn mark_retired(&mut self, batch_key: BatchKey, expected_version: BatchVersion) {
         let key =
             NodeKey::new(batch_key.get()).expect("synthetic batch keys are nonzero node keys");
         let index = node_index(key);
+        let node = &mut self.nodes[index].node;
         debug_assert_eq!(
-            self.nodes[index].status(),
+            node.status(),
             NodeStatus::Resident {
                 version: expected_version,
             }
         );
-        self.nodes[index] = self.nodes[index].with_status(NodeStatus::Missing);
+        *node = node.with_status(NodeStatus::Missing);
     }
 
     pub(crate) fn resident_batches(&self) -> u64 {
         let count = self
             .nodes
             .iter()
-            .filter(|node| matches!(node.status(), NodeStatus::Resident { .. }))
+            .filter(|node| matches!(node.node.status(), NodeStatus::Resident { .. }))
             .count();
         u64::try_from(count).expect("the resident node count fits in u64")
     }
@@ -348,32 +358,31 @@ mod tests {
         let represented_leaf_points = scene
             .nodes
             .iter()
-            .zip(&scene.layouts)
-            .filter(|(_, layout)| layout.level == QUADTREE_DEPTH)
-            .map(|(node, _)| node.point_count())
+            .filter(|node| node.layout.level == QUADTREE_DEPTH)
+            .map(|node| node.node.point_count())
             .sum::<u64>();
         assert!(represented_leaf_points >= 10_000_000);
         assert_eq!(represented_leaf_points, LOGICAL_POINT_COUNT);
         assert_eq!(LOGICAL_POINT_COUNT, 16_777_216);
-        assert_eq!(scene.nodes[0].parent(), None);
+        assert_eq!(scene.nodes[0].node.parent(), None);
         assert!(
             scene
                 .nodes
                 .iter()
-                .all(|node| node.status() == NodeStatus::Missing)
+                .all(|node| node.node.status() == NodeStatus::Missing)
         );
     }
 
     #[test]
     fn requested_batches_are_deterministic_and_change_residency_explicitly() {
         let mut scene = SyntheticScene::new(view_generation()).unwrap();
-        let root = scene.nodes[0];
-        scene.nodes[0] = scene.nodes[0].with_status(NodeStatus::Requested);
+        let root = scene.nodes[0].node;
+        scene.nodes[0].node = root.with_status(NodeStatus::Requested);
         scene.pending.push_back(root.key());
         let first = scene.next_batch().unwrap().unwrap();
         scene.mark_resident(first.key(), first.version());
         scene.mark_retired(first.key(), first.version());
-        scene.nodes[0] = scene.nodes[0].with_status(NodeStatus::Requested);
+        scene.nodes[0].node = root.with_status(NodeStatus::Requested);
         scene.pending.push_back(root.key());
         let second = scene.next_batch().unwrap().unwrap();
         scene.mark_resident(second.key(), second.version());
@@ -399,8 +408,8 @@ mod tests {
         }));
         let batch = make_batch(
             view_generation(),
-            scene.nodes[leaf_index],
-            scene.layouts[leaf_index],
+            scene.nodes[leaf_index].node,
+            scene.nodes[leaf_index].layout,
             BatchVersion::new(1),
         )
         .unwrap();
@@ -419,8 +428,8 @@ mod tests {
         let scene = SyntheticScene::new(view_generation()).unwrap();
         let root = make_batch(
             view_generation(),
-            scene.nodes[0],
-            scene.layouts[0],
+            scene.nodes[0].node,
+            scene.nodes[0].layout,
             BatchVersion::new(1),
         )
         .unwrap();
@@ -441,7 +450,7 @@ mod tests {
     fn rematerialized_nodes_advance_renderer_batch_versions() {
         let generation = view_generation();
         let mut scene = SyntheticScene::new(generation).unwrap();
-        let root = scene.nodes[0];
+        let root = scene.nodes[0].node;
         let mut renderer_state = RenderStateModel::new(RenderLimits::new(
             root.estimated_bytes(),
             root.point_count(),
@@ -453,7 +462,7 @@ mod tests {
             })
             .unwrap();
 
-        scene.nodes[0] = scene.nodes[0].with_status(NodeStatus::Requested);
+        scene.nodes[0].node = root.with_status(NodeStatus::Requested);
         scene.pending.push_back(root.key());
         let first = scene.next_batch().unwrap().unwrap();
         let first_key = first.key();
@@ -471,7 +480,7 @@ mod tests {
             .unwrap();
         scene.mark_retired(first_key, first_version);
 
-        scene.nodes[0] = scene.nodes[0].with_status(NodeStatus::Requested);
+        scene.nodes[0].node = root.with_status(NodeStatus::Requested);
         scene.pending.push_back(root.key());
         let second = scene.next_batch().unwrap().unwrap();
         assert_eq!(second.version(), BatchVersion::new(2));

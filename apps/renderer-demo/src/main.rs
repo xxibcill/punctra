@@ -386,10 +386,11 @@ impl Graphics {
     }
 
     fn plan_view(&mut self, camera: &Camera, viewport: [u32; 2]) -> DemoResult<()> {
+        let planning_nodes = self.scene.planning_nodes();
         let plan = self.planner.plan(
             camera,
             viewport,
-            AvailableNodes::new(VIEW_GENERATION, self.scene.nodes()),
+            AvailableNodes::new(VIEW_GENERATION, &planning_nodes),
             PLANNING_BUDGET,
         )?;
 
