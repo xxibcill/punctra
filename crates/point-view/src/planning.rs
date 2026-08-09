@@ -617,6 +617,7 @@ fn retain_resident_descendants(
             )
         {
             retained[descendant] = true;
+            continue;
         }
         pending.extend(
             hierarchy.children[descendant]

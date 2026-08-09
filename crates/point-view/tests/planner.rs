@@ -457,6 +457,31 @@ fn nested_refinement_retires_already_replaced_ancestors() {
 }
 
 #[test]
+fn coarsening_keeps_only_the_nearest_resident_fallback() {
+    let nodes = [
+        node(1, None, root_bounds(), 0.0, 1, 1, 101, NodeStatus::Missing),
+        node(2, Some(1), root_bounds(), 0.0, 1, 1, 102, resident(1)),
+        node(3, Some(2), root_bounds(), 0.0, 1, 1, 103, resident(1)),
+    ];
+
+    let plan = planner(2.0, 0.25)
+        .plan(
+            &camera(),
+            [100, 100],
+            AvailableNodes::new(generation(5, 2), &nodes),
+            PlanningBudget::new(2, 2, 2),
+        )
+        .unwrap();
+
+    assert_eq!(request_keys(&plan), vec![node_key(1)]);
+    assert_eq!(retained_keys(&plan), vec![node_key(2)]);
+    assert_eq!(retirement_batches(&plan), vec![BatchKey::new(103)]);
+    assert_eq!(plan.resource_usage().point_count(), 2);
+    assert_eq!(plan.resource_usage().estimated_bytes(), 2);
+    assert_eq!(plan.resource_usage().batch_count(), 2);
+}
+
+#[test]
 fn coarsening_keeps_resident_descendants_until_parent_arrives() {
     let generation = generation(6, 0);
     let mut planner = planner(10.0, 2.0);
