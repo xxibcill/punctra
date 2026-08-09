@@ -95,8 +95,33 @@ impl FrameReport {
     }
 }
 
+/// An exact GPU-resource snapshot of one frame recorded by a [`WgpuRenderer`].
+///
+/// Pass this value back to [`WgpuRenderer::pick`] to pick against the exact
+/// batches, versions, camera, and style used by the recorded draw. Retaining a
+/// recorded frame also retains any GPU buffers replaced or removed afterward;
+/// drop it when exact-frame picking is no longer needed.
+pub struct RecordedFrame {
+    renderer: Arc<RendererIdentity>,
+    frame: Frame,
+    batches: Box<[RecordedBatch]>,
+    pick_table: Arc<PickTable>,
+    report: FrameReport,
+}
+
+impl RecordedFrame {
+    /// Returns the work report for this recorded frame.
+    #[must_use]
+    pub const fn report(&self) -> FrameReport {
+        self.report
+    }
+}
+
+struct RendererIdentity;
+
 /// A bounded wgpu representation of one active progressive View.
 pub struct WgpuRenderer {
+    identity: Arc<RendererIdentity>,
     device: wgpu::Device,
     state: RenderStateModel,
     pipelines: PointPipelines,
@@ -146,6 +171,7 @@ impl WgpuRenderer {
         );
 
         Ok(Self {
+            identity: Arc::new(RendererIdentity),
             device: device.clone(),
             state: RenderStateModel::new(config.limits),
             pipelines,
@@ -217,22 +243,29 @@ impl WgpuRenderer {
     ///
     /// # Errors
     ///
-    /// Returns an error when the requested generation is not active or when a
-    /// batch origin cannot be represented relative to the 64-bit camera.
+    /// Returns an error when the requested generation is not active, generation
+    /// pick metadata is unavailable, or a batch origin cannot be represented
+    /// relative to the 64-bit camera.
     pub fn render(
         &mut self,
         encoder: &mut wgpu::CommandEncoder,
         target: &wgpu::TextureView,
         frame: &Frame,
-    ) -> Result<FrameReport, RendererError> {
+    ) -> Result<RecordedFrame, RendererError> {
         let started_at = Instant::now();
         let snapshot = self.state.snapshot();
         let active_view_generation =
             self.require_active_view_generation(frame.view_generation())?;
+        let batches = self.recorded_batches();
+        let pick_table = Arc::clone(
+            self.pick_table
+                .as_ref()
+                .ok_or(RendererError::PickMetadataUnavailable)?,
+        );
 
         let viewport = frame.viewport();
         self.ensure_depth(viewport);
-        self.record_frame_uniforms(encoder, frame)?;
+        self.record_frame_uniforms(encoder, frame, &batches)?;
 
         let clear = frame.style().clear_color();
         let color_attachment = Some(wgpu::RenderPassColorAttachment {
@@ -275,16 +308,23 @@ impl WgpuRenderer {
                 &mut pass,
                 &self.pipelines.draw,
                 &self.camera_bind_group,
-                self.batches.values(),
+                batches.iter(),
             );
         }
 
-        Ok(FrameReport {
+        let report = FrameReport {
             view_generation: active_view_generation,
             drawn_points: snapshot.resident().point_count(),
             draw_calls: snapshot.resident().batch_count(),
             resident_bytes: snapshot.resident().estimated_gpu_bytes(),
             encoding_time: started_at.elapsed(),
+        };
+        Ok(RecordedFrame {
+            renderer: Arc::clone(&self.identity),
+            frame: *frame,
+            batches,
+            pick_table,
+            report,
         })
     }
 
@@ -296,16 +336,18 @@ impl WgpuRenderer {
     ///
     /// # Errors
     ///
-    /// Returns an error for a stale frame, an out-of-bounds pixel, or unavailable
-    /// generation metadata.
+    /// Returns an error when the frame belongs to another renderer, the pixel is
+    /// outside its viewport, or an internal render target is unavailable.
     pub fn pick(
         &mut self,
         encoder: &mut wgpu::CommandEncoder,
-        frame: &Frame,
+        recorded_frame: &RecordedFrame,
         request: PickRequest,
     ) -> Result<PickTicket, RendererError> {
-        let active_view_generation =
-            self.require_active_view_generation(frame.view_generation())?;
+        if !Arc::ptr_eq(&self.identity, &recorded_frame.renderer) {
+            return Err(RendererError::ForeignRecordedFrame);
+        }
+        let frame = recorded_frame.frame;
         let viewport = frame.viewport();
         let pixel = request.pixel();
         if pixel[0] >= viewport[0] || pixel[1] >= viewport[1] {
@@ -314,7 +356,7 @@ impl WgpuRenderer {
 
         self.ensure_depth(viewport);
         self.ensure_pick_target(viewport);
-        self.record_frame_uniforms(encoder, frame)?;
+        self.record_frame_uniforms(encoder, &frame, &recorded_frame.batches)?;
         let pick_target = self
             .pick_target
             .as_ref()
@@ -323,19 +365,21 @@ impl WgpuRenderer {
             .depth
             .as_ref()
             .ok_or(RendererError::DepthTargetUnavailable)?;
-        self.record_pick_pass(encoder, pick_target, depth);
+        self.record_pick_pass(encoder, pick_target, depth, &recorded_frame.batches);
         let (readback, receiver) = self.record_pick_readback(encoder, pick_target, pixel);
-        let table = Arc::clone(
-            self.pick_table
-                .as_ref()
-                .ok_or(RendererError::PickMetadataUnavailable)?,
-        );
         Ok(PickTicket::new(
-            active_view_generation,
+            frame.view_generation(),
             readback,
             receiver,
-            table,
+            Arc::clone(&recorded_frame.pick_table),
         ))
+    }
+
+    fn recorded_batches(&self) -> Box<[RecordedBatch]> {
+        self.batches
+            .iter()
+            .map(|(key, batch)| RecordedBatch::new(*key, batch))
+            .collect()
     }
 
     fn require_active_view_generation(
@@ -359,6 +403,7 @@ impl WgpuRenderer {
         encoder: &mut wgpu::CommandEncoder,
         target: &PickTarget,
         depth: &DepthTarget,
+        batches: &[RecordedBatch],
     ) {
         let pick_attachments = [Some(wgpu::RenderPassColorAttachment {
             view: &target.view,
@@ -388,7 +433,7 @@ impl WgpuRenderer {
             &mut pass,
             &self.pipelines.pick,
             &self.camera_bind_group,
-            self.batches.values(),
+            batches,
         );
     }
 
@@ -468,6 +513,7 @@ impl WgpuRenderer {
         &self,
         encoder: &mut wgpu::CommandEncoder,
         frame: &Frame,
+        batches: &[RecordedBatch],
     ) -> Result<(), RendererError> {
         let viewport = frame.viewport();
         let viewport_f32 = viewport_as_f32(viewport);
@@ -485,14 +531,14 @@ impl WgpuRenderer {
         let camera_bytes = bytemuck::bytes_of(&camera_uniform);
         let batch_uniform_size = size_of::<BatchUniform>() as wgpu::BufferAddress;
         let mut upload_bytes =
-            Vec::with_capacity(camera_bytes.len() + self.batches.len() * size_of::<BatchUniform>());
+            Vec::with_capacity(camera_bytes.len() + batches.len() * size_of::<BatchUniform>());
         upload_bytes.extend_from_slice(camera_bytes);
-        let mut copies = Vec::with_capacity(self.batches.len());
-        for (key, batch) in &self.batches {
+        let mut copies = Vec::with_capacity(batches.len());
+        for batch in batches {
             let mut offset = [0.0_f32; 3];
             for axis in 0..3 {
                 offset[axis] =
-                    camera_relative_axis(batch.world_origin[axis], eye[axis], *key, axis)?;
+                    camera_relative_axis(batch.world_origin[axis], eye[axis], batch.key, axis)?;
             }
             let uniform = BatchUniform {
                 origin_from_camera: [offset[0], offset[1], offset[2], 0.0],
@@ -527,6 +573,28 @@ impl WgpuRenderer {
             );
         }
         Ok(())
+    }
+}
+
+struct RecordedBatch {
+    key: BatchKey,
+    world_origin: [f64; 3],
+    point_count: u32,
+    vertex_buffer: wgpu::Buffer,
+    uniform_buffer: wgpu::Buffer,
+    bind_group: wgpu::BindGroup,
+}
+
+impl RecordedBatch {
+    fn new(key: BatchKey, batch: &GpuBatch) -> Self {
+        Self {
+            key,
+            world_origin: batch.world_origin,
+            point_count: batch.point_count,
+            vertex_buffer: batch.vertex_buffer.clone(),
+            uniform_buffer: batch.uniform_buffer.clone(),
+            bind_group: batch.bind_group.clone(),
+        }
     }
 }
 
@@ -623,7 +691,7 @@ fn record_point_batches<'pass>(
     pass: &mut wgpu::RenderPass<'pass>,
     pipeline: &'pass wgpu::RenderPipeline,
     camera_bind_group: &'pass wgpu::BindGroup,
-    batches: impl IntoIterator<Item = &'pass GpuBatch>,
+    batches: impl IntoIterator<Item = &'pass RecordedBatch>,
 ) {
     pass.set_pipeline(pipeline);
     pass.set_bind_group(0, camera_bind_group, &[]);
@@ -685,6 +753,9 @@ pub enum RendererError {
         /// The requested View generation.
         requested: ViewGenerationKey,
     },
+    /// A recorded frame was passed to a renderer other than the one that made it.
+    #[error("recorded frame belongs to another renderer")]
+    ForeignRecordedFrame,
     /// A requested physical pixel lies outside the frame viewport.
     #[error("pick pixel {pixel:?} is outside viewport {viewport:?}")]
     PickOutsideViewport {

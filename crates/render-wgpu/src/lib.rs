@@ -43,8 +43,8 @@
 //!     1_000.0,
 //! )?;
 //! let frame = Frame::new(view_generation, camera, [1280, 720])?;
-//! let report = renderer.render(encoder, target, &frame)?;
-//! assert_eq!(report.drawn_points(), 1);
+//! let recorded_frame = renderer.render(encoder, target, &frame)?;
+//! assert_eq!(recorded_frame.report().drawn_points(), 1);
 //! # Ok(())
 //! # }
 //! ```
@@ -60,4 +60,4 @@ mod renderer;
 pub use camera::{Camera, CameraError};
 pub use frame::{Frame, FrameError, PointStyle};
 pub use pick::{PickError, PickHit, PickPoll, PickRequest, PickTicket};
-pub use renderer::{FrameReport, RendererConfig, RendererError, WgpuRenderer};
+pub use renderer::{FrameReport, RecordedFrame, RendererConfig, RendererError, WgpuRenderer};

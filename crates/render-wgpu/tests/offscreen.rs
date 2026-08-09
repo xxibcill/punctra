@@ -11,7 +11,7 @@ use render_protocol::{
 };
 use render_wgpu::{
     Camera, Frame, FrameReport, PickError, PickHit, PickPoll, PickRequest, PickTicket, PointStyle,
-    RendererConfig, RendererError, WgpuRenderer,
+    RecordedFrame, RendererConfig, RendererError, WgpuRenderer,
 };
 
 const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
@@ -51,6 +51,16 @@ fn asynchronous_pick_tickets_survive_reset_and_resize() {
 #[test]
 fn frames_recorded_before_one_submit_keep_their_exact_cameras() {
     with_gpu(assert_deferred_frame_camera_stability);
+}
+
+#[test]
+fn recorded_frames_keep_replaced_batch_data_and_identity() {
+    with_gpu(assert_recorded_frame_replacement_stability);
+}
+
+#[test]
+fn recorded_frames_are_bound_to_the_renderer_that_created_them() {
+    with_gpu(assert_foreign_recorded_frame_rejected);
 }
 
 fn assert_lifecycle_updates_are_atomic(gpu: &GpuContext) {
@@ -200,13 +210,17 @@ fn assert_raster_and_pick_semantics(gpu: &GpuContext) {
         view_generation,
         point_ids: vec![near_id],
     });
-    assert_pixel(subject.render(&frame).image.pixel(CENTER), GREEN);
+    let highlighted = subject.render(&frame);
+    assert_pixel(highlighted.image.pixel(CENTER), GREEN);
 
     let hit = subject
-        .pick_and_wait(&frame, CENTER)
+        .pick_and_wait(&highlighted.recorded_frame, CENTER)
         .expect("the center point should be picked");
     assert_hit(hit, view_generation, 1, 1, near_id);
-    assert_eq!(subject.pick_and_wait(&frame, discarded_corner), None);
+    assert_eq!(
+        subject.pick_and_wait(&highlighted.recorded_frame, discarded_corner),
+        None
+    );
 }
 
 fn assert_large_world_precision(gpu: &GpuContext) {
@@ -244,10 +258,10 @@ fn assert_large_world_precision(gpu: &GpuContext) {
     );
 
     let red_hit = subject
-        .pick_and_wait(&frame, red_pixel)
+        .pick_and_wait(&rendered.recorded_frame, red_pixel)
         .expect("the red precision point should be pickable");
     let cyan_hit = subject
-        .pick_and_wait(&frame, cyan_pixel)
+        .pick_and_wait(&rendered.recorded_frame, cyan_pixel)
         .expect("the cyan precision point should be pickable");
     assert_eq!(red_hit.point(), red_id);
     assert_eq!(cyan_hit.point(), cyan_id);
@@ -272,7 +286,8 @@ fn assert_async_ticket_stability(gpu: &GpuContext) {
         ),
     });
     let old_frame = standard_frame(old_view_generation, VIEWPORT, 18.0, GREEN);
-    let (mut old_ticket, old_commands) = subject.encode_pick(&old_frame, CENTER);
+    let old_render = subject.render(&old_frame);
+    let (mut old_ticket, old_commands) = subject.encode_pick(&old_render.recorded_frame, CENTER);
     assert_eq!(old_ticket.poll().unwrap(), PickPoll::Pending);
     gpu.queue.submit([old_commands]);
 
@@ -290,8 +305,11 @@ fn assert_async_ticket_stability(gpu: &GpuContext) {
     });
     let new_center = [RESIZED_VIEWPORT[0] / 2, RESIZED_VIEWPORT[1] / 2];
     let new_frame = standard_frame(new_view_generation, RESIZED_VIEWPORT, 18.0, GREEN);
-    let (mut new_ticket, new_commands) = subject.encode_pick(&new_frame, new_center);
-    let (mut no_hit_ticket, no_hit_commands) = subject.encode_pick(&new_frame, [0, 0]);
+    let new_render = subject.render(&new_frame);
+    let (mut new_ticket, new_commands) =
+        subject.encode_pick(&new_render.recorded_frame, new_center);
+    let (mut no_hit_ticket, no_hit_commands) =
+        subject.encode_pick(&new_render.recorded_frame, [0, 0]);
     assert_eq!(new_ticket.poll().unwrap(), PickPoll::Pending);
     assert_eq!(no_hit_ticket.poll().unwrap(), PickPoll::Pending);
     gpu.queue.submit([new_commands, no_hit_commands]);
@@ -343,6 +361,73 @@ fn assert_deferred_frame_camera_stability(gpu: &GpuContext) {
     );
 }
 
+fn assert_recorded_frame_replacement_stability(gpu: &GpuContext) {
+    let mut subject = OffscreenRenderer::new(gpu, roomy_limits());
+    let view_generation = ViewGenerationKey::new(ViewId::new(6), 1);
+    let batch_key = 19;
+    let first_id = PointId::new(101);
+    let replacement_id = PointId::new(202);
+    subject.apply(&RenderUpdate::Reset { view_generation });
+    subject.apply(&RenderUpdate::Upsert {
+        batch: batch(
+            view_generation,
+            batch_key,
+            1,
+            WORLD_ORIGIN,
+            vec![point([0.0; 3], RED, first_id.get())],
+        ),
+    });
+    let frame = standard_frame(view_generation, VIEWPORT, 18.0, GREEN);
+    let retained = subject.render(&frame);
+    assert_pixel(retained.image.pixel(CENTER), RED);
+
+    subject.apply(&RenderUpdate::Upsert {
+        batch: batch(
+            view_generation,
+            batch_key,
+            2,
+            WORLD_ORIGIN,
+            vec![point([0.0; 3], BLUE, replacement_id.get())],
+        ),
+    });
+    let current = subject.render(&frame);
+    assert_pixel(current.image.pixel(CENTER), BLUE);
+
+    let retained_hit = subject
+        .pick_and_wait(&retained.recorded_frame, CENTER)
+        .expect("the retained frame should pick its original point");
+    assert_hit(retained_hit, view_generation, batch_key, 1, first_id);
+}
+
+fn assert_foreign_recorded_frame_rejected(gpu: &GpuContext) {
+    let view_generation = ViewGenerationKey::new(ViewId::new(7), 1);
+    let mut owner = OffscreenRenderer::new(gpu, roomy_limits());
+    owner.apply(&RenderUpdate::Reset { view_generation });
+    owner.apply(&RenderUpdate::Upsert {
+        batch: batch(
+            view_generation,
+            1,
+            1,
+            WORLD_ORIGIN,
+            vec![point([0.0; 3], RED, 701)],
+        ),
+    });
+    let frame = standard_frame(view_generation, VIEWPORT, 18.0, GREEN);
+    let recorded = owner.render(&frame);
+
+    let mut foreign = OffscreenRenderer::new(gpu, roomy_limits());
+    foreign.apply(&RenderUpdate::Reset { view_generation });
+    let mut encoder = foreign.encoder("punctra foreign recorded frame encoder");
+    assert!(matches!(
+        foreign.renderer.pick(
+            &mut encoder,
+            &recorded.recorded_frame,
+            PickRequest::new(CENTER),
+        ),
+        Err(RendererError::ForeignRecordedFrame)
+    ));
+}
+
 struct GpuContext {
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -385,13 +470,18 @@ impl<'gpu> OffscreenRenderer<'gpu> {
     fn try_render(&mut self, frame: &Frame) -> Result<RenderedFrame, RendererError> {
         let target = ColorTarget::new(&self.gpu.device, frame.viewport());
         let mut encoder = self.encoder("punctra acceptance render encoder");
-        let report = self.renderer.render(&mut encoder, &target.view, frame)?;
+        let recorded_frame = self.renderer.render(&mut encoder, &target.view, frame)?;
+        let report = recorded_frame.report();
         target.encode_copy(&mut encoder);
         let receiver = target.map_after_submit(&mut encoder);
         self.gpu.queue.submit([encoder.finish()]);
         self.gpu.wait();
         let image = target.read(&receiver);
-        Ok(RenderedFrame { report, image })
+        Ok(RenderedFrame {
+            recorded_frame,
+            report,
+            image,
+        })
     }
 
     fn render_pair_before_submit(
@@ -402,14 +492,16 @@ impl<'gpu> OffscreenRenderer<'gpu> {
         let first_target = ColorTarget::new(&self.gpu.device, first_frame.viewport());
         let second_target = ColorTarget::new(&self.gpu.device, second_frame.viewport());
         let mut encoder = self.encoder("punctra deferred frame acceptance encoder");
-        let first_report = self
+        let first_recorded_frame = self
             .renderer
             .render(&mut encoder, &first_target.view, first_frame)
             .expect("the first deferred frame should encode");
-        let second_report = self
+        let second_recorded_frame = self
             .renderer
             .render(&mut encoder, &second_target.view, second_frame)
             .expect("the second deferred frame should encode");
+        let first_report = first_recorded_frame.report();
+        let second_report = second_recorded_frame.report();
         first_target.encode_copy(&mut encoder);
         second_target.encode_copy(&mut encoder);
         let first_receiver = first_target.map_after_submit(&mut encoder);
@@ -420,27 +512,37 @@ impl<'gpu> OffscreenRenderer<'gpu> {
         let second_image = second_target.read(&second_receiver);
         (
             RenderedFrame {
+                recorded_frame: first_recorded_frame,
                 report: first_report,
                 image: first_image,
             },
             RenderedFrame {
+                recorded_frame: second_recorded_frame,
                 report: second_report,
                 image: second_image,
             },
         )
     }
 
-    fn encode_pick(&mut self, frame: &Frame, pixel: [u32; 2]) -> (PickTicket, wgpu::CommandBuffer) {
+    fn encode_pick(
+        &mut self,
+        recorded_frame: &RecordedFrame,
+        pixel: [u32; 2],
+    ) -> (PickTicket, wgpu::CommandBuffer) {
         let mut encoder = self.encoder("punctra acceptance pick encoder");
         let ticket = self
             .renderer
-            .pick(&mut encoder, frame, PickRequest::new(pixel))
+            .pick(&mut encoder, recorded_frame, PickRequest::new(pixel))
             .expect("the pick request should encode");
         (ticket, encoder.finish())
     }
 
-    fn pick_and_wait(&mut self, frame: &Frame, pixel: [u32; 2]) -> Option<PickHit> {
-        let (mut ticket, commands) = self.encode_pick(frame, pixel);
+    fn pick_and_wait(
+        &mut self,
+        recorded_frame: &RecordedFrame,
+        pixel: [u32; 2],
+    ) -> Option<PickHit> {
+        let (mut ticket, commands) = self.encode_pick(recorded_frame, pixel);
         self.gpu.queue.submit([commands]);
         self.gpu.wait();
         let PickPoll::Ready(hit) = ticket.poll().expect("the submitted pick should resolve") else {
@@ -457,6 +559,7 @@ impl<'gpu> OffscreenRenderer<'gpu> {
 }
 
 struct RenderedFrame {
+    recorded_frame: RecordedFrame,
     report: FrameReport,
     image: Image,
 }

@@ -318,7 +318,7 @@ impl Graphics {
             [self.surface_config.width, self.surface_config.height],
         )?
         .with_style(self.style);
-        let report = self.renderer.render(&mut encoder, &target, &frame)?;
+        let recorded_frame = self.renderer.render(&mut encoder, &target, &frame)?;
         self.queue.submit([encoder.finish()]);
         self.window.pre_present_notify();
         self.queue.present(surface_texture);
@@ -326,7 +326,8 @@ impl Graphics {
             self.configure_surface();
         }
 
-        self.metrics.record_frame(report, frame_started.elapsed());
+        self.metrics
+            .record_frame(recorded_frame.report(), frame_started.elapsed());
         self.metrics.update_title(
             &self.window,
             self.scene.loaded_batches(),

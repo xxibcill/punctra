@@ -23,7 +23,8 @@ renderer.apply(&RenderUpdate::Reset { view_generation })?;
 renderer.apply(&RenderUpdate::Upsert { batch })?;
 
 let frame = Frame::new(view_generation, camera, [width, height])?;
-let report = renderer.render(&mut encoder, &target, &frame)?;
+let recorded_frame = renderer.render(&mut encoder, &target, &frame)?;
+let report = recorded_frame.report();
 queue.submit([encoder.finish()]);
 ```
 
@@ -36,9 +37,12 @@ that logical residency model.
 
 Frame uniform uploads are part of the recorded command stream. A host may
 record several Punctra frames before one submission without later camera values
-changing earlier frames. Picking follows the same host-owned flow: encode a
-`PickRequest`, submit the encoder, drive normal wgpu device polling, and poll
-the returned `PickTicket` without blocking.
+changing earlier frames. Rendering returns a `RecordedFrame`; pass that exact
+value back when encoding a `PickRequest` so the pick uses the batches and
+identity metadata displayed by that render. Retaining a `RecordedFrame` pins
+any replaced GPU resources it references until the value is dropped. Picking
+otherwise follows the same host-owned flow: submit the encoder, drive normal
+wgpu device polling, and poll the returned `PickTicket` without blocking.
 
 ## Workspace
 
