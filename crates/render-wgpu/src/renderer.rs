@@ -520,11 +520,10 @@ impl WgpuRenderer {
             preflight_frame_uniform_staging(batches.len(), self.device.limits().max_buffer_size)?;
         let viewport = frame.viewport();
         let viewport_f32 = viewport_as_f32(viewport);
-        let aspect_ratio = viewport_f32[0] / viewport_f32[1];
         let style = frame.style();
         let camera = frame.camera();
         let camera_uniform = CameraUniform {
-            view_projection: camera.view_projection(aspect_ratio).to_cols_array_2d(),
+            view_projection: frame.view_projection().to_cols_array_2d(),
             viewport_size: viewport_f32,
             default_point_size: style.default_size_pixels(),
             _padding: 0.0,

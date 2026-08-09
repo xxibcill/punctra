@@ -23,7 +23,8 @@ impl Camera {
     /// # Errors
     ///
     /// Returns [`CameraError`] when a vector is non-finite or degenerate, the
-    /// field of view is outside `(0, pi)`, or the clipping range is invalid.
+    /// field of view is outside `(0, pi)`, the clipping range is invalid, or
+    /// otherwise valid parameters would produce a non-finite projection.
     pub fn perspective(
         eye: [f64; 3],
         target: [f64; 3],
@@ -72,7 +73,7 @@ impl Camera {
             });
         }
 
-        Ok(Self {
+        let camera = Self {
             eye,
             target,
             up,
@@ -81,7 +82,9 @@ impl Camera {
             vertical_field_of_view_radians,
             near_distance,
             far_distance,
-        })
+        };
+        camera.view_projection(1.0)?;
+        Ok(camera)
     }
 
     /// Returns the camera position in world coordinates.
@@ -120,7 +123,7 @@ impl Camera {
         self.far_distance
     }
 
-    pub(crate) fn view_projection(&self, aspect_ratio: f32) -> Mat4 {
+    pub(crate) fn view_projection(&self, aspect_ratio: f32) -> Result<Mat4, CameraError> {
         let view = view::look_at_mat4(
             Vec3::ZERO,
             Vec3::from_array(self.view_direction),
@@ -132,7 +135,12 @@ impl Camera {
             self.near_distance,
             self.far_distance,
         );
-        projection * view
+        let view_projection = projection * view;
+        if view_projection.is_finite() {
+            Ok(view_projection)
+        } else {
+            Err(CameraError::NonFiniteProjection)
+        }
     }
 }
 
@@ -171,6 +179,9 @@ pub enum CameraError {
         /// The invalid far distance.
         far: f32,
     },
+    /// The accepted camera parameters cannot produce a finite projection matrix.
+    #[error("camera projection matrix must remain finite")]
+    NonFiniteProjection,
 }
 
 fn validate_finite_vector(name: &'static str, vector: [f64; 3]) -> Result<(), CameraError> {
@@ -233,7 +244,9 @@ mod tests {
 
     #[test]
     fn builds_a_finite_large_world_matrix() {
-        let matrix = valid_camera().view_projection(16.0 / 9.0);
+        let matrix = valid_camera()
+            .view_projection(16.0 / 9.0)
+            .expect("the validated camera should produce a finite projection");
 
         assert!(matrix.to_cols_array().into_iter().all(f32::is_finite));
     }
@@ -251,13 +264,7 @@ mod tests {
             )
             .expect("finite view directions should be normalized before narrowing");
 
-            assert!(
-                camera
-                    .view_projection(1.0)
-                    .to_cols_array()
-                    .into_iter()
-                    .all(f32::is_finite)
-            );
+            assert!(camera.view_projection(1.0).is_ok());
         }
     }
 
@@ -273,5 +280,31 @@ mod tests {
         );
 
         assert_eq!(result, Err(CameraError::ParallelUpVector));
+    }
+
+    #[test]
+    fn rejects_parameters_that_produce_non_finite_projection_matrices() {
+        let tiny_field_of_view = Camera::perspective(
+            [0.0, -5.0, 0.0],
+            [0.0; 3],
+            [0.0, 0.0, 1.0],
+            f32::from_bits(1),
+            0.1,
+            100.0,
+        );
+        let overflowing_depth_range = Camera::perspective(
+            [0.0, -5.0, 0.0],
+            [0.0; 3],
+            [0.0, 0.0, 1.0],
+            1.0,
+            1.0e20,
+            2.0e20,
+        );
+
+        assert_eq!(tiny_field_of_view, Err(CameraError::NonFiniteProjection));
+        assert_eq!(
+            overflowing_depth_range,
+            Err(CameraError::NonFiniteProjection)
+        );
     }
 }

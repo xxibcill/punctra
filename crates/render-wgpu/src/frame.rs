@@ -1,3 +1,4 @@
+use glam::Mat4;
 use render_protocol::ViewGenerationKey;
 use thiserror::Error;
 
@@ -76,6 +77,7 @@ pub struct Frame {
     camera: Camera,
     viewport: [u32; 2],
     style: PointStyle,
+    view_projection: Mat4,
 }
 
 impl Frame {
@@ -83,7 +85,9 @@ impl Frame {
     ///
     /// # Errors
     ///
-    /// Returns [`FrameError::EmptyViewport`] when either physical extent is zero.
+    /// Returns [`FrameError::EmptyViewport`] when either physical extent is
+    /// zero, or [`FrameError::NonFiniteCameraProjection`] when the viewport's
+    /// aspect ratio would make the camera projection non-finite.
     pub fn new(
         view_generation: ViewGenerationKey,
         camera: Camera,
@@ -92,12 +96,16 @@ impl Frame {
         if viewport.into_iter().any(|extent| extent == 0) {
             return Err(FrameError::EmptyViewport { viewport });
         }
+        let view_projection = camera
+            .view_projection(viewport_aspect_ratio(viewport))
+            .map_err(|_| FrameError::NonFiniteCameraProjection { viewport })?;
 
         Ok(Self {
             view_generation,
             camera,
             viewport,
             style: PointStyle::default(),
+            view_projection,
         })
     }
 
@@ -131,6 +139,10 @@ impl Frame {
     pub const fn style(self) -> PointStyle {
         self.style
     }
+
+    pub(crate) const fn view_projection(self) -> Mat4 {
+        self.view_projection
+    }
 }
 
 /// A frame or style construction error.
@@ -140,6 +152,12 @@ pub enum FrameError {
     #[error("frame viewport must be non-zero, got {viewport:?}")]
     EmptyViewport {
         /// The rejected viewport.
+        viewport: [u32; 2],
+    },
+    /// The camera cannot produce a finite projection for this viewport.
+    #[error("camera projection for viewport {viewport:?} must remain finite")]
+    NonFiniteCameraProjection {
+        /// The viewport whose aspect ratio made the projection non-finite.
         viewport: [u32; 2],
     },
     /// The default point diameter is not positive and finite.
@@ -153,6 +171,11 @@ pub enum FrameError {
         /// Zero-based RGBA channel.
         channel: usize,
     },
+}
+
+#[allow(clippy::cast_precision_loss)]
+fn viewport_aspect_ratio(viewport: [u32; 2]) -> f32 {
+    viewport[0] as f32 / viewport[1] as f32
 }
 
 fn validate_color<T, const N: usize>(name: &'static str, color: &[T; N]) -> Result<(), FrameError>
@@ -222,6 +245,27 @@ mod tests {
             Err(FrameError::InvalidColor {
                 name: "highlight",
                 channel: 1,
+            })
+        );
+    }
+
+    #[test]
+    fn frame_rejects_a_projection_that_overflows_for_its_viewport() {
+        let view_generation = ViewGenerationKey::new(ViewId::new(1), 1);
+        let narrow_field_of_view_camera = Camera::perspective(
+            [0.0, -5.0, 0.0],
+            [0.0; 3],
+            [0.0, 0.0, 1.0],
+            1.0e-30,
+            0.1,
+            100.0,
+        )
+        .expect("the projection should remain finite at a square aspect ratio");
+
+        assert_eq!(
+            Frame::new(view_generation, narrow_field_of_view_camera, [1, u32::MAX]),
+            Err(FrameError::NonFiniteCameraProjection {
+                viewport: [1, u32::MAX],
             })
         );
     }
