@@ -519,14 +519,10 @@ fn conservative_target_usage(
     visibility: &[NodeProjection],
     target_cut: &BTreeSet<usize>,
 ) -> Result<ResourceUsage, PlanError> {
-    let mut resource_mask = required_residents(hierarchy, visibility, target_cut);
+    let retained_mask = required_residents(hierarchy, visibility, target_cut);
+    let mut resource_mask = resource_mask_with_requested_nodes(hierarchy, &retained_mask);
     for index in target_cut.iter().copied() {
         resource_mask[index] = true;
-    }
-    for (index, node) in hierarchy.nodes.iter().enumerate() {
-        if node.status == NodeStatus::Requested {
-            resource_mask[index] = true;
-        }
     }
     usage_for_mask(hierarchy, &resource_mask)
 }
@@ -611,12 +607,7 @@ fn select_requests(
     budget: PlanningBudget,
     view_generation: render_protocol::ViewGenerationKey,
 ) -> Result<Vec<NodeRequest>, PlanError> {
-    let mut resource_mask = retained_mask.to_vec();
-    for (index, node) in hierarchy.nodes.iter().enumerate() {
-        if node.status == NodeStatus::Requested {
-            resource_mask[index] = true;
-        }
-    }
+    let mut resource_mask = resource_mask_with_requested_nodes(hierarchy, retained_mask);
     let current_usage = usage_for_mask(hierarchy, &resource_mask)?;
     if !current_usage.fits_within(budget) {
         return Ok(Vec::new());
@@ -655,6 +646,16 @@ fn select_requests(
     Ok(requests)
 }
 
+fn resource_mask_with_requested_nodes(hierarchy: &Hierarchy, base_mask: &[bool]) -> Vec<bool> {
+    let mut resource_mask = base_mask.to_vec();
+    for (index, node) in hierarchy.nodes.iter().enumerate() {
+        if node.status == NodeStatus::Requested {
+            resource_mask[index] = true;
+        }
+    }
+    resource_mask
+}
+
 fn actual_resource_usage(
     hierarchy: &Hierarchy,
     retained_mask: &[bool],
@@ -664,16 +665,12 @@ fn actual_resource_usage(
         .iter()
         .map(|request| request.node_key)
         .collect::<BTreeSet<_>>();
-    let resource_mask = hierarchy
-        .nodes
-        .iter()
-        .enumerate()
-        .map(|(index, node)| {
-            retained_mask[index]
-                || node.status == NodeStatus::Requested
-                || request_keys.contains(&node.key)
-        })
-        .collect::<Vec<_>>();
+    let mut resource_mask = resource_mask_with_requested_nodes(hierarchy, retained_mask);
+    for (index, node) in hierarchy.nodes.iter().enumerate() {
+        if request_keys.contains(&node.key) {
+            resource_mask[index] = true;
+        }
+    }
     usage_for_mask(hierarchy, &resource_mask)
 }
 
