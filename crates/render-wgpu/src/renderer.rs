@@ -1,5 +1,6 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
+    mem::size_of,
     sync::{Arc, mpsc},
     time::{Duration, Instant},
 };
@@ -515,6 +516,8 @@ impl WgpuRenderer {
         frame: &Frame,
         batches: &[RecordedBatch],
     ) -> Result<(), RendererError> {
+        let staging =
+            preflight_frame_uniform_staging(batches.len(), self.device.limits().max_buffer_size)?;
         let viewport = frame.viewport();
         let viewport_f32 = viewport_as_f32(viewport);
         let aspect_ratio = viewport_f32[0] / viewport_f32[1];
@@ -529,9 +532,7 @@ impl WgpuRenderer {
         };
         let eye = camera.eye();
         let camera_bytes = bytemuck::bytes_of(&camera_uniform);
-        let batch_uniform_size = size_of::<BatchUniform>() as wgpu::BufferAddress;
-        let mut upload_bytes =
-            Vec::with_capacity(camera_bytes.len() + batches.len() * size_of::<BatchUniform>());
+        let mut upload_bytes = Vec::with_capacity(staging.allocation_capacity);
         upload_bytes.extend_from_slice(camera_bytes);
         let mut copies = Vec::with_capacity(batches.len());
         for batch in batches {
@@ -543,8 +544,12 @@ impl WgpuRenderer {
             let uniform = BatchUniform {
                 origin_from_camera: [offset[0], offset[1], offset[2], 0.0],
             };
-            let source_offset = u64::try_from(upload_bytes.len())
-                .expect("frame uniform staging fits in wgpu's buffer address space");
+            let source_offset =
+                wgpu::BufferAddress::try_from(upload_bytes.len()).map_err(|_| {
+                    RendererError::FrameUniformStagingSizeOverflow {
+                        batch_count: batches.len(),
+                    }
+                })?;
             upload_bytes.extend_from_slice(bytemuck::bytes_of(&uniform));
             copies.push((batch, source_offset));
         }
@@ -556,20 +561,14 @@ impl WgpuRenderer {
                 contents: &upload_bytes,
                 usage: wgpu::BufferUsages::COPY_SRC,
             });
-        encoder.copy_buffer_to_buffer(
-            &upload,
-            0,
-            &self.camera_buffer,
-            0,
-            camera_bytes.len() as wgpu::BufferAddress,
-        );
+        encoder.copy_buffer_to_buffer(&upload, 0, &self.camera_buffer, 0, staging.camera_copy_size);
         for (batch, source_offset) in copies {
             encoder.copy_buffer_to_buffer(
                 &upload,
                 source_offset,
                 &batch.uniform_buffer,
                 0,
-                batch_uniform_size,
+                staging.batch_copy_size,
             );
         }
         Ok(())
@@ -742,6 +741,24 @@ pub enum RendererError {
         /// The attached device's maximum buffer size.
         max_buffer_size: u64,
     },
+    /// The combined frame-uniform staging size cannot be represented safely.
+    #[error("frame uniform staging size cannot be represented for {batch_count} batches")]
+    FrameUniformStagingSizeOverflow {
+        /// The number of batch uniforms requested alongside the camera uniform.
+        batch_count: usize,
+    },
+    /// The combined frame-uniform staging buffer exceeds the device limit.
+    #[error(
+        "frame uniforms for {batch_count} batches need a {requested_bytes}-byte staging buffer, exceeding the device limit {max_buffer_size}"
+    )]
+    FrameUniformStagingBufferTooLarge {
+        /// The number of batch uniforms requested alongside the camera uniform.
+        batch_count: usize,
+        /// Exact combined bytes required by the camera and batch uniforms.
+        requested_bytes: u64,
+        /// The attached device's maximum buffer size.
+        max_buffer_size: u64,
+    },
     /// Rendering was requested before a reset began a View generation.
     #[error("rendering requires an active View generation")]
     NoActiveViewGeneration,
@@ -824,6 +841,45 @@ fn camera_relative_axis(
     Ok(relative)
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct FrameUniformStagingLayout {
+    camera_copy_size: wgpu::BufferAddress,
+    batch_copy_size: wgpu::BufferAddress,
+    allocation_capacity: usize,
+}
+
+fn preflight_frame_uniform_staging(
+    batch_count: usize,
+    max_buffer_size: wgpu::BufferAddress,
+) -> Result<FrameUniformStagingLayout, RendererError> {
+    let size_overflow = || RendererError::FrameUniformStagingSizeOverflow { batch_count };
+    let camera_bytes =
+        wgpu::BufferAddress::try_from(size_of::<CameraUniform>()).map_err(|_| size_overflow())?;
+    let batch_bytes =
+        wgpu::BufferAddress::try_from(size_of::<BatchUniform>()).map_err(|_| size_overflow())?;
+    let batch_count_address =
+        wgpu::BufferAddress::try_from(batch_count).map_err(|_| size_overflow())?;
+    let total_bytes = batch_count_address
+        .checked_mul(batch_bytes)
+        .and_then(|bytes| camera_bytes.checked_add(bytes))
+        .ok_or_else(size_overflow)?;
+
+    if total_bytes > max_buffer_size {
+        return Err(RendererError::FrameUniformStagingBufferTooLarge {
+            batch_count,
+            requested_bytes: total_bytes,
+            max_buffer_size,
+        });
+    }
+
+    let allocation_bytes = usize::try_from(total_bytes).map_err(|_| size_overflow())?;
+    Ok(FrameUniformStagingLayout {
+        camera_copy_size: camera_bytes,
+        batch_copy_size: batch_bytes,
+        allocation_capacity: allocation_bytes,
+    })
+}
+
 fn validate_batch_buffer_size(
     key: BatchKey,
     requested_bytes: u64,
@@ -843,6 +899,55 @@ fn validate_batch_buffer_size(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn frame_uniform_staging_accepts_the_exact_device_limit() {
+        let batch_count = 3;
+        let camera_bytes = wgpu::BufferAddress::try_from(size_of::<CameraUniform>()).unwrap();
+        let batch_bytes = wgpu::BufferAddress::try_from(size_of::<BatchUniform>()).unwrap();
+        let exact_limit = camera_bytes + 3 * batch_bytes;
+
+        let layout = preflight_frame_uniform_staging(batch_count, exact_limit).unwrap();
+
+        assert_eq!(
+            layout,
+            FrameUniformStagingLayout {
+                camera_copy_size: camera_bytes,
+                batch_copy_size: batch_bytes,
+                allocation_capacity: usize::try_from(exact_limit).unwrap(),
+            }
+        );
+    }
+
+    #[test]
+    fn frame_uniform_staging_rejects_a_device_limit_one_byte_too_small() {
+        let batch_count = 3;
+        let camera_bytes = wgpu::BufferAddress::try_from(size_of::<CameraUniform>()).unwrap();
+        let batch_bytes = wgpu::BufferAddress::try_from(size_of::<BatchUniform>()).unwrap();
+        let requested_bytes = camera_bytes + 3 * batch_bytes;
+        let max_buffer_size = requested_bytes - 1;
+
+        assert!(matches!(
+            preflight_frame_uniform_staging(batch_count, max_buffer_size),
+            Err(RendererError::FrameUniformStagingBufferTooLarge {
+                batch_count: rejected_count,
+                requested_bytes: rejected_bytes,
+                max_buffer_size: rejected_limit,
+            }) if rejected_count == batch_count
+                && rejected_bytes == requested_bytes
+                && rejected_limit == max_buffer_size
+        ));
+    }
+
+    #[test]
+    fn frame_uniform_staging_rejects_arithmetic_or_allocation_size_overflow() {
+        assert!(matches!(
+            preflight_frame_uniform_staging(usize::MAX, wgpu::BufferAddress::MAX),
+            Err(RendererError::FrameUniformStagingSizeOverflow {
+                batch_count: usize::MAX,
+            })
+        ));
+    }
 
     #[test]
     fn device_buffer_limit_is_checked_before_allocation() {
