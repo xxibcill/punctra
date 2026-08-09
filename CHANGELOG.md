@@ -5,6 +5,11 @@ All notable changes to Punctra are documented here. The project follows
 
 ## Unreleased
 
+- Started v0.5 Durable document core under an accepted narrow design: one
+  headless Workspace seam for exact classification selections, spillable
+  process-scoped Point Sets, reversible sparse classification Revisions, and
+  crash-safe Operation Identity reconciliation without modifying Source bytes.
+
 ## 0.4.0 - 2026-08-10
 
 - Added `point-index` with one deterministic 65,536-Point fixed-block BVH,

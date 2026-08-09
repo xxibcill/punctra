@@ -9,10 +9,9 @@ as technical and customer evidence changes. Milestone outcomes and dependency
 order matter more than version numbers.
 
 Only an **Active** release has committed scope. Punctra v0.1 through v0.4 are
-complete. No later release is active until it receives a separate accepted
-design or architecture decision. In particular, Workspace behavior, editing,
-terrain, export, and general application UI are not silently made current scope
-by appearing here.
+complete, and v0.5 is active under its accepted narrow design. Work beyond
+that design remains proposed. In particular, terrain, export, general editing,
+and application UI are not silently made current scope by appearing here.
 
 ## Working direction
 
@@ -206,28 +205,36 @@ Exact scope and verification rules are recorded in the
 
 ### v0.5 — Durable document core
 
-Status: **Candidate**
+Status: **Active**
 
-Candidate outcome: make exact selections and reversible classification Edits
-without changing immutable Source bytes.
+Accepted outcome: make exact classification selections and reversible
+classification Edits durable without changing immutable Source bytes.
 
-Likely scope:
+Accepted scope:
 
-- exact revision-pinned spatial and attribute Queries;
-- spillable, immutable Point Sets;
-- sparse classification Edits, immutable Revisions, undo, and crash recovery;
-- coherent Source, index, Snapshot, and operation lifecycle through a Workspace;
-  and
-- exact CPU confirmation of provisional display picks.
+- one deep headless Workspace over one complete Spatial Index and its verified
+  Source;
+- exact revision-pinned All, inclusive world-box, and bounded explicit-Point-ID
+  selection with an optional effective-classification predicate;
+- process-scoped immutable Point Sets with bounded automatic spill;
+- sparse uniform classification Edits, immutable linear Revisions,
+  immediate-head Revert, and crash recovery; and
+- durable caller-owned Operation Identity with committed, rejected, retryable,
+  not-recorded, and indeterminate reconciliation.
 
 Evidence of readiness:
 
-- Point Identity survives decode, index, View, pick, Query, Point Set, commit,
-  and reopen;
+- Point Identity survives Source decode, index, exact Point-ID confirmation,
+  Point Set, classification commit, Revert, and reopen;
 - forced-spill and hard-budget tests keep memory and temporary storage bounded;
 - fault injection at persistence boundaries exposes either the complete old or
   complete new state; and
 - recovery and retry by Operation Identity never duplicate a commit.
+
+Complete screen-through/brush selection, general Attribute or position edits,
+durable named Point Sets, Breaklines, branches, merge, and compaction are not
+part of v0.5. Exact scope and verification rules are recorded in the
+[v0.5 Durable document core design](docs/design/durable-document-core-v0.5.md).
 
 ### v0.6 — Terrain and QA benchmark
 

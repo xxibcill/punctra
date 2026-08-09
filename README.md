@@ -28,6 +28,14 @@ display-only hierarchy samples, efficient fixed-chunk LAZ seeks, and a private
 host-owned path from a verified real Source through View planning to atomic
 renderer updates. It does not introduce Workspace or exact Query semantics.
 
+Version 0.5.0 is active under the accepted
+[Durable document core design](docs/design/durable-document-core-v0.5.md). The
+narrow slice adds one headless Workspace for exact All, world-box, and explicit
+Point-ID classification selections; bounded temporary Point Sets; immutable
+classification Revisions; immediate-head Revert Edits; and durable Operation
+reconciliation. Screen-through selection, general edits, named Point Sets,
+terrain, and Source rewriting remain outside this scope.
+
 Future direction is described in the [living roadmap](ROADMAP.md). Its release
 themes are adjustable and do not expand the accepted implementation scope by
 themselves.

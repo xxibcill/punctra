@@ -1,8 +1,8 @@
 # Domain Context: Point-Cloud Foundation
 
 Status: renderer, adaptive View planning, Real Sources, and the narrow Spatial
-Index/out-of-core View slice are implemented; broader Workspace and terrain
-terms are deferred
+Index/out-of-core View slice are implemented; the narrow v0.5 Workspace is
+active; broader document, terrain, and product terms remain deferred
 
 Punctra v0.4 builds on the reusable render engine, renderer-neutral View
 planner, and verified Source path described in the accepted [v0.1 renderer
@@ -10,11 +10,11 @@ design](docs/design/render-engine-v0.1.md), [v0.2 planning
 design](docs/design/adaptive-view-planning-v0.2.md), and [v0.3 Real Sources
 design](docs/design/real-sources-v0.3.md). The accepted [v0.4 Out-of-core View
 design](docs/design/out-of-core-view-v0.4.md) additionally implements Spatial
-Index and rebuildable Artifact behavior for its narrow scope. The definitions
-of Source, Source Identity, Point, Point Identity, Attribute, Point Batch,
-Coordinate Reference, Artifact, Spatial Index, View, Coverage, and View Batch
-below are canonical. The remaining terms are retained as vocabulary research
-for possible host projects and do not imply current product scope.
+Index and rebuildable Artifact behavior for its narrow scope. The accepted
+[v0.5 Durable document core design](docs/design/durable-document-core-v0.5.md)
+makes the narrow classification meanings of Workspace, Snapshot, Query, Point
+Set, Edit, Revert Edit, Revision, and Operation Identity current. Broader uses
+of those terms remain vocabulary research and do not imply product scope.
 
 ## Artifact
 
@@ -58,6 +58,14 @@ An intentional logical change to Workspace state, such as changing Point classif
 
 _Avoid:_ mutation when referring to Source data, patch without domain context
 
+## Effective Attribute Value
+
+The value obtained by applying every relevant overlay through one pinned
+Revision to the immutable Source value. In v0.5 only the chosen `U8`
+classification Attribute can have an effective value different from Source.
+
+_Avoid:_ current value without naming the Snapshot, mutated Source value
+
 ## Export
 
 The act of encoding a Snapshot or Artifact for an external tool or file format. Export does not alter the Workspace.
@@ -69,6 +77,14 @@ _Avoid:_ save when producing an external deliverable
 An opaque caller-chosen identity for one canonical commit request. The caller records it before starting the commit so recovery can determine whether that request committed, was rejected, or was never recorded.
 
 _Avoid:_ Job handle, random retry ID
+
+## Pick Hint
+
+A provisional Point Identity obtained from partial View residency. A Pick Hint
+may be confirmed through an exact explicit-Point-ID Query, but it never proves
+that a View or screen region contains no other matching Points.
+
+_Avoid:_ exact selection, Query result, visibility proof
 
 ## Point
 
@@ -123,6 +139,14 @@ _Avoid:_ bounds when the shape may be more than an axis-aligned box
 An immutable, ordered state of a Workspace after a committed Edit. A Revision has exactly one logical predecessor in the initial model.
 
 _Avoid:_ version, generation, save point
+
+## Revert Edit
+
+An Edit that applies the recorded inverse of the current head Revision and
+creates a new child Revision. It does not move the head backward, erase the
+target Revision, or imply general history rewriting.
+
+_Avoid:_ rollback, head rewind, delete history
 
 ## Snapshot
 
