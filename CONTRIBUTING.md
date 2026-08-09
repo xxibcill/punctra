@@ -17,8 +17,8 @@ RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps
 ```
 
 GPU acceptance tests use any available headless wgpu adapter. They skip when no
-adapter is present unless `PUNCTRA_REQUIRE_GPU=1`; CI uses Mesa Lavapipe and
-requires the adapter.
+adapter is present unless `PUNCTRA_REQUIRE_GPU=1`. Run all verification locally;
+the repository does not use hosted CI.
 
 Keep public behavior documented, add interface-level tests for changes, avoid
 unsafe code, and preserve caller-owned wgpu submission.

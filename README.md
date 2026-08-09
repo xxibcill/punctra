@@ -85,8 +85,8 @@ adapter supported by wgpu; renderer-neutral protocol tests do not.
 
 GPU-backed tests are separated from renderer-neutral contract tests so the
 protocol remains testable on machines without a graphics adapter. Set
-`PUNCTRA_REQUIRE_GPU=1` to make a missing headless adapter a test failure; CI
-does this against Mesa Lavapipe.
+`PUNCTRA_REQUIRE_GPU=1` to make a missing headless adapter a local test failure.
+All repository verification is run locally; no hosted CI workflow is configured.
 
 ## License
 
