@@ -314,6 +314,25 @@ impl RenderUpdate {
     }
 }
 
+/// Renderer work authorized by one accepted logical update.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum UpdateEffect<'update> {
+    /// Clear renderer resources and begin the report's View generation.
+    GenerationReset,
+    /// Publish the complete accepted point batch.
+    BatchUpserted {
+        /// The batch borrowed from the applied update.
+        batch: &'update PointBatch,
+    },
+    /// Remove one resident batch key.
+    BatchRemoved {
+        /// The accepted key to remove.
+        key: BatchKey,
+    },
+    /// Replace renderer highlighting from the state model's accepted set.
+    HighlightsSet,
+}
+
 /// Hard protocol residency limits selected by the caller.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct RenderLimits {
@@ -476,6 +495,27 @@ impl UpdateReport {
     }
 }
 
+/// The report and renderer effect produced by one accepted update.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct AppliedUpdate<'update> {
+    report: UpdateReport,
+    effect: UpdateEffect<'update>,
+}
+
+impl<'update> AppliedUpdate<'update> {
+    /// Returns the accepted update's observable accounting.
+    #[must_use]
+    pub const fn report(self) -> UpdateReport {
+        self.report
+    }
+
+    /// Returns the renderer work authorized by the accepted transition.
+    #[must_use]
+    pub const fn effect(self) -> UpdateEffect<'update> {
+        self.effect
+    }
+}
+
 /// An immutable observable snapshot of protocol state.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct RenderSnapshot {
@@ -557,20 +597,38 @@ impl RenderStateModel {
     /// Returns [`ProtocolError`] when the update does not belong to a valid
     /// active generation, violates batch-version ordering, fails a conditional
     /// removal, overflows accounting, or exceeds a hard residency limit.
-    pub fn apply(&mut self, update: &RenderUpdate) -> Result<UpdateReport, ProtocolError> {
-        match update {
-            RenderUpdate::Reset { view_generation } => self.apply_reset(*view_generation),
-            RenderUpdate::Upsert { batch } => self.apply_upsert(batch),
+    /// On success, the result pairs public accounting with the renderer work
+    /// authorized by the accepted state transition.
+    pub fn apply<'update>(
+        &mut self,
+        update: &'update RenderUpdate,
+    ) -> Result<AppliedUpdate<'update>, ProtocolError> {
+        let (report, effect) = match update {
+            RenderUpdate::Reset { view_generation } => (
+                self.apply_reset(*view_generation)?,
+                UpdateEffect::GenerationReset,
+            ),
+            RenderUpdate::Upsert { batch } => (
+                self.apply_upsert(batch)?,
+                UpdateEffect::BatchUpserted { batch },
+            ),
             RenderUpdate::Remove {
                 view_generation,
                 key,
                 expected_version,
-            } => self.apply_remove(*view_generation, *key, *expected_version),
+            } => (
+                self.apply_remove(*view_generation, *key, *expected_version)?,
+                UpdateEffect::BatchRemoved { key: *key },
+            ),
             RenderUpdate::SetHighlights {
                 view_generation,
                 point_ids,
-            } => self.apply_highlights(*view_generation, point_ids),
-        }
+            } => (
+                self.apply_highlights(*view_generation, point_ids)?,
+                UpdateEffect::HighlightsSet,
+            ),
+        };
+        Ok(AppliedUpdate { report, effect })
     }
 
     /// Captures public aggregate state and highlights in deterministic order.

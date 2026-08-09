@@ -2,7 +2,8 @@
 
 use render_protocol::{
     BatchKey, BatchVersion, PointBatch, PointId, ProtocolError, RenderLimits, RenderPoint,
-    RenderStateModel, RenderUpdate, ResidentResource, UpdateKind, ViewGenerationKey, ViewId,
+    RenderStateModel, RenderUpdate, ResidentResource, UpdateEffect, UpdateKind, ViewGenerationKey,
+    ViewId,
 };
 
 #[test]
@@ -12,7 +13,8 @@ fn reset_begins_exactly_one_generation_and_is_observable() {
 
     let report = state
         .apply(&RenderUpdate::Reset { view_generation })
-        .unwrap();
+        .unwrap()
+        .report();
 
     assert_eq!(report.kind(), UpdateKind::Reset);
     assert_eq!(report.view_generation(), view_generation);
@@ -31,6 +33,50 @@ fn reset_begins_exactly_one_generation_and_is_observable() {
 }
 
 #[test]
+fn accepted_updates_describe_their_renderer_effects() {
+    let view_generation = view_generation(11, 0);
+    let mut state = RenderStateModel::new(RenderLimits::new(1_024, 32, 4));
+    let reset = RenderUpdate::Reset { view_generation };
+    assert_eq!(
+        state.apply(&reset).unwrap().effect(),
+        UpdateEffect::GenerationReset
+    );
+
+    let upsert = RenderUpdate::Upsert {
+        batch: batch(view_generation, 7, 2, &[10, 11]),
+    };
+    let accepted_upsert = state.apply(&upsert).unwrap();
+    let RenderUpdate::Upsert { batch } = &upsert else {
+        unreachable!("the fixture is an upsert")
+    };
+    assert_eq!(
+        accepted_upsert.effect(),
+        UpdateEffect::BatchUpserted { batch }
+    );
+
+    let highlights = RenderUpdate::SetHighlights {
+        view_generation,
+        point_ids: vec![PointId::new(10)],
+    };
+    assert_eq!(
+        state.apply(&highlights).unwrap().effect(),
+        UpdateEffect::HighlightsSet
+    );
+
+    let remove = RenderUpdate::Remove {
+        view_generation,
+        key: BatchKey::new(7),
+        expected_version: BatchVersion::new(2),
+    };
+    assert_eq!(
+        state.apply(&remove).unwrap().effect(),
+        UpdateEffect::BatchRemoved {
+            key: BatchKey::new(7),
+        }
+    );
+}
+
+#[test]
 fn upsert_inserts_and_strictly_newer_versions_replace_atomically() {
     let view_generation = view_generation(1, 0);
     let mut state = started_state(view_generation, RenderLimits::new(1_024, 32, 4));
@@ -39,7 +85,8 @@ fn upsert_inserts_and_strictly_newer_versions_replace_atomically() {
         .apply(&RenderUpdate::Upsert {
             batch: batch(view_generation, 8, 3, &[10, 11]),
         })
-        .unwrap();
+        .unwrap()
+        .report();
 
     assert_eq!(inserted.kind(), UpdateKind::BatchInserted);
     assert_eq!(inserted.uploaded_points(), 2);
@@ -54,7 +101,8 @@ fn upsert_inserts_and_strictly_newer_versions_replace_atomically() {
         .apply(&RenderUpdate::Upsert {
             batch: batch(view_generation, 8, 4, &[12]),
         })
-        .unwrap();
+        .unwrap()
+        .report();
 
     assert_eq!(replaced.kind(), UpdateKind::BatchReplaced);
     assert_eq!(replaced.uploaded_points(), 1);
@@ -111,7 +159,8 @@ fn conditional_remove_preserves_newer_batches_and_versions_survive_removal() {
             key: BatchKey::new(5),
             expected_version: BatchVersion::new(7),
         })
-        .unwrap();
+        .unwrap()
+        .report();
     assert_eq!(removed.kind(), UpdateKind::BatchRemoved);
     assert_eq!(removed.removed_points(), 2);
     assert_eq!(removed.removed_bytes(), 64);
@@ -202,7 +251,8 @@ fn reset_requires_forward_progress_per_view_and_clears_generation_state() {
         .apply(&RenderUpdate::Reset {
             view_generation: next,
         })
-        .unwrap();
+        .unwrap()
+        .report();
     assert_eq!(report.removed_points(), 1);
     assert_eq!(report.removed_bytes(), 32);
     assert_eq!(report.resident().batch_count(), 0);
@@ -237,7 +287,8 @@ fn highlights_are_a_sorted_distinct_replaceable_set() {
             view_generation,
             point_ids: vec![PointId::new(9), PointId::new(2), PointId::new(9)],
         })
-        .unwrap();
+        .unwrap()
+        .report();
 
     assert_eq!(report.kind(), UpdateKind::HighlightsSet);
     assert_eq!(report.highlight_count(), 2);
@@ -376,7 +427,8 @@ fn assert_resident_batch(
             key: BatchKey::new(key),
             expected_version: BatchVersion::new(version),
         })
-        .expect("the expected resident batch should be removable from a cloned model");
+        .expect("the expected resident batch should be removable from a cloned model")
+        .report();
     assert_eq!(report.removed_points(), point_count);
     assert_eq!(report.removed_bytes(), estimated_gpu_bytes);
 }

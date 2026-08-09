@@ -8,7 +8,7 @@ use std::{
 use bytemuck::Zeroable;
 use render_protocol::{
     BatchKey, PointBatch, PointId, ProtocolError, RenderLimits, RenderStateModel, RenderUpdate,
-    UpdateReport, ViewGenerationKey,
+    UpdateEffect, UpdateReport, ViewGenerationKey,
 };
 use thiserror::Error;
 use wgpu::util::DeviceExt;
@@ -196,14 +196,15 @@ impl WgpuRenderer {
     /// renderer's active logical state.
     pub fn apply(&mut self, update: &RenderUpdate) -> Result<UpdateReport, RendererError> {
         let mut next_state = self.state.clone();
-        let report = next_state.apply(update)?;
+        let applied = next_state.apply(update)?;
+        let report = applied.report();
 
-        match update {
-            RenderUpdate::Reset { view_generation } => {
+        match applied.effect() {
+            UpdateEffect::GenerationReset => {
                 self.batches.clear();
-                self.pick_table = Some(Arc::new(PickTable::new(*view_generation)));
+                self.pick_table = Some(Arc::new(PickTable::new(report.view_generation())));
             }
-            RenderUpdate::Upsert { batch } => {
+            UpdateEffect::BatchUpserted { batch } => {
                 let highlights = highlights(&next_state);
                 let pick_table = self
                     .pick_table
@@ -218,10 +219,10 @@ impl WgpuRenderer {
                 )?;
                 self.batches.insert(batch.key(), gpu_batch);
             }
-            RenderUpdate::Remove { key, .. } => {
-                self.batches.remove(key);
+            UpdateEffect::BatchRemoved { key } => {
+                self.batches.remove(&key);
             }
-            RenderUpdate::SetHighlights { .. } => {
+            UpdateEffect::HighlightsSet => {
                 let highlights = highlights(&next_state);
                 for batch in self.batches.values_mut() {
                     batch.apply_highlights(&self.device, &highlights);
