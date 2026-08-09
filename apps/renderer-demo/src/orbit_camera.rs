@@ -6,6 +6,7 @@ const MIN_ELEVATION: f64 = 0.08;
 const MAX_ELEVATION: f64 = 1.48;
 const MIN_RADIUS: f64 = 20.0;
 const MAX_RADIUS: f64 = 10_000.0;
+const FAR_DISTANCE: f32 = 20_000.0;
 const ORBIT_RADIANS_PER_PIXEL: f64 = 0.006;
 const ZOOM_EXPONENT_PER_LINE: f64 = 0.12;
 
@@ -56,13 +57,18 @@ impl OrbitCamera {
             [0.0, 0.0, 1.0],
             std::f32::consts::FRAC_PI_4,
             0.5,
-            5_000.0,
+            FAR_DISTANCE,
         )
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use point_view::{AvailableNodes, PlanningBudget, ViewPlanner};
+    use render_protocol::{ViewGenerationKey, ViewId};
+
+    use crate::synthetic::{SCENE_RADIUS, SCENE_TARGET, SyntheticScene};
+
     use super::*;
 
     const TARGET: [f64; 3] = [6_378_137.125, 13_756_432.625, 120.0];
@@ -89,5 +95,26 @@ mod tests {
         changed.reset(700.0);
 
         assert_eq!(changed.as_render_camera(), initial.as_render_camera());
+    }
+
+    #[test]
+    fn maximum_radius_keeps_the_scene_root_requestable() {
+        let view_generation = ViewGenerationKey::new(ViewId::new(1), 1);
+        let scene = SyntheticScene::new(view_generation).unwrap();
+        let planning_nodes = scene.planning_nodes();
+        let mut orbit = OrbitCamera::new(SCENE_TARGET, SCENE_RADIUS);
+        orbit.zoom(-1_000_000.0);
+
+        let plan = ViewPlanner::default()
+            .plan(
+                &orbit.as_render_camera().unwrap(),
+                [1_280, 800],
+                AvailableNodes::new(view_generation, &planning_nodes),
+                PlanningBudget::new(u64::MAX, u64::MAX, u64::MAX),
+            )
+            .unwrap();
+
+        assert_eq!(plan.requests().len(), 1);
+        assert_eq!(plan.requests()[0].node().get(), 1);
     }
 }
