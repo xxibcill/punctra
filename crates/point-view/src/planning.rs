@@ -406,6 +406,7 @@ fn select_target_cut(
             index,
         );
     }
+    let mut missing_transition_targets = BTreeSet::new();
 
     let mut refinements = hierarchy
         .nodes
@@ -426,13 +427,31 @@ fn select_target_cut(
             .filter(|child| visibility[*child].visible)
             .collect::<Vec<_>>();
         target_cut.extend(visible_children.iter().copied());
+        let candidate_was_transition_target = missing_transition_targets.remove(&candidate.index);
+        let added_transition_targets = visible_children
+            .iter()
+            .copied()
+            .filter(|child| hierarchy.nodes[*child].status == NodeStatus::Missing)
+            .filter(|child| missing_transition_targets.insert(*child))
+            .collect::<Vec<_>>();
 
-        let usage = conservative_target_usage(hierarchy, visibility, &target_cut)?;
-        if !usage.fits_within(budget) {
-            for child in visible_children {
-                target_cut.remove(&child);
+        if !transition_targets_fit_budget(
+            hierarchy,
+            visibility,
+            &target_cut,
+            &missing_transition_targets,
+            budget,
+        )? {
+            for child in &visible_children {
+                target_cut.remove(child);
+            }
+            for child in added_transition_targets {
+                missing_transition_targets.remove(&child);
             }
             target_cut.insert(candidate.index);
+            if candidate_was_transition_target {
+                missing_transition_targets.insert(candidate.index);
+            }
             continue;
         }
 
@@ -514,17 +533,26 @@ fn exceeds_refinement_threshold(
     }
 }
 
-fn conservative_target_usage(
+fn transition_targets_fit_budget(
     hierarchy: &Hierarchy,
     visibility: &[NodeProjection],
     target_cut: &BTreeSet<usize>,
-) -> Result<ResourceUsage, PlanError> {
+    missing_transition_targets: &BTreeSet<usize>,
+    budget: PlanningBudget,
+) -> Result<bool, PlanError> {
     let retained_mask = required_residents(hierarchy, visibility, target_cut);
-    let mut resource_mask = resource_mask_with_requested_nodes(hierarchy, &retained_mask);
-    for index in target_cut.iter().copied() {
-        resource_mask[index] = true;
+    let Some(request_indices) =
+        select_request_indices(hierarchy, visibility, target_cut, &retained_mask, budget)?
+    else {
+        return Ok(false);
+    };
+    if missing_transition_targets.is_empty() {
+        return Ok(true);
     }
-    usage_for_mask(hierarchy, &resource_mask)
+    let request_indices = request_indices.into_iter().collect::<BTreeSet<_>>();
+    Ok(missing_transition_targets
+        .iter()
+        .all(|index| request_indices.contains(index)))
 }
 
 fn required_residents(
@@ -607,10 +635,38 @@ fn select_requests(
     budget: PlanningBudget,
     view_generation: render_protocol::ViewGenerationKey,
 ) -> Result<Vec<NodeRequest>, PlanError> {
-    let mut resource_mask = resource_mask_with_requested_nodes(hierarchy, retained_mask);
-    let current_usage = usage_for_mask(hierarchy, &resource_mask)?;
-    if !current_usage.fits_within(budget) {
+    let Some(request_indices) =
+        select_request_indices(hierarchy, visibility, target_cut, retained_mask, budget)?
+    else {
         return Ok(Vec::new());
+    };
+
+    Ok(request_indices
+        .into_iter()
+        .map(|index| {
+            let node = &hierarchy.nodes[index];
+            NodeRequest {
+                view_generation,
+                node_key: node.key,
+                batch_key: node.batch_key,
+                point_count: node.point_count,
+                estimated_bytes: node.estimated_bytes,
+                screen_space_error_pixels: visibility[index].screen_error,
+            }
+        })
+        .collect())
+}
+
+fn select_request_indices(
+    hierarchy: &Hierarchy,
+    visibility: &[NodeProjection],
+    target_cut: &BTreeSet<usize>,
+    retained_mask: &[bool],
+    budget: PlanningBudget,
+) -> Result<Option<Vec<usize>>, PlanError> {
+    let mut current_usage = reserved_resource_usage(hierarchy, retained_mask)?;
+    if !current_usage.fits_within(budget) {
+        return Ok(None);
     }
 
     let mut missing_targets = target_cut
@@ -625,35 +681,17 @@ fn select_requests(
             .then_with(|| hierarchy.nodes[*left].key.cmp(&hierarchy.nodes[*right].key))
     });
 
-    let mut requests = Vec::new();
+    let mut request_indices = Vec::new();
     for index in missing_targets {
-        resource_mask[index] = true;
-        let proposed_usage = usage_for_mask(hierarchy, &resource_mask)?;
+        let mut proposed_usage = current_usage;
+        add_node_usage(&mut proposed_usage, &hierarchy.nodes[index])?;
         if !proposed_usage.fits_within(budget) {
-            resource_mask[index] = false;
             continue;
         }
-        let node = &hierarchy.nodes[index];
-        requests.push(NodeRequest {
-            view_generation,
-            node_key: node.key,
-            batch_key: node.batch_key,
-            point_count: node.point_count,
-            estimated_bytes: node.estimated_bytes,
-            screen_space_error_pixels: visibility[index].screen_error,
-        });
+        current_usage = proposed_usage;
+        request_indices.push(index);
     }
-    Ok(requests)
-}
-
-fn resource_mask_with_requested_nodes(hierarchy: &Hierarchy, base_mask: &[bool]) -> Vec<bool> {
-    let mut resource_mask = base_mask.to_vec();
-    for (index, node) in hierarchy.nodes.iter().enumerate() {
-        if node.status == NodeStatus::Requested {
-            resource_mask[index] = true;
-        }
-    }
-    resource_mask
+    Ok(Some(request_indices))
 }
 
 fn actual_resource_usage(
@@ -665,38 +703,43 @@ fn actual_resource_usage(
         .iter()
         .map(|request| request.node_key)
         .collect::<BTreeSet<_>>();
-    let mut resource_mask = resource_mask_with_requested_nodes(hierarchy, retained_mask);
+    let mut resource_mask = retained_mask.to_vec();
     for (index, node) in hierarchy.nodes.iter().enumerate() {
         if request_keys.contains(&node.key) {
             resource_mask[index] = true;
         }
     }
-    usage_for_mask(hierarchy, &resource_mask)
+    reserved_resource_usage(hierarchy, &resource_mask)
 }
 
-fn usage_for_mask(
+fn reserved_resource_usage(
     hierarchy: &Hierarchy,
     resource_mask: &[bool],
 ) -> Result<ResourceUsage, PlanError> {
     let mut usage = ResourceUsage::default();
     for (node, included) in hierarchy.nodes.iter().zip(resource_mask) {
-        if !included {
+        if !included && node.status != NodeStatus::Requested {
             continue;
         }
-        usage.point_count = usage
-            .point_count
-            .checked_add(node.point_count)
-            .ok_or(PlanError::ResourceUsageOverflow)?;
-        usage.estimated_bytes = usage
-            .estimated_bytes
-            .checked_add(node.estimated_bytes)
-            .ok_or(PlanError::ResourceUsageOverflow)?;
-        usage.batch_count = usage
-            .batch_count
-            .checked_add(1)
-            .ok_or(PlanError::ResourceUsageOverflow)?;
+        add_node_usage(&mut usage, node)?;
     }
     Ok(usage)
+}
+
+fn add_node_usage(usage: &mut ResourceUsage, node: &AvailableNode) -> Result<(), PlanError> {
+    usage.point_count = usage
+        .point_count
+        .checked_add(node.point_count)
+        .ok_or(PlanError::ResourceUsageOverflow)?;
+    usage.estimated_bytes = usage
+        .estimated_bytes
+        .checked_add(node.estimated_bytes)
+        .ok_or(PlanError::ResourceUsageOverflow)?;
+    usage.batch_count = usage
+        .batch_count
+        .checked_add(1)
+        .ok_or(PlanError::ResourceUsageOverflow)?;
+    Ok(())
 }
 
 fn retained_nodes(

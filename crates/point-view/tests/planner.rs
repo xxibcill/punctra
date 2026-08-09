@@ -614,6 +614,60 @@ fn refinement_budget_is_spent_on_the_highest_screen_error_first() {
 }
 
 #[test]
+fn unaffordable_missing_root_does_not_block_an_affordable_refinement() {
+    let nodes = [
+        node(
+            1,
+            None,
+            root_bounds(),
+            30.0,
+            23,
+            230,
+            1,
+            NodeStatus::Missing,
+        ),
+        node(2, None, root_bounds(), 0.0, 2, 20, 2, NodeStatus::Requested),
+        node(3, None, root_bounds(), 10.0, 10, 100, 3, resident(1)),
+        node(
+            4,
+            Some(3),
+            root_bounds(),
+            2.0,
+            4,
+            40,
+            4,
+            NodeStatus::Missing,
+        ),
+        node(
+            5,
+            Some(3),
+            root_bounds(),
+            1.0,
+            6,
+            60,
+            5,
+            NodeStatus::Missing,
+        ),
+    ];
+
+    let plan = planner(2.0, 0.25)
+        .plan(
+            &camera(),
+            [100, 100],
+            AvailableNodes::new(generation(14, 0), &nodes),
+            PlanningBudget::new(22, 220, 4),
+        )
+        .unwrap();
+
+    assert_eq!(request_keys(&plan), vec![node_key(4), node_key(5)]);
+    assert_eq!(retained_keys(&plan), vec![node_key(3)]);
+    assert!(plan.retirements().is_empty());
+    assert_eq!(plan.resource_usage().point_count(), 22);
+    assert_eq!(plan.resource_usage().estimated_bytes(), 220);
+    assert_eq!(plan.resource_usage().batch_count(), 4);
+}
+
+#[test]
 fn in_flight_work_is_reserved_and_never_requested_twice() {
     let generation = generation(9, 0);
     let nodes = [
