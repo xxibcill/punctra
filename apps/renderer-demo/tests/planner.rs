@@ -1,4 +1,4 @@
-//! Planner-to-renderer GPU acceptance on an available headless adapter.
+//! Demo-level planner-to-renderer GPU acceptance on an available headless adapter.
 
 use std::{env, sync::OnceLock};
 

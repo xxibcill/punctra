@@ -15,7 +15,6 @@ thiserror.workspace = true
 wgpu.workspace = true
 
 [dev-dependencies]
-point-view.workspace = true
 pollster.workspace = true
 
 [lints]

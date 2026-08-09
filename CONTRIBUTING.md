@@ -17,7 +17,8 @@ cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace --all-features
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps
 cargo bench -p point-view --bench planner
-PUNCTRA_REQUIRE_GPU=1 cargo test -p render-wgpu --test offscreen --test planner
+PUNCTRA_REQUIRE_GPU=1 cargo test -p render-wgpu --test offscreen
+PUNCTRA_REQUIRE_GPU=1 cargo test -p renderer-demo --test planner
 ```
 
 GPU acceptance tests use any available headless wgpu adapter. They skip when no

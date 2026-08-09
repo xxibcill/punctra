@@ -132,9 +132,16 @@ crates/
     tests/
       contracts.rs
       offscreen.rs
-      planner.rs
 
 apps/
+  renderer-demo/
+    src/
+      main.rs
+      orbit_camera.rs
+      synthetic.rs
+    tests/
+      planner.rs
+
   point-cli/
     src/
       main.rs
