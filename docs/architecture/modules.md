@@ -1,6 +1,7 @@
 # Module Catalog
 
-Status: proposed v0.1
+Status: deferred platform proposal; render-engine v0.1 is defined in
+[the current design](../design/render-engine-v0.1.md)
 
 This document is the ownership map. Each crate below is one logical module with one job. The job sentence is normative: if new behavior does not fit it, that behavior does not belong in the module.
 
@@ -503,7 +504,7 @@ ViewInput is revision-pinned and opaque: it exposes immutable Snapshot provenanc
 
 It owns:
 
-- frozen FrameToken and FrameKey values;
+- frozen FrameToken and ViewGenerationKey values;
 - stable point-batch and mesh-batch keys;
 - origin-relative display columns;
 - Reset, Upsert, Remove, and replacement semantics;
@@ -523,7 +524,7 @@ Conceptual interface:
 
 ~~~rust
 pub struct MeshBatch {
-    pub frame: FrameKey,
+    pub view_generation: ViewGenerationKey,
     pub key: MeshBatchKey,
     pub artifact: ArtifactId,
     pub world_origin: [f64; 3],
@@ -534,11 +535,11 @@ pub struct MeshBatch {
 pub enum RenderDelta {
     Points(ViewDelta),
     UpsertMesh {
-        frame: FrameKey,
+        view_generation: ViewGenerationKey,
         batch: MeshBatch,
     },
     RemoveMesh {
-        frame: FrameKey,
+        view_generation: ViewGenerationKey,
         key: MeshBatchKey,
     },
 }

@@ -1,0 +1,21 @@
+[package]
+name = "render-wgpu"
+description = "A bounded, embeddable wgpu point-cloud renderer for Punctra."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+bytemuck.workspace = true
+glam.workspace = true
+render-protocol.workspace = true
+thiserror.workspace = true
+wgpu.workspace = true
+
+[dev-dependencies]
+pollster.workspace = true
+
+[lints]
+workspace = true

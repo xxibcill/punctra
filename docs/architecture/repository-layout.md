@@ -1,6 +1,7 @@
 # Repository and Dependency Layout
 
-Status: proposed v0.1
+Status: deferred platform proposal; render-engine v0.1 is defined in
+[the current design](../design/render-engine-v0.1.md)
 
 The repository is one Cargo workspace containing independently buildable crates. A crate is created only when its implementation and at least one caller exist; the tree below is the intended destination, not a requirement to scaffold empty directories.
 

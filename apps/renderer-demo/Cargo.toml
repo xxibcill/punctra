@@ -1,0 +1,19 @@
+[package]
+name = "renderer-demo"
+description = "Interactive synthetic point-cloud demonstration for Punctra."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+pollster.workspace = true
+render-protocol.workspace = true
+render-wgpu.workspace = true
+wgpu.workspace = true
+winit.workspace = true
+
+[lints]
+workspace = true

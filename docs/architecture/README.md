@@ -1,6 +1,11 @@
 # Point-Cloud Foundation Architecture
 
-Status: proposed v0.1
+Status: deferred platform proposal
+
+> Punctra v0.1 is now scoped to the reusable point-cloud render engine. Its
+> accepted contract is [render-engine-v0.1.md](../design/render-engine-v0.1.md).
+> This broader document remains as research for possible host projects; it is
+> not the current implementation plan.
 
 This package defines a reusable, headless foundation for very large point-cloud documents. It is aimed at learning, experimentation, and reuse by desktop applications, command-line tools, language bindings, and future research code.
 
