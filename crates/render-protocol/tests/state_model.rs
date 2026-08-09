@@ -48,11 +48,7 @@ fn upsert_inserts_and_strictly_newer_versions_replace_atomically() {
     assert_eq!(inserted.resident().batch_count(), 1);
     assert_eq!(inserted.resident().point_count(), 2);
     assert_eq!(inserted.resident().estimated_gpu_bytes(), 64);
-    assert_eq!(state.snapshot().batches()[0].key(), BatchKey::new(8));
-    assert_eq!(
-        state.snapshot().batches()[0].version(),
-        BatchVersion::new(3)
-    );
+    assert_resident_batch(&state, view_generation, 8, 3, 2, 64);
 
     let replaced = state
         .apply(&RenderUpdate::Upsert {
@@ -67,6 +63,7 @@ fn upsert_inserts_and_strictly_newer_versions_replace_atomically() {
     assert_eq!(replaced.removed_bytes(), 64);
     assert_eq!(replaced.resident().batch_count(), 1);
     assert_eq!(replaced.resident().point_count(), 1);
+    assert_resident_batch(&state, view_generation, 8, 4, 1, 32);
 
     let before = state.snapshot();
     assert_eq!(
@@ -80,6 +77,7 @@ fn upsert_inserts_and_strictly_newer_versions_replace_atomically() {
         })
     );
     assert_eq!(state.snapshot(), before);
+    assert_resident_batch(&state, view_generation, 8, 4, 1, 32);
 }
 
 #[test]
@@ -207,7 +205,8 @@ fn reset_requires_forward_progress_per_view_and_clears_generation_state() {
         .unwrap();
     assert_eq!(report.removed_points(), 1);
     assert_eq!(report.removed_bytes(), 32);
-    assert!(state.snapshot().batches().is_empty());
+    assert_eq!(report.resident().batch_count(), 0);
+    assert_batch_not_resident(&state, next, 1);
     assert!(state.snapshot().highlights().is_empty());
     assert_eq!(state.snapshot().active_view_generation(), Some(next));
 
@@ -292,6 +291,7 @@ fn byte_point_and_batch_limits_are_hard_and_transactional() {
         })
     );
     assert_eq!(state.snapshot(), before);
+    assert_resident_batch(&state, view_generation, 1, 0, 1, 32);
 }
 
 #[test]
@@ -316,6 +316,7 @@ fn rejected_replacement_keeps_the_complete_previous_batch() {
         })
     );
     assert_eq!(state.snapshot(), before);
+    assert_resident_batch(&state, view_generation, 1, 1, 1, 32);
 }
 
 #[test]
@@ -358,6 +359,44 @@ fn assert_limit_rejection(
         })
     );
     assert_eq!(state.snapshot(), before);
+}
+
+fn assert_resident_batch(
+    state: &RenderStateModel,
+    view_generation: ViewGenerationKey,
+    key: u64,
+    version: u64,
+    point_count: u64,
+    estimated_gpu_bytes: u64,
+) {
+    let mut probe = state.clone();
+    let report = probe
+        .apply(&RenderUpdate::Remove {
+            view_generation,
+            key: BatchKey::new(key),
+            expected_version: BatchVersion::new(version),
+        })
+        .expect("the expected resident batch should be removable from a cloned model");
+    assert_eq!(report.removed_points(), point_count);
+    assert_eq!(report.removed_bytes(), estimated_gpu_bytes);
+}
+
+fn assert_batch_not_resident(
+    state: &RenderStateModel,
+    view_generation: ViewGenerationKey,
+    key: u64,
+) {
+    let mut probe = state.clone();
+    assert_eq!(
+        probe.apply(&RenderUpdate::Remove {
+            view_generation,
+            key: BatchKey::new(key),
+            expected_version: BatchVersion::new(0),
+        }),
+        Err(ProtocolError::BatchNotResident {
+            key: BatchKey::new(key),
+        })
+    );
 }
 
 fn started_state(view_generation: ViewGenerationKey, limits: RenderLimits) -> RenderStateModel {

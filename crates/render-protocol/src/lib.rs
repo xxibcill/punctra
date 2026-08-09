@@ -380,37 +380,20 @@ impl ResidentStats {
     }
 }
 
-/// Observable metadata for one resident batch.
+/// Internal state for one resident batch.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct ResidentBatch {
-    key: BatchKey,
+struct BatchResidency {
     version: BatchVersion,
     point_count: u64,
     estimated_gpu_bytes: u64,
 }
 
-impl ResidentBatch {
-    /// Returns the batch key.
-    #[must_use]
-    pub const fn key(self) -> BatchKey {
-        self.key
-    }
-
-    /// Returns the resident batch version.
-    #[must_use]
-    pub const fn version(self) -> BatchVersion {
-        self.version
-    }
-
-    /// Returns the number of points in the batch.
-    #[must_use]
-    pub const fn point_count(self) -> u64 {
+impl BatchResidency {
+    const fn point_count(self) -> u64 {
         self.point_count
     }
 
-    /// Returns this batch's bytes under the protocol residency model.
-    #[must_use]
-    pub const fn estimated_gpu_bytes(self) -> u64 {
+    const fn estimated_gpu_bytes(self) -> u64 {
         self.estimated_gpu_bytes
     }
 }
@@ -498,7 +481,6 @@ impl UpdateReport {
 pub struct RenderSnapshot {
     active_view_generation: Option<ViewGenerationKey>,
     resident: ResidentStats,
-    batches: Vec<ResidentBatch>,
     highlights: Vec<PointId>,
 }
 
@@ -513,12 +495,6 @@ impl RenderSnapshot {
     #[must_use]
     pub const fn resident(&self) -> ResidentStats {
         self.resident
-    }
-
-    /// Returns resident batches in ascending [`BatchKey`] order.
-    #[must_use]
-    pub fn batches(&self) -> &[ResidentBatch] {
-        &self.batches
     }
 
     /// Returns distinct highlights in ascending [`PointId`] order.
@@ -547,7 +523,7 @@ pub struct RenderStateModel {
     limits: RenderLimits,
     active_view_generation: Option<ViewGenerationKey>,
     last_generations: BTreeMap<ViewId, u64>,
-    batches: BTreeMap<BatchKey, ResidentBatch>,
+    batches: BTreeMap<BatchKey, BatchResidency>,
     latest_versions: BTreeMap<BatchKey, BatchVersion>,
     highlights: BTreeSet<PointId>,
     resident: ResidentStats,
@@ -597,13 +573,12 @@ impl RenderStateModel {
         }
     }
 
-    /// Captures all caller-observable state in deterministic key order.
+    /// Captures public aggregate state and highlights in deterministic order.
     #[must_use]
     pub fn snapshot(&self) -> RenderSnapshot {
         RenderSnapshot {
             active_view_generation: self.active_view_generation,
             resident: self.resident,
-            batches: self.batches.values().copied().collect(),
             highlights: self.highlights.iter().copied().collect(),
         }
     }
@@ -663,10 +638,9 @@ impl RenderStateModel {
         } else {
             UpdateKind::BatchInserted
         };
-        let removed_points = replaced.map_or(0, ResidentBatch::point_count);
-        let removed_bytes = replaced.map_or(0, ResidentBatch::estimated_gpu_bytes);
-        let resident_batch = ResidentBatch {
-            key: batch.key(),
+        let removed_points = replaced.map_or(0, BatchResidency::point_count);
+        let removed_bytes = replaced.map_or(0, BatchResidency::estimated_gpu_bytes);
+        let resident_batch = BatchResidency {
             version: batch.version(),
             point_count: batch.point_count(),
             estimated_gpu_bytes: batch.estimated_gpu_bytes(),
@@ -701,10 +675,10 @@ impl RenderStateModel {
     fn residency_after_upsert(
         &self,
         batch: &PointBatch,
-        replaced: Option<ResidentBatch>,
+        replaced: Option<BatchResidency>,
     ) -> Result<ResidentStats, ProtocolError> {
-        let old_points = replaced.map_or(0, ResidentBatch::point_count);
-        let old_bytes = replaced.map_or(0, ResidentBatch::estimated_gpu_bytes);
+        let old_points = replaced.map_or(0, BatchResidency::point_count);
+        let old_bytes = replaced.map_or(0, BatchResidency::estimated_gpu_bytes);
         let added_batches = u64::from(replaced.is_none());
 
         Ok(ResidentStats {
