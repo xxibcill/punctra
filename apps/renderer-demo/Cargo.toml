@@ -10,6 +10,7 @@ publish = false
 
 [dependencies]
 pollster.workspace = true
+point-view.workspace = true
 render-protocol.workspace = true
 render-wgpu.workspace = true
 wgpu.workspace = true

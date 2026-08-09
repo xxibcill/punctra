@@ -7,9 +7,13 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+mod camera;
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use thiserror::Error;
+
+pub use camera::{Camera, CameraError};
 
 /// Estimated GPU bytes for one point in the protocol's residency model.
 ///

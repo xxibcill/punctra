@@ -1,7 +1,8 @@
 # Repository and Dependency Layout
 
-Status: deferred platform proposal; render-engine v0.1 is defined in
-[the current design](../design/render-engine-v0.1.md)
+Status: broader platform layout deferred; the implemented renderer and planner
+are defined by the [v0.1 renderer](../design/render-engine-v0.1.md) and
+[v0.2 planning](../design/adaptive-view-planning-v0.2.md) scopes
 
 The repository is one Cargo workspace containing independently buildable crates. A crate is created only when its implementation and at least one caller exist; the tree below is the intended destination, not a requirement to scaffold empty directories.
 
@@ -82,16 +83,19 @@ crates/
   render-protocol/
     src/
       lib.rs
-      frame.rs
-      delta.rs
-      reference_state.rs
+      camera.rs
+    tests/
+      contracts.rs
+      state_model.rs
 
   point-view/
     src/
       lib.rs
-      priority.rs
-      floating_origin.rs
-      pack.rs
+      planning.rs
+    tests/
+      planner.rs
+    benches/
+      planner.rs
 
   terrain-model/
     src/
@@ -118,10 +122,17 @@ crates/
   render-wgpu/
     src/
       lib.rs
-      resident.rs
-      pipelines.rs
       frame.rs
-      recover.rs
+      gpu.rs
+      pick.rs
+      pipeline.rs
+      point.wgsl
+      renderer.rs
+      targets.rs
+    tests/
+      contracts.rs
+      offscreen.rs
+      planner.rs
 
 apps/
   point-cli/
@@ -179,7 +190,7 @@ point-set -> point-contracts + foundation-runtime
 point-revisions -> point-set + point-contracts + foundation-runtime
 point-query -> point-source + point-index + point-revisions
 render-protocol -> point-contracts
-point-view -> point-query + point-index + render-protocol
+point-view -> render-protocol
 terrain-model -> point-contracts + foundation-runtime
 landxml -> terrain-model + foundation-runtime
 point-workspace -> point-source + point-index + point-revisions + point-query
@@ -271,9 +282,10 @@ let surface = terrain_model::derive(
 // Encode a stored Terrain Surface fixture without the engine.
 let xml = LandXml::encode(&surface, options)?;
 
-// Draw synthetic render-protocol deltas without opening point data.
-renderer.apply(RenderDelta::Points(synthetic_view_delta))?;
-renderer.render(&target, &frame)?;
+// Draw synthetic render-protocol updates without opening point data.
+renderer.apply(&RenderUpdate::Reset { view_generation })?;
+renderer.apply(&RenderUpdate::Upsert { batch: synthetic_batch })?;
+let recorded = renderer.render(&mut encoder, &target, &frame)?;
 ~~~
 
 ## Private depth inside crates

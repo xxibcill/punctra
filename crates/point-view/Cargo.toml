@@ -1,6 +1,6 @@
 [package]
-name = "render-protocol"
-description = "Renderer-neutral, generation-safe point-cloud update contracts for Punctra."
+name = "point-view"
+description = "Renderer-neutral adaptive view planning for Punctra point clouds."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,7 +9,15 @@ repository.workspace = true
 
 [dependencies]
 glam.workspace = true
+render-protocol.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "planner"
+harness = false
 
 [lints]
 workspace = true

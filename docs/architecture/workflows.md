@@ -131,51 +131,63 @@ Concurrent commits do not affect the pinned Snapshot.
 
 ## 4. Prepare and render a View
 
-View preparation is a bounded stream and GPU drawing is synchronous. A View cannot begin until Snapshot.view_input confirms a complete compatible Spatial Index.
+Adaptive planning is one synchronous, renderer-neutral CPU operation. The host
+owns hierarchy acquisition, node materialization, scheduling, renderer updates,
+command submission, and device polling. **point-view** does not require a
+Snapshot, Spatial Index, or `ViewInput`; a future host adapter may derive its
+`AvailableNodes` snapshot from those deferred platform capabilities.
 
 ~~~mermaid
 sequenceDiagram
-    participant DESK as Desktop adapter
+    participant HOST as Host adapter
     participant VIEW as point-view
-    participant IDX as point-index
-    participant QRY as point-query
+    participant LOAD as Host loader
     participant GPU as render-wgpu
 
-    DESK->>QRY: Snapshot.view_input()
-    QRY-->>DESK: opaque index-ready ViewInput
-    DESK->>VIEW: prepare(ViewInput, frozen View specification)
-    VIEW->>IDX: hierarchy(roots and children)
-    IDX-->>VIEW: bounds, counts, spans, and geometric errors
-    VIEW->>VIEW: apply camera, screen-error, priority, and point-budget policy
-    VIEW->>QRY: materialize planned samples at Snapshot
-    VIEW-->>DESK: Reset(FrameToken)
-    DESK->>GPU: apply Reset
+    HOST->>GPU: apply(RenderUpdate::Reset)
 
-    loop progressive refinement
-        QRY-->>VIEW: authoritative Point Batches
-        VIEW->>VIEW: choose world origin and pack display values
-        VIEW-->>DESK: Upsert or Remove delta with Coverage
-        DESK->>GPU: apply(RenderDelta)
-        DESK->>GPU: render(target, FrameToken)
-        GPU-->>DESK: Frame report for the same generation
+    loop camera, viewport, or residency change
+        HOST->>VIEW: plan(Camera, viewport, AvailableNodes, PlanningBudget)
+        VIEW-->>HOST: ViewPlan(requests, retention, retirements)
+
+        loop safe conditional retirements
+            HOST->>GPU: apply(RenderUpdate::Remove)
+        end
+
+        loop prioritized missing-node requests
+            HOST->>LOAD: request(node key)
+            LOAD-->>HOST: materialized PointBatch
+            HOST->>GPU: apply(RenderUpdate::Upsert)
+        end
+
+        HOST->>GPU: render(encoder, target, Frame)
+        GPU-->>HOST: RecordedFrame and FrameReport
     end
-
-    VIEW-->>DESK: Complete(ViewSummary)
 ~~~
 
 Rules:
 
-- **point-view** owns LOD policy and renderer-neutral display packing;
-- **render-wgpu** owns only GPU residency and drawing;
-- Reset, stable batch keys, and explicit replacement prevent mixed cameras or Revisions;
+- **point-view** owns culling, screen-error LOD, hysteresis, budget planning,
+  Coverage retention, and safe retirement decisions;
+- the host owns Point Batch materialization, origin-relative display packing,
+  request execution, and application of every renderer update;
+- **render-wgpu** owns bounded GPU point residency, command recording, and
+  provisional picking, but not automatic eviction;
+- Reset, stable batch keys, increasing versions, and conditional removal prevent
+  stale generations or plans from replacing newer data;
 - render never waits for Source I/O, decompression, indexing, or terrain construction;
-- a frame reports the Snapshot Revision and Coverage it represents;
-- one View Batch uses one 64-bit world origin and 32-bit relative display positions; and
+- the host retains any Snapshot or Revision provenance associated with its View
+  generation; neither `ViewPlan` nor `Frame` claims that provenance;
+- one `PointBatch` uses one 64-bit world origin and 32-bit relative display
+  positions; and
 - deleting all GPU resources cannot alter Workspace state.
 
 ### Standalone use
 
-**render-wgpu** can render generated render-protocol deltas in an offscreen test. **point-view** can produce deltas for the CPU RenderStateModel or a file inspector. Neither requires the other to pass its own conformance tests.
+**render-wgpu** can apply generated render-protocol updates and render them in
+an offscreen test. **point-view** can plan directly from generated hierarchy
+metadata and inspect `ViewPlan` without creating a GPU device. Neither requires
+the other at runtime to pass its own conformance tests.
 
 ## 5. Select Points and commit an Edit
 
@@ -190,8 +202,9 @@ sequenceDiagram
     participant WS as point-workspace
     participant REV as point-revisions
 
-    DESK->>GPU: pick_candidates(screen polygon, FrameToken)
-    GPU-->>DESK: provisional candidates and resident Coverage
+    DESK->>GPU: pick(encoder, RecordedFrame, PickRequest)
+    GPU-->>DESK: nonblocking PickTicket
+    DESK->>DESK: submit encoder, drive device polling, poll provisional PickHit
     DESK->>QRY: exact screen-through Query(frozen camera and Snapshot)
     QRY-->>DESK: bounded exact Point stream
     DESK->>SET: materialize(exact stream, budget)

@@ -1,7 +1,8 @@
 # Verification Strategy
 
-Status: deferred platform proposal; render-engine v0.1 is defined in
-[the current design](../design/render-engine-v0.1.md)
+Status: deferred platform proposal; the implemented scopes are the
+[v0.1 render engine](../design/render-engine-v0.1.md) and
+[v0.2 adaptive View planner](../design/adaptive-view-planning-v0.2.md)
 
 The interface is the test surface. Verification asks whether each module preserves its documented inputs, outputs, invariants, ordering, resource limits, errors, and effects. Tests do not lock private algorithms or file layouts unless the layout is itself a persisted contract.
 
@@ -227,34 +228,45 @@ Assert exact equality of Point Identity and requested values, stable ordinal ord
 
 ### render-protocol
 
-Generate Reset, Upsert, replacement, Remove, and mesh-update sequences:
+Generate Reset, Upsert, replacement, conditional Remove, and SetHighlights
+sequences:
 
 - a generation begins with exactly one Reset;
-- stale View identity, generation, and Revision deltas are rejected;
-- duplicate Upsert keys are idempotent replacements;
-- replacement removes superseded coarse batches;
-- Coverage never moves backward within one generation;
-- point and mesh batch limits are enforced; and
-- the CPU reference state ends with the expected resident-key set.
+- stale View identities and generations are rejected;
+- Upserts must strictly increase the last batch version;
+- conditional Remove rejects a mismatched resident version;
+- point, estimated-byte, and batch limits are enforced independently;
+- rejected updates leave state unchanged; and
+- the CPU reference state exposes the expected aggregate residency and
+  deterministic highlight set.
 
 ### point-view
 
-For fixed camera, viewport, error, and point budgets:
+For fixed camera, viewport, hierarchy, and hard budgets:
 
-- node and Point priority is deterministic;
-- emitted Points stay within the requested budget;
-- Coverage progresses monotonically;
-- all View Batches retain stable Point Identities;
-- large world coordinates remain visually separated after floating-origin conversion;
-- origin-relative conversion stays within the declared 32-bit display error bound;
-- changing worker count does not change priority order;
-- every stream begins with Reset and uses explicit replacement or removal;
-- changing camera or Revision requires a new generation;
-- ViewInput provenance is used to reject a mismatched FrameToken before Reset;
-- an incomplete index returns IndexIncomplete;
-- no View result is accepted as an exact Query result.
+- nodes outside any frustum plane are culled conservatively;
+- screen-space error selects the expected hierarchy cut;
+- point, estimated-byte, and batch limits independently block new requests;
+- requested nodes reserve budget and are not requested twice;
+- a parent remains retained until every selected visible replacement is
+  resident;
+- resident descendants remain retained while a selected coarse parent loads;
+- hysteresis prevents refinement from oscillating inside the configured dead
+  band;
+- shuffled node input produces byte-for-byte equal request, retention, and
+  retirement order;
+- malformed, cyclic, or spatially inconsistent hierarchies fail before planner
+  history changes;
+- a generation change resets hysteresis history; and
+- every retirement carries the exact generation, batch key, and observed
+  version.
 
-The render-protocol CPU reference state validates the View stream; no GPU is needed.
+Run those contracts entirely through the planner interface without a GPU. A
+separate headless acceptance test materializes planned synthetic batches,
+applies them to **render-wgpu**, and proves that coarse Coverage is retired only
+after its replacements render within the same fixed limits. The optimized
+planner benchmark uses the demo-scale 5,461-node hierarchy representing more
+than 10 million logical Points.
 
 ### terrain-model
 
@@ -297,21 +309,25 @@ Maintain fixtures produced by independent consumer tools when licensing permits.
 
 ### render-wgpu
 
-Use synthetic render-protocol point and mesh deltas with offscreen targets:
+Use synthetic render-protocol point updates with offscreen targets:
 
 - render one Point, dense overlapping Points, classifications, highlights, and empty input;
 - exercise very large world origins with small relative offsets;
-- enforce CPU and GPU residency budgets;
-- return ResourceLimit rather than silently evicting active-generation batches;
-- verify that frame submission performs no Source-scale I/O;
-- test device loss and renderer reconstruction;
-- reject mixed FrameToken generations and Revisions;
-- verify explicit coarse-batch replacement and removal;
-- render bounded Terrain Surface mesh batches;
-- test pick hints only as candidates; and
+- enforce logical residency and device buffer limits;
+- return a resource error rather than silently evicting active batches;
+- verify that command recording performs no Source-scale I/O and submission
+  remains host-owned;
+- preserve exact cameras across multiple frames recorded before one submission;
+- keep replaced batch resources and identity metadata alive through
+  `RecordedFrame`;
+- reject frames from a different View generation and recorded frames from a
+  different renderer;
+- verify explicit coarse-batch replacement and conditional removal;
+- test asynchronous one-pixel pick hits only as provisional candidates; and
 - compare tolerant image statistics or perceptual hashes, not fragile byte-identical pixels across GPU vendors.
 
-Run dedicated lanes for the available Vulkan, Metal, Direct3D 12, and software fallback adapters. Rendering is not required to be pixel-identical across GPUs.
+Qualify available Vulkan, Metal, Direct3D 12, and software fallback adapters
+locally. Rendering is not required to be pixel-identical across GPUs.
 
 ### point-workspace
 

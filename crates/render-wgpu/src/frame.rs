@@ -1,8 +1,6 @@
 use glam::Mat4;
-use render_protocol::ViewGenerationKey;
+use render_protocol::{Camera, ViewGenerationKey};
 use thiserror::Error;
-
-use crate::Camera;
 
 /// Appearance shared by every point in one rendered frame.
 ///
@@ -97,9 +95,11 @@ impl Frame {
         if viewport.into_iter().any(|extent| extent == 0) {
             return Err(FrameError::EmptyViewport { viewport });
         }
-        let view_projection = camera
-            .view_projection(viewport_aspect_ratio(viewport))
-            .map_err(|_| FrameError::NonFiniteCameraProjection { viewport })?;
+        let view_projection = Mat4::from_cols_array(
+            &camera
+                .view_projection_matrix(viewport_aspect_ratio(viewport))
+                .map_err(|_| FrameError::NonFiniteCameraProjection { viewport })?,
+        );
 
         Ok(Self {
             view_generation,

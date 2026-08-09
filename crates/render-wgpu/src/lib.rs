@@ -53,7 +53,6 @@
 //! # }
 //! ```
 
-mod camera;
 mod frame;
 mod gpu;
 mod pick;
@@ -61,7 +60,7 @@ mod pipeline;
 mod renderer;
 mod targets;
 
-pub use camera::{Camera, CameraError};
 pub use frame::{Frame, FrameError, PointStyle};
 pub use pick::{PickError, PickHit, PickPoll, PickRequest, PickTicket};
+pub use render_protocol::{Camera, CameraError};
 pub use renderer::{FrameReport, RecordedFrame, RendererConfig, RendererError, WgpuRenderer};

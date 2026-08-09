@@ -1,13 +1,14 @@
 [workspace]
 members = [
     "apps/renderer-demo",
+    "crates/point-view",
     "crates/render-protocol",
     "crates/render-wgpu",
 ]
 resolver = "3"
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.90"
 license = "MIT OR Apache-2.0"
@@ -15,8 +16,10 @@ repository = "https://github.com/xxibcill/punctra"
 
 [workspace.dependencies]
 bytemuck = { version = "1.25.2", features = ["derive"] }
+criterion = "0.7.0"
 glam = "0.33.3"
 pollster = "1.0.1"
+point-view = { path = "crates/point-view" }
 render-protocol = { path = "crates/render-protocol" }
 render-wgpu = { path = "crates/render-wgpu" }
 thiserror = "2.0.20"

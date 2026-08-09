@@ -17,8 +17,9 @@ fn frame_uses_the_documented_default_point_style() {
         [0.015, 0.02, 0.03, 1.0].map(f64::to_bits)
     );
 
-    let camera = Camera::perspective([0.0, -1.0, 0.0], [0.0; 3], [0.0, 0.0, 1.0], 1.0, 0.1, 100.0)
-        .expect("the contract camera should be valid");
+    let camera: render_protocol::Camera =
+        Camera::perspective([0.0, -1.0, 0.0], [0.0; 3], [0.0, 0.0, 1.0], 1.0, 0.1, 100.0)
+            .expect("the re-exported contract camera should be valid");
     let frame = Frame::new(ViewGenerationKey::new(ViewId::new(1), 1), camera, [1, 1])
         .expect("the contract frame should be valid");
 

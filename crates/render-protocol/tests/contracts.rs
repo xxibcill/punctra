@@ -1,9 +1,46 @@
 //! Public-interface tests for owned renderer-neutral values.
 
 use render_protocol::{
-    BatchKey, BatchVersion, ESTIMATED_GPU_BYTES_PER_POINT, PointBatch, PointId, ProtocolError,
-    RenderPoint, ViewGenerationKey, ViewId,
+    BatchKey, BatchVersion, Camera, ESTIMATED_GPU_BYTES_PER_POINT, PointBatch, PointId,
+    ProtocolError, RenderPoint, ViewGenerationKey, ViewId,
 };
+
+#[test]
+fn camera_is_a_renderer_neutral_projection_contract() {
+    let camera = Camera::perspective(
+        [1_000_000.0, 2_000_000.0, 100.0],
+        [1_000_001.0, 2_000_000.0, 99.0],
+        [0.0, 0.0, 1.0],
+        std::f32::consts::FRAC_PI_3,
+        0.1,
+        10_000.0,
+    )
+    .expect("the contract camera should be valid");
+
+    assert_eq!(
+        camera.eye().map(f64::to_bits),
+        [1_000_000.0, 2_000_000.0, 100.0].map(f64::to_bits)
+    );
+    assert_eq!(
+        camera.target().map(f64::to_bits),
+        [1_000_001.0, 2_000_000.0, 99.0].map(f64::to_bits)
+    );
+    assert_eq!(
+        camera.up().map(f64::to_bits),
+        [0.0, 0.0, 1.0].map(f64::to_bits)
+    );
+    assert_eq!(
+        camera.vertical_field_of_view_radians().to_bits(),
+        std::f32::consts::FRAC_PI_3.to_bits()
+    );
+    assert_eq!(camera.near_distance().to_bits(), 0.1_f32.to_bits());
+    assert_eq!(camera.far_distance().to_bits(), 10_000.0_f32.to_bits());
+
+    let matrix = camera
+        .view_projection_matrix(16.0 / 9.0)
+        .expect("the validated camera should produce a finite projection");
+    assert!(matrix.into_iter().all(f32::is_finite));
+}
 
 #[test]
 fn point_batch_owns_valid_renderer_neutral_points() {

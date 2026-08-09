@@ -1,21 +1,33 @@
+use std::collections::VecDeque;
+
+use point_view::{AvailableNode, AxisAlignedBox, NodeKey, NodeRequest, NodeStatus, PlanError};
 use render_protocol::{
-    BatchKey, BatchVersion, PointBatch, PointId, ProtocolError, RenderPoint, ViewGenerationKey,
+    BatchKey, BatchVersion, ESTIMATED_GPU_BYTES_PER_POINT, PointBatch, PointId, ProtocolError,
+    RenderPoint, ViewGenerationKey,
 };
 
-pub(crate) const TILE_COLUMNS: u32 = 16;
-pub(crate) const TOTAL_BATCHES: u64 = 256;
-pub(crate) const POINTS_PER_BATCH: u64 = 4_096;
-pub(crate) const TOTAL_POINTS: u64 = TOTAL_BATCHES * POINTS_PER_BATCH;
-pub(crate) const SCENE_RADIUS: f64 = 700.0;
+pub(crate) const RESIDENT_POINT_BUDGET: u64 = 600_000;
+pub(crate) const RESIDENT_BYTE_BUDGET: u64 = RESIDENT_POINT_BUDGET * ESTIMATED_GPU_BYTES_PER_POINT;
+pub(crate) const RESIDENT_BATCH_BUDGET: u64 = 640;
+pub(crate) const LOGICAL_POINT_COUNT: u64 = 16_777_216;
+pub(crate) const TOTAL_NODE_COUNT: u64 = 5_461;
+pub(crate) const SCENE_RADIUS: f64 = 2_500.0;
 pub(crate) const SCENE_TARGET: [f64; 3] = [6_378_137.125, 13_756_432.625, 120.0];
 
-const POINTS_PER_AXIS: u32 = 64;
-const TILE_SIZE_F32: f32 = 32.0;
-const TILE_SIZE_F64: f64 = 32.0;
-const HEIGHT_SCALE: f32 = 18.0;
+const QUADTREE_DEPTH: u32 = 6;
+const LEAF_TILES_PER_AXIS: u32 = 1 << QUADTREE_DEPTH;
+const LEAF_POINTS_PER_AXIS: u32 = 64;
+const INTERNAL_POINTS_PER_AXIS: u32 = 32;
+const GLOBAL_POINTS_PER_AXIS: u32 = LEAF_TILES_PER_AXIS * LEAF_POINTS_PER_AXIS;
+const SCENE_EXTENT: f64 = 2_048.0;
+const HALF_SCENE_EXTENT: f64 = SCENE_EXTENT / 2.0;
+const MIN_HEIGHT: f64 = -48.0;
+const MAX_HEIGHT: f64 = 48.0;
+const HEIGHT_SCALE: f32 = 28.0;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct TileCoordinate {
+struct NodeLayout {
+    level: u32,
     column: u32,
     row: u32,
 }
@@ -23,174 +35,316 @@ struct TileCoordinate {
 #[derive(Debug)]
 pub(crate) struct SyntheticScene {
     view_generation: ViewGenerationKey,
-    tile_order: Vec<TileCoordinate>,
-    next_tile: usize,
+    nodes: Vec<AvailableNode>,
+    layouts: Vec<NodeLayout>,
+    latest_versions: Vec<u64>,
+    pending: VecDeque<NodeKey>,
 }
 
 impl SyntheticScene {
-    pub(crate) fn new(view_generation: ViewGenerationKey) -> Self {
-        let mut tile_order = all_tiles();
-        tile_order.sort_by_key(|tile| tile_sort_key(*tile));
-        Self {
+    pub(crate) fn new(view_generation: ViewGenerationKey) -> Result<Self, PlanError> {
+        let capacity = usize::try_from(TOTAL_NODE_COUNT).expect("the node count fits in usize");
+        let mut nodes = Vec::with_capacity(capacity);
+        let mut layouts = Vec::with_capacity(capacity);
+
+        for level in 0..=QUADTREE_DEPTH {
+            let cells_per_axis = 1_u32 << level;
+            for row in 0..cells_per_axis {
+                for column in 0..cells_per_axis {
+                    let layout = NodeLayout { level, column, row };
+                    nodes.push(make_node(layout)?);
+                    layouts.push(layout);
+                }
+            }
+        }
+
+        debug_assert_eq!(nodes.len(), capacity);
+        Ok(Self {
             view_generation,
-            tile_order,
-            next_tile: 0,
+            nodes,
+            layouts,
+            latest_versions: vec![0; capacity],
+            pending: VecDeque::new(),
+        })
+    }
+
+    pub(crate) fn nodes(&self) -> &[AvailableNode] {
+        &self.nodes
+    }
+
+    pub(crate) fn enqueue_requests(&mut self, requests: &[NodeRequest]) {
+        for request in requests {
+            let index = node_index(request.node_key());
+            if self.nodes[index].status() != NodeStatus::Missing {
+                continue;
+            }
+            self.replace_status(index, NodeStatus::Requested);
+            self.pending.push_back(request.node_key());
         }
     }
 
     pub(crate) fn next_batch(&mut self) -> Result<Option<PointBatch>, ProtocolError> {
-        let Some(tile) = self.tile_order.get(self.next_tile).copied() else {
-            return Ok(None);
-        };
-        self.next_tile += 1;
-        make_batch(self.view_generation, tile).map(Some)
-    }
+        while let Some(key) = self.pending.pop_front() {
+            let index = node_index(key);
+            if self.nodes[index].status() != NodeStatus::Requested {
+                continue;
+            }
 
-    pub(crate) fn loaded_batches(&self) -> u64 {
-        u64::try_from(self.next_tile).expect("the tile count fits in u64")
-    }
-
-    pub(crate) fn highlight_ids(&self) -> Vec<PointId> {
-        self.tile_order.iter().copied().map(highlight_id).collect()
-    }
-}
-
-fn all_tiles() -> Vec<TileCoordinate> {
-    let capacity = usize::try_from(TOTAL_BATCHES).expect("the tile count fits in usize");
-    let mut tiles = Vec::with_capacity(capacity);
-    for row in 0..TILE_COLUMNS {
-        for column in 0..TILE_COLUMNS {
-            tiles.push(TileCoordinate { column, row });
+            let version = self.latest_versions[index]
+                .checked_add(1)
+                .expect("the interactive demo cannot exhaust batch versions");
+            let batch = make_batch(
+                self.view_generation,
+                self.nodes[index],
+                self.layouts[index],
+                BatchVersion::new(version),
+            )?;
+            return Ok(Some(batch));
         }
+        Ok(None)
     }
-    tiles
+
+    pub(crate) fn mark_resident(&mut self, batch_key: BatchKey, version: BatchVersion) {
+        let key =
+            NodeKey::new(batch_key.get()).expect("synthetic batch keys are nonzero node keys");
+        let index = node_index(key);
+        debug_assert_eq!(self.nodes[index].status(), NodeStatus::Requested);
+        debug_assert_eq!(version.get(), self.latest_versions[index] + 1);
+        self.latest_versions[index] = version.get();
+        self.replace_status(index, NodeStatus::Resident { version });
+    }
+
+    pub(crate) fn mark_retired(&mut self, batch_key: BatchKey, expected_version: BatchVersion) {
+        let key =
+            NodeKey::new(batch_key.get()).expect("synthetic batch keys are nonzero node keys");
+        let index = node_index(key);
+        debug_assert_eq!(
+            self.nodes[index].status(),
+            NodeStatus::Resident {
+                version: expected_version,
+            }
+        );
+        self.replace_status(index, NodeStatus::Missing);
+    }
+
+    pub(crate) fn resident_batches(&self) -> u64 {
+        let count = self
+            .nodes
+            .iter()
+            .filter(|node| matches!(node.status(), NodeStatus::Resident { .. }))
+            .count();
+        u64::try_from(count).expect("the resident node count fits in u64")
+    }
+
+    pub(crate) fn pending_batches(&self) -> u64 {
+        u64::try_from(self.pending.len()).expect("the pending node count fits in u64")
+    }
+
+    pub(crate) fn highlight_ids() -> Vec<PointId> {
+        let quarter = GLOBAL_POINTS_PER_AXIS / 4;
+        let center = GLOBAL_POINTS_PER_AXIS / 2;
+        [
+            point_id(quarter, quarter),
+            point_id(center, center),
+            point_id(3 * quarter, 3 * quarter),
+        ]
+        .to_vec()
+    }
+
+    fn replace_status(&mut self, index: usize, status: NodeStatus) {
+        let node = self.nodes[index];
+        self.nodes[index] = AvailableNode::new(
+            node.key(),
+            node.parent(),
+            node.bounds(),
+            node.geometric_error(),
+            node.point_count(),
+            node.estimated_bytes(),
+            node.batch_key(),
+            status,
+        )
+        .expect("changing node status preserves validated metadata");
+    }
 }
 
-fn tile_sort_key(tile: TileCoordinate) -> (i32, u32, u32) {
-    let column = centered_index(tile.column);
-    let row = centered_index(tile.row);
-    (column * column + row * row, tile.row, tile.column)
+fn make_node(layout: NodeLayout) -> Result<AvailableNode, PlanError> {
+    let key = node_key(layout);
+    let parent = parent_key(layout);
+    let bounds = node_bounds(layout)?;
+    let points_per_axis = points_per_axis(layout.level);
+    let point_count = u64::from(points_per_axis) * u64::from(points_per_axis);
+    let estimated_bytes = point_count * ESTIMATED_GPU_BYTES_PER_POINT;
+    let geometric_error = if layout.level == QUADTREE_DEPTH {
+        0.0
+    } else {
+        node_extent(layout.level) / 32.0
+    };
+
+    AvailableNode::new(
+        key,
+        parent,
+        bounds,
+        geometric_error,
+        point_count,
+        estimated_bytes,
+        BatchKey::new(key.get()),
+        NodeStatus::Missing,
+    )
+}
+
+fn node_bounds(layout: NodeLayout) -> Result<AxisAlignedBox, PlanError> {
+    let extent = node_extent(layout.level);
+    let min_x = SCENE_TARGET[0] - HALF_SCENE_EXTENT + f64::from(layout.column) * extent;
+    let min_y = SCENE_TARGET[1] - HALF_SCENE_EXTENT + f64::from(layout.row) * extent;
+    AxisAlignedBox::new(
+        [min_x, min_y, SCENE_TARGET[2] + MIN_HEIGHT],
+        [min_x + extent, min_y + extent, SCENE_TARGET[2] + MAX_HEIGHT],
+    )
 }
 
 fn make_batch(
     view_generation: ViewGenerationKey,
-    tile: TileCoordinate,
+    node: AvailableNode,
+    layout: NodeLayout,
+    version: BatchVersion,
 ) -> Result<PointBatch, ProtocolError> {
-    let point_capacity =
-        usize::try_from(POINTS_PER_BATCH).expect("the points-per-batch count fits in usize");
+    let points_per_axis = points_per_axis(layout.level);
+    let point_capacity = usize::try_from(u64::from(points_per_axis).pow(2))
+        .expect("the synthetic batch size fits in usize");
     let mut points = Vec::with_capacity(point_capacity);
-    for row in 0..POINTS_PER_AXIS {
-        for column in 0..POINTS_PER_AXIS {
-            points.push(make_point(tile, column, row)?);
+    let region_points = GLOBAL_POINTS_PER_AXIS >> layout.level;
+    let sample_stride = region_points / points_per_axis;
+    let start_column = layout.column * region_points;
+    let start_row = layout.row * region_points;
+    let origin = node_origin(layout);
+
+    for row in 0..points_per_axis {
+        for column in 0..points_per_axis {
+            let global_column = start_column + column * sample_stride;
+            let global_row = start_row + row * sample_stride;
+            points.push(make_point(global_column, global_row, origin)?);
         }
     }
 
-    PointBatch::new(
-        view_generation,
-        batch_key(tile),
-        BatchVersion::new(1),
-        tile_world_origin(tile),
-        points,
-    )
+    PointBatch::new(view_generation, node.batch_key(), version, origin, points)
 }
 
-fn make_point(tile: TileCoordinate, column: u32, row: u32) -> Result<RenderPoint, ProtocolError> {
-    let denominator =
-        f32::from(u16::try_from(POINTS_PER_AXIS - 1).expect("the point-grid extent fits in u16"));
-    let column_fraction =
-        f32::from(u16::try_from(column).expect("the point column fits in u16")) / denominator;
-    let row_fraction =
-        f32::from(u16::try_from(row).expect("the point row fits in u16")) / denominator;
-    let relative_x = (column_fraction - 0.5) * TILE_SIZE_F32;
-    let relative_y = (row_fraction - 0.5) * TILE_SIZE_F32;
-    let scene_x = centered_index_f32(tile.column) * TILE_SIZE_F32 / 2.0 + relative_x;
-    let scene_y = centered_index_f32(tile.row) * TILE_SIZE_F32 / 2.0 + relative_y;
-    let noise = point_noise(tile, column, row);
-    let height = terrain_height(scene_x, scene_y, noise);
+#[allow(clippy::cast_possible_truncation)]
+fn make_point(
+    global_column: u32,
+    global_row: u32,
+    origin: [f64; 3],
+) -> Result<RenderPoint, ProtocolError> {
+    let spacing = SCENE_EXTENT / f64::from(GLOBAL_POINTS_PER_AXIS);
+    let scene_x = -HALF_SCENE_EXTENT + (f64::from(global_column) + 0.5) * spacing;
+    let scene_y = -HALF_SCENE_EXTENT + (f64::from(global_row) + 0.5) * spacing;
+    let noise = point_noise(global_column, global_row);
+    let height = terrain_height(scene_x as f32, scene_y as f32, noise);
+    let world_x = SCENE_TARGET[0] + scene_x;
+    let world_y = SCENE_TARGET[1] + scene_y;
+
+    let relative_position = [
+        (world_x - origin[0]) as f32,
+        (world_y - origin[1]) as f32,
+        height,
+    ];
 
     RenderPoint::new(
-        [relative_x, relative_y, height],
+        relative_position,
         terrain_color(height, noise),
-        point_id(tile, column, row),
+        point_id(global_column, global_row),
     )
 }
 
 fn terrain_height(x: f32, y: f32, noise: f32) -> f32 {
-    let broad_hills = (x * 0.018).sin() * (y * 0.015).cos() * HEIGHT_SCALE;
-    let fine_ridges = ((x + y) * 0.055).sin() * 4.5;
-    let drainage = -9.0 * (-((y - x * 0.28) * 0.035).powi(2)).exp();
+    let broad_hills = (x * 0.0045).sin() * (y * 0.0038).cos() * HEIGHT_SCALE;
+    let fine_ridges = ((x + y) * 0.014).sin() * 6.5;
+    let drainage = -12.0 * (-((y - x * 0.28) * 0.009).powi(2)).exp();
     broad_hills + fine_ridges + drainage + noise
 }
 
 fn terrain_color(height: f32, noise: f32) -> [u8; 4] {
     let variation = if noise.is_sign_positive() { 10 } else { 0 };
-    if height < -10.0 {
+    if height < -14.0 {
         [34, 104, 151, 255]
-    } else if height < 2.0 {
+    } else if height < 1.0 {
         [42, 128_u8.saturating_add(variation), 92, 255]
-    } else if height < 13.0 {
+    } else if height < 17.0 {
         [111, 151_u8.saturating_add(variation), 77, 255]
-    } else if height < 22.0 {
+    } else if height < 29.0 {
         [177, 145, 91_u8.saturating_add(variation), 255]
     } else {
         [215, 218, 210, 255]
     }
 }
 
-fn point_noise(tile: TileCoordinate, column: u32, row: u32) -> f32 {
-    let mut hash = tile.column.wrapping_mul(0x9E37_79B9)
-        ^ tile.row.wrapping_mul(0x85EB_CA6B)
-        ^ column.wrapping_mul(0xC2B2_AE35)
-        ^ row.wrapping_mul(0x27D4_EB2F);
+fn point_noise(column: u32, row: u32) -> f32 {
+    let mut hash = column.wrapping_mul(0xC2B2_AE35) ^ row.wrapping_mul(0x27D4_EB2F);
     hash ^= hash >> 16;
     hash = hash.wrapping_mul(0x7FEB_352D);
     hash ^= hash >> 15;
     let low_bits = u16::try_from(hash & u32::from(u16::MAX)).expect("the hash was masked to u16");
     let unit = f32::from(low_bits) / f32::from(u16::MAX);
-    (unit - 0.5) * 0.7
+    (unit - 0.5) * 0.8
 }
 
-fn tile_world_origin(tile: TileCoordinate) -> [f64; 3] {
+fn node_origin(layout: NodeLayout) -> [f64; 3] {
+    let extent = node_extent(layout.level);
     [
-        SCENE_TARGET[0] + f64::from(centered_index(tile.column)) * TILE_SIZE_F64 / 2.0,
-        SCENE_TARGET[1] + f64::from(centered_index(tile.row)) * TILE_SIZE_F64 / 2.0,
+        SCENE_TARGET[0] - HALF_SCENE_EXTENT + (f64::from(layout.column) + 0.5) * extent,
+        SCENE_TARGET[1] - HALF_SCENE_EXTENT + (f64::from(layout.row) + 0.5) * extent,
         SCENE_TARGET[2],
     ]
 }
 
-fn centered_index(index: u32) -> i32 {
-    i32::try_from(index).expect("the tile index fits in i32") * 2
-        - (i32::try_from(TILE_COLUMNS).expect("the tile extent fits in i32") - 1)
+const fn points_per_axis(level: u32) -> u32 {
+    if level == QUADTREE_DEPTH {
+        LEAF_POINTS_PER_AXIS
+    } else {
+        INTERNAL_POINTS_PER_AXIS
+    }
 }
 
-fn centered_index_f32(index: u32) -> f32 {
-    let centered =
-        i16::try_from(centered_index(index)).expect("the centered tile index fits in i16");
-    f32::from(centered)
+fn node_extent(level: u32) -> f64 {
+    SCENE_EXTENT / f64::from(1_u32 << level)
 }
 
-fn batch_key(tile: TileCoordinate) -> BatchKey {
-    BatchKey::new(tile_linear_index(tile) + 1)
+fn node_key(layout: NodeLayout) -> NodeKey {
+    let cells_per_axis = 1_u64 << layout.level;
+    let key = level_offset(layout.level)
+        + u64::from(layout.row) * cells_per_axis
+        + u64::from(layout.column)
+        + 1;
+    NodeKey::new(key).expect("synthetic node keys are nonzero")
 }
 
-fn point_id(tile: TileCoordinate, column: u32, row: u32) -> PointId {
-    let local_index = u64::from(row) * u64::from(POINTS_PER_AXIS) + u64::from(column);
-    PointId::new(tile_linear_index(tile) * POINTS_PER_BATCH + local_index + 1)
+fn parent_key(layout: NodeLayout) -> Option<NodeKey> {
+    (layout.level > 0).then(|| {
+        node_key(NodeLayout {
+            level: layout.level - 1,
+            column: layout.column / 2,
+            row: layout.row / 2,
+        })
+    })
 }
 
-fn highlight_id(tile: TileCoordinate) -> PointId {
-    point_id(tile, POINTS_PER_AXIS / 2, POINTS_PER_AXIS / 2)
+const fn level_offset(level: u32) -> u64 {
+    ((1_u64 << (2 * level)) - 1) / 3
 }
 
-fn tile_linear_index(tile: TileCoordinate) -> u64 {
-    u64::from(tile.row) * u64::from(TILE_COLUMNS) + u64::from(tile.column)
+fn node_index(key: NodeKey) -> usize {
+    usize::try_from(key.get() - 1).expect("the synthetic node key fits in usize")
+}
+
+fn point_id(column: u32, row: u32) -> PointId {
+    PointId::new(u64::from(row) * u64::from(GLOBAL_POINTS_PER_AXIS) + u64::from(column) + 1)
 }
 
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
 
-    use render_protocol::ViewId;
+    use render_protocol::{RenderLimits, RenderStateModel, RenderUpdate, ViewId};
 
     use super::*;
 
@@ -199,36 +353,148 @@ mod tests {
     }
 
     #[test]
-    fn streams_every_tile_once_from_the_center_out() {
-        let mut scene = SyntheticScene::new(view_generation());
+    fn hierarchy_represents_more_than_ten_million_logical_points() {
+        let scene = SyntheticScene::new(view_generation()).unwrap();
+
+        assert_eq!(
+            scene.nodes.len(),
+            usize::try_from(TOTAL_NODE_COUNT).unwrap()
+        );
+        let represented_leaf_points = scene
+            .nodes
+            .iter()
+            .zip(&scene.layouts)
+            .filter(|(_, layout)| layout.level == QUADTREE_DEPTH)
+            .map(|(node, _)| node.point_count())
+            .sum::<u64>();
+        assert!(represented_leaf_points >= 10_000_000);
+        assert_eq!(represented_leaf_points, LOGICAL_POINT_COUNT);
+        assert_eq!(LOGICAL_POINT_COUNT, 16_777_216);
+        assert_eq!(scene.nodes[0].parent(), None);
+        assert!(
+            scene
+                .nodes
+                .iter()
+                .all(|node| node.status() == NodeStatus::Missing)
+        );
+    }
+
+    #[test]
+    fn requested_batches_are_deterministic_and_change_residency_explicitly() {
+        let mut scene = SyntheticScene::new(view_generation()).unwrap();
+        let root = scene.nodes[0];
+        scene.replace_status(0, NodeStatus::Requested);
+        scene.pending.push_back(root.key());
         let first = scene.next_batch().unwrap().unwrap();
+        scene.mark_resident(first.key(), first.version());
+        scene.mark_retired(first.key(), first.version());
+        scene.replace_status(0, NodeStatus::Requested);
+        scene.pending.push_back(root.key());
+        let second = scene.next_batch().unwrap().unwrap();
+        scene.mark_resident(second.key(), second.version());
 
-        assert_eq!(first.point_count(), POINTS_PER_BATCH);
-        assert!(first.world_origin()[0] > 6_000_000.0);
-        assert!(first.world_origin()[1] > 10_000_000.0);
+        assert_eq!(first.points(), second.points());
         assert_eq!(
-            scene.tile_order.len(),
-            usize::try_from(TOTAL_BATCHES).unwrap()
+            first.world_origin().map(f64::to_bits),
+            second.world_origin().map(f64::to_bits)
         );
-        assert_eq!(scene.highlight_ids().len(), scene.tile_order.len());
+        assert_eq!(first.version(), BatchVersion::new(1));
+        assert_eq!(second.version(), BatchVersion::new(2));
+        assert_eq!(scene.resident_batches(), 1);
+        assert_eq!(scene.pending_batches(), 0);
     }
 
     #[test]
-    fn generated_batches_are_deterministic() {
-        let tile = TileCoordinate { column: 5, row: 9 };
+    fn every_batch_uses_unique_stable_point_identities() {
+        let scene = SyntheticScene::new(view_generation()).unwrap();
+        let leaf_index = node_index(node_key(NodeLayout {
+            level: QUADTREE_DEPTH,
+            column: 17,
+            row: 29,
+        }));
+        let batch = make_batch(
+            view_generation(),
+            scene.nodes[leaf_index],
+            scene.layouts[leaf_index],
+            BatchVersion::new(1),
+        )
+        .unwrap();
+        let identities = batch
+            .points()
+            .iter()
+            .map(RenderPoint::point_id)
+            .collect::<BTreeSet<_>>();
 
-        assert_eq!(
-            make_batch(view_generation(), tile),
-            make_batch(view_generation(), tile)
+        assert_eq!(identities.len(), batch.points().len());
+        assert_eq!(batch.point_count(), u64::from(LEAF_POINTS_PER_AXIS).pow(2));
+    }
+
+    #[test]
+    fn highlighted_identities_are_present_in_coarse_coverage() {
+        let scene = SyntheticScene::new(view_generation()).unwrap();
+        let root = make_batch(
+            view_generation(),
+            scene.nodes[0],
+            scene.layouts[0],
+            BatchVersion::new(1),
+        )
+        .unwrap();
+        let root_ids = root
+            .points()
+            .iter()
+            .map(RenderPoint::point_id)
+            .collect::<BTreeSet<_>>();
+
+        assert!(
+            SyntheticScene::highlight_ids()
+                .into_iter()
+                .all(|identity| root_ids.contains(&identity))
         );
     }
 
     #[test]
-    fn highlight_identifiers_are_unique() {
-        let scene = SyntheticScene::new(view_generation());
-        let highlights = scene.highlight_ids();
-        let unique = highlights.iter().copied().collect::<BTreeSet<_>>();
+    fn rematerialized_nodes_advance_renderer_batch_versions() {
+        let generation = view_generation();
+        let mut scene = SyntheticScene::new(generation).unwrap();
+        let root = scene.nodes[0];
+        let mut renderer_state = RenderStateModel::new(RenderLimits::new(
+            root.estimated_bytes(),
+            root.point_count(),
+            1,
+        ));
+        renderer_state
+            .apply(&RenderUpdate::Reset {
+                view_generation: generation,
+            })
+            .unwrap();
 
-        assert_eq!(unique.len(), highlights.len());
+        scene.replace_status(0, NodeStatus::Requested);
+        scene.pending.push_back(root.key());
+        let first = scene.next_batch().unwrap().unwrap();
+        let first_key = first.key();
+        let first_version = first.version();
+        renderer_state
+            .apply(&RenderUpdate::Upsert { batch: first })
+            .unwrap();
+        scene.mark_resident(first_key, first_version);
+        renderer_state
+            .apply(&RenderUpdate::Remove {
+                view_generation: generation,
+                key: first_key,
+                expected_version: first_version,
+            })
+            .unwrap();
+        scene.mark_retired(first_key, first_version);
+
+        scene.replace_status(0, NodeStatus::Requested);
+        scene.pending.push_back(root.key());
+        let second = scene.next_batch().unwrap().unwrap();
+        assert_eq!(second.version(), BatchVersion::new(2));
+        let second_key = second.key();
+        let second_version = second.version();
+        renderer_state
+            .apply(&RenderUpdate::Upsert { batch: second })
+            .expect("a rematerialized node must use a strictly newer version");
+        scene.mark_resident(second_key, second_version);
     }
 }

@@ -1,5 +1,5 @@
 use glam::{
-    DVec3, Mat4, Vec3,
+    DVec3, Vec3,
     camera::rh::{proj::directx, view},
 };
 use thiserror::Error;
@@ -83,7 +83,7 @@ impl Camera {
             near_distance,
             far_distance,
         };
-        camera.view_projection(1.0)?;
+        camera.view_projection_matrix(1.0)?;
         Ok(camera)
     }
 
@@ -123,7 +123,16 @@ impl Camera {
         self.far_distance
     }
 
-    pub(crate) fn view_projection(&self, aspect_ratio: f32) -> Result<Mat4, CameraError> {
+    /// Builds the right-handed view-projection matrix for an aspect ratio.
+    ///
+    /// The returned flat array is column-major: each consecutive group of four
+    /// values is one matrix column. Its clip-space depth range is `0..=1`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CameraError::NonFiniteProjection`] when the aspect ratio and
+    /// validated camera parameters do not produce a finite matrix.
+    pub fn view_projection_matrix(&self, aspect_ratio: f32) -> Result<[f32; 16], CameraError> {
         let view = view::look_at_mat4(
             Vec3::ZERO,
             Vec3::from_array(self.view_direction),
@@ -137,14 +146,14 @@ impl Camera {
         );
         let view_projection = projection * view;
         if view_projection.is_finite() {
-            Ok(view_projection)
+            Ok(view_projection.to_cols_array())
         } else {
             Err(CameraError::NonFiniteProjection)
         }
     }
 }
 
-/// A camera construction error.
+/// A camera construction or projection error.
 #[derive(Clone, Debug, Error, PartialEq)]
 pub enum CameraError {
     /// A world-coordinate vector contains NaN or infinity.
@@ -245,10 +254,10 @@ mod tests {
     #[test]
     fn builds_a_finite_large_world_matrix() {
         let matrix = valid_camera()
-            .view_projection(16.0 / 9.0)
+            .view_projection_matrix(16.0 / 9.0)
             .expect("the validated camera should produce a finite projection");
 
-        assert!(matrix.to_cols_array().into_iter().all(f32::is_finite));
+        assert!(matrix.into_iter().all(f32::is_finite));
     }
 
     #[test]
@@ -264,7 +273,7 @@ mod tests {
             )
             .expect("finite view directions should be normalized before narrowing");
 
-            assert!(camera.view_projection(1.0).is_ok());
+            assert!(camera.view_projection_matrix(1.0).is_ok());
         }
     }
 

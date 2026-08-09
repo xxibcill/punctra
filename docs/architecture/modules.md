@@ -1,7 +1,8 @@
 # Module Catalog
 
-Status: deferred platform proposal; render-engine v0.1 is defined in
-[the current design](../design/render-engine-v0.1.md)
+Status: broader platform proposal deferred; the current renderer and View
+planner are defined by the [v0.1 renderer](../design/render-engine-v0.1.md) and
+[v0.2 planning](../design/adaptive-view-planning-v0.2.md) scopes
 
 This document is the ownership map. Each crate below is one logical module with one job. The job sentence is normative: if new behavior does not fit it, that behavior does not belong in the module.
 
@@ -18,8 +19,8 @@ This document is the ownership map. Each crate below is one logical module with 
 | **point-set** | Materialize exact Point Identities as immutable bounded-memory Point Sets. | Exact Point Batch stream with terminal Snapshot provenance | Spillable Point Set handle |
 | **point-revisions** | Persist sparse Edits and resolve immutable Revision state. | Revision target, Operation Identity, expected Revision, and Edit Batch | Commit resolution and Revision view |
 | **point-query** | Provide bounded revision-pinned reads from one Snapshot. | Source, Spatial Index, Revision view, read request | Snapshot, exact Point or Breakline streams, ViewInput |
-| **render-protocol** | Represent generation-safe renderer-neutral point and mesh updates. | Point or mesh display data | Validated frame tokens and render deltas |
-| **point-view** | Turn one frozen View into progressive renderer-neutral View updates. | Query-ready Snapshot and View specification | View-update stream and summary |
+| **render-protocol** | Represent generation-safe renderer-neutral camera and point-display contracts. | Camera and point display data | Validated camera values and render updates |
+| **point-view** | Plan one frozen View over a host-owned hierarchy without performing I/O. | Camera, viewport, node snapshot, and hard budget | Prioritized requests, required retention, and safe retirements |
 | **terrain-model** | Derive one deterministic Terrain Surface from Points and constraints. | Point Batch stream, Breaklines, Recipe | Immutable Terrain Surface Artifact |
 | **landxml** | Encode one Terrain Surface as validated LandXML. | Terrain Surface and export options | Bounded XML byte stream and validation report |
 | **point-workspace** | Manage the coherent lifecycle of one Source and its revisioned Workspace. | One Source, options, Queries, Edits | Open result, Snapshots, commit outcomes, preparation jobs |
@@ -494,105 +495,138 @@ A Query uses the already pinned Snapshot. Concurrent commits cannot change its o
 
 When no compatible index exists, a complete Query may sequentially scan the Source. A View requires a compatible index because a full scan cannot satisfy an interactive LOD contract.
 
-ViewInput is revision-pinned and opaque: it exposes immutable Snapshot provenance, hierarchy facts, and bounded materialization of selected node keys while hiding Source, Spatial Index, and Revision-store ownership. It always applies the same Snapshot overlays as an exact Query. **point-view** compares ViewSpec's FrameToken with that provenance before emitting Reset.
+`ViewInput` is a deferred platform capability: a future host adapter may use it
+to obtain revision-pinned hierarchy facts and materialize selected node keys.
+That adapter can translate the facts and materialization state into the
+host-owned `AvailableNodes` snapshot accepted by the current **point-view**
+contract. **point-view** itself does not depend on **point-query**, accept a
+`ViewSpec` or `FrameToken`, or emit renderer resets.
 
 **Independent proof:** use **source-memory** with real index and Revision stores in temporary directories, then compare streamed results against a simple sequential oracle.
 
 ## 8. render-protocol
 
-**Job:** represent generation-safe renderer-neutral point and mesh updates.
+**Job:** represent generation-safe renderer-neutral camera and point-display
+contracts.
 
 It owns:
 
-- frozen FrameToken and ViewGenerationKey values;
-- stable point-batch and mesh-batch keys;
-- origin-relative display columns;
-- Reset, Upsert, Remove, and replacement semantics;
-- progressive Coverage values;
-- renderer-neutral mesh batches; and
-- validation that one delta cannot mix View identity, generation, or Revision.
+- validated perspective `Camera` values in 64-bit world coordinates;
+- caller-selected View, generation, Point, batch, and batch-version identities;
+- origin-relative `RenderPoint` and `PointBatch` values;
+- fixed point, estimated-byte, and batch residency accounting;
+- Reset, Upsert, conditional Remove, and complete highlight-set updates; and
+- a CPU state model that validates generations, versions, and hard limits.
 
 It does not own:
 
-- LOD or camera policy;
+- hierarchy, LOD, loading, or eviction policy;
 - Source or Snapshot access;
 - GPU allocation or drawing;
-- Terrain Surface derivation; or
+- mesh or Terrain Surface display contracts; or
 - exact selection.
 
-Conceptual interface:
+Primary interface:
 
 ~~~rust
-pub struct MeshBatch {
-    pub view_generation: ViewGenerationKey,
-    pub key: MeshBatchKey,
-    pub artifact: ArtifactId,
-    pub world_origin: [f64; 3],
-    pub relative_positions: BoundedVec<[f32; 3]>,
-    pub triangle_indices: BoundedVec<[u32; 3]>,
+impl Camera {
+    pub fn perspective(
+        eye: [f64; 3],
+        target: [f64; 3],
+        up: [f64; 3],
+        vertical_field_of_view_radians: f32,
+        near_distance: f32,
+        far_distance: f32,
+    ) -> Result<Self, CameraError>;
 }
 
-pub enum RenderDelta {
-    Points(ViewDelta),
-    UpsertMesh {
+pub enum RenderUpdate {
+    Reset { view_generation: ViewGenerationKey },
+    Upsert { batch: PointBatch },
+    Remove {
         view_generation: ViewGenerationKey,
-        batch: MeshBatch,
+        key: BatchKey,
+        expected_version: BatchVersion,
     },
-    RemoveMesh {
+    SetHighlights {
         view_generation: ViewGenerationKey,
-        key: MeshBatchKey,
+        point_ids: Vec<PointId>,
     },
 }
 
 impl RenderStateModel {
-    pub fn apply(&mut self, delta: &RenderDelta) -> Result<()>;
-    pub fn active_frame(&self) -> Option<&FrameToken>;
+    pub fn new(limits: RenderLimits) -> Self;
+    pub fn apply<'update>(
+        &mut self,
+        update: &'update RenderUpdate,
+    ) -> Result<AppliedUpdate<'update>, ProtocolError>;
+    pub fn snapshot(&self) -> RenderSnapshot;
 }
 ~~~
 
-RenderStateModel is a small CPU reference for protocol validation; it owns no GPU resources. The renderer and tests use the same transition rules.
+`RenderStateModel` is a small CPU reference for protocol validation; it owns no
+GPU resources. A Reset explicitly begins one `ViewGenerationKey`. Upserts must
+advance a batch version, conditional removal cannot remove a newer replacement,
+and hard point, estimated-byte, and batch limits fail without changing state.
+The renderer and protocol tests use these same transition rules.
 
-**Independent proof:** apply generated Reset, Upsert, replacement, removal, stale-generation, and mixed-Revision sequences and verify the resulting abstract resident-key set without creating a GPU.
+**Independent proof:** apply generated Reset, Upsert, replacement, conditional
+Remove, highlight, stale-generation, and resource-limit sequences and inspect
+the deterministic public snapshot without creating a GPU.
 
 ## 9. point-view
 
-**Job:** turn one frozen View into progressive renderer-neutral View updates.
+**Job:** plan one frozen View over a host-owned hierarchy without performing
+I/O.
 
 It owns:
 
 - frustum and screen-error planning;
-- point-budget allocation;
+- point, byte, and batch-budget allocation;
 - stable LOD priority and refinement;
-- choosing a floating world origin;
-- converting authoritative positions to origin-relative display values;
-- progressive Coverage; and
-- renderer-neutral picking identities.
+- parent Coverage during progressive replacement;
+- hysteresis across successive plans; and
+- exact generation-safe retirement decisions.
 
 It does not own:
 
+- hierarchy construction or persistence;
+- node materialization, request execution, or cancellation;
 - GPU buffers, shaders, or device state;
 - exact selection membership;
 - Source decoding;
 - Edits;
 - Terrain Surface derivation; or
-- persistent caches outside its own disposable view data.
+- automatic renderer eviction.
 
-Conceptual interface:
+Primary interface:
 
 ~~~rust
-impl ViewPreparer {
-    pub fn prepare(
-        input: ViewInput,
-        spec: ViewSpec,
-    ) -> Box<dyn BatchStream<ViewDelta, ViewSummary>>;
+impl ViewPlanner {
+    pub fn plan(
+        &mut self,
+        camera: &Camera,
+        viewport: [u32; 2],
+        available_nodes: AvailableNodes<'_>,
+        budget: PlanningBudget,
+    ) -> Result<ViewPlan, PlanError>;
 }
 ~~~
 
-ViewInput is an opaque, index-ready capability created by **point-query**. View preparation fails with IndexIncomplete until the Spatial Index is complete. View ordering is deterministic for a normalized request even if worker completion order is not. A displayed Point is a sample, not proof that all relevant Points have been considered.
+The host supplies immutable hierarchy facts and current missing, requested, or
+resident state. `ViewPlanner` retains only hysteresis history. It materializes
+no point data and performs no side effects. A later platform adapter may
+translate a Spatial Index hierarchy into this node snapshot without creating a
+new public seam inside the planner.
 
-ViewSpec's FrameToken Revision must equal ViewInput's pinned Revision. A mismatch fails before Reset is emitted.
+Requests are ordered by visual priority with stable node-key tie breaking.
+Resident parents remain retained until all selected visible replacements are
+resident. Every retirement copies the observed View generation, batch key, and
+batch version, so applying a delayed retirement cannot remove newer data.
 
-**Independent proof:** run camera and LOD fixtures through **source-memory** and the real Query interface, then inspect View Batches without creating a GPU device.
+**Independent proof:** run generated hierarchy and residency snapshots through
+the public planning interface and inspect the deterministic plan without
+creating a GPU device or materializing a Point Batch.
 
 ## 10. terrain-model
 
@@ -763,58 +797,74 @@ The Workspace interface is the public test surface for coherent Source, index, R
 
 It owns:
 
-- GPU buffer allocation and eviction;
-- shaders and render pipelines;
-- uploads and draw ordering;
+- point GPU buffers and explicit Reset, Upsert, and Remove effects;
+- point draw and pick shaders, pipelines, depth, and render targets;
+- command-encoded uploads and draw ordering;
 - point appearance and highlighting;
-- mesh vertex and index uploads;
-- isolation of View identity and generation;
-- frame timing and residency-pressure reports; and
-- device-loss recovery.
+- exact-resource `RecordedFrame` snapshots for provisional picking; and
+- frame timing and logical residency reports.
 
 It does not own:
 
 - Source I/O;
-- Spatial Index or LOD policy;
+- Spatial Index, hierarchy, loading, LOD, or automatic eviction policy;
 - authoritative coordinates;
 - exact selection;
 - Edits;
-- Terrain derivation; or
-- Workspace persistence.
+- Terrain derivation or mesh rendering;
+- Workspace persistence; or
+- queue submission, device polling, or device-loss recovery.
 
-Conceptual interface:
+Primary interface:
 
 ~~~rust
 impl WgpuRenderer {
-    pub fn attach(
-        device: wgpu::Device,
-        queue: wgpu::Queue,
-        options: RenderOptions,
-    ) -> Result<Self>;
+    pub fn new(
+        device: &wgpu::Device,
+        config: RendererConfig,
+    ) -> Result<Self, RendererError>;
 
-    pub fn apply(&mut self, update: RenderDelta) -> Result<()>;
+    pub fn apply(
+        &mut self,
+        update: &RenderUpdate,
+    ) -> Result<UpdateReport, RendererError>;
 
     pub fn render(
         &mut self,
+        encoder: &mut wgpu::CommandEncoder,
         target: &wgpu::TextureView,
-        frame: &FrameToken,
-    ) -> Result<FrameReport>;
+        frame: &Frame,
+    ) -> Result<RecordedFrame, RendererError>;
 
-    pub fn pick_candidates(
-        &self,
-        frame: &FrameToken,
-        region: ScreenRegion,
-    ) -> Result<PickHint>;
+    pub fn pick(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        recorded_frame: &RecordedFrame,
+        request: PickRequest,
+    ) -> Result<PickTicket, RendererError>;
+}
+
+impl PickTicket {
+    pub fn poll(&mut self) -> Result<PickPoll, PickError>;
 }
 ~~~
 
-The renderer rejects updates from a different View identity or generation until it receives an explicit Reset. Upsert and Remove deltas replace LOD batches by stable batch key. PickHint is provisional and reports resident Coverage; it can provide immediate feedback but can never be committed as an exact Point Set.
+The host owns the device, queue, command encoder, target texture, submission, and
+device polling. An explicit Reset clears the previous generation; the renderer
+never silently evicts active batches. Upsert and conditional Remove updates use
+stable batch keys and exact versions. An update that exceeds its logical point,
+byte, or batch limits returns a resource error without changing residency.
 
-The renderer may evict inactive generations after Reset. It never silently evicts an active generation below the protocol state; an upload that exceeds its GPU budget returns ResourceLimit and residency pressure so the host can request a lower-budget new View generation.
+Rendering records the currently resident point batches into the host encoder and
+returns a `RecordedFrame` whose report describes that generation. Retaining the
+recorded frame pins the exact GPU resources it references. Picking records a
+one-pixel provisional ID pass against that value and returns a nonblocking
+ticket; it never confirms exact Point Set membership. Neither rendering nor
+picking performs Source-scale I/O, decoding, indexing, or terrain construction.
 
-Rendering uses whatever point and mesh batches are resident for the requested FrameToken and returns within a frame budget. It never performs Source-scale I/O, LAZ decoding, indexing, or terrain construction synchronously.
-
-**Independent proof:** render synthetic render-protocol point and mesh deltas to an offscreen texture. No Source, Workspace, point-view, or terrain module is required.
+**Independent proof:** apply synthetic render-protocol point updates, render
+them to an offscreen texture, and poll provisional picks. No Source, Workspace,
+**point-view**, or terrain module is required.
 
 ## 14. Application adapters
 
@@ -828,7 +878,9 @@ Adapters translate host concepts; they do not reimplement domain behavior.
 
 The desktop adapter may use a GPU pick as a candidate hint. It creates the durable Point Set only after an exact Query at the frozen frame's Revision.
 
-For Terrain Surface display, the desktop adapter reads the Artifact Identity plus bounded vertex and face ranges from SurfaceArtifact and packs renderer-neutral MeshBatch values. This remains adapter code while there is one caller; a separate seam is earned only when a second producer needs the same policy.
+Terrain Surface display remains part of the deferred platform proposal. A
+future adapter may pack host-owned bounded display batches, but the implemented
+**render-protocol** and **render-wgpu** contracts expose no mesh batch type.
 
 ## Allowed dependencies
 
@@ -845,7 +897,7 @@ The dependency allowlist is stricter than Cargo's ability to compile a graph:
 | point-revisions | point-contracts, foundation-runtime, point-set |
 | point-query | point-contracts, foundation-runtime, point-source, point-index, point-revisions |
 | render-protocol | point-contracts |
-| point-view | point-contracts, foundation-runtime, render-protocol, point-index, point-query |
+| point-view | render-protocol and narrow in-process math/value dependencies |
 | terrain-model | point-contracts, foundation-runtime |
 | landxml | point-contracts, foundation-runtime, terrain-model |
 | point-workspace | point-contracts, foundation-runtime, point-source, point-index, point-revisions, point-query |
@@ -862,10 +914,17 @@ In particular:
 
 ## Public seams and private locality
 
-Only these seams are intended for third-party adapters in v0.1:
+The implemented v0.2 foundation exposes three reusable seams:
 
-1. the **SourceCandidate/PointSource** seam, because LAS/LAZ, COPC, and memory adapters prove it;
-2. bounded stream and render-protocol values, because multiple producers and consumers already exist; and
-3. the high-level Workspace interface, because CLI, desktop, and future language adapters share it.
+1. **render-protocol** camera, point-batch, generation, and versioned update
+   values;
+2. **point-view**'s `ViewPlanner::plan`, which accepts a host-owned hierarchy
+   snapshot and returns requests, required retention, and exact retirements;
+   and
+3. **render-wgpu**'s explicit update and frame interfaces.
+
+The `SourceCandidate`/`PointSource` and Workspace seams described elsewhere in
+this document remain part of the deferred broader platform proposal. They are
+not prerequisites for using the current planner or renderer.
 
 Filesystem storage, scheduling, index page layout, terrain predicates, and journal framing remain private. Publishing those details would reduce locality and freeze decisions before multiple adapters prove a useful seam.
