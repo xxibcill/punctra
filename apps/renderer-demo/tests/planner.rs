@@ -1,6 +1,7 @@
 //! Demo-level planner-to-renderer GPU acceptance on an available headless adapter.
 
-use std::{env, sync::OnceLock};
+#[path = "../../../tests/support/gpu.rs"]
+mod gpu_support;
 
 use point_view::{
     AvailableNode, AvailableNodes, AxisAlignedBox, NodeKey, NodeRequest, NodeStatus, PlannerConfig,
@@ -12,6 +13,8 @@ use render_protocol::{
 };
 use render_wgpu::{Camera, Frame, FrameReport, RendererConfig, RendererError, WgpuRenderer};
 
+use gpu_support::{GpuContext, with_gpu};
+
 const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 const VIEWPORT: [u32; 2] = [64, 64];
 const WORLD_ORIGIN: [f64; 3] = [0.0; 3];
@@ -21,8 +24,6 @@ const RIGHT_CHILD_KEY: u64 = 3;
 const TRANSITION_POINTS: u64 = 3;
 const TRANSITION_BYTES: u64 = TRANSITION_POINTS * POINT_BYTES;
 const TRANSITION_BATCHES: u64 = 3;
-
-static GPU: OnceLock<Option<GpuContext>> = OnceLock::new();
 
 #[test]
 fn adaptive_plan_keeps_coverage_and_retires_exact_gpu_batches() {
@@ -337,68 +338,4 @@ fn render_and_submit(gpu: &GpuContext, renderer: &mut WgpuRenderer, frame: &Fram
     gpu.queue.submit([encoder.finish()]);
     gpu.wait();
     report
-}
-
-struct GpuContext {
-    device: wgpu::Device,
-    queue: wgpu::Queue,
-}
-
-impl GpuContext {
-    fn wait(&self) {
-        self.device
-            .poll(wgpu::PollType::wait_indefinitely())
-            .expect("headless device polling should succeed");
-    }
-}
-
-fn with_gpu(test: impl FnOnce(&GpuContext)) {
-    if let Some(gpu) = GPU.get_or_init(initialize_gpu).as_ref() {
-        test(gpu);
-    }
-}
-
-fn initialize_gpu() -> Option<GpuContext> {
-    pollster::block_on(request_gpu())
-}
-
-async fn request_gpu() -> Option<GpuContext> {
-    let instance =
-        wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
-    let adapter = instance
-        .request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::None,
-            force_fallback_adapter: false,
-            compatible_surface: None,
-            apply_limit_buckets: false,
-        })
-        .await;
-    let adapter = match adapter {
-        Ok(adapter) => adapter,
-        Err(error) if gpu_is_required() => {
-            panic!("PUNCTRA_REQUIRE_GPU=1 but no headless adapter is available: {error}");
-        }
-        Err(error) => {
-            eprintln!(
-                "skipping GPU acceptance tests because no headless adapter is available: {error}"
-            );
-            return None;
-        }
-    };
-    let (device, queue) = adapter
-        .request_device(&wgpu::DeviceDescriptor {
-            label: Some("punctra planner acceptance test device"),
-            required_features: wgpu::Features::empty(),
-            required_limits: wgpu::Limits::downlevel_defaults(),
-            experimental_features: wgpu::ExperimentalFeatures::disabled(),
-            memory_hints: wgpu::MemoryHints::MemoryUsage,
-            trace: wgpu::Trace::Off,
-        })
-        .await
-        .expect("a discovered headless adapter should provide a baseline device");
-    Some(GpuContext { device, queue })
-}
-
-fn gpu_is_required() -> bool {
-    env::var("PUNCTRA_REQUIRE_GPU").is_ok_and(|value| value == "1")
 }
