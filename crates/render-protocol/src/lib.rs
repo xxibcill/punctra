@@ -13,7 +13,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use thiserror::Error;
 
-pub use camera::{Camera, CameraError};
+pub use camera::{Camera, CameraBasis, CameraError};
 
 /// Estimated GPU bytes for one point in the protocol's residency model.
 ///

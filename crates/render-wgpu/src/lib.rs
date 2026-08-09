@@ -62,5 +62,5 @@ mod targets;
 
 pub use frame::{Frame, FrameError, PointStyle};
 pub use pick::{PickError, PickHit, PickPoll, PickRequest, PickTicket};
-pub use render_protocol::{Camera, CameraError};
+pub use render_protocol::{Camera, CameraBasis, CameraError};
 pub use renderer::{FrameReport, RecordedFrame, RendererConfig, RendererError, WgpuRenderer};

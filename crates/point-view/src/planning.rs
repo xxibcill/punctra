@@ -223,10 +223,10 @@ struct Projection {
 impl Projection {
     fn new(camera: &Camera, viewport: [u32; 2]) -> Self {
         let eye = DVec3::from_array(camera.eye());
-        let forward = normalize_direction(DVec3::from_array(camera.target()) - eye);
-        let camera_up = normalize_direction(DVec3::from_array(camera.up()));
-        let right = normalize_direction(forward.cross(camera_up));
-        let up = right.cross(forward);
+        let world_basis = camera.world_basis();
+        let forward = DVec3::from_array(world_basis.forward());
+        let right = DVec3::from_array(world_basis.right());
+        let up = DVec3::from_array(world_basis.up());
         let half_vertical_tangent =
             (f64::from(camera.vertical_field_of_view_radians()) * 0.5).tan();
         let aspect_ratio = f64::from(viewport[0]) / f64::from(viewport[1]);
@@ -269,12 +269,6 @@ impl Projection {
         let nearest_depth = (center_depth - depth_radius).max(self.near_distance);
         node.geometric_error * self.pixel_scale / nearest_depth
     }
-}
-
-fn normalize_direction(vector: DVec3) -> DVec3 {
-    let scale = vector.abs().max_element();
-    debug_assert!(scale.is_finite() && scale > 0.0);
-    (vector / scale).normalize()
 }
 
 #[derive(Clone, Copy, Debug)]

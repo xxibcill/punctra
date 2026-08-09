@@ -4,12 +4,41 @@ use glam::{
 };
 use thiserror::Error;
 
+/// Canonical orthonormal world-space basis of a validated perspective camera.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CameraBasis {
+    forward: [f64; 3],
+    right: [f64; 3],
+    up: [f64; 3],
+}
+
+impl CameraBasis {
+    /// Returns the normalized direction from the camera eye toward its target.
+    #[must_use]
+    pub const fn forward(self) -> [f64; 3] {
+        self.forward
+    }
+
+    /// Returns the normalized right direction.
+    #[must_use]
+    pub const fn right(self) -> [f64; 3] {
+        self.right
+    }
+
+    /// Returns the normalized view-up direction orthogonal to forward and right.
+    #[must_use]
+    pub const fn up(self) -> [f64; 3] {
+        self.up
+    }
+}
+
 /// A validated perspective camera expressed in 64-bit world coordinates.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Camera {
     eye: [f64; 3],
     target: [f64; 3],
     up: [f64; 3],
+    world_basis: CameraBasis,
     view_direction: [f32; 3],
     view_up: [f32; 3],
     vertical_field_of_view_radians: f32,
@@ -45,9 +74,12 @@ impl Camera {
         if up_vector == DVec3::ZERO {
             return Err(CameraError::ZeroUpVector);
         }
-        let view_direction =
-            normalize_for_gpu(forward).ok_or(CameraError::NonFiniteViewDirection)?;
-        let requested_up = normalize_for_gpu(up_vector).ok_or(CameraError::ZeroUpVector)?;
+        let world_forward =
+            normalize_world_direction(forward).ok_or(CameraError::NonFiniteViewDirection)?;
+        let world_requested_up =
+            normalize_world_direction(up_vector).ok_or(CameraError::ZeroUpVector)?;
+        let view_direction = world_forward.as_vec3();
+        let requested_up = world_requested_up.as_vec3();
         let view_right = view_direction
             .cross(requested_up)
             .try_normalize()
@@ -56,6 +88,9 @@ impl Camera {
         if !view_up.is_finite() {
             return Err(CameraError::ParallelUpVector);
         }
+        let world_right = normalize_world_direction(world_forward.cross(world_requested_up))
+            .ok_or(CameraError::ParallelUpVector)?;
+        let world_up = world_right.cross(world_forward);
         if !vertical_field_of_view_radians.is_finite()
             || !(0.0..std::f32::consts::PI).contains(&vertical_field_of_view_radians)
         {
@@ -77,6 +112,11 @@ impl Camera {
             eye,
             target,
             up,
+            world_basis: CameraBasis {
+                forward: world_forward.to_array(),
+                right: world_right.to_array(),
+                up: world_up.to_array(),
+            },
             view_direction: view_direction.to_array(),
             view_up: view_up.to_array(),
             vertical_field_of_view_radians,
@@ -103,6 +143,12 @@ impl Camera {
     #[must_use]
     pub const fn up(&self) -> [f64; 3] {
         self.up
+    }
+
+    /// Returns the canonical orthonormal basis used for world-space planning.
+    #[must_use]
+    pub const fn world_basis(&self) -> CameraBasis {
+        self.world_basis
     }
 
     /// Returns the vertical field of view in radians.
@@ -201,13 +247,13 @@ fn validate_finite_vector(name: &'static str, vector: [f64; 3]) -> Result<(), Ca
     }
 }
 
-fn normalize_for_gpu(vector: DVec3) -> Option<Vec3> {
+fn normalize_world_direction(vector: DVec3) -> Option<DVec3> {
     let scale = vector.abs().max_element();
     if !scale.is_finite() || scale == 0.0 {
         return None;
     }
 
-    let normalized = (vector / scale).try_normalize()?.as_vec3();
+    let normalized = (vector / scale).try_normalize()?;
     normalized.is_finite().then_some(normalized)
 }
 
@@ -258,6 +304,21 @@ mod tests {
             .expect("the validated camera should produce a finite projection");
 
         assert!(matrix.into_iter().all(f32::is_finite));
+    }
+
+    #[test]
+    fn exposes_an_orthonormal_world_basis() {
+        let basis = valid_camera().world_basis();
+        let forward = DVec3::from_array(basis.forward());
+        let right = DVec3::from_array(basis.right());
+        let up = DVec3::from_array(basis.up());
+
+        for direction in [forward, right, up] {
+            assert!((direction.length() - 1.0).abs() < f64::EPSILON * 4.0);
+        }
+        assert!(forward.dot(right).abs() < f64::EPSILON * 4.0);
+        assert!(forward.dot(up).abs() < f64::EPSILON * 4.0);
+        assert!(right.dot(up).abs() < f64::EPSILON * 4.0);
     }
 
     #[test]
