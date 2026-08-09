@@ -4,6 +4,10 @@ use thiserror::Error;
 use crate::Camera;
 
 /// Appearance shared by every point in one rendered frame.
+///
+/// The default style uses a 3.0-physical-pixel point diameter, the linear RGBA
+/// highlight color `[1.0, 0.8, 0.1, 1.0]`, and the linear RGBA clear color
+/// `[0.015, 0.02, 0.03, 1.0]`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PointStyle {
     default_size_pixels: f32,
@@ -75,7 +79,7 @@ pub struct Frame {
 }
 
 impl Frame {
-    /// Creates a frame using the default point style.
+    /// Creates a frame using [`PointStyle::default`].
     ///
     /// # Errors
     ///
