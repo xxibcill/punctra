@@ -10,7 +10,7 @@ fn frame_uses_the_documented_default_point_style() {
     assert_eq!(style.default_size_pixels().to_bits(), 3.0_f32.to_bits());
     assert_eq!(
         style.highlight_color().map(f32::to_bits),
-        [1.0, 0.8, 0.1, 1.0].map(f32::to_bits)
+        [1.0, 0.8, 0.1].map(f32::to_bits)
     );
     assert_eq!(
         style.clear_color().map(f64::to_bits),

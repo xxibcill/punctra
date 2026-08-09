@@ -3,7 +3,8 @@ struct CameraUniform {
     viewport_size: vec2<f32>,
     default_point_size: f32,
     _padding: f32,
-    highlight_color: vec4<f32>,
+    highlight_color: vec3<f32>,
+    _highlight_padding: f32,
 }
 
 struct BatchUniform {
@@ -59,8 +60,8 @@ fn point_vertex(input: VertexInput, @builtin(vertex_index) vertex_index: u32) ->
     var output: VertexOutput;
     output.clip_position = clip_position;
     let highlighted_color = vec4<f32>(
-        camera.highlight_color.rgb,
-        input.color.a * camera.highlight_color.a,
+        camera.highlight_color,
+        input.color.a,
     );
     output.color = select(input.color, highlighted_color, (input.flags & HIGHLIGHTED) != 0u);
     output.corner = corner;

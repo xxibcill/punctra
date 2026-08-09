@@ -39,6 +39,11 @@ fn depth_highlights_circular_splats_and_pick_identity_are_preserved() {
 }
 
 #[test]
+fn highlights_preserve_source_alpha() {
+    with_gpu(assert_highlight_alpha_preservation);
+}
+
+#[test]
 fn millimeter_separation_survives_a_billion_unit_world_origin() {
     with_gpu(assert_large_world_precision);
 }
@@ -232,6 +237,36 @@ fn assert_raster_and_pick_semantics(gpu: &GpuContext) {
         .pick_and_wait(&transparent_highlighted.recorded_frame, CENTER)
         .expect("highlighting a transparent point must not hide the visible point behind it");
     assert_hit(visible_hit, view_generation, 1, 1, near_id);
+}
+
+fn assert_highlight_alpha_preservation(gpu: &GpuContext) {
+    let mut subject = OffscreenRenderer::new(gpu, roomy_limits());
+    let view_generation = ViewGenerationKey::new(ViewId::new(8), 1);
+    let point_id = PointId::new(801);
+    subject.apply(&RenderUpdate::Reset { view_generation });
+    subject.apply(&RenderUpdate::Upsert {
+        batch: batch(
+            view_generation,
+            1,
+            1,
+            WORLD_ORIGIN,
+            vec![point([0.0; 3], [255, 0, 0, 128], point_id.get())],
+        ),
+    });
+    subject.apply(&RenderUpdate::SetHighlights {
+        view_generation,
+        point_ids: vec![point_id],
+    });
+
+    let style = PointStyle::new(18.0, [0.0, 1.0, 0.0], [0.0; 4])
+        .expect("the alpha-preservation style should be valid");
+    let frame = frame_with_style(view_generation, VIEWPORT, style);
+    let rendered = subject.render(&frame);
+    assert_pixel(rendered.image.pixel(CENTER), [0, 128, 0, 128]);
+    let hit = subject
+        .pick_and_wait(&rendered.recorded_frame, CENTER)
+        .expect("highlighting must preserve a source-visible point for picking");
+    assert_hit(hit, view_generation, 1, 1, point_id);
 }
 
 fn assert_large_world_precision(gpu: &GpuContext) {
@@ -779,6 +814,17 @@ fn standard_frame(
     point_size: f32,
     highlight_color: [u8; 4],
 ) -> Frame {
+    let highlight = rgba8_to_linear_rgb(highlight_color);
+    let style = PointStyle::new(point_size, highlight, [0.0, 0.0, 0.0, 1.0])
+        .expect("the acceptance point style should be valid");
+    frame_with_style(view_generation, viewport, style)
+}
+
+fn frame_with_style(
+    view_generation: ViewGenerationKey,
+    viewport: [u32; 2],
+    style: PointStyle,
+) -> Frame {
     let camera = Camera::perspective(
         [WORLD_ORIGIN[0], WORLD_ORIGIN[1] - 5.0, WORLD_ORIGIN[2]],
         WORLD_ORIGIN,
@@ -788,9 +834,6 @@ fn standard_frame(
         100.0,
     )
     .expect("the standard acceptance camera should be valid");
-    let highlight = rgba8_to_linear(highlight_color);
-    let style = PointStyle::new(point_size, highlight, [0.0, 0.0, 0.0, 1.0])
-        .expect("the acceptance point style should be valid");
     Frame::new(view_generation, camera, viewport)
         .expect("the acceptance frame should be valid")
         .with_style(style)
@@ -806,7 +849,7 @@ fn precision_frame(view_generation: ViewGenerationKey) -> Frame {
         1.0,
     )
     .expect("the precision camera should be valid");
-    let style = PointStyle::new(5.0, [1.0; 4], [0.0, 0.0, 0.0, 1.0])
+    let style = PointStyle::new(5.0, [1.0; 3], [0.0, 0.0, 0.0, 1.0])
         .expect("the precision style should be valid");
     Frame::new(view_generation, camera, [128, 128])
         .expect("the precision frame should be valid")
@@ -828,20 +871,19 @@ fn translated_frame(view_generation: ViewGenerationKey, horizontal_offset: f64) 
         100.0,
     )
     .expect("the translated camera should be valid");
-    let style = PointStyle::new(14.0, rgba8_to_linear(GREEN), [0.0, 0.0, 0.0, 1.0])
+    let style = PointStyle::new(14.0, rgba8_to_linear_rgb(GREEN), [0.0, 0.0, 0.0, 1.0])
         .expect("the translated frame style should be valid");
     Frame::new(view_generation, camera, VIEWPORT)
         .expect("the translated frame should be valid")
         .with_style(style)
 }
 
-fn rgba8_to_linear(color: [u8; 4]) -> [f32; 4] {
+fn rgba8_to_linear_rgb(color: [u8; 4]) -> [f32; 3] {
     let maximum = f32::from(u8::MAX);
     [
         f32::from(color[0]) / maximum,
         f32::from(color[1]) / maximum,
         f32::from(color[2]) / maximum,
-        f32::from(color[3]) / maximum,
     ]
 }
 

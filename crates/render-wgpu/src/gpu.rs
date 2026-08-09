@@ -9,7 +9,8 @@ pub(crate) struct CameraUniform {
     pub(crate) viewport_size: [f32; 2],
     pub(crate) default_point_size: f32,
     pub(crate) _padding: f32,
-    pub(crate) highlight_color: [f32; 4],
+    pub(crate) highlight_color: [f32; 3],
+    pub(crate) _highlight_padding: f32,
 }
 
 #[repr(C)]

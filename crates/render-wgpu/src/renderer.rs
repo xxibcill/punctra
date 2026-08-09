@@ -498,6 +498,7 @@ impl WgpuRenderer {
             default_point_size: style.default_size_pixels(),
             _padding: 0.0,
             highlight_color: style.highlight_color(),
+            _highlight_padding: 0.0,
         };
         let eye = camera.eye();
         let camera_bytes = bytemuck::bytes_of(&camera_uniform);

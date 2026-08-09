@@ -272,7 +272,7 @@ impl Graphics {
             view_generation: VIEW_GENERATION,
         };
         renderer.apply(&reset)?;
-        let style = PointStyle::new(2.4, [1.0, 0.24, 0.06, 1.0], [0.008, 0.012, 0.02, 1.0])?;
+        let style = PointStyle::new(2.4, [1.0, 0.24, 0.06], [0.008, 0.012, 0.02, 1.0])?;
 
         Ok(Self {
             surface,

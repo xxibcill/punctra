@@ -6,14 +6,14 @@ use crate::Camera;
 
 /// Appearance shared by every point in one rendered frame.
 ///
-/// The default style uses a 3.0-physical-pixel point diameter, the linear RGBA
-/// highlight color `[1.0, 0.8, 0.1, 1.0]`, and the linear RGBA clear color
-/// `[0.015, 0.02, 0.03, 1.0]`. Highlight alpha multiplies each point's source
-/// alpha, so highlighting cannot make an excluded alpha-zero point visible.
+/// The default style uses a 3.0-physical-pixel point diameter, the linear RGB
+/// highlight color `[1.0, 0.8, 0.1]`, and the linear RGBA clear color
+/// `[0.015, 0.02, 0.03, 1.0]`. Highlighting replaces only source RGB and
+/// preserves each point's source alpha for drawing and picking.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PointStyle {
     default_size_pixels: f32,
-    highlight_color: [f32; 4],
+    highlight_color: [f32; 3],
     clear_color: [f64; 4],
 }
 
@@ -26,7 +26,7 @@ impl PointStyle {
     /// or a color channel lies outside the finite inclusive unit interval.
     pub fn new(
         default_size_pixels: f32,
-        highlight_color: [f32; 4],
+        highlight_color: [f32; 3],
         clear_color: [f64; 4],
     ) -> Result<Self, FrameError> {
         if !default_size_pixels.is_finite() || default_size_pixels <= 0.0 {
@@ -48,11 +48,9 @@ impl PointStyle {
         self.default_size_pixels
     }
 
-    /// Returns the linear RGBA highlight color.
-    ///
-    /// Its alpha multiplies the highlighted point's source alpha.
+    /// Returns the linear RGB highlight color.
     #[must_use]
-    pub const fn highlight_color(self) -> [f32; 4] {
+    pub const fn highlight_color(self) -> [f32; 3] {
         self.highlight_color
     }
 
@@ -67,7 +65,7 @@ impl Default for PointStyle {
     fn default() -> Self {
         Self {
             default_size_pixels: 3.0,
-            highlight_color: [1.0, 0.8, 0.1, 1.0],
+            highlight_color: [1.0, 0.8, 0.1],
             clear_color: [0.015, 0.02, 0.03, 1.0],
         }
     }
@@ -240,11 +238,11 @@ mod tests {
     #[test]
     fn style_rejects_invalid_size_and_color() {
         assert_eq!(
-            PointStyle::new(0.0, [1.0; 4], [0.0; 4]),
+            PointStyle::new(0.0, [1.0; 3], [0.0; 4]),
             Err(FrameError::InvalidPointSize(0.0))
         );
         assert_eq!(
-            PointStyle::new(2.0, [1.0, f32::NAN, 0.0, 1.0], [0.0; 4]),
+            PointStyle::new(2.0, [1.0, f32::NAN, 0.0], [0.0; 4]),
             Err(FrameError::InvalidColor {
                 name: "highlight",
                 channel: 1,
