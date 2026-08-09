@@ -271,13 +271,12 @@ impl WgpuRenderer {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            pass.set_pipeline(&self.pipelines.draw);
-            pass.set_bind_group(0, &self.camera_bind_group, &[]);
-            for batch in self.batches.values() {
-                pass.set_bind_group(1, &batch.bind_group, &[]);
-                pass.set_vertex_buffer(0, batch.vertex_buffer.slice(..));
-                pass.draw(0..6, 0..batch.point_count);
-            }
+            record_point_batches(
+                &mut pass,
+                &self.pipelines.draw,
+                &self.camera_bind_group,
+                self.batches.values(),
+            );
         }
 
         Ok(FrameReport {
@@ -385,13 +384,12 @@ impl WgpuRenderer {
             occlusion_query_set: None,
             multiview_mask: None,
         });
-        pass.set_pipeline(&self.pipelines.pick);
-        pass.set_bind_group(0, &self.camera_bind_group, &[]);
-        for batch in self.batches.values() {
-            pass.set_bind_group(1, &batch.bind_group, &[]);
-            pass.set_vertex_buffer(0, batch.vertex_buffer.slice(..));
-            pass.draw(0..6, 0..batch.point_count);
-        }
+        record_point_batches(
+            &mut pass,
+            &self.pipelines.pick,
+            &self.camera_bind_group,
+            self.batches.values(),
+        );
     }
 
     fn record_pick_readback(
@@ -618,6 +616,21 @@ impl GpuBatch {
         if changed {
             self.vertex_buffer = point_buffer(device, &self.gpu_points);
         }
+    }
+}
+
+fn record_point_batches<'pass>(
+    pass: &mut wgpu::RenderPass<'pass>,
+    pipeline: &'pass wgpu::RenderPipeline,
+    camera_bind_group: &'pass wgpu::BindGroup,
+    batches: impl IntoIterator<Item = &'pass GpuBatch>,
+) {
+    pass.set_pipeline(pipeline);
+    pass.set_bind_group(0, camera_bind_group, &[]);
+    for batch in batches {
+        pass.set_bind_group(1, &batch.bind_group, &[]);
+        pass.set_vertex_buffer(0, batch.vertex_buffer.slice(..));
+        pass.draw(0..6, 0..batch.point_count);
     }
 }
 
