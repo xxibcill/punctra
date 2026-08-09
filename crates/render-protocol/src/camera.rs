@@ -39,8 +39,6 @@ pub struct Camera {
     target: [f64; 3],
     up: [f64; 3],
     world_basis: CameraBasis,
-    view_direction: [f32; 3],
-    view_up: [f32; 3],
     vertical_field_of_view_radians: f32,
     near_distance: f32,
     far_distance: f32,
@@ -78,14 +76,13 @@ impl Camera {
             normalize_world_direction(forward).ok_or(CameraError::NonFiniteViewDirection)?;
         let world_requested_up =
             normalize_world_direction(up_vector).ok_or(CameraError::ZeroUpVector)?;
-        let view_direction = world_forward.as_vec3();
-        let requested_up = world_requested_up.as_vec3();
-        let view_right = view_direction
-            .cross(requested_up)
+        let narrowed_forward = world_forward.as_vec3();
+        let narrowed_requested_up = world_requested_up.as_vec3();
+        let narrowed_right = narrowed_forward
+            .cross(narrowed_requested_up)
             .try_normalize()
             .ok_or(CameraError::ParallelUpVector)?;
-        let view_up = view_right.cross(view_direction);
-        if !view_up.is_finite() {
+        if !narrowed_right.cross(narrowed_forward).is_finite() {
             return Err(CameraError::ParallelUpVector);
         }
         let world_right = normalize_world_direction(world_forward.cross(world_requested_up))
@@ -117,8 +114,6 @@ impl Camera {
                 right: world_right.to_array(),
                 up: world_up.to_array(),
             },
-            view_direction: view_direction.to_array(),
-            view_up: view_up.to_array(),
             vertical_field_of_view_radians,
             near_distance,
             far_distance,
@@ -179,11 +174,9 @@ impl Camera {
     /// Returns [`CameraError::NonFiniteProjection`] when the aspect ratio and
     /// validated camera parameters do not produce a finite matrix.
     pub fn view_projection_matrix(&self, aspect_ratio: f32) -> Result<[f32; 16], CameraError> {
-        let view = view::look_at_mat4(
-            Vec3::ZERO,
-            Vec3::from_array(self.view_direction),
-            Vec3::from_array(self.view_up),
-        );
+        let forward = DVec3::from_array(self.world_basis.forward).as_vec3();
+        let up = DVec3::from_array(self.world_basis.up).as_vec3();
+        let view = view::look_at_mat4(Vec3::ZERO, forward, up);
         let projection = directx::perspective(
             self.vertical_field_of_view_radians,
             aspect_ratio,
@@ -350,6 +343,35 @@ mod tests {
         );
 
         assert_eq!(result, Err(CameraError::ParallelUpVector));
+    }
+
+    #[test]
+    fn projection_uses_the_canonical_basis_for_near_parallel_up_vectors() {
+        let camera = Camera::perspective(
+            [0.0; 3],
+            [1.0, 1.0, 1.0],
+            [0.999_999_95, 1.000_000_04, 1.000_000_05],
+            1.0,
+            1.0,
+            100.0,
+        )
+        .unwrap();
+        let point = DVec3::new(
+            7.267_795_159_728_823_5,
+            0.196_727_468_879_519_3,
+            9.855_985_447_080_432,
+        );
+        let basis = camera.world_basis();
+        let forward = DVec3::from_array(basis.forward());
+        let right = DVec3::from_array(basis.right());
+        let depth = forward.dot(point);
+        let half_field_of_view = 0.5 * f64::from(camera.vertical_field_of_view_radians());
+        let horizontal_limit = depth * half_field_of_view.tan();
+        assert!(right.dot(point).abs() > horizontal_limit);
+
+        let matrix = glam::Mat4::from_cols_array(&camera.view_projection_matrix(1.0).unwrap());
+        let clip = matrix * point.as_vec3().extend(1.0);
+        assert!(clip.x.abs() > clip.w);
     }
 
     #[test]
