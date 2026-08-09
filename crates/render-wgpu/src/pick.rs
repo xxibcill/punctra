@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex, mpsc};
+use std::sync::{Arc, Mutex, TryLockError, mpsc};
 
 use render_protocol::{BatchKey, BatchVersion, PointId, ViewGenerationKey};
 use thiserror::Error;
@@ -78,6 +78,7 @@ pub struct PickTicket {
     readback: wgpu::Buffer,
     receiver: mpsc::Receiver<Result<(), wgpu::BufferAsyncError>>,
     table: Arc<PickTable>,
+    ready_token: Option<u32>,
     completed: bool,
 }
 
@@ -93,6 +94,7 @@ impl PickTicket {
             readback,
             receiver,
             table,
+            ready_token: None,
             completed: false,
         }
     }
@@ -116,6 +118,9 @@ impl PickTicket {
         if self.completed {
             return Err(PickError::AlreadyCompleted);
         }
+        if let Some(token) = self.ready_token {
+            return self.resolve_token(token);
+        }
 
         match self.receiver.try_recv() {
             Ok(Ok(())) => self.read_result(),
@@ -132,11 +137,11 @@ impl PickTicket {
     }
 
     fn read_result(&mut self) -> Result<PickPoll, PickError> {
-        self.completed = true;
         let bytes = match self.readback.get_mapped_range(0..PICK_TOKEN_BYTES) {
             Ok(bytes) => bytes,
             Err(error) => {
                 self.readback.unmap();
+                self.completed = true;
                 return Err(PickError::BufferAccess(error));
             }
         };
@@ -145,10 +150,27 @@ impl PickTicket {
         self.readback.unmap();
 
         if token == 0 {
+            self.completed = true;
             return Ok(PickPoll::Ready(None));
         }
-        let hit = self.table.lookup(token)?;
-        Ok(PickPoll::Ready(Some(hit)))
+        self.ready_token = Some(token);
+        self.resolve_token(token)
+    }
+
+    fn resolve_token(&mut self, token: u32) -> Result<PickPoll, PickError> {
+        match self.table.lookup(token) {
+            Ok(PickLookup::Busy) => Ok(PickPoll::Pending),
+            Ok(PickLookup::Hit(hit)) => {
+                self.ready_token = None;
+                self.completed = true;
+                Ok(PickPoll::Ready(Some(hit)))
+            }
+            Err(error) => {
+                self.ready_token = None;
+                self.completed = true;
+                Err(error)
+            }
+        }
     }
 }
 
@@ -188,6 +210,11 @@ pub(crate) struct PickRecord {
     pub(crate) batch: BatchKey,
     pub(crate) version: BatchVersion,
     pub(crate) point: PointId,
+}
+
+enum PickLookup {
+    Busy,
+    Hit(PickHit),
 }
 
 pub(crate) struct PickTable {
@@ -230,11 +257,12 @@ impl PickTable {
         Ok(tokens)
     }
 
-    fn lookup(&self, token: u32) -> Result<PickHit, PickError> {
-        let table = self
-            .records
-            .lock()
-            .map_err(|_| PickError::MetadataPoisoned)?;
+    fn lookup(&self, token: u32) -> Result<PickLookup, PickError> {
+        let table = match self.records.try_lock() {
+            Ok(table) => table,
+            Err(TryLockError::WouldBlock) => return Ok(PickLookup::Busy),
+            Err(TryLockError::Poisoned(_)) => return Err(PickError::MetadataPoisoned),
+        };
         let index = token
             .checked_sub(1)
             .and_then(|index| usize::try_from(index).ok())
@@ -246,12 +274,12 @@ impl PickTable {
             token,
             view_generation: self.view_generation,
         })?;
-        Ok(PickHit {
+        Ok(PickLookup::Hit(PickHit {
             view_generation: self.view_generation,
             batch: record.batch,
             version: record.version,
             point: record.point,
-        })
+        }))
     }
 }
 
@@ -312,8 +340,12 @@ mod tests {
         let tokens = table.append(records).unwrap();
 
         assert_eq!(tokens, [1, 2]);
-        let first = table.lookup(tokens[0]).unwrap();
-        let second = table.lookup(tokens[1]).unwrap();
+        let PickLookup::Hit(first) = table.lookup(tokens[0]).unwrap() else {
+            panic!("uncontended lookup should resolve immediately");
+        };
+        let PickLookup::Hit(second) = table.lookup(tokens[1]).unwrap() else {
+            panic!("uncontended lookup should resolve immediately");
+        };
         assert_eq!(first.point(), PointId::new(0));
         assert_eq!(first.batch(), BatchKey::new(10));
         assert_eq!(second.point(), PointId::new(0));
@@ -323,5 +355,27 @@ mod tests {
             Err(PickError::UnknownToken { token: 0, .. })
         ));
         assert!(table.append([]).unwrap().is_empty());
+    }
+
+    #[test]
+    fn lookup_reports_busy_without_blocking_and_resolves_after_release() {
+        let view_generation = ViewGenerationKey::new(ViewId::new(4), 2);
+        let table = PickTable::new(view_generation);
+        let tokens = table
+            .append([PickRecord {
+                batch: BatchKey::new(10),
+                version: BatchVersion::new(1),
+                point: PointId::new(8),
+            }])
+            .unwrap();
+
+        let guard = table.records.lock().unwrap();
+        assert!(matches!(table.lookup(tokens[0]), Ok(PickLookup::Busy)));
+        drop(guard);
+
+        let PickLookup::Hit(hit) = table.lookup(tokens[0]).unwrap() else {
+            panic!("lookup should resolve once the metadata lock is released");
+        };
+        assert_eq!(hit.point(), PointId::new(8));
     }
 }
