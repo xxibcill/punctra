@@ -41,6 +41,48 @@ Required fixture classes:
 
 Synthetic fixtures are generated from a seed recorded in every failure. No test depends on machine-local survey data.
 
+## Public point-cloud datasets
+
+Use real LAS/LAZ data progressively rather than making large downloads part of
+the default test suite:
+
+1. Generate synthetic clouds for unit and property tests.
+2. Download a 1–5 million-point subset from OpenTopography or NOAA for routine
+   integration and renderer development.
+3. Test one USGS 3DEP LAZ tile with its original coordinates, attributes, and
+   spatial reference intact.
+4. Combine several tiles for streaming tests above 100 million points.
+5. Use AHN or NOAA bulk data for dedicated stress testing.
+
+Recommended sources:
+
+- **[USGS 3DEP](https://www.usgs.gov/the-national-map-data-delivery/gis-data-download)**
+  is the preferred starting point for classified US point clouds. Select one
+  tile in LidarExplorer. USGS describes 3DEP products as public domain; see the
+  [dataset record](https://data.usgs.gov/datacatalog/data/USGS%3Ab7e353d2-325f-4fc6-8d95-01254705638a).
+- **[NOAA Digital Coast](https://coast.noaa.gov/htdata/lidar1_z/index.html)**
+  provides LAZ bulk downloads, custom subsets, COPC, EPT, and browser previews.
+  Use the [Data Access Viewer](https://coast.noaa.gov/dataviewer/) to select a
+  small custom area.
+- **[OpenTopography](https://opentopography.org/start)** supports cropped LAS
+  or LAZ downloads, individual tiles, and bulk access across varied
+  landscapes. Licensing and attribution vary by dataset, so record the
+  selected dataset's metadata. See its
+  [download documentation](https://opentopography.org/faq-page).
+- **[AHN Netherlands](https://www.ahn.nl/open-data)** provides dense nationwide
+  aerial lidar that is particularly useful for buildings and urban scenes.
+  Older releases are unrestricted open data; AHN5 requires source attribution
+  for derivative products.
+
+Keep large point-cloud files out of Git. Commit a download script or retrieval
+instructions instead, together with the source URL, dataset/version, license
+and required attribution, expected checksum, and relevant metadata such as
+bounds, point count, CRS, and LAS point format.
+
+LAS/LAZ decoding remains outside the renderer interface. Tests and applications
+feed the renderer bounded Point Batches, regardless of whether those batches
+came from a local LAZ file, a network source, or a deterministic generator.
+
 ## Module verification matrix
 
 ### point-contracts
