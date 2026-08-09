@@ -387,12 +387,6 @@ impl NodeRequest {
 
     /// Returns the requested hierarchy node.
     #[must_use]
-    pub const fn node_key(self) -> NodeKey {
-        self.node_key
-    }
-
-    /// Returns the requested hierarchy node.
-    #[must_use]
     pub const fn node(self) -> NodeKey {
         self.node_key
     }
@@ -484,26 +478,14 @@ impl Retirement {
         self.expected_version
     }
 
-    /// Converts this conditional retirement into a renderer update.
+    /// Returns the conditional renderer update represented by this token.
     #[must_use]
-    pub const fn into_render_update(self) -> RenderUpdate {
+    pub const fn render_update(self) -> RenderUpdate {
         RenderUpdate::Remove {
             view_generation: self.view_generation,
             key: self.batch_key,
             expected_version: self.expected_version,
         }
-    }
-
-    /// Returns the conditional renderer update represented by this token.
-    #[must_use]
-    pub const fn render_update(self) -> RenderUpdate {
-        self.into_render_update()
-    }
-}
-
-impl From<Retirement> for RenderUpdate {
-    fn from(retirement: Retirement) -> Self {
-        retirement.into_render_update()
     }
 }
 

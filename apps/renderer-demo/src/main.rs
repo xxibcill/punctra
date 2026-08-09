@@ -394,7 +394,7 @@ impl Graphics {
         )?;
 
         for retirement in plan.retirements().iter().copied() {
-            let update = retirement.into_render_update();
+            let update = retirement.render_update();
             self.renderer.apply(&update)?;
             self.scene
                 .mark_retired(retirement.batch_key(), retirement.expected_version());

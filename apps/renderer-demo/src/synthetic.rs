@@ -74,12 +74,12 @@ impl SyntheticScene {
 
     pub(crate) fn enqueue_requests(&mut self, requests: &[NodeRequest]) {
         for request in requests {
-            let index = node_index(request.node_key());
+            let index = node_index(request.node());
             if self.nodes[index].status() != NodeStatus::Missing {
                 continue;
             }
             self.nodes[index] = self.nodes[index].with_status(NodeStatus::Requested);
-            self.pending.push_back(request.node_key());
+            self.pending.push_back(request.node());
         }
     }
 

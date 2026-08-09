@@ -79,7 +79,7 @@ fn exact_parent_removal(plan: &ViewPlan, view_generation: ViewGenerationKey) -> 
     assert_eq!(parent_retirement.view_generation(), view_generation);
     assert_eq!(parent_retirement.batch_key(), BatchKey::new(PARENT_KEY));
     assert_eq!(parent_retirement.expected_version(), BatchVersion::new(1));
-    parent_retirement.into_render_update()
+    parent_retirement.render_update()
 }
 
 fn assert_children_only(report: FrameReport) {
@@ -140,7 +140,7 @@ impl<'gpu> PlannerRenderer<'gpu> {
 
     fn materialize_requests(&mut self, requests: &[NodeRequest]) {
         for request in requests {
-            let key = request.node_key().get();
+            let key = request.node().get();
             self.renderer
                 .apply(&RenderUpdate::Upsert {
                     batch: point_batch(
@@ -267,7 +267,7 @@ fn node_key(value: u64) -> NodeKey {
 fn request_keys(plan: &ViewPlan) -> Vec<u64> {
     plan.requests()
         .iter()
-        .map(|request| request.node_key().get())
+        .map(|request| request.node().get())
         .collect()
 }
 
