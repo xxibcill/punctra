@@ -432,9 +432,23 @@ fn select_target_cut(
         .map(|(_, node)| node.key)
         .collect::<BTreeSet<_>>();
     while let Some(candidate) = candidates.pop() {
-        if !target_cut.remove(&candidate.index) {
+        if !target_cut.contains(&candidate.index) {
             continue;
         }
+        let candidate_node = &hierarchy.nodes[candidate.index];
+        if candidate_node.status == NodeStatus::Missing
+            && !has_visible_coverage(hierarchy, visibility, candidate.index)
+            && target_is_requestable_in_current_cut(
+                hierarchy,
+                visibility,
+                &target_cut,
+                budget,
+                candidate.index,
+            )?
+        {
+            continue;
+        }
+        target_cut.remove(&candidate.index);
         let visible_children = hierarchy.children[candidate.index]
             .iter()
             .copied()
@@ -493,12 +507,11 @@ fn push_candidate(
     index: usize,
 ) {
     let node = &hierarchy.nodes[index];
-    let has_coverage = matches!(node.status, NodeStatus::Resident { .. })
-        || has_visible_resident_descendant(hierarchy, visibility, index);
+    let has_coverage = has_visible_coverage(hierarchy, visibility, index);
     let has_visible_children = hierarchy.children[index]
         .iter()
         .any(|child| visibility[*child].visible);
-    if has_coverage
+    if (has_coverage || node.status == NodeStatus::Missing)
         && has_visible_children
         && exceeds_refinement_threshold(
             visibility[index].screen_error,
@@ -512,6 +525,29 @@ fn push_candidate(
             screen_error: visibility[index].screen_error,
         });
     }
+}
+
+fn has_visible_coverage(
+    hierarchy: &Hierarchy,
+    visibility: &[NodeProjection],
+    index: usize,
+) -> bool {
+    matches!(hierarchy.nodes[index].status, NodeStatus::Resident { .. })
+        || has_visible_resident_descendant(hierarchy, visibility, index)
+}
+
+fn target_is_requestable_in_current_cut(
+    hierarchy: &Hierarchy,
+    visibility: &[NodeProjection],
+    target_cut: &BTreeSet<usize>,
+    budget: PlanningBudget,
+    target: usize,
+) -> Result<bool, PlanError> {
+    let retained_mask = required_residents(hierarchy, visibility, target_cut);
+    Ok(
+        select_request_indices(hierarchy, visibility, target_cut, &retained_mask, budget)?
+            .is_some_and(|requests| requests.contains(&target)),
+    )
 }
 
 fn has_visible_resident_descendant(

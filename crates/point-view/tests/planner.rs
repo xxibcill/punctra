@@ -446,6 +446,59 @@ fn initial_loading_requests_coarse_coverage_before_refining() {
 }
 
 #[test]
+fn cold_start_refines_past_an_unaffordable_root() {
+    let generation = generation(4, 1);
+    let nodes = [
+        node(
+            1,
+            None,
+            root_bounds(),
+            10.0,
+            100,
+            100,
+            101,
+            NodeStatus::Missing,
+        ),
+        node(
+            2,
+            Some(1),
+            bounds([-2.0, -1.0, -11.0], [0.0, 1.0, -9.0]),
+            0.0,
+            10,
+            10,
+            102,
+            NodeStatus::Missing,
+        ),
+        node(
+            3,
+            Some(1),
+            bounds([0.0, -1.0, -11.0], [2.0, 1.0, -9.0]),
+            0.0,
+            10,
+            10,
+            103,
+            NodeStatus::Missing,
+        ),
+    ];
+
+    let plan = planner(2.0, 0.25)
+        .plan(
+            &camera(),
+            [100, 100],
+            AvailableNodes::new(generation, &nodes),
+            PlanningBudget::new(20, 20, 2),
+        )
+        .unwrap();
+
+    assert_eq!(request_keys(&plan), vec![node_key(2), node_key(3)]);
+    assert!(plan.retained_nodes().is_empty());
+    assert!(plan.retirements().is_empty());
+    assert_eq!(plan.resource_usage().point_count(), 20);
+    assert_eq!(plan.resource_usage().estimated_bytes(), 20);
+    assert_eq!(plan.resource_usage().batch_count(), 2);
+}
+
+#[test]
 fn parent_retires_only_after_every_visible_replacement_is_resident() {
     let generation = generation(5, 9);
     let mut planner = planner(2.0, 0.25);
