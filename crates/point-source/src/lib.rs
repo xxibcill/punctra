@@ -32,7 +32,7 @@ mod error;
 mod stream;
 
 use adapter::{AdapterContract, AdapterVerified, CandidateAdapter, FullVerification, ReadAdapter};
-pub use error::{MAX_SOURCE_DIAGNOSTIC_BYTES, SourceDiagnostic, SourceError};
+pub use error::{MAX_SOURCE_DIAGNOSTIC_BYTES, ReadLimit, SourceDiagnostic, SourceError};
 pub use point_contracts::{MAX_ATTRIBUTE_DEFINITIONS, MAX_LOGICAL_ORDER_BYTES};
 pub use stream::{PointBatches, SourceReadSummary};
 
@@ -653,12 +653,12 @@ impl ReadBudget {
     ) -> Result<Self, SourceError> {
         if max_batch_points == 0 {
             return Err(SourceError::InvalidBudget {
-                limit: "max_batch_points",
+                limit: ReadLimit::MaxBatchPoints,
             });
         }
         if max_batch_payload_bytes == 0 {
             return Err(SourceError::InvalidBudget {
-                limit: "max_batch_payload_bytes",
+                limit: ReadLimit::MaxBatchPayloadBytes,
             });
         }
         Ok(Self {
@@ -1014,14 +1014,14 @@ fn normalize_request(
         count
             .checked_add(span.point_count())
             .ok_or(SourceError::ResourceLimit {
-                limit: "requested Point count",
+                limit: ReadLimit::RequestedPoints,
                 required: u64::MAX,
                 allowed: request.budget.max_points(),
             })
     })?;
     if exact_count > request.budget.max_points() {
         return Err(SourceError::ResourceLimit {
-            limit: "requested Point count",
+            limit: ReadLimit::RequestedPoints,
             required: exact_count,
             allowed: request.budget.max_points(),
         });
@@ -1048,7 +1048,7 @@ fn normalize_spans(
         SpanSelection::Spans(spans) => spans,
         SpanSelection::TooManyInputSpans { at_least } => {
             return Err(SourceError::ResourceLimit {
-                limit: "input Source spans",
+                limit: ReadLimit::InputSourceSpans,
                 required: at_least,
                 allowed: u64::try_from(MAX_INPUT_SOURCE_SPANS).unwrap_or(u64::MAX),
             });
@@ -1078,7 +1078,7 @@ fn normalize_spans(
     let normalized_count = u64::try_from(normalized.len()).unwrap_or(u64::MAX);
     if normalized_count > budget.max_spans() {
         return Err(SourceError::ResourceLimit {
-            limit: "normalized Source spans",
+            limit: ReadLimit::NormalizedSourceSpans,
             required: normalized_count,
             allowed: budget.max_spans(),
         });
@@ -1112,7 +1112,7 @@ fn resolve_attributes(
         }
         AttributeSelectionKind::TooManyInputAttributes { at_least } => {
             Err(SourceError::ResourceLimit {
-                limit: "input Attribute identities",
+                limit: ReadLimit::InputAttributeIdentities,
                 required: *at_least,
                 allowed: u64::try_from(MAX_INPUT_ATTRIBUTE_IDS).unwrap_or(u64::MAX),
             })

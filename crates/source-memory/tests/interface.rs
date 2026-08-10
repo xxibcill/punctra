@@ -7,8 +7,8 @@ use point_contracts::{
     PositionTransform, SourceMetadata, WorldBounds,
 };
 use point_source::{
-    AttributeSelection, OpenOptions, ReadBudget, ReadRequest, Source, SourceError, SourceSpan,
-    VerificationPolicy,
+    AttributeSelection, OpenOptions, ReadBudget, ReadLimit, ReadRequest, Source, SourceError,
+    SourceSpan, VerificationPolicy,
 };
 use source_memory::{MemoryFaultControl, MemorySource, open, open_with};
 
@@ -105,7 +105,7 @@ fn every_batch_obeys_point_and_payload_byte_budgets() {
     assert!(matches!(
         failed.next(),
         Err(SourceError::ResourceLimit {
-            limit: "batch payload bytes",
+            limit: ReadLimit::BatchPayloadBytes,
             required: BYTES_PER_POINT,
             allowed,
         }) if allowed == BYTES_PER_POINT - 1

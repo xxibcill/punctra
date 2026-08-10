@@ -43,8 +43,8 @@ use point_source::adapter::{
     FullVerification, ReadAdapter,
 };
 use point_source::{
-    AttributeSelection, OpenOptions, ReadBudget, SourceCandidate, SourceError, SourceJob,
-    SourcePreview,
+    AttributeSelection, OpenOptions, ReadBudget, ReadLimit, SourceCandidate, SourceError,
+    SourceJob, SourcePreview,
 };
 use thiserror::Error;
 
@@ -450,14 +450,14 @@ fn batch_point_count(
         total
             .checked_add(u64::from(definition.data_type().element_bytes()))
             .ok_or(SourceError::ResourceLimit {
-                limit: "Point payload bytes",
+                limit: ReadLimit::PointPayloadBytes,
                 required: u64::MAX,
                 allowed: budget.max_batch_payload_bytes(),
             })
     })?;
     if bytes_per_point > budget.max_batch_payload_bytes() {
         return Err(SourceError::ResourceLimit {
-            limit: "batch payload bytes",
+            limit: ReadLimit::BatchPayloadBytes,
             required: bytes_per_point,
             allowed: budget.max_batch_payload_bytes(),
         });

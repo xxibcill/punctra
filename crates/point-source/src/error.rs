@@ -67,6 +67,54 @@ impl From<&str> for SourceDiagnostic {
     }
 }
 
+/// Stable identity of a caller or adapter Source-read limit.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum ReadLimit {
+    /// Caller maximum Points in one batch.
+    MaxBatchPoints,
+    /// Caller maximum canonical payload bytes in one batch.
+    MaxBatchPayloadBytes,
+    /// Total Points selected by a normalized request.
+    RequestedPoints,
+    /// Raw Source spans supplied before normalization.
+    InputSourceSpans,
+    /// Normalized disjoint Source spans.
+    NormalizedSourceSpans,
+    /// Raw Attribute identities supplied before resolution.
+    InputAttributeIdentities,
+    /// Points in one emitted batch.
+    BatchPoints,
+    /// Canonical bytes required by one Point.
+    PointPayloadBytes,
+    /// Canonical payload bytes in one emitted batch.
+    BatchPayloadBytes,
+    /// Adapter decoder working memory.
+    AdapterWorkingBytes,
+    /// Full-verification decoder working memory.
+    VerificationWorkingBytes,
+    /// Points accepted from adapter batches.
+    EmittedPoints,
+}
+
+impl fmt::Display for ReadLimit {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::MaxBatchPoints => "max batch Points",
+            Self::MaxBatchPayloadBytes => "max batch payload bytes",
+            Self::RequestedPoints => "requested Point count",
+            Self::InputSourceSpans => "input Source spans",
+            Self::NormalizedSourceSpans => "normalized Source spans",
+            Self::InputAttributeIdentities => "input Attribute identities",
+            Self::BatchPoints => "batch Points",
+            Self::PointPayloadBytes => "Point payload bytes",
+            Self::BatchPayloadBytes => "batch payload bytes",
+            Self::AdapterWorkingBytes => "adapter working bytes",
+            Self::VerificationWorkingBytes => "verification working bytes",
+            Self::EmittedPoints => "emitted Point count",
+        })
+    }
+}
+
 /// Failure reported while verifying or reading a [`Source`](crate::Source).
 #[derive(Debug, Error)]
 #[non_exhaustive]
@@ -137,14 +185,14 @@ pub enum SourceError {
     #[error("{limit} must be greater than zero")]
     InvalidBudget {
         /// Name of the invalid limit.
-        limit: &'static str,
+        limit: ReadLimit,
     },
 
     /// A valid Point cannot fit within the caller's hard read budget.
     #[error("the Source read exceeded {limit}: required {required}, limit {allowed}")]
     ResourceLimit {
         /// Name of the exceeded limit.
-        limit: &'static str,
+        limit: ReadLimit,
         /// Amount required by the rejected batch.
         required: u64,
         /// Hard caller-selected limit.

@@ -10,7 +10,7 @@ use point_contracts::{
 
 use crate::adapter::{AdapterRead, AdapterReadRequest, ReadAdapter};
 use crate::{
-    NormalizedRead, ReadBudget, ReadRequest, SourceError, SourceSpan, normalize_request,
+    NormalizedRead, ReadBudget, ReadLimit, ReadRequest, SourceError, SourceSpan, normalize_request,
     publish_complete,
 };
 
@@ -262,7 +262,7 @@ impl PointBatches {
         let points = u64::try_from(batch.len()).unwrap_or(u64::MAX);
         if points > self.budget.max_batch_points() {
             return Err(SourceError::ResourceLimit {
-                limit: "batch Points",
+                limit: ReadLimit::BatchPoints,
                 required: points,
                 allowed: self.budget.max_batch_points(),
             });
@@ -270,7 +270,7 @@ impl PointBatches {
         let payload = batch.estimated_payload_bytes();
         if payload > self.budget.max_batch_payload_bytes() {
             return Err(SourceError::ResourceLimit {
-                limit: "batch payload bytes",
+                limit: ReadLimit::BatchPayloadBytes,
                 required: payload,
                 allowed: self.budget.max_batch_payload_bytes(),
             });
@@ -364,7 +364,7 @@ impl PointBatches {
             self.emitted_count
                 .checked_add(batch_points)
                 .ok_or(SourceError::ResourceLimit {
-                    limit: "emitted Point count",
+                    limit: ReadLimit::EmittedPoints,
                     required: u64::MAX,
                     allowed: self.expected_count,
                 })?;

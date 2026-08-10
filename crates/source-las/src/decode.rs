@@ -10,7 +10,7 @@ use point_contracts::{
     QuantizedPositions, SourceId, WorldBounds,
 };
 use point_source::adapter::{AdapterRead, AdapterReadRequest, ReadAdapter};
-use point_source::{ReadBudget, SourceError, SourceSpan};
+use point_source::{ReadBudget, ReadLimit, SourceError, SourceSpan};
 
 use crate::format::{
     AttributeKind, AttributePlan, Compression, FileWitness, LasLayout, SourceFileWitness,
@@ -105,14 +105,14 @@ fn batch_rows(
         bytes
             .checked_add(u64::from(attribute.definition.data_type().element_bytes()))
             .ok_or(SourceError::ResourceLimit {
-                limit: "canonical Point payload bytes",
+                limit: ReadLimit::PointPayloadBytes,
                 required: u64::MAX,
                 allowed: budget.max_batch_payload_bytes(),
             })
     })?;
     if canonical_row_bytes > budget.max_batch_payload_bytes() {
         return Err(SourceError::ResourceLimit {
-            limit: "batch payload bytes",
+            limit: ReadLimit::BatchPayloadBytes,
             required: canonical_row_bytes,
             allowed: budget.max_batch_payload_bytes(),
         });
@@ -126,7 +126,7 @@ fn batch_rows(
     let fixed = FIXED_DECODER_WORKING_BYTES
         .checked_add(layout.compression.decoder_bytes())
         .ok_or(SourceError::ResourceLimit {
-            limit: "adapter working bytes",
+            limit: ReadLimit::AdapterWorkingBytes,
             required: u64::MAX,
             allowed: budget.max_adapter_working_bytes(),
         })?;
@@ -135,13 +135,13 @@ fn batch_rows(
     let required = fixed
         .checked_add(record_len)
         .ok_or(SourceError::ResourceLimit {
-            limit: "adapter working bytes",
+            limit: ReadLimit::AdapterWorkingBytes,
             required: u64::MAX,
             allowed: budget.max_adapter_working_bytes(),
         })?;
     if required > budget.max_adapter_working_bytes() {
         return Err(SourceError::ResourceLimit {
-            limit: "adapter working bytes",
+            limit: ReadLimit::AdapterWorkingBytes,
             required,
             allowed: budget.max_adapter_working_bytes(),
         });
@@ -384,7 +384,7 @@ pub(crate) fn scan_bounds(
     let fixed = FIXED_DECODER_WORKING_BYTES
         .checked_add(layout.compression.decoder_bytes())
         .ok_or(SourceError::ResourceLimit {
-            limit: "verification working bytes",
+            limit: ReadLimit::VerificationWorkingBytes,
             required: u64::MAX,
             allowed: VERIFICATION_WORKING_BYTES,
         })?;
@@ -393,13 +393,13 @@ pub(crate) fn scan_bounds(
     let required = fixed
         .checked_add(record_len)
         .ok_or(SourceError::ResourceLimit {
-            limit: "verification working bytes",
+            limit: ReadLimit::VerificationWorkingBytes,
             required: u64::MAX,
             allowed: VERIFICATION_WORKING_BYTES,
         })?;
     if required > VERIFICATION_WORKING_BYTES {
         return Err(SourceError::ResourceLimit {
-            limit: "verification working bytes",
+            limit: ReadLimit::VerificationWorkingBytes,
             required,
             allowed: VERIFICATION_WORKING_BYTES,
         });

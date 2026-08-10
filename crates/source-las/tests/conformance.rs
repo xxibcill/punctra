@@ -15,8 +15,8 @@ use point_contracts::{
     PointBatch, PositionTransform, SourceMetadata, WorldBounds,
 };
 use point_source::{
-    AttributeSelection, OpenOptions, ReadBudget, ReadRequest, Source, SourceError, SourceRecord,
-    SourceSpan, VerificationPolicy,
+    AttributeSelection, OpenOptions, ReadBudget, ReadLimit, ReadRequest, Source, SourceError,
+    SourceRecord, SourceSpan, VerificationPolicy,
 };
 use source_las::{open as open_file, open_with as open_file_with};
 use source_memory::{MemorySource, open as open_memory, open_with as open_memory_with};
@@ -262,7 +262,7 @@ fn projection_and_every_hard_read_budget_are_enforced_through_the_public_source(
         assert!(matches!(
             payload_error,
             SourceError::ResourceLimit {
-                limit: "batch payload bytes",
+                limit: ReadLimit::BatchPayloadBytes,
                 required,
                 allowed,
             } if required == bytes_per_point && allowed == bytes_per_point - 1
@@ -275,7 +275,7 @@ fn projection_and_every_hard_read_budget_are_enforced_through_the_public_source(
         assert!(matches!(
             source.read(ReadRequest::all().budget(max_points)),
             Err(SourceError::ResourceLimit {
-                limit: "requested Point count",
+                limit: ReadLimit::RequestedPoints,
                 required,
                 allowed,
             }) if required == POINT_COUNT as u64 && allowed == (POINT_COUNT - 1) as u64

@@ -17,7 +17,7 @@ use point_source::adapter::{
 use point_source::{
     AttributeSelection, MAX_ADAPTER_NAME_BYTES, MAX_ADAPTER_VERSION_BYTES, MAX_FAST_TOKEN_BYTES,
     MAX_INPUT_ATTRIBUTE_IDS, MAX_INPUT_SOURCE_SPANS, MAX_LOGICAL_ORDER_BYTES,
-    MAX_SOURCE_DIAGNOSTIC_BYTES, OpenOptions, ReadBudget, ReadRequest, SourceCandidate,
+    MAX_SOURCE_DIAGNOSTIC_BYTES, OpenOptions, ReadBudget, ReadLimit, ReadRequest, SourceCandidate,
     SourceDiagnostic, SourceError, SourcePreview, SourceSpan, VerificationPolicy,
 };
 
@@ -568,7 +568,7 @@ fn max_spans_applies_after_overlap_normalization() {
     assert!(matches!(
         disjoint,
         Err(SourceError::ResourceLimit {
-            limit: "normalized Source spans",
+            limit: ReadLimit::NormalizedSourceSpans,
             required: 2,
             allowed: 1,
         })
@@ -603,7 +603,7 @@ fn raw_span_safety_cap_does_not_eagerly_poll_known_oversized_input() {
     assert!(matches!(
         result,
         Err(SourceError::ResourceLimit {
-            limit: "input Source spans",
+            limit: ReadLimit::InputSourceSpans,
             ..
         })
     ));
@@ -638,7 +638,7 @@ fn attribute_selection_is_bounded_before_collection() {
     assert!(matches!(
         result,
         Err(SourceError::ResourceLimit {
-            limit: "input Attribute identities",
+            limit: ReadLimit::InputAttributeIdentities,
             ..
         })
     ));
@@ -661,7 +661,7 @@ fn total_point_budget_is_enforced_before_adapter_start() {
     assert!(matches!(
         result,
         Err(SourceError::ResourceLimit {
-            limit: "requested Point count",
+            limit: ReadLimit::RequestedPoints,
             required: 3,
             allowed: 2,
         })
@@ -743,7 +743,7 @@ fn point_budget_failure_is_fused_without_summary() {
     assert!(matches!(
         points.next(),
         Err(SourceError::ResourceLimit {
-            limit: "batch Points",
+            limit: ReadLimit::BatchPoints,
             ..
         })
     ));
@@ -929,6 +929,32 @@ fn runtime_cancellation_has_one_domain_error() {
         SourceError::from(RuntimeError::WorkerPanicked),
         SourceError::Runtime(RuntimeError::WorkerPanicked)
     ));
+}
+
+#[test]
+fn read_limits_have_stable_public_names() {
+    for (limit, expected) in [
+        (ReadLimit::MaxBatchPoints, "max batch Points"),
+        (ReadLimit::MaxBatchPayloadBytes, "max batch payload bytes"),
+        (ReadLimit::RequestedPoints, "requested Point count"),
+        (ReadLimit::InputSourceSpans, "input Source spans"),
+        (ReadLimit::NormalizedSourceSpans, "normalized Source spans"),
+        (
+            ReadLimit::InputAttributeIdentities,
+            "input Attribute identities",
+        ),
+        (ReadLimit::BatchPoints, "batch Points"),
+        (ReadLimit::PointPayloadBytes, "Point payload bytes"),
+        (ReadLimit::BatchPayloadBytes, "batch payload bytes"),
+        (ReadLimit::AdapterWorkingBytes, "adapter working bytes"),
+        (
+            ReadLimit::VerificationWorkingBytes,
+            "verification working bytes",
+        ),
+        (ReadLimit::EmittedPoints, "emitted Point count"),
+    ] {
+        assert_eq!(limit.to_string(), expected);
+    }
 }
 
 #[test]
