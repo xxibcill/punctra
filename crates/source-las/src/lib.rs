@@ -91,7 +91,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use foundation_runtime::OperationReporter;
-use point_source::adapter::{AdapterVerified, CandidateAdapter, FullVerification};
+use point_source::adapter::{AdapterContract, AdapterVerified, CandidateAdapter, FullVerification};
 use point_source::{OpenOptions, SourceCandidate, SourceError, SourceJob, SourcePreview};
 
 use crate::decode::LasReadAdapter;
@@ -167,9 +167,8 @@ fn publish_verified(verified: VerifiedFile) -> AdapterVerified {
         Arc::clone(&verified.layout),
     ));
     AdapterVerified::new(
-        ADAPTER_NAME,
-        ADAPTER_VERSION,
-        LOGICAL_ORDER,
+        AdapterContract::new(ADAPTER_NAME, ADAPTER_VERSION, LOGICAL_ORDER)
+            .expect("the static LAS adapter contract is valid"),
         verified.metadata,
         verified.content_hash,
         FAST_TOKEN.to_vec(),

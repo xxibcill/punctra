@@ -11,8 +11,8 @@ use point_contracts::{
     PositionTransform, QuantizedPositions, SourceId, SourceMetadata, WorldBounds,
 };
 use point_source::adapter::{
-    AdapterRead, AdapterReadRequest, AdapterVerified, CandidateAdapter, FullVerification,
-    ReadAdapter,
+    AdapterContract, AdapterRead, AdapterReadRequest, AdapterVerified, CandidateAdapter,
+    FullVerification, ReadAdapter,
 };
 use point_source::{
     AttributeSelection, MAX_ADAPTER_NAME_BYTES, MAX_ADAPTER_VERSION_BYTES, MAX_FAST_TOKEN_BYTES,
@@ -57,9 +57,7 @@ impl FakeCandidate {
     fn verified_with_hash(&self, content_hash: ContentHash) -> AdapterVerified {
         let reader: Arc<dyn ReadAdapter> = self.reader.clone();
         AdapterVerified::new(
-            "fake",
-            self.adapter_version,
-            "input row order",
+            AdapterContract::new("fake", self.adapter_version, "input row order").unwrap(),
             Arc::new(self.metadata.clone()),
             content_hash,
             FAST_TOKEN.to_vec(),
@@ -889,6 +887,36 @@ fn source_record_deserialization_enforces_all_adapter_owned_bounds() {
         ),
     );
     assert!(serde_json::from_value::<point_source::SourceRecord>(oversized_token).is_err());
+}
+
+#[test]
+fn adapter_contract_validates_identity_fields_once() {
+    let contract = AdapterContract::new("adapter", "1", "input row order").unwrap();
+    assert_eq!(contract.name(), "adapter");
+    assert_eq!(contract.version(), "1");
+    assert_eq!(contract.logical_order(), "input row order");
+
+    for invalid in [
+        AdapterContract::new(" ", "1", "input row order"),
+        AdapterContract::new("adapter", " ", "input row order"),
+        AdapterContract::new("adapter", "1", " "),
+        AdapterContract::new(
+            "x".repeat(MAX_ADAPTER_NAME_BYTES + 1),
+            "1",
+            "input row order",
+        ),
+        AdapterContract::new(
+            "adapter",
+            "x".repeat(MAX_ADAPTER_VERSION_BYTES + 1),
+            "input row order",
+        ),
+        AdapterContract::new("adapter", "1", "x".repeat(MAX_LOGICAL_ORDER_BYTES + 1)),
+    ] {
+        assert!(matches!(
+            invalid,
+            Err(SourceError::SourceContractMismatch { .. })
+        ));
+    }
 }
 
 #[test]

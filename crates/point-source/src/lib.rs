@@ -31,7 +31,7 @@ pub mod adapter;
 mod error;
 mod stream;
 
-use adapter::{AdapterVerified, CandidateAdapter, FullVerification, ReadAdapter};
+use adapter::{AdapterContract, AdapterVerified, CandidateAdapter, FullVerification, ReadAdapter};
 pub use error::{MAX_SOURCE_DIAGNOSTIC_BYTES, SourceDiagnostic, SourceError};
 pub use point_contracts::{MAX_ATTRIBUTE_DEFINITIONS, MAX_LOGICAL_ORDER_BYTES};
 pub use stream::{PointBatches, SourceReadSummary};
@@ -161,9 +161,8 @@ pub struct SourceRecord {
     version: u32,
     source: SourceId,
     content_hash: ContentHash,
-    adapter_name: String,
-    adapter_version: String,
-    logical_order: String,
+    #[serde(flatten)]
+    adapter_contract: AdapterContract,
     metadata: Arc<SourceMetadata>,
     fast_token: Vec<u8>,
 }
@@ -186,13 +185,17 @@ impl<'de> Deserialize<'de> for SourceRecord {
         D: Deserializer<'de>,
     {
         let wire = SourceRecordWire::deserialize(deserializer)?;
+        let adapter_contract = AdapterContract::new(
+            wire.adapter_name.0,
+            wire.adapter_version.0,
+            wire.logical_order.0,
+        )
+        .map_err(serde::de::Error::custom)?;
         Ok(Self {
             version: wire.version,
             source: wire.source,
             content_hash: wire.content_hash,
-            adapter_name: wire.adapter_name.0,
-            adapter_version: wire.adapter_version.0,
-            logical_order: wire.logical_order.0,
+            adapter_contract,
             metadata: Arc::new(wire.metadata),
             fast_token: wire.fast_token.0,
         })
@@ -357,19 +360,25 @@ impl SourceRecord {
     /// Returns the concrete adapter name.
     #[must_use]
     pub fn adapter_name(&self) -> &str {
-        &self.adapter_name
+        self.adapter_contract.name()
     }
 
     /// Returns the concrete adapter contract version.
     #[must_use]
     pub fn adapter_version(&self) -> &str {
-        &self.adapter_version
+        self.adapter_contract.version()
     }
 
     /// Returns the adapter's canonical Point ordering rule.
     #[must_use]
     pub fn logical_order(&self) -> &str {
-        &self.logical_order
+        self.adapter_contract.logical_order()
+    }
+
+    /// Returns the validated concrete adapter identity contract.
+    #[must_use]
+    pub const fn adapter_contract(&self) -> &AdapterContract {
+        &self.adapter_contract
     }
 
     /// Returns verified canonical Source metadata.
@@ -815,7 +824,7 @@ fn open_source(
     control.check_cancelled()?;
     let (verified, expected) = verify_adapter(adapter, options, control)?;
     control.check_cancelled()?;
-    validate_adapter_identity(&verified)?;
+    validate_adapter_verified(&verified)?;
     let source_id = derive_source_id(&verified);
 
     if let Some(record) = expected.as_ref() {
@@ -886,7 +895,7 @@ fn try_fast_match(
         ) => return Ok(None),
         Err(error) => return Err(error),
     };
-    validate_adapter_identity(&verified)?;
+    validate_adapter_verified(&verified)?;
     let source = derive_source_id(&verified);
     match validate_record(record, source, &verified) {
         Ok(()) => Ok(Some(verified)),
@@ -895,33 +904,7 @@ fn try_fast_match(
     }
 }
 
-fn validate_adapter_identity(verified: &AdapterVerified) -> Result<(), SourceError> {
-    for (name, value, max_bytes) in [
-        (
-            "adapter name",
-            verified.adapter_name(),
-            MAX_ADAPTER_NAME_BYTES,
-        ),
-        (
-            "adapter version",
-            verified.adapter_version(),
-            MAX_ADAPTER_VERSION_BYTES,
-        ),
-        (
-            "logical order",
-            verified.logical_order(),
-            MAX_LOGICAL_ORDER_BYTES,
-        ),
-    ] {
-        if value.trim().is_empty() {
-            return Err(SourceError::contract(format!("{name} is empty")));
-        }
-        if value.len() > max_bytes {
-            return Err(SourceError::contract(format!(
-                "{name} exceeds its {max_bytes}-byte limit"
-            )));
-        }
-    }
+fn validate_adapter_verified(verified: &AdapterVerified) -> Result<(), SourceError> {
     if verified.fast_token().len() > MAX_FAST_TOKEN_BYTES {
         return Err(SourceError::contract(format!(
             "Fast evidence exceeds its {MAX_FAST_TOKEN_BYTES}-byte limit"
@@ -940,10 +923,7 @@ fn validate_record(
             "content fingerprint differs from the record",
         ));
     }
-    if verified.adapter_name() != record.adapter_name
-        || verified.adapter_version() != record.adapter_version
-        || verified.logical_order() != record.logical_order
-    {
+    if verified.contract() != record.adapter_contract() {
         return Err(SourceError::changed(
             "adapter name, version, or logical-order rule differs from the record",
         ));
@@ -964,9 +944,10 @@ fn validate_record(
 fn derive_source_id(verified: &AdapterVerified) -> SourceId {
     let mut hasher = Hasher::new();
     hasher.update(SOURCE_ID_DOMAIN);
-    hash_text(&mut hasher, verified.adapter_name());
-    hash_text(&mut hasher, verified.adapter_version());
-    hash_text(&mut hasher, verified.logical_order());
+    let contract = verified.contract();
+    hash_text(&mut hasher, contract.name());
+    hash_text(&mut hasher, contract.version());
+    hash_text(&mut hasher, contract.logical_order());
     hasher.update(verified.content_hash().as_bytes());
     SourceId::new(*hasher.finalize().as_bytes())
 }
@@ -982,7 +963,7 @@ fn publish_source(source: SourceId, verified: AdapterVerified) -> Result<Source,
     let provenance = SourceProvenance::new(
         source,
         parts.content_hash,
-        parts.logical_order.clone(),
+        parts.contract.logical_order().to_owned(),
         SOURCE_CONTRACT_VERSION,
     )
     .map_err(|error| SourceError::contract(error.to_string()))?;
@@ -990,9 +971,7 @@ fn publish_source(source: SourceId, verified: AdapterVerified) -> Result<Source,
         version: SOURCE_RECORD_VERSION,
         source,
         content_hash: parts.content_hash,
-        adapter_name: parts.adapter_name,
-        adapter_version: parts.adapter_version,
-        logical_order: parts.logical_order,
+        adapter_contract: parts.contract,
         metadata: Arc::clone(&parts.metadata),
         fast_token: parts.fast_token,
     };

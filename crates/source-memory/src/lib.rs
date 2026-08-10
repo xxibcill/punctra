@@ -39,8 +39,8 @@ use point_contracts::{
     PositionTransform, QuantizedPositions, SourceMetadata, WorldBounds,
 };
 use point_source::adapter::{
-    AdapterRead, AdapterReadRequest, AdapterVerified, CandidateAdapter, FullVerification,
-    ReadAdapter,
+    AdapterContract, AdapterRead, AdapterReadRequest, AdapterVerified, CandidateAdapter,
+    FullVerification, ReadAdapter,
 };
 use point_source::{
     AttributeSelection, OpenOptions, ReadBudget, SourceCandidate, SourceError, SourceJob,
@@ -270,9 +270,8 @@ impl CandidateAdapter for MemoryCandidate {
 
 fn verified(state: &Arc<MemoryState>, epoch: u64, content_hash: ContentHash) -> AdapterVerified {
     AdapterVerified::new(
-        ADAPTER_NAME,
-        ADAPTER_VERSION,
-        LOGICAL_ORDER,
+        AdapterContract::new(ADAPTER_NAME, ADAPTER_VERSION, LOGICAL_ORDER)
+            .expect("the static memory adapter contract is valid"),
         Arc::clone(&state.metadata),
         content_hash,
         epoch.to_le_bytes().to_vec(),
