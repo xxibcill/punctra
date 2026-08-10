@@ -13,6 +13,7 @@ use point_source::SourceError;
 
 const EXTRA_BYTES_WIDTH: u16 = 2;
 const POINT_COUNT: usize = 2;
+const CANCELLATION_FIXTURE_POINTS: usize = 5_000;
 static NEXT_DIRECTORY: AtomicU64 = AtomicU64::new(0);
 
 #[test]
@@ -102,6 +103,27 @@ fn verified_source_reads_from_immutable_bytes() {
     let mut batches = source.points().unwrap();
     let batch = batches.next().unwrap().unwrap();
     assert_eq!(batch.positions().ticks()[0], ticks(0));
+}
+
+#[test]
+fn permissive_budget_still_allows_cancellation_between_decode_quanta() {
+    let directory = FixtureDirectory::new();
+    let path = directory.path().join("cancellation-quanta.las");
+    write_cancellation_fixture(&path);
+    let source = source_las::open(&path).blocking_wait().unwrap();
+    let permissive = point_source::ReadBudget::new(u64::MAX, u64::MAX)
+        .unwrap()
+        .with_max_adapter_working_bytes(u64::MAX);
+    let mut batches = source
+        .read(point_source::ReadRequest::all().budget(permissive))
+        .unwrap();
+
+    let first = batches.next().unwrap().unwrap();
+    assert!(first.len() < CANCELLATION_FIXTURE_POINTS);
+    batches.handle().cancel();
+    assert!(matches!(batches.next(), Err(SourceError::Cancelled)));
+    assert!(batches.next().unwrap().is_none());
+    assert!(batches.summary().is_none());
 }
 
 fn assert_supported_format(directory: &FixtureDirectory, point_format: u8, extension: &str) {
@@ -261,6 +283,23 @@ fn write_fixture(path: &Path, point_format: u8) {
     let mut writer = Writer::from_path(path, builder.into_header().unwrap()).unwrap();
     for row in 0..POINT_COUNT {
         writer.write_point(point(format, row)).unwrap();
+    }
+    writer.close().unwrap();
+}
+
+fn write_cancellation_fixture(path: &Path) {
+    let mut builder = Builder::from((1, 4));
+    builder.point_format = Format::new(0).unwrap();
+    let mut writer = Writer::from_path(path, builder.into_header().unwrap()).unwrap();
+    for row in 0..CANCELLATION_FIXTURE_POINTS {
+        writer
+            .write_point(Point {
+                x: f64::from(u32::try_from(row).unwrap()),
+                return_number: 1,
+                number_of_returns: 1,
+                ..Point::default()
+            })
+            .unwrap();
     }
     writer.close().unwrap();
 }

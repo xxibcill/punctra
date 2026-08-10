@@ -20,6 +20,9 @@ use crate::format::{
 const FIXED_DECODER_WORKING_BYTES: u64 = 64 * 1024;
 const VERIFICATION_WORKING_BYTES: u64 = 64 * 1024 * 1024;
 const VERIFICATION_ROWS: u64 = 16_384;
+const READ_CANCELLATION_ROWS: u64 = 4_096;
+const READ_CANCELLATION_PAYLOAD_BYTES: u64 = 4 * 1_024 * 1_024;
+const READ_CANCELLATION_WORKING_BYTES: u64 = 8 * 1_024 * 1_024;
 
 pub(crate) struct LasReadAdapter {
     file: Arc<File>,
@@ -107,14 +110,18 @@ fn batch_rows(
                 allowed: budget.max_batch_payload_bytes(),
             })
     })?;
-    let rows_by_payload = budget.max_batch_payload_bytes() / canonical_row_bytes;
-    if rows_by_payload == 0 {
+    if canonical_row_bytes > budget.max_batch_payload_bytes() {
         return Err(SourceError::ResourceLimit {
             limit: "batch payload bytes",
             required: canonical_row_bytes,
             allowed: budget.max_batch_payload_bytes(),
         });
     }
+    let interruptible_payload_bytes = budget
+        .max_batch_payload_bytes()
+        .min(READ_CANCELLATION_PAYLOAD_BYTES)
+        .max(canonical_row_bytes);
+    let rows_by_payload = interruptible_payload_bytes / canonical_row_bytes;
 
     let fixed = FIXED_DECODER_WORKING_BYTES
         .checked_add(layout.compression.decoder_bytes())
@@ -139,9 +146,14 @@ fn batch_rows(
             allowed: budget.max_adapter_working_bytes(),
         });
     }
-    let rows_by_working = (budget.max_adapter_working_bytes() - fixed) / record_len;
+    let interruptible_working_bytes = budget
+        .max_adapter_working_bytes()
+        .min(READ_CANCELLATION_WORKING_BYTES)
+        .max(required);
+    let rows_by_working = (interruptible_working_bytes - fixed) / record_len;
     Ok(budget
         .max_batch_points()
+        .min(READ_CANCELLATION_ROWS)
         .min(rows_by_payload)
         .min(rows_by_working))
 }

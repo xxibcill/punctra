@@ -115,6 +115,32 @@ fn every_batch_obeys_point_and_payload_byte_budgets() {
 }
 
 #[test]
+fn permissive_budget_still_allows_cancellation_between_internal_quanta() {
+    const ROWS: usize = 20_000;
+
+    let ticks = (0..ROWS)
+        .map(|row| [i64::try_from(row).unwrap(), 0, 0])
+        .collect();
+    let input = MemorySource::from_columns(
+        PositionTransform::new([0.0; 3], [1.0; 3]).unwrap(),
+        CoordinateReference::Unknown,
+        ticks,
+        AttributeColumns::empty(ROWS),
+    )
+    .unwrap();
+    let source = open(input).blocking_wait().unwrap();
+    let permissive = ReadBudget::new(u64::MAX, u64::MAX).unwrap();
+    let mut batches = source.read(ReadRequest::all().budget(permissive)).unwrap();
+
+    let first = batches.next().unwrap().unwrap();
+    assert!(first.len() < ROWS);
+    batches.handle().cancel();
+    assert!(matches!(batches.next(), Err(SourceError::Cancelled)));
+    assert!(batches.next().unwrap().is_none());
+    assert!(batches.summary().is_none());
+}
+
+#[test]
 fn fast_reopen_matches_the_recorded_source() {
     let input = fixture_input();
     let source = open(input.clone()).blocking_wait().unwrap();

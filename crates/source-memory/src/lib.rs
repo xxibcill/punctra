@@ -56,6 +56,8 @@ const NO_READ_FAULT: u64 = u64::MAX;
 const HASH_ROW_QUANTUM: usize = 4_096;
 const HASH_VALUE_QUANTUM: usize = 4_096;
 const HASH_BYTE_QUANTUM: usize = 64 * 1_024;
+const READ_CANCELLATION_ROWS: u64 = 4_096;
+const READ_CANCELLATION_PAYLOAD_BYTES: u64 = 4 * 1_024 * 1_024;
 
 /// Validated immutable columnar input for one in-memory Source.
 #[derive(Clone)]
@@ -454,16 +456,21 @@ fn batch_point_count(
                 allowed: budget.max_batch_payload_bytes(),
             })
     })?;
-    let points_by_bytes = budget.max_batch_payload_bytes() / bytes_per_point;
-    if points_by_bytes == 0 {
+    if bytes_per_point > budget.max_batch_payload_bytes() {
         return Err(SourceError::ResourceLimit {
             limit: "batch payload bytes",
             required: bytes_per_point,
             allowed: budget.max_batch_payload_bytes(),
         });
     }
+    let interruptible_payload_bytes = budget
+        .max_batch_payload_bytes()
+        .min(READ_CANCELLATION_PAYLOAD_BYTES)
+        .max(bytes_per_point);
+    let points_by_bytes = interruptible_payload_bytes / bytes_per_point;
     Ok(remaining
         .min(budget.max_batch_points())
+        .min(READ_CANCELLATION_ROWS)
         .min(points_by_bytes))
 }
 
