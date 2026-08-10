@@ -576,9 +576,19 @@ impl CheckPointReport {
     }
 }
 
-/// Receipt for one durably published `LandXML` export.
+/// How one successful `LandXML` ensure operation satisfied its target.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LandXmlDisposition {
+    /// This operation durably created the target without replacement.
+    Created,
+    /// A complete byte-identical target already existed and was verified.
+    ReconciledExisting,
+}
+
+/// Receipt for one durably published or reconciled `LandXML` export.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct LandXmlReceipt {
+    disposition: LandXmlDisposition,
     surface_artifact_hash: ContentHash,
     geometry_hash: ContentHash,
     topology_hash: ContentHash,
@@ -591,6 +601,7 @@ pub struct LandXmlReceipt {
 impl LandXmlReceipt {
     #[allow(clippy::too_many_arguments)]
     pub(crate) const fn new(
+        disposition: LandXmlDisposition,
         surface_artifact_hash: ContentHash,
         geometry_hash: ContentHash,
         topology_hash: ContentHash,
@@ -600,6 +611,7 @@ impl LandXmlReceipt {
         face_count: u64,
     ) -> Self {
         Self {
+            disposition,
             surface_artifact_hash,
             geometry_hash,
             topology_hash,
@@ -608,6 +620,12 @@ impl LandXmlReceipt {
             vertex_count,
             face_count,
         }
+    }
+
+    /// Returns whether this operation created or reconciled the target.
+    #[must_use]
+    pub const fn disposition(self) -> LandXmlDisposition {
+        self.disposition
     }
 
     /// Returns the exported Terrain Artifact hash.

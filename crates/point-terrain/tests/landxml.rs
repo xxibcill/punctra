@@ -10,7 +10,9 @@ use std::{
 
 use blake3::Hasher;
 use point_contracts::ContentHash;
-use point_terrain::{LandXmlLimits, LandXmlOptions, TerrainError, TerrainSurface};
+use point_terrain::{
+    LandXmlDisposition, LandXmlLimits, LandXmlOptions, TerrainError, TerrainSurface,
+};
 use roxmltree::{Document, Node};
 
 use support::{TerrainFixture, derive_surface};
@@ -106,6 +108,7 @@ fn deterministic_bytes_round_trip_through_an_independent_semantic_parser() {
 
     assert_eq!(first_bytes, second_bytes);
     assert_eq!(first_receipt, second_receipt);
+    assert_eq!(first_receipt.disposition(), LandXmlDisposition::Created);
     assert_eq!(
         first_receipt.content_hash(),
         ContentHash::new(*blake3::hash(&first_bytes).as_bytes())
@@ -164,6 +167,160 @@ fn create_new_never_replaces_an_existing_target() {
         fs::read(&target).expect("existing target remains readable"),
         b"caller-owned sentinel"
     );
+    output.assert_no_stages();
+}
+
+#[test]
+fn ensure_creates_then_reconciles_the_exact_existing_target() {
+    let (_fixture, surface) = planar_surface("landxml-ensure");
+    let output = TemporaryOutput::new("ensure");
+    let target = output.path("terrain.xml");
+    let options = asserted_options("Recovery Ground");
+
+    let created = surface
+        .ensure_landxml(&target, options.clone(), LandXmlLimits::default())
+        .blocking_wait()
+        .expect("ensure creates a missing target");
+    let original = fs::read(&target).expect("created target is readable");
+    let reconciled = surface
+        .ensure_landxml(&target, options, LandXmlLimits::default())
+        .blocking_wait()
+        .expect("ensure reconciles exact existing bytes");
+
+    assert_eq!(created.disposition(), LandXmlDisposition::Created);
+    assert_eq!(
+        reconciled.disposition(),
+        LandXmlDisposition::ReconciledExisting
+    );
+    assert_eq!(created.content_hash(), reconciled.content_hash());
+    assert_eq!(created.byte_length(), reconciled.byte_length());
+    assert_eq!(
+        fs::read(&target).expect("reconciled target remains readable"),
+        original
+    );
+    output.assert_no_stages();
+}
+
+#[test]
+fn ensure_reports_conflict_without_modifying_different_existing_bytes() {
+    let (_fixture, surface) = planar_surface("landxml-conflict");
+    let output = TemporaryOutput::new("conflict");
+    let target = output.path("terrain.xml");
+    let sentinel = b"caller-owned conflicting LandXML";
+    fs::write(&target, sentinel).expect("create conflicting target");
+
+    let error = surface
+        .ensure_landxml(
+            &target,
+            asserted_options("Expected Ground"),
+            LandXmlLimits::default(),
+        )
+        .blocking_wait()
+        .expect_err("different existing bytes conflict");
+
+    let TerrainError::ExportConflict {
+        expected_hash,
+        actual_hash,
+        ..
+    } = error
+    else {
+        panic!("different existing bytes must return a structured conflict");
+    };
+    assert_ne!(expected_hash, actual_hash);
+    assert_eq!(
+        actual_hash,
+        ContentHash::new(*blake3::hash(sentinel).as_bytes())
+    );
+    assert_eq!(
+        fs::read(&target).expect("target remains readable"),
+        sentinel
+    );
+    output.assert_no_stages();
+}
+
+#[test]
+fn ensure_rejects_non_regular_targets_without_modification() {
+    let (_fixture, surface) = planar_surface("landxml-non-regular");
+    let output = TemporaryOutput::new("non-regular");
+    let target = output.path("terrain.xml");
+    fs::create_dir(&target).expect("create conflicting directory target");
+
+    let error = surface
+        .ensure_landxml(
+            &target,
+            asserted_options("Expected Ground"),
+            LandXmlLimits::default(),
+        )
+        .blocking_wait()
+        .expect_err("directory target fails closed");
+
+    assert!(matches!(error, TerrainError::InvalidArgument { .. }));
+    assert!(target.is_dir());
+    output.assert_no_stages();
+}
+
+#[cfg(unix)]
+#[test]
+fn ensure_rejects_a_symlink_without_reading_or_modifying_its_destination() {
+    use std::os::unix::fs::symlink;
+
+    let (_fixture, surface) = planar_surface("landxml-symlink");
+    let output = TemporaryOutput::new("symlink");
+    let destination = output.path("destination.xml");
+    let target = output.path("terrain.xml");
+    let sentinel = b"caller-owned symlink destination";
+    fs::write(&destination, sentinel).expect("create symlink destination");
+    symlink(&destination, &target).expect("create conflicting symlink target");
+
+    let error = surface
+        .ensure_landxml(
+            &target,
+            asserted_options("Expected Ground"),
+            LandXmlLimits::default(),
+        )
+        .blocking_wait()
+        .expect_err("symlink target fails closed");
+
+    assert!(matches!(error, TerrainError::InvalidArgument { .. }));
+    assert!(
+        fs::symlink_metadata(&target)
+            .expect("symlink remains")
+            .file_type()
+            .is_symlink()
+    );
+    assert_eq!(fs::read(&destination).unwrap(), sentinel);
+    output.assert_no_stages();
+}
+
+#[test]
+fn ensure_applies_resource_limits_before_reconciling_an_existing_target() {
+    let (_fixture, surface) = planar_surface("landxml-ensure-limits");
+    let output = TemporaryOutput::new("ensure-limits");
+    let target = output.path("terrain.xml");
+    let options = asserted_options("Bounded Recovery Ground");
+    surface
+        .ensure_landxml(&target, options.clone(), LandXmlLimits::default())
+        .blocking_wait()
+        .expect("seed ensure succeeds");
+    let exact = fs::read(&target).expect("seed target is readable");
+
+    let error = surface
+        .ensure_landxml(
+            &target,
+            options,
+            replace_byte_limits(LandXmlLimits::default(), Some(1), None, None, None, None),
+        )
+        .blocking_wait()
+        .expect_err("output limit is not bypassed by an existing target");
+
+    assert!(matches!(
+        error,
+        TerrainError::ResourceLimit {
+            limit: "LandXML output bytes",
+            ..
+        }
+    ));
+    assert_eq!(fs::read(&target).unwrap(), exact);
     output.assert_no_stages();
 }
 
@@ -254,6 +411,32 @@ fn cancellation_before_publication_leaves_no_target_or_stage() {
     let job = surface.export_landxml(
         &target,
         asserted_options("Cancellation Fixture"),
+        LandXmlLimits::default(),
+    );
+    job.handle().cancel();
+
+    assert!(matches!(job.blocking_wait(), Err(TerrainError::Cancelled)));
+    assert!(!target.exists());
+    output.assert_no_stages();
+}
+
+#[test]
+fn ensure_cancellation_before_publication_leaves_no_target_or_stage() {
+    let side = 72_i64;
+    let ticks = (0..side)
+        .flat_map(|y| (0..side).map(move |x| [x, y, x + 2 * y]))
+        .collect::<Vec<_>>();
+    let fixture = TerrainFixture::new(
+        "landxml-ensure-cancel",
+        ticks.clone(),
+        vec![GROUND; ticks.len()],
+    );
+    let surface = derive_surface(fixture.snapshot(), GROUND);
+    let output = TemporaryOutput::new("ensure-cancel");
+    let target = output.path("cancelled.xml");
+    let job = surface.ensure_landxml(
+        &target,
+        asserted_options("Ensure Cancellation Fixture"),
         LandXmlLimits::default(),
     );
     job.handle().cancel();
