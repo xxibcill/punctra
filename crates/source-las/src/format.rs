@@ -1,6 +1,6 @@
 use std::fs::{File, Metadata};
-use std::io::{BufReader, Read, Seek, SeekFrom};
-use std::path::Path;
+use std::io::{BufReader, Read, Seek, SeekFrom, Write};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::UNIX_EPOCH;
 
@@ -15,6 +15,7 @@ use point_contracts::{
 };
 use point_source::adapter::FullVerification;
 use point_source::{SourceDiagnostic, SourceError};
+use tempfile::tempfile;
 
 use crate::decode::scan_bounds;
 
@@ -28,10 +29,41 @@ const MAX_LAZ_CHUNKS: u64 = 1_000_000;
 
 pub(crate) struct VerifiedFile {
     pub(crate) file: Arc<File>,
-    pub(crate) witness: FileWitness,
+    pub(crate) source_witness: SourceFileWitness,
     pub(crate) layout: Arc<LasLayout>,
     pub(crate) metadata: Arc<SourceMetadata>,
     pub(crate) content_hash: ContentHash,
+}
+
+#[derive(Clone)]
+pub(crate) struct SourceFileWitness {
+    file: Arc<File>,
+    path: Arc<PathBuf>,
+    metadata: FileWitness,
+}
+
+impl SourceFileWitness {
+    fn new(file: File, path: &Path, metadata: FileWitness) -> Self {
+        Self {
+            file: Arc::new(file),
+            path: Arc::new(path.to_path_buf()),
+            metadata,
+        }
+    }
+
+    pub(crate) fn ensure_unchanged(&self) -> Result<(), SourceError> {
+        self.metadata.ensure_file(&self.file)?;
+        let path_metadata = FileWitness::for_path(&self.path).map_err(|_| {
+            SourceError::changed("the verified Source path is no longer accessible")
+        })?;
+        if path_metadata == self.metadata {
+            Ok(())
+        } else {
+            Err(SourceError::changed(
+                "the file at the verified Source path changed",
+            ))
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -59,7 +91,7 @@ impl FileWitness {
             .map_err(classify_io)
     }
 
-    pub(crate) fn for_path(path: &Path) -> Result<Self, SourceError> {
+    fn for_path(path: &Path) -> Result<Self, SourceError> {
         path.metadata()
             .map(|metadata| Self::from_metadata(&metadata))
             .map_err(classify_io)
@@ -70,16 +102,6 @@ impl FileWitness {
             Ok(())
         } else {
             Err(SourceError::changed("the verified file changed"))
-        }
-    }
-
-    pub(crate) fn ensure_path(&self, path: &Path) -> Result<(), SourceError> {
-        if &Self::for_path(path)? == self {
-            Ok(())
-        } else {
-            Err(SourceError::changed(
-                "the file at the verified path changed",
-            ))
         }
     }
 }
@@ -165,9 +187,11 @@ pub(crate) fn verify_file(
     reporter: &OperationReporter,
 ) -> Result<VerifiedFile, SourceError> {
     reporter.check_cancelled()?;
-    let mut file = File::open(path).map_err(classify_io)?;
-    let witness = FileWitness::for_file(&file)?;
-    let content_hash = hash_file(&mut file, witness.len, reporter)?;
+    let mut source_file = File::open(path).map_err(classify_io)?;
+    let source_witness = FileWitness::for_file(&source_file)?;
+    let mut file = tempfile().map_err(classify_io)?;
+    let content_hash =
+        snapshot_and_hash(&mut source_file, &mut file, source_witness.len, reporter)?;
     if verification
         .expected_content_hash()
         .is_some_and(|expected| expected != content_hash)
@@ -177,13 +201,17 @@ pub(crate) fn verify_file(
         ));
     }
 
-    witness.ensure_file(&file)?;
-    witness.ensure_path(path)?;
-    let parsed = parse_layout(&mut file, witness.len)?;
+    source_witness.ensure_file(&source_file)?;
+    if FileWitness::for_path(path)? != source_witness {
+        return Err(SourceError::changed(
+            "the file at the verified path changed",
+        ));
+    }
+    let snapshot_witness = FileWitness::for_file(&file)?;
+    let parsed = parse_layout(&mut file, snapshot_witness.len)?;
     let layout = Arc::new(parsed.layout);
-    let bounds = scan_bounds(&file, &witness, &layout, reporter)?;
-    witness.ensure_file(&file)?;
-    witness.ensure_path(path)?;
+    let bounds = scan_bounds(&file, &snapshot_witness, &layout, reporter)?;
+    snapshot_witness.ensure_file(&file)?;
 
     let schema = AttributeSchema::new(
         layout
@@ -206,7 +234,7 @@ pub(crate) fn verify_file(
 
     Ok(VerifiedFile {
         file: Arc::new(file),
-        witness,
+        source_witness: SourceFileWitness::new(source_file, path, source_witness),
         layout,
         metadata: Arc::new(metadata),
         content_hash,
@@ -254,7 +282,7 @@ fn parse_layout(file: &mut File, file_len: u64) -> Result<ParsedLayout, SourceEr
     format.extra_bytes = u16::try_from(record_len - base_len)
         .map_err(|_| SourceError::corrupt("point-record extra-byte width does not fit u16"))?;
 
-    let point_count = point_count(&header);
+    let point_count = point_count(&header)?;
     let transform = PositionTransform::new(
         [header.x_offset, header.y_offset, header.z_offset],
         [
@@ -370,15 +398,18 @@ fn validate_uncompressed_points(facts: FileLayoutFacts) -> Result<Compression, S
     Ok(Compression::Las)
 }
 
-fn point_count(header: &las::raw::Header) -> u64 {
+fn point_count(header: &las::raw::Header) -> Result<u64, SourceError> {
     let legacy = u64::from(header.number_of_point_records);
-    if legacy != 0 {
-        legacy
-    } else {
-        header
-            .large_file
-            .map_or(0, |large| large.number_of_point_records)
+    let Some(large_file) = header.large_file else {
+        return Ok(legacy);
+    };
+    let extended = large_file.number_of_point_records;
+    if legacy != 0 && legacy != extended {
+        return Err(SourceError::corrupt(format!(
+            "LAS 1.4 point counts disagree: legacy count {legacy}, extended count {extended}"
+        )));
     }
+    Ok(if legacy == 0 { extended } else { legacy })
 }
 
 struct RawVlr {
@@ -444,69 +475,160 @@ fn read_vlrs(
         usize::try_from(count).map_err(|_| SourceError::corrupt("metadata count overflow"))?,
     );
     for _ in 0..count {
-        let header_len = if extended {
-            EVLR_HEADER_BYTES
-        } else {
-            VLR_HEADER_BYTES
-        };
-        let header_start = reader.stream_position().map_err(classify_io)?;
-        let header_len_u64 = u64::try_from(header_len)
-            .map_err(|_| SourceError::corrupt("metadata header length does not fit u64"))?;
-        if header_start
-            .checked_add(header_len_u64)
-            .is_none_or(|end| end > limit)
-        {
-            return Err(SourceError::corrupt(
-                "metadata header extends beyond its LAS section",
-            ));
-        }
-        let mut fixed = [0_u8; EVLR_HEADER_BYTES];
-        reader
-            .read_exact(&mut fixed[..header_len])
-            .map_err(classify_io)?;
-        let (payload_len, description_start) = if extended {
-            (
-                u64::from_le_bytes(fixed[20..28].try_into().map_err(slice_error)?),
-                28,
-            )
-        } else {
-            (
-                u64::from(u16::from_le_bytes(
-                    fixed[20..22].try_into().map_err(slice_error)?,
-                )),
-                22,
-            )
-        };
-        if payload_len > MAX_METADATA_RECORD_PAYLOAD_BYTES as u64 {
-            return Err(SourceError::corrupt(
-                "one LAS metadata payload exceeds the canonical cap",
-            ));
-        }
-        budget.reserve_payload(payload_len)?;
-        let payload_end = header_start
-            .checked_add(header_len_u64)
-            .and_then(|offset| offset.checked_add(payload_len))
-            .ok_or_else(|| SourceError::corrupt("metadata end offset overflows"))?;
-        if payload_end > limit {
-            return Err(SourceError::corrupt(
-                "metadata payload extends beyond its LAS section",
-            ));
-        }
-        let mut data = vec![
-            0_u8;
-            usize::try_from(payload_len).map_err(|_| SourceError::corrupt(
-                "metadata payload does not fit usize"
-            ))?
-        ];
-        reader.read_exact(&mut data).map_err(classify_io)?;
-        records.push(RawVlr {
-            user_id: las_text(&fixed[2..18]),
-            record_id: u16::from_le_bytes(fixed[18..20].try_into().map_err(slice_error)?),
-            description: las_text(&fixed[description_start..description_start + 32]),
-            data,
-        });
+        records.push(read_vlr(&mut reader, extended, limit, budget)?);
     }
     Ok(records)
+}
+
+struct RawVlrHeader {
+    start: u64,
+    len: u64,
+    payload_len: u64,
+    description_start: usize,
+    fixed: [u8; EVLR_HEADER_BYTES],
+}
+
+fn read_vlr_header(
+    reader: &mut BufReader<&mut File>,
+    extended: bool,
+    limit: u64,
+) -> Result<RawVlrHeader, SourceError> {
+    let header_len = if extended {
+        EVLR_HEADER_BYTES
+    } else {
+        VLR_HEADER_BYTES
+    };
+    let start = reader.stream_position().map_err(classify_io)?;
+    let len = u64::try_from(header_len)
+        .map_err(|_| metadata_corrupt(extended, "header", start, "length does not fit u64"))?;
+    if start.checked_add(len).is_none_or(|end| end > limit) {
+        return Err(metadata_corrupt(
+            extended,
+            "header",
+            start,
+            "extends beyond its LAS section",
+        ));
+    }
+    let mut fixed = [0_u8; EVLR_HEADER_BYTES];
+    reader
+        .read_exact(&mut fixed[..header_len])
+        .map_err(classify_io)
+        .map_err(|error| contextualize_metadata_error(error, extended, "header", start))?;
+    let (payload_len, description_start) = if extended {
+        (
+            u64::from_le_bytes(fixed[20..28].try_into().map_err(|_| {
+                metadata_corrupt(extended, "header", start, "truncated payload length")
+            })?),
+            28,
+        )
+    } else {
+        (
+            u64::from(u16::from_le_bytes(fixed[20..22].try_into().map_err(
+                |_| metadata_corrupt(extended, "header", start, "truncated payload length"),
+            )?)),
+            22,
+        )
+    };
+    if payload_len > MAX_METADATA_RECORD_PAYLOAD_BYTES as u64 {
+        return Err(metadata_corrupt(
+            extended,
+            "payload",
+            start,
+            "exceeds the canonical per-record cap",
+        ));
+    }
+    Ok(RawVlrHeader {
+        start,
+        len,
+        payload_len,
+        description_start,
+        fixed,
+    })
+}
+
+fn read_vlr(
+    reader: &mut BufReader<&mut File>,
+    extended: bool,
+    limit: u64,
+    budget: &mut MetadataReadBudget,
+) -> Result<RawVlr, SourceError> {
+    let header = read_vlr_header(reader, extended, limit)?;
+    let user_id = las_text(&header.fixed[2..18], "user ID")
+        .map_err(|error| contextualize_metadata_error(error, extended, "header", header.start))?;
+    let description = las_text(
+        &header.fixed[header.description_start..header.description_start + 32],
+        "description",
+    )
+    .map_err(|error| contextualize_metadata_error(error, extended, "header", header.start))?;
+    budget
+        .reserve_payload(header.payload_len)
+        .map_err(|error| contextualize_metadata_error(error, extended, "payload", header.start))?;
+    let payload_end = header
+        .start
+        .checked_add(header.len)
+        .and_then(|offset| offset.checked_add(header.payload_len))
+        .ok_or_else(|| {
+            metadata_corrupt(extended, "payload", header.start, "end offset overflows")
+        })?;
+    if payload_end > limit {
+        return Err(metadata_corrupt(
+            extended,
+            "payload",
+            header.start,
+            "extends beyond its LAS section",
+        ));
+    }
+    let mut data = vec![
+        0_u8;
+        usize::try_from(header.payload_len).map_err(|_| metadata_corrupt(
+            extended,
+            "payload",
+            header.start,
+            "length does not fit usize"
+        ))?
+    ];
+    reader
+        .read_exact(&mut data)
+        .map_err(classify_io)
+        .map_err(|error| contextualize_metadata_error(error, extended, "payload", header.start))?;
+    let record_id = u16::from_le_bytes(header.fixed[18..20].try_into().map_err(|_| {
+        metadata_corrupt(
+            extended,
+            "header",
+            header.start,
+            "truncated record identity",
+        )
+    })?);
+    Ok(RawVlr {
+        user_id,
+        record_id,
+        description,
+        data,
+    })
+}
+
+fn contextualize_metadata_error(
+    error: SourceError,
+    extended: bool,
+    phase: &str,
+    byte_offset: u64,
+) -> SourceError {
+    match error {
+        SourceError::CorruptSource { reason } => {
+            metadata_corrupt(extended, phase, byte_offset, reason)
+        }
+        error => error,
+    }
+}
+
+fn metadata_corrupt(
+    extended: bool,
+    phase: &str,
+    byte_offset: u64,
+    reason: impl std::fmt::Display,
+) -> SourceError {
+    let section = if extended { "EVLR" } else { "VLR" };
+    SourceError::corrupt(format!("{section} {phase} at byte {byte_offset}: {reason}"))
 }
 
 fn compression(
@@ -1073,22 +1195,26 @@ fn plan(
     Ok(AttributePlan { definition, kind })
 }
 
-fn hash_file(
-    file: &mut File,
+fn snapshot_and_hash(
+    source: &mut File,
+    snapshot: &mut File,
     file_len: u64,
     reporter: &OperationReporter,
 ) -> Result<ContentHash, SourceError> {
-    file.seek(SeekFrom::Start(0)).map_err(classify_io)?;
+    source.seek(SeekFrom::Start(0)).map_err(classify_io)?;
+    snapshot.set_len(0).map_err(classify_io)?;
+    snapshot.seek(SeekFrom::Start(0)).map_err(classify_io)?;
     let mut hasher = blake3::Hasher::new();
     let mut buffer = vec![0_u8; HASH_BUFFER_BYTES];
     let mut completed = 0_u64;
     loop {
         reporter.check_cancelled()?;
-        let read = file.read(&mut buffer).map_err(classify_io)?;
+        let read = source.read(&mut buffer).map_err(classify_io)?;
         if read == 0 {
             break;
         }
         hasher.update(&buffer[..read]);
+        snapshot.write_all(&buffer[..read]).map_err(classify_io)?;
         completed = completed
             .checked_add(
                 u64::try_from(read)
@@ -1101,6 +1227,8 @@ fn hash_file(
             "the file length changed while hashing",
         ));
     }
+    snapshot.flush().map_err(classify_io)?;
+    snapshot.seek(SeekFrom::Start(0)).map_err(classify_io)?;
     Ok(ContentHash::new(*hasher.finalize().as_bytes()))
 }
 
@@ -1127,10 +1255,11 @@ fn slice_error(_: std::array::TryFromSliceError) -> SourceError {
     SourceError::corrupt("truncated LAS fixed-width field")
 }
 
-fn las_text(bytes: &[u8]) -> String {
-    String::from_utf8_lossy(bytes)
-        .trim_end_matches(['\0', ' '])
-        .to_owned()
+fn las_text(bytes: &[u8], field: &str) -> Result<String, SourceError> {
+    let text = std::str::from_utf8(bytes).map_err(|error| {
+        SourceError::corrupt(format!("{field} contains invalid UTF-8: {error}"))
+    })?;
+    Ok(text.trim_end_matches(['\0', ' ']).to_owned())
 }
 
 #[cfg(test)]

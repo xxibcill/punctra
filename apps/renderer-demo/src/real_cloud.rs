@@ -510,7 +510,7 @@ mod tests {
     use point_contracts::{AttributeColumns, CoordinateReference, PositionTransform};
     use point_index::PrepareLimits;
     use point_view::{AvailableNodes, PlanningBudget, ViewPlan, ViewPlanner};
-    use render_protocol::{Camera, RenderLimits, RenderStateModel, RenderUpdate};
+    use render_protocol::{Camera, RenderLimits, RenderStateModel, RenderUpdate, Viewport};
     use source_memory::MemorySource;
 
     use crate::{
@@ -522,7 +522,6 @@ mod tests {
 
     const TEST_GENERATION: ViewGenerationKey =
         ViewGenerationKey::new(render_protocol::ViewId::new(91), 1);
-    const VIEWPORT: [u32; 2] = [1_280, 800];
 
     #[test]
     fn hierarchy_preflight_has_an_exact_working_set_boundary() {
@@ -695,7 +694,7 @@ mod tests {
         planner
             .plan(
                 camera,
-                VIEWPORT,
+                Viewport::new(1_280, 800).unwrap(),
                 AvailableNodes::new(TEST_GENERATION, nodes),
                 PlanningBudget::new(
                     RESIDENT_POINT_BUDGET,

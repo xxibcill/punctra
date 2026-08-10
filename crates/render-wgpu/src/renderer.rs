@@ -8,7 +8,7 @@ use std::{
 use bytemuck::Zeroable;
 use render_protocol::{
     BatchKey, PointBatch, PointId, ProtocolError, RenderLimits, RenderStateModel, RenderUpdate,
-    UpdateEffect, UpdateReport, ViewGenerationKey,
+    UpdateEffect, UpdateReport, ViewGenerationKey, Viewport,
 };
 use thiserror::Error;
 use wgpu::util::DeviceExt;
@@ -346,8 +346,11 @@ impl WgpuRenderer {
         let frame = recorded_frame.frame;
         let viewport = frame.viewport();
         let pixel = request.pixel();
-        if pixel[0] >= viewport[0] || pixel[1] >= viewport[1] {
-            return Err(RendererError::PickOutsideViewport { pixel, viewport });
+        if pixel[0] >= viewport.width() || pixel[1] >= viewport.height() {
+            return Err(RendererError::PickOutsideViewport {
+                pixel,
+                viewport: viewport.dimensions(),
+            });
         }
 
         self.record_frame_uniforms(encoder, &frame, &recorded_frame.batches)?;
@@ -783,8 +786,8 @@ fn highlights(state: &RenderStateModel) -> BTreeSet<PointId> {
 }
 
 #[allow(clippy::cast_precision_loss)]
-fn viewport_as_f32(viewport: [u32; 2]) -> [f32; 2] {
-    [viewport[0] as f32, viewport[1] as f32]
+fn viewport_as_f32(viewport: Viewport) -> [f32; 2] {
+    [viewport.width() as f32, viewport.height() as f32]
 }
 
 fn camera_relative_axis(

@@ -4,7 +4,9 @@ use point_view::{
     AvailableNode, AvailableNodes, AxisAlignedBox, NodeKey, NodeStatus, PlanError, PlannerConfig,
     PlanningBudget, ViewPlanner,
 };
-use render_protocol::{BatchKey, BatchVersion, Camera, RenderUpdate, ViewGenerationKey, ViewId};
+use render_protocol::{
+    BatchKey, BatchVersion, Camera, RenderUpdate, ViewGenerationKey, ViewId, Viewport,
+};
 
 const GENEROUS_BUDGET: PlanningBudget = PlanningBudget::new(u64::MAX, u64::MAX, u64::MAX);
 
@@ -98,15 +100,6 @@ fn hierarchy_validation_is_deterministic_and_atomic() {
     let mut planner = planner(10.0, 1.0);
 
     assert_eq!(
-        planner.plan(
-            &camera(),
-            [0, 100],
-            AvailableNodes::new(generation, &[valid]),
-            GENEROUS_BUDGET,
-        ),
-        Err(PlanError::InvalidViewport)
-    );
-    assert_eq!(
         plan_error(&mut planner, generation, &[valid, valid]),
         PlanError::DuplicateNodeKey { key: node_key(1) }
     );
@@ -183,7 +176,7 @@ fn hierarchy_validation_is_deterministic_and_atomic() {
     let empty = planner
         .plan(
             &camera(),
-            [100, 100],
+            viewport(100, 100),
             AvailableNodes::new(generation, &[]),
             GENEROUS_BUDGET,
         )
@@ -256,7 +249,7 @@ fn perspective_frustum_culls_all_six_planes_and_keeps_intersections() {
     let plan = planner(100.0, 1.0)
         .plan(
             &camera(),
-            [100, 100],
+            viewport(100, 100),
             AvailableNodes::new(generation, &nodes),
             GENEROUS_BUDGET,
         )
@@ -270,6 +263,35 @@ fn perspective_frustum_culls_all_six_planes_and_keeps_intersections() {
             .map(BatchKey::new)
             .collect::<Vec<_>>()
     );
+}
+
+#[test]
+fn frustum_keeps_zero_volume_bounds_touching_a_side_plane() {
+    let depth = 5.990_738_311_191_579;
+    let half_field_of_view = f64::from(std::f32::consts::FRAC_PI_2) * 0.5;
+    let horizontal_limit = depth * half_field_of_view.tan();
+    let touching_point = [horizontal_limit, 0.0, -depth];
+    let node = node(
+        1,
+        None,
+        bounds(touching_point, touching_point),
+        0.0,
+        1,
+        1,
+        1,
+        NodeStatus::Missing,
+    );
+
+    let plan = planner(2.0, 0.25)
+        .plan(
+            &camera(),
+            viewport(100, 100),
+            AvailableNodes::new(generation(2, 4), &[node]),
+            GENEROUS_BUDGET,
+        )
+        .unwrap();
+
+    assert_eq!(request_keys(&plan), vec![node_key(1)]);
 }
 
 #[test]
@@ -300,7 +322,7 @@ fn frustum_culling_handles_opposite_extreme_coordinates() {
     let plan = planner(2.0, 0.25)
         .plan(
             &camera,
-            [100, 100],
+            viewport(100, 100),
             AvailableNodes::new(generation(2, 1), &[node]),
             GENEROUS_BUDGET,
         )
@@ -338,7 +360,7 @@ fn projection_uses_f64_world_coordinates_and_reports_pixel_error() {
     let plan = planner(20.0, 1.0)
         .plan(
             &camera,
-            [100, 100],
+            viewport(100, 100),
             AvailableNodes::new(generation, &[node]),
             GENEROUS_BUDGET,
         )
@@ -364,7 +386,7 @@ fn projection_handles_extreme_width_without_overflow() {
     let plan = planner(20.0, 1.0)
         .plan(
             &camera(),
-            [100, 100],
+            viewport(100, 100),
             AvailableNodes::new(generation(3, 2), &[node]),
             GENEROUS_BUDGET,
         )
@@ -372,6 +394,140 @@ fn projection_handles_extreme_width_without_overflow() {
 
     assert_eq!(plan.requests().len(), 1);
     assert!((plan.requests()[0].screen_space_error_pixels() - 10.0).abs() < 0.001);
+}
+
+#[test]
+fn projection_preserves_large_finite_error_priority() {
+    let field_of_view = std::f32::consts::FRAC_PI_2;
+    let camera = Camera::perspective(
+        [0.0; 3],
+        [0.0, 0.0, -1.0],
+        [0.0, 1.0, 0.0],
+        field_of_view,
+        1.0,
+        1.0e20,
+    )
+    .unwrap();
+    let point = [0.0, 0.0, -1.0e19];
+    let nodes = [
+        node(
+            1,
+            None,
+            bounds(point, point),
+            1.0e307,
+            1,
+            1,
+            1,
+            NodeStatus::Missing,
+        ),
+        node(
+            2,
+            None,
+            bounds(point, point),
+            1.0e308,
+            1,
+            1,
+            2,
+            NodeStatus::Missing,
+        ),
+    ];
+
+    let plan = planner(2.0, 0.25)
+        .plan(
+            &camera,
+            viewport(100, 100),
+            AvailableNodes::new(generation(3, 3), &nodes),
+            PlanningBudget::new(1, 1, 1),
+        )
+        .unwrap();
+
+    assert_eq!(request_keys(&plan), vec![node_key(2)]);
+    let screen_error = plan.requests()[0].screen_space_error_pixels();
+    let pixel_scale = 100.0 / (2.0 * (f64::from(field_of_view) * 0.5).tan());
+    let expected = (1.0e308 / 1.0e19) * pixel_scale;
+    assert!(screen_error.is_finite());
+    assert!((screen_error / expected - 1.0).abs() < f64::EPSILON * 4.0);
+}
+
+#[test]
+fn projection_preserves_small_finite_error_priority() {
+    let field_of_view = f32::from_bits(std::f32::consts::PI.to_bits() - 1);
+    let camera = Camera::perspective(
+        [0.0; 3],
+        [0.0, 0.0, -1.0],
+        [0.0, 1.0, 0.0],
+        field_of_view,
+        1.0e-6,
+        1.0,
+    )
+    .unwrap();
+    let point = [0.0, 0.0, -1.0e-5];
+    let nodes = [
+        node(
+            1,
+            None,
+            bounds(point, point),
+            2.0e-317,
+            1,
+            1,
+            1,
+            NodeStatus::Missing,
+        ),
+        node(
+            2,
+            None,
+            bounds(point, point),
+            4.0e-317,
+            1,
+            1,
+            2,
+            NodeStatus::Missing,
+        ),
+    ];
+
+    let plan = planner(2.0, 0.25)
+        .plan(
+            &camera,
+            viewport(1, 1),
+            AvailableNodes::new(generation(3, 4), &nodes),
+            GENEROUS_BUDGET,
+        )
+        .unwrap();
+
+    assert_eq!(request_keys(&plan), vec![node_key(2), node_key(1)]);
+    assert!(
+        plan.requests()
+            .iter()
+            .all(|request| request.screen_space_error_pixels() > 0.0)
+    );
+    assert!(
+        plan.requests()[0].screen_space_error_pixels()
+            > plan.requests()[1].screen_space_error_pixels()
+    );
+}
+
+#[test]
+fn signed_zero_screen_errors_use_node_key_tie_breaking() {
+    let nodes = [
+        node(1, None, root_bounds(), -0.0, 1, 1, 1, NodeStatus::Missing),
+        node(2, None, root_bounds(), 0.0, 1, 1, 2, NodeStatus::Missing),
+    ];
+
+    let plan = planner(2.0, 0.25)
+        .plan(
+            &camera(),
+            viewport(100, 100),
+            AvailableNodes::new(generation(3, 5), &nodes),
+            GENEROUS_BUDGET,
+        )
+        .unwrap();
+
+    assert_eq!(request_keys(&plan), vec![node_key(1), node_key(2)]);
+    assert!(
+        plan.requests()
+            .iter()
+            .all(|request| request.screen_space_error_pixels().to_bits() == 0.0_f64.to_bits())
+    );
 }
 
 #[test]
@@ -399,7 +555,7 @@ fn projection_normalizes_large_camera_directions_without_overflow() {
     let plan = planner(2.0, 0.25)
         .plan(
             &camera,
-            [100, 100],
+            viewport(100, 100),
             AvailableNodes::new(generation(3, 1), &[node]),
             GENEROUS_BUDGET,
         )
@@ -421,7 +577,7 @@ fn initial_loading_requests_coarse_coverage_before_refining() {
     let coarse = planner
         .plan(
             &camera(),
-            [100, 100],
+            viewport(100, 100),
             AvailableNodes::new(generation, &initial),
             GENEROUS_BUDGET,
         )
@@ -433,7 +589,7 @@ fn initial_loading_requests_coarse_coverage_before_refining() {
     let refining = planner
         .plan(
             &camera(),
-            [100, 100],
+            viewport(100, 100),
             AvailableNodes::new(generation, &coarse_resident),
             PlanningBudget::new(30, 300, 3),
         )
@@ -447,6 +603,59 @@ fn initial_loading_requests_coarse_coverage_before_refining() {
 }
 
 #[test]
+fn cold_start_refines_past_an_unaffordable_root() {
+    let generation = generation(4, 1);
+    let nodes = [
+        node(
+            1,
+            None,
+            root_bounds(),
+            10.0,
+            100,
+            100,
+            101,
+            NodeStatus::Missing,
+        ),
+        node(
+            2,
+            Some(1),
+            bounds([-2.0, -1.0, -11.0], [0.0, 1.0, -9.0]),
+            0.0,
+            10,
+            10,
+            102,
+            NodeStatus::Missing,
+        ),
+        node(
+            3,
+            Some(1),
+            bounds([0.0, -1.0, -11.0], [2.0, 1.0, -9.0]),
+            0.0,
+            10,
+            10,
+            103,
+            NodeStatus::Missing,
+        ),
+    ];
+
+    let plan = planner(2.0, 0.25)
+        .plan(
+            &camera(),
+            viewport(100, 100),
+            AvailableNodes::new(generation, &nodes),
+            PlanningBudget::new(20, 20, 2),
+        )
+        .unwrap();
+
+    assert_eq!(request_keys(&plan), vec![node_key(2), node_key(3)]);
+    assert!(plan.retained_nodes().is_empty());
+    assert!(plan.retirements().is_empty());
+    assert_eq!(plan.resource_usage().point_count(), 20);
+    assert_eq!(plan.resource_usage().estimated_bytes(), 20);
+    assert_eq!(plan.resource_usage().batch_count(), 2);
+}
+
+#[test]
 fn parent_retires_only_after_every_visible_replacement_is_resident() {
     let generation = generation(5, 9);
     let mut planner = planner(2.0, 0.25);
@@ -455,7 +664,7 @@ fn parent_retires_only_after_every_visible_replacement_is_resident() {
     let plan = planner
         .plan(
             &camera(),
-            [100, 100],
+            viewport(100, 100),
             AvailableNodes::new(generation, &partial),
             GENEROUS_BUDGET,
         )
@@ -468,7 +677,7 @@ fn parent_retires_only_after_every_visible_replacement_is_resident() {
     let plan = planner
         .plan(
             &camera(),
-            [100, 100],
+            viewport(100, 100),
             AvailableNodes::new(generation, &complete),
             GENEROUS_BUDGET,
         )
@@ -510,7 +719,7 @@ fn nested_refinement_retires_already_replaced_ancestors() {
     let plan = planner(2.0, 0.25)
         .plan(
             &camera(),
-            [100, 100],
+            viewport(100, 100),
             AvailableNodes::new(generation(5, 1), &nodes),
             PlanningBudget::new(2, 2, 2),
         )
@@ -533,7 +742,7 @@ fn coarsening_keeps_only_the_nearest_resident_fallback() {
     let plan = planner(2.0, 0.25)
         .plan(
             &camera(),
-            [100, 100],
+            viewport(100, 100),
             AvailableNodes::new(generation(5, 2), &nodes),
             PlanningBudget::new(2, 2, 2),
         )
@@ -556,7 +765,7 @@ fn coarsening_keeps_resident_descendants_until_parent_arrives() {
     let refined = planner
         .plan(
             &camera(),
-            [130, 130],
+            viewport(130, 130),
             AvailableNodes::new(generation, &fine),
             GENEROUS_BUDGET,
         )
@@ -567,7 +776,7 @@ fn coarsening_keeps_resident_descendants_until_parent_arrives() {
     let coarsening = planner
         .plan(
             &camera(),
-            [70, 70],
+            viewport(70, 70),
             AvailableNodes::new(generation, &parent_missing),
             GENEROUS_BUDGET,
         )
@@ -580,7 +789,7 @@ fn coarsening_keeps_resident_descendants_until_parent_arrives() {
     let coarse = planner
         .plan(
             &camera(),
-            [70, 70],
+            viewport(70, 70),
             AvailableNodes::new(generation, &parent_arrived),
             GENEROUS_BUDGET,
         )
@@ -639,7 +848,7 @@ fn frustum_culling_preserves_same_generation_hysteresis_history() {
     let culled = planner
         .plan(
             &looking_away,
-            [90, 90],
+            viewport(90, 90),
             AvailableNodes::new(generation, &nodes),
             GENEROUS_BUDGET,
         )
@@ -665,7 +874,7 @@ fn each_budget_dimension_blocks_an_unaffordable_refinement() {
         let plan = planner(2.0, 0.25)
             .plan(
                 &camera(),
-                [100, 100],
+                viewport(100, 100),
                 AvailableNodes::new(generation, &nodes),
                 budget,
             )
@@ -694,7 +903,7 @@ fn refinement_budget_is_spent_on_the_highest_screen_error_first() {
     let complete_plan = planner(2.0, 0.25)
         .plan(
             &camera(),
-            [100, 100],
+            viewport(100, 100),
             AvailableNodes::new(generation, &nodes),
             GENEROUS_BUDGET,
         )
@@ -716,7 +925,7 @@ fn refinement_budget_is_spent_on_the_highest_screen_error_first() {
     let plan = planner(2.0, 0.25)
         .plan(
             &camera(),
-            [100, 100],
+            viewport(100, 100),
             AvailableNodes::new(generation, &nodes),
             PlanningBudget::new(4, 4, 4),
         )
@@ -766,7 +975,7 @@ fn unaffordable_missing_root_does_not_block_an_affordable_refinement() {
     let plan = planner(2.0, 0.25)
         .plan(
             &camera(),
-            [100, 100],
+            viewport(100, 100),
             AvailableNodes::new(generation(14, 0), &nodes),
             PlanningBudget::new(22, 220, 4),
         )
@@ -813,7 +1022,7 @@ fn in_flight_work_is_reserved_and_never_requested_twice() {
     let exact = planner(20.0, 1.0)
         .plan(
             &camera(),
-            [100, 100],
+            viewport(100, 100),
             AvailableNodes::new(generation, &nodes),
             PlanningBudget::new(11, 110, 2),
         )
@@ -825,7 +1034,7 @@ fn in_flight_work_is_reserved_and_never_requested_twice() {
     let constrained = planner(20.0, 1.0)
         .plan(
             &camera(),
-            [100, 100],
+            viewport(100, 100),
             AvailableNodes::new(generation, &nodes),
             PlanningBudget::new(10, 110, 2),
         )
@@ -875,7 +1084,7 @@ fn demand_includes_missing_and_requested_targets_in_planner_priority_order() {
     let plan = planner(100.0, 1.0)
         .plan(
             &camera(),
-            [100, 100],
+            viewport(100, 100),
             AvailableNodes::new(generation, &nodes),
             GENEROUS_BUDGET,
         )
@@ -918,7 +1127,7 @@ fn camera_changes_remove_stale_requested_nodes_from_demand() {
     let first = planner
         .plan(
             &camera(),
-            [100, 100],
+            viewport(100, 100),
             AvailableNodes::new(generation, &nodes),
             GENEROUS_BUDGET,
         )
@@ -938,7 +1147,7 @@ fn camera_changes_remove_stale_requested_nodes_from_demand() {
     let moved = planner
         .plan(
             &moved_camera,
-            [100, 100],
+            viewport(100, 100),
             AvailableNodes::new(generation, &nodes),
             GENEROUS_BUDGET,
         )
@@ -956,7 +1165,7 @@ fn over_budget_visible_coverage_is_not_retired_to_force_compliance() {
     let plan = planner(20.0, 1.0)
         .plan(
             &camera(),
-            [100, 100],
+            viewport(100, 100),
             AvailableNodes::new(generation, &[resident_root]),
             PlanningBudget::new(10, 100, 0),
         )
@@ -1025,7 +1234,7 @@ fn requests_and_output_lists_are_input_order_independent() {
     let first = planner(100.0, 1.0)
         .plan(
             &camera(),
-            [100, 100],
+            viewport(100, 100),
             AvailableNodes::new(generation, &ordered),
             GENEROUS_BUDGET,
         )
@@ -1033,7 +1242,7 @@ fn requests_and_output_lists_are_input_order_independent() {
     let second = planner(100.0, 1.0)
         .plan(
             &camera(),
-            [100, 100],
+            viewport(100, 100),
             AvailableNodes::new(generation, &shuffled),
             GENEROUS_BUDGET,
         )
@@ -1082,7 +1291,7 @@ fn accounting_overflow_is_reported_without_updating_hysteresis() {
     assert_eq!(
         planner.plan(
             &camera(),
-            [100, 100],
+            viewport(100, 100),
             AvailableNodes::new(generation, &overflowing),
             GENEROUS_BUDGET,
         ),
@@ -1117,7 +1326,7 @@ fn deep_reverse_key_hierarchies_validate_in_linear_time() {
     let plan = planner(2.0, 0.25)
         .plan(
             &camera(),
-            [100, 100],
+            viewport(100, 100),
             AvailableNodes::new(generation(14, 0), &nodes),
             GENEROUS_BUDGET,
         )
@@ -1135,7 +1344,7 @@ fn plan_error(
     planner
         .plan(
             &camera(),
-            [100, 100],
+            viewport(100, 100),
             AvailableNodes::new(generation, nodes),
             GENEROUS_BUDGET,
         )
@@ -1151,7 +1360,7 @@ fn plan_at_height(
     planner
         .plan(
             &camera(),
-            [height, height],
+            viewport(height, height),
             AvailableNodes::new(generation, nodes),
             GENEROUS_BUDGET,
         )
@@ -1310,6 +1519,10 @@ fn camera() -> Camera {
         100.0,
     )
     .unwrap()
+}
+
+fn viewport(width: u32, height: u32) -> Viewport {
+    Viewport::new(width, height).unwrap()
 }
 
 fn generation(view: u64, generation: u64) -> ViewGenerationKey {

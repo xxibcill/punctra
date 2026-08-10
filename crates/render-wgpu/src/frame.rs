@@ -1,5 +1,5 @@
 use glam::Mat4;
-use render_protocol::{Camera, ViewGenerationKey};
+use render_protocol::{Camera, ViewGenerationKey, Viewport};
 use thiserror::Error;
 
 /// Appearance shared by every point in one rendered frame.
@@ -74,7 +74,7 @@ impl Default for PointStyle {
 pub struct Frame {
     view_generation: ViewGenerationKey,
     camera: Camera,
-    viewport: [u32; 2],
+    viewport: Viewport,
     style: PointStyle,
     view_projection: Mat4,
 }
@@ -84,21 +84,19 @@ impl Frame {
     ///
     /// # Errors
     ///
-    /// Returns [`FrameError::EmptyViewport`] when either physical extent is
-    /// zero, or [`FrameError::NonFiniteCameraProjection`] when the viewport's
+    /// Returns [`FrameError::NonFiniteCameraProjection`] when the viewport's
     /// aspect ratio would make the camera projection non-finite.
     pub fn new(
         view_generation: ViewGenerationKey,
         camera: Camera,
-        viewport: [u32; 2],
+        viewport: Viewport,
     ) -> Result<Self, FrameError> {
-        if viewport.into_iter().any(|extent| extent == 0) {
-            return Err(FrameError::EmptyViewport { viewport });
-        }
         let view_projection = Mat4::from_cols_array(
             &camera
-                .view_projection_matrix(viewport_aspect_ratio(viewport))
-                .map_err(|_| FrameError::NonFiniteCameraProjection { viewport })?,
+                .view_projection_matrix(viewport.aspect_ratio())
+                .map_err(|_| FrameError::NonFiniteCameraProjection {
+                    viewport: viewport.dimensions(),
+                })?,
         );
 
         Ok(Self {
@@ -131,7 +129,7 @@ impl Frame {
 
     /// Returns the physical viewport width and height.
     #[must_use]
-    pub const fn viewport(self) -> [u32; 2] {
+    pub const fn viewport(self) -> Viewport {
         self.viewport
     }
 
@@ -149,12 +147,6 @@ impl Frame {
 /// A frame or style construction error.
 #[derive(Clone, Debug, Error, PartialEq)]
 pub enum FrameError {
-    /// The requested physical viewport has no drawable area.
-    #[error("frame viewport must be non-zero, got {viewport:?}")]
-    EmptyViewport {
-        /// The rejected viewport.
-        viewport: [u32; 2],
-    },
     /// The camera cannot produce a finite projection for this viewport.
     #[error("camera projection for viewport {viewport:?} must remain finite")]
     NonFiniteCameraProjection {
@@ -172,11 +164,6 @@ pub enum FrameError {
         /// Zero-based RGBA channel.
         channel: usize,
     },
-}
-
-#[allow(clippy::cast_precision_loss)]
-fn viewport_aspect_ratio(viewport: [u32; 2]) -> f32 {
-    viewport[0] as f32 / viewport[1] as f32
 }
 
 fn validate_color<T, const N: usize>(name: &'static str, color: &[T; N]) -> Result<(), FrameError>
@@ -211,30 +198,6 @@ mod tests {
     use super::*;
     use render_protocol::ViewId;
 
-    fn camera() -> Camera {
-        Camera::perspective(
-            [0.0, -5.0, 2.0],
-            [0.0, 0.0, 0.0],
-            [0.0, 0.0, 1.0],
-            1.0,
-            0.1,
-            100.0,
-        )
-        .unwrap()
-    }
-
-    #[test]
-    fn frame_rejects_an_empty_viewport() {
-        let view_generation = ViewGenerationKey::new(ViewId::new(1), 1);
-
-        assert_eq!(
-            Frame::new(view_generation, camera(), [1920, 0]),
-            Err(FrameError::EmptyViewport {
-                viewport: [1920, 0]
-            })
-        );
-    }
-
     #[test]
     fn style_rejects_invalid_size_and_color() {
         assert_eq!(
@@ -264,7 +227,11 @@ mod tests {
         .expect("the projection should remain finite at a square aspect ratio");
 
         assert_eq!(
-            Frame::new(view_generation, narrow_field_of_view_camera, [1, u32::MAX]),
+            Frame::new(
+                view_generation,
+                narrow_field_of_view_camera,
+                Viewport::new(1, u32::MAX).unwrap(),
+            ),
             Err(FrameError::NonFiniteCameraProjection {
                 viewport: [1, u32::MAX],
             })

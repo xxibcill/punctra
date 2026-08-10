@@ -9,6 +9,7 @@ use point_view::{
 };
 use render_protocol::{
     BatchKey, BatchVersion, Camera, ESTIMATED_GPU_BYTES_PER_POINT, ViewGenerationKey, ViewId,
+    Viewport,
 };
 
 const LEAF_LEVEL: u32 = 6;
@@ -28,6 +29,7 @@ fn planner_benchmark(criterion: &mut Criterion) {
     )
     .unwrap();
     let generation = ViewGenerationKey::new(ViewId::new(1), 0);
+    let viewport = Viewport::new(1_920, 1_080).unwrap();
     let budget = PlanningBudget::new(
         LOGICAL_LEAF_POINTS,
         LOGICAL_LEAF_POINTS * ESTIMATED_GPU_BYTES_PER_POINT,
@@ -40,7 +42,7 @@ fn planner_benchmark(criterion: &mut Criterion) {
             planner
                 .plan(
                     &camera,
-                    [1_920, 1_080],
+                    viewport,
                     AvailableNodes::new(generation, &nodes),
                     budget,
                 )

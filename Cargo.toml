@@ -29,6 +29,7 @@ foundation-runtime = { path = "crates/foundation-runtime" }
 glam = "0.33.3"
 las = { version = "=0.10.0", features = ["laz"] }
 laz = "=0.12.2"
+libm = "0.2.16"
 pollster = "1.0.1"
 point-contracts = { path = "crates/point-contracts" }
 point-index = { path = "crates/point-index" }
@@ -39,6 +40,7 @@ render-wgpu = { path = "crates/render-wgpu" }
 serde = { version = "1.0.229", features = ["derive", "rc"] }
 source-las = { path = "crates/source-las" }
 source-memory = { path = "crates/source-memory" }
+tempfile = "=3.24.0"
 thiserror = "2.0.20"
 wgpu = "30.0.0"
 winit = "0.30.13"

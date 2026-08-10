@@ -11,6 +11,7 @@ use std::{
 
 use foundation_runtime::RuntimeError;
 use point_index::{IndexError, NodeReadBudget, PrepareDisposition, PrepareLimits, prepare};
+use point_source::ReadLimit;
 
 use support::{
     BLOCK_POINTS, TemporaryTarget, clustered_ticks, open_controlled_source, open_source, read_node,
@@ -173,7 +174,7 @@ fn cold_build_limits_fail_without_a_partial_target_and_preserve_only_valid_work(
         prepare(one_point.clone(), source_payload.path(), limit).blocking_wait(),
         Err(IndexError::Source(
             point_source::SourceError::ResourceLimit {
-                limit: "batch payload bytes",
+                limit: ReadLimit::BatchPayloadBytes,
                 required: 24,
                 allowed: 23,
             }
