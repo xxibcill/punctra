@@ -38,6 +38,7 @@ render-wgpu = { path = "crates/render-wgpu" }
 serde = { version = "1.0.229", features = ["derive", "rc"] }
 source-las = { path = "crates/source-las" }
 source-memory = { path = "crates/source-memory" }
+tempfile = "=3.24.0"
 thiserror = "2.0.20"
 wgpu = "30.0.0"
 winit = "0.30.13"

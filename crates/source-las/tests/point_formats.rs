@@ -1,6 +1,6 @@
 //! Exact field coverage for every supported LAS and LAZ point-record format.
 
-use std::fs;
+use std::fs::{self, FileTimes, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -77,6 +77,31 @@ fn conflicting_las_1_4_point_counts_are_corrupt() {
         source_las::open(&path).blocking_wait(),
         Err(SourceError::CorruptSource { .. })
     ));
+}
+
+#[test]
+fn verified_source_reads_from_immutable_bytes() {
+    let directory = FixtureDirectory::new();
+    let path = directory.path().join("immutable-source.las");
+    write_fixture(&path, 8);
+    let source = source_las::open(&path).blocking_wait().unwrap();
+    let original_modified = fs::metadata(&path).unwrap().modified().unwrap();
+
+    let mut bytes = fs::read(&path).unwrap();
+    let point_offset =
+        usize::try_from(u32::from_le_bytes(bytes[96..100].try_into().unwrap())).unwrap();
+    bytes[point_offset..point_offset + 4].copy_from_slice(&(-5_i32).to_le_bytes());
+    fs::write(&path, bytes).unwrap();
+    OpenOptions::new()
+        .write(true)
+        .open(&path)
+        .unwrap()
+        .set_times(FileTimes::new().set_modified(original_modified))
+        .unwrap();
+
+    let mut batches = source.points().unwrap();
+    let batch = batches.next().unwrap().unwrap();
+    assert_eq!(batch.positions().ticks()[0], ticks(0));
 }
 
 fn assert_supported_format(directory: &FixtureDirectory, point_format: u8, extension: &str) {

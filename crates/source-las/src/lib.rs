@@ -53,8 +53,10 @@
 //! # Verification
 //!
 //! Identifying and Full reopening hash every file byte and validate every point
-//! record before publishing a [`point_source::Source`]. This adapter has no
-//! weaker stable file witness: `FastOnly` reopening returns
+//! record before publishing a [`point_source::Source`]. The verified bytes are
+//! retained in a private anonymous snapshot, so later path or in-place changes
+//! cannot alter Points published under the established Source Identity. This
+//! adapter has no weaker stable file witness: `FastOnly` reopening returns
 //! [`point_source::SourceError::VerificationRequired`], while `FastThenFull`
 //! falls back to Full verification.
 //!
@@ -161,7 +163,7 @@ impl CandidateAdapter for LasCandidate {
 fn publish_verified(verified: VerifiedFile) -> AdapterVerified {
     let reader = Arc::new(LasReadAdapter::new(
         verified.file,
-        verified.witness,
+        verified.source_witness,
         Arc::clone(&verified.layout),
     ));
     AdapterVerified::new(

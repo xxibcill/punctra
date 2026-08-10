@@ -13,7 +13,8 @@ use point_source::adapter::{AdapterRead, AdapterReadRequest, ReadAdapter};
 use point_source::{ReadBudget, SourceError, SourceSpan};
 
 use crate::format::{
-    AttributeKind, AttributePlan, Compression, FileWitness, LasLayout, classify_io,
+    AttributeKind, AttributePlan, Compression, FileWitness, LasLayout, SourceFileWitness,
+    classify_io,
 };
 
 const FIXED_DECODER_WORKING_BYTES: u64 = 64 * 1024;
@@ -22,15 +23,19 @@ const VERIFICATION_ROWS: u64 = 16_384;
 
 pub(crate) struct LasReadAdapter {
     file: Arc<File>,
-    witness: FileWitness,
+    source_witness: SourceFileWitness,
     layout: Arc<LasLayout>,
 }
 
 impl LasReadAdapter {
-    pub(crate) fn new(file: Arc<File>, witness: FileWitness, layout: Arc<LasLayout>) -> Self {
+    pub(crate) fn new(
+        file: Arc<File>,
+        source_witness: SourceFileWitness,
+        layout: Arc<LasLayout>,
+    ) -> Self {
         Self {
             file,
-            witness,
+            source_witness,
             layout,
         }
     }
@@ -43,15 +48,14 @@ impl ReadAdapter for LasReadAdapter {
         source: SourceId,
         reporter: OperationReporter,
     ) -> Result<Box<dyn AdapterRead>, SourceError> {
-        self.witness.ensure_file(&self.file)?;
+        self.source_witness.ensure_unchanged()?;
         let selected = selected_attributes(&self.layout, request.attributes().explicit())?;
         let max_rows = batch_rows(&self.layout, &selected, request.budget())?;
         let decoder = RecordDecoder::new(&self.file, &self.layout)?;
         let spans = request.spans().to_vec();
         let next_ordinal = spans.first().map_or(0, |span| span.first_ordinal());
         Ok(Box::new(LasRead {
-            file: Arc::clone(&self.file),
-            witness: self.witness.clone(),
+            source_witness: self.source_witness.clone(),
             layout: Arc::clone(&self.layout),
             decoder,
             reporter,
@@ -139,8 +143,7 @@ fn batch_rows(
 }
 
 struct LasRead {
-    file: Arc<File>,
-    witness: FileWitness,
+    source_witness: SourceFileWitness,
     layout: Arc<LasLayout>,
     decoder: RecordDecoder,
     reporter: OperationReporter,
@@ -162,7 +165,7 @@ impl AdapterRead for LasRead {
         if let Err(error) = self.reporter.check_cancelled().map_err(SourceError::from) {
             return self.fail(error);
         }
-        if let Err(error) = self.witness.ensure_file(&self.file) {
+        if let Err(error) = self.source_witness.ensure_unchanged() {
             return self.fail(error);
         }
         let Some(span) = self.spans.get(self.span_index).copied() else {
@@ -197,7 +200,7 @@ impl AdapterRead for LasRead {
         if let Err(error) = self.reporter.check_cancelled().map_err(SourceError::from) {
             return self.fail(error);
         }
-        if let Err(error) = self.witness.ensure_file(&self.file) {
+        if let Err(error) = self.source_witness.ensure_unchanged() {
             return self.fail(error);
         }
         self.advance(point_count, span.end_ordinal());
@@ -217,8 +220,8 @@ impl LasRead {
     }
 
     fn decode_failure(&self, message: &str) -> SourceError {
-        self.witness
-            .ensure_file(&self.file)
+        self.source_witness
+            .ensure_unchanged()
             .err()
             .unwrap_or_else(|| {
                 SourceError::corrupt(format!(

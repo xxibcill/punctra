@@ -1,6 +1,6 @@
 use std::fs::{File, Metadata};
-use std::io::{BufReader, Read, Seek, SeekFrom};
-use std::path::Path;
+use std::io::{BufReader, Read, Seek, SeekFrom, Write};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::UNIX_EPOCH;
 
@@ -15,6 +15,7 @@ use point_contracts::{
 };
 use point_source::adapter::FullVerification;
 use point_source::{SourceDiagnostic, SourceError};
+use tempfile::tempfile;
 
 use crate::decode::scan_bounds;
 
@@ -28,10 +29,41 @@ const MAX_LAZ_CHUNKS: u64 = 1_000_000;
 
 pub(crate) struct VerifiedFile {
     pub(crate) file: Arc<File>,
-    pub(crate) witness: FileWitness,
+    pub(crate) source_witness: SourceFileWitness,
     pub(crate) layout: Arc<LasLayout>,
     pub(crate) metadata: Arc<SourceMetadata>,
     pub(crate) content_hash: ContentHash,
+}
+
+#[derive(Clone)]
+pub(crate) struct SourceFileWitness {
+    file: Arc<File>,
+    path: Arc<PathBuf>,
+    metadata: FileWitness,
+}
+
+impl SourceFileWitness {
+    fn new(file: File, path: &Path, metadata: FileWitness) -> Self {
+        Self {
+            file: Arc::new(file),
+            path: Arc::new(path.to_path_buf()),
+            metadata,
+        }
+    }
+
+    pub(crate) fn ensure_unchanged(&self) -> Result<(), SourceError> {
+        self.metadata.ensure_file(&self.file)?;
+        let path_metadata = FileWitness::for_path(&self.path).map_err(|_| {
+            SourceError::changed("the verified Source path is no longer accessible")
+        })?;
+        if path_metadata == self.metadata {
+            Ok(())
+        } else {
+            Err(SourceError::changed(
+                "the file at the verified Source path changed",
+            ))
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -59,7 +91,7 @@ impl FileWitness {
             .map_err(classify_io)
     }
 
-    pub(crate) fn for_path(path: &Path) -> Result<Self, SourceError> {
+    fn for_path(path: &Path) -> Result<Self, SourceError> {
         path.metadata()
             .map(|metadata| Self::from_metadata(&metadata))
             .map_err(classify_io)
@@ -70,16 +102,6 @@ impl FileWitness {
             Ok(())
         } else {
             Err(SourceError::changed("the verified file changed"))
-        }
-    }
-
-    pub(crate) fn ensure_path(&self, path: &Path) -> Result<(), SourceError> {
-        if &Self::for_path(path)? == self {
-            Ok(())
-        } else {
-            Err(SourceError::changed(
-                "the file at the verified path changed",
-            ))
         }
     }
 }
@@ -158,9 +180,11 @@ pub(crate) fn verify_file(
     reporter: &OperationReporter,
 ) -> Result<VerifiedFile, SourceError> {
     reporter.check_cancelled()?;
-    let mut file = File::open(path).map_err(classify_io)?;
-    let witness = FileWitness::for_file(&file)?;
-    let content_hash = hash_file(&mut file, witness.len, reporter)?;
+    let mut source_file = File::open(path).map_err(classify_io)?;
+    let source_witness = FileWitness::for_file(&source_file)?;
+    let mut file = tempfile().map_err(classify_io)?;
+    let content_hash =
+        snapshot_and_hash(&mut source_file, &mut file, source_witness.len, reporter)?;
     if verification
         .expected_content_hash()
         .is_some_and(|expected| expected != content_hash)
@@ -170,13 +194,17 @@ pub(crate) fn verify_file(
         ));
     }
 
-    witness.ensure_file(&file)?;
-    witness.ensure_path(path)?;
-    let parsed = parse_layout(&mut file, witness.len)?;
+    source_witness.ensure_file(&source_file)?;
+    if FileWitness::for_path(path)? != source_witness {
+        return Err(SourceError::changed(
+            "the file at the verified path changed",
+        ));
+    }
+    let snapshot_witness = FileWitness::for_file(&file)?;
+    let parsed = parse_layout(&mut file, snapshot_witness.len)?;
     let layout = Arc::new(parsed.layout);
-    let bounds = scan_bounds(&file, &witness, &layout, reporter)?;
-    witness.ensure_file(&file)?;
-    witness.ensure_path(path)?;
+    let bounds = scan_bounds(&file, &snapshot_witness, &layout, reporter)?;
+    snapshot_witness.ensure_file(&file)?;
 
     let schema = AttributeSchema::new(
         layout
@@ -199,7 +227,7 @@ pub(crate) fn verify_file(
 
     Ok(VerifiedFile {
         file: Arc::new(file),
-        witness,
+        source_witness: SourceFileWitness::new(source_file, path, source_witness),
         layout,
         metadata: Arc::new(metadata),
         content_hash,
@@ -1047,22 +1075,26 @@ fn plan(
     Ok(AttributePlan { definition, kind })
 }
 
-fn hash_file(
-    file: &mut File,
+fn snapshot_and_hash(
+    source: &mut File,
+    snapshot: &mut File,
     file_len: u64,
     reporter: &OperationReporter,
 ) -> Result<ContentHash, SourceError> {
-    file.seek(SeekFrom::Start(0)).map_err(classify_io)?;
+    source.seek(SeekFrom::Start(0)).map_err(classify_io)?;
+    snapshot.set_len(0).map_err(classify_io)?;
+    snapshot.seek(SeekFrom::Start(0)).map_err(classify_io)?;
     let mut hasher = blake3::Hasher::new();
     let mut buffer = vec![0_u8; HASH_BUFFER_BYTES];
     let mut completed = 0_u64;
     loop {
         reporter.check_cancelled()?;
-        let read = file.read(&mut buffer).map_err(classify_io)?;
+        let read = source.read(&mut buffer).map_err(classify_io)?;
         if read == 0 {
             break;
         }
         hasher.update(&buffer[..read]);
+        snapshot.write_all(&buffer[..read]).map_err(classify_io)?;
         completed = completed
             .checked_add(
                 u64::try_from(read)
@@ -1075,6 +1107,8 @@ fn hash_file(
             "the file length changed while hashing",
         ));
     }
+    snapshot.flush().map_err(classify_io)?;
+    snapshot.seek(SeekFrom::Start(0)).map_err(classify_io)?;
     Ok(ContentHash::new(*hasher.finalize().as_bytes()))
 }
 
