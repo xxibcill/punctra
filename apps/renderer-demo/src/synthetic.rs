@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 use point_view::{AvailableNode, AxisAlignedBox, NodeKey, NodeRequest, NodeStatus, PlanError};
 use render_protocol::{
     BatchKey, BatchVersion, ESTIMATED_GPU_BYTES_PER_POINT, PointBatch, PointId, ProtocolError,
-    RenderPoint, ViewGenerationKey,
+    RenderPoint, SourceId, ViewGenerationKey,
 };
 
 pub(crate) const RESIDENT_POINT_BUDGET: u64 = 600_000;
@@ -24,6 +24,7 @@ const HALF_SCENE_EXTENT: f64 = SCENE_EXTENT / 2.0;
 const MIN_HEIGHT: f64 = -48.0;
 const MAX_HEIGHT: f64 = 48.0;
 const HEIGHT_SCALE: f32 = 28.0;
+const SYNTHETIC_SOURCE: SourceId = SourceId::new([0x66; 32]);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct NodeLayout {
@@ -340,7 +341,10 @@ fn node_index(key: NodeKey) -> usize {
 }
 
 fn point_id(column: u32, row: u32) -> PointId {
-    PointId::new(u64::from(row) * u64::from(GLOBAL_POINTS_PER_AXIS) + u64::from(column) + 1)
+    PointId::new(
+        SYNTHETIC_SOURCE,
+        u64::from(row) * u64::from(GLOBAL_POINTS_PER_AXIS) + u64::from(column),
+    )
 }
 
 #[cfg(test)]
@@ -429,6 +433,15 @@ mod tests {
 
         assert_eq!(identities.len(), batch.points().len());
         assert_eq!(batch.point_count(), u64::from(LEAF_POINTS_PER_AXIS).pow(2));
+    }
+
+    #[test]
+    fn synthetic_point_ordinals_cover_the_zero_based_source_range() {
+        assert_eq!(point_id(0, 0).ordinal(), 0);
+        assert_eq!(
+            point_id(GLOBAL_POINTS_PER_AXIS - 1, GLOBAL_POINTS_PER_AXIS - 1).ordinal(),
+            LOGICAL_POINT_COUNT - 1
+        );
     }
 
     #[test]

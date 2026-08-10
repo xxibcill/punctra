@@ -54,7 +54,7 @@ impl PickHit {
         self.version
     }
 
-    /// Returns the caller's stable point identity.
+    /// Returns the canonical Source-aware Point Identity.
     #[must_use]
     pub const fn point(self) -> PointId {
         self.point
@@ -283,9 +283,11 @@ impl PickTable {
 
 #[cfg(test)]
 mod tests {
-    use render_protocol::ViewId;
+    use render_protocol::{SourceId, ViewId};
 
     use super::*;
+
+    const TEST_SOURCE: SourceId = SourceId::new([0x33; 32]);
 
     #[test]
     fn tokens_preserve_zero_and_duplicate_caller_identities() {
@@ -295,12 +297,12 @@ mod tests {
             PickRecord {
                 batch: BatchKey::new(10),
                 version: BatchVersion::new(1),
-                point: PointId::new(0),
+                point: point_id(0),
             },
             PickRecord {
                 batch: BatchKey::new(11),
                 version: BatchVersion::new(7),
-                point: PointId::new(0),
+                point: point_id(0),
             },
         ];
 
@@ -313,9 +315,9 @@ mod tests {
         let PickLookup::Hit(second) = table.lookup(tokens[1]).unwrap() else {
             panic!("uncontended lookup should resolve immediately");
         };
-        assert_eq!(first.point(), PointId::new(0));
+        assert_eq!(first.point(), point_id(0));
         assert_eq!(first.batch(), BatchKey::new(10));
-        assert_eq!(second.point(), PointId::new(0));
+        assert_eq!(second.point(), point_id(0));
         assert_eq!(second.batch(), BatchKey::new(11));
         assert!(matches!(
             table.lookup(0),
@@ -332,7 +334,7 @@ mod tests {
             .append([PickRecord {
                 batch: BatchKey::new(10),
                 version: BatchVersion::new(1),
-                point: PointId::new(8),
+                point: point_id(8),
             }])
             .unwrap();
 
@@ -343,6 +345,10 @@ mod tests {
         let PickLookup::Hit(hit) = table.lookup(tokens[0]).unwrap() else {
             panic!("lookup should resolve once the metadata lock is released");
         };
-        assert_eq!(hit.point(), PointId::new(8));
+        assert_eq!(hit.point(), point_id(8));
+    }
+
+    const fn point_id(ordinal: u64) -> PointId {
+        PointId::new(TEST_SOURCE, ordinal)
     }
 }

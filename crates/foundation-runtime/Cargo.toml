@@ -1,6 +1,6 @@
 [package]
-name = "render-protocol"
-description = "Renderer-neutral, generation-safe point-cloud update contracts for Punctra."
+name = "foundation-runtime"
+description = "Runtime-neutral bounded execution controls for Punctra foundation modules."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,9 +8,10 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-glam.workspace = true
-point-contracts.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+pollster.workspace = true
 
 [lints]
 workspace = true

@@ -12,6 +12,7 @@ mod viewport;
 
 use std::collections::{BTreeMap, BTreeSet};
 
+pub use point_contracts::{PointId, SourceId};
 use thiserror::Error;
 
 pub use camera::{Camera, CameraBasis, CameraError};
@@ -32,24 +33,6 @@ pub const ESTIMATED_GPU_BYTES_PER_POINT: u64 = 24;
 pub struct ViewId(u64);
 
 impl ViewId {
-    /// Creates an identifier from a caller-selected value.
-    #[must_use]
-    pub const fn new(value: u64) -> Self {
-        Self(value)
-    }
-
-    /// Returns the caller-selected value.
-    #[must_use]
-    pub const fn get(self) -> u64 {
-        self.0
-    }
-}
-
-/// Identifies one caller-owned point for highlighting and picking.
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct PointId(u64);
-
-impl PointId {
     /// Creates an identifier from a caller-selected value.
     #[must_use]
     pub const fn new(value: u64) -> Self {
@@ -172,7 +155,7 @@ impl RenderPoint {
         self.color
     }
 
-    /// Returns the caller's stable point identity.
+    /// Returns the canonical Source-aware Point Identity.
     #[must_use]
     pub const fn point_id(&self) -> PointId {
         self.point_id

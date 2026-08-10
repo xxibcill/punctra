@@ -2,8 +2,10 @@
 
 use render_protocol::{
     BatchKey, BatchVersion, Camera, ESTIMATED_GPU_BYTES_PER_POINT, PointBatch, PointId,
-    ProtocolError, RenderPoint, ViewGenerationKey, ViewId, Viewport, ViewportError,
+    ProtocolError, RenderPoint, SourceId, ViewGenerationKey, ViewId, Viewport, ViewportError,
 };
+
+const TEST_SOURCE: SourceId = SourceId::new([0x11; 32]);
 
 #[test]
 fn viewport_owns_physical_dimensions_and_projection_ratio() {
@@ -89,8 +91,8 @@ fn assert_vector_close(actual: [f64; 3], expected: [f64; 3]) {
 fn point_batch_owns_valid_renderer_neutral_points() {
     let view_generation = ViewGenerationKey::new(ViewId::new(7), 3);
     let points = vec![
-        RenderPoint::new([1.0, 2.0, 3.0], [10, 20, 30, 40], PointId::new(11)).unwrap(),
-        RenderPoint::new([-4.0, 5.0, 0.25], [50, 60, 70, 80], PointId::new(12)).unwrap(),
+        RenderPoint::new([1.0, 2.0, 3.0], [10, 20, 30, 40], point_id(11)).unwrap(),
+        RenderPoint::new([-4.0, 5.0, 0.25], [50, 60, 70, 80], point_id(12)).unwrap(),
     ];
 
     let batch = PointBatch::new(
@@ -119,13 +121,13 @@ fn point_batch_owns_valid_renderer_neutral_points() {
         [1.0, 2.0, 3.0].map(f32::to_bits)
     );
     assert_eq!(batch.points()[0].color(), [10, 20, 30, 40]);
-    assert_eq!(batch.points()[0].point_id(), PointId::new(11));
+    assert_eq!(batch.points()[0].point_id(), point_id(11));
 }
 
 #[test]
 fn point_contracts_reject_non_finite_and_empty_data() {
     assert_eq!(
-        RenderPoint::new([f32::NAN, 0.0, 0.0], [0; 4], PointId::new(1)),
+        RenderPoint::new([f32::NAN, 0.0, 0.0], [0; 4], point_id(1)),
         Err(ProtocolError::NonFiniteRelativePosition { axis: 0 })
     );
 
@@ -153,5 +155,9 @@ fn point_contracts_reject_non_finite_and_empty_data() {
 }
 
 fn point(id: u64) -> RenderPoint {
-    RenderPoint::new([0.0; 3], [255; 4], PointId::new(id)).unwrap()
+    RenderPoint::new([0.0; 3], [255; 4], point_id(id)).unwrap()
+}
+
+const fn point_id(ordinal: u64) -> PointId {
+    PointId::new(TEST_SOURCE, ordinal)
 }

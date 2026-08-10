@@ -1,8 +1,10 @@
 # Module Catalog
 
-Status: broader platform proposal deferred; the current renderer and View
-planner are defined by the [v0.1 renderer](../design/render-engine-v0.1.md) and
-[v0.2 planning](../design/adaptive-view-planning-v0.2.md) scopes
+Status: broader platform proposal deferred; the current renderer, View, and
+Source modules are implemented under the
+[v0.1 renderer](../design/render-engine-v0.1.md),
+[v0.2 planning](../design/adaptive-view-planning-v0.2.md), and
+[v0.3 Real Sources](../design/real-sources-v0.3.md) scopes
 
 This document is the ownership map. Each crate below is one logical module with one job. The job sentence is normative: if new behavior does not fit it, that behavior does not belong in the module.
 
@@ -14,8 +16,8 @@ This document is the ownership map. Each crate below is one logical module with 
 |---|---|---|---|
 | **point-contracts** | Define and validate lossless Point values and stable spatial provenance. | None | IDs, Point Batches, spatial metadata, provenance |
 | **foundation-runtime** | Standardize bounded execution control for long foundation operations. | Operation closure or producer | Jobs, batch streams, budgets, progress, cancellation |
-| **point-source** | Provide verified bounded canonical read access to one immutable Source. | Source candidate, expectation, verification policy, and read request | VerifiedSource, SourceRecord, and Point Batches |
-| **point-index** | Provide a rebuildable persistent mapping from spatial requests to candidate Source ranges. | PointSource, index target, expectation, and build options | Complete Spatial Index and bounded read plans |
+| **point-source** | Provide verified bounded canonical read access to one immutable Source. | Source candidate, open options, and read request | Opaque verified Source, Source Record, and Point Batches |
+| **point-index** | Provide a rebuildable persistent mapping from spatial requests to candidate Source ranges. | Verified Source, index target, expectation, and build options | Complete Spatial Index and bounded read plans |
 | **point-set** | Materialize exact Point Identities as immutable bounded-memory Point Sets. | Exact Point Batch stream with terminal Snapshot provenance | Spillable Point Set handle |
 | **point-revisions** | Persist sparse Edits and resolve immutable Revision state. | Revision target, Operation Identity, expected Revision, and Edit Batch | Commit resolution and Revision view |
 | **point-query** | Provide bounded revision-pinned reads from one Snapshot. | Source, Spatial Index, Revision view, read request | Snapshot, exact Point or Breakline streams, ViewInput |
@@ -145,27 +147,32 @@ impl OperationId {
     pub fn as_bytes(&self) -> &[u8; 16];
 }
 
-pub struct Job<T> { /* opaque */ }
+pub struct Job<T, E> { /* opaque */ }
 
-impl<T> Future for Job<T> {
-    type Output = Result<T>;
+impl<T, E> Job<T, E> {
+    pub fn handle(&self) -> OperationHandle;
+    pub fn blocking_wait(self) -> Result<T, E>;
 }
 
-pub enum StreamEvent<T, S> {
-    Batch(T),
-    Progress(Progress),
-    Complete(S),
+impl<T, E> Future for Job<T, E> {
+    type Output = Result<T, E>;
 }
 
-pub trait BatchStream<T, S> {
-    fn next(
-        &mut self,
-        cancel: &CancellationToken,
-    ) -> Result<Option<StreamEvent<T, S>>>;
+pub trait BatchStream: Send {
+    type Batch;
+    type Summary;
+    type Error;
+
+    fn next(&mut self) -> Result<Option<Self::Batch>, Self::Error>;
+    fn summary(&self) -> Option<&Self::Summary>;
+    fn handle(&self) -> OperationHandle;
 }
 ~~~
 
-It uses standard Future and Waker contracts rather than requiring Tokio or another host runtime.
+It uses standard Future and Waker contracts rather than requiring Tokio or
+another host runtime. Jobs and streams expose a cloneable `OperationHandle`
+for progress observation and cancellation. Progress is never interleaved with
+data batches, and callers cannot publish producer progress or terminal state.
 
 **Independent proof:** drive synthetic Jobs and streams through success, cancellation, budget exhaustion, blocking wait, asynchronous wait, and fused terminal behavior without loading point data.
 
@@ -175,8 +182,12 @@ It uses standard Future and Waker contracts rather than requiring Tokio or anoth
 
 The module defines the proven Source seam and common validation. Format behavior lives in adapter crates:
 
-- **source-las** decodes LAS and LAZ record order, headers, VLRs, EVLRs, and Attributes;
-- **source-copc** decodes local COPC hierarchy order, byte ranges, and Attributes; and
+- **source-las** decodes LAS formats 0–10 and LAZ formats 0–8 in point-record
+  order, including headers, VLRs, EVLRs, and supported Attributes; LAZ formats
+  9 and 10 are explicitly unsupported pending exact layered WavePacket14 codec
+  support;
+- the proposed, deferred **source-copc** would decode local COPC hierarchy
+  order, byte ranges, and Attributes; and
 - **source-memory** supplies deterministic fixtures and fault injection.
 
 It owns:
@@ -201,39 +212,57 @@ It does not own:
 Conceptual interface:
 
 ~~~rust
-pub trait SourceCandidate: Send + Sync {
-    fn preview(&self) -> &SourcePreview;
-    fn verify(
-        self: Arc<Self>,
-        expectation: SourceExpectation,
-        policy: VerificationPolicy,
-    ) -> Job<VerifiedSource>;
+pub struct SourceCandidate { /* opaque, unverified */ }
+
+impl SourceCandidate {
+    pub fn preview(&self) -> &SourcePreview;
+    pub fn open(self, options: OpenOptions) -> SourceJob;
 }
 
-pub struct VerifiedSource {
-    pub source: Arc<dyn PointSource>,
-    pub record: SourceRecord,
-    pub level: VerificationLevel,
+pub type SourceJob = Job<Source, SourceError>;
+
+pub struct Source { /* opaque, verified, cloneable */ }
+
+impl Source {
+    pub fn identity(&self) -> SourceId;
+    pub fn metadata(&self) -> &SourceMetadata;
+    pub fn provenance(&self) -> &SourceProvenance;
+    pub fn record(&self) -> &SourceRecord;
+    pub fn points(&self) -> Result<PointBatches, SourceError>;
+    pub fn read(&self, request: ReadRequest) -> Result<PointBatches, SourceError>;
 }
 
-pub trait PointSource: Send + Sync {
-    fn identity(&self) -> &SourceId;
-    fn metadata(&self) -> &SourceMetadata;
-    fn read(
-        &self,
-        spans: &[SourceSpan],
-        fields: FieldMask,
-        budget: ReadBudget,
-    ) -> Box<dyn BatchStream<PointBatch, SourceReadSummary>>;
+impl PointBatches {
+    pub fn next(&mut self) -> Result<Option<PointBatch>, SourceError>;
+    pub fn summary(&self) -> Option<&SourceReadSummary>;
+    pub fn handle(&self) -> OperationHandle;
+}
+
+impl OpenOptions {
+    pub fn identify() -> Self;
+    pub fn match_record(record: SourceRecord, policy: VerificationPolicy) -> Self;
 }
 ~~~
 
-PointSource is always verified. SourceRecord is a versioned, serializable value owned by **point-source**; it binds Source Identity to the Full fingerprint and the adapter-specific facts required for Fast verification. SourceExpectation is either New or Recorded(SourceRecord). VerifiedSource returns the reader, the record safe to persist for later reopen, and the achieved VerificationLevel. Engine::create forces Full verification with New; Engine::open supplies Recorded from the manifest and the requested Fast or Full policy. No Workspace Snapshot can hold SourceCandidate.
+`SourceCandidate` is unverified. Opening it with `OpenOptions::identify` forces
+Full verification; `OpenOptions::match_record` carries persisted
+`SourceRecord` evidence and the requested Fast or Full policy. Success returns
+one opaque, already verified `Source`, regardless of the concrete adapter.
+`SourceRecord` is a versioned, serializable value owned by **point-source**; it
+binds Source Identity to the Full fingerprint and the adapter-specific facts
+required for Fast verification. The verification policy is an opening input,
+not a second reader type or an achieved-level witness. No Workspace Snapshot
+can hold `SourceCandidate`.
+
+Concrete adapter crates may expose convenience `open` functions that construct
+and identify their candidate, but those functions still return `SourceJob` and
+publish the same opaque `Source`.
 
 The logical ordinal is part of the adapter contract:
 
 - LAS and LAZ use point-record order.
-- COPC uses canonical hierarchy-key order followed by record offset within the node.
+- A future COPC adapter would use canonical hierarchy-key order followed by
+  record offset within the node.
 
 An index may reorder storage for speed, but it must carry the original Point Identity.
 
@@ -271,14 +300,14 @@ pub enum IndexOpen {
 pub fn open_index(
     target: IndexTarget,
     expectation: IndexExpectation,
-) -> Job<IndexOpen>;
+) -> Job<IndexOpen, IndexError>;
 
 impl IndexBuilder {
     pub fn build_or_resume(
-        source: Arc<dyn PointSource>,
+        source: Source,
         target: IndexTarget,
         options: IndexOptions,
-    ) -> Job<IndexArtifact>;
+    ) -> Job<IndexArtifact, IndexError>;
 }
 
 impl IndexArtifact {
@@ -287,7 +316,11 @@ impl IndexArtifact {
     pub fn exact_candidates(
         &self,
         region: &Region,
-    ) -> Result<Box<dyn BatchStream<SourceSpanBatch, ExactPlanSummary>>>;
+    ) -> Result<Box<dyn BatchStream<
+        Batch = SourceSpanBatch,
+        Summary = ExactPlanSummary,
+        Error = IndexError,
+    >>>;
 
     pub fn hierarchy(
         &self,
@@ -300,7 +333,12 @@ open_index is the only public reader of the persisted index representation. It v
 
 An exact read plan is a bounded stream of conservative candidate-span batches. The Query module performs exact spatial and Attribute tests. False positives are allowed; false negatives are not. An incomplete index returns IndexIncomplete instead of an exact plan.
 
-The builder reads stable logical Source spans through PointSource and checkpoints the next ordinal, builder state, and Source Identity. Calling build_or_resume after restart verifies the checkpoint and resumes the scan. v0.1 deliberately builds the same foundation index for COPC; native-hierarchy import waits for a second real producer before gaining a seam.
+The builder reads stable logical Source spans through the opaque, verified
+`Source` and checkpoints the next ordinal, builder state, and Source Identity.
+Calling `build_or_resume` after restart verifies the checkpoint and resumes the
+scan. The proposed foundation index deliberately treats COPC through the same
+canonical Source seam; native-hierarchy import waits for a second real
+producer before gaining a seam.
 
 The index exposes hierarchy facts only. **point-view** owns camera culling, screen error, point budgets, priority, and refinement policy.
 
@@ -332,9 +370,13 @@ Conceptual interface:
 
 ~~~rust
 pub fn materialize(
-    points: impl BatchStream<PointBatch, ExactPointSummary>,
+    points: impl BatchStream<
+        Batch = PointBatch,
+        Summary = ExactPointSummary,
+        Error = QueryError,
+    >,
     budget: PointSetBudget,
-) -> Job<PointSetHandle>;
+) -> Job<PointSetHandle, PointSetError>;
 
 impl PointSetHandle {
     pub fn provenance(&self) -> &SnapshotProvenance;
@@ -379,13 +421,13 @@ impl RevisionStore {
         target: RevisionTarget,
         source: RevisionSourceContract,
         options: RevisionOptions,
-    ) -> Job<Self>;
+    ) -> Job<Self, RevisionError>;
 
     pub fn open_and_recover(
         target: RevisionTarget,
         expected_source: RevisionSourceContract,
         options: RevisionOptions,
-    ) -> Job<Self>;
+    ) -> Job<Self, RevisionError>;
 
     pub fn source_contract(&self) -> &RevisionSourceContract;
     pub fn head(&self) -> RevisionId;
@@ -396,7 +438,7 @@ impl RevisionStore {
         operation: OperationId,
         expected_head: RevisionId,
         edits: EditBatch,
-    ) -> Job<CommitOutcome>;
+    ) -> Job<CommitOutcome, RevisionError>;
 
     pub fn resolve_operation(
         &self,
@@ -448,7 +490,7 @@ Conceptual interface:
 ~~~rust
 impl QueryEngine {
     pub fn new(
-        source: Arc<dyn PointSource>,
+        source: Source,
         index: Option<Arc<IndexArtifact>>,
         revisions: Arc<RevisionStore>,
     ) -> Result<Self>;
@@ -463,12 +505,20 @@ impl Snapshot {
     pub fn query(
         &self,
         query: PointQuery,
-    ) -> Box<dyn BatchStream<PointBatch, ExactPointSummary>>;
+    ) -> Box<dyn BatchStream<
+        Batch = PointBatch,
+        Summary = ExactPointSummary,
+        Error = QueryError,
+    >>;
 
     pub fn breaklines(
         &self,
         region: Region,
-    ) -> Box<dyn BatchStream<BreaklineBatch, ExactBreaklineSummary>>;
+    ) -> Box<dyn BatchStream<
+        Batch = BreaklineBatch,
+        Summary = ExactBreaklineSummary,
+        Error = QueryError,
+    >>;
 
     pub fn view_input(&self) -> Result<ViewInput>;
 }
@@ -485,11 +535,21 @@ impl ViewInput {
         &self,
         selection: NodeSelection,
         fields: FieldMask,
-    ) -> Box<dyn BatchStream<PointBatch, ViewReadSummary>>;
+    ) -> Box<dyn BatchStream<
+        Batch = PointBatch,
+        Summary = ViewReadSummary,
+        Error = QueryError,
+    >>;
 }
 ~~~
 
-QueryEngine::new verifies that the PointSource metadata, optional IndexArtifact, and RevisionStore carry the same Source Identity and that Source point count, editable Attribute schema, and Coordinate Reference equal the persisted Revision Source Contract. It rejects the composition before any Snapshot is created. pin accepts only a Revision Identity and obtains its RevisionView from that validated store, so a view from another store cannot be injected.
+`QueryEngine::new` verifies that the opaque `Source` metadata, optional
+`IndexArtifact`, and `RevisionStore` carry the same Source Identity and that
+Source point count, editable Attribute schema, and Coordinate Reference equal
+the persisted Revision Source Contract. It rejects the composition before any
+Snapshot is created. `pin` accepts only a Revision Identity and obtains its
+`RevisionView` from that validated store, so a view from another store cannot
+be injected.
 
 A Query uses the already pinned Snapshot. Concurrent commits cannot change its output. Point Queries are exact and complete in v0.1; partial Coverage belongs to Views.
 
@@ -658,7 +718,7 @@ pub fn derive(
     input: TerrainInput,
     recipe: TerrainRecipe,
     limits: TerrainLimits,
-) -> Job<SurfaceArtifact>;
+) -> Job<SurfaceArtifact, TerrainError>;
 
 impl SurfaceArtifact {
     pub fn identity(&self) -> &ArtifactId;
@@ -701,7 +761,11 @@ impl LandXml {
     pub fn encode(
         surface: &SurfaceArtifact,
         options: LandXmlOptions,
-    ) -> Box<dyn BatchStream<ByteChunk, LandXmlReport>>;
+    ) -> Box<dyn BatchStream<
+        Batch = ByteChunk,
+        Summary = LandXmlReport,
+        Error = LandXmlError,
+    >>;
 }
 ~~~
 
@@ -748,16 +812,16 @@ impl WorkspaceId {
 impl Engine {
     pub fn create(
         root: WorkspaceRoot,
-        source: Arc<dyn SourceCandidate>,
+        source: SourceCandidate,
         options: CreateOptions,
-    ) -> Job<Opened>;
+    ) -> Job<Opened, WorkspaceError>;
 
     pub fn open(
         root: WorkspaceRoot,
-        source: Arc<dyn SourceCandidate>,
+        source: SourceCandidate,
         verification: VerificationPolicy,
         options: OpenOptions,
-    ) -> Job<Opened>;
+    ) -> Job<Opened, WorkspaceError>;
 }
 
 impl Workspace {
@@ -765,14 +829,17 @@ impl Workspace {
     pub fn head(&self) -> Result<Snapshot>;
     pub fn snapshot(&self, revision: RevisionId) -> Result<Snapshot>;
     pub fn index_status(&self) -> IndexStatus;
-    pub fn prepare_index(&self, options: IndexOptions) -> Job<IndexReady>;
+    pub fn prepare_index(
+        &self,
+        options: IndexOptions,
+    ) -> Job<IndexReady, WorkspaceError>;
 
     pub fn commit(
         &self,
         operation: OperationId,
         expected: RevisionId,
         edits: EditBatch,
-    ) -> Job<CommitOutcome>;
+    ) -> Job<CommitOutcome, WorkspaceError>;
 
     pub fn resolve_operation(
         &self,
@@ -891,7 +958,8 @@ The dependency allowlist is stricter than Cargo's ability to compile a graph:
 | point-contracts | standard library and narrow value-type dependencies |
 | foundation-runtime | standard library and narrow concurrency dependencies |
 | point-source | point-contracts, foundation-runtime |
-| source-las, source-copc, source-memory | point-source, point-contracts, foundation-runtime |
+| source-las, source-memory | point-source, point-contracts, foundation-runtime |
+| proposed source-copc | point-source, point-contracts, foundation-runtime |
 | point-index | point-contracts, foundation-runtime, point-source |
 | point-set | point-contracts, foundation-runtime |
 | point-revisions | point-contracts, foundation-runtime, point-set |
@@ -914,17 +982,18 @@ In particular:
 
 ## Public seams and private locality
 
-The implemented v0.2 foundation exposes three reusable seams:
+The implemented foundation exposes four reusable seams:
 
 1. **render-protocol** camera, point-batch, generation, and versioned update
    values;
 2. **point-view**'s `ViewPlanner::plan`, which accepts a host-owned hierarchy
    snapshot and returns requests, required retention, and exact retirements;
-   and
-3. **render-wgpu**'s explicit update and frame interfaces.
+3. **render-wgpu**'s explicit update and frame interfaces; and
+4. the v0.3 **point-source** opaque verified `Source`, `SourceRecord`, and
+   bounded `PointBatches` interface.
 
-The `SourceCandidate`/`PointSource` and Workspace seams described elsewhere in
+The Spatial Index, Query, Revision, and Workspace seams described elsewhere in
 this document remain part of the deferred broader platform proposal. They are
-not prerequisites for using the current planner or renderer.
+not prerequisites for using the current Source, planner, or renderer.
 
 Filesystem storage, scheduling, index page layout, terrain predicates, and journal framing remain private. Publishing those details would reduce locality and freeze decisions before multiple adapters prove a useful seam.

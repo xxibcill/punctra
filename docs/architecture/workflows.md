@@ -1,7 +1,8 @@
 # Runtime Workflows
 
-Status: deferred platform proposal; render-engine v0.1 is defined in
-[the current design](../design/render-engine-v0.1.md)
+Status: deferred platform proposal; the v0.1 renderer, v0.2 adaptive View, and
+v0.3 Real Sources contracts are implemented under the accepted designs in
+[`docs/design`](../design)
 
 These workflows show composition without hidden reverse calls. A module invokes only an allowed dependency. Application adapters coordinate sibling modules when no lower module should own the whole workflow.
 
@@ -18,8 +19,8 @@ sequenceDiagram
     participant IDX as point-index
 
     APP->>WS: Engine::open(manifest, source adapter, verification policy)
-    WS->>SRC: verify(Recorded(SourceRecord), policy)
-    SRC-->>WS: VerifiedSource(reader, SourceRecord, level)
+    WS->>SRC: candidate.open(match_record(SourceRecord, policy))
+    SRC-->>WS: opaque verified Source
     WS->>REV: open_and_recover(target, Revision Source Contract)
     REV-->>WS: durable head Revision
     WS->>IDX: open_index(target, expected Source Identity)
@@ -54,12 +55,9 @@ Creating a new Workspace has one additional gate: a complete content fingerprint
 An index tool can bypass **point-workspace**:
 
 ~~~rust
-let candidate = source_las::open_candidate(path)?;
-let verified = candidate
-    .verify(SourceExpectation::New, VerificationPolicy::Full)
-    .await?;
+let source = source_las::open(path).await?;
 let index = point_index::IndexBuilder::build_or_resume(
-    verified.source,
+    source,
     index_target,
     index_options,
 ).await?;
@@ -75,7 +73,7 @@ sequenceDiagram
     participant IDX as point-index
     participant SRC as point-source
 
-    APP->>IDX: build_or_resume(verified PointSource, target, options)
+    APP->>IDX: build_or_resume(verified Source, target, options)
     IDX->>IDX: verify checkpoint frames
 
     loop bounded Source spans
@@ -92,7 +90,9 @@ sequenceDiagram
 
 Cancellation leaves only verified checkpoints. Resume starts at the last verified checkpoint. Source record order remains the identity authority even if the index stores a different spatial order.
 
-v0.1 builds the same foundation index for LAS, LAZ, and COPC. Importing a native hierarchy is deferred until a second real producer proves that seam.
+The proposed Spatial Index would use the same canonical Source seam for the
+implemented LAS/LAZ adapter and a future COPC adapter. Native-hierarchy import
+remains deferred until a second real producer proves that seam.
 
 ## 3. Run an exact Query
 

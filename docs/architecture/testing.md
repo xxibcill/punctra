@@ -1,8 +1,9 @@
 # Verification Strategy
 
 Status: deferred platform proposal; the implemented scopes are the
-[v0.1 render engine](../design/render-engine-v0.1.md) and
-[v0.2 adaptive View planner](../design/adaptive-view-planning-v0.2.md)
+[v0.1 render engine](../design/render-engine-v0.1.md),
+[v0.2 adaptive View planner](../design/adaptive-view-planning-v0.2.md), and
+[v0.3 Real Sources](../design/real-sources-v0.3.md)
 
 The interface is the test surface. Verification asks whether each module preserves its documented inputs, outputs, invariants, ordering, resource limits, errors, and effects. Tests do not lock private algorithms or file layouts unless the layout is itself a persisted contract.
 
@@ -32,7 +33,8 @@ Required fixture classes:
 - known and unknown Coordinate References;
 - every supported LAS point format and important flag combination;
 - extra-byte Attributes, missing optional Attributes, and unusual scale/offset values;
-- LAS, chunked LAZ, and COPC equivalents;
+- LAS and chunked LAZ equivalents, with COPC equivalents added only when the
+  proposed `source-copc` adapter is implemented;
 - truncated headers, records, chunks, hierarchy pages, and invalid lengths;
 - repeated XY positions with equal and conflicting elevations;
 - collinear, crossing, overlapping, and self-intersecting Breaklines;
@@ -110,7 +112,7 @@ Test:
 - Job implements Future and blocking_wait with the same terminal result;
 - cancellation before and after a declared commit point follows the documented outcome;
 - progress phases and counters never move backward;
-- every successful stream emits exactly one Complete summary and then fused None;
+- every successfully exhausted stream makes exactly one summary available and then remains fused at `None`;
 - failed and cancelled streams return one terminal error and then fused None;
 - empty data batches are rejected;
 - hard batch, memory, and temporary-storage budgets are enforced; and
@@ -118,7 +120,10 @@ Test:
 
 ### Source adapters
 
-Run one shared Source conformance suite against **source-memory**, **source-las**, and **source-copc**:
+The current v0.3 shared Source conformance suite runs against
+**source-memory** and **source-las**, exercising both LAS and LAZ encodings. A
+future **source-copc** adapter must pass the same suite before it is considered
+implemented:
 
 - repeated reads return identical Point Batches;
 - arbitrary valid span partitioning returns the same ordered Points;
@@ -128,11 +133,18 @@ Run one shared Source conformance suite against **source-memory**, **source-las*
 - cancellation stops without persistent effects;
 - Fast and Full verification follow their documented threat models;
 - Full verification returns a serializable SourceRecord whose Recorded form reopens the same Source;
-- VerifiedSource reports the achieved VerificationLevel and never exposes a reader before verification completes;
+- successful opening returns one opaque verified Source and never exposes it before verification completes;
 - a changed Source is rejected before affected Point values are returned; and
 - malformed input yields a structured error without panic or unbounded allocation.
 
-Cross-adapter semantic fixtures should compare LAS, LAZ, and COPC encodings of the same logical Points while accepting that re-encoding creates a different Source Identity.
+Format coverage includes LAS point-data record formats 0–10 and LAZ formats
+0–8. LAZ formats 9 and 10 must return an explicit unsupported-format error until
+an exact layered WavePacket14 codec is available; tests must not mask the
+boundary with constant waveform fixtures.
+
+Current cross-adapter semantic fixtures compare memory, LAS, and LAZ encodings
+of the same logical Points while accepting that re-encoding creates a different
+Source Identity. Add COPC equivalents when the proposed adapter is implemented.
 
 ### point-index
 
@@ -367,7 +379,8 @@ These tests are more valuable than screenshot-only application tests:
 Fuzz seams where untrusted bytes or combinatorial geometry enter:
 
 - LAS/LAZ headers, VLRs, EVLRs, records, chunk tables, and extra-byte schemas;
-- COPC hierarchy pages and local byte-range slices;
+- COPC hierarchy pages and local byte-range slices when the proposed
+  `source-copc` adapter is implemented;
 - index and Revision persisted frames;
 - Point Set spill headers, segments, and checksums;
 - Point Batch column lengths and Attribute descriptors;

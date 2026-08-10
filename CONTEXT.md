@@ -1,15 +1,17 @@
 # Domain Context: Point-Cloud Foundation
 
-Status: renderer and adaptive View-planning terms are active; broader platform
-terms are deferred
+Status: renderer, adaptive View-planning, and Real Sources terms are
+implemented; broader Workspace and terrain terms are deferred
 
-Punctra v0.2 implements the reusable render engine and renderer-neutral View
-planner described in the accepted [v0.1 renderer
-design](docs/design/render-engine-v0.1.md) and [v0.2 planning
-design](docs/design/adaptive-view-planning-v0.2.md). The definitions of Point,
-Point Identity, Point Batch, View, Coverage, and View Batch below are canonical.
-The remaining terms are retained as vocabulary research for possible host
-projects and do not imply current product scope.
+Punctra v0.3 implements the reusable render engine, renderer-neutral View
+planner, and verified Source path described in the accepted [v0.1 renderer
+design](docs/design/render-engine-v0.1.md), [v0.2 planning
+design](docs/design/adaptive-view-planning-v0.2.md), and [v0.3 Real Sources
+design](docs/design/real-sources-v0.3.md). The definitions of Source, Source
+Identity, Point, Point Identity, Attribute, Point Batch, Coordinate Reference,
+View, Coverage, and View Batch below are canonical. The remaining terms are
+retained as vocabulary research for possible host projects and do not imply
+current product scope.
 
 ## Artifact
 
@@ -136,6 +138,13 @@ _Avoid:_ dataset when Source or Workspace is more precise
 The recorded identity of one immutable Source. Replacing or re-encoding the Source creates a different Source Identity, even if its visible Points appear equivalent.
 
 _Avoid:_ filename, path, URL
+
+## Source Span
+
+A half-open interval of logical Point ordinals within one Source. Equivalent
+overlapping Source Spans describe their union and never duplicate a Point.
+
+_Avoid:_ byte range, chunk, index node
 
 ## Spatial Index
 

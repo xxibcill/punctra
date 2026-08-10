@@ -7,7 +7,7 @@ mod gpu_support;
 
 use render_protocol::{
     BatchKey, BatchVersion, ESTIMATED_GPU_BYTES_PER_POINT as POINT_BYTES, PointBatch, PointId,
-    ProtocolError, RenderLimits, RenderPoint, RenderUpdate, ResidentResource, UpdateKind,
+    ProtocolError, RenderLimits, RenderPoint, RenderUpdate, ResidentResource, SourceId, UpdateKind,
     UpdateReport, ViewGenerationKey, ViewId, Viewport,
 };
 use render_wgpu::{
@@ -29,6 +29,7 @@ const BLUE: [u8; 4] = [0, 0, 255, 255];
 const CYAN: [u8; 4] = [0, 255, 255, 255];
 const TRANSPARENT: [u8; 4] = [255, 255, 255, 0];
 const TWO_POINT_BYTES: u64 = 2 * POINT_BYTES;
+const TEST_SOURCE: SourceId = SourceId::new([0x55; 32]);
 
 #[test]
 fn lifecycle_updates_are_atomic_in_gpu_state() {
@@ -175,16 +176,16 @@ fn assert_raster_and_pick_semantics(gpu: &GpuContext) {
     let mut subject = OffscreenRenderer::new(gpu, roomy_limits());
     let view_generation = ViewGenerationKey::new(ViewId::new(2), 1);
     subject.apply(&RenderUpdate::Reset { view_generation });
-    let near_id = PointId::new(101);
-    let far_id = PointId::new(202);
-    let transparent_id = PointId::new(303);
+    let near_id = point_id(101);
+    let far_id = point_id(202);
+    let transparent_id = point_id(303);
     subject.apply(&RenderUpdate::Upsert {
         batch: batch(
             view_generation,
             1,
             1,
             WORLD_ORIGIN,
-            vec![point([0.0, -1.0, 0.0], RED, near_id.get())],
+            vec![point([0.0, -1.0, 0.0], RED, near_id.ordinal())],
         ),
     });
     subject.apply(&RenderUpdate::Upsert {
@@ -193,7 +194,7 @@ fn assert_raster_and_pick_semantics(gpu: &GpuContext) {
             2,
             1,
             WORLD_ORIGIN,
-            vec![point([0.0, 1.0, 0.0], BLUE, far_id.get())],
+            vec![point([0.0, 1.0, 0.0], BLUE, far_id.ordinal())],
         ),
     });
     subject.apply(&RenderUpdate::Upsert {
@@ -202,7 +203,11 @@ fn assert_raster_and_pick_semantics(gpu: &GpuContext) {
             3,
             1,
             WORLD_ORIGIN,
-            vec![point([0.0, -2.0, 0.0], TRANSPARENT, transparent_id.get())],
+            vec![point(
+                [0.0, -2.0, 0.0],
+                TRANSPARENT,
+                transparent_id.ordinal(),
+            )],
         ),
     });
 
@@ -244,7 +249,7 @@ fn assert_raster_and_pick_semantics(gpu: &GpuContext) {
 fn assert_highlight_alpha_preservation(gpu: &GpuContext) {
     let mut subject = OffscreenRenderer::new(gpu, roomy_limits());
     let view_generation = ViewGenerationKey::new(ViewId::new(8), 1);
-    let point_id = PointId::new(801);
+    let point_id = point_id(801);
     subject.apply(&RenderUpdate::Reset { view_generation });
     subject.apply(&RenderUpdate::Upsert {
         batch: batch(
@@ -252,7 +257,7 @@ fn assert_highlight_alpha_preservation(gpu: &GpuContext) {
             1,
             1,
             WORLD_ORIGIN,
-            vec![point([0.0; 3], [255, 0, 0, 128], point_id.get())],
+            vec![point([0.0; 3], [255, 0, 0, 128], point_id.ordinal())],
         ),
     });
     subject.apply(&RenderUpdate::SetHighlights {
@@ -275,8 +280,8 @@ fn assert_large_world_precision(gpu: &GpuContext) {
     let mut subject = OffscreenRenderer::new(gpu, roomy_limits());
     let view_generation = ViewGenerationKey::new(ViewId::new(3), 1);
     subject.apply(&RenderUpdate::Reset { view_generation });
-    let red_id = PointId::new(301);
-    let cyan_id = PointId::new(302);
+    let red_id = point_id(301);
+    let cyan_id = point_id(302);
     subject.apply(&RenderUpdate::Upsert {
         batch: batch(
             view_generation,
@@ -284,8 +289,8 @@ fn assert_large_world_precision(gpu: &GpuContext) {
             1,
             WORLD_ORIGIN,
             vec![
-                point([-0.000_5, 0.0, 0.0], RED, red_id.get()),
-                point([0.000_5, 0.0, 0.0], CYAN, cyan_id.get()),
+                point([-0.000_5, 0.0, 0.0], RED, red_id.ordinal()),
+                point([0.000_5, 0.0, 0.0], CYAN, cyan_id.ordinal()),
             ],
         ),
     });
@@ -319,8 +324,8 @@ fn assert_async_ticket_stability(gpu: &GpuContext) {
     let mut subject = OffscreenRenderer::new(gpu, roomy_limits());
     let old_view_generation = ViewGenerationKey::new(ViewId::new(4), 1);
     let new_view_generation = ViewGenerationKey::new(ViewId::new(4), 2);
-    let old_id = PointId::new(401);
-    let new_id = PointId::new(402);
+    let old_id = point_id(401);
+    let new_id = point_id(402);
     subject.apply(&RenderUpdate::Reset {
         view_generation: old_view_generation,
     });
@@ -330,7 +335,7 @@ fn assert_async_ticket_stability(gpu: &GpuContext) {
             7,
             3,
             WORLD_ORIGIN,
-            vec![point([0.0; 3], RED, old_id.get())],
+            vec![point([0.0; 3], RED, old_id.ordinal())],
         ),
     });
     let old_frame = standard_frame(old_view_generation, VIEWPORT, 18.0, GREEN);
@@ -348,7 +353,7 @@ fn assert_async_ticket_stability(gpu: &GpuContext) {
             8,
             4,
             WORLD_ORIGIN,
-            vec![point([0.0; 3], BLUE, new_id.get())],
+            vec![point([0.0; 3], BLUE, new_id.ordinal())],
         ),
     });
     let new_center = [RESIZED_VIEWPORT[0] / 2, RESIZED_VIEWPORT[1] / 2];
@@ -417,8 +422,8 @@ fn assert_recorded_frame_replacement_stability(gpu: &GpuContext) {
     let mut subject = OffscreenRenderer::new(gpu, roomy_limits());
     let view_generation = ViewGenerationKey::new(ViewId::new(6), 1);
     let batch_key = 19;
-    let first_id = PointId::new(101);
-    let replacement_id = PointId::new(202);
+    let first_id = point_id(101);
+    let replacement_id = point_id(202);
     subject.apply(&RenderUpdate::Reset { view_generation });
     subject.apply(&RenderUpdate::Upsert {
         batch: batch(
@@ -426,7 +431,7 @@ fn assert_recorded_frame_replacement_stability(gpu: &GpuContext) {
             batch_key,
             1,
             WORLD_ORIGIN,
-            vec![point([0.0; 3], RED, first_id.get())],
+            vec![point([0.0; 3], RED, first_id.ordinal())],
         ),
     });
     let frame = standard_frame(view_generation, VIEWPORT, 18.0, GREEN);
@@ -439,7 +444,7 @@ fn assert_recorded_frame_replacement_stability(gpu: &GpuContext) {
             batch_key,
             2,
             WORLD_ORIGIN,
-            vec![point([0.0; 3], BLUE, replacement_id.get())],
+            vec![point([0.0; 3], BLUE, replacement_id.ordinal())],
         ),
     });
     let current = subject.render(&frame);
@@ -743,8 +748,12 @@ fn batch(
 }
 
 fn point(position: [f32; 3], color: [u8; 4], id: u64) -> RenderPoint {
-    RenderPoint::new(position, color, PointId::new(id))
+    RenderPoint::new(position, color, point_id(id))
         .expect("the acceptance fixture point should be valid")
+}
+
+const fn point_id(ordinal: u64) -> PointId {
+    PointId::new(TEST_SOURCE, ordinal)
 }
 
 fn standard_frame(

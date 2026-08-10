@@ -1,13 +1,20 @@
 # Point-Cloud Foundation Architecture
 
-Status: broader platform proposal deferred; the v0.1 renderer and v0.2 adaptive
-View planner are implemented
+Status: broader platform proposal deferred; the v0.1 renderer, v0.2 adaptive
+View planner, and v0.3 Real Sources are implemented
 
 > Punctra's accepted current contracts are the reusable
-> [v0.1 render engine](../design/render-engine-v0.1.md) and renderer-neutral
-> [v0.2 adaptive View planner](../design/adaptive-view-planning-v0.2.md). The
-> remaining broader document is research for possible host projects, not the
-> current implementation plan.
+> [v0.1 render engine](../design/render-engine-v0.1.md), renderer-neutral
+> [v0.2 adaptive View planner](../design/adaptive-view-planning-v0.2.md), and
+> completed [v0.3 Real Sources path](../design/real-sources-v0.3.md). Where this
+> older proposal differs from the v0.3 Source interface, the accepted v0.3
+> design controls. The remaining broader document is research for possible host
+> projects, not the current implementation plan.
+
+The implemented v0.3 adapters are `source-memory` and `source-las`.
+`source-las` supports LAS point-data record formats 0–10 and LAZ formats 0–8;
+LAZ formats 9 and 10 are explicitly unsupported pending exact layered
+WavePacket14 codec support. `source-copc` remains a proposed, deferred adapter.
 
 This package defines a reusable, headless foundation for very large point-cloud documents. It is aimed at learning, experimentation, and reuse by desktop applications, command-line tools, language bindings, and future research code.
 
@@ -107,7 +114,7 @@ flowchart TD
     WS --> RT
 
     LAS["source-las adapter"] --> SRC
-    COPC["source-copc adapter"] --> SRC
+    COPC["source-copc adapter (proposed)"] --> SRC
     MEM["source-memory adapter"] --> SRC
 ~~~
 
@@ -152,14 +159,20 @@ A Spatial Index, View cache, or derived cache may be deleted and rebuilt. The So
 
 ### Seams must be earned
 
-The Source interface is a real seam because LAS/LAZ, COPC, and in-memory adapters exist. Filesystem and fault-injection storage adapters form private test seams inside their owning modules; they are not public extension interfaces. LandXML remains a concrete module until a second export format proves a useful export seam. There is no public analysis-plugin seam in v0.1.
+The Source interface is a real seam because the implemented in-memory and
+LAS/LAZ adapters share it. The proposed `source-copc` adapter must reuse and
+prove that seam before it can be described as implemented. Filesystem and
+fault-injection storage adapters form private test seams inside their owning
+modules; they are not public extension interfaces. LandXML remains a concrete
+module until a second export format proves a useful export seam. There is no
+public analysis-plugin seam in v0.1.
 
 ## Typical headless composition
 
 The Workspace is the coherent document-access module, while the host composes independent selection, terrain, and export modules:
 
 ~~~rust
-let source = source_las::open_candidate("survey.laz")?;
+let source = source_las::open("survey.laz").await?;
 let Opened {
     workspace,
     index_status,
@@ -167,7 +180,7 @@ let Opened {
 } = Engine::open(
     "survey.pcw",
     source,
-    VerificationPolicy::Fast,
+    VerificationPolicy::FastThenFull,
     OpenOptions::default(),
 ).await?;
 

@@ -1,8 +1,10 @@
 # Repository and Dependency Layout
 
-Status: broader platform layout deferred; the implemented renderer and planner
-are defined by the [v0.1 renderer](../design/render-engine-v0.1.md) and
-[v0.2 planning](../design/adaptive-view-planning-v0.2.md) scopes
+Status: broader platform layout deferred; the v0.1 renderer, v0.2 adaptive View
+planner, and v0.3 Real Sources modules are implemented under the
+[v0.1 renderer](../design/render-engine-v0.1.md),
+[v0.2 planning](../design/adaptive-view-planning-v0.2.md), and
+[v0.3 Real Sources](../design/real-sources-v0.3.md) scopes
 
 The repository is one Cargo workspace containing independently buildable crates. A crate is created only when its implementation and at least one caller exist; the tree below is the intended destination, not a requirement to scaffold empty directories.
 
@@ -39,7 +41,7 @@ crates/
       records.rs
       attributes.rs
 
-  source-copc/
+  source-copc/              # proposed and deferred; not in the v0.3 workspace
     src/
       lib.rs
       hierarchy.rs
@@ -262,19 +264,14 @@ Examples of direct use:
 
 ~~~rust
 // Decode without a Workspace.
-let source = source_las::open_candidate(path)?;
-let verified = source
-    .verify(SourceExpectation::New, VerificationPolicy::Full)
-    .await?;
-let event = verified.source.read(spans, fields, budget).next(&cancel)?;
+let source = source_las::open(path).await?;
+let mut batches = source.read(request)?;
+let batch = batches.next()?;
 
 // Index generated Points through the memory adapter, without a Workspace.
-let source = source_memory::from_batches(generated_batches)?;
-let verified = source
-    .verify(SourceExpectation::New, VerificationPolicy::Full)
-    .await?;
+let source = source_memory::open(generated_memory_source).await?;
 let index = point_index::IndexBuilder::build_or_resume(
-    verified.source,
+    source,
     target,
     options,
 ).await?;
@@ -334,7 +331,8 @@ Expose stable domain values, operations, progress, and errors instead.
 Keep optional heavy dependencies at adapter edges:
 
 - **source-las** owns LAS/LAZ codec dependencies.
-- **source-copc** initially owns local COPC hierarchy and byte-range decoding only.
+- A proposed **source-copc** adapter would own local COPC hierarchy and
+  byte-range decoding only; it is deferred and is not in the v0.3 workspace.
 - **landxml** owns XML encoding and validation dependencies.
 - **render-wgpu** owns wgpu and shader dependencies.
 - **viewer-desktop** owns windowing and UI dependencies.
@@ -396,7 +394,8 @@ Build vertical evidence in this order:
 5. **point-revisions** with sparse classification Edits and fault-injected recovery.
 6. **point-query** and **point-workspace** with exact Snapshot Queries.
 7. **render-protocol**, **point-view**, **render-wgpu**, and a minimal desktop adapter.
-8. **source-copc** using the same PointSource and foundation-index path.
+8. Proposed, deferred **source-copc** using the same opaque verified Source and
+   foundation-index path.
 9. **terrain-model** with complete TerrainLimits and deterministic fixtures.
 10. **landxml** with independent parsing and semantic fixtures.
 11. Bindings and additional adapters only after the Rust interfaces settle.

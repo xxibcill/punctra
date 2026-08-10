@@ -1,0 +1,32 @@
+[package]
+name = "source-memory"
+description = "Deterministic in-memory Source adapter for Punctra."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+test-support = []
+
+[dependencies]
+blake3.workspace = true
+foundation-runtime.workspace = true
+point-contracts.workspace = true
+point-source.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "read"
+harness = false
+
+[[test]]
+name = "interface"
+required-features = ["test-support"]
+
+[lints]
+workspace = true
