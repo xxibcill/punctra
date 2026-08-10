@@ -513,6 +513,30 @@ fn projection_preserves_small_finite_error_priority() {
 }
 
 #[test]
+fn signed_zero_screen_errors_use_node_key_tie_breaking() {
+    let nodes = [
+        node(1, None, root_bounds(), -0.0, 1, 1, 1, NodeStatus::Missing),
+        node(2, None, root_bounds(), 0.0, 1, 1, 2, NodeStatus::Missing),
+    ];
+
+    let plan = planner(2.0, 0.25)
+        .plan(
+            &camera(),
+            [100, 100],
+            AvailableNodes::new(generation(3, 5), &nodes),
+            GENEROUS_BUDGET,
+        )
+        .unwrap();
+
+    assert_eq!(request_keys(&plan), vec![node_key(1), node_key(2)]);
+    assert!(
+        plan.requests()
+            .iter()
+            .all(|request| request.screen_space_error_pixels().to_bits() == 0.0_f64.to_bits())
+    );
+}
+
+#[test]
 fn projection_normalizes_large_camera_directions_without_overflow() {
     let camera = Camera::perspective(
         [0.0, 0.0, 0.0],

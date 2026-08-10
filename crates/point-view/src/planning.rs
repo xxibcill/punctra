@@ -283,8 +283,12 @@ impl Projection {
 }
 
 fn multiply_divide(left: f64, right: f64, divisor: f64) -> f64 {
+    if left == 0.0 || right == 0.0 {
+        return 0.0;
+    }
+
     let product = left * right;
-    if product.is_normal() || left == 0.0 || right == 0.0 {
+    if product.is_normal() {
         return product / divisor;
     }
 
