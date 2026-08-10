@@ -165,7 +165,7 @@ fn run_headless_smoke(mut scene: Scene) -> DemoResult<()> {
             PLANNING_BUDGET,
         )?
     };
-    scene.reconcile_requests(plan.demanded_nodes(), plan.requests());
+    scene.reconcile_requests(plan.demanded_nodes(), plan.requests())?;
 
     let Some(batch) = scene.next_batch()? else {
         if scene.metrics().logical_points == 0 {
@@ -606,7 +606,7 @@ impl Graphics {
             plan.requests()
         };
         self.scene
-            .reconcile_requests(plan.demanded_nodes(), requests);
+            .reconcile_requests(plan.demanded_nodes(), requests)?;
         self.metrics.record_plan(
             u64::try_from(plan.requests().len()).expect("the request count fits in u64"),
             plan.resource_usage(),

@@ -64,9 +64,12 @@ impl Scene {
         &mut self,
         demanded_nodes: &[NodeKey],
         requests: &[NodeRequest],
-    ) {
+    ) -> SceneResult<()> {
         match self {
-            Self::Synthetic(scene) => scene.reconcile_requests(demanded_nodes, requests),
+            Self::Synthetic(scene) => {
+                scene.reconcile_requests(demanded_nodes, requests);
+                Ok(())
+            }
             Self::Real(scene) => scene.reconcile_requests(demanded_nodes, requests),
         }
     }
