@@ -472,66 +472,48 @@ GPU picking may produce provisional candidate Point Identities from resident Vie
 ## View contract
 
 ~~~rust
-pub struct FrameToken {
-    pub view: ViewId,
-    pub generation: u64,
-    pub revision: RevisionId,
-    pub camera_world: Camera64,
-    pub viewport_pixels: [u32; 2],
-}
-
-pub struct ViewGenerationKey {
-    pub view: ViewId,
-    pub generation: u64,
-    pub revision: RevisionId,
-}
-
-pub struct ViewSpec {
-    pub frame: FrameToken,
-    pub maximum_error_pixels: f32,
-    pub maximum_points: u64,
-    pub fields: FieldMask,
-}
-
-pub enum ViewDelta {
-    Reset { frame: FrameToken },
-    Upsert {
-        view_generation: ViewGenerationKey,
-        batch: ViewBatch,
-        replaces: BoundedVec<ViewBatchKey>,
-    },
-    Remove {
-        view_generation: ViewGenerationKey,
-        batches: BoundedVec<ViewBatchKey>,
-        coverage_after: Coverage,
-    },
-}
-
-pub struct ViewSummary {
-    pub frame: FrameToken,
-    pub final_coverage: Coverage,
-    pub emitted_points: u64,
+impl ViewPlanner {
+    pub fn plan(
+        &mut self,
+        camera: &Camera,
+        viewport: Viewport,
+        available_nodes: AvailableNodes<'_>,
+        budget: PlanningBudget,
+    ) -> Result<ViewPlan, PlanError>;
 }
 ~~~
 
-A View:
+A v0.2 View plan:
 
-- is pinned to one Snapshot;
-- validates ViewSpec's FrameToken Revision against ViewInput's exposed Snapshot provenance before emitting Reset;
-- requires a complete compatible Spatial Index in v0.1;
-- is progressive and may return partial Coverage;
-- obeys its point and memory budgets;
-- emits origin-relative values plus stable Point Identities;
-- uses canonical visibility priority and node-key tie-breaking;
-- begins with Reset for exactly one View identity, generation, and Revision;
-- uses stable batch keys and explicit replacement or removal;
-- treats a duplicate Upsert key as idempotent replacement;
-- may refine without invalidating authoritative state; and
-- never claims exact selection or analytical completeness.
+- consumes one host-owned, generation-stamped snapshot of hierarchy metadata and
+  missing, requested, or resident batch state;
+- conservatively culls the 64-bit world-space bounds against a validated
+  perspective `Camera`;
+- selects LOD by screen-space error with hysteresis and stable node-key tie
+  breaking;
+- reserves requested and retained point, estimated-byte, and batch costs before
+  adding a request;
+- keeps resident ancestors or descendants until selected replacement Coverage
+  is resident;
+- returns requests by descending visual priority, retained nodes by node key,
+  and conditional retirements by batch key;
+- stamps every result with the snapshot `ViewGenerationKey`, and stamps each
+  retirement with the observed batch version; and
+- performs no materialization, I/O, renderer update, exact selection, or claim
+  of analytical completeness.
 
-The renderer maintains no implicit “current camera.” It applies deltas only to the active ViewGenerationKey and renders only the explicitly requested FrameToken. A mixed View identity, generation, or Revision returns ViewGenerationMismatch.
+`ViewGenerationKey` contains the caller's View identity and generation; it does
+not contain a Workspace Revision. A host that derives `AvailableNodes` from a
+Snapshot remains responsible for retaining and validating that provenance and
+for selecting a new generation when its policy requires one. **point-view** has
+no dependency on `ViewInput`, **point-query**, or a Spatial Index.
 
-MeshBatch follows the same ViewGenerationKey and floating-origin rules as ViewBatch. Its bounded triangle indices reference only vertices in that batch, and its Artifact Identity lets the host replace or remove all batches from one Terrain Surface without inspecting GPU storage. Mesh display values are never fed back into terrain or export.
+The host explicitly begins renderer state with `RenderUpdate::Reset`, converts
+materialized requested nodes into `PointBatch` Upserts, and applies plan
+retirements as conditional Remove updates. A render `Frame` supplies the exact
+generation, camera, and validated `Viewport` to draw; a mismatched generation
+returns `ViewGenerationMismatch`. Mesh rendering remains outside the
+implemented renderer and planner contracts.
 
 ## Terrain contract
 
@@ -585,7 +567,9 @@ Rules:
 - detached synthetic streams require the same Source Identity, combined input-content hash, and Coordinate Reference and cannot claim a Workspace Revision;
 - every detached Point Batch Source Identity must equal the Source Identity in its Detached provenance;
 - SurfaceProvenance records that Snapshot or detached input identity, a batch-partition-independent digest of the consumed Points and Breaklines, the fully normalized Recipe, the applied limits, and the terrain contract version;
-- ArtifactId is derived from the versioned SurfaceProvenance and canonical topology content, so the host can label every MeshBatch without inspecting terrain internals;
+- ArtifactId is derived from the versioned SurfaceProvenance and canonical
+  topology content, so a future host can label bounded display batches without
+  inspecting terrain internals;
 - the caller supplies finite Point Batches and raw finite Breaklines;
 - a named preset is resolved to complete numeric parameters before recording;
 - the module normalizes duplicate vertices and Breakline intersections according to the Recipe;

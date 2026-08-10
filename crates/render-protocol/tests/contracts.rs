@@ -1,9 +1,89 @@
 //! Public-interface tests for owned renderer-neutral values.
 
 use render_protocol::{
-    BatchKey, BatchVersion, ESTIMATED_GPU_BYTES_PER_POINT, PointBatch, PointId, ProtocolError,
-    RenderPoint, ViewGenerationKey, ViewId,
+    BatchKey, BatchVersion, Camera, ESTIMATED_GPU_BYTES_PER_POINT, PointBatch, PointId,
+    ProtocolError, RenderPoint, ViewGenerationKey, ViewId, Viewport, ViewportError,
 };
+
+#[test]
+fn viewport_owns_physical_dimensions_and_projection_ratio() {
+    let viewport = Viewport::new(1_920, 1_080).unwrap();
+
+    assert_eq!(viewport.width(), 1_920);
+    assert_eq!(viewport.height(), 1_080);
+    assert_eq!(viewport.dimensions(), [1_920, 1_080]);
+    assert_eq!(
+        viewport.aspect_ratio().to_bits(),
+        (1_920_f32 / 1_080_f32).to_bits()
+    );
+    assert_eq!(
+        Viewport::new(1_920, 0),
+        Err(ViewportError::Empty {
+            dimensions: [1_920, 0],
+        })
+    );
+}
+
+#[test]
+fn camera_is_a_renderer_neutral_projection_contract() {
+    let camera = Camera::perspective(
+        [1_000_000.0, 2_000_000.0, 100.0],
+        [1_000_001.0, 2_000_000.0, 99.0],
+        [0.0, 0.0, 1.0],
+        std::f32::consts::FRAC_PI_3,
+        0.1,
+        10_000.0,
+    )
+    .expect("the contract camera should be valid");
+
+    assert_eq!(
+        camera.eye().map(f64::to_bits),
+        [1_000_000.0, 2_000_000.0, 100.0].map(f64::to_bits)
+    );
+    assert_eq!(
+        camera.target().map(f64::to_bits),
+        [1_000_001.0, 2_000_000.0, 99.0].map(f64::to_bits)
+    );
+    assert_eq!(
+        camera.up().map(f64::to_bits),
+        [0.0, 0.0, 1.0].map(f64::to_bits)
+    );
+    assert_eq!(
+        camera.vertical_field_of_view_radians().to_bits(),
+        std::f32::consts::FRAC_PI_3.to_bits()
+    );
+    assert_eq!(camera.near_distance().to_bits(), 0.1_f32.to_bits());
+    assert_eq!(camera.far_distance().to_bits(), 10_000.0_f32.to_bits());
+    let basis = camera.world_basis();
+    assert_vector_close(
+        basis.forward(),
+        [
+            std::f64::consts::FRAC_1_SQRT_2,
+            0.0,
+            -std::f64::consts::FRAC_1_SQRT_2,
+        ],
+    );
+    assert_vector_close(basis.right(), [0.0, -1.0, 0.0]);
+    assert_vector_close(
+        basis.up(),
+        [
+            std::f64::consts::FRAC_1_SQRT_2,
+            0.0,
+            std::f64::consts::FRAC_1_SQRT_2,
+        ],
+    );
+
+    let matrix = camera
+        .view_projection_matrix(16.0 / 9.0)
+        .expect("the validated camera should produce a finite projection");
+    assert!(matrix.into_iter().all(f32::is_finite));
+}
+
+fn assert_vector_close(actual: [f64; 3], expected: [f64; 3]) {
+    for (actual, expected) in actual.into_iter().zip(expected) {
+        assert!((actual - expected).abs() < f64::EPSILON * 4.0);
+    }
+}
 
 #[test]
 fn point_batch_owns_valid_renderer_neutral_points() {

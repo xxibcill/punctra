@@ -11,12 +11,15 @@ use std::{
 };
 
 use orbit_camera::OrbitCamera;
+use point_view::{AvailableNodes, PlannerConfig, PlanningBudget, ResourceUsage, ViewPlanner};
 use render_protocol::{
-    ESTIMATED_GPU_BYTES_PER_POINT, RenderLimits, RenderUpdate, UpdateReport, ViewGenerationKey,
-    ViewId,
+    RenderLimits, RenderUpdate, UpdateReport, ViewGenerationKey, ViewId, Viewport,
 };
-use render_wgpu::{Frame, FrameReport, PointStyle, RendererConfig, WgpuRenderer};
-use synthetic::{SCENE_RADIUS, SCENE_TARGET, SyntheticScene, TOTAL_BATCHES, TOTAL_POINTS};
+use render_wgpu::{Camera, Frame, FrameReport, PointStyle, RendererConfig, WgpuRenderer};
+use synthetic::{
+    LOGICAL_POINT_COUNT, RESIDENT_BATCH_BUDGET, RESIDENT_BYTE_BUDGET, RESIDENT_POINT_BUDGET,
+    SCENE_RADIUS, SCENE_TARGET, SyntheticScene,
+};
 use winit::{
     application::ApplicationHandler,
     dpi::{LogicalSize, PhysicalPosition, PhysicalSize},
@@ -26,19 +29,24 @@ use winit::{
     window::{Window, WindowId},
 };
 
-const BASE_TITLE: &str = "Punctra renderer v0.1";
+const BASE_TITLE: &str = "Punctra adaptive View v0.2";
 const INITIAL_WIDTH: f64 = 1_280.0;
 const INITIAL_HEIGHT: f64 = 800.0;
 const TITLE_REFRESH_INTERVAL: Duration = Duration::from_millis(500);
 const VIEW_GENERATION: ViewGenerationKey = ViewGenerationKey::new(ViewId::new(1), 1);
+const PLANNING_BUDGET: PlanningBudget = PlanningBudget::new(
+    RESIDENT_POINT_BUDGET,
+    RESIDENT_BYTE_BUDGET,
+    RESIDENT_BATCH_BUDGET,
+);
 
 type DemoResult<T> = Result<T, Box<dyn Error>>;
 
 fn main() -> DemoResult<()> {
     println!(
-        "Punctra renderer demo\n\
+        "Punctra adaptive View demo (16.7M logical Points, fixed residency)\n\
          Left drag: orbit | Wheel: zoom | R: reset view | H: highlights | \
-         Space: pause stream | Escape: quit"
+         Space: pause loads | Escape: quit"
     );
 
     let event_loop = EventLoop::new()?;
@@ -216,11 +224,12 @@ struct Graphics {
     surface_config: wgpu::SurfaceConfiguration,
     presentation: PresentationState,
     renderer: WgpuRenderer,
+    planner: ViewPlanner,
     scene: SyntheticScene,
     camera: OrbitCamera,
     style: PointStyle,
     input: PointerInput,
-    streaming_paused: bool,
+    loads_paused: bool,
     highlights_enabled: bool,
     metrics: Metrics,
 }
@@ -262,9 +271,9 @@ impl Graphics {
         }
 
         let limits = RenderLimits::new(
-            TOTAL_POINTS * ESTIMATED_GPU_BYTES_PER_POINT,
-            TOTAL_POINTS,
-            TOTAL_BATCHES,
+            RESIDENT_BYTE_BUDGET,
+            RESIDENT_POINT_BUDGET,
+            RESIDENT_BATCH_BUDGET,
         );
         let mut renderer =
             WgpuRenderer::new(&device, RendererConfig::new(surface_config.format, limits))?;
@@ -272,6 +281,8 @@ impl Graphics {
             view_generation: VIEW_GENERATION,
         };
         renderer.apply(&reset)?;
+        let planner = ViewPlanner::new(PlannerConfig::new(2.0, 0.25)?);
+        let scene = SyntheticScene::new(VIEW_GENERATION)?;
         let style = PointStyle::new(2.4, [1.0, 0.24, 0.06], [0.008, 0.012, 0.02, 1.0])?;
 
         Ok(Self {
@@ -283,11 +294,12 @@ impl Graphics {
             surface_config,
             presentation: PresentationState::new(surface_configured),
             renderer,
-            scene: SyntheticScene::new(VIEW_GENERATION),
+            planner,
+            scene,
             camera: OrbitCamera::new(SCENE_TARGET, SCENE_RADIUS),
             style,
             input: PointerInput::default(),
-            streaming_paused: false,
+            loads_paused: false,
             highlights_enabled: false,
             metrics: Metrics::new(),
         })
@@ -299,7 +311,10 @@ impl Graphics {
         }
 
         let frame_started = Instant::now();
+        let viewport = Viewport::new(self.surface_config.width, self.surface_config.height)?;
+        let camera = self.camera.as_render_camera()?;
         self.stream_next_batch()?;
+        self.plan_view(&camera, viewport)?;
         let Some((surface_texture, reconfigure_after_present)) = self.acquire_surface_texture()?
         else {
             return Ok(());
@@ -312,12 +327,7 @@ impl Graphics {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("punctra renderer demo frame"),
             });
-        let frame = Frame::new(
-            VIEW_GENERATION,
-            self.camera.as_render_camera()?,
-            [self.surface_config.width, self.surface_config.height],
-        )?
-        .with_style(self.style);
+        let frame = Frame::new(VIEW_GENERATION, camera, viewport)?.with_style(self.style);
         let recorded_frame = self.renderer.render(&mut encoder, &target, &frame)?;
         self.queue.submit([encoder.finish()]);
         self.window.pre_present_notify();
@@ -330,8 +340,9 @@ impl Graphics {
             .record_frame(recorded_frame.report(), frame_started.elapsed());
         self.metrics.update_title(
             &self.window,
-            self.scene.loaded_batches(),
-            self.streaming_paused,
+            self.scene.resident_batches(),
+            self.scene.pending_batches(),
+            self.loads_paused,
             self.highlights_enabled,
         );
         Ok(())
@@ -359,17 +370,45 @@ impl Graphics {
     }
 
     fn stream_next_batch(&mut self) -> DemoResult<()> {
-        if self.streaming_paused {
+        if self.loads_paused {
             return Ok(());
         }
         let Some(batch) = self.scene.next_batch()? else {
             return Ok(());
         };
 
+        let batch_key = batch.key();
+        let batch_version = batch.version();
         let update = RenderUpdate::Upsert { batch };
         let upload_started = Instant::now();
         let report = self.renderer.apply(&update)?;
+        self.scene.mark_resident(batch_key, batch_version);
         self.metrics.record_upload(report, upload_started.elapsed());
+        Ok(())
+    }
+
+    fn plan_view(&mut self, camera: &Camera, viewport: Viewport) -> DemoResult<()> {
+        let planning_nodes = self.scene.planning_nodes();
+        let plan = self.planner.plan(
+            camera,
+            viewport,
+            AvailableNodes::new(VIEW_GENERATION, &planning_nodes),
+            PLANNING_BUDGET,
+        )?;
+
+        for retirement in plan.retirements().iter().copied() {
+            let update = retirement.render_update();
+            self.renderer.apply(&update)?;
+            self.scene
+                .mark_retired(retirement.batch_key(), retirement.expected_version());
+        }
+        if !self.loads_paused {
+            self.scene.enqueue_requests(plan.requests());
+        }
+        self.metrics.record_plan(
+            u64::try_from(plan.requests().len()).expect("the request count fits in u64"),
+            plan.resource_usage(),
+        );
         Ok(())
     }
 
@@ -415,7 +454,7 @@ impl Graphics {
         match code {
             KeyCode::KeyR => self.camera.reset(SCENE_RADIUS),
             KeyCode::KeyH => self.toggle_highlights()?,
-            KeyCode::Space => self.streaming_paused = !self.streaming_paused,
+            KeyCode::Space => self.loads_paused = !self.loads_paused,
             _ => return Ok(()),
         }
         self.window.request_redraw();
@@ -425,7 +464,7 @@ impl Graphics {
     fn toggle_highlights(&mut self) -> DemoResult<()> {
         self.highlights_enabled = !self.highlights_enabled;
         let point_ids = if self.highlights_enabled {
-            self.scene.highlight_ids()
+            SyntheticScene::highlight_ids()
         } else {
             Vec::new()
         };
@@ -501,6 +540,8 @@ struct Metrics {
     latest_upload_time: Duration,
     latest_frame_time: Duration,
     latest_report: Option<FrameReport>,
+    latest_plan_requests: u64,
+    latest_plan_usage: ResourceUsage,
 }
 
 impl Metrics {
@@ -512,6 +553,8 @@ impl Metrics {
             latest_upload_time: Duration::ZERO,
             latest_frame_time: Duration::ZERO,
             latest_report: None,
+            latest_plan_requests: 0,
+            latest_plan_usage: ResourceUsage::default(),
         }
     }
 
@@ -528,11 +571,17 @@ impl Metrics {
         self.latest_report = Some(report);
     }
 
+    fn record_plan(&mut self, requests: u64, usage: ResourceUsage) {
+        self.latest_plan_requests = requests;
+        self.latest_plan_usage = usage;
+    }
+
     fn update_title(
         &mut self,
         window: &Window,
-        loaded_batches: u64,
-        streaming_paused: bool,
+        resident_batches: u64,
+        pending_batches: u64,
+        loads_paused: bool,
         highlights_enabled: bool,
     ) {
         let interval = self.interval_started.elapsed();
@@ -544,19 +593,23 @@ impl Metrics {
         };
 
         let frames_per_second = f64::from(self.interval_frames) / interval.as_secs_f64();
-        let stream_state = if loaded_batches == TOTAL_BATCHES {
-            "complete"
-        } else if streaming_paused {
-            "paused"
-        } else {
+        let stream_state = if loads_paused {
+            "loads-paused"
+        } else if pending_batches > 0 || self.latest_plan_requests > 0 {
             "streaming"
+        } else {
+            "steady"
         };
         let highlight_state = if highlights_enabled { "on" } else { "off" };
         let title = format!(
-            "{BASE_TITLE} | {} pts | {} MiB resident | {} MiB uploaded | {} draws | \
+            "{BASE_TITLE} | {} logical | {} / {} pts | {} MiB resident | {} MiB uploaded | \
+             {} draws | \
              {:.0} fps | frame {:.2} ms | encode {:.2} ms | upload {:.2} ms | \
-             {loaded_batches}/{TOTAL_BATCHES} {stream_state} | H:{highlight_state}",
+             {} req | {} planned | {pending_batches} queued | \
+             {resident_batches} batches {stream_state} | H:{highlight_state}",
+            compact_count(LOGICAL_POINT_COUNT),
             compact_count(report.drawn_points()),
+            compact_count(RESIDENT_POINT_BUDGET),
             mebibytes(report.resident_bytes()),
             mebibytes(self.total_uploaded_bytes),
             report.draw_calls(),
@@ -564,6 +617,8 @@ impl Metrics {
             duration_milliseconds(self.latest_frame_time),
             duration_milliseconds(report.encoding_time()),
             duration_milliseconds(self.latest_upload_time),
+            self.latest_plan_requests,
+            self.latest_plan_usage.batch_count(),
         );
         window.set_title(&title);
         self.interval_started = Instant::now();

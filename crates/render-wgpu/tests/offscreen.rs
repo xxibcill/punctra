@@ -1,19 +1,21 @@
 //! GPU acceptance coverage on an available headless adapter.
 
-use std::{
-    env,
-    sync::{OnceLock, mpsc},
-};
+use std::sync::mpsc;
+
+#[path = "../../../tests/support/gpu.rs"]
+mod gpu_support;
 
 use render_protocol::{
     BatchKey, BatchVersion, ESTIMATED_GPU_BYTES_PER_POINT as POINT_BYTES, PointBatch, PointId,
     ProtocolError, RenderLimits, RenderPoint, RenderUpdate, ResidentResource, UpdateKind,
-    UpdateReport, ViewGenerationKey, ViewId,
+    UpdateReport, ViewGenerationKey, ViewId, Viewport,
 };
 use render_wgpu::{
     Camera, Frame, FrameReport, PickError, PickHit, PickPoll, PickRequest, PickTicket, PointStyle,
     RecordedFrame, RendererConfig, RendererError, WgpuRenderer,
 };
+
+use gpu_support::{GpuContext, with_gpu};
 
 const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 const VIEWPORT: [u32; 2] = [64, 64];
@@ -27,8 +29,6 @@ const BLUE: [u8; 4] = [0, 0, 255, 255];
 const CYAN: [u8; 4] = [0, 255, 255, 255];
 const TRANSPARENT: [u8; 4] = [255, 255, 255, 0];
 const TWO_POINT_BYTES: u64 = 2 * POINT_BYTES;
-
-static GPU: OnceLock<Option<GpuContext>> = OnceLock::new();
 
 #[test]
 fn lifecycle_updates_are_atomic_in_gpu_state() {
@@ -480,19 +480,6 @@ fn assert_foreign_recorded_frame_rejected(gpu: &GpuContext) {
     ));
 }
 
-struct GpuContext {
-    device: wgpu::Device,
-    queue: wgpu::Queue,
-}
-
-impl GpuContext {
-    fn wait(&self) {
-        self.device
-            .poll(wgpu::PollType::wait_indefinitely())
-            .expect("headless device polling should succeed");
-    }
-}
-
 struct OffscreenRenderer<'gpu> {
     gpu: &'gpu GpuContext,
     renderer: WgpuRenderer,
@@ -520,7 +507,7 @@ impl<'gpu> OffscreenRenderer<'gpu> {
     }
 
     fn try_render(&mut self, frame: &Frame) -> Result<RenderedFrame, RendererError> {
-        let target = ColorTarget::new(&self.gpu.device, frame.viewport());
+        let target = ColorTarget::new(&self.gpu.device, frame.viewport().dimensions());
         let mut encoder = self.encoder("punctra acceptance render encoder");
         let recorded_frame = self.renderer.render(&mut encoder, &target.view, frame)?;
         let report = recorded_frame.report();
@@ -541,8 +528,9 @@ impl<'gpu> OffscreenRenderer<'gpu> {
         first_frame: &Frame,
         second_frame: &Frame,
     ) -> (RenderedFrame, RenderedFrame) {
-        let first_target = ColorTarget::new(&self.gpu.device, first_frame.viewport());
-        let second_target = ColorTarget::new(&self.gpu.device, second_frame.viewport());
+        let first_target = ColorTarget::new(&self.gpu.device, first_frame.viewport().dimensions());
+        let second_target =
+            ColorTarget::new(&self.gpu.device, second_frame.viewport().dimensions());
         let mut encoder = self.encoder("punctra deferred frame acceptance encoder");
         let first_recorded_frame = self
             .renderer
@@ -733,57 +721,6 @@ impl Image {
     }
 }
 
-fn with_gpu(test: impl FnOnce(&GpuContext)) {
-    if let Some(gpu) = GPU.get_or_init(initialize_gpu).as_ref() {
-        test(gpu);
-    }
-}
-
-fn initialize_gpu() -> Option<GpuContext> {
-    pollster::block_on(request_gpu())
-}
-
-async fn request_gpu() -> Option<GpuContext> {
-    let instance =
-        wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
-    let adapter = instance
-        .request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::None,
-            force_fallback_adapter: false,
-            compatible_surface: None,
-            apply_limit_buckets: false,
-        })
-        .await;
-    let adapter = match adapter {
-        Ok(adapter) => adapter,
-        Err(error) if gpu_is_required() => {
-            panic!("PUNCTRA_REQUIRE_GPU=1 but no headless adapter is available: {error}");
-        }
-        Err(error) => {
-            eprintln!(
-                "skipping GPU acceptance tests because no headless adapter is available: {error}"
-            );
-            return None;
-        }
-    };
-    let (device, queue) = adapter
-        .request_device(&wgpu::DeviceDescriptor {
-            label: Some("punctra acceptance test device"),
-            required_features: wgpu::Features::empty(),
-            required_limits: wgpu::Limits::downlevel_defaults(),
-            experimental_features: wgpu::ExperimentalFeatures::disabled(),
-            memory_hints: wgpu::MemoryHints::MemoryUsage,
-            trace: wgpu::Trace::Off,
-        })
-        .await
-        .expect("a discovered headless adapter should provide a baseline device");
-    Some(GpuContext { device, queue })
-}
-
-fn gpu_is_required() -> bool {
-    env::var("PUNCTRA_REQUIRE_GPU").is_ok_and(|value| value == "1")
-}
-
 fn roomy_limits() -> RenderLimits {
     RenderLimits::new(1024 * 1024, 1024, 16)
 }
@@ -836,9 +773,13 @@ fn frame_with_style(
         100.0,
     )
     .expect("the standard acceptance camera should be valid");
-    Frame::new(view_generation, camera, viewport)
-        .expect("the acceptance frame should be valid")
-        .with_style(style)
+    Frame::new(
+        view_generation,
+        camera,
+        Viewport::new(viewport[0], viewport[1]).unwrap(),
+    )
+    .expect("the acceptance frame should be valid")
+    .with_style(style)
 }
 
 fn precision_frame(view_generation: ViewGenerationKey) -> Frame {
@@ -853,7 +794,7 @@ fn precision_frame(view_generation: ViewGenerationKey) -> Frame {
     .expect("the precision camera should be valid");
     let style = PointStyle::new(5.0, [1.0; 3], [0.0, 0.0, 0.0, 1.0])
         .expect("the precision style should be valid");
-    Frame::new(view_generation, camera, [128, 128])
+    Frame::new(view_generation, camera, Viewport::new(128, 128).unwrap())
         .expect("the precision frame should be valid")
         .with_style(style)
 }
@@ -875,9 +816,13 @@ fn translated_frame(view_generation: ViewGenerationKey, horizontal_offset: f64) 
     .expect("the translated camera should be valid");
     let style = PointStyle::new(14.0, rgba8_to_linear_rgb(GREEN), [0.0, 0.0, 0.0, 1.0])
         .expect("the translated frame style should be valid");
-    Frame::new(view_generation, camera, VIEWPORT)
-        .expect("the translated frame should be valid")
-        .with_style(style)
+    Frame::new(
+        view_generation,
+        camera,
+        Viewport::new(VIEWPORT[0], VIEWPORT[1]).unwrap(),
+    )
+    .expect("the translated frame should be valid")
+    .with_style(style)
 }
 
 fn rgba8_to_linear_rgb(color: [u8; 4]) -> [f32; 3] {

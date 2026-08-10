@@ -1,11 +1,14 @@
 # Domain Context: Point-Cloud Foundation
 
-Status: renderer terms are active; broader platform terms are deferred
+Status: renderer and adaptive View-planning terms are active; broader platform
+terms are deferred
 
-Punctra v0.1 implements only the reusable render engine described in
-[the accepted design](docs/design/render-engine-v0.1.md). The definitions of
-Point, Point Identity, Point Batch, View, and View Batch below are canonical for
-v0.1. The remaining terms are retained as vocabulary research for possible host
+Punctra v0.2 implements the reusable render engine and renderer-neutral View
+planner described in the accepted [v0.1 renderer
+design](docs/design/render-engine-v0.1.md) and [v0.2 planning
+design](docs/design/adaptive-view-planning-v0.2.md). The definitions of Point,
+Point Identity, Point Batch, View, Coverage, and View Batch below are canonical.
+The remaining terms are retained as vocabulary research for possible host
 projects and do not imply current product scope.
 
 ## Artifact

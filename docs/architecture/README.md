@@ -1,11 +1,13 @@
 # Point-Cloud Foundation Architecture
 
-Status: deferred platform proposal
+Status: broader platform proposal deferred; the v0.1 renderer and v0.2 adaptive
+View planner are implemented
 
-> Punctra v0.1 is now scoped to the reusable point-cloud render engine. Its
-> accepted contract is [render-engine-v0.1.md](../design/render-engine-v0.1.md).
-> This broader document remains as research for possible host projects; it is
-> not the current implementation plan.
+> Punctra's accepted current contracts are the reusable
+> [v0.1 render engine](../design/render-engine-v0.1.md) and renderer-neutral
+> [v0.2 adaptive View planner](../design/adaptive-view-planning-v0.2.md). The
+> remaining broader document is research for possible host projects, not the
+> current implementation plan.
 
 This package defines a reusable, headless foundation for very large point-cloud documents. It is aimed at learning, experimentation, and reuse by desktop applications, command-line tools, language bindings, and future research code.
 
@@ -80,8 +82,6 @@ flowchart TD
     QRY --> SRC
     QRY --> IDX
     QRY --> REV
-    VIEW --> QRY
-    VIEW --> IDX
     VIEW --> RP["render-protocol"]
     TER --> CT["point-contracts"]
     XML --> TER
@@ -95,7 +95,6 @@ flowchart TD
     SET --> CT
     REV --> CT
     QRY --> CT
-    VIEW --> CT
     WS --> CT
 
     SRC --> RT
@@ -103,7 +102,6 @@ flowchart TD
     SET --> RT
     REV --> RT
     QRY --> RT
-    VIEW --> RT
     TER --> RT
     XML --> RT
     WS --> RT

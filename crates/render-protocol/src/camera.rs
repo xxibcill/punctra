@@ -1,8 +1,36 @@
 use glam::{
-    DVec3, Mat4, Vec3,
+    DVec3, Vec3,
     camera::rh::{proj::directx, view},
 };
 use thiserror::Error;
+
+/// Canonical orthonormal world-space basis of a validated perspective camera.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CameraBasis {
+    forward: [f64; 3],
+    right: [f64; 3],
+    up: [f64; 3],
+}
+
+impl CameraBasis {
+    /// Returns the normalized direction from the camera eye toward its target.
+    #[must_use]
+    pub const fn forward(self) -> [f64; 3] {
+        self.forward
+    }
+
+    /// Returns the normalized right direction.
+    #[must_use]
+    pub const fn right(self) -> [f64; 3] {
+        self.right
+    }
+
+    /// Returns the normalized view-up direction orthogonal to forward and right.
+    #[must_use]
+    pub const fn up(self) -> [f64; 3] {
+        self.up
+    }
+}
 
 /// A validated perspective camera expressed in 64-bit world coordinates.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -10,8 +38,7 @@ pub struct Camera {
     eye: [f64; 3],
     target: [f64; 3],
     up: [f64; 3],
-    view_direction: [f32; 3],
-    view_up: [f32; 3],
+    world_basis: CameraBasis,
     vertical_field_of_view_radians: f32,
     near_distance: f32,
     far_distance: f32,
@@ -45,17 +72,22 @@ impl Camera {
         if up_vector == DVec3::ZERO {
             return Err(CameraError::ZeroUpVector);
         }
-        let view_direction =
-            normalize_for_gpu(forward).ok_or(CameraError::NonFiniteViewDirection)?;
-        let requested_up = normalize_for_gpu(up_vector).ok_or(CameraError::ZeroUpVector)?;
-        let view_right = view_direction
-            .cross(requested_up)
+        let world_forward =
+            normalize_world_direction(forward).ok_or(CameraError::NonFiniteViewDirection)?;
+        let world_requested_up =
+            normalize_world_direction(up_vector).ok_or(CameraError::ZeroUpVector)?;
+        let narrowed_forward = world_forward.as_vec3();
+        let narrowed_requested_up = world_requested_up.as_vec3();
+        let narrowed_right = narrowed_forward
+            .cross(narrowed_requested_up)
             .try_normalize()
             .ok_or(CameraError::ParallelUpVector)?;
-        let view_up = view_right.cross(view_direction);
-        if !view_up.is_finite() {
+        if !narrowed_right.cross(narrowed_forward).is_finite() {
             return Err(CameraError::ParallelUpVector);
         }
+        let world_right = normalize_world_direction(world_forward.cross(world_requested_up))
+            .ok_or(CameraError::ParallelUpVector)?;
+        let world_up = world_right.cross(world_forward);
         if !vertical_field_of_view_radians.is_finite()
             || !(0.0..std::f32::consts::PI).contains(&vertical_field_of_view_radians)
         {
@@ -77,13 +109,16 @@ impl Camera {
             eye,
             target,
             up,
-            view_direction: view_direction.to_array(),
-            view_up: view_up.to_array(),
+            world_basis: CameraBasis {
+                forward: world_forward.to_array(),
+                right: world_right.to_array(),
+                up: world_up.to_array(),
+            },
             vertical_field_of_view_radians,
             near_distance,
             far_distance,
         };
-        camera.view_projection(1.0)?;
+        camera.view_projection_matrix(1.0)?;
         Ok(camera)
     }
 
@@ -105,6 +140,12 @@ impl Camera {
         self.up
     }
 
+    /// Returns the canonical orthonormal basis used for world-space planning.
+    #[must_use]
+    pub const fn world_basis(&self) -> CameraBasis {
+        self.world_basis
+    }
+
     /// Returns the vertical field of view in radians.
     #[must_use]
     pub const fn vertical_field_of_view_radians(&self) -> f32 {
@@ -123,12 +164,19 @@ impl Camera {
         self.far_distance
     }
 
-    pub(crate) fn view_projection(&self, aspect_ratio: f32) -> Result<Mat4, CameraError> {
-        let view = view::look_at_mat4(
-            Vec3::ZERO,
-            Vec3::from_array(self.view_direction),
-            Vec3::from_array(self.view_up),
-        );
+    /// Builds the right-handed view-projection matrix for an aspect ratio.
+    ///
+    /// The returned flat array is column-major: each consecutive group of four
+    /// values is one matrix column. Its clip-space depth range is `0..=1`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CameraError::NonFiniteProjection`] when the aspect ratio and
+    /// validated camera parameters do not produce a finite matrix.
+    pub fn view_projection_matrix(&self, aspect_ratio: f32) -> Result<[f32; 16], CameraError> {
+        let forward = DVec3::from_array(self.world_basis.forward).as_vec3();
+        let up = DVec3::from_array(self.world_basis.up).as_vec3();
+        let view = view::look_at_mat4(Vec3::ZERO, forward, up);
         let projection = directx::perspective(
             self.vertical_field_of_view_radians,
             aspect_ratio,
@@ -137,14 +185,14 @@ impl Camera {
         );
         let view_projection = projection * view;
         if view_projection.is_finite() {
-            Ok(view_projection)
+            Ok(view_projection.to_cols_array())
         } else {
             Err(CameraError::NonFiniteProjection)
         }
     }
 }
 
-/// A camera construction error.
+/// A camera construction or projection error.
 #[derive(Clone, Debug, Error, PartialEq)]
 pub enum CameraError {
     /// A world-coordinate vector contains NaN or infinity.
@@ -192,13 +240,13 @@ fn validate_finite_vector(name: &'static str, vector: [f64; 3]) -> Result<(), Ca
     }
 }
 
-fn normalize_for_gpu(vector: DVec3) -> Option<Vec3> {
+fn normalize_world_direction(vector: DVec3) -> Option<DVec3> {
     let scale = vector.abs().max_element();
     if !scale.is_finite() || scale == 0.0 {
         return None;
     }
 
-    let normalized = (vector / scale).try_normalize()?.as_vec3();
+    let normalized = (vector / scale).try_normalize()?;
     normalized.is_finite().then_some(normalized)
 }
 
@@ -245,10 +293,25 @@ mod tests {
     #[test]
     fn builds_a_finite_large_world_matrix() {
         let matrix = valid_camera()
-            .view_projection(16.0 / 9.0)
+            .view_projection_matrix(16.0 / 9.0)
             .expect("the validated camera should produce a finite projection");
 
-        assert!(matrix.to_cols_array().into_iter().all(f32::is_finite));
+        assert!(matrix.into_iter().all(f32::is_finite));
+    }
+
+    #[test]
+    fn exposes_an_orthonormal_world_basis() {
+        let basis = valid_camera().world_basis();
+        let forward = DVec3::from_array(basis.forward());
+        let right = DVec3::from_array(basis.right());
+        let up = DVec3::from_array(basis.up());
+
+        for direction in [forward, right, up] {
+            assert!((direction.length() - 1.0).abs() < f64::EPSILON * 4.0);
+        }
+        assert!(forward.dot(right).abs() < f64::EPSILON * 4.0);
+        assert!(forward.dot(up).abs() < f64::EPSILON * 4.0);
+        assert!(right.dot(up).abs() < f64::EPSILON * 4.0);
     }
 
     #[test]
@@ -264,7 +327,7 @@ mod tests {
             )
             .expect("finite view directions should be normalized before narrowing");
 
-            assert!(camera.view_projection(1.0).is_ok());
+            assert!(camera.view_projection_matrix(1.0).is_ok());
         }
     }
 
@@ -280,6 +343,35 @@ mod tests {
         );
 
         assert_eq!(result, Err(CameraError::ParallelUpVector));
+    }
+
+    #[test]
+    fn projection_uses_the_canonical_basis_for_near_parallel_up_vectors() {
+        let camera = Camera::perspective(
+            [0.0; 3],
+            [1.0, 1.0, 1.0],
+            [0.999_999_95, 1.000_000_04, 1.000_000_05],
+            1.0,
+            1.0,
+            100.0,
+        )
+        .unwrap();
+        let point = DVec3::new(
+            7.267_795_159_728_823_5,
+            0.196_727_468_879_519_3,
+            9.855_985_447_080_432,
+        );
+        let basis = camera.world_basis();
+        let forward = DVec3::from_array(basis.forward());
+        let right = DVec3::from_array(basis.right());
+        let depth = forward.dot(point);
+        let half_field_of_view = 0.5 * f64::from(camera.vertical_field_of_view_radians());
+        let horizontal_limit = depth * half_field_of_view.tan();
+        assert!(right.dot(point).abs() > horizontal_limit);
+
+        let matrix = glam::Mat4::from_cols_array(&camera.view_projection_matrix(1.0).unwrap());
+        let clip = matrix * point.as_vec3().extend(1.0);
+        assert!(clip.x.abs() > clip.w);
     }
 
     #[test]

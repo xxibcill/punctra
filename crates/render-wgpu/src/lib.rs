@@ -9,7 +9,7 @@
 //! ```no_run
 //! use render_protocol::{
 //!     BatchKey, BatchVersion, ESTIMATED_GPU_BYTES_PER_POINT, PointBatch, PointId,
-//!     RenderLimits, RenderPoint, RenderUpdate, ViewGenerationKey, ViewId,
+//!     RenderLimits, RenderPoint, RenderUpdate, ViewGenerationKey, ViewId, Viewport,
 //! };
 //! use render_wgpu::{Camera, Frame, RendererConfig, WgpuRenderer};
 //!
@@ -46,14 +46,14 @@
 //!     0.1,
 //!     1_000.0,
 //! )?;
-//! let frame = Frame::new(view_generation, camera, [1280, 720])?;
+//! let viewport = Viewport::new(1280, 720)?;
+//! let frame = Frame::new(view_generation, camera, viewport)?;
 //! let recorded_frame = renderer.render(encoder, target, &frame)?;
 //! assert_eq!(recorded_frame.report().drawn_points(), 1);
 //! # Ok(())
 //! # }
 //! ```
 
-mod camera;
 mod frame;
 mod gpu;
 mod pick;
@@ -61,7 +61,7 @@ mod pipeline;
 mod renderer;
 mod targets;
 
-pub use camera::{Camera, CameraError};
 pub use frame::{Frame, FrameError, PointStyle};
 pub use pick::{PickError, PickHit, PickPoll, PickRequest, PickTicket};
+pub use render_protocol::{Camera, CameraBasis, CameraError, Viewport, ViewportError};
 pub use renderer::{FrameReport, RecordedFrame, RendererConfig, RendererError, WgpuRenderer};
