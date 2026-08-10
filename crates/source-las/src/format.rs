@@ -1226,31 +1226,3 @@ fn las_text(bytes: &[u8]) -> String {
         .trim_end_matches(['\0', ' '])
         .to_owned()
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn metadata_budget_is_shared_across_file_sections() {
-        let mut budget = MetadataReadBudget::new();
-        budget
-            .reserve_records(MAX_METADATA_RECORDS as u64 - 1)
-            .unwrap();
-        budget.reserve_records(1).unwrap();
-        assert!(matches!(
-            budget.reserve_records(1),
-            Err(SourceError::CorruptSource { .. })
-        ));
-
-        let mut budget = MetadataReadBudget::new();
-        budget
-            .reserve_payload(MAX_SOURCE_METADATA_PAYLOAD_BYTES as u64 - 1)
-            .unwrap();
-        budget.reserve_payload(1).unwrap();
-        assert!(matches!(
-            budget.reserve_payload(1),
-            Err(SourceError::CorruptSource { .. })
-        ));
-    }
-}

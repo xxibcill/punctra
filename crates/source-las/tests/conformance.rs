@@ -11,8 +11,8 @@ use las::raw::point::ScanAngle;
 use las::{Builder, Color, Point, Transform, Vector, Vlr, Writer};
 use point_contracts::{
     AttributeColumn, AttributeColumns, AttributeDataType, AttributeDefinition, AttributeId,
-    AttributeSchema, AttributeValues, CoordinateReference, MetadataRecord, PointBatch,
-    PositionTransform, SourceMetadata, WorldBounds,
+    AttributeSchema, AttributeValues, CoordinateReference, MAX_METADATA_RECORDS, MetadataRecord,
+    PointBatch, PositionTransform, SourceMetadata, WorldBounds,
 };
 use point_source::{
     AttributeSelection, OpenOptions, ReadBudget, ReadRequest, Source, SourceError, SourceRecord,
@@ -497,6 +497,27 @@ fn malformed_metadata_reports_its_section_and_byte_offset() {
             .contains(&format!("VLR payload at byte {header_start}")),
         "diagnostic did not retain the known context: {reason}"
     );
+}
+
+#[test]
+fn combined_vlr_and_evlr_count_is_bounded_through_public_open() {
+    let directory = unique_temp_directory();
+    fs::create_dir(&directory).unwrap();
+    let path = directory.join("too-many-metadata-records.las");
+    let regular_count = MAX_METADATA_RECORDS / 2;
+    let extended_count = MAX_METADATA_RECORDS - regular_count + 1;
+    write_las_fixture_with_metadata(
+        &path,
+        &fixture_rows(),
+        empty_vlrs(regular_count),
+        empty_vlrs(extended_count),
+    );
+
+    assert!(matches!(
+        open_file(&path).blocking_wait(),
+        Err(SourceError::CorruptSource { .. })
+    ));
+    fs::remove_dir_all(directory).unwrap();
 }
 
 fn overwrite_first_layer_size(bytes: &mut [u8], layer_size: u32) {
@@ -1051,6 +1072,12 @@ fn vlr(user_id: &str, record_id: u16, description: &str, data: Vec<u8>) -> Vlr {
         description: description.to_owned(),
         data,
     }
+}
+
+fn empty_vlrs(count: usize) -> Vec<Vlr> {
+    std::iter::repeat_with(|| vlr("limit", 1, "limit", Vec::new()))
+        .take(count)
+        .collect()
 }
 
 fn wkt_payload() -> Vec<u8> {
