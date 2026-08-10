@@ -468,69 +468,155 @@ fn read_vlrs(
         usize::try_from(count).map_err(|_| SourceError::corrupt("metadata count overflow"))?,
     );
     for _ in 0..count {
-        let header_len = if extended {
-            EVLR_HEADER_BYTES
-        } else {
-            VLR_HEADER_BYTES
-        };
-        let header_start = reader.stream_position().map_err(classify_io)?;
-        let header_len_u64 = u64::try_from(header_len)
-            .map_err(|_| SourceError::corrupt("metadata header length does not fit u64"))?;
-        if header_start
-            .checked_add(header_len_u64)
-            .is_none_or(|end| end > limit)
-        {
-            return Err(SourceError::corrupt(
-                "metadata header extends beyond its LAS section",
-            ));
-        }
-        let mut fixed = [0_u8; EVLR_HEADER_BYTES];
-        reader
-            .read_exact(&mut fixed[..header_len])
-            .map_err(classify_io)?;
-        let (payload_len, description_start) = if extended {
-            (
-                u64::from_le_bytes(fixed[20..28].try_into().map_err(slice_error)?),
-                28,
-            )
-        } else {
-            (
-                u64::from(u16::from_le_bytes(
-                    fixed[20..22].try_into().map_err(slice_error)?,
-                )),
-                22,
-            )
-        };
-        if payload_len > MAX_METADATA_RECORD_PAYLOAD_BYTES as u64 {
-            return Err(SourceError::corrupt(
-                "one LAS metadata payload exceeds the canonical cap",
-            ));
-        }
-        budget.reserve_payload(payload_len)?;
-        let payload_end = header_start
-            .checked_add(header_len_u64)
-            .and_then(|offset| offset.checked_add(payload_len))
-            .ok_or_else(|| SourceError::corrupt("metadata end offset overflows"))?;
-        if payload_end > limit {
-            return Err(SourceError::corrupt(
-                "metadata payload extends beyond its LAS section",
-            ));
-        }
-        let mut data = vec![
-            0_u8;
-            usize::try_from(payload_len).map_err(|_| SourceError::corrupt(
-                "metadata payload does not fit usize"
-            ))?
-        ];
-        reader.read_exact(&mut data).map_err(classify_io)?;
-        records.push(RawVlr {
-            user_id: las_text(&fixed[2..18]),
-            record_id: u16::from_le_bytes(fixed[18..20].try_into().map_err(slice_error)?),
-            description: las_text(&fixed[description_start..description_start + 32]),
-            data,
-        });
+        records.push(read_vlr(&mut reader, extended, limit, budget)?);
     }
     Ok(records)
+}
+
+struct RawVlrHeader {
+    start: u64,
+    len: u64,
+    payload_len: u64,
+    description_start: usize,
+    fixed: [u8; EVLR_HEADER_BYTES],
+}
+
+fn read_vlr_header(
+    reader: &mut BufReader<&mut File>,
+    extended: bool,
+    limit: u64,
+) -> Result<RawVlrHeader, SourceError> {
+    let header_len = if extended {
+        EVLR_HEADER_BYTES
+    } else {
+        VLR_HEADER_BYTES
+    };
+    let start = reader.stream_position().map_err(classify_io)?;
+    let len = u64::try_from(header_len)
+        .map_err(|_| metadata_corrupt(extended, "header", start, "length does not fit u64"))?;
+    if start.checked_add(len).is_none_or(|end| end > limit) {
+        return Err(metadata_corrupt(
+            extended,
+            "header",
+            start,
+            "extends beyond its LAS section",
+        ));
+    }
+    let mut fixed = [0_u8; EVLR_HEADER_BYTES];
+    reader
+        .read_exact(&mut fixed[..header_len])
+        .map_err(classify_io)
+        .map_err(|error| contextualize_metadata_error(error, extended, "header", start))?;
+    let (payload_len, description_start) = if extended {
+        (
+            u64::from_le_bytes(fixed[20..28].try_into().map_err(|_| {
+                metadata_corrupt(extended, "header", start, "truncated payload length")
+            })?),
+            28,
+        )
+    } else {
+        (
+            u64::from(u16::from_le_bytes(fixed[20..22].try_into().map_err(
+                |_| metadata_corrupt(extended, "header", start, "truncated payload length"),
+            )?)),
+            22,
+        )
+    };
+    if payload_len > MAX_METADATA_RECORD_PAYLOAD_BYTES as u64 {
+        return Err(metadata_corrupt(
+            extended,
+            "payload",
+            start,
+            "exceeds the canonical per-record cap",
+        ));
+    }
+    Ok(RawVlrHeader {
+        start,
+        len,
+        payload_len,
+        description_start,
+        fixed,
+    })
+}
+
+fn read_vlr(
+    reader: &mut BufReader<&mut File>,
+    extended: bool,
+    limit: u64,
+    budget: &mut MetadataReadBudget,
+) -> Result<RawVlr, SourceError> {
+    let header = read_vlr_header(reader, extended, limit)?;
+    budget
+        .reserve_payload(header.payload_len)
+        .map_err(|error| contextualize_metadata_error(error, extended, "payload", header.start))?;
+    let payload_end = header
+        .start
+        .checked_add(header.len)
+        .and_then(|offset| offset.checked_add(header.payload_len))
+        .ok_or_else(|| {
+            metadata_corrupt(extended, "payload", header.start, "end offset overflows")
+        })?;
+    if payload_end > limit {
+        return Err(metadata_corrupt(
+            extended,
+            "payload",
+            header.start,
+            "extends beyond its LAS section",
+        ));
+    }
+    let mut data = vec![
+        0_u8;
+        usize::try_from(header.payload_len).map_err(|_| metadata_corrupt(
+            extended,
+            "payload",
+            header.start,
+            "length does not fit usize"
+        ))?
+    ];
+    reader
+        .read_exact(&mut data)
+        .map_err(classify_io)
+        .map_err(|error| contextualize_metadata_error(error, extended, "payload", header.start))?;
+    let record_id = u16::from_le_bytes(header.fixed[18..20].try_into().map_err(|_| {
+        metadata_corrupt(
+            extended,
+            "header",
+            header.start,
+            "truncated record identity",
+        )
+    })?);
+    Ok(RawVlr {
+        user_id: las_text(&header.fixed[2..18]),
+        record_id,
+        description: las_text(
+            &header.fixed[header.description_start..header.description_start + 32],
+        ),
+        data,
+    })
+}
+
+fn contextualize_metadata_error(
+    error: SourceError,
+    extended: bool,
+    phase: &str,
+    byte_offset: u64,
+) -> SourceError {
+    match error {
+        SourceError::CorruptSource { reason } => {
+            metadata_corrupt(extended, phase, byte_offset, reason)
+        }
+        error => error,
+    }
+}
+
+fn metadata_corrupt(
+    extended: bool,
+    phase: &str,
+    byte_offset: u64,
+    reason: impl std::fmt::Display,
+) -> SourceError {
+    let section = if extended { "EVLR" } else { "VLR" };
+    SourceError::corrupt(format!("{section} {phase} at byte {byte_offset}: {reason}"))
 }
 
 fn compression(

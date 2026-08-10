@@ -479,6 +479,26 @@ fn missing_truncated_corrupt_and_changed_files_have_stable_public_failures() {
     ));
 }
 
+#[test]
+fn malformed_metadata_reports_its_section_and_byte_offset() {
+    let fixtures = FixtureSet::new();
+    let path = fixtures.directory.join("bad-vlr-length.las");
+    let mut bytes = fs::read(&fixtures.uncompressed).unwrap();
+    let header_start = usize::from(u16::from_le_bytes(bytes[94..96].try_into().unwrap()));
+    bytes[header_start + 20..header_start + 22].copy_from_slice(&u16::MAX.to_le_bytes());
+    fs::write(&path, bytes).unwrap();
+
+    let Err(SourceError::CorruptSource { reason }) = open_file(&path).blocking_wait() else {
+        panic!("the malformed VLR must be rejected as corrupt");
+    };
+    assert!(
+        reason
+            .as_str()
+            .contains(&format!("VLR payload at byte {header_start}")),
+        "diagnostic did not retain the known context: {reason}"
+    );
+}
+
 fn overwrite_first_layer_size(bytes: &mut [u8], layer_size: u32) {
     let point_offset = usize::try_from(u32::from_le_bytes(bytes[96..100].try_into().unwrap()))
         .expect("LAS point offset fits usize");
