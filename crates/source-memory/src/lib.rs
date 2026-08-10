@@ -43,8 +43,7 @@ use point_source::adapter::{
     FullVerification, ReadAdapter,
 };
 use point_source::{
-    AttributeSelection, OpenOptions, ReadBudget, ReadLimit, SourceCandidate, SourceError,
-    SourceJob, SourcePreview,
+    AttributeSelection, OpenOptions, SourceCandidate, SourceError, SourceJob, SourcePreview,
 };
 use thiserror::Error;
 
@@ -56,8 +55,6 @@ const NO_READ_FAULT: u64 = u64::MAX;
 const HASH_ROW_QUANTUM: usize = 4_096;
 const HASH_VALUE_QUANTUM: usize = 4_096;
 const HASH_BYTE_QUANTUM: usize = 64 * 1_024;
-const READ_CANCELLATION_ROWS: u64 = 4_096;
-const READ_CANCELLATION_PAYLOAD_BYTES: u64 = 4 * 1_024 * 1_024;
 
 /// Validated immutable columnar input for one in-memory Source.
 #[derive(Clone)]
@@ -296,12 +293,13 @@ impl ReadAdapter for MemoryReadAdapter {
     ) -> Result<Box<dyn AdapterRead>, SourceError> {
         ensure_unchanged(&self.state, self.verified_epoch)?;
         let selected_attributes = selected_attributes(&self.state.metadata, request.attributes());
+        let max_rows = request.max_output_batch_points();
         Ok(Box::new(MemoryRead {
             state: Arc::clone(&self.state),
             verified_epoch: self.verified_epoch,
             spans: request.spans().to_vec(),
             selected_attributes,
-            budget: request.budget(),
+            max_rows,
             source,
             reporter,
             span_index: 0,
@@ -319,7 +317,7 @@ struct MemoryRead {
     verified_epoch: u64,
     spans: Vec<point_source::SourceSpan>,
     selected_attributes: Vec<AttributeId>,
-    budget: ReadBudget,
+    max_rows: u64,
     source: point_contracts::SourceId,
     reporter: OperationReporter,
     span_index: usize,
@@ -347,12 +345,7 @@ impl AdapterRead for MemoryRead {
         }
 
         let remaining = span.end_ordinal() - self.next_ordinal;
-        let mut point_count = batch_point_count(
-            remaining,
-            self.budget,
-            &self.state.metadata,
-            &self.selected_attributes,
-        )?;
+        let mut point_count = remaining.min(self.max_rows);
         if corrupt_ordinal > self.next_ordinal && corrupt_ordinal < self.next_ordinal + point_count
         {
             point_count = corrupt_ordinal - self.next_ordinal;
@@ -433,44 +426,6 @@ fn projected_columns(
         })
         .collect::<Result<Vec<_>, SourceError>>()?;
     AttributeColumns::new(projected, rows.end - rows.start).map_err(contract_as_source)
-}
-
-fn batch_point_count(
-    remaining: u64,
-    budget: ReadBudget,
-    metadata: &SourceMetadata,
-    selected: &[AttributeId],
-) -> Result<u64, SourceError> {
-    let bytes_per_point = selected.iter().try_fold(24_u64, |total, &id| {
-        let definition = metadata.attributes().get(id).ok_or_else(|| {
-            SourceError::unsupported_schema(format!(
-                "Source does not contain requested Attribute {id:?}"
-            ))
-        })?;
-        total
-            .checked_add(u64::from(definition.data_type().element_bytes()))
-            .ok_or(SourceError::ResourceLimit {
-                limit: ReadLimit::PointPayloadBytes,
-                required: u64::MAX,
-                allowed: budget.max_batch_payload_bytes(),
-            })
-    })?;
-    if bytes_per_point > budget.max_batch_payload_bytes() {
-        return Err(SourceError::ResourceLimit {
-            limit: ReadLimit::BatchPayloadBytes,
-            required: bytes_per_point,
-            allowed: budget.max_batch_payload_bytes(),
-        });
-    }
-    let interruptible_payload_bytes = budget
-        .max_batch_payload_bytes()
-        .min(READ_CANCELLATION_PAYLOAD_BYTES)
-        .max(bytes_per_point);
-    let points_by_bytes = interruptible_payload_bytes / bytes_per_point;
-    Ok(remaining
-        .min(budget.max_batch_points())
-        .min(READ_CANCELLATION_ROWS)
-        .min(points_by_bytes))
 }
 
 fn ensure_unchanged(state: &MemoryState, verified_epoch: u64) -> Result<(), SourceError> {

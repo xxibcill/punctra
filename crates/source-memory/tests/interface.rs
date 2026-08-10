@@ -101,17 +101,14 @@ fn every_batch_obeys_point_and_payload_byte_budgets() {
     assert_eq!(batch_sizes(&source, byte_limited), vec![2; 6]);
 
     let too_small = ReadBudget::new(99, BYTES_PER_POINT - 1).unwrap();
-    let mut failed = source.read(ReadRequest::all().budget(too_small)).unwrap();
     assert!(matches!(
-        failed.next(),
+        source.read(ReadRequest::all().budget(too_small)),
         Err(SourceError::ResourceLimit {
             limit: ReadLimit::BatchPayloadBytes,
             required: BYTES_PER_POINT,
             allowed,
         }) if allowed == BYTES_PER_POINT - 1
     ));
-    assert!(failed.next().unwrap().is_none());
-    assert!(failed.summary().is_none());
 }
 
 #[test]

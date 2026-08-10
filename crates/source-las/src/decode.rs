@@ -20,8 +20,6 @@ use crate::format::{
 const FIXED_DECODER_WORKING_BYTES: u64 = 64 * 1024;
 const VERIFICATION_WORKING_BYTES: u64 = 64 * 1024 * 1024;
 const VERIFICATION_ROWS: u64 = 16_384;
-const READ_CANCELLATION_ROWS: u64 = 4_096;
-const READ_CANCELLATION_PAYLOAD_BYTES: u64 = 4 * 1_024 * 1_024;
 const READ_CANCELLATION_WORKING_BYTES: u64 = 8 * 1_024 * 1_024;
 
 pub(crate) struct LasReadAdapter {
@@ -53,7 +51,11 @@ impl ReadAdapter for LasReadAdapter {
     ) -> Result<Box<dyn AdapterRead>, SourceError> {
         self.source_witness.ensure_unchanged()?;
         let selected = selected_attributes(&self.layout, request.attributes().explicit())?;
-        let max_rows = batch_rows(&self.layout, &selected, request.budget())?;
+        let max_rows = batch_rows(
+            &self.layout,
+            request.budget(),
+            request.max_output_batch_points(),
+        )?;
         let decoder = RecordDecoder::new(&self.file, &self.layout)?;
         let spans = request.spans().to_vec();
         let next_ordinal = spans.first().map_or(0, |span| span.first_ordinal());
@@ -98,31 +100,9 @@ fn selected_attributes(
 
 fn batch_rows(
     layout: &LasLayout,
-    selected: &[AttributePlan],
     budget: ReadBudget,
+    max_output_batch_points: u64,
 ) -> Result<u64, SourceError> {
-    let canonical_row_bytes = selected.iter().try_fold(24_u64, |bytes, attribute| {
-        bytes
-            .checked_add(u64::from(attribute.definition.data_type().element_bytes()))
-            .ok_or(SourceError::ResourceLimit {
-                limit: ReadLimit::PointPayloadBytes,
-                required: u64::MAX,
-                allowed: budget.max_batch_payload_bytes(),
-            })
-    })?;
-    if canonical_row_bytes > budget.max_batch_payload_bytes() {
-        return Err(SourceError::ResourceLimit {
-            limit: ReadLimit::BatchPayloadBytes,
-            required: canonical_row_bytes,
-            allowed: budget.max_batch_payload_bytes(),
-        });
-    }
-    let interruptible_payload_bytes = budget
-        .max_batch_payload_bytes()
-        .min(READ_CANCELLATION_PAYLOAD_BYTES)
-        .max(canonical_row_bytes);
-    let rows_by_payload = interruptible_payload_bytes / canonical_row_bytes;
-
     let fixed = FIXED_DECODER_WORKING_BYTES
         .checked_add(layout.compression.decoder_bytes())
         .ok_or(SourceError::ResourceLimit {
@@ -151,11 +131,7 @@ fn batch_rows(
         .min(READ_CANCELLATION_WORKING_BYTES)
         .max(required);
     let rows_by_working = (interruptible_working_bytes - fixed) / record_len;
-    Ok(budget
-        .max_batch_points()
-        .min(READ_CANCELLATION_ROWS)
-        .min(rows_by_payload)
-        .min(rows_by_working))
+    Ok(max_output_batch_points.min(rows_by_working))
 }
 
 struct LasRead {

@@ -47,6 +47,9 @@ const DEFAULT_BATCH_POINTS: u64 = 65_536;
 const DEFAULT_BATCH_BYTES: u64 = 8 * 1024 * 1024;
 const DEFAULT_MAX_SPANS: u64 = 65_536;
 const DEFAULT_ADAPTER_WORKING_BYTES: u64 = 16 * 1024 * 1024;
+const READ_CANCELLATION_POINTS: u64 = 4_096;
+const READ_CANCELLATION_PAYLOAD_BYTES: u64 = 4 * 1024 * 1024;
+const POSITION_PAYLOAD_BYTES_PER_POINT: u64 = 24;
 
 /// Hard safety cap on raw Source spans accepted before normalization.
 ///
@@ -1003,6 +1006,7 @@ pub(crate) struct NormalizedRead {
     pub(crate) attributes: AttributeSelection,
     pub(crate) budget: ReadBudget,
     pub(crate) exact_count: u64,
+    pub(crate) max_output_batch_points: u64,
 }
 
 fn normalize_request(
@@ -1027,6 +1031,11 @@ fn normalize_request(
         });
     }
     let expected_attributes = resolve_attributes(metadata, &request.attributes)?;
+    let max_output_batch_points = if exact_count == 0 {
+        0
+    } else {
+        max_output_batch_points(metadata, &expected_attributes, request.budget)?
+    };
     let attributes = AttributeSelection::resolved(expected_attributes.clone());
     Ok(NormalizedRead {
         spans: Arc::from(spans),
@@ -1034,7 +1043,48 @@ fn normalize_request(
         attributes,
         budget: request.budget,
         exact_count,
+        max_output_batch_points,
     })
+}
+
+fn max_output_batch_points(
+    metadata: &SourceMetadata,
+    attributes: &[AttributeId],
+    budget: ReadBudget,
+) -> Result<u64, SourceError> {
+    let bytes_per_point =
+        attributes
+            .iter()
+            .try_fold(POSITION_PAYLOAD_BYTES_PER_POINT, |total, &attribute| {
+                let definition = metadata.attributes().get(attribute).ok_or_else(|| {
+                    SourceError::unsupported_schema(format!(
+                        "Source does not contain requested Attribute {attribute:?}"
+                    ))
+                })?;
+                total
+                    .checked_add(u64::from(definition.data_type().element_bytes()))
+                    .ok_or(SourceError::ResourceLimit {
+                        limit: ReadLimit::PointPayloadBytes,
+                        required: u64::MAX,
+                        allowed: budget.max_batch_payload_bytes(),
+                    })
+            })?;
+    if bytes_per_point > budget.max_batch_payload_bytes() {
+        return Err(SourceError::ResourceLimit {
+            limit: ReadLimit::BatchPayloadBytes,
+            required: bytes_per_point,
+            allowed: budget.max_batch_payload_bytes(),
+        });
+    }
+
+    let interruptible_payload_bytes = budget
+        .max_batch_payload_bytes()
+        .min(READ_CANCELLATION_PAYLOAD_BYTES)
+        .max(bytes_per_point);
+    Ok(budget
+        .max_batch_points()
+        .min(READ_CANCELLATION_POINTS)
+        .min(interruptible_payload_bytes / bytes_per_point))
 }
 
 fn normalize_spans(

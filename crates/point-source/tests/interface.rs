@@ -677,7 +677,11 @@ fn empty_selection_completes_with_exact_facts_and_complete_progress() {
         .blocking_wait()
         .unwrap();
     let mut points = source
-        .read(ReadRequest::all().spans(std::iter::empty::<SourceSpan>()))
+        .read(
+            ReadRequest::all()
+                .spans(std::iter::empty::<SourceSpan>())
+                .budget(ReadBudget::new(1, 1).unwrap()),
+        )
         .unwrap();
     let control = points.handle();
 
@@ -750,6 +754,40 @@ fn point_budget_failure_is_fused_without_summary() {
     assert!(points.next().unwrap().is_none());
     assert!(points.summary().is_none());
     assert_ne!(control.progress().phase(), ProgressPhase::COMPLETE);
+}
+
+#[test]
+fn canonical_payload_budget_is_resolved_before_adapter_start() {
+    let fixture = fixture();
+    let source = fixture
+        .candidate(5, FastBehavior::Match)
+        .open(OpenOptions::identify())
+        .blocking_wait()
+        .unwrap();
+
+    let two_point_payload = 2 * (24 + 2);
+    let _points = source
+        .read(
+            ReadRequest::all()
+                .spans([SourceSpan::new(0, 2).unwrap()])
+                .budget(ReadBudget::new(u64::MAX, two_point_payload).unwrap()),
+        )
+        .unwrap();
+    assert_eq!(fixture.reader.last_request().max_output_batch_points(), 2);
+
+    let result = source.read(
+        ReadRequest::all()
+            .spans([SourceSpan::new(0, 1).unwrap()])
+            .budget(ReadBudget::new(1, 25).unwrap()),
+    );
+    assert!(matches!(
+        result,
+        Err(SourceError::ResourceLimit {
+            limit: ReadLimit::BatchPayloadBytes,
+            required: 26,
+            allowed: 25,
+        })
+    ));
 }
 
 #[test]

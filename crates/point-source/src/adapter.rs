@@ -250,6 +250,7 @@ pub struct AdapterReadRequest {
     spans: Arc<[SourceSpan]>,
     attributes: AttributeSelection,
     budget: ReadBudget,
+    max_output_batch_points: u64,
 }
 
 impl AdapterReadRequest {
@@ -257,11 +258,13 @@ impl AdapterReadRequest {
         spans: Arc<[SourceSpan]>,
         attributes: AttributeSelection,
         budget: ReadBudget,
+        max_output_batch_points: u64,
     ) -> Self {
         Self {
             spans,
             attributes,
             budget,
+            max_output_batch_points,
         }
     }
 
@@ -284,6 +287,16 @@ impl AdapterReadRequest {
     #[must_use]
     pub const fn budget(&self) -> ReadBudget {
         self.budget
+    }
+
+    /// Returns the effective Point limit for one canonical output batch.
+    ///
+    /// This combines the caller's Point and payload budgets with the Source
+    /// module's cancellation quantum. Adapters may apply additional working-
+    /// memory limits but do not need to repeat canonical payload accounting.
+    #[must_use]
+    pub const fn max_output_batch_points(&self) -> u64 {
+        self.max_output_batch_points
     }
 }
 

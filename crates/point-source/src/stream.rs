@@ -96,11 +96,17 @@ impl PointBatches {
             attributes,
             budget,
             exact_count,
+            max_output_batch_points,
         } = normalize_request(metadata.as_ref(), request)?;
         let next_ordinal = spans.first().map(|span| span.first_ordinal());
         let expected_attributes = Arc::from(expected_attributes);
         let control = OperationControl::new();
-        let adapter_request = AdapterReadRequest::new(Arc::clone(&spans), attributes, budget);
+        let adapter_request = AdapterReadRequest::new(
+            Arc::clone(&spans),
+            attributes,
+            budget,
+            max_output_batch_points,
+        );
         let adapter_read = if spans.is_empty() {
             None
         } else {
