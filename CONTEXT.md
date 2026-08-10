@@ -1,8 +1,9 @@
 # Domain Context: Point-Cloud Foundation
 
 Status: renderer, adaptive View planning, Real Sources, Spatial Index/out-of-
-core View, and the narrow v0.5 Workspace are implemented; broader document,
-terrain, and product terms remain deferred
+core View, and the narrow v0.5 Workspace are implemented; the narrow v0.6
+Terrain and Check Point QA meanings are accepted and implementation is in
+progress; broader terrain and product terms remain deferred
 
 Punctra v0.5 builds on the reusable render engine, renderer-neutral View
 planner, and verified Source path described in the accepted [v0.1 renderer
@@ -15,7 +16,10 @@ Index and rebuildable Artifact behavior for its narrow scope. The accepted
 implements the narrow classification meanings of Workspace, Snapshot, Query,
 Point Set, Edit, Revert Edit, Revision, and Operation Identity behind the one
 deep `point-workspace` crate. Broader uses of those terms remain vocabulary
-research and do not imply product scope.
+research and do not imply product scope. The accepted [v0.6 Terrain and QA
+benchmark design](docs/design/terrain-qa-benchmark-v0.6.md) fixes the narrow
+meanings of Ground Input, Terrain Surface, Check Point, Residual, and Terrain
+Gap used by the implementation now in progress.
 
 ## Artifact
 
@@ -34,6 +38,14 @@ _Avoid:_ property, metadata when referring to a per-point value
 An ordered line whose vertices constrain the shape of a Terrain Surface. A Breakline may represent a ridge, curb, channel, wall, or another discontinuity that triangulation must respect.
 
 _Avoid:_ polyline when its terrain-constraining meaning matters
+
+## Check Point
+
+A detached surveyed position used as independent evidence about a Terrain
+Surface. A Check Point is not a Source Point and has its own caller-provided
+identity.
+
+_Avoid:_ control point, Point when the observation is detached from the Source
 
 ## Coordinate Reference
 
@@ -72,6 +84,13 @@ _Avoid:_ current value without naming the Snapshot, mutated Source value
 The act of encoding a Snapshot or Artifact for an external tool or file format. Export does not alter the Workspace.
 
 _Avoid:_ save when producing an external deliverable
+
+## Ground Input
+
+The complete set of Snapshot Points selected by one explicit effective ground
+classification and optional Region for a Terrain Derivation.
+
+_Avoid:_ visible ground, display Points, inferred terrain Points
 
 ## Operation Identity
 
@@ -128,6 +147,14 @@ _Avoid:_ search when spatial and attribute semantics matter
 The complete, normalized parameters and algorithm version used by a Derivation. A Recipe is recorded so the same Artifact can be reproduced.
 
 _Avoid:_ preset after its defaults have been resolved
+
+## Residual
+
+The signed vertical difference between an observed elevation and the Terrain
+Surface elevation at the same horizontal position. Its sign convention must be
+declared; v0.6 uses observed elevation minus surface elevation.
+
+_Avoid:_ error when the direction and reference surface are unnamed
 
 ## Region
 
@@ -187,9 +214,20 @@ _Avoid:_ database, source of truth
 
 ## Terrain Surface
 
-An immutable triangulated Artifact representing terrain for one explicit input provenance and Recipe. Its Artifact Identity, vertices, faces, constraints, Coordinate Reference, and provenance are explicit.
+An immutable triangulated Artifact representing terrain for one explicit input
+provenance and Recipe. Its Artifact Identity, vertices, faces, constraints or
+explicit absence of constraints, Coordinate Reference, and provenance are
+explicit.
 
 _Avoid:_ mesh when the terrain semantics and provenance matter
+
+## Terrain Gap
+
+An explicit result that a Terrain Surface has no face at a requested horizontal
+position. A Terrain Gap is not an elevation and is never silently filled by
+extrapolation.
+
+_Avoid:_ zero elevation, missing value when absence of surface Coverage matters
 
 ## View
 

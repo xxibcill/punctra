@@ -5,6 +5,16 @@ All notable changes to Punctra are documented here. The project follows
 
 ## Unreleased
 
+- Accepted the v0.6 Terrain and QA benchmark design. Implementation is in
+  progress for one exact classification-aware Snapshot Point-row stream, one
+  deep `point-terrain` crate, and one headless `terrain-demo` caller.
+- Fixed v0.6 scope to a deterministic single-worker unconstrained in-memory
+  TIN, detached Check Point residual QA, and an atomic create-new metric-metre
+  LandXML 1.2 points/faces subset with independent semantic parsing. Terrain
+  persistence, Breaklines, Profiles, classifiers, CRS transformation, general
+  LandXML, downstream-application round trips, licensed production evidence,
+  and partner workflow claims remain outstanding.
+
 ## 0.5.0 - 2026-08-10
 
 - Added one deep `point-workspace` crate over a complete `PreparedIndex` and

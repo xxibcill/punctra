@@ -9,9 +9,11 @@ as technical and customer evidence changes. Milestone outcomes and dependency
 order matter more than version numbers.
 
 Only an **Active** release has committed scope. Punctra v0.1 through v0.5 are
-complete. Work beyond the accepted v0.5 design remains proposed. In
-particular, terrain, export, general editing, and application UI are not
-silently made current scope by appearing here.
+complete. The narrow [v0.6 Terrain and QA benchmark
+design](docs/design/terrain-qa-benchmark-v0.6.md) is accepted and implementation
+is in progress. Work beyond that exact design remains proposed; broader
+terrain, export, general editing, and application UI are not silently made
+current scope by appearing here.
 
 ## Working direction
 
@@ -59,16 +61,19 @@ Roadmap status labels are:
 
 ## Scope and evidence checkpoint
 
-Status: **v0.5 technical slice complete; external product evidence remains outstanding**
+Status: **v0.6 technical slice accepted and in progress; external product
+evidence remains outstanding**
 
 The [implemented v0.5 design](docs/design/durable-document-core-v0.5.md) places
 exact classification selection, temporary Point Sets, sparse Revisions, and
 Operation recovery behind one deep `point-workspace` interface. Repository
-tests and generated-source benchmarks close that technical slice. They do not
-authorize screen selection, general Edit, terrain, export, or product-
-application proposals, and they are not a substitute for licensed field data
-or partner validation. Those later boundaries still require their own evidence
-and accepted designs.
+tests and generated-source benchmarks close that technical slice. The accepted
+[v0.6 design](docs/design/terrain-qa-benchmark-v0.6.md) now authorizes only its
+one-worker in-memory unconstrained TIN, detached Check Point residual, and
+metric-metre LandXML points/faces path. It does not authorize broader terrain,
+screen selection, general Edit, or product-application proposals, and neither
+v0.5 nor v0.6 repository evidence substitutes for licensed field data or
+partner validation.
 
 Useful evidence for proceeding includes:
 
@@ -255,33 +260,58 @@ part of v0.5. Exact scope and verification rules are recorded in the
 
 ### v0.6 — Terrain and QA benchmark
 
-Status: **Candidate**
+Status: **Active — accepted design; implementation in progress**
 
-Candidate outcome: complete the first end-to-end benchmark/demo milestone on a
-narrow, explicitly supported workflow.
+Accepted outcome: complete the first headless LAS/LAZ-to-terrain technical
+benchmark on one narrow, explicitly supported workflow.
 
-Likely scope:
+Accepted scope:
 
-- deterministic CPU-authoritative TIN derivation;
-- narrow Breakline, profile, residual, or check-point QA needed by benchmark
-  partners;
-- reversible ground correction using existing classification, with any
-  provisional classifier kept narrow and evidence-led;
-- one constrained LandXML export path with independent validation; and
-- a minimal host application that exercises LAS/LAZ through terrain delivery.
+- one narrow exact `Snapshot::point_rows` stream containing Point Identity,
+  exact position ticks, and effective `U8` classification;
+- one deep `point-terrain` crate deriving a deterministic, unconstrained,
+  in-memory 2.5D TIN from an explicit ground class and optional inclusive world
+  bounds;
+- strict rejection of insufficient, duplicate-XY, conflicting-elevation,
+  collinear, over-budget, and otherwise unsupported degenerate input;
+- bounded detached Check Point QA whose signed residual is observed Z minus
+  interpolated surface Z and whose outside-surface result is an explicit gap;
+- reversible ground correction only through the existing classification
+  Revision and immediate-head Revert interfaces;
+- one private LandXML 1.2 encoder for an atomic create-new, metric-metre,
+  one-TIN-Surface points-and-faces subset, independently parsed by
+  `roxmltree`; and
+- one headless `terrain-demo` application exercising generated LAS and LAZ
+  through Workspace, terrain, QA, and export.
+
+The accepted implementation supports one worker. Terrain Surfaces are immutable
+in-memory Artifacts and are not persisted or resumable. Breaklines, Profiles,
+Source residual Queries, classifiers, boundaries/holes, CRS or unit
+transformation, non-metre exports, and general LandXML remain outside v0.6.
 
 Evidence of readiness:
 
-- terrain topology is deterministic across runs and supported worker counts;
-- degenerate geometry and resource limits have explicit fixture coverage;
-- exports independently parse and round-trip through the declared downstream
-  application versions; and
-- a published comparison measures time to first use, human attention, accuracy,
-  and accepted-deliverable time—not only frame rate.
+- terrain vertices, faces, descriptor hashes, and export semantics are
+  deterministic across repeated single-worker runs and Point-row batchings;
+- exact Snapshot overlay input, degenerate geometry, cancellation, and every
+  resource family have explicit fixture coverage;
+- analytic fixtures prove Check Point interpolation, residual sign, boundary
+  inclusion, and gaps;
+- an independent `roxmltree` path reconstructs the exported points/faces and
+  matches the in-memory semantic digest; and
+- generated LAS and LAZ complete the headless caller path while Source bytes
+  remain unchanged through classification correction and Revert.
 
 The working product target is five-times faster time to first use and 50% less
 human production time on the specific large-project workflows where customer
 evidence supports those comparisons. Accuracy cannot be traded for speed.
+Licensed production data, Sources above 500 million Points, design-partner
+tolerances, downstream Civil 3D/Bentley round trips, paid use, and published
+human-time comparisons remain explicitly outstanding and are not v0.6
+repository acceptance claims.
+
+Exact interface, invariants, verification, and exclusions are recorded in the
+[accepted v0.6 design](docs/design/terrain-qa-benchmark-v0.6.md).
 
 ### v0.7 — Design-partner alpha
 
@@ -376,7 +406,7 @@ a reason to publish v1.
 | Product milestone | Candidate releases | Outcome |
 |---|---|---|
 | Renderer and planning foundations | v0.1–v0.2 | Reusable bounded display engine and adaptive View planner. |
-| Benchmark/demo | v0.3–v0.6 | Measured real-data path from LAS/LAZ to one narrow accepted terrain deliverable. |
+| Benchmark/demo | v0.3–v0.6 | Headless technical path from verified LAS/LAZ to one narrow terrain deliverable; external workflow evidence remains separate. |
 | Design-partner MVP | v0.7–v0.8 | Recoverable production workflow validated by partner datasets and paid use. |
 | Trustworthy v1 | v0.9–v1.0 | Explicitly supported, regression-tested, maintainable compatibility surface. |
 

@@ -37,8 +37,17 @@ and durable Operation reconciliation. Source bytes remain immutable.
 Screen-through selection, general edits, named Point Sets, terrain, and Source
 rewriting remain outside this scope.
 
-Future direction is described in the [living roadmap](ROADMAP.md). Its release
-themes are adjustable and do not expand the accepted implementation scope by
+Version 0.6 implementation is in progress against the accepted
+[Terrain and QA benchmark design](docs/design/terrain-qa-benchmark-v0.6.md).
+The narrow slice adds one exact classification-aware Snapshot Point-row stream,
+one deep `point-terrain` crate for a single-worker unconstrained in-memory TIN,
+detached Check Point residual QA, a private metric-metre LandXML 1.2
+points/faces encoder, and one headless `terrain-demo` caller. It does not add
+Breaklines, Profiles, a classifier, terrain persistence, general LandXML, or
+coordinate transformation.
+
+Later direction is described in the [living roadmap](ROADMAP.md). Its release
+themes are adjustable and do not expand accepted implementation scope by
 themselves.
 
 ## Embedding model
@@ -109,8 +118,14 @@ no I/O and never mutates renderer state.
 - `renderer-demo` exercises the engine with either generated point batches or
   one Full-verified indexed LAS/LAZ Source.
 
-Networking, screen selection, general editing, terrain construction, Source
-rewriting, and general application UI remain outside the completed v0.5 scope.
+The accepted v0.6 work in progress extends `point-workspace` with a narrow exact
+Point-row stream, adds one deep `point-terrain` crate, and adds a private
+headless `terrain-demo` composition. Until those changes and their local gates
+land, the completed reusable surface remains v0.5.
+
+Networking, screen selection, general editing, Source rewriting, persistent or
+constrained terrain, general export, and general application UI remain outside
+the accepted scope.
 
 ## Examples
 
