@@ -500,6 +500,37 @@ fn malformed_metadata_reports_its_section_and_byte_offset() {
 }
 
 #[test]
+fn invalid_metadata_header_text_is_rejected_without_lossy_replacement() {
+    let fixtures = FixtureSet::new();
+    let original = fs::read(&fixtures.uncompressed).unwrap();
+    let header_start = usize::from(u16::from_le_bytes(original[94..96].try_into().unwrap()));
+
+    for (file_name, field_offset, field_name) in [
+        ("bad-vlr-user-id.las", 2, "user ID"),
+        ("bad-vlr-description.las", 22, "description"),
+    ] {
+        let path = fixtures.directory.join(file_name);
+        let mut bytes = original.clone();
+        bytes[header_start + field_offset] = 0xff;
+        fs::write(&path, bytes).unwrap();
+
+        let Err(SourceError::CorruptSource { reason }) = open_file(&path).blocking_wait() else {
+            panic!("invalid {field_name} text must be rejected as corrupt");
+        };
+        assert!(
+            reason
+                .as_str()
+                .contains(&format!("VLR header at byte {header_start}")),
+            "diagnostic did not retain the known context: {reason}"
+        );
+        assert!(
+            reason.as_str().contains(field_name) && reason.as_str().contains("invalid UTF-8"),
+            "diagnostic did not identify the invalid field: {reason}"
+        );
+    }
+}
+
+#[test]
 fn combined_vlr_and_evlr_count_is_bounded_through_public_open() {
     let directory = unique_temp_directory();
     fs::create_dir(&directory).unwrap();

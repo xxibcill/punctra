@@ -546,6 +546,13 @@ fn read_vlr(
     budget: &mut MetadataReadBudget,
 ) -> Result<RawVlr, SourceError> {
     let header = read_vlr_header(reader, extended, limit)?;
+    let user_id = las_text(&header.fixed[2..18], "user ID")
+        .map_err(|error| contextualize_metadata_error(error, extended, "header", header.start))?;
+    let description = las_text(
+        &header.fixed[header.description_start..header.description_start + 32],
+        "description",
+    )
+    .map_err(|error| contextualize_metadata_error(error, extended, "header", header.start))?;
     budget
         .reserve_payload(header.payload_len)
         .map_err(|error| contextualize_metadata_error(error, extended, "payload", header.start))?;
@@ -586,11 +593,9 @@ fn read_vlr(
         )
     })?);
     Ok(RawVlr {
-        user_id: las_text(&header.fixed[2..18]),
+        user_id,
         record_id,
-        description: las_text(
-            &header.fixed[header.description_start..header.description_start + 32],
-        ),
+        description,
         data,
     })
 }
@@ -1221,8 +1226,9 @@ fn slice_error(_: std::array::TryFromSliceError) -> SourceError {
     SourceError::corrupt("truncated LAS fixed-width field")
 }
 
-fn las_text(bytes: &[u8]) -> String {
-    String::from_utf8_lossy(bytes)
-        .trim_end_matches(['\0', ' '])
-        .to_owned()
+fn las_text(bytes: &[u8], field: &str) -> Result<String, SourceError> {
+    let text = std::str::from_utf8(bytes).map_err(|error| {
+        SourceError::corrupt(format!("{field} contains invalid UTF-8: {error}"))
+    })?;
+    Ok(text.trim_end_matches(['\0', ' ']).to_owned())
 }
