@@ -253,55 +253,70 @@ pub(crate) fn open_or_create_work(
     limits: PrepareLimits,
     control: &OperationControl,
 ) -> Result<WorkFile, IndexError> {
+    preflight_work_initialization(source, limits, control)?;
     let path = sibling_path(target, ".work")?;
     reject_symlink(&path, "work path is a symbolic link")?;
-    match OpenOptions::new().read(true).write(true).open(&path) {
-        Ok(mut file) => scan_work(source, path, &mut file, limits, control),
+    let file = match OpenOptions::new().read(true).write(true).open(&path) {
+        Ok(file) => file,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            create_work(source, path, limits, control)
+            match OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create_new(true)
+                .open(&path)
+            {
+                Ok(file) => file,
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                    OpenOptions::new()
+                        .read(true)
+                        .write(true)
+                        .open(&path)
+                        .map_err(|error| IndexError::io("open raced", &path, error))?
+                }
+                Err(error) => return Err(IndexError::io("create", path, error)),
+            }
         }
-        Err(error) => Err(IndexError::io("open", path, error)),
+        Err(error) => return Err(IndexError::io("open", path, error)),
+    };
+    acquire_work_ownership(&file, target)?;
+    let file_bytes = file
+        .metadata()
+        .map_err(|error| IndexError::io("inspect", &path, error))?
+        .len();
+    if file_bytes == 0 {
+        initialize_work(source, path, file, limits)
+    } else {
+        scan_work(source, path, file, limits, control)
     }
 }
 
-fn create_work(
+fn acquire_work_ownership(file: &File, target: &Path) -> Result<(), IndexError> {
+    match file.try_lock() {
+        Ok(()) => {}
+        Err(std::fs::TryLockError::WouldBlock) => {
+            return Err(IndexError::PreparationInProgress {
+                path: target.to_path_buf(),
+            });
+        }
+        Err(std::fs::TryLockError::Error(error)) => {
+            return Err(IndexError::io("lock work for", target, error));
+        }
+    }
+    if target_exists(target)? {
+        return Err(IndexError::IncompatibleArtifact {
+            reason: "target appeared while its index was being built",
+        });
+    }
+    Ok(())
+}
+
+fn initialize_work(
     source: &Source,
     path: PathBuf,
+    mut file: File,
     limits: PrepareLimits,
-    control: &OperationControl,
 ) -> Result<WorkFile, IndexError> {
-    control.check_cancelled()?;
-    require(
-        WORK_HEADER_BYTES,
-        limits.max_incomplete_bytes(),
-        "incomplete index bytes",
-    )?;
-    let leaf_count = canonical_leaf_count(source.metadata().point_count());
-    let leaf_bytes =
-        leaf_count.saturating_mul(u64::try_from(mem::size_of::<LeafRecord>()).unwrap_or(u64::MAX));
-    require(
-        leaf_bytes.saturating_add(WORK_HEADER_BYTES),
-        limits.max_build_working_bytes(),
-        "build working bytes",
-    )?;
     let header = encode_work_header(source);
-    let mut file = match OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create_new(true)
-        .open(&path)
-    {
-        Ok(file) => file,
-        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-            let mut file = OpenOptions::new()
-                .read(true)
-                .write(true)
-                .open(&path)
-                .map_err(|error| IndexError::io("open raced", &path, error))?;
-            return scan_work(source, path, &mut file, limits, control);
-        }
-        Err(error) => return Err(IndexError::io("create", path, error)),
-    };
     file.write_all(&header)
         .and_then(|()| file.sync_data())
         .map_err(|error| IndexError::io("write and flush", &path, error))?;
@@ -315,10 +330,31 @@ fn create_work(
     })
 }
 
+fn preflight_work_initialization(
+    source: &Source,
+    limits: PrepareLimits,
+    control: &OperationControl,
+) -> Result<(), IndexError> {
+    control.check_cancelled()?;
+    require(
+        WORK_HEADER_BYTES,
+        limits.max_incomplete_bytes(),
+        "incomplete index bytes",
+    )?;
+    let leaf_count = canonical_leaf_count(source.metadata().point_count());
+    let leaf_bytes =
+        leaf_count.saturating_mul(u64::try_from(mem::size_of::<LeafRecord>()).unwrap_or(u64::MAX));
+    require(
+        leaf_bytes.saturating_add(WORK_HEADER_BYTES),
+        limits.max_build_working_bytes(),
+        "build working bytes",
+    )
+}
+
 fn scan_work(
     source: &Source,
     path: PathBuf,
-    file: &mut File,
+    mut file: File,
     limits: PrepareLimits,
     control: &OperationControl,
 ) -> Result<WorkFile, IndexError> {
@@ -378,7 +414,14 @@ fn scan_work(
     let mut durable_points = 0_u64;
     while next_frame < file_bytes && durable_points < source.metadata().point_count() {
         control.check_cancelled()?;
-        match scan_frame(file, &path, next_frame, file_bytes, durable_points, source)? {
+        match scan_frame(
+            &mut file,
+            &path,
+            next_frame,
+            file_bytes,
+            durable_points,
+            source,
+        )? {
             Some((leaf, frame_end)) => {
                 leaves.push(leaf);
                 durable_points = leaf.span.end_ordinal();
@@ -393,9 +436,7 @@ fn scan_work(
             .map_err(|error| IndexError::io("truncate invalid suffix of", &path, error))?;
     }
     Ok(WorkFile {
-        file: file
-            .try_clone()
-            .map_err(|error| IndexError::io("clone handle for", &path, error))?,
+        file,
         path,
         leaves,
         durable_points,

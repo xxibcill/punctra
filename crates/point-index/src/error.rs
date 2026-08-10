@@ -44,6 +44,13 @@ pub enum IndexError {
         reason: &'static str,
     },
 
+    /// Another preparation operation owns the writable state for this target.
+    #[error("index preparation is already in progress for {path}")]
+    PreparationInProgress {
+        /// Requested complete-index path whose build is already owned.
+        path: PathBuf,
+    },
+
     /// A complete target failed structural or checksum validation.
     #[error("corrupt complete index: {reason}")]
     CorruptArtifact {

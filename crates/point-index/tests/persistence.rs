@@ -218,6 +218,44 @@ fn cold_build_limits_fail_without_a_partial_target_and_preserve_only_valid_work(
 }
 
 #[test]
+fn concurrent_prepares_have_one_exclusive_writer() {
+    let source = open_source(clustered_ticks(BLOCK_POINTS * 2 + 1));
+    let target = TemporaryTarget::new("concurrent-prepare-owner");
+    let slow_limits = PrepareLimits::new(1, 24).unwrap();
+    let first = prepare(source.clone(), target.path(), slow_limits);
+    let first_handle = first.handle();
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while fs::metadata(target.work_path()).map_or(true, |metadata| metadata.len() < 200) {
+        assert!(
+            Instant::now() < deadline,
+            "first prepare did not initialize its work file"
+        );
+        thread::sleep(Duration::from_millis(1));
+    }
+
+    assert!(matches!(
+        prepare(source.clone(), target.path(), PrepareLimits::default()).blocking_wait(),
+        Err(IndexError::PreparationInProgress { .. })
+    ));
+    assert!(!target.path().exists());
+
+    first_handle.cancel();
+    assert!(matches!(
+        first.blocking_wait(),
+        Err(IndexError::Runtime(RuntimeError::Cancelled))
+    ));
+    assert!(target.work_path().exists());
+
+    let resumed = prepare(source, target.path(), PrepareLimits::default())
+        .blocking_wait()
+        .unwrap();
+    assert_eq!(
+        resumed.prepare_report().disposition(),
+        PrepareDisposition::Built
+    );
+}
+
+#[test]
 fn faulted_build_recovers_valid_frames_discards_bad_suffix_and_matches_clean_bytes() {
     let point_count = BLOCK_POINTS + 64;
     let ticks = clustered_ticks(point_count);
