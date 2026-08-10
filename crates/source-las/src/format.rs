@@ -247,7 +247,7 @@ fn parse_layout(file: &mut File, file_len: u64) -> Result<ParsedLayout, SourceEr
     format.extra_bytes = u16::try_from(record_len - base_len)
         .map_err(|_| SourceError::corrupt("point-record extra-byte width does not fit u16"))?;
 
-    let point_count = point_count(&header);
+    let point_count = point_count(&header)?;
     let transform = PositionTransform::new(
         [header.x_offset, header.y_offset, header.z_offset],
         [
@@ -363,15 +363,18 @@ fn validate_uncompressed_points(facts: FileLayoutFacts) -> Result<Compression, S
     Ok(Compression::Las)
 }
 
-fn point_count(header: &las::raw::Header) -> u64 {
+fn point_count(header: &las::raw::Header) -> Result<u64, SourceError> {
     let legacy = u64::from(header.number_of_point_records);
-    if legacy != 0 {
-        legacy
-    } else {
-        header
-            .large_file
-            .map_or(0, |large| large.number_of_point_records)
+    let Some(large_file) = header.large_file else {
+        return Ok(legacy);
+    };
+    let extended = large_file.number_of_point_records;
+    if legacy != 0 && legacy != extended {
+        return Err(SourceError::corrupt(format!(
+            "LAS 1.4 point counts disagree: legacy count {legacy}, extended count {extended}"
+        )));
     }
+    Ok(if legacy == 0 { extended } else { legacy })
 }
 
 struct RawVlr {

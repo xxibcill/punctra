@@ -59,6 +59,26 @@ fn layered_waveform_laz_formats_are_explicitly_unsupported() {
     }
 }
 
+#[test]
+fn conflicting_las_1_4_point_counts_are_corrupt() {
+    let directory = FixtureDirectory::new();
+    let path = directory.path().join("conflicting-point-counts.las");
+    write_fixture(&path, 8);
+
+    let mut bytes = fs::read(&path).unwrap();
+    assert_eq!(
+        u32::from_le_bytes(bytes[107..111].try_into().unwrap()),
+        u32::try_from(POINT_COUNT).unwrap()
+    );
+    bytes[107..111].copy_from_slice(&1_u32.to_le_bytes());
+    fs::write(&path, bytes).unwrap();
+
+    assert!(matches!(
+        source_las::open(&path).blocking_wait(),
+        Err(SourceError::CorruptSource { .. })
+    ));
+}
+
 fn assert_supported_format(directory: &FixtureDirectory, point_format: u8, extension: &str) {
     let path = directory
         .path()
