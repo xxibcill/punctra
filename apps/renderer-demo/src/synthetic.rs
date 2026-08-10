@@ -36,7 +36,18 @@ struct NodeLayout {
 struct SyntheticNode {
     node: AvailableNode,
     layout: NodeLayout,
-    latest_version: u64,
+    latest_version: BatchVersion,
+}
+
+impl SyntheticNode {
+    fn next_version(self) -> BatchVersion {
+        let version = self
+            .latest_version
+            .get()
+            .checked_add(1)
+            .expect("the interactive demo cannot exhaust batch versions");
+        BatchVersion::new(version)
+    }
 }
 
 #[derive(Debug)]
@@ -59,7 +70,7 @@ impl SyntheticScene {
                     nodes.push(SyntheticNode {
                         node: make_node(layout)?,
                         layout,
-                        latest_version: 0,
+                        latest_version: BatchVersion::new(0),
                     });
                 }
             }
@@ -97,15 +108,11 @@ impl SyntheticScene {
                 continue;
             }
 
-            let version = node
-                .latest_version
-                .checked_add(1)
-                .expect("the interactive demo cannot exhaust batch versions");
             let batch = make_batch(
                 self.view_generation,
                 node.node,
                 node.layout,
-                BatchVersion::new(version),
+                node.next_version(),
             )?;
             return Ok(Some(batch));
         }
@@ -118,8 +125,8 @@ impl SyntheticScene {
         let index = node_index(key);
         let node = &mut self.nodes[index];
         debug_assert_eq!(node.node.status(), NodeStatus::Requested);
-        debug_assert_eq!(version.get(), node.latest_version + 1);
-        node.latest_version = version.get();
+        debug_assert_eq!(version, node.next_version());
+        node.latest_version = version;
         node.node = node.node.with_status(NodeStatus::Resident { version });
     }
 
