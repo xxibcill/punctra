@@ -371,6 +371,104 @@ impl Default for PointRowLimits {
     }
 }
 
+/// Hard ceilings for one complete immutable Revision Audit.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[allow(clippy::struct_field_names)]
+pub struct RevisionAuditLimits {
+    source_read_budget: ReadBudget,
+    max_revision_blocks: u64,
+    max_revision_bytes: u64,
+    max_changed_points: u64,
+    max_transition_entries: u64,
+    max_result_bytes: u64,
+    max_working_bytes: u64,
+}
+
+impl RevisionAuditLimits {
+    /// Creates independent Source, Revision, result, and memory ceilings.
+    ///
+    /// Every value is a hard ceiling. Zero Revision or Source capacity permits
+    /// only the Root Revision's empty input. Result and working ceilings still
+    /// apply to that canonical empty report.
+    #[must_use]
+    #[allow(clippy::too_many_arguments)]
+    pub const fn new(
+        source_read_budget: ReadBudget,
+        max_revision_blocks: u64,
+        max_revision_bytes: u64,
+        max_changed_points: u64,
+        max_transition_entries: u64,
+        max_result_bytes: u64,
+        max_working_bytes: u64,
+    ) -> Self {
+        Self {
+            source_read_budget,
+            max_revision_blocks,
+            max_revision_bytes,
+            max_changed_points,
+            max_transition_entries,
+            max_result_bytes,
+            max_working_bytes,
+        }
+    }
+
+    /// Returns the exact Source span, Point, batch, payload, and decoder limits.
+    #[must_use]
+    pub const fn source_read_budget(self) -> ReadBudget {
+        self.source_read_budget
+    }
+
+    /// Returns the maximum checksummed Revision blocks read.
+    #[must_use]
+    pub const fn max_revision_blocks(self) -> u64 {
+        self.max_revision_blocks
+    }
+
+    /// Returns the maximum encoded immutable Revision file bytes read.
+    #[must_use]
+    pub const fn max_revision_bytes(self) -> u64 {
+        self.max_revision_bytes
+    }
+
+    /// Returns the maximum exact changed rows in the Revision.
+    #[must_use]
+    pub const fn max_changed_points(self) -> u64 {
+        self.max_changed_points
+    }
+
+    /// Returns the maximum distinct `(before, after)` transition entries.
+    #[must_use]
+    pub const fn max_transition_entries(self) -> u64 {
+        self.max_transition_entries
+    }
+
+    /// Returns the maximum complete retained report bytes.
+    #[must_use]
+    pub const fn max_result_bytes(self) -> u64 {
+        self.max_result_bytes
+    }
+
+    /// Returns the combined peak incremental audit working-memory ceiling.
+    #[must_use]
+    pub const fn max_working_bytes(self) -> u64 {
+        self.max_working_bytes
+    }
+}
+
+impl Default for RevisionAuditLimits {
+    fn default() -> Self {
+        Self::new(
+            ReadBudget::default().with_max_points(10_000_000),
+            1_000_000,
+            2 * GIB,
+            10_000_000,
+            65_280,
+            2 * MIB,
+            128 * MIB,
+        )
+    }
+}
+
 /// Hard ceilings for streaming exact Point Identities from a completed Point Set.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[allow(clippy::struct_field_names)]

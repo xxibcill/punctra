@@ -23,7 +23,6 @@ const POSITION_PAYLOAD_BYTES: u64 = 24;
 const CLASSIFICATION_PAYLOAD_BYTES: u64 = 1;
 const ROW_PAYLOAD_BYTES: u64 =
     ORDINAL_PAYLOAD_BYTES + POSITION_PAYLOAD_BYTES + CLASSIFICATION_PAYLOAD_BYTES;
-const POINT_ID_HASH_DOMAIN: &[u8] = b"punctra-point-set-ids-v1";
 const CONTENT_HASH_DOMAIN: &[u8] = b"punctra-snapshot-point-rows-v1";
 const SPAN_HASH_DOMAIN: &[u8] = b"punctra-selection-spans-v1";
 
@@ -700,8 +699,7 @@ pub(crate) fn start(
         .budget(source_budget);
     let source = session.source().read(request)?;
 
-    let mut point_id_hasher = domain_hasher(POINT_ID_HASH_DOMAIN);
-    point_id_hasher.update(provenance.source().as_bytes());
+    let point_id_hasher = crate::hashes::point_id_hasher(provenance.source());
     let mut content_hasher = domain_hasher(CONTENT_HASH_DOMAIN);
     content_hasher.update(provenance.workspace().as_bytes());
     content_hasher.update(provenance.source().as_bytes());

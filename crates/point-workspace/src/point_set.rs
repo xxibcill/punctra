@@ -15,7 +15,6 @@ use crate::{
     workspace::Session,
 };
 
-const POINT_ID_HASH_DOMAIN: &[u8] = b"punctra-point-set-ids-v1";
 const CONTENT_HASH_DOMAIN: &[u8] = b"punctra-point-set-content-v1";
 const FILE_HASH_DOMAIN: &[u8] = b"punctra-point-set-file-v1";
 const FRAME_HASH_DOMAIN: &[u8] = b"punctra-point-set-frame-v1";
@@ -1243,9 +1242,7 @@ fn create_spill_file(scratch: &Path) -> Result<(PathBuf, File), WorkspaceError> 
 }
 
 fn point_id_hasher(provenance: &SnapshotProvenance) -> Hasher {
-    let mut hasher = domain_hasher(POINT_ID_HASH_DOMAIN);
-    hasher.update(provenance.source().as_bytes());
-    hasher
+    crate::hashes::point_id_hasher(provenance.source())
 }
 
 fn content_hasher(provenance: &SnapshotProvenance) -> Hasher {

@@ -385,6 +385,137 @@ impl RevisionInfo {
     }
 }
 
+/// One nonempty effective-classification change group in a Revision Audit.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ClassificationTransition {
+    before: u8,
+    after: u8,
+    count: u64,
+}
+
+impl ClassificationTransition {
+    pub(crate) const fn new(before: u8, after: u8, count: u64) -> Self {
+        Self {
+            before,
+            after,
+            count,
+        }
+    }
+
+    /// Returns the effective classification before the Revision.
+    #[must_use]
+    pub const fn before(self) -> u8 {
+        self.before
+    }
+
+    /// Returns the effective classification after the Revision.
+    #[must_use]
+    pub const fn after(self) -> u8 {
+        self.after
+    }
+
+    /// Returns the nonzero number of Points with this transition.
+    #[must_use]
+    pub const fn count(self) -> u64 {
+        self.count
+    }
+}
+
+/// Complete rebuildable audit of one immutable Workspace Revision.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RevisionAudit {
+    provenance: SnapshotProvenance,
+    revision: RevisionInfo,
+    edit_footprint: Option<WorldBounds>,
+    transitions: Box<[ClassificationTransition]>,
+    changed_point_count: u64,
+    point_id_hash: ContentHash,
+    content_hash: ContentHash,
+    accounted_peak_working_bytes: u64,
+    retained_result_bytes: u64,
+}
+
+impl RevisionAudit {
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) const fn new(
+        provenance: SnapshotProvenance,
+        revision: RevisionInfo,
+        edit_footprint: Option<WorldBounds>,
+        transitions: Box<[ClassificationTransition]>,
+        changed_point_count: u64,
+        point_id_hash: ContentHash,
+        content_hash: ContentHash,
+        accounted_peak_working_bytes: u64,
+        retained_result_bytes: u64,
+    ) -> Self {
+        Self {
+            provenance,
+            revision,
+            edit_footprint,
+            transitions,
+            changed_point_count,
+            point_id_hash,
+            content_hash,
+            accounted_peak_working_bytes,
+            retained_result_bytes,
+        }
+    }
+
+    /// Returns the exact Workspace, Source, and audited Revision identity.
+    #[must_use]
+    pub const fn provenance(&self) -> SnapshotProvenance {
+        self.provenance
+    }
+
+    /// Returns the immutable audited Revision facts.
+    #[must_use]
+    pub const fn revision(&self) -> RevisionInfo {
+        self.revision
+    }
+
+    /// Returns inclusive bounds of exactly the changed Source Points.
+    #[must_use]
+    pub const fn edit_footprint(&self) -> Option<WorldBounds> {
+        self.edit_footprint
+    }
+
+    /// Returns unique transitions sorted by `(before, after)`.
+    #[must_use]
+    pub fn transitions(&self) -> &[ClassificationTransition] {
+        &self.transitions
+    }
+
+    /// Returns the exact number of changed Revision rows.
+    #[must_use]
+    pub const fn changed_point_count(&self) -> u64 {
+        self.changed_point_count
+    }
+
+    /// Returns the canonical hash of ordered Source-aware changed membership.
+    #[must_use]
+    pub const fn point_id_hash(&self) -> ContentHash {
+        self.point_id_hash
+    }
+
+    /// Returns the canonical provenance-bound complete audit hash.
+    #[must_use]
+    pub const fn content_hash(&self) -> ContentHash {
+        self.content_hash
+    }
+
+    /// Returns conservatively accounted peak incremental working bytes.
+    #[must_use]
+    pub const fn accounted_peak_working_bytes(&self) -> u64 {
+        self.accounted_peak_working_bytes
+    }
+
+    /// Returns exact retained report bytes, including transition storage.
+    #[must_use]
+    pub const fn retained_result_bytes(&self) -> u64 {
+        self.retained_result_bytes
+    }
+}
+
 /// Exact Query grammar supported by v0.5.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PointQuery {
