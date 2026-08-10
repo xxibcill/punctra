@@ -2,10 +2,10 @@
 
 Status: renderer, adaptive View planning, Real Sources, Spatial Index/out-of-
 core View, the narrow Workspace, and the v0.6 Terrain and Check Point QA slice
-are implemented; the narrow v0.7 technical-readiness workflow is active;
-broader terrain and product terms remain deferred
+are implemented; the narrow v0.7 technical-readiness Workflow Run is also
+implemented; broader terrain and product terms remain deferred
 
-Punctra v0.6 builds on the reusable render engine, renderer-neutral View
+Punctra v0.7 builds on the reusable render engine, renderer-neutral View
 planner, and verified Source path described in the accepted [v0.1 renderer
 design](docs/design/render-engine-v0.1.md), [v0.2 planning
 design](docs/design/adaptive-view-planning-v0.2.md), and [v0.3 Real Sources
@@ -20,7 +20,7 @@ research and do not imply product scope. The implemented [v0.6 Terrain and QA
 benchmark design](docs/design/terrain-qa-benchmark-v0.6.md) fixes the narrow
 meanings of Ground Input, Terrain Surface, Check Point, Residual, and Terrain
 Gap used by `Snapshot::point_rows`, `point-terrain`, and `terrain-demo`.
-The accepted [v0.7 technical-readiness
+The implemented [v0.7 technical-readiness
 design](docs/design/technical-alpha-readiness-v0.7.md) additionally fixes the
 narrow meanings of Workflow Run, Run Checkpoint, Revision Audit, Edit
 Footprint, Surface Change Envelope, and Recovery Action. Those terms describe
@@ -75,6 +75,15 @@ _Avoid:_ processing when the specific operation is derivation
 An intentional logical change to Workspace state, such as changing Point classifications or adding a Breakline. An Edit is recorded rather than applied to Source bytes.
 
 _Avoid:_ mutation when referring to Source data, patch without domain context
+
+## Edit Footprint
+
+The inclusive axis-aligned world bounds of the Source Points whose effective
+classification actually changed in one immutable Revision. It is derived from
+exact Source positions and Revision rows. It does not describe every Terrain
+face affected by the Edit.
+
+_Avoid:_ changed region, Surface Change Envelope, exact change polygon
 
 ## Effective Attribute Value
 
@@ -153,6 +162,15 @@ The complete, normalized parameters and algorithm version used by a Derivation. 
 
 _Avoid:_ preset after its defaults have been resolved
 
+## Recovery Action
+
+The one safe caller action attached to a structured Workflow failure, such as
+resuming the same Run, raising a named limit, restoring the expected Source, or
+removing a conflicting caller-owned target. It is not an automatic retry
+policy.
+
+_Avoid:_ suggestion, best effort, retry everything
+
 ## Residual
 
 The signed vertical difference between an observed elevation and the Terrain
@@ -173,6 +191,14 @@ An immutable, ordered state of a Workspace after a committed Edit. A Revision ha
 
 _Avoid:_ version, generation, save point
 
+## Revision Audit
+
+A rebuildable in-memory Artifact that describes exactly one immutable
+Workspace Revision. It contains the Revision facts, ordered classification
+transitions, changed Point count and membership hash, and Edit Footprint.
+
+_Avoid:_ audit log, mutable history, Workflow report
+
 ## Revert Edit
 
 An Edit that applies the recorded inverse of the current head Revision and
@@ -180,6 +206,15 @@ creates a new child Revision. It does not move the head backward, erase the
 target Revision, or imply general history rewriting.
 
 _Avoid:_ rollback, head rewind, delete history
+
+## Run Checkpoint
+
+An immutable checksummed frame proving that one Workflow phase fact was
+durably synced. A checkpoint must be revalidated against the owning Source,
+Workspace, Terrain, export, or report state; it is not an independent source of
+truth.
+
+_Avoid:_ cache entry, save point, proof without revalidation
 
 ## Snapshot
 
@@ -217,6 +252,14 @@ the verified Source.
 
 _Avoid:_ database, source of truth
 
+## Surface Change Envelope
+
+Conservative inclusive bounds over vertices incident to Terrain faces added or
+removed between the baseline and changed Surfaces. It is application report
+evidence, not a persisted Workspace value or exact change polygon.
+
+_Avoid:_ Edit Footprint, affected-area polygon, persisted terrain boundary
+
 ## Terrain Surface
 
 An immutable triangulated Artifact representing terrain for one explicit input
@@ -245,6 +288,15 @@ _Avoid:_ scene when referring to a request
 A bounded, renderer-neutral group of origin-relative display values and stable Point Identities produced for a View. A View Batch is disposable and is never authoritative geometry.
 
 _Avoid:_ GPU buffer, render chunk
+
+## Workflow Run
+
+One durable execution intent for the supported classification-to-terrain path.
+Its caller-owned Run Identity, Workspace Operation Identity, request meaning,
+and Source/index/Workspace/Run-root path bindings are fixed by the first
+durable journal frame.
+
+_Avoid:_ process, Job handle, retry attempt
 
 ## Workspace
 

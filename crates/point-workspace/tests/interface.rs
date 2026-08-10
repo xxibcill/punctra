@@ -28,16 +28,18 @@ fn deterministic_fixture_retains_complete_source_and_schema() {
 #[test]
 fn create_lock_drop_and_reopen_preserve_root_identity() {
     let (temporary, index, _ticks, _classifications) = prepare_fixture("lifecycle", 1_003);
+    let schema = WorkspaceSchema::new(classification_attribute());
     let workspace = create(
         temporary.workspace_path(),
         index.clone(),
-        WorkspaceSchema::new(classification_attribute()),
+        schema,
         OpenLimits::default(),
     )
     .blocking_wait()
     .unwrap();
     let identity = workspace.identity();
     let source = workspace.source();
+    assert_eq!(workspace.schema(), schema);
     let root = workspace.head();
     let root_provenance = *root.provenance();
     let root_info = workspace.revision_info(root_provenance.revision()).unwrap();
@@ -66,6 +68,7 @@ fn create_lock_drop_and_reopen_preserve_root_identity() {
         .unwrap();
     assert_eq!(reopened.identity(), identity);
     assert_eq!(reopened.source(), source);
+    assert_eq!(reopened.schema(), schema);
     assert_eq!(reopened.head().provenance(), &root_provenance);
 }
 

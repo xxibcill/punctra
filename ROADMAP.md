@@ -8,13 +8,13 @@ dates. Candidate releases may be split, merged, reordered, renamed, or skipped
 as technical and customer evidence changes. Milestone outcomes and dependency
 order matter more than version numbers.
 
-Only an **Active** release has committed scope. Punctra v0.1 through v0.6 are
-complete repository technical slices. The narrow [v0.7 Technical partner-alpha
-readiness design](docs/design/technical-alpha-readiness-v0.7.md) is accepted
-and active. It strengthens restart and audit behavior without claiming the
-external partner evidence required by the product milestone. Broader terrain,
-export, general editing, and application UI are not silently made current
-scope by appearing here.
+Only an **Active** release has committed scope. Punctra v0.1 through v0.7 are
+complete repository technical slices. The implemented [v0.7 Technical
+partner-alpha readiness design](docs/design/technical-alpha-readiness-v0.7.md)
+strengthens restart and audit behavior without claiming the external partner
+evidence required by the product milestone. No later candidate is made active
+merely by appearing here; broader terrain, export, general editing, and
+application UI remain uncommitted until an accepted design says otherwise.
 
 ## Working direction
 
@@ -62,7 +62,7 @@ Roadmap status labels are:
 
 ## Scope and evidence checkpoint
 
-Status: **v0.7 repository technical-readiness slice active; external product
+Status: **v0.7 repository technical-readiness slice complete; external product
 evidence remains outstanding**
 
 The [implemented v0.5 design](docs/design/durable-document-core-v0.5.md) places
@@ -75,6 +75,13 @@ detached Check Point residual, and metric-metre LandXML points/faces path. It
 does not authorize broader terrain, screen selection, general Edit, or product-
 application proposals, and neither v0.5 nor v0.6 repository evidence
 substitutes for licensed field data or partner validation.
+
+The implemented v0.7 slice closes the repository restart/audit gap for that
+narrow path: caller-owned intent precedes selection/commit, one eight-frame Run
+can be resumed or inspected, the changed Revision has an exact Audit/Edit
+Footprint, and exact LandXML/report targets reconcile without overwrite. Its
+generated tests and benchmark establish only those technical guarantees; they
+do not satisfy any external evidence item below.
 
 Useful evidence for proceeding includes:
 
@@ -94,8 +101,8 @@ module. The detailed discovery signals and pivot criteria live in the
 
 ## Release sequence
 
-There are three provisional pre-v1 release themes after the completed v0.6.
-This is a working count, not a requirement to publish exactly three more
+There are two provisional pre-v1 release themes after the completed v0.7.
+This is a working count, not a requirement to publish exactly two more
 releases.
 
 ### v0.1 — Renderer foundation
@@ -330,35 +337,37 @@ design](docs/design/terrain-qa-benchmark-v0.6.md).
 
 ### v0.7 — Design-partner alpha
 
-Status: **Active technical-readiness slice; external design-partner milestone
-evidence remains outstanding**
+Status: **Complete — repository technical-readiness slice only; external
+design-partner milestone remains outstanding**
 
-Accepted repository outcome: implement the exact restart, audit, and
-reconciliation guarantees in the [v0.7 design](docs/design/technical-alpha-readiness-v0.7.md).
-The slice adds no Breaklines or new public workflow crate. It proves that the
-existing narrow LAS/LAZ correction-to-terrain path can record its Operation
-Identity before mutation, resume through one private Workflow Run journal,
-derive an exact Revision Audit/Edit Footprint, reconcile a byte-identical
-LandXML target without overwrite, and publish bounded actionable diagnostics.
+Implemented repository outcome: the exact restart, audit, and reconciliation
+guarantees in the [v0.7 design](docs/design/technical-alpha-readiness-v0.7.md).
+The slice adds no Breaklines or new public foundation crate. It proves that the
+existing narrow LAS/LAZ correction-to-terrain path can:
 
-Candidate outcome: turn the benchmark path into something partners can use on
-real projects while keeping the supported workflow narrow.
+- durably record caller-owned Run and Operation identities before selection or
+  commit;
+- resume through an eight-frame checksummed Workflow journal and expose
+  journal-only `inspect` status;
+- link parent cancellation to synchronously awaited child Jobs;
+- derive an exact Revision Audit, classification transitions, and Edit
+  Footprint from immutable Workspace state;
+- ensure byte-identical LandXML and canonical report targets without overwrite;
+  and
+- emit bounded structured failures naming stage, certainty, known identities,
+  and exactly one safe recovery action.
 
-Likely scope:
+Repository evidence includes 33 `terrain-demo` tests—18 unit/private, 12
+workflow-facade, and three process—every eight-frame resume prefix, 12 public
+limit families, generated LAS/LAZ semantic-projection checks, scoped fault and
+representative cancellation/corruption coverage, and a five-mode generated
+10,000-Point benchmark. The completed Run used a 2,804-byte journal and
+11,435-byte report with 114 semantic limit facts.
 
-- robust Breakline and terrain-edit edge cases found in partner data;
-- visible QA, changed-region tracking, and classification audit information;
-- autosave, cancellation, recovery, and actionable diagnostics;
-- workflow UX driven by observed partner use; and
-- regression coverage across roughly 5–10 representative production datasets.
-
-Evidence of readiness:
-
-- partner tolerance and deliverable checks pass repeatably;
-- interrupted long operations recover without ambiguous visible state;
-- failures identify the Source, operation, phase, and safe recovery action; and
-- new requests are rejected or deferred when they do not strengthen the chosen
-  workflow.
+The product-level design-partner alpha outcome is not complete. Partner
+tolerances, production datasets, downstream deliverable checks, paid use, and
+measured human workflow results remain external evidence gates. The repository
+tests are intentionally not relabeled as those facts.
 
 ### v0.8 — Design-partner MVP
 
@@ -431,7 +440,7 @@ a reason to publish v1.
 |---|---|---|
 | Renderer and planning foundations | v0.1–v0.2 | Reusable bounded display engine and adaptive View planner. |
 | Benchmark/demo | v0.3–v0.6 | Headless technical path from verified LAS/LAZ to one narrow terrain deliverable; external workflow evidence remains separate. |
-| Design-partner MVP | v0.7–v0.8 | Recoverable production workflow validated by partner datasets and paid use. |
+| Design-partner MVP | v0.7–v0.8 | Candidate recoverable production workflow; partner datasets and paid use remain required external evidence. |
 | Trustworthy v1 | v0.9–v1.0 | Explicitly supported, regression-tested, maintainable compatibility surface. |
 
 ## Deferred until evidence changes

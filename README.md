@@ -1,11 +1,12 @@
 # Punctra
 
 Punctra is an embeddable Rust point-cloud foundation with verified Source
-access, adaptive View planning, and wgpu rendering. It is for applications that
-need authoritative Point reads, progressive display of very large point sets,
-precise large-world coordinates, bounded logical residency, generation-safe
-streaming updates, and Point picking without adopting a complete editor or
-document model.
+access, exact revisioned classification, deterministic Terrain/QA, adaptive
+View planning, and wgpu rendering. It is for applications that need
+authoritative Point reads, recoverable narrow Edits and deliverables,
+progressive display of very large point sets, precise large-world coordinates,
+bounded logical residency, generation-safe streaming updates, and Point picking
+without adopting a complete editor or product UI.
 
 Version 0.2.0 adds the adaptive planning scope and verification gates recorded
 in [the v0.2 design](docs/design/adaptive-view-planning-v0.2.md) on top of
@@ -48,13 +49,16 @@ persistence, general LandXML, or coordinate transformation. This repository
 completion is not a claim of product, partner, licensed-data, or downstream-
 application acceptance.
 
-Version 0.7 is now the active, deliberately technical slice described by the
-accepted [Technical partner-alpha readiness
+Version 0.7 completes the deliberately technical slice described by the
+implemented [Technical partner-alpha readiness
 design](docs/design/technical-alpha-readiness-v0.7.md). It adds exact Revision
 Audit and Edit Footprint facts, restart-safe LandXML reconciliation, linked
-child cancellation, and one private durable Workflow Run inside
-`terrain-demo`. It does not add Breaklines or claim partner, production-data,
-downstream-application, paid-use, or human-workflow acceptance.
+child cancellation, and one durable eight-checkpoint Workflow Run inside
+`terrain-demo`. The app now has explicit `start`, `resume`, and journal-only
+`inspect` commands, canonical `audit.json` evidence, and structured failures
+with one safe recovery action. It does not add Breaklines or establish the
+external design-partner, production-data, downstream-application, paid-use,
+or human-workflow evidence required by the product milestone.
 
 Later direction is described in the [living roadmap](ROADMAP.md). Its release
 themes are adjustable and do not expand accepted implementation scope by
@@ -122,17 +126,18 @@ no I/O and never mutates renderer state.
   process-scoped spillable Point Sets, immutable sparse classification
   Revisions, immediate-head Revert, Operation-ID recovery, and the narrow exact
   classification-aware `Snapshot::point_rows` pull stream behind one deep
-  caller interface.
+  caller interface. It can also rebuild a bounded exact `RevisionAudit`,
+  including transitions and the Edit Footprint, from immutable Revision rows.
 - `point-terrain` derives one immutable `TerrainSurface` with canonical
   `SurfaceVertex` and `SurfaceFace` values, evaluates detached Check Points,
-  and durably creates the supported LandXML 1.2 subset.
+  and durably creates or exactly reconciles the supported LandXML 1.2 subset.
 - `render-protocol` defines and validates renderer-neutral View updates.
 - `point-view` plans deterministic, budgeted hierarchy requests and retirement.
 - `render-wgpu` owns GPU resources, pipelines, drawing, and picking.
 - `renderer-demo` exercises the engine with either generated point batches or
   one Full-verified indexed LAS/LAZ Source.
-- `terrain-demo` exercises the GPU-free LAS/LAZ-to-index-to-Workspace-to-
-  terrain-to-QA-to-LandXML composition.
+- `terrain-demo` owns the GPU-free, restartable LAS/LAZ-to-index-to-Workspace-
+  to-terrain-to-QA-to-LandXML Workflow Run and its canonical audit report.
 
 Networking, screen selection, general editing, Source rewriting, persistent or
 constrained terrain, general export, and general application UI remain outside
@@ -172,7 +177,7 @@ classify them, append an immediate-head Revert, and reopen the durable result:
 
 ```bash
 cargo run --release -p point-workspace --example classify -- \
-  survey.laz survey.laz.pidx survey.pcw CLASSIFICATION_ATTRIBUTE_ID
+  survey.laz survey.laz.pidx survey.pcw 6
 ```
 
 Run the complete generated in-memory Source-to-LandXML terrain composition:
@@ -181,21 +186,58 @@ Run the complete generated in-memory Source-to-LandXML terrain composition:
 cargo run -p point-terrain --example derive
 ```
 
-Run the headless real LAS/LAZ terrain path. The Source must already use metric
-metres; `--assert-unknown-crs-metric` is an explicit caller assertion, not CRS
+Start one durable headless LAS/LAZ terrain Workflow Run. The caller must retain
+the nonzero Run and Workspace Operation identities and the expected baseline
+Revision before invoking the command. Both the Workspace and `RUN_ROOT` must
+already exist. `terrain-demo` opens but never creates the Workspace; an absent
+Workspace fails with `PWF_INVALID_REQUEST` before Run creation or Workspace
+mutation. The Source must already use metric metres;
+`--assert-unknown-crs-metric` is an explicit caller assertion, not CRS
 inference:
 
 ```bash
-cargo run --release -p terrain-demo -- \
-  --date 2026-08-10 --time 00:00:00Z --qa-sample \
-  --exercise-correction-revert 4 \
-  survey.laz survey.laz.pidx survey.pcw existing-ground.xml
+cargo run --release -p terrain-demo -- start \
+  --run-id "$RUN_ID_HEX" \
+  --operation-id "$OPERATION_ID_HEX" \
+  --baseline "$BASELINE_REVISION_HEX" \
+  --exclude-ground-ordinal 4 \
+  --date 2026-08-10 --time 00:00:00Z \
+  --assert-unknown-crs-metric \
+  survey.laz survey.laz.pidx survey.pcw run-root
 ```
 
-The correction/Revert option selects one exact Ground Point by Source ordinal,
-sets it to class 1, derives the changed Ground Input, appends an immediate-head
-Revert, and requires exact restoration of geometry, topology, vertices, and
-faces before export.
+The command records the complete Intent before selection or commit, changes the
+listed class-2 Ground ordinals to class 1, audits the resulting Revision,
+derives baseline and changed Surfaces, evaluates any repeated
+`--check-point ID,X,Y,Z` observations, ensures `terrain.xml`, and ensures
+`audit.json`. It returns success only after all eight journal frames are
+durable. Resume uses the same paths, options, identities, baseline, ordinals,
+and Check Points with `resume` in place of `start`; it never invents a new
+Operation Identity. Journal-only status inspection requires only the Run root:
+
+```bash
+cargo run --release -p terrain-demo -- inspect run-root
+```
+
+The fixed Run-root children are `run.pwf`, `run.lock`, `terrain.xml`, and
+`audit.json`. Existing exact XML/report bytes reconcile; different caller-owned
+targets fail without replacement. Inspect may durably truncate a torn final
+journal suffix to its last verified frame, but it does not open or mutate the
+Source, index, Workspace, LandXML, or report. It then revalidates Run-root
+identity; replacement after a durable repair is reported conservatively as
+`PWF_PUBLICATION_INDETERMINATE` at the `inspect` stage with publication phase
+`journal-checkpoint`.
+
+Create the Workspace separately through the public `point-workspace` API. The
+[classification example](crates/point-workspace/examples/classify.rs)
+demonstrates setup and prints Revision identities. `terrain-demo` requires that
+Workspace's selected `U8` Attribute to be Source Attribute 6, the `source-las`
+classification column, and verifies it through the public
+`Workspace::schema().classification()` accessor. The workflow baseline is the
+current
+`workspace.head().provenance().revision()` obtained from a freshly opened
+session; retain that identity, then drop every Workspace/Snapshot/PointSet
+handle so `terrain-demo` can acquire the exclusive Workspace lock.
 
 Pass a real Source to Full-verify it, build or open its index, and render it.
 The optional target defaults to `SOURCE.pidx`:
@@ -302,6 +344,33 @@ universal performance, licensed-production, above-500-million-Point, partner,
 downstream Civil 3D/Bentley, paid-use, or human-time evidence. Every such
 external gate remains outstanding.
 
+## v0.7 benchmark evidence
+
+`terrain-demo` has 33 package tests: 18 unit/private fault and contract tests,
+12 public workflow-facade tests, and three process tests. The public suites
+cover every eight-frame resume prefix and 12 limit families; the private fault
+scope is documented precisely in the [verification strategy](docs/architecture/testing.md).
+
+The checked-in `terrain-demo` Criterion benchmark exercises five restart modes
+through the public workflow facade with generated local LAS data. The local
+10,000-Point smoke used ten samples and reported these confidence intervals:
+
+| Mode | Lower | Estimate | Upper |
+|---|---:|---:|---:|
+| Cold start | 153.38 ms | 157.84 ms | 161.25 ms |
+| Resume after committed Edit | 113.23 ms | 114.88 ms | 117.08 ms |
+| Resume from retryable Workspace intent | 123.76 ms | 126.67 ms | 129.66 ms |
+| LandXML and report reconciliation | 96.871 ms | 97.629 ms | 98.365 ms |
+| Complete revalidation | 87.233 ms | 88.181 ms | 89.112 ms |
+
+The completed Run had an eight-frame 2,804-byte journal and an 11,435-byte
+canonical report containing 114 semantic limit facts. The benchmark accepts
+only the documented generated 10,000, 100,000, and 1,000,000-Point modes through
+`PUNCTRA_TERRAIN_WORKFLOW_BENCH_POINTS`; only the 10,000-Point smoke is recorded
+here. These are generated local technical observations. Worker peak heap was
+not measured, and partner, production, downstream round-trip, and human-time
+acceptance remain unmeasured.
+
 ## Development
 
 Install the pinned Rust toolchain, then run the authoritative local verification
@@ -318,10 +387,12 @@ cargo bench -p source-las --bench read
 cargo bench -p point-index --bench index
 cargo bench -p point-workspace --bench document
 cargo bench -p point-terrain --bench terrain
+cargo bench -p terrain-demo --bench journal
 cargo run -p point-index --example direct_use
 cargo run --release -p point-workspace --example classify -- \
-  survey.laz survey.laz.pidx survey.pcw CLASSIFICATION_ATTRIBUTE_ID
+  survey.laz survey.laz.pidx survey.pcw 6
 cargo run -p point-terrain --example derive
+cargo test -p terrain-demo --test workflow
 cargo test -p terrain-demo --test process
 cargo test -p renderer-demo --test headless_smoke
 PUNCTRA_REQUIRE_GPU=1 cargo test -p render-wgpu --test offscreen

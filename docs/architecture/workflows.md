@@ -1,7 +1,7 @@
 # Runtime Workflows
 
-Status: implemented through the narrow v0.6 terrain/QA slice; broader terrain
-and export workflows deferred
+Status: implemented through the narrow v0.7 technical-readiness slice; broader
+terrain and export workflows deferred
 
 The host composes sibling modules explicitly. Lower crates never call back into
 an application, discover a Source for a Workspace, submit a GPU queue, or infer
@@ -242,7 +242,7 @@ correction is a separate existing Workspace commit; immediate-head Revert and
 a later Derivation can restore equal geometry while retaining distinct Revision
 provenance. Source bytes remain unchanged.
 
-## 8. Evaluate detached QA and create LandXML
+## 8. Evaluate detached QA and ensure LandXML
 
 ~~~mermaid
 sequenceDiagram
@@ -254,11 +254,16 @@ sequenceDiagram
     TER->>TER: validate identities; locate closed faces; interpolate
     TER-->>HOST: ordered samples/gaps + compensated residual statistics
 
-    HOST->>TER: export_landxml(target, explicit options, limits)
+    HOST->>TER: ensure_landxml(target, explicit options, limits)
     TER->>DISK: create/sync/reopen/verify bounded sibling stage
-    TER->>DISK: no-replace publish target + sync parent
-    TER->>DISK: remove stage + sync cleanup
-    TER-->>HOST: LandXmlReceipt after durable completion
+    alt target absent
+        TER->>DISK: no-replace publish target + sync parent
+        TER->>DISK: remove stage + sync cleanup
+        TER-->>HOST: Created receipt after durable completion
+    else regular target exists
+        TER->>DISK: bounded exact length/hash verification
+        TER-->>HOST: ReconciledExisting or conflict
+    end
 ~~~
 
 Residual is observed Z minus Surface Z. Outside-hull positions are explicit
@@ -268,7 +273,77 @@ occurs. Once target publication starts, any inability to prove final
 verification, durability, cleanup, or terminal acknowledgement is reported as
 indeterminate rather than success.
 
-## 9. Prepare and render a View
+An exact existing regular target reconciles without replacement. A different,
+symlinked, or non-regular target fails closed. Create versus reconcile is an
+attempt observation; the durable Workflow fact is always `ensured_exact`.
+
+## 9. Start, resume, or inspect one durable terrain Run
+
+The application facade composes the earlier workflows without adding a public
+foundation crate. The caller supplies the same complete paths, identities,
+baseline, correction ordinals, Terrain Recipe, detached Check Points, LandXML
+options, and limits on every start or resume.
+
+The caller creates the Workspace separately through workflow 2 and reads its
+current `workspace.head().provenance().revision()` as the baseline. The terrain
+Workflow requires Source Attribute 6 (`source-las` classification) as the
+Workspace's selected `U8` Attribute. It opens only and never creates a
+Workspace. An absent Workspace returns `PWF_INVALID_REQUEST` before Run
+creation or Workspace mutation.
+
+~~~mermaid
+sequenceDiagram
+    participant CALLER as Caller
+    participant RUN as terrain-demo Workflow
+    participant WS as Workspace
+    participant TER as point-terrain
+    participant DISK as Run root
+
+    CALLER->>RUN: start_run(paths, intent, limits)
+    RUN->>DISK: acquire run.lock; publish synced Intent
+    RUN->>WS: resolve/select/commit same Operation Identity
+    WS-->>RUN: one changed Revision or structured stop
+    RUN->>DISK: RevisionResolved
+    RUN->>WS: exact revision_audit
+    RUN->>DISK: AuditObserved
+    RUN->>TER: derive baseline + changed Surfaces
+    RUN->>DISK: SurfaceObserved
+    RUN->>TER: detached Check Point QA
+    RUN->>DISK: QaObserved
+    RUN->>TER: ensure terrain.xml
+    RUN->>DISK: ExportEnsured
+    RUN->>DISK: ensure canonical audit.json; ReportEnsured
+    RUN->>DISK: revalidate all final facts; Complete
+    RUN-->>CALLER: WorkflowReceipt
+
+    Note over CALLER,DISK: After interruption, same paths and intent
+    CALLER->>RUN: resume_run(paths, intent, limits)
+    RUN->>DISK: verify/repair journal prefix and semantic links
+    RUN->>WS: revalidate or resolve durable Operation fact
+    RUN->>TER: recompute immutable Audit/Terrain/QA facts
+    RUN-->>CALLER: same complete receipt
+
+    CALLER->>RUN: inspect_run(run_root, limits)
+    RUN->>DISK: lock; verify journal format/hash/semantic chain
+    RUN->>DISK: repair only torn suffix; revalidate root identity
+    RUN-->>CALLER: Run/Operation/frame-count/complete status
+~~~
+
+The exact monotonic frame order is `Intent`, `RevisionResolved`,
+`AuditObserved`, `SurfaceObserved`, `QaObserved`, `ExportEnsured`,
+`ReportEnsured`, `Complete`. Recomputed values must match any existing frame.
+A torn final suffix repairs to the last complete frame; corruption in a
+complete frame fails closed. A committed Workspace Revision remains committed
+if a later phase fails, and resume never invents another Operation Identity. If
+the Run root is replaced after a durable inspect repair, inspection returns
+publication-indeterminate at `inspect` with the `journal-checkpoint` phase.
+
+The fixed Run root contains `run.pwf`, `run.lock`, `terrain.xml`, and
+`audit.json`. Exact XML/report targets reconcile, conflicts are not overwritten,
+and unknown children are not deleted. `WorkflowFailure` names the stable code,
+stage, certainty, known identities, and exactly one safe recovery action.
+
+## 10. Prepare and render a View
 
 View planning remains separate from exact Workspace selection. The current
 real-cloud host bridge reads `PreparedIndex` directly.
@@ -301,7 +376,7 @@ The host owns scheduling, staging, update ordering, queue submission, and device
 polling. A node becomes Resident only after a complete accepted Upsert. Parent
 Coverage remains until the planner emits its exact conditional retirement.
 
-## 10. Cancellation and crash matrix
+## 11. Cancellation and crash matrix
 
 | Operation | Safe cancellation boundary | Permitted residue | Published truth |
 |---|---|---|---|
@@ -313,11 +388,12 @@ Coverage remains until the planner emits its exact conditional retirement.
 | Revision commit | Before publication; afterward certainty is conservative | Complete ready/rejection/Revision links and recognized scratch | Rejected old head, Committed new head, or Indeterminate until reopen |
 | Terrain Derivation | Between rows, sort/predicate/topology blocks, and before final seal | Private in-memory working allocations | No Surface, or one complete immutable Surface |
 | Detached QA | Between inputs and bounded face-location work | Private partial results | No report, or one complete report |
-| LandXML export | Before target publication; afterward certainty is conservative | Recognized sibling stage and possibly one complete target | No target, one complete target plus receipt, or ExportIndeterminate |
+| LandXML ensure | Before target publication; afterward certainty is conservative | Recognized sibling stage and possibly one complete target | No target, one exact target plus receipt, exact-existing reconciliation, conflict, or ExportIndeterminate |
+| Terrain Workflow Run | Cooperative phase boundaries and directly linked active child Jobs; after publication certainty remains conservative | Fixed `run.lock`/rebuildable index work before Intent; afterward a verified journal prefix, committed Revision, exact XML/report targets, or recognized sibling stages | No Run before Intent, or one resumable Run whose frames never overstate durable facts |
 | View planning | Before returning a plan | None | Old planner history or one complete new plan |
 | GPU frame | Host-controlled frame/device boundary | Disposable GPU allocations | Workspace unchanged |
 
-## 11. Staleness
+## 12. Staleness
 
 Snapshots and Revisions are immutable. A later commit creates a new head but
 does not mutate older Snapshots. Derived Surfaces remain immutable even when a
@@ -336,6 +412,11 @@ flowchart LR
     S0 --> T0["Immutable Terrain Surface"]
     S2 --> T2["Later immutable Terrain Surface"]
     T2 --> XML["Caller-owned LandXML Export"]
+    R2 --> AUD["Rebuildable Revision Audit"]
+    T2 --> REP["Canonical audit.json"]
+    RUN["Durable Workflow journal"] -. "checkpoints; must revalidate" .-> R2
+    RUN -. "checkpoints; must revalidate" .-> XML
+    RUN -. "checkpoints; must revalidate" .-> REP
     VIEW["Disposable View/GPU state"] -. "never mutates" .-> R2
 ~~~
 

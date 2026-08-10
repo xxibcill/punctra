@@ -1,6 +1,7 @@
 # Technical Partner-Alpha Readiness Design (v0.7)
 
-Status: accepted on 2026-08-10; implementation in progress
+Status: implemented on 2026-08-10 as a repository technical-readiness slice;
+external design-partner/product evidence remains outstanding
 
 This design is authoritative for Punctra v0.7. It strengthens the already
 implemented LAS/LAZ classification-to-terrain path so a headless caller can
@@ -243,6 +244,13 @@ After a successful new target link, failures remain
 can call ensure again; it does not need to have received or persisted the
 lost receipt.
 
+`Created` versus `ReconciledExisting` is an observation of one ensure attempt,
+not a canonical Workflow Run fact. A crash after target publication but before
+the receipt is observed necessarily turns the next attempt into
+`ReconciledExisting`. The workflow journal and `audit.json` therefore record
+only the stable semantic outcome `ensured_exact`; attempt disposition is never
+hashed into canonical run bytes.
+
 ## Private terrain-demo workflow interface
 
 The package moves orchestration out of `main.rs` into private `journal`,
@@ -250,33 +258,50 @@ The package moves orchestration out of `main.rs` into private `journal`,
 caller. Tests may use a package library facade, but it is not a foundation
 compatibility promise.
 
-The conceptual interface is:
+The implemented package facade is:
 
 ```rust,ignore
-fn start_run(
+pub fn start_run(
     paths: WorkflowPaths,
-    intent: WorkflowIntent,
+    intent: WorkflowRunIntent,
     limits: WorkflowLimits,
 ) -> WorkflowJob;
 
-fn resume_run(
+pub fn resume_run(
     paths: WorkflowPaths,
-    intent: WorkflowIntent,
+    intent: WorkflowRunIntent,
     limits: WorkflowLimits,
 ) -> WorkflowJob;
 
-fn inspect_run(
+pub fn inspect_run(
     run_root: impl AsRef<Path>,
-    limits: JournalLimits,
+    limits: WorkflowLimits,
 ) -> Result<WorkflowStatus, WorkflowFailure>;
 ```
+
+`WorkflowPaths::new(source, index, workspace, run_root)` fixes the four paths.
+The exact intent constructor is
+`WorkflowRunIntent::new(run, operation, baseline_revision,
+correction_ordinals, non_ground_classification, recipe, check_points,
+landxml_options)`. It accepts at most 1,000 correction ordinals and 256 Check
+Points, sorts them canonically, requires a nonempty unique ordinal set and
+unique Check Point identities, and rejects zero/invalid identities or equal
+Ground/replacement classes.
+
+`WorkflowReceipt` exposes Run, Operation, changed Revision, report hash/bytes,
+and frame count. `WorkflowStatus` exposes Run, Operation, verified frame count,
+and Complete status. `WorkflowLimits` composes the public index, Workspace row/
+selection/commit/audit, Terrain, QA, and LandXML limits with intent, envelope,
+journal, report, and aggregate working ceilings. Builders replace each public
+child-limit family and expose intent-count, envelope, journal-byte, report-byte,
+and aggregate-working controls for constrained runs and evidence.
 
 `WorkflowPaths` supplies Source, index, Workspace, and Run-root paths on every
 start or resume. Paths are not reconstructed from journal bytes. The journal
 stores bounded platform-tagged path-binding hashes, and resume rejects any
 mismatch before mutation.
 
-`WorkflowIntent` contains:
+`WorkflowRunIntent` contains:
 
 - caller-supplied nonzero Run and Workspace Operation identities;
 - a bounded sorted unique set of explicit Source ordinals to change from the
@@ -302,6 +327,23 @@ audit.json    canonical complete report
 
 Temporary journal, XML, and report stages are sibling names with a private
 fixed prefix. Unknown children are never deleted.
+
+The binary is a thin bounded grammar and presentation layer:
+
+```text
+terrain-demo start|resume [OPTIONS] SOURCE INDEX WORKSPACE RUN_ROOT
+terrain-demo inspect RUN_ROOT
+```
+
+Start/resume require `--run-id HEX32`, `--operation-id HEX32`,
+`--baseline HEX64`, one or more `--exclude-ground-ordinal N` values, and
+explicit `--date`/`--time` LandXML values. Detached observations use repeated
+`--check-point ID,X,Y,Z`; the replacement classification, Surface name, and
+explicit unknown-CRS metric assertion are bounded options. Resume repeats the
+identical request. Inspect opens only the Run root and reports Run, Operation,
+verified frame count, and Complete status. It may repair a torn final journal
+suffix to the last verified frame, but it never opens Source, index, Workspace,
+LandXML, or report state.
 
 ## Journal format
 
@@ -364,6 +406,12 @@ frame with a bad hash, sequence, previous hash, reserved field, kind order, or
 semantic fact is corruption, not a disposable suffix. Unknown versions are
 incompatible.
 
+After a torn-suffix repair, inspection revalidates the Run-root directory
+identity under the lock. If the root was replaced after the repair became
+durable, it returns `PWF_PUBLICATION_INDETERMINATE` at `inspect` with the
+indeterminate phase `journal-checkpoint`, rather than claiming the inspected
+path is stable.
+
 Every checkpoint is independently revalidated against Workspace state, a
 recomputed Revision Audit, a rederived Terrain descriptor, a reevaluated QA
 report, the ensured LandXML target, or the canonical report. Journal claims
@@ -381,9 +429,10 @@ Both entrypoints run one state machine.
 
 ### Start
 
-1. Validate the complete request and Run root without mutation.
+1. Validate the complete request and existing Run root, capture its directory
+   identity, and acquire the exclusive `run.lock`.
 2. Open and fully verify the Source, prepare/open the Spatial Index, and
-   open/create the Workspace.
+   open the existing Workspace. Start never creates a Workspace.
 3. Validate Source, Workspace, classification Attribute, baseline Revision,
    explicit ordinals, and target paths.
 4. Publish the journal Intent containing the already chosen Operation
@@ -391,7 +440,20 @@ Both entrypoints run one state machine.
 5. Advance the shared state machine.
 
 If start fails before Intent publication, no Workflow Run exists and no
-Workspace mutation was attempted.
+Workspace mutation was attempted. The fixed empty `run.lock` and independently
+valid rebuildable index work may exist; neither is a Workflow checkpoint or
+Workspace Edit.
+
+The caller creates the Workspace separately through the public
+`point-workspace` lifecycle and supplies its current
+`workspace.head().provenance().revision()` as the baseline. The classification
+example demonstrates Workspace setup and reports Revision identities. The
+Workspace's selected `U8` Attribute must be Source Attribute 6, the
+`source-las` classification column, as exposed by
+`Workspace::schema().classification()`. After retaining the current head
+identity, the caller drops all Workspace/Snapshot/PointSet handles so the
+Workflow can acquire the exclusive lock. An absent Workspace is
+`PWF_INVALID_REQUEST` before Run creation or Workspace mutation.
 
 ### Resume
 
@@ -430,7 +492,7 @@ After Revision resolution, the workflow:
 6. deterministically encodes and no-replace ensures `audit.json`, then appends
    `ReportEnsured`;
 7. revalidates every final identity and hash, appends `Complete`, and only then
-   returns a Workflow receipt.
+   marks terminal progress and returns a Workflow receipt.
 
 Terrain, Revision Audit, QA, and the change envelope are recomputed on resume.
 Their observation frames detect nondeterminism; they are not persistence or
@@ -469,11 +531,14 @@ contains:
 
 - Run, Source, Workspace, baseline/changed Revision, and Operation identities;
 - normalized request and binding hashes;
+- a named source-independent `semantic_results_hash` while retaining every
+  exact identity elsewhere in the report;
 - Edit Point count, Revision transitions, Edit Footprint, and audit hashes;
 - baseline and changed Terrain descriptor counts and hashes;
 - Surface Change Envelope counts, bounds, and hashes;
 - ordered Check Point outcomes and residual statistics;
-- LandXML disposition, content hash, bytes, vertex count, and face count;
+- the stable `ensured_exact` LandXML outcome, content hash, bytes, vertex count,
+  and face count;
 - every semantic resource ceiling; and
 - an explicit statement that partner, downstream, and human-workflow
   acceptance was not evaluated.
@@ -505,39 +570,90 @@ The app never automatically retries an uncertain mutation, overwrites a
 conflicting output, replaces a Source, deletes unknown files, or guesses a new
 Operation Identity.
 
+The package facade exposes stable getters for `code`, `stage`, `certainty`, an
+optional indeterminate `publication_phase`, `recovery_action`, and any known
+Run, Source, Workspace, Operation, or Revision identity. The CLI renders that
+same bounded information.
+
+The stable codes are `PWF_INVALID_REQUEST`, `PWF_RESOURCE_LIMIT`,
+`PWF_CANCELLED`, `PWF_SOURCE_MISMATCH`, `PWF_WORKSPACE_MISMATCH`,
+`PWF_STALE_BASELINE`, `PWF_OPERATION_REJECTED`,
+`PWF_OPERATION_INDETERMINATE`, `PWF_JOURNAL_CONFLICT`,
+`PWF_JOURNAL_CORRUPT`, `PWF_OUTPUT_CONFLICT`,
+`PWF_PUBLICATION_INDETERMINATE`, `PWF_IO`, and `PWF_INTERNAL`. Stage names are
+`validate`, `lock`, `source`, `index`, `workspace`, `intent-publication`,
+`operation-resolution`, `exact-selection`, `commit`, `revision-audit`,
+`terrain-derivation`, `surface-change-envelope`, `check-point-qa`,
+`landxml-ensure`, `report-ensure`, `complete-checkpoint`, and `inspect`.
+Certainty is `pre_publication`, `durable_fact`, or `indeterminate`; the last may
+name its exact publication phase.
+
 ## Verification and fault matrix
 
-All verification remains local. Public and process tests must prove:
+All verification remains local. The implemented component suites cover linked
+cancellation; exact Root/classification/historical/Revert Revision Audits;
+Revision and LandXML corruption, limits, races, publication faults, and lost
+acknowledgements; and the existing Terrain/QA resource and semantic contracts.
+Private journal tests exhaust the application-defined Intent-publication
+boundaries and the append-before-write, before-sync, and after-sync lost-
+acknowledgement boundaries using `Complete`. Private report tests exhaust the
+application-defined post-link boundaries. Representative report cases cover
+pre-link cancellation/failure, exact and conflicting `AlreadyExists` races,
+post-link replacement, target kind, staging/working limits, and stage/parent
+directory identity.
 
-- parent cancellation reaches the active Source/index/Workspace/Terrain/QA/
-  export child Job and no phase is falsely complete;
-- Root, classification, historical, and Revert Revision Audits have exact
-  transitions, hashes, and Edit Footprints across Source batch partitions;
-- generated LAS and LAZ audits and Workflow reports are byte-identical where
-  Source meaning is identical;
-- every Revision Audit, journal, report, Terrain, QA, and LandXML limit fails
-  before publishing a partial result;
-- start/resume at every checkpoint yields the same final report and at most one
-  Workspace Revision for the Operation Identity;
-- cancellation, injected failure, panic, and lost acknowledgement immediately
-  before and after journal Intent, Workspace ready/Revision, checkpoint sync,
-  LandXML link/sync, report link/sync, and Complete sync recover to an old or
-  complete new fact;
-- corrupt, truncated, gapped, forked, oversized, symlinked, or version-mismatched
-  journal and output files fail closed;
-- a stale Workspace head, changed Source, incompatible index, wrong path
-  binding, or conflicting output never mutates the Run or overwrites files;
-- the exclusive Run lock prevents concurrent mutation;
-- Source bytes are unchanged; and
-- all diagnostics remain bounded and name the stage, certainty, identity, and
-  only safe recovery action.
+The `terrain-demo` package has 33 tests: 18 unit/private tests, 12 public
+workflow-facade tests, and three process tests. The 15 public/process tests
+prove:
 
-The benchmark uses generated public APIs with a 10,000-Point default and
-documented 100,000/1,000,000 modes. It separately records cold start, resume
-after committed Edit, resume from retryable Workspace intent, LandXML and
-report reconciliation, journal/report bytes, phase times, and accounted
-resource ceilings. Worker heap is unclaimed unless it is actually measured on
-the worker thread. No benchmark is labeled partner or production evidence.
+- every prefix of the eight checkpoints resumes to the same final report and
+  at most one Workspace Revision for the Operation Identity;
+- exact report reconciliation/conflict, LandXML/report recovery, the exclusive
+  Run lock, path binding, and representative torn/corrupt journal behavior;
+- generated LAS and LAZ runs have matching explicitly source-independent
+  `semantic_results_hash` projections where Point meaning is identical, while
+  full reports retain and honestly differ on exact Source, Workspace, Run,
+  Operation, and Revision identities;
+- immediate parent cancellation publishes no false Complete checkpoint and
+  leaves Source bytes unchanged;
+- 12 public resource-limit families stop with `PWF_RESOURCE_LIMIT` and can be
+  retried or resumed as their durable prefix permits;
+- stale head, differently bound recorded rejection, changed Source, changed
+  Workspace identity, and deterministic Retryable Workspace intent fail or
+  recover without inventing another Operation identity;
+- `Workspace::schema().classification()` rejects any Attribute other than
+  Source Attribute 6 before Run or Workspace mutation; and
+- `start`, `resume`, and `inspect` expose bounded structured CLI diagnostics.
+
+These exhaustive labels apply only to the named application-defined boundary
+sets, not every possible operating-system fault. The named report cases,
+active-child cancellation, and corrupt frame topology are representative. The
+reader's fail-closed validation contract is exercised by torn, version,
+reserved-field, sequence, and semantic cases; v0.7 does not claim every
+possible corrupt journal topology or OS fault.
+
+The private workflow regression rederives the immediate-head Revert and proves
+an empty baseline-to-restored Surface Change Envelope. The LandXML suite
+additionally covers cancellation after target link with conservative
+indeterminate certainty and exact reconciliation on retry.
+
+The checked-in Criterion benchmark uses generated public APIs and accepts only
+the documented 10,000, 100,000, and 1,000,000-Point modes. The completed local
+10,000-Point smoke used ten samples:
+
+| Mode | Lower | Estimate | Upper |
+|---|---:|---:|---:|
+| Cold start | 153.38 ms | 157.84 ms | 161.25 ms |
+| Resume after committed Edit | 113.23 ms | 114.88 ms | 117.08 ms |
+| Resume from Retryable Workspace intent | 123.76 ms | 126.67 ms | 129.66 ms |
+| LandXML and report reconciliation | 96.871 ms | 97.629 ms | 98.365 ms |
+| Complete revalidation | 87.233 ms | 88.181 ms | 89.112 ms |
+
+The resulting journal was 2,804 bytes, the canonical report was 11,435 bytes,
+and the report named 114 semantic limit facts across eight frames. Worker peak
+heap is explicitly unmeasured. These observations use generated local data and
+are not labeled partner, production, downstream round-trip, or human-time
+evidence.
 
 ## Explicit exclusions
 
@@ -564,7 +680,7 @@ narrow workflow is technically ready to be exercised safely.
 
 ## Delivery slices
 
-Implementation proceeds in four reviewable slices:
+Implementation completed in four reviewable slices:
 
 1. linked child cancellation plus exact Revision Audit and public tests;
 2. idempotent LandXML ensure and publication/reconciliation fault tests;

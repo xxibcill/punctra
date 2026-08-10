@@ -1,7 +1,7 @@
 # Repository and Dependency Layout
 
-Status: current through the narrow v0.6 terrain/QA slice; later crates are
-created only with accepted behavior and a caller
+Status: current through the narrow v0.7 technical-readiness slice; later crates
+are created only with accepted behavior and a caller
 
 The repository is one Cargo workspace. Each current crate is independently
 buildable and exposes a smaller public interface than its private
@@ -28,8 +28,19 @@ apps/
       planner.rs
 
   terrain-demo/
-    src/main.rs
-    tests/process.rs
+    src/
+      lib.rs
+      main.rs
+      cli.rs
+      diagnostic.rs
+      journal.rs
+      report.rs
+      workflow.rs
+    benches/journal.rs
+    tests/
+      process.rs
+      workflow.rs
+      support/mod.rs
 
 crates/
   foundation-runtime/
@@ -91,12 +102,14 @@ crates/
       persistence.rs
       point_rows.rs
       point_set.rs
+      revision_audit.rs
       selection.rs
       workspace.rs
     examples/classify.rs
     benches/document.rs
     tests/
       interface.rs
+      revision_audit.rs
       row_stream.rs
       selection.rs
       persistence.rs
@@ -180,7 +193,7 @@ render-protocol -> point-contracts
 point-view -> render-protocol
 render-wgpu -> render-protocol + point-contracts
 renderer-demo -> source-las + point-index + point-view + render-protocol + render-wgpu
-terrain-demo -> source-las + point-index + point-workspace + point-terrain + point-contracts
+terrain-demo -> source-las + point-source + point-index + point-workspace + point-terrain + point-contracts + foundation-runtime
 ~~~
 
 Development-only edges may add fixture adapters, `criterion`, LAS writers, or
@@ -216,13 +229,15 @@ cargo bench -p point-index --bench index
 
 cargo test -p point-workspace --all-features
 cargo run --release -p point-workspace --example classify -- \
-  survey.laz survey.laz.pidx survey.pcw CLASSIFICATION_ATTRIBUTE_ID
+  survey.laz survey.laz.pidx survey.pcw 6
 cargo bench -p point-workspace --bench document
 
 cargo test -p point-terrain --all-features
 cargo run -p point-terrain --example derive
 cargo bench -p point-terrain --bench terrain
+cargo test -p terrain-demo --test workflow
 cargo test -p terrain-demo --test process
+cargo bench -p terrain-demo --bench journal
 
 cargo bench -p point-view --bench planner
 cargo test -p renderer-demo --test headless_smoke
@@ -233,8 +248,10 @@ PUNCTRA_REQUIRE_GPU=1 cargo test -p renderer-demo --test planner
 The Workspace direct example proves the one-deep-crate lifecycle without a GUI:
 LAS/LAZ open, index prepare/open, Workspace create, exact classification
 selection, classification commit, immediate-head Revert, and reopen.
-The terrain example proves the public in-memory Source-to-LandXML composition;
-the `terrain-demo` process test proves the generated LAS/LAZ composition.
+The terrain example proves the public in-memory Source-to-LandXML composition.
+The `terrain-demo` workflow and process tests prove the generated LAS/LAZ
+durable start/resume/inspect composition; its journal benchmark measures five
+generated restart modes.
 
 ## Private depth inside point-workspace
 
@@ -242,7 +259,8 @@ The public interface is compact:
 
 ~~~text
 create/open -> Workspace
-Workspace -> head/snapshot/revision_info
+Workspace -> schema/head/snapshot/revision_info
+Workspace -> revision_audit
 Snapshot -> select/select_point_ids -> PointSet
 Snapshot -> point_rows -> SnapshotPointBatches
 PointSet -> metadata/ids
@@ -260,6 +278,8 @@ Private behavior hidden behind it includes:
   cleanup;
 - request/delta hashing and sparse before/after rows;
 - immutable manifest, intent, rejection, and Revision encodings;
+- exact Revision-row validation, Source-position joining, transitions, hashes,
+  and Edit Footprint derivation;
 - no-replace publication, directory durability, lock ownership, and recovery;
 - cancellation/publication phase tracking; and
 - operation-specific memory, temporary, and durable ledgers.
@@ -276,7 +296,7 @@ The public interface is also compact:
 derive(Snapshot, TerrainRecipe, TerrainLimits) -> TerrainSurface
 TerrainSurface -> descriptor/vertices/faces
 TerrainSurface -> check_points -> CheckPointReport
-TerrainSurface -> export_landxml -> LandXmlReceipt
+TerrainSurface -> export_landxml/ensure_landxml -> LandXmlReceipt
 ~~~
 
 Private behavior includes exact row ingestion, normalized predicate inputs,
@@ -287,7 +307,8 @@ exporter registry is public.
 
 ## Persisted directories
 
-Index, Workspace, and caller-owned Export storage are separate:
+Index, Workspace, caller-owned Export storage, and the application Run root are
+separate:
 
 ~~~text
 survey.laz                    # immutable Source, host-owned
@@ -305,7 +326,11 @@ survey.pcw/
     <sequence>-<revision-id>.pwr
   scratch/                    # recognized disposable stages and live Point Sets
 
-existing-ground.xml          # caller-owned LandXML Export; never Workspace state
+run-root/
+  run.pwf                    # terrain-demo eight-frame Workflow journal
+  run.lock                   # exclusive Run lock
+  terrain.xml                # caller-owned exactly ensured LandXML Export
+  audit.json                 # caller-owned exactly ensured canonical report
 ~~~
 
 Ownership rules:
@@ -313,15 +338,19 @@ Ownership rules:
 - only `point-index` interprets `.pidx` and its sidecars;
 - only `point-workspace` interprets the Workspace directory;
 - the Source remains outside the Workspace and is never rewritten;
-- a Point Set spill is temporary and retained only by live handles; and
+- a Point Set spill is temporary and retained only by live handles;
 - `TerrainSurface`, View, and GPU state are not persisted as authoritative
-  document data; LandXML is a caller-requested deliverable only.
+  document data; LandXML and `audit.json` are caller-requested deliverables;
+  and
+- only `terrain-demo` interprets `run.pwf`; unknown Run-root children are never
+  deleted.
 
 ## Versioning
 
 Cargo semantic versions, persisted schema versions, deterministic algorithm
-versions, and the LandXML subset version are separate axes. A Cargo `0.6`
-version does not imply disk schema or terrain algorithm version 6.
+versions, and LandXML/journal/report format versions are separate axes. A Cargo
+`0.7` version does not imply Workspace disk schema or terrain algorithm version
+7.
 
 - Unknown persisted major versions fail explicitly.
 - Identity and persisted schema values remain opaque outside their owner.
@@ -331,9 +360,10 @@ version does not imply disk schema or terrain algorithm version 6.
 - Golden fixtures are required when more than one persisted version is
   supported.
 
-v0.6 does not change the Workspace disk schema and does not claim migration,
-compaction, or persisted Terrain Surfaces. Terrain algorithm version 1 and the
-supported LandXML subset evolve independently of Cargo versions.
+v0.7 does not change the Workspace disk schema and does not claim migration,
+compaction, or persisted Terrain Surfaces. Terrain algorithm version 1,
+Workspace schema version 1, Workflow journal version 1, and the supported
+LandXML/report subsets evolve independently of Cargo versions.
 
 ## Implementation order
 
@@ -342,10 +372,12 @@ Completed vertical slices are:
 1. render protocol and wgpu engine;
 2. adaptive View planning;
 3. verified Source contracts with memory/LAS/LAZ adapters;
-4. complete persistent Spatial Index and real-cloud View composition; and
-5. one deep durable classification Workspace; and
+4. complete persistent Spatial Index and real-cloud View composition;
+5. one deep durable classification Workspace;
 6. one exact Snapshot Point-row stream plus one deep deterministic Terrain/QA/
-   LandXML technical slice.
+   LandXML technical slice; and
+7. linked cancellation, exact Revision Audit/LandXML reconciliation, and one
+   private durable application Workflow Run with canonical evidence.
 
 The next accepted slice may add only terrain or workflow behavior earned by its
 real caller and evidence. COPC, general LandXML, UI, bindings, and other

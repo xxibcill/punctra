@@ -1,7 +1,7 @@
 # Module Catalog
 
-Status: current through the narrow v0.6 terrain/QA slice; broader terrain and
-export modules deferred
+Status: current through the narrow v0.7 technical-readiness slice; broader
+terrain and export modules deferred
 
 This is the ownership map for implemented crates. Each crate has one public
 job. Several private files may cooperate behind one deep interface; private
@@ -18,16 +18,16 @@ file boundaries are not public module promises.
 | `source-las` | Decode supported local LAS/LAZ through the Source contract. | LAS/LAZ path | `point-source` capability |
 | `point-index` | Prepare and query one rebuildable persistent spatial index. | Verified Source, target, limits | Complete `PreparedIndex`, candidates, display reads |
 | `point-workspace` | Make narrow exact classification selection/history durable and stream exact effective Point rows for one Source. | Complete index, schema, selection/row/commit requests | Workspace, Snapshot, Point rows, Point Set, commit/recovery outcomes |
-| `point-terrain` | Derive and evaluate the narrow v0.6 Terrain Surface and encode its supported deliverable. | Snapshot, Terrain Recipe, detached Check Points | `TerrainSurface`, QA report, LandXML receipt |
+| `point-terrain` | Derive and evaluate the narrow Terrain Surface and encode or reconcile its supported deliverable. | Snapshot, Terrain Recipe, detached Check Points | `TerrainSurface`, QA report, LandXML receipt |
 | `render-protocol` | Define generation-safe renderer-neutral point display state. | Camera and display values | Validated updates and frame values |
 | `point-view` | Plan one frozen View over a host-owned hierarchy without I/O. | Camera, viewport, hierarchy/residency, budget | Demand, requests, retention, retirements |
 | `render-wgpu` | Maintain and draw one wgpu representation of render-protocol state. | Render updates, frame, host target | Recorded commands, report, provisional picks |
 | `renderer-demo` | Exercise synthetic or indexed LAS/LAZ View-to-render composition. | CLI or generated inputs | Interactive demo or GPU-free process smoke |
-| `terrain-demo` | Exercise the headless LAS/LAZ-to-terrain composition. | LAS/LAZ and caller-owned paths/options | Indexed Workspace, Terrain/QA report, LandXML file |
+| `terrain-demo` | Own one recoverable headless LAS/LAZ-to-terrain Workflow Run. | Caller-owned paths, identities, baseline, correction/QA intent, limits | Eight-frame journal, Revision, Terrain/QA evidence, LandXML, canonical report |
 
 `source-copc`, constrained or persisted terrain, general LandXML, general
 application UI, bindings, and remote storage are not implemented modules in
-v0.6.
+v0.7.
 
 ## 1. point-contracts
 
@@ -46,7 +46,8 @@ round-trips, and contract tests run without I/O or a GPU.
 **Job:** standardize runtime-neutral bounded long-operation control.
 
 It owns `Job`, `OperationHandle`, `OperationControl`, progress phases,
-cancellation, and bounded pull-stream conventions. It does not own durable
+cancellation, direct parent-linked child waits, and bounded pull-stream
+conventions. It does not own durable
 Workspace `OperationId`, domain algorithms, storage, an async runtime, or a
 thread pool policy exposed to callers.
 
@@ -154,13 +155,23 @@ let outcome = workspace.commit(
     CommitRequest::set_classification(operation, points, 1),
     CommitLimits::default(),
 ).blocking_wait()?;
+let revision = match outcome {
+    CommitOutcome::Committed(receipt) => receipt.revision(),
+    other => return handle_noncommitted(other),
+};
+
+let audit = workspace
+    .revision_audit(revision, RevisionAuditLimits::default())
+    .blocking_wait()?;
 ~~~
 
 Public types include `Workspace`, `Snapshot`, `PointSet`, `PointQuery`,
 `SnapshotPointBatch`, `SnapshotPointBatches`, `SnapshotPointSummary`,
-`WorkspaceSchema`, the commit and Operation-resolution variants, explicit
-limit types, and bounded diagnostics. `PreparedIndex::source()` is the only
-Source seam needed by construction.
+`RevisionAudit`, `ClassificationTransition`, `WorkspaceSchema`, the commit and
+Operation-resolution variants, explicit limit types, and bounded diagnostics.
+`PreparedIndex::source()` is the only Source seam needed by construction.
+`Workspace::schema()` exposes the selected classification Attribute without
+exposing private manifest storage.
 
 It does not own Source discovery/verification, index building, screen
 projection, general Attribute streaming or position edits, named Point Sets,
@@ -174,9 +185,15 @@ Point-row tests cover root/Edit/history/Revert overlays, partition-independent
 hashes, generated LAS/LAZ, cumulative limits, complete no-match streams, fused
 error, and cancellation.
 
+The v0.7 audit seam adds `RevisionAudit`, `ClassificationTransition`, and
+`RevisionAuditLimits` behind `Workspace::revision_audit`. It validates immutable
+Revision structure and hashes, joins exact Source positions, and publishes
+complete transitions, Point membership/content hashes, and Edit Footprint only
+after bounded completion. It adds no persisted audit cache or schema change.
+
 ## 6. point-terrain
 
-**Job:** derive and evaluate the narrow v0.6 Terrain Surface and encode its one
+**Job:** derive and evaluate the narrow Terrain Surface and encode its one
 supported deliverable.
 
 `point-terrain` owns exact Ground Input ingestion through
@@ -199,7 +216,7 @@ let report = surface
     .check_points(check_points, CheckPointLimits::default())
     .blocking_wait()?;
 let receipt = surface
-    .export_landxml(target, options, LandXmlLimits::default())
+    .ensure_landxml(target, options, LandXmlLimits::default())
     .blocking_wait()?;
 ~~~
 
@@ -207,11 +224,11 @@ It does not own Source/index discovery, Workspace edits, Breaklines,
 constrained topology, terrain persistence, coordinate transformation, general
 LandXML, rendering, or host recovery policy.
 
-**Independent proof:** 41 package tests—15 unit/private and 26 integration—plus
-one documentation test cover the public interface, robust topology/oracle
-agreement, degeneracy and every resource family, detached QA, injected durable
-LandXML certainty boundaries, and independent XML semantics. A public example
-and generated 10k/100k/1M-capable benchmark compose only public seams;
+**Independent proof:** package and documentation tests cover the public
+interface, robust topology/oracle agreement, degeneracy and every resource
+family, detached QA, exact-existing reconciliation, injected durable LandXML
+certainty boundaries, and independent XML semantics. A public example and
+generated 10k/100k/1M-capable benchmark compose only public seams;
 `terrain-demo` is the real LAS/LAZ process caller.
 
 ## 7. render-protocol
@@ -267,22 +284,51 @@ materialization seam.
 
 ## 11. terrain-demo
 
-**Job:** exercise the complete GPU-free LAS/LAZ-to-Terrain composition without
-turning host policy into another foundation interface.
+**Job:** own one recoverable GPU-free LAS/LAZ-to-Terrain Workflow Run without
+turning application policy into another foundation crate.
 
-The application Full-verifies a supported LAS/LAZ Source, prepares or opens its
-Spatial Index, creates or opens one Workspace, derives the class-2 Terrain,
-optionally evaluates a built-in covered/gap QA sample, and durably creates the
-supported LandXML file with explicit document date/time. Unknown Coordinate
-Reference requires the caller's explicit metric-metre assertion. Its optional
-`--exercise-correction-revert ORDINAL` path performs one exact classification
-correction, re-Derivation, immediate-head Revert, and exact Surface-restoration
-check.
+The package exposes a small application facade: `WorkflowPaths`,
+`WorkflowRunIntent`, `WorkflowLimits`, `WorkflowReceipt`, `WorkflowStatus`,
+`WorkflowFailure`, `start_run`, `resume_run`, and `inspect_run`. The binary is a
+thin bounded grammar and presentation layer with `start`, `resume`, and
+`inspect` commands. Start/resume require the same caller-owned Run/Operation
+identities, expected baseline Revision, nonempty exact Ground-ordinal set,
+normalized Terrain Recipe, detached Check Points, LandXML options, four paths,
+and limits.
 
-**Independent proof:** one process integration test runs generated LAS and LAZ
-through the complete composition without a GPU and checks deterministic output
-semantics, changed Ground Input, exact post-Revert geometry/topology/vertices/
-faces, and byte-identical Source data.
+The Workflow never creates a Workspace. The caller creates one through the
+public `point-workspace` lifecycle, supplies the current head as the baseline,
+uses Source Attribute 6 (`source-las` classification) as the selected `U8`
+Attribute, and provides an already existing Run-root directory. An absent
+Workspace is an invalid request before Run creation or Workspace mutation.
+
+Private `journal`, `workflow`, `report`, and `diagnostic` modules own the
+exclusive Run lock, exact path bindings, eight-frame journal, Operation
+resolution, Revision Audit, baseline/changed Derivation, conservative Surface
+Change Envelope, QA, LandXML/report reconciliation, and one-action structured
+failures. The fixed Run root contains `run.pwf`, `run.lock`, `terrain.xml`, and
+`audit.json`. No Terrain Surface or audit cache is persisted.
+
+**Independent proof:** 33 package tests—18 unit/private, 12 workflow-facade,
+and three process—cover every eight-frame restart prefix, one-Revision
+idempotence, exact report/XML conflict and recovery, 12 public limit families,
+LAS/LAZ semantic projection, Source immutability, stale/mismatched state,
+Retryable intent, cancellation, and CLI diagnostics. The generated
+10k/100k/1M-capable Criterion benchmark has five
+cold/restart/reconciliation modes. Its evidence is generated-only and does not
+claim worker heap or external acceptance.
+
+Private journal faults exhaust the application-defined Intent-publication and
+`Complete` append-before-write, before-sync, and after-sync lost-
+acknowledgement boundaries. Private report faults exhaust the application-
+defined post-link boundaries. Pre-link cancellation/failure, exact/conflicting
+`AlreadyExists` races, post-link replacement, target kind, staging/working
+limits, and stage/parent directory identity cases are representative. This is
+not a claim about every possible operating-system fault.
+
+The private workflow regression additionally rederives the immediate-head
+Revert and proves that its baseline-to-restored Surface Change Envelope is
+empty.
 
 ## Deferred modules
 
@@ -307,7 +353,7 @@ The allowlist is stricter than what Cargo can compile:
 | `point-view` | `render-protocol` and narrow math/value dependencies |
 | `render-wgpu` | `render-protocol`, `point-contracts` |
 | `renderer-demo` | only the Source/index/View/render crates it composes |
-| `terrain-demo` | only the Source/index/Workspace/terrain crates it composes |
+| `terrain-demo` | `source-las`, `point-source`, `point-index`, `point-workspace`, `point-terrain`, `point-contracts`, `foundation-runtime` |
 
 Additional rules:
 
@@ -327,8 +373,9 @@ The implemented reusable seams are:
 2. runtime-neutral work control in `foundation-runtime`;
 3. verified bounded `point-source` access shared by memory/LAS/LAZ;
 4. complete persistent `point-index` preparation and reads;
-5. the one-deep-crate `point-workspace` document and exact Point-row interface;
-6. deterministic Terrain Derivation, QA, and supported deliverable creation in
+5. the one-deep-crate `point-workspace` document, exact Point-row, and Revision
+   Audit interface;
+6. deterministic Terrain Derivation, QA, and supported deliverable ensure in
    `point-terrain`;
 7. generation-safe `render-protocol` values;
 8. deterministic `point-view` planning; and

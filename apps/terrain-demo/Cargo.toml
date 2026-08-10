@@ -9,15 +9,26 @@ repository.workspace = true
 publish = false
 
 [dependencies]
+blake3.workspace = true
+foundation-runtime.workspace = true
+getrandom.workspace = true
 point-contracts.workspace = true
 point-index.workspace = true
+point-source.workspace = true
 point-terrain.workspace = true
 point-workspace.workspace = true
 source-las.workspace = true
+thiserror.workspace = true
 
 [dev-dependencies]
+criterion.workspace = true
 las.workspace = true
 roxmltree.workspace = true
+serde_json = "1.0.151"
+
+[[bench]]
+name = "journal"
+harness = false
 
 [lints]
 workspace = true

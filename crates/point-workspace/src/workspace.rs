@@ -76,6 +76,12 @@ impl Workspace {
         self.session.identity
     }
 
+    /// Returns the immutable editable-Attribute schema fixed at creation.
+    #[must_use]
+    pub fn schema(&self) -> WorkspaceSchema {
+        self.session.schema
+    }
+
     /// Returns the immutable Source identity.
     #[must_use]
     pub fn source(&self) -> SourceId {

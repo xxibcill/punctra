@@ -13,10 +13,14 @@ Sets, sparse classification Revisions, and Operation recovery. The completed
 [v0.6 Terrain and QA benchmark
 scope](docs/design/terrain-qa-benchmark-v0.6.md) additionally permits the exact
 `Snapshot::point_rows` stream, one deep `point-terrain` crate, and the private
-headless `terrain-demo` composition. Format decoding belongs only in accepted
-Source adapter crates. Networking, screen selection, general editing,
-constrained or persistent terrain, general export, Source rewriting, and
-general host UI remain in callers or future projects unless the scope is
+headless `terrain-demo` composition. The completed [v0.7 technical-readiness
+scope](docs/design/technical-alpha-readiness-v0.7.md) permits linked child
+cancellation, exact Revision Audit and Edit Footprint facts, exact LandXML
+ensure/reconciliation, and the private durable `terrain-demo` Workflow Run,
+canonical report, and structured recovery diagnostics. Format decoding belongs
+only in accepted Source adapter crates. Networking, screen selection, general
+editing, constrained or persistent terrain, general export, Source rewriting,
+and general host UI remain in callers or future projects unless the scope is
 explicitly revised.
 
 ## Local verification
@@ -34,11 +38,13 @@ cargo bench -p source-las --bench read
 cargo bench -p point-index --bench index
 cargo bench -p point-workspace --bench document
 cargo bench -p point-terrain --bench terrain
+cargo bench -p terrain-demo --bench journal
 cargo run -p source-memory --example memory_source
 cargo run -p point-index --example direct_use
 cargo test -p point-workspace --all-features
 cargo run -p point-terrain --example derive
 cargo test -p point-terrain --all-features
+cargo test -p terrain-demo --test workflow
 cargo test -p terrain-demo --test process
 cargo test -p renderer-demo --test headless_smoke
 PUNCTRA_REQUIRE_GPU=1 cargo test -p render-wgpu --test offscreen
@@ -54,6 +60,8 @@ PUNCTRA_POINT_WORKSPACE_BENCH_POINTS=10000000 \
   cargo bench -p point-workspace --bench document
 PUNCTRA_TERRAIN_BENCH_POINTS=100000 \
   cargo bench -p point-terrain --bench terrain
+PUNCTRA_TERRAIN_WORKFLOW_BENCH_POINTS=100000 \
+  cargo bench -p terrain-demo --bench journal
 ```
 
 The terrain benchmark accepts positive generated sizes through one million
@@ -62,6 +70,13 @@ Points; its intended scales are 10,000, 100,000, and 1,000,000. The default is
 `worker_heap_measurement` means that no observed worker-heap measurement is
 claimed.
 
+The Workflow benchmark accepts exactly 10,000, 100,000, or 1,000,000 generated
+Points. It measures cold start, committed-Edit resume, Retryable-intent resume,
+LandXML/report reconciliation, and Complete revalidation. Its journal/report
+bytes and semantic limit facts are deterministic generated evidence. It does
+not measure worker peak heap or establish production, partner, downstream, or
+human-workflow acceptance.
+
 Exercise the complete real-cloud process path without requiring a GPU:
 
 ```bash
@@ -69,22 +84,36 @@ cargo run -p source-las --example inspect -- path/to/source.laz
 cargo run --release -p renderer-demo -- --smoke path/to/source.laz path/to/source.pidx
 cargo run --release -p point-workspace --example classify -- \
   path/to/source.laz path/to/source.pidx path/to/workspace.pcw \
-  CLASSIFICATION_ATTRIBUTE_ID
-cargo run --release -p terrain-demo -- \
-  --date 2026-08-10 --time 00:00:00Z --qa-sample \
-  --exercise-correction-revert 4 \
-  path/to/source.laz path/to/source.pidx path/to/workspace.pcw \
-  path/to/existing-ground.xml
+  6
+cargo run --release -p terrain-demo -- start \
+  --run-id "$RUN_ID_HEX" --operation-id "$OPERATION_ID_HEX" \
+  --baseline "$BASELINE_REVISION_HEX" --exclude-ground-ordinal 4 \
+  --date 2026-08-10 --time 00:00:00Z \
+  --assert-unknown-crs-metric \
+  path/to/source.laz path/to/source.pidx path/to/workspace.pcw path/to/run-root
+cargo run --release -p terrain-demo -- inspect path/to/run-root
 ```
 
-`terrain-demo` requires metric-metre coordinates and performs no transformation.
-For a Source whose Coordinate Reference is explicitly unknown, the caller may
-add `--assert-unknown-crs-metric` only when that unit assertion is independently
-known to be true.
-`--exercise-correction-revert ORDINAL` requires that Source ordinal to be in
-the current class-2 Ground Input. It commits class 1, derives the changed
-Surface, appends an immediate-head Revert, and fails unless the original
-geometry/topology/vertices/faces are restored.
+`RUN_ID_HEX` and `OPERATION_ID_HEX` are caller-owned nonzero 32-character hex
+identities; `BASELINE_REVISION_HEX` is the exact expected 64-character
+Workspace head identity. Create the Workspace separately through
+`point-workspace`; its classification example demonstrates setup and prints
+Revision identities. Its selected `U8` Attribute must be Source Attribute 6,
+the `source-las` classification column. `terrain-demo` opens but never creates
+it, and an absent Workspace is `PWF_INVALID_REQUEST` before Run creation or
+Workspace mutation. Retain the current head identity, then drop all
+Workspace/Snapshot/PointSet handles before starting so the app can acquire the
+exclusive Workspace lock.
+`path/to/run-root` must already be a directory. Resume repeats the identical
+command and request with `resume` in place of `start`. At least one repeated
+`--exclude-ground-ordinal ORDINAL` is required, and every listed ordinal must
+be in the baseline class-2 Ground Input. Optional detached observations use
+repeated `--check-point ID,X,Y,Z` arguments.
+
+`terrain-demo` requires metric-metre coordinates and performs no
+transformation. For a Source whose Coordinate Reference is explicitly unknown,
+the caller may add `--assert-unknown-crs-metric` only when that unit assertion
+is independently known to be true.
 
 GPU acceptance tests use any available headless wgpu adapter. They skip when no
 adapter is present unless `PUNCTRA_REQUIRE_GPU=1`. Run all verification locally;
