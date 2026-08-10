@@ -662,29 +662,153 @@ enum AttributeValuesKind {
     FixedBytes { width: NonZeroU32, payload: Vec<u8> },
 }
 
+/// A borrowed, exactly typed view of one Attribute column.
+///
+/// This is the canonical dispatch surface for Attribute storage. Consumers
+/// that need type-specific behavior can match the value and receive the
+/// corresponding slice without separately consulting [`AttributeValues::data_type`].
+#[derive(Clone, Copy, Debug)]
+pub enum AttributeValuesView<'a> {
+    /// Signed 8-bit values.
+    I8(&'a [i8]),
+    /// Unsigned 8-bit values.
+    U8(&'a [u8]),
+    /// Signed 16-bit values.
+    I16(&'a [i16]),
+    /// Unsigned 16-bit values.
+    U16(&'a [u16]),
+    /// Signed 32-bit values.
+    I32(&'a [i32]),
+    /// Unsigned 32-bit values.
+    U32(&'a [u32]),
+    /// Signed 64-bit values.
+    I64(&'a [i64]),
+    /// Unsigned 64-bit values.
+    U64(&'a [u64]),
+    /// IEEE 754 32-bit values.
+    F32(&'a [f32]),
+    /// IEEE 754 64-bit values.
+    F64(&'a [f64]),
+    /// Fixed-width opaque values and their contiguous payload.
+    FixedBytes {
+        /// Bytes in each value.
+        width: NonZeroU32,
+        /// Contiguous row payload.
+        payload: &'a [u8],
+    },
+}
+
+impl AttributeValuesView<'_> {
+    /// Returns the exact Attribute storage type.
+    #[must_use]
+    pub const fn data_type(self) -> AttributeDataType {
+        match self {
+            Self::I8(_) => AttributeDataType::I8,
+            Self::U8(_) => AttributeDataType::U8,
+            Self::I16(_) => AttributeDataType::I16,
+            Self::U16(_) => AttributeDataType::U16,
+            Self::I32(_) => AttributeDataType::I32,
+            Self::U32(_) => AttributeDataType::U32,
+            Self::I64(_) => AttributeDataType::I64,
+            Self::U64(_) => AttributeDataType::U64,
+            Self::F32(_) => AttributeDataType::F32,
+            Self::F64(_) => AttributeDataType::F64,
+            Self::FixedBytes { width, .. } => AttributeDataType::FixedBytes(width),
+        }
+    }
+
+    /// Returns the number of Attribute rows.
+    #[must_use]
+    pub fn len(self) -> usize {
+        match self {
+            Self::I8(values) => values.len(),
+            Self::U8(values) => values.len(),
+            Self::I16(values) => values.len(),
+            Self::U16(values) => values.len(),
+            Self::I32(values) => values.len(),
+            Self::U32(values) => values.len(),
+            Self::I64(values) => values.len(),
+            Self::U64(values) => values.len(),
+            Self::F32(values) => values.len(),
+            Self::F64(values) => values.len(),
+            Self::FixedBytes { width, payload } => {
+                let Ok(width) = usize::try_from(width.get()) else {
+                    return 0;
+                };
+                payload.len() / width
+            }
+        }
+    }
+
+    /// Reports whether the column has no rows.
+    #[must_use]
+    pub fn is_empty(self) -> bool {
+        self.len() == 0
+    }
+
+    /// Returns the encoded payload size without container overhead.
+    #[must_use]
+    pub fn payload_bytes(self) -> u64 {
+        match self {
+            Self::I8(values) => vector_payload_bytes::<i8>(values.len()),
+            Self::U8(values) => vector_payload_bytes::<u8>(values.len()),
+            Self::I16(values) => vector_payload_bytes::<i16>(values.len()),
+            Self::U16(values) => vector_payload_bytes::<u16>(values.len()),
+            Self::I32(values) => vector_payload_bytes::<i32>(values.len()),
+            Self::U32(values) => vector_payload_bytes::<u32>(values.len()),
+            Self::I64(values) => vector_payload_bytes::<i64>(values.len()),
+            Self::U64(values) => vector_payload_bytes::<u64>(values.len()),
+            Self::F32(values) => vector_payload_bytes::<f32>(values.len()),
+            Self::F64(values) => vector_payload_bytes::<f64>(values.len()),
+            Self::FixedBytes { payload, .. } => u64::try_from(payload.len()).unwrap_or(u64::MAX),
+        }
+    }
+}
+
+impl AttributeValuesKind {
+    const fn view(&self) -> AttributeValuesView<'_> {
+        match self {
+            Self::I8(values) => AttributeValuesView::I8(values.as_slice()),
+            Self::U8(values) => AttributeValuesView::U8(values.as_slice()),
+            Self::I16(values) => AttributeValuesView::I16(values.as_slice()),
+            Self::U16(values) => AttributeValuesView::U16(values.as_slice()),
+            Self::I32(values) => AttributeValuesView::I32(values.as_slice()),
+            Self::U32(values) => AttributeValuesView::U32(values.as_slice()),
+            Self::I64(values) => AttributeValuesView::I64(values.as_slice()),
+            Self::U64(values) => AttributeValuesView::U64(values.as_slice()),
+            Self::F32(values) => AttributeValuesView::F32(values.as_slice()),
+            Self::F64(values) => AttributeValuesView::F64(values.as_slice()),
+            Self::FixedBytes { width, payload } => AttributeValuesView::FixedBytes {
+                width: *width,
+                payload: payload.as_slice(),
+            },
+        }
+    }
+}
+
 impl PartialEq for AttributeValues {
     fn eq(&self, other: &Self) -> bool {
-        match (&self.values, &other.values) {
-            (AttributeValuesKind::I8(left), AttributeValuesKind::I8(right)) => left == right,
-            (AttributeValuesKind::U8(left), AttributeValuesKind::U8(right)) => left == right,
-            (AttributeValuesKind::I16(left), AttributeValuesKind::I16(right)) => left == right,
-            (AttributeValuesKind::U16(left), AttributeValuesKind::U16(right)) => left == right,
-            (AttributeValuesKind::I32(left), AttributeValuesKind::I32(right)) => left == right,
-            (AttributeValuesKind::U32(left), AttributeValuesKind::U32(right)) => left == right,
-            (AttributeValuesKind::I64(left), AttributeValuesKind::I64(right)) => left == right,
-            (AttributeValuesKind::U64(left), AttributeValuesKind::U64(right)) => left == right,
-            (AttributeValuesKind::F32(left), AttributeValuesKind::F32(right)) => {
+        match (self.view(), other.view()) {
+            (AttributeValuesView::I8(left), AttributeValuesView::I8(right)) => left == right,
+            (AttributeValuesView::U8(left), AttributeValuesView::U8(right)) => left == right,
+            (AttributeValuesView::I16(left), AttributeValuesView::I16(right)) => left == right,
+            (AttributeValuesView::U16(left), AttributeValuesView::U16(right)) => left == right,
+            (AttributeValuesView::I32(left), AttributeValuesView::I32(right)) => left == right,
+            (AttributeValuesView::U32(left), AttributeValuesView::U32(right)) => left == right,
+            (AttributeValuesView::I64(left), AttributeValuesView::I64(right)) => left == right,
+            (AttributeValuesView::U64(left), AttributeValuesView::U64(right)) => left == right,
+            (AttributeValuesView::F32(left), AttributeValuesView::F32(right)) => {
                 float_bits_equal(left, right, f32::to_bits)
             }
-            (AttributeValuesKind::F64(left), AttributeValuesKind::F64(right)) => {
+            (AttributeValuesView::F64(left), AttributeValuesView::F64(right)) => {
                 float_bits_equal(left, right, f64::to_bits)
             }
             (
-                AttributeValuesKind::FixedBytes {
+                AttributeValuesView::FixedBytes {
                     width: left_width,
                     payload: left_payload,
                 },
-                AttributeValuesKind::FixedBytes {
+                AttributeValuesView::FixedBytes {
                     width: right_width,
                     payload: right_payload,
                 },
@@ -714,51 +838,51 @@ impl Serialize for AttributeValuesKind {
     where
         S: serde::Serializer,
     {
-        match self {
-            Self::I8(values) => {
+        match self.view() {
+            AttributeValuesView::I8(values) => {
                 serializer.serialize_newtype_variant("AttributeValuesKind", 0, "i8", values)
             }
-            Self::U8(values) => {
+            AttributeValuesView::U8(values) => {
                 serializer.serialize_newtype_variant("AttributeValuesKind", 1, "u8", values)
             }
-            Self::I16(values) => {
+            AttributeValuesView::I16(values) => {
                 serializer.serialize_newtype_variant("AttributeValuesKind", 2, "i16", values)
             }
-            Self::U16(values) => {
+            AttributeValuesView::U16(values) => {
                 serializer.serialize_newtype_variant("AttributeValuesKind", 3, "u16", values)
             }
-            Self::I32(values) => {
+            AttributeValuesView::I32(values) => {
                 serializer.serialize_newtype_variant("AttributeValuesKind", 4, "i32", values)
             }
-            Self::U32(values) => {
+            AttributeValuesView::U32(values) => {
                 serializer.serialize_newtype_variant("AttributeValuesKind", 5, "u32", values)
             }
-            Self::I64(values) => {
+            AttributeValuesView::I64(values) => {
                 serializer.serialize_newtype_variant("AttributeValuesKind", 6, "i64", values)
             }
-            Self::U64(values) => {
+            AttributeValuesView::U64(values) => {
                 serializer.serialize_newtype_variant("AttributeValuesKind", 7, "u64", values)
             }
-            Self::F32(values) => serializer.serialize_newtype_variant(
+            AttributeValuesView::F32(values) => serializer.serialize_newtype_variant(
                 "AttributeValuesKind",
                 8,
                 "f32_bits",
                 &FloatBits32(values),
             ),
-            Self::F64(values) => serializer.serialize_newtype_variant(
+            AttributeValuesView::F64(values) => serializer.serialize_newtype_variant(
                 "AttributeValuesKind",
                 9,
                 "f64_bits",
                 &FloatBits64(values),
             ),
-            Self::FixedBytes { width, payload } => {
+            AttributeValuesView::FixedBytes { width, payload } => {
                 let mut state = serializer.serialize_struct_variant(
                     "AttributeValuesKind",
                     10,
                     "fixed_bytes",
                     2,
                 )?;
-                state.serialize_field("width", width)?;
+                state.serialize_field("width", &width)?;
                 state.serialize_field("payload", payload)?;
                 state.end()
             }
@@ -914,45 +1038,22 @@ impl AttributeValues {
         Self { values }
     }
 
+    /// Returns the canonical borrowed view of this column's typed storage.
+    #[must_use]
+    pub const fn view(&self) -> AttributeValuesView<'_> {
+        self.values.view()
+    }
+
     /// Returns the exact Attribute storage type.
     #[must_use]
     pub const fn data_type(&self) -> AttributeDataType {
-        match &self.values {
-            AttributeValuesKind::I8(_) => AttributeDataType::I8,
-            AttributeValuesKind::U8(_) => AttributeDataType::U8,
-            AttributeValuesKind::I16(_) => AttributeDataType::I16,
-            AttributeValuesKind::U16(_) => AttributeDataType::U16,
-            AttributeValuesKind::I32(_) => AttributeDataType::I32,
-            AttributeValuesKind::U32(_) => AttributeDataType::U32,
-            AttributeValuesKind::I64(_) => AttributeDataType::I64,
-            AttributeValuesKind::U64(_) => AttributeDataType::U64,
-            AttributeValuesKind::F32(_) => AttributeDataType::F32,
-            AttributeValuesKind::F64(_) => AttributeDataType::F64,
-            AttributeValuesKind::FixedBytes { width, .. } => AttributeDataType::FixedBytes(*width),
-        }
+        self.view().data_type()
     }
 
     /// Returns the number of Attribute rows.
     #[must_use]
     pub fn len(&self) -> usize {
-        match &self.values {
-            AttributeValuesKind::I8(values) => values.len(),
-            AttributeValuesKind::U8(values) => values.len(),
-            AttributeValuesKind::I16(values) => values.len(),
-            AttributeValuesKind::U16(values) => values.len(),
-            AttributeValuesKind::I32(values) => values.len(),
-            AttributeValuesKind::U32(values) => values.len(),
-            AttributeValuesKind::I64(values) => values.len(),
-            AttributeValuesKind::U64(values) => values.len(),
-            AttributeValuesKind::F32(values) => values.len(),
-            AttributeValuesKind::F64(values) => values.len(),
-            AttributeValuesKind::FixedBytes { width, payload } => {
-                let Ok(width) = usize::try_from(width.get()) else {
-                    return 0;
-                };
-                payload.len() / width
-            }
-        }
+        self.view().len()
     }
 
     /// Reports whether the column has no rows.
@@ -964,21 +1065,7 @@ impl AttributeValues {
     /// Returns the encoded payload size without container overhead.
     #[must_use]
     pub fn payload_bytes(&self) -> u64 {
-        match &self.values {
-            AttributeValuesKind::I8(values) => vector_payload_bytes::<i8>(values.len()),
-            AttributeValuesKind::U8(values) => vector_payload_bytes::<u8>(values.len()),
-            AttributeValuesKind::I16(values) => vector_payload_bytes::<i16>(values.len()),
-            AttributeValuesKind::U16(values) => vector_payload_bytes::<u16>(values.len()),
-            AttributeValuesKind::I32(values) => vector_payload_bytes::<i32>(values.len()),
-            AttributeValuesKind::U32(values) => vector_payload_bytes::<u32>(values.len()),
-            AttributeValuesKind::I64(values) => vector_payload_bytes::<i64>(values.len()),
-            AttributeValuesKind::U64(values) => vector_payload_bytes::<u64>(values.len()),
-            AttributeValuesKind::F32(values) => vector_payload_bytes::<f32>(values.len()),
-            AttributeValuesKind::F64(values) => vector_payload_bytes::<f64>(values.len()),
-            AttributeValuesKind::FixedBytes { payload, .. } => {
-                u64::try_from(payload.len()).unwrap_or(u64::MAX)
-            }
-        }
+        self.view().payload_bytes()
     }
 
     /// Copies a row range while preserving the exact Attribute type.
@@ -988,18 +1075,18 @@ impl AttributeValues {
     /// Returns an error for an invalid row range.
     pub fn slice_rows(&self, rows: Range<usize>) -> Result<Self, ContractError> {
         validate_row_range_allow_empty(&rows, self.len())?;
-        match &self.values {
-            AttributeValuesKind::I8(values) => Ok(Self::i8(values[rows].to_vec())),
-            AttributeValuesKind::U8(values) => Ok(Self::u8(values[rows].to_vec())),
-            AttributeValuesKind::I16(values) => Ok(Self::i16(values[rows].to_vec())),
-            AttributeValuesKind::U16(values) => Ok(Self::u16(values[rows].to_vec())),
-            AttributeValuesKind::I32(values) => Ok(Self::i32(values[rows].to_vec())),
-            AttributeValuesKind::U32(values) => Ok(Self::u32(values[rows].to_vec())),
-            AttributeValuesKind::I64(values) => Ok(Self::i64(values[rows].to_vec())),
-            AttributeValuesKind::U64(values) => Ok(Self::u64(values[rows].to_vec())),
-            AttributeValuesKind::F32(values) => Ok(Self::f32(values[rows].to_vec())),
-            AttributeValuesKind::F64(values) => Ok(Self::f64(values[rows].to_vec())),
-            AttributeValuesKind::FixedBytes { width, payload } => {
+        match self.view() {
+            AttributeValuesView::I8(values) => Ok(Self::i8(values[rows].to_vec())),
+            AttributeValuesView::U8(values) => Ok(Self::u8(values[rows].to_vec())),
+            AttributeValuesView::I16(values) => Ok(Self::i16(values[rows].to_vec())),
+            AttributeValuesView::U16(values) => Ok(Self::u16(values[rows].to_vec())),
+            AttributeValuesView::I32(values) => Ok(Self::i32(values[rows].to_vec())),
+            AttributeValuesView::U32(values) => Ok(Self::u32(values[rows].to_vec())),
+            AttributeValuesView::I64(values) => Ok(Self::i64(values[rows].to_vec())),
+            AttributeValuesView::U64(values) => Ok(Self::u64(values[rows].to_vec())),
+            AttributeValuesView::F32(values) => Ok(Self::f32(values[rows].to_vec())),
+            AttributeValuesView::F64(values) => Ok(Self::f64(values[rows].to_vec())),
+            AttributeValuesView::FixedBytes { width, payload } => {
                 let width_usize =
                     usize::try_from(width.get()).map_err(|_| ContractError::PayloadSizeOverflow)?;
                 let start = rows
@@ -1010,7 +1097,7 @@ impl AttributeValues {
                     .end
                     .checked_mul(width_usize)
                     .ok_or(ContractError::PayloadSizeOverflow)?;
-                Self::from_fixed_bytes(*width, payload[start..end].to_vec())
+                Self::from_fixed_bytes(width, payload[start..end].to_vec())
             }
         }
     }
@@ -1018,8 +1105,8 @@ impl AttributeValues {
     /// Returns signed 8-bit values when this column has that type.
     #[must_use]
     pub fn as_i8(&self) -> Option<&[i8]> {
-        match &self.values {
-            AttributeValuesKind::I8(values) => Some(values),
+        match self.view() {
+            AttributeValuesView::I8(values) => Some(values),
             _ => None,
         }
     }
@@ -1027,8 +1114,8 @@ impl AttributeValues {
     /// Returns unsigned 8-bit values when this column has that type.
     #[must_use]
     pub fn as_u8(&self) -> Option<&[u8]> {
-        match &self.values {
-            AttributeValuesKind::U8(values) => Some(values),
+        match self.view() {
+            AttributeValuesView::U8(values) => Some(values),
             _ => None,
         }
     }
@@ -1036,8 +1123,8 @@ impl AttributeValues {
     /// Returns signed 16-bit values when this column has that type.
     #[must_use]
     pub fn as_i16(&self) -> Option<&[i16]> {
-        match &self.values {
-            AttributeValuesKind::I16(values) => Some(values),
+        match self.view() {
+            AttributeValuesView::I16(values) => Some(values),
             _ => None,
         }
     }
@@ -1045,8 +1132,8 @@ impl AttributeValues {
     /// Returns unsigned 16-bit values when this column has that type.
     #[must_use]
     pub fn as_u16(&self) -> Option<&[u16]> {
-        match &self.values {
-            AttributeValuesKind::U16(values) => Some(values),
+        match self.view() {
+            AttributeValuesView::U16(values) => Some(values),
             _ => None,
         }
     }
@@ -1054,8 +1141,8 @@ impl AttributeValues {
     /// Returns signed 32-bit values when this column has that type.
     #[must_use]
     pub fn as_i32(&self) -> Option<&[i32]> {
-        match &self.values {
-            AttributeValuesKind::I32(values) => Some(values),
+        match self.view() {
+            AttributeValuesView::I32(values) => Some(values),
             _ => None,
         }
     }
@@ -1063,8 +1150,8 @@ impl AttributeValues {
     /// Returns unsigned 32-bit values when this column has that type.
     #[must_use]
     pub fn as_u32(&self) -> Option<&[u32]> {
-        match &self.values {
-            AttributeValuesKind::U32(values) => Some(values),
+        match self.view() {
+            AttributeValuesView::U32(values) => Some(values),
             _ => None,
         }
     }
@@ -1072,8 +1159,8 @@ impl AttributeValues {
     /// Returns signed 64-bit values when this column has that type.
     #[must_use]
     pub fn as_i64(&self) -> Option<&[i64]> {
-        match &self.values {
-            AttributeValuesKind::I64(values) => Some(values),
+        match self.view() {
+            AttributeValuesView::I64(values) => Some(values),
             _ => None,
         }
     }
@@ -1081,8 +1168,8 @@ impl AttributeValues {
     /// Returns unsigned 64-bit values when this column has that type.
     #[must_use]
     pub fn as_u64(&self) -> Option<&[u64]> {
-        match &self.values {
-            AttributeValuesKind::U64(values) => Some(values),
+        match self.view() {
+            AttributeValuesView::U64(values) => Some(values),
             _ => None,
         }
     }
@@ -1090,8 +1177,8 @@ impl AttributeValues {
     /// Returns 32-bit floating values when this column has that type.
     #[must_use]
     pub fn as_f32(&self) -> Option<&[f32]> {
-        match &self.values {
-            AttributeValuesKind::F32(values) => Some(values),
+        match self.view() {
+            AttributeValuesView::F32(values) => Some(values),
             _ => None,
         }
     }
@@ -1099,8 +1186,8 @@ impl AttributeValues {
     /// Returns 64-bit floating values when this column has that type.
     #[must_use]
     pub fn as_f64(&self) -> Option<&[f64]> {
-        match &self.values {
-            AttributeValuesKind::F64(values) => Some(values),
+        match self.view() {
+            AttributeValuesView::F64(values) => Some(values),
             _ => None,
         }
     }
@@ -1108,8 +1195,8 @@ impl AttributeValues {
     /// Returns the width and payload when this column contains fixed bytes.
     #[must_use]
     pub fn as_fixed_bytes(&self) -> Option<(u32, &[u8])> {
-        match &self.values {
-            AttributeValuesKind::FixedBytes { width, payload } => Some((width.get(), payload)),
+        match self.view() {
+            AttributeValuesView::FixedBytes { width, payload } => Some((width.get(), payload)),
             _ => None,
         }
     }

@@ -35,8 +35,8 @@ use blake3::Hasher;
 use foundation_runtime::{OperationReporter, ProgressPhase, ProgressSnapshot};
 use point_contracts::{
     AttributeColumn, AttributeColumns, AttributeDataType, AttributeId, AttributeSchema,
-    AttributeValues, ContentHash, ContractError, CoordinateReference, PointBatch,
-    PositionTransform, QuantizedPositions, SourceMetadata, WorldBounds,
+    AttributeValues, AttributeValuesView, ContentHash, ContractError, CoordinateReference,
+    PointBatch, PositionTransform, QuantizedPositions, SourceMetadata, WorldBounds,
 };
 use point_source::adapter::{
     AdapterContract, AdapterRead, AdapterReadRequest, AdapterVerified, CandidateAdapter,
@@ -670,81 +670,21 @@ fn hash_values(
     values: &AttributeValues,
     reporter: &OperationReporter,
 ) -> Result<(), SourceError> {
-    hash_attribute_type(hasher, values.data_type());
-    hash_len(hasher, values.len())?;
-    match values.data_type() {
-        AttributeDataType::I8 => {
-            hash_numeric(
-                hasher,
-                values.as_i8().expect("type-matched values"),
-                reporter,
-            )?;
-        }
-        AttributeDataType::U8 => {
-            hash_raw_bytes(
-                hasher,
-                values.as_u8().expect("type-matched values"),
-                reporter,
-            )?;
-        }
-        AttributeDataType::I16 => {
-            hash_numeric(
-                hasher,
-                values.as_i16().expect("type-matched values"),
-                reporter,
-            )?;
-        }
-        AttributeDataType::U16 => {
-            hash_numeric(
-                hasher,
-                values.as_u16().expect("type-matched values"),
-                reporter,
-            )?;
-        }
-        AttributeDataType::I32 => {
-            hash_numeric(
-                hasher,
-                values.as_i32().expect("type-matched values"),
-                reporter,
-            )?;
-        }
-        AttributeDataType::U32 => {
-            hash_numeric(
-                hasher,
-                values.as_u32().expect("type-matched values"),
-                reporter,
-            )?;
-        }
-        AttributeDataType::I64 => {
-            hash_numeric(
-                hasher,
-                values.as_i64().expect("type-matched values"),
-                reporter,
-            )?;
-        }
-        AttributeDataType::U64 => {
-            hash_numeric(
-                hasher,
-                values.as_u64().expect("type-matched values"),
-                reporter,
-            )?;
-        }
-        AttributeDataType::F32 => {
-            hash_numeric(
-                hasher,
-                values.as_f32().expect("type-matched values"),
-                reporter,
-            )?;
-        }
-        AttributeDataType::F64 => {
-            hash_numeric(
-                hasher,
-                values.as_f64().expect("type-matched values"),
-                reporter,
-            )?;
-        }
-        AttributeDataType::FixedBytes(_) => {
-            let (_, payload) = values.as_fixed_bytes().expect("type-matched values");
+    let view = values.view();
+    hash_attribute_type(hasher, view.data_type());
+    hash_len(hasher, view.len())?;
+    match view {
+        AttributeValuesView::I8(values) => hash_numeric(hasher, values, reporter)?,
+        AttributeValuesView::U8(values) => hash_raw_bytes(hasher, values, reporter)?,
+        AttributeValuesView::I16(values) => hash_numeric(hasher, values, reporter)?,
+        AttributeValuesView::U16(values) => hash_numeric(hasher, values, reporter)?,
+        AttributeValuesView::I32(values) => hash_numeric(hasher, values, reporter)?,
+        AttributeValuesView::U32(values) => hash_numeric(hasher, values, reporter)?,
+        AttributeValuesView::I64(values) => hash_numeric(hasher, values, reporter)?,
+        AttributeValuesView::U64(values) => hash_numeric(hasher, values, reporter)?,
+        AttributeValuesView::F32(values) => hash_numeric(hasher, values, reporter)?,
+        AttributeValuesView::F64(values) => hash_numeric(hasher, values, reporter)?,
+        AttributeValuesView::FixedBytes { payload, .. } => {
             hash_raw_bytes(hasher, payload, reporter)?;
         }
     }
