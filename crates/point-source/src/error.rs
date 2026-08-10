@@ -133,13 +133,6 @@ pub enum SourceError {
         point_count: u64,
     },
 
-    /// A requested Attribute is absent from the Source schema.
-    #[error("Source does not contain requested Attribute {attribute:?}")]
-    UnknownAttribute {
-        /// Missing Attribute identity.
-        attribute: AttributeId,
-    },
-
     /// A caller-supplied budget has an invalid zero limit.
     #[error("{limit} must be greater than zero")]
     InvalidBudget {
@@ -273,6 +266,14 @@ impl SourceError {
     #[must_use]
     pub fn corrupt(reason: impl Into<SourceDiagnostic>) -> Self {
         Self::CorruptSource {
+            reason: reason.into(),
+        }
+    }
+
+    /// Creates an explicit unsupported-schema failure.
+    #[must_use]
+    pub fn unsupported_schema(reason: impl Into<SourceDiagnostic>) -> Self {
+        Self::UnsupportedSchema {
             reason: reason.into(),
         }
     }

@@ -441,10 +441,11 @@ fn batch_point_count(
     selected: &[AttributeId],
 ) -> Result<u64, SourceError> {
     let bytes_per_point = selected.iter().try_fold(24_u64, |total, &id| {
-        let definition = metadata
-            .attributes()
-            .get(id)
-            .ok_or(SourceError::UnknownAttribute { attribute: id })?;
+        let definition = metadata.attributes().get(id).ok_or_else(|| {
+            SourceError::unsupported_schema(format!(
+                "Source does not contain requested Attribute {id:?}"
+            ))
+        })?;
         total
             .checked_add(u64::from(definition.data_type().element_bytes()))
             .ok_or(SourceError::ResourceLimit {

@@ -512,6 +512,24 @@ fn attribute_ids_are_resolved_sorted_and_deduplicated_for_adapter_and_summary() 
 }
 
 #[test]
+fn unavailable_requested_attribute_is_an_unsupported_schema() {
+    let fixture = fixture();
+    let source = fixture
+        .candidate(63, FastBehavior::Match)
+        .open(OpenOptions::identify())
+        .blocking_wait()
+        .unwrap();
+    let unavailable = AttributeId::new(999).unwrap();
+
+    let Err(error) =
+        source.read(ReadRequest::all().attributes(AttributeSelection::only([unavailable])))
+    else {
+        panic!("the unavailable Attribute must fail before reading");
+    };
+    assert!(matches!(error, SourceError::UnsupportedSchema { .. }));
+}
+
+#[test]
 fn max_spans_applies_after_overlap_normalization() {
     let fixture = fixture();
     let source = fixture

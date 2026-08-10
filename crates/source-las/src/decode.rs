@@ -84,7 +84,11 @@ fn selected_attributes(
                 .iter()
                 .find(|attribute| attribute.definition.id() == *id)
                 .cloned()
-                .ok_or(SourceError::UnknownAttribute { attribute: *id })
+                .ok_or_else(|| {
+                    SourceError::unsupported_schema(format!(
+                        "Source does not contain requested Attribute {id:?}"
+                    ))
+                })
         })
         .collect()
 }

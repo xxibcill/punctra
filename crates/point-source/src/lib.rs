@@ -1124,7 +1124,9 @@ fn resolve_attributes(
             attributes.dedup();
             for &attribute in &attributes {
                 if metadata.attributes().get(attribute).is_none() {
-                    return Err(SourceError::UnknownAttribute { attribute });
+                    return Err(SourceError::unsupported_schema(format!(
+                        "Source does not contain requested Attribute {attribute:?}"
+                    )));
                 }
             }
             Ok(attributes)
