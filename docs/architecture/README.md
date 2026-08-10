@@ -1,240 +1,186 @@
 # Point-Cloud Foundation Architecture
 
-Status: broader platform proposal deferred; v0.1 through v0.4 are implemented
+Status: v0.1 through v0.5 implemented; terrain, export, and product layers
+remain deferred
 
-> Punctra's accepted current contracts are the reusable
-> [v0.1 render engine](../design/render-engine-v0.1.md), renderer-neutral
-> [v0.2 adaptive View planner](../design/adaptive-view-planning-v0.2.md), and
-> completed [v0.3 Real Sources path](../design/real-sources-v0.3.md), plus the
-> completed [v0.4 Out-of-core View path](../design/out-of-core-view-v0.4.md). Where
-> this older proposal differs from those accepted interfaces and boundaries,
-> the versioned designs control. The remaining broader document is research for
-> possible host projects, not the current implementation plan.
+The accepted versioned designs are authoritative:
 
-The implemented v0.3 adapters are `source-memory` and `source-las`.
-`source-las` supports LAS point-data record formats 0–10 and LAZ formats 0–8;
-LAZ formats 9 and 10 are explicitly unsupported pending exact layered
-WavePacket14 codec support. `source-copc` remains a proposed, deferred adapter.
-The implemented v0.4 `point-index` prepares one complete deterministic
-fixed-block BVH and the private `renderer-demo` bridge consumes it; the broader
-Workspace, Query, Revision, terrain, and export modules below remain proposed.
+- [v0.1 render engine](../design/render-engine-v0.1.md)
+- [v0.2 adaptive View planner](../design/adaptive-view-planning-v0.2.md)
+- [v0.3 Real Sources](../design/real-sources-v0.3.md)
+- [v0.4 Out-of-core View](../design/out-of-core-view-v0.4.md)
+- [v0.5 Durable document core](../design/durable-document-core-v0.5.md)
 
-This package defines a reusable, headless foundation for very large point-cloud documents. It is aimed at learning, experimentation, and reuse by desktop applications, command-line tools, language bindings, and future research code.
+The current foundation is headless and embeddable. It reads immutable Sources,
+prepares a complete rebuildable Spatial Index, resolves progressive display,
+renders through a host-owned wgpu lifecycle, and stores one narrow class of
+durable document Edit. A crate exists only when its behavior, direct tests, and
+a caller exist.
 
-The architecture optimizes for one property: every module has one job and can be exercised without starting the whole product.
-
-## What “works individually” means
-
-An independently usable module:
-
-1. has one sentence that completely states its job;
-2. exposes an interface expressed in canonical contracts rather than another module's private representation;
-3. can be constructed with an in-memory or fixture adapter;
-4. can be built, tested, fuzzed, and benchmarked from its own crate;
-5. does not require a window, GPU, network connection, or Workspace unless its one job inherently requires that capability; and
-6. may depend only on modules below it in the dependency graph.
-
-Independence does not mean a network process. These are in-process Rust libraries. Keeping them in one address space preserves performance, deterministic ordering, and simple debugging while still allowing direct reuse.
-
-## Goals
-
-- Open immutable LAS and LAZ Sources without loading the whole Source; keep
-  COPC proposed until its adapter exists.
-- Preserve stable Point Identity and exact Attributes.
-- Build, resume, reopen, query, and progressively read one complete Spatial
-  Index under explicit limits.
-- Stream bounded, Revision-pinned Queries.
-- Materialize exact, spillable Point Sets without requiring all identities in memory.
-- Store sparse Edits as crash-safe immutable Revisions.
-- Prepare renderer-neutral, progressive View Batches.
-- Derive deterministic Terrain Surfaces on the CPU.
-- Export explicit Terrain Surface topology to LandXML.
-- Keep the engine useful without a GUI or GPU.
-- Let additional adapters reuse the same behavior without copying it.
-
-## Non-goals for the first foundation
-
-- photogrammetry, scan registration, or sensor calibration;
-- editing Source bytes in place;
-- automatic CRS or vertical-datum guessing;
-- reprojection or vertical-datum transformation;
-- general CAD or BIM authoring;
-- collaboration, cloud storage, or distributed execution;
-- more than one Source per Workspace;
-- View output before Source registration and a complete Spatial Index;
-- exact visible-only or occlusion-aware screen selection;
-- Profiles, residual analysis, and classification algorithms;
-- E57, raster terrain, or arbitrary geometry formats;
-- rewritten or classified LAS/LAZ output;
-- native hierarchy import and remote Source range reads;
-- a public plugin registry for hypothetical extensions; or
-- authoritative geometry computed from GPU display values.
-
-## Dependency graph
+## Current module shape
 
 An arrow means “may depend on.” Cycles are forbidden.
 
 ~~~mermaid
 flowchart TD
-    APP["Application adapters"] --> WS["point-workspace"]
-    APP --> RW["render-wgpu"]
-    APP --> SET["point-set"]
+    APP["Host applications"] --> WS["point-workspace"]
     APP --> VIEW["point-view"]
-    APP --> TER["terrain-model"]
-    APP --> XML["landxml"]
-    APP --> RT["foundation-runtime"]
+    APP --> RW["render-wgpu"]
+    APP --> IDX["point-index"]
+    APP --> SRC["point-source"]
 
-    WS --> SRC["point-source"]
-    WS --> IDX["point-index"]
-    WS --> REV["point-revisions"]
-    WS --> QRY["point-query"]
+    WS --> IDX
+    WS --> SRC
+    WS --> CT["point-contracts"]
+    WS --> RT["foundation-runtime"]
 
-    REV --> SET
     IDX --> SRC
-    QRY --> SRC
-    QRY --> IDX
-    QRY --> REV
+    IDX --> CT
+    IDX --> RT
+
     VIEW --> RP["render-protocol"]
-    TER --> CT["point-contracts"]
-    XML --> TER
-    XML --> CT
     RW --> RP
     RW --> CT
     RP --> CT
 
     SRC --> CT
-    IDX --> CT
-    SET --> CT
-    REV --> CT
-    QRY --> CT
-    WS --> CT
-
     SRC --> RT
-    IDX --> RT
-    SET --> RT
-    REV --> RT
-    QRY --> RT
-    TER --> RT
-    XML --> RT
-    WS --> RT
+    LAS["source-las"] --> SRC
+    MEM["source-memory"] --> SRC
 
-    LAS["source-las adapter"] --> SRC
-    COPC["source-copc adapter (proposed)"] --> SRC
-    MEM["source-memory adapter"] --> SRC
+    APP -. "future accepted slice" .-> TER["terrain/export"]
 ~~~
 
-The graph deliberately has two levels of use:
-
-- The individual modules are for researchers, specialized tools, and tests that need one capability.
-- **point-workspace** is the deep module for coherent Source, Spatial Index, Revision, and Query lifecycle. Application adapters compose optional viewing, terrain, export, and rendering modules without moving their behavior into the Workspace.
+`point-workspace` is intentionally one deep crate. Exact selection, temporary
+Point Set storage, classification overlays, Revision persistence, and Operation
+recovery are private cooperating modules behind its public `Workspace`,
+`Snapshot`, `PointSet`, and commit interface. The earlier four-crate document
+proposal was not implemented because it would expose construction seams with
+only one caller.
 
 ## Architecture rules
 
-### One job per module
+### One job per crate
 
-Every module has a job statement in [modules.md](modules.md). Adding behavior that does not fit that sentence requires placing it in another existing module or proposing a new one. A module name is not permission to become a grab bag.
+Every current crate has one job in [modules.md](modules.md). A new public seam
+requires its own behavior, direct interface tests, and at least one real caller.
+Private files may remain numerous when that makes a public module deeper.
 
-### The interface is the test surface
+### Canonical values cross seams
 
-Tests exercise each module through its public interface. Private data structures may change freely. Tests may inspect private state only when fault injection cannot be expressed through the interface.
-
-### Canonical contracts cross seams
-
-Modules exchange immutable Point values from **point-contracts**, execution control from **foundation-runtime**, and renderer-neutral deltas from **render-protocol**. They do not share mutable index nodes, memory maps, GPU buffers, journal pages, or triangulator internals.
+Crates exchange immutable Point and Source values from `point-contracts`,
+runtime-neutral work control from `foundation-runtime`, and renderer-neutral
+updates from `render-protocol`. They do not share mutable index nodes, decoder
+buffers, Workspace journal frames, spill files, or GPU buffers.
 
 ### State has one owner
 
-- Source adapters own decoding.
-- **point-index** owns index persistence and lookup.
-- **point-set** owns compressed and spilled Point Set materialization.
-- **point-revisions** owns logical history and crash recovery.
-- **render-protocol** owns frame-generation and replacement semantics.
-- **terrain-model** owns terrain topology rules.
-- **render-wgpu** owns GPU resources.
-
-No other module writes those representations.
+- Source adapters own format decoding.
+- `point-index` owns `.pidx` construction, recovery, validation, and lookup.
+- `point-workspace` owns its manifest, Point Set spills, effective
+  classification overlays, immutable Revisions, and Operation records.
+- `render-protocol` owns generation and replacement semantics.
+- `point-view` owns deterministic culling, LOD demand, retention, and safe
+  retirement decisions.
+- `render-wgpu` owns GPU resources and command recording.
 
 ### Exact work and display work stay distinct
 
-Queries, Edits, Terrain Surfaces, and Exports use authoritative CPU values. Views may be partial and use origin-relative 32-bit display positions. A View can suggest Point Identities for picking, but an exact Query confirms the Point Set.
+Exact Workspace selection reads CPU-authoritative Source values and applies
+Revision overlays. A View may be partial and may use display samples and
+origin-relative `f32` coordinates. A GPU pick is only a Pick Hint; v0.5 can
+confirm explicit Point Identities but does not implement complete screen,
+brush, visible-only, or occlusion selection.
 
-### Derived state is disposable
+### Durable and rebuildable state stay distinct
 
-A Spatial Index, View cache, or derived cache may be deleted and rebuilt. The Source and Revision journal are durable Workspace state. Terrain Surfaces and their Recipes are immutable host-owned results in v0.1. Recovery never treats a cache as the source of truth.
+Source bytes and immutable Workspace Revision files are authoritative. The
+Spatial Index and all View/GPU state are rebuildable or disposable. Deleting
+an index never deletes an Edit, and deleting display state never changes a
+Workspace.
+
+### Limits are part of correctness
+
+Source reads, index operations, selection, Point-ID iteration, Workspace open,
+and commit each have explicit hard ceilings. A limit failure cannot downgrade
+an exact result to partial Coverage or publish a partial durable value.
 
 ### Seams must be earned
 
-The Source interface is a real seam because the implemented in-memory and
-LAS/LAZ adapters share it. The proposed `source-copc` adapter must reuse and
-prove that seam before it can be described as implemented. Filesystem and
-fault-injection storage adapters form private test seams inside their owning
-modules; they are not public extension interfaces. LandXML remains a concrete
-module until a second export format proves a useful export seam. There is no
-public analysis-plugin seam in v0.1.
+The Source seam is proven by memory, LAS, and LAZ implementations. The
+`point-workspace` seam is proven by its direct example, generated LAS/LAZ
+integration, and public interface tests. COPC, terrain, LandXML, remote reads,
+screen selection, general Edits, and application UI remain deferred until an
+accepted design and caller earn them.
 
 ## Typical headless composition
 
-The Workspace is the coherent document-access module, while the host composes independent selection, terrain, and export modules:
+This uses the implemented v0.5 signatures. The full recovery branch is shown
+in the [classification example](../../crates/point-workspace/examples/classify.rs).
 
-~~~rust
-let source = source_las::open("survey.laz").await?;
-let Opened {
-    workspace,
-    index_status,
-    ..
-} = Engine::open(
-    "survey.pcw",
+~~~rust,ignore
+let source = source_las::open("survey.laz").blocking_wait()?;
+let index = point_index::prepare(
     source,
-    VerificationPolicy::FastThenFull,
-    OpenOptions::default(),
-).await?;
+    "survey.laz.pidx",
+    PrepareLimits::default(),
+).blocking_wait()?;
 
-if !index_status.is_ready() {
-    workspace.prepare_index(IndexOptions::default()).await?;
-}
+let workspace = point_workspace::create(
+    "survey.pcw",
+    index,
+    WorkspaceSchema::new(classification_attribute),
+    OpenLimits::default(),
+).blocking_wait()?;
 
-let snapshot = workspace.head()?;
-let point_set = point_set::materialize(
-    snapshot.query(select_query),
-    PointSetBudget::default(),
-).await?;
+let root = workspace.head();
+let selected = root.select(
+    PointQuery::within(bounds).classification_is(2),
+    PointSetLimits::default(),
+).blocking_wait()?;
 
-let edits = EditBatch::reclassify(point_set, GROUND);
 let operation = OperationId::generate()?;
-// The host records only the identity needed to ask for the outcome after restart.
-host_recovery.reserve(workspace.identity(), operation)?;
-let outcome = workspace
-    .commit(
-        operation,
-        snapshot.revision(),
-        edits,
-    )
-    .await?;
+host_recovery.save(workspace.identity(), operation)?;
+let outcome = workspace.commit(
+    CommitRequest::set_classification(operation, selected, 1),
+    CommitLimits::default(),
+).blocking_wait()?;
+
 let revision = match outcome {
-    CommitOutcome::Committed { revision } => revision,
-    CommitOutcome::Rejected { reason } => return Err(reason.into()),
-    CommitOutcome::Indeterminate { operation } => {
-        return Err(NeedsReconciliation(operation).into());
+    CommitOutcome::Committed(receipt) => receipt.revision(),
+    CommitOutcome::Rejected(reason) => return Err(reason.into()),
+    CommitOutcome::Indeterminate(uncertainty) => {
+        host_recovery.mark_indeterminate(
+            uncertainty.operation(),
+            uncertainty.phase(),
+        )?;
+        return Err("drop the session, reopen, and resolve this Operation".into());
     }
 };
 
-let terrain_snapshot = workspace.snapshot(revision)?;
-let terrain_input = TerrainInput::snapshot(
-    terrain_snapshot.provenance().clone(),
-    terrain_snapshot.query(terrain_query),
-    terrain_snapshot.breaklines(terrain_region),
-);
-let surface = terrain_model::derive(
-    terrain_input,
-    TerrainRecipe::default(),
-    TerrainLimits::default(),
-).await?;
-
-let xml = LandXml::encode(&surface, LandXmlOptions::default())?;
-atomic_file::write_stream(output, xml)?;
+let snapshot = workspace.snapshot(revision)?;
 ~~~
 
-The composition is intentionally explicit. Format decoding, index construction, Point Set spill, sparse overlay resolution, deterministic terrain rules, encoding, and recovery retain locality in the modules that own them.
+After an indeterminate acknowledgement, the host drops every session handle,
+reopens with the same complete index and verified Source, and calls
+`resolve_operation` with the retained `OperationId`. A `Retryable` result is
+resumed with `retry_operation`; the host does not reconstruct the expired Point
+Set or invent a replacement identity.
+
+## Scope boundary after v0.5
+
+Implemented document behavior is deliberately narrow:
+
+- one immutable Source and one complete index per Workspace;
+- one explicitly selected `U8` classification Attribute;
+- exact All, inclusive world-box, and explicit Point-ID selection;
+- uniform sparse classification assignment;
+- immediate-head Revert only; and
+- one local exclusive Workspace session.
+
+General predicate languages, Point-row streaming, position or other Attribute
+Edits, named Point Sets, branches, merge, compaction, multiple Sources, terrain,
+export, networking, autosave policy, and product UI remain outside v0.5.
 
 ## Document map
 

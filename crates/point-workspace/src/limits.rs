@@ -1,0 +1,508 @@
+use point_index::CandidateLimits;
+use point_source::ReadBudget;
+
+use crate::WorkspaceError;
+
+const MIB: u64 = 1024 * 1024;
+const GIB: u64 = 1024 * MIB;
+
+/// Hard resource ceilings for creating or reopening one Workspace.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[allow(clippy::struct_field_names)]
+pub struct OpenLimits {
+    max_manifest_bytes: u64,
+    max_operation_records: u64,
+    max_revision_files: u64,
+    max_revision_blocks: u64,
+    max_revision_rows: u64,
+    max_revision_block_bytes: u64,
+    max_single_file_bytes: u64,
+    max_total_persisted_bytes: u64,
+    max_working_bytes: u64,
+    max_resident_metadata_bytes: u64,
+}
+
+impl OpenLimits {
+    /// Creates explicit ceilings for one complete open or create operation.
+    ///
+    /// Every zero permits only zero use of that resource. Because a valid
+    /// Workspace has a nonempty manifest and root Revision, zero manifest or
+    /// Revision capacity makes every existing Workspace fail explicitly.
+    #[must_use]
+    #[allow(clippy::too_many_arguments)]
+    pub const fn new(
+        max_manifest_bytes: u64,
+        max_operation_records: u64,
+        max_revision_files: u64,
+        max_revision_blocks: u64,
+        max_revision_rows: u64,
+        max_revision_block_bytes: u64,
+        max_single_file_bytes: u64,
+        max_total_persisted_bytes: u64,
+        max_working_bytes: u64,
+        max_resident_metadata_bytes: u64,
+    ) -> Self {
+        Self {
+            max_manifest_bytes,
+            max_operation_records,
+            max_revision_files,
+            max_revision_blocks,
+            max_revision_rows,
+            max_revision_block_bytes,
+            max_single_file_bytes,
+            max_total_persisted_bytes,
+            max_working_bytes,
+            max_resident_metadata_bytes,
+        }
+    }
+
+    /// Returns the maximum accepted manifest file length.
+    #[must_use]
+    pub const fn max_manifest_bytes(self) -> u64 {
+        self.max_manifest_bytes
+    }
+
+    /// Returns the maximum combined durable intent and rejection records.
+    #[must_use]
+    pub const fn max_operation_records(self) -> u64 {
+        self.max_operation_records
+    }
+
+    /// Returns the maximum immutable Revision files, including the root.
+    #[must_use]
+    pub const fn max_revision_files(self) -> u64 {
+        self.max_revision_files
+    }
+
+    /// Returns the maximum checksummed Revision blocks scanned in total.
+    #[must_use]
+    pub const fn max_revision_blocks(self) -> u64 {
+        self.max_revision_blocks
+    }
+
+    /// Returns the cumulative changed-row ceiling across all Revisions.
+    #[must_use]
+    pub const fn max_revision_rows(self) -> u64 {
+        self.max_revision_rows
+    }
+
+    /// Returns the maximum encoded payload bytes in one Revision block.
+    #[must_use]
+    pub const fn max_revision_block_bytes(self) -> u64 {
+        self.max_revision_block_bytes
+    }
+
+    /// Returns the maximum accepted length of any one persisted file.
+    #[must_use]
+    pub const fn max_single_file_bytes(self) -> u64 {
+        self.max_single_file_bytes
+    }
+
+    /// Returns the cumulative persisted-byte ceiling charged during open.
+    #[must_use]
+    pub const fn max_total_persisted_bytes(self) -> u64 {
+        self.max_total_persisted_bytes
+    }
+
+    /// Returns the peak temporary working-memory ceiling.
+    #[must_use]
+    pub const fn max_working_bytes(self) -> u64 {
+        self.max_working_bytes
+    }
+
+    /// Returns the retained Revision and operation metadata ceiling.
+    #[must_use]
+    pub const fn max_resident_metadata_bytes(self) -> u64 {
+        self.max_resident_metadata_bytes
+    }
+}
+
+impl Default for OpenLimits {
+    fn default() -> Self {
+        Self::new(
+            MIB,
+            100_000,
+            100_001,
+            10_000_000,
+            100_000_000,
+            4 * MIB,
+            4 * GIB,
+            64 * GIB,
+            128 * MIB,
+            128 * MIB,
+        )
+    }
+}
+
+/// Cumulative hard ceilings for one exact Point Set selection.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[allow(clippy::struct_field_names)]
+pub struct PointSetLimits {
+    candidate_limits: CandidateLimits,
+    source_read_budget: ReadBudget,
+    max_input_point_ids: u64,
+    max_output_points: u64,
+    max_overlay_segments: u64,
+    max_overlay_bytes: u64,
+    max_working_bytes: u64,
+    max_resident_bytes: u64,
+    max_temporary_bytes: u64,
+}
+
+impl PointSetLimits {
+    /// Creates one selection budget without hidden per-batch resets.
+    ///
+    /// `max_input_point_ids` is charged only by explicit Point-ID selection.
+    /// `max_output_points` covers the complete unpublished result.
+    /// `max_working_bytes` is the combined peak of retained candidate spans,
+    /// the current Source batch, overlay state, and builder buffers; child
+    /// limits are not independent extra allowances. `max_temporary_bytes`
+    /// charges all spill bytes written during the selection. A zero resident
+    /// ceiling forces every nonempty Point Set to spill; a simultaneous zero
+    /// temporary ceiling therefore permits only an empty result.
+    #[must_use]
+    #[allow(clippy::too_many_arguments)]
+    pub const fn new(
+        candidate_limits: CandidateLimits,
+        source_read_budget: ReadBudget,
+        max_input_point_ids: u64,
+        max_output_points: u64,
+        max_overlay_segments: u64,
+        max_overlay_bytes: u64,
+        max_working_bytes: u64,
+        max_resident_bytes: u64,
+        max_temporary_bytes: u64,
+    ) -> Self {
+        Self {
+            candidate_limits,
+            source_read_budget,
+            max_input_point_ids,
+            max_output_points,
+            max_overlay_segments,
+            max_overlay_bytes,
+            max_working_bytes,
+            max_resident_bytes,
+            max_temporary_bytes,
+        }
+    }
+
+    /// Returns conservative Spatial Index planning limits.
+    #[must_use]
+    pub const fn candidate_limits(self) -> CandidateLimits {
+        self.candidate_limits
+    }
+
+    /// Returns bounded Source batch, payload, span, Point, and decoder limits.
+    #[must_use]
+    pub const fn source_read_budget(self) -> ReadBudget {
+        self.source_read_budget
+    }
+
+    /// Returns the caller-supplied Point Identity ceiling.
+    #[must_use]
+    pub const fn max_input_point_ids(self) -> u64 {
+        self.max_input_point_ids
+    }
+
+    /// Returns the exact result Point ceiling.
+    #[must_use]
+    pub const fn max_output_points(self) -> u64 {
+        self.max_output_points
+    }
+
+    /// Returns the maximum Revision overlay segments inspected.
+    #[must_use]
+    pub const fn max_overlay_segments(self) -> u64 {
+        self.max_overlay_segments
+    }
+
+    /// Returns the cumulative overlay payload bytes read across all segments.
+    #[must_use]
+    pub const fn max_overlay_bytes(self) -> u64 {
+        self.max_overlay_bytes
+    }
+
+    /// Returns the combined peak selection working-memory ceiling.
+    #[must_use]
+    pub const fn max_working_bytes(self) -> u64 {
+        self.max_working_bytes
+    }
+
+    /// Returns the maximum Point Set bytes retained in memory.
+    #[must_use]
+    pub const fn max_resident_bytes(self) -> u64 {
+        self.max_resident_bytes
+    }
+
+    /// Returns the cumulative Point Set spill-byte ceiling.
+    #[must_use]
+    pub const fn max_temporary_bytes(self) -> u64 {
+        self.max_temporary_bytes
+    }
+}
+
+impl Default for PointSetLimits {
+    fn default() -> Self {
+        Self::new(
+            CandidateLimits::default(),
+            ReadBudget::default().with_max_points(50_000_000),
+            10_000_000,
+            10_000_000,
+            100_000,
+            4 * GIB,
+            128 * MIB,
+            64 * MIB,
+            4 * GIB,
+        )
+    }
+}
+
+/// Hard ceilings for streaming exact Point Identities from a completed Point Set.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[allow(clippy::struct_field_names)]
+pub struct PointIdReadLimits {
+    max_points: u64,
+    max_batch_points: u64,
+    max_batch_bytes: u64,
+    max_read_buffer_bytes: u64,
+    max_working_bytes: u64,
+}
+
+impl PointIdReadLimits {
+    /// Creates explicit read ceilings.
+    ///
+    /// Zero `max_points` permits only an empty Point Set. Zero batch or working
+    /// capacity likewise permits only a read that emits no batch.
+    #[must_use]
+    pub const fn new(
+        max_points: u64,
+        max_batch_points: u64,
+        max_batch_bytes: u64,
+        max_read_buffer_bytes: u64,
+        max_working_bytes: u64,
+    ) -> Self {
+        Self {
+            max_points,
+            max_batch_points,
+            max_batch_bytes,
+            max_read_buffer_bytes,
+            max_working_bytes,
+        }
+    }
+
+    /// Returns the total exact Point Identity ceiling.
+    #[must_use]
+    pub const fn max_points(self) -> u64 {
+        self.max_points
+    }
+
+    /// Returns the maximum identities in one emitted batch.
+    #[must_use]
+    pub const fn max_batch_points(self) -> u64 {
+        self.max_batch_points
+    }
+
+    /// Returns the maximum canonical payload bytes in one emitted batch.
+    #[must_use]
+    pub const fn max_batch_bytes(self) -> u64 {
+        self.max_batch_bytes
+    }
+
+    /// Returns the maximum bytes used to decode one resident or spilled batch.
+    #[must_use]
+    pub const fn max_read_buffer_bytes(self) -> u64 {
+        self.max_read_buffer_bytes
+    }
+
+    /// Returns the peak stream working-memory ceiling.
+    #[must_use]
+    pub const fn max_working_bytes(self) -> u64 {
+        self.max_working_bytes
+    }
+}
+
+impl Default for PointIdReadLimits {
+    fn default() -> Self {
+        Self::new(u64::MAX, 65_536, 4 * MIB, 4 * MIB, 8 * MIB)
+    }
+}
+
+/// Hard resource ceilings for staging and publishing one classification Edit.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[allow(clippy::struct_field_names)]
+pub struct CommitLimits {
+    max_selected_points: u64,
+    max_changed_points: u64,
+    max_input_frames: u64,
+    max_block_points: u64,
+    max_block_bytes: u64,
+    max_working_bytes: u64,
+    max_temporary_bytes: u64,
+    max_revision_bytes: u64,
+    max_total_durable_bytes: u64,
+}
+
+impl CommitLimits {
+    /// Creates explicit commit ceilings.
+    ///
+    /// Each value is a hard ceiling. Selected Points and input frames are
+    /// charged even when many rows are unchanged. Zero selected, changed,
+    /// block, temporary, Revision, or total-durable capacity prevents
+    /// publication of a nonempty Edit. Temporary bytes are cumulative across
+    /// all staging files; working bytes are peak simultaneous memory.
+    #[must_use]
+    #[allow(clippy::too_many_arguments)]
+    pub const fn new(
+        max_selected_points: u64,
+        max_changed_points: u64,
+        max_input_frames: u64,
+        max_block_points: u64,
+        max_block_bytes: u64,
+        max_working_bytes: u64,
+        max_temporary_bytes: u64,
+        max_revision_bytes: u64,
+        max_total_durable_bytes: u64,
+    ) -> Self {
+        Self {
+            max_selected_points,
+            max_changed_points,
+            max_input_frames,
+            max_block_points,
+            max_block_bytes,
+            max_working_bytes,
+            max_temporary_bytes,
+            max_revision_bytes,
+            max_total_durable_bytes,
+        }
+    }
+
+    /// Returns the maximum selected Points inspected by one commit.
+    #[must_use]
+    pub const fn max_selected_points(self) -> u64 {
+        self.max_selected_points
+    }
+
+    /// Returns the maximum Points whose effective value may change.
+    #[must_use]
+    pub const fn max_changed_points(self) -> u64 {
+        self.max_changed_points
+    }
+
+    /// Returns the maximum Point Set or prior-Revision frames consumed.
+    #[must_use]
+    pub const fn max_input_frames(self) -> u64 {
+        self.max_input_frames
+    }
+
+    /// Returns the maximum change rows in one checksummed Revision block.
+    #[must_use]
+    pub const fn max_block_points(self) -> u64 {
+        self.max_block_points
+    }
+
+    /// Returns the maximum encoded bytes in one Revision block.
+    #[must_use]
+    pub const fn max_block_bytes(self) -> u64 {
+        self.max_block_bytes
+    }
+
+    /// Returns the combined peak commit working-memory ceiling.
+    #[must_use]
+    pub const fn max_working_bytes(self) -> u64 {
+        self.max_working_bytes
+    }
+
+    /// Returns the cumulative commit staging-byte ceiling.
+    #[must_use]
+    pub const fn max_temporary_bytes(self) -> u64 {
+        self.max_temporary_bytes
+    }
+
+    /// Returns the maximum final immutable Revision file length.
+    #[must_use]
+    pub const fn max_revision_bytes(self) -> u64 {
+        self.max_revision_bytes
+    }
+
+    /// Returns the maximum total durable Workspace bytes after publication.
+    #[must_use]
+    pub const fn max_total_durable_bytes(self) -> u64 {
+        self.max_total_durable_bytes
+    }
+}
+
+impl Default for CommitLimits {
+    fn default() -> Self {
+        Self::new(
+            10_000_000,
+            10_000_000,
+            1_000_000,
+            65_536,
+            4 * MIB,
+            128 * MIB,
+            2 * GIB,
+            2 * GIB,
+            64 * GIB,
+        )
+    }
+}
+
+pub(crate) fn require(
+    required: u64,
+    allowed: u64,
+    limit: &'static str,
+) -> Result<(), WorkspaceError> {
+    if required > allowed {
+        return Err(WorkspaceError::ResourceLimit {
+            limit,
+            required,
+            allowed,
+        });
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use point_index::CandidateLimits;
+    use point_source::ReadBudget;
+
+    use super::{CommitLimits, PointIdReadLimits, PointSetLimits};
+
+    #[test]
+    fn zero_resident_bytes_expresses_forced_spill_without_hidden_minimum() {
+        let limits = PointSetLimits::new(
+            CandidateLimits::new(1, 1, 1, 1),
+            ReadBudget::new(1, 1).expect("nonzero Source batch limits"),
+            1,
+            1,
+            1,
+            1,
+            1,
+            0,
+            9,
+        );
+        assert_eq!(limits.max_resident_bytes(), 0);
+        assert_eq!(limits.max_temporary_bytes(), 9);
+        assert_eq!(limits.max_overlay_bytes(), 1);
+    }
+
+    #[test]
+    fn point_id_read_limits_keep_total_batch_and_buffer_caps_separate() {
+        let limits = PointIdReadLimits::new(10, 4, 160, 80, 240);
+        assert_eq!(limits.max_points(), 10);
+        assert_eq!(limits.max_batch_points(), 4);
+        assert_eq!(limits.max_batch_bytes(), 160);
+        assert_eq!(limits.max_read_buffer_bytes(), 80);
+        assert_eq!(limits.max_working_bytes(), 240);
+    }
+
+    #[test]
+    fn commit_limits_charge_selected_changed_and_durable_growth_separately() {
+        let limits = CommitLimits::new(10, 4, 2, 3, 30, 40, 50, 60, 70);
+        assert_eq!(limits.max_selected_points(), 10);
+        assert_eq!(limits.max_changed_points(), 4);
+        assert_eq!(limits.max_input_frames(), 2);
+        assert_eq!(limits.max_total_durable_bytes(), 70);
+    }
+}

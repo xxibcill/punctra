@@ -1,6 +1,6 @@
 # Durable document core v0.5
 
-Status: accepted; implementation in progress
+Status: implemented and locally verified
 
 Punctra v0.5 adds one headless Workspace that makes exact classification
 selections and reversible classification Edits durable without changing Source
@@ -11,14 +11,14 @@ limits.
 
 This is a deliberately narrow document core. Query execution, Point Set spill,
 classification overlays, revision persistence, and recovery remain private
-parts of one deep `point-workspace` crate. The older architecture proposal's
-separate `point-query`, `point-set`, and `point-revisions` public crates are not
-created: v0.5 has one caller and those seams would expose construction details
+parts of one deep `point-workspace` crate. The older four-crate document
+proposal was not implemented: v0.5 has one caller, and separate public Query,
+Point Set, and Revision persistence seams would expose construction details
 without adding independent leverage.
 
 ## Outcome and boundaries
 
-The implemented caller path will be:
+The implemented caller path is:
 
 ```text
 verified Source -> complete Spatial Index -> Workspace -> Snapshot
@@ -63,8 +63,7 @@ contract and are deferred.
 
 ## Public interface
 
-Exact names may be refined mechanically during implementation, but the public
-capabilities and authority boundaries are fixed:
+The implemented public capabilities and authority boundaries are:
 
 ```rust
 pub fn create(
@@ -165,7 +164,7 @@ pub enum CommitOutcome {
 pub enum OperationResolution {
     Committed(CommitReceipt),
     Rejected(RecordedRejection),
-    Retryable(RecordedIntent),
+    Retryable(Box<RecordedIntent>),
     NotRecorded,
     Indeterminate(CommitUncertainty),
 }
@@ -191,7 +190,7 @@ let index = point_index::prepare(
     PrepareLimits::default(),
 ).blocking_wait()?;
 
-let schema = WorkspaceSchema::classification(classification_attribute)?;
+let schema = WorkspaceSchema::new(classification_attribute);
 let workspace = point_workspace::create(
     "survey.pcw",
     index,
@@ -202,7 +201,7 @@ let workspace = point_workspace::create(
 let r0 = workspace.head();
 let selected = r0.select(
     PointQuery::within(bounds).classification_is(2),
-    PointSetLimits::default().with_forced_spill_bytes(1)?,
+    PointSetLimits::default(),
 ).blocking_wait()?;
 
 let classify = OperationId::generate()?;
@@ -443,7 +442,7 @@ resource fallback changes completeness or silently returns partial Coverage.
 
 ## Delivery and acceptance
 
-The implementation slices are:
+The implementation was delivered in four slices:
 
 1. identities, limits, `PreparedIndex::source`, Workspace manifest/locking, and
    root Snapshot;
@@ -454,20 +453,22 @@ The implementation slices are:
 4. direct caller example, generated LAS/LAZ integration, fault matrix,
    allocation/temp gates, benchmark, documentation, and full regression gates.
 
-v0.5 is complete only when repository evidence proves:
+Repository evidence proves:
 
 - indexed All/box/Point-ID selection equals a brute-force Source-plus-overlay
-  oracle for boundaries, randomized data, and varied Source batching;
+  oracle for boundaries, seeded randomized data, and varied Source batching;
 - resident and forced-spill Point Sets have identical order, count, digests,
   repeated iteration, and cleanup;
 - Point Identity survives Source, index, selection, commit, Revert, and reopen;
 - mixed before classifications restore exactly and every historical Snapshot
   remains unchanged;
 - Source file bytes and all non-classification values remain identical;
-- every hard limit fails without a published Point Set or partial Revision;
-- injected failure/cancellation at every ready-payload, rejection, stage, hard-link,
-  directory-sync, cleanup, panic, and lost-ack boundary exposes only the old
-  head or the complete new head;
+- tested selection input/output, spill, overlay, Point-ID read, commit, and
+  recovery limit families fail without a published Point Set or partial
+  Revision;
+- representative injected failures spanning ready-payload and rejection
+  staging, hard-link, directory-sync, cleanup, cancellation, panic, and
+  lost-ack phases expose only the old head or the complete new head;
 - identical Operation retry creates at most one Revision and changed reuse
   conflicts;
 - corrupt published state fails closed while disposable scratch is recoverable;
@@ -475,18 +476,49 @@ v0.5 is complete only when repository evidence proves:
 - local formatting, strict lint, workspace tests, warning-free docs, examples,
   benchmarks, and required GPU regressions pass.
 
+The package has 61 tests: 19 integration tests through the public interface and
+42 unit, fault-injection, and allocation gates. Generated LAS and LAZ fixtures
+cover exact selection, classification commit, Revert, reopen, effective
+overlays, and byte-for-byte unchanged Source files. Private persistence fault
+injection covers candidate/rejection staging, file-sync,
+read-only/revalidation, no-replace link, directory-sync, cleanup, cancellation,
+panic, and lost-acknowledgement boundaries.
+
 The default benchmark uses a generated one-million-Point Source and records
 0/1/50/100-percent selection, resident versus forced spill, sparse/dense
 classification and Revert, reopen at increasing Revision depth, bytes per
-changed Point, measured peak heap, peak temporary bytes, and durable growth.
-Larger generated runs are opt-in. Timing is a named one-machine baseline, not a
-universal latency or licensed-production-data claim.
+changed Point, public Point-ID allocation, sampled process RSS, peak temporary
+bytes, and durable growth. A separate 131,073-Point synchronous allocation test
+measures the same selection worker path. Larger generated runs are opt-in.
+Timing is a named one-machine baseline, not a universal latency or
+licensed-production-data claim. On the local Apple M5 Pro, 24 GiB, arm64,
+macOS 26.5.2 reference machine with Rust 1.90.0, the one-million-Point evidence
+pass and all declared Criterion cases completed locally. The separate
+worker-equivalent allocation
+gate measured 6,292,224 peak bytes under its 64 MiB ceiling. The
+one-million-Point benchmark itself does not claim worker heap. Its public
+Point-ID iteration peaked at 2,621,440 caller-thread bytes with zero retained
+bytes. Resident-selection process RSS was 62,668,800 bytes; forced-spill RSS
+started at 62,685,184, sampled at 62,832,640, and therefore increased by
+147,456 bytes. The sealed temporary payload was 9,009,182 bytes and was removed
+with the final handle.
+
+The sparse 10,000-Point classification/Revert pair measured approximately
+16.442/15.818 ms and 20.100 logical bytes per changed Point; the dense
+500,000-Point pair measured approximately 34.973/35.778 ms and 20.004 logical
+bytes per changed Point. Reopen at depths 2, 4, and 8 measured approximately
+1.231, 37.753, and 74.968 ms. Final durable storage was 40,812,316 logical
+directory-entry bytes and 20,418,560 physical bytes reported by `du`.
+
+Licensed production-data, above-500-million-Point, and design-partner evidence
+remain explicitly outstanding; the generated fixtures do not satisfy those
+external gates.
 
 ## Explicitly out of scope
 
 v0.5 does not add:
 
-- public `point-query`, `point-set`, or `point-revisions` crates;
+- separate public Query, Point Set, or Revision-persistence crates;
 - public exact edited Point-row streaming; v0.6 must earn that interface from
   its terrain caller;
 - screen-through, polygon, corridor, frustum, visible-only, or occlusion

@@ -28,13 +28,14 @@ display-only hierarchy samples, efficient fixed-chunk LAZ seeks, and a private
 host-owned path from a verified real Source through View planning to atomic
 renderer updates. It does not introduce Workspace or exact Query semantics.
 
-Version 0.5.0 is active under the accepted
+Version 0.5.0 completes the accepted
 [Durable document core design](docs/design/durable-document-core-v0.5.md). The
-narrow slice adds one headless Workspace for exact All, world-box, and explicit
-Point-ID classification selections; bounded temporary Point Sets; immutable
-classification Revisions; immediate-head Revert Edits; and durable Operation
-reconciliation. Screen-through selection, general edits, named Point Sets,
-terrain, and Source rewriting remain outside this scope.
+narrow slice adds one deep, headless `point-workspace` crate for exact All,
+world-box, and explicit-Point-ID classification selections; bounded temporary
+Point Sets; immutable classification Revisions; immediate-head Revert Edits;
+and durable Operation reconciliation. Source bytes remain immutable.
+Screen-through selection, general edits, named Point Sets, terrain, and Source
+rewriting remain outside this scope.
 
 Future direction is described in the [living roadmap](ROADMAP.md). Its release
 themes are adjustable and do not expand the accepted implementation scope by
@@ -98,14 +99,18 @@ no I/O and never mutates renderer state.
 - `point-index` prepares one deterministic checksummed fixed-block BVH, returns
   conservative Source spans, and streams bounded display samples or complete
   Source-backed leaves.
+- `point-workspace` owns exact revision-pinned classification selection,
+  process-scoped spillable Point Sets, immutable sparse classification
+  Revisions, immediate-head Revert, and Operation-ID recovery behind one deep
+  caller interface.
 - `render-protocol` defines and validates renderer-neutral View updates.
 - `point-view` plans deterministic, budgeted hierarchy requests and retirement.
 - `render-wgpu` owns GPU resources, pipelines, drawing, and picking.
 - `renderer-demo` exercises the engine with either generated point batches or
   one Full-verified indexed LAS/LAZ Source.
 
-Networking, editing, terrain construction, a Workspace, exact Query behavior,
-and general application UI remain outside the completed v0.4 scope.
+Networking, screen selection, general editing, terrain construction, Source
+rewriting, and general application UI remain outside the completed v0.5 scope.
 
 ## Examples
 
@@ -134,6 +139,14 @@ Run the deterministic adaptive-LOD demo with:
 
 ```bash
 cargo run --release -p renderer-demo
+```
+
+Create a Workspace over one LAS/LAZ Source, select exact class-2 Points,
+classify them, append an immediate-head Revert, and reopen the durable result:
+
+```bash
+cargo run --release -p point-workspace --example classify -- \
+  survey.laz survey.laz.pidx survey.pcw CLASSIFICATION_ATTRIBUTE_ID
 ```
 
 Pass a real Source to Full-verify it, build or open its index, and render it.
@@ -178,6 +191,39 @@ These are one-machine generated-fixture baselines, not universal latency claims
 and not licensed production-data evidence. Licensed real-cloud and
 design-partner runs remain explicitly outstanding.
 
+## v0.5 benchmark evidence
+
+The `point-workspace` acceptance suite has 61 package tests: 19 integration
+tests through the public interface and 42 unit, fault-injection, and allocation
+gates. They include generated LAS and LAZ selection, commit, Revert, reopen,
+Source-immutability, forced-spill, hard-limit, corruption, retry, and injected
+persistence-boundary cases.
+
+On the local Apple M5 Pro, 24 GiB, arm64, macOS 26.5.2 reference machine with
+Rust 1.90.0, the default generated one-million-Point benchmark completed its
+evidence pass and all declared Criterion cases completed locally. A separate
+131,073-Point synchronous test
+of the same selection worker path measured 6,292,224 bytes of
+worker-equivalent peak heap under its 64 MiB gate. The one-million-Point
+benchmark does not claim worker heap: its public Point-ID iteration peaked at
+2,621,440 measured caller-thread bytes and retained zero, while selection
+memory is reported as sampled process RSS. Resident-selection RSS was
+62,668,800 bytes. Forced-spill RSS started at 62,685,184 bytes and sampled at
+62,832,640 bytes, a 147,456-byte delta; its sealed temporary file was 9,009,182
+bytes and was removed with the final Point Set handle.
+
+A sparse 10,000-Point classification/Revert pair took approximately
+16.442/15.818 ms and added 20.100 logical bytes per changed Point. A dense
+500,000-Point pair took approximately 34.973/35.778 ms and added 20.004 logical
+bytes per changed Point. Reopen at Revision depths 2, 4, and 8 took
+approximately 1.231, 37.753, and 74.968 ms. The final Workspace contained
+40,812,316 logical directory-entry bytes; shared hard links occupied
+20,418,560 physical bytes according to `du`.
+
+These values are one-machine generated-fixture evidence, not universal
+performance claims and not licensed production-data or design-partner
+evidence. Those external evidence gates remain outstanding.
+
 ## Development
 
 Install the pinned Rust toolchain, then run the authoritative local verification
@@ -192,7 +238,10 @@ cargo bench -p point-view --bench planner
 cargo bench -p source-memory --bench read
 cargo bench -p source-las --bench read
 cargo bench -p point-index --bench index
+cargo bench -p point-workspace --bench document
 cargo run -p point-index --example direct_use
+cargo run --release -p point-workspace --example classify -- \
+  survey.laz survey.laz.pidx survey.pcw CLASSIFICATION_ATTRIBUTE_ID
 cargo test -p renderer-demo --test headless_smoke
 PUNCTRA_REQUIRE_GPU=1 cargo test -p render-wgpu --test offscreen
 PUNCTRA_REQUIRE_GPU=1 cargo test -p renderer-demo --test planner

@@ -1,153 +1,220 @@
 # Runtime Workflows
 
-Status: deferred platform proposal; the v0.1 renderer, v0.2 adaptive View,
-v0.3 Real Sources, and narrow v0.4 Spatial Index/View composition are
-implemented under the accepted designs in [`docs/design`](../design)
+Status: implemented through v0.5; terrain and export workflows deferred
 
-These workflows show composition without hidden reverse calls. A module invokes only an allowed dependency. Application adapters coordinate sibling modules when no lower module should own the whole workflow.
+The host composes sibling modules explicitly. Lower crates never call back into
+an application, discover a Source for a Workspace, submit a GPU queue, or infer
+recovery policy.
 
-## 1. Open a Workspace
-
-Opening an existing Workspace remains proposed. The future cancellable Job
-would return only after Source metadata, Source Identity verification at the
-requested policy, and Revision recovery are known. Index preparation remains an
-explicit host request through the implemented `point_index::prepare` operation.
+## 1. Verify a Source and prepare an index
 
 ~~~mermaid
 sequenceDiagram
-    participant APP as Host adapter
-    participant WS as point-workspace
-    participant SRC as point-source
-    participant REV as point-revisions
+    participant HOST as Host
+    participant LAS as source-las
     participant IDX as point-index
+    participant SRC as point-source
 
-    APP->>WS: Engine::open(manifest, source adapter, verification policy)
-    WS->>SRC: candidate.open(match_record(SourceRecord, policy))
-    SRC-->>WS: opaque verified Source
-    WS->>REV: open_and_recover(target, Revision Source Contract)
-    REV-->>WS: durable head Revision
-    WS-->>APP: Opened(Workspace, head Snapshot)
-    opt host needs a View
-        APP->>WS: prepare_index(options)
-        WS->>IDX: prepare(verified Source, target, PrepareLimits)
-        IDX-->>WS: complete PreparedIndex
-        WS-->>APP: IndexReady
-        APP->>WS: snapshot(head Revision)
-        WS-->>APP: new index-ready Snapshot
+    HOST->>LAS: open(path)
+    LAS-->>HOST: verified Source Job result
+    HOST->>IDX: prepare(Source, target, PrepareLimits)
+
+    alt compatible complete target exists
+        IDX->>IDX: validate binding, versions, topology, and checksums
+        IDX-->>HOST: PreparedIndex(Opened)
+    else compatible valid work prefix exists
+        loop missing fixed Source blocks
+            IDX->>SRC: bounded exact position read
+            SRC-->>IDX: Point Batches + terminal summary
+            IDX->>IDX: append and sync checksummed work frame
+        end
+        IDX->>IDX: deterministic BVH and display samples
+        IDX->>IDX: sync, revalidate, and no-replace publish artifact
+        IDX-->>HOST: PreparedIndex(Resumed)
+    else target is absent
+        IDX->>SRC: bounded fixed-block reads
+        IDX->>IDX: build, sync, revalidate, and no-replace publish
+        IDX-->>HOST: PreparedIndex(Built)
     end
 ~~~
 
-Rules:
+Cancellation leaves only a verified work prefix and recognized disposable
+sidecars. Existing incompatible, corrupt, or racing targets fail without
+replacement. `PreparedIndex` retains the exact verified Source capability used
+to build or open it.
 
-- a changed Source is rejected according to the requested Fast or Full verification policy before affected Point values are returned;
-- recovery exposes a complete prior or new Revision;
-- a missing derived index is not Workspace corruption and is prepared only on
-  an explicit host request;
-- Fast reopen performs no total-Source scan; Full reopen does; and
-- no GPU or window is involved.
+Standalone callers may stop here:
 
-Creating a new Workspace has one additional gate: a complete content fingerprint establishes Source Identity before Opened or any Snapshot is returned. The Workspace derives a Revision Source Contract from verified Source metadata, persists Workspace Identity in its manifest, and invokes RevisionStore::create. v0.1 does not expose provisional View data or provisional Point Identity.
-
-### Standalone use
-
-An index tool can bypass **point-workspace**:
-
-~~~rust
-let source = source_las::open(path).await?;
+~~~rust,ignore
+let source = source_las::open(path).blocking_wait()?;
 let index = point_index::prepare(
     source,
     index_target,
     PrepareLimits::default(),
-).await?;
+).blocking_wait()?;
 ~~~
 
-This is the required independence proof for Source and index modules.
-
-## 2. Build or resume a Spatial Index
+## 2. Create or reopen a Workspace
 
 ~~~mermaid
 sequenceDiagram
-    participant APP as Host adapter
-    participant IDX as point-index
-    participant SRC as point-source
+    participant HOST as Host
+    participant WS as point-workspace
+    participant IDX as PreparedIndex
+    participant DISK as Workspace directory
 
-    APP->>IDX: prepare(verified Source, target, PrepareLimits)
+    HOST->>WS: create(root, index, schema, OpenLimits)
+    WS->>IDX: inspect retained Source and complete descriptor
+    WS->>WS: validate selected U8 classification Attribute
+    WS->>DISK: acquire exclusive lock
+    WS->>DISK: stage, sync, revalidate, and publish manifest
+    WS->>WS: construct deterministic root Revision
+    WS-->>HOST: Workspace + root Snapshot capability
 
-    alt compatible complete target exists
-        IDX->>IDX: verify Source/version binding, layout, topology, and checksums
-        IDX-->>APP: PreparedIndex(Opened, zero Source Points read)
-    else target is absent
-        IDX->>IDX: verify/create append-only work and recover valid frame prefix
+    Note over HOST,DISK: Later process/session
 
-        loop missing 65,536-Point Source blocks
-            IDX->>SRC: read(one span, positions only, bounded budget)
-            SRC-->>IDX: exact Point Batches and terminal summary
-            IDX->>IDX: bounds + bounded hash-selected samples
-            IDX->>IDX: append and sync checksummed frame
-            IDX-->>APP: monotonic durable-Point progress
-        end
-
-        IDX->>IDX: deterministic BVH + bounded child-sample merges
-        IDX->>IDX: write and sync complete temporary artifact
-        IDX->>IDX: no-replace hard-link target + sync parent
-        IDX->>IDX: remove disposable siblings + sync parent
-        IDX-->>APP: PreparedIndex(Built or Resumed, report)
-    end
+    HOST->>WS: open(root, reopened_index, OpenLimits)
+    WS->>DISK: acquire exclusive lock
+    WS->>DISK: validate manifest, operations, contiguous Revisions
+    WS->>IDX: revalidate Source/schema/index binding
+    WS->>DISK: clean recognized disposable scratch
+    WS-->>HOST: Workspace at complete recovered head
 ~~~
 
-Cancellation leaves only verified work frames and never a partial complete
-target. Resume starts at the last verified ordinal-contiguous frame. Existing,
-incompatible, corrupt, or racing targets fail without replacement. Source
-record order remains the identity authority even though the hierarchy groups
-Source blocks spatially.
+Create and open take a complete `PreparedIndex`; the Workspace never discovers
+or builds one. A second open fails while any Workspace, Snapshot, or Point Set
+from the first session retains the lock. Open fails closed on corrupt, forked,
+gapped, mismatched, or over-limit durable state.
 
-The implemented Spatial Index uses the same canonical Source seam for memory
-and LAS/LAZ adapters. A future COPC adapter can use that seam, but native
-hierarchy import remains deferred until a second real producer proves it.
-
-## 3. Run an exact Query
+## 3. Select an exact Point Set
 
 ~~~mermaid
 sequenceDiagram
-    participant APP as Host adapter
-    participant QRY as point-query
+    participant HOST as Host
+    participant SNAP as Snapshot
     participant IDX as point-index
     participant SRC as point-source
-    participant REV as point-revisions
+    participant WSP as private Workspace state
 
-    APP->>QRY: Snapshot.query(Point Query)
+    HOST->>SNAP: select(PointQuery, PointSetLimits)
+    SNAP->>IDX: complete conservative candidate plan
+    IDX-->>SNAP: sorted disjoint Source spans
 
-    alt complete compatible index
-        QRY->>IDX: candidates(Region bounds, CandidateLimits)
-        IDX-->>QRY: complete conservative CandidatePlan
-    else index missing or building
-        QRY->>SRC: sequential all-Point scan
+    loop bounded Source batches
+        SNAP->>SRC: positions + classification
+        SRC-->>SNAP: exact values
+        SNAP->>WSP: apply overlays through pinned Revision
+        SNAP->>SNAP: exact inclusive bounds and class predicate
+        SNAP->>WSP: append bounded Point Set records; spill if needed
     end
 
-    loop bounded candidate spans
-        QRY->>SRC: read(span, requested fields)
-        SRC-->>QRY: canonical Point Batch
-        QRY->>REV: overlays(Snapshot, Point Identities)
-        REV-->>QRY: sparse Attribute patches
-        QRY->>QRY: apply overlays and exact predicates
-        QRY-->>APP: ordered exact Point Batch
-    end
-
-    QRY-->>APP: Complete(ExactPointSummary)
+    SNAP->>SRC: verify terminal summary
+    SNAP->>WSP: seal count, hashes, and spill footer
+    SNAP-->>HOST: immutable PointSet
 ~~~
 
-If no complete index is available, the Query uses a slower sequential scan. It never substitutes a partial index result. Point Queries are always exact and complete in v0.1; partial Coverage belongs only to Views.
+`select_point_ids` replaces index planning with bounded input consumption,
+Source validation, sorting, deduplication, and span normalization. The exact
+Source/overlay/filter/seal path is otherwise the same.
 
-Concurrent commits do not affect the pinned Snapshot.
+No Point Set is published after cancellation, Source/index error, corruption,
+or resource-limit failure. Display samples and GPU picks never act as a
+negative completeness witness.
 
-## 4. Prepare and render a View
+## 4. Commit a classification Edit
 
-Adaptive planning is one synchronous, renderer-neutral CPU operation. The host
-owns hierarchy acquisition, node materialization, scheduling, renderer updates,
-command submission, and device polling. **point-view** does not require a
-Snapshot, Spatial Index, or `ViewInput`. The implemented private real-cloud
-bridge derives its `AvailableNodes` snapshot from `PreparedIndex`; other hosts
-may continue to supply unrelated hierarchies.
+~~~mermaid
+sequenceDiagram
+    participant HOST as Host
+    participant WS as Workspace
+    participant SET as PointSet
+    participant DISK as Workspace persistence
+
+    HOST->>HOST: generate and retain (WorkspaceId, OperationId)
+    HOST->>WS: commit(set_classification(OperationId, PointSet, value), limits)
+    WS->>WS: serialize writer; validate health/head/provenance/limits
+    WS->>SET: bounded records with exact before-values
+    SET-->>WS: ordered records
+    WS->>WS: omit no-op rows; hash request and reversible delta
+
+    alt no changed rows or definitive stale/conflict
+        WS->>DISK: sync immutable rejection without replacement
+        WS-->>HOST: Rejected
+    else nonempty candidate
+        WS->>DISK: stage/sync/close/read-only/revalidate candidate
+        WS->>DISK: no-replace link Operation ready + sync operations directory
+        WS->>WS: recheck expected head
+        WS->>DISK: no-replace link Revision + sync revisions directory
+        WS-->>HOST: Committed(CommitReceipt)
+    end
+~~~
+
+The Revision stores only sorted `(ordinal, before, after)` rows. Source bytes,
+positions, and every non-classification Attribute remain unchanged. A failure
+before publication is an error. A failure after publication begins is
+`Indeterminate`, because false certainty would be unsafe.
+
+## 5. Commit an immediate-head Revert
+
+~~~mermaid
+sequenceDiagram
+    participant HOST as Host
+    participant WS as Workspace
+    participant DISK as Workspace persistence
+
+    HOST->>HOST: generate and retain OperationId
+    HOST->>WS: commit(revert_head(OperationId, expected_head), limits)
+    WS->>WS: require current non-root expected head
+    WS->>DISK: bounded read of immediate-head rows
+    WS->>WS: swap before and after; derive new child identity
+    WS->>DISK: publish ready, then Revision, with directory syncs
+    WS-->>HOST: Committed(new inverse Revision)
+~~~
+
+Revert appends history. It does not move the head backward, delete the reverted
+Revision, or support arbitrary historical targets. Reverting the inverse is
+redo.
+
+## 6. Reconcile an indeterminate Operation
+
+~~~mermaid
+sequenceDiagram
+    participant HOST as Host
+    participant WS as point-workspace
+    participant DISK as Workspace persistence
+
+    HOST->>HOST: drop every Workspace/Snapshot/PointSet session handle
+    HOST->>WS: open(root, same complete index, OpenLimits)
+    WS->>DISK: recover and validate complete durable state
+    WS-->>HOST: reopened Workspace
+    HOST->>WS: resolve_operation(retained OperationId)
+
+    alt matching Revision
+        WS->>DISK: establish revisions-directory durability
+        WS-->>HOST: Committed
+    else immutable rejection
+        WS->>DISK: establish operations-directory durability
+        WS-->>HOST: Rejected
+    else complete ready and expected head is current
+        WS->>DISK: establish operations-directory durability
+        WS-->>HOST: Retryable
+        HOST->>WS: retry_operation(same OperationId, CommitLimits)
+        WS->>DISK: revalidate and link complete payload
+        WS-->>HOST: Committed or Indeterminate
+    else no durable record
+        WS-->>HOST: NotRecorded
+    else durability cannot be proved
+        WS-->>HOST: Indeterminate
+    end
+~~~
+
+The host never invents a replacement identity for the same logical request.
+`Retryable` contains a complete durable intent; no live Point Set is needed.
+
+## 7. Prepare and render a View
+
+View planning remains separate from exact Workspace selection. The current
+real-cloud host bridge reads `PreparedIndex` directly.
 
 ~~~mermaid
 sequenceDiagram
@@ -156,208 +223,59 @@ sequenceDiagram
     participant VIEW as point-view
     participant GPU as render-wgpu
 
-    HOST->>GPU: apply(RenderUpdate::Reset)
-
-    loop camera, viewport, or residency change
-        HOST->>VIEW: plan(Camera, viewport, AvailableNodes, PlanningBudget)
-        VIEW-->>HOST: ViewPlan(demanded nodes, requests, retention, retirements)
-
-        HOST->>HOST: prune queued Requested nodes no longer demanded
-
-        loop safe conditional retirements
-            HOST->>GPU: apply(RenderUpdate::Remove)
-        end
-
-        opt one prioritized requested node fits host staging
-            HOST->>IDX: read_node(IndexNodeId, NodeReadBudget)
+    HOST->>GPU: apply(Reset)
+    loop camera, viewport, hierarchy, or residency change
+        HOST->>VIEW: plan(camera, viewport, nodes, budget)
+        VIEW-->>HOST: demand, new requests, retention, retirements
+        HOST->>HOST: cancel queued work no longer demanded
+        HOST->>GPU: apply safe conditional Removes
+        opt one requested node fits staging limits
+            HOST->>IDX: read_node(node, budget)
             IDX-->>HOST: display batches + exact terminal summary
-            HOST->>HOST: exact ticks to origin-relative render points
-            HOST->>GPU: apply(one complete RenderUpdate::Upsert)
-            GPU-->>HOST: accepted or rejected
+            HOST->>HOST: pack exact ticks into origin-relative display points
+            HOST->>GPU: apply one complete atomic Upsert
         end
-
-        HOST->>GPU: render(encoder, target, Frame)
-        GPU-->>HOST: RecordedFrame and FrameReport
+        HOST->>GPU: render(encoder, target, frame)
+        GPU-->>HOST: RecordedFrame + report
     end
 ~~~
 
-Rules:
+The host owns scheduling, staging, update ordering, queue submission, and device
+polling. A node becomes Resident only after a complete accepted Upsert. Parent
+Coverage remains until the planner emits its exact conditional retirement.
 
-- **point-view** owns culling, screen-error LOD, hysteresis, budget planning,
-  Coverage retention, and safe retirement decisions;
-- `ViewPlan::demanded_nodes()` includes current nonresident targets already
-  Requested, while `requests()` remains only the new-load delta;
-- the host owns Point Batch materialization, origin-relative display packing,
-  request execution, and application of every renderer update;
-- **render-wgpu** owns bounded GPU point residency, command recording, and
-  provisional picking, but not automatic eviction;
-- Reset, stable batch keys, increasing versions, and conditional removal prevent
-  stale generations or plans from replacing newer data;
-- render never waits for Source I/O, decompression, indexing, or terrain construction;
-- the host retains any Snapshot or Revision provenance associated with its View
-  generation; neither `ViewPlan` nor `Frame` claims that provenance;
-- one `PointBatch` uses one 64-bit world origin and 32-bit relative display
-  positions; and
-- the real bridge marks a node Resident only after an accepted complete Upsert,
-  assigns monotonically increasing versions to retries, and retains parent
-  Coverage until the planner emits its exact conditional retirement; and
-- deleting all GPU resources cannot alter Workspace state.
+## 8. Cancellation and crash matrix
 
-### Standalone use
-
-**render-wgpu** can apply generated render-protocol updates and render them in
-an offscreen test. **point-view** can plan directly from generated hierarchy
-metadata and inspect `ViewPlan` without creating a GPU device.
-`renderer-demo --smoke SOURCE [INDEX_TARGET]` Full-verifies LAS/LAZ, prepares
-the index, plans one node, and accepts one atomic CPU-model Upsert without a
-GPU. The modules do not require each other at runtime to pass their own
-conformance tests.
-
-## 5. Select Points and commit an Edit
-
-A GPU pick is a hint. The exact Point Set is resolved by **point-query** against the frozen Snapshot and View context.
-
-~~~mermaid
-sequenceDiagram
-    participant DESK as Desktop adapter
-    participant GPU as render-wgpu
-    participant QRY as point-query
-    participant SET as point-set
-    participant WS as point-workspace
-    participant REV as point-revisions
-
-    DESK->>GPU: pick(encoder, RecordedFrame, PickRequest)
-    GPU-->>DESK: nonblocking PickTicket
-    DESK->>DESK: submit encoder, drive device polling, poll provisional PickHit
-    DESK->>QRY: exact screen-through Query(frozen camera and Snapshot)
-    QRY-->>DESK: bounded exact Point stream
-    DESK->>SET: materialize(exact stream, budget)
-    SET->>QRY: pull bounded Point Batches to Complete
-    SET-->>DESK: immutable spillable PointSetHandle
-    DESK->>DESK: choose Operation Identity and retain it with Workspace Identity
-    DESK->>WS: commit(Operation Identity, expected Revision, Edit Batch)
-    WS->>REV: stage full payload, then compare-and-swap commit
-
-    alt committed
-        REV-->>WS: Committed(new Revision)
-        WS-->>DESK: committed outcome
-    else rejected
-        REV-->>WS: Rejected(reason and actual head)
-        WS-->>DESK: rejected; no state changed
-    else acknowledgement failed near commit point
-        REV-->>WS: Indeterminate(Operation Identity)
-        WS-->>DESK: Indeterminate(Operation Identity)
-        DESK->>WS: reopen, then resolve_operation(Operation Identity)
-        WS-->>DESK: committed, rejected, or not-recorded resolution
-    end
-~~~
-
-Before the logical commit point, **point-revisions** consumes the process-scoped Point Set and durably stages the complete canonical Edit payload in bounded batches. A crash during staging cannot create a Revision. NotRecorded means no operation record exists and therefore no Revision was created; the host closes that recovery record rather than trying to reconstruct an expired Point Set. Reusing a recorded identity with different content is Rejected.
-
-The exact v0.1 screen rule is through-selection: CPU projection includes every matching Point regardless of occlusion, including the polygon boundary. Pick candidates are only immediate feedback. The Edit targets stable Point Identities, not coordinates or transient node offsets. A Point Set from a different Revision is rejected rather than silently rebased.
-
-## 6. Derive a Terrain Surface
-
-The host adapter composes Query and terrain modules. **terrain-model** never opens a Workspace or reaches upward into **point-query**.
-
-~~~mermaid
-sequenceDiagram
-    participant APP as Host adapter
-    participant WS as point-workspace
-    participant QRY as point-query
-    participant TER as terrain-model
-
-    APP->>WS: snapshot(Revision)
-    WS-->>APP: immutable Snapshot
-    APP->>QRY: Snapshot.query(terrain Point Query)
-    APP->>QRY: Snapshot.breaklines(terrain Region)
-    QRY-->>APP: two bounded streams with identical Snapshot provenance
-    APP->>TER: derive(TerrainInput, normalized Recipe, limits)
-    TER->>TER: thin candidates
-    TER->>TER: normalize constraints
-    TER->>TER: deterministic constrained triangulation
-    TER->>TER: validate topology
-    TER-->>APP: immutable Terrain Surface and diagnostics
-~~~
-
-This composition keeps the terrain module independently useful:
-
-~~~rust
-let points = snapshot.query(terrain_query);
-let breaklines = snapshot.breaklines(terrain_region);
-let surface = terrain_model::derive(
-    TerrainInput::snapshot(snapshot.provenance(), points, breaklines),
-    recipe,
-    limits,
-).await?;
-~~~
-
-The terrain module verifies both terminal stream summaries before publishing the Artifact. The result records Artifact Identity, Source Identity, Revision, Coordinate Reference, normalized Recipe, algorithm version, input digest, and TerrainLimits. A later Revision makes the prior Terrain Surface stale; it does not mutate that Artifact.
-
-## 7. Export LandXML
-
-~~~mermaid
-sequenceDiagram
-    participant APP as Host adapter
-    participant XML as landxml
-    participant FS as Atomic file adapter
-
-    APP->>FS: create temporary sibling
-    APP->>XML: encode(Terrain Surface, options)
-    XML->>XML: validate topology and export semantics
-    loop bounded byte chunks
-        XML-->>APP: ByteChunk
-        APP->>FS: write chunk
-    end
-    XML-->>APP: Complete(LandXmlReport)
-
-    alt validation and write succeed
-        APP->>FS: flush, sync, and atomically replace
-        FS-->>APP: committed destination
-    else any failure
-        APP->>FS: discard temporary sibling
-        APP-->>APP: destination remains unchanged
-    end
-~~~
-
-The **landxml** module emits a bounded byte stream. Path replacement belongs to the host's file adapter, so encoding can be tested in memory and reused by bindings.
-
-## 8. Cancellation and crash recovery
-
-| Operation | Safe cancellation point | Permitted residue | Durable state after failure |
+| Operation | Safe cancellation boundary | Permitted residue | Published truth |
 |---|---|---|---|
-| Source read | Between decode blocks or Point Batches | None | Unchanged |
-| Index prepare | After a synced checksummed work frame; before no-replace publication | Verified work prefix and disposable temporary/spool files | Existing target unchanged, or one complete newly linked target |
-| Query | Between Point Batches | Disposable read cache | Unchanged |
-| View preparation | Between View Batches | Disposable view cache | Unchanged |
-| Revision commit | Before the durable commit point | Caller-retained Operation Identity plus journal-owned canonical digest and staged payload | Rejected old head, Committed new head, or Indeterminate until reconciled |
-| Terrain derivation | Between deterministic phases or partitions | Verified disposable artifact blocks | Unchanged |
-| LandXML export | Before atomic target replacement | Temporary sibling | Previous destination or new complete destination |
-| GPU frame | At frame end or device loss | Disposable GPU allocations | Workspace unchanged |
+| Source read | Between decoder blocks or Point Batches | None | No partial Source result |
+| Index prepare | After synced checksummed work frame; before artifact publication | Verified work prefix and recognized sidecars | Existing target or one complete new target |
+| Workspace create/open | Before manifest/session publication; recovery becomes noncancellable once durable create is visible | Recognized scratch/partial pre-manifest directory | No Workspace, or one complete reopenable Workspace |
+| Exact selection | Between candidate/Source/overlay/Point Set blocks | Live disposable spill owned by Job | No Point Set, or one sealed complete Point Set |
+| Revision commit | Before publication; afterward certainty is conservative | Complete ready/rejection/Revision links and recognized scratch | Rejected old head, Committed new head, or Indeterminate until reopen |
+| View planning | Before returning a plan | None | Old planner history or one complete new plan |
+| GPU frame | Host-controlled frame/device boundary | Disposable GPU allocations | Workspace unchanged |
 
-Recovery order is:
+## 9. Staleness
 
-1. verify the Source Identity;
-2. recover the Revision journal;
-3. open or reject the Spatial Index;
-4. discard invalid derived cache entries;
-5. expose the complete head Snapshot;
-6. reconcile any Indeterminate Operation Identity and close caller recovery records resolved as Committed, Rejected, or NotRecorded; and
-7. resume explicitly requested background Jobs.
-
-No recovery path guesses missing identity, Coordinate Reference, or Revision information.
-
-## 9. Staleness propagation
-
-Artifacts are immutable. Staleness is metadata, not in-place invalidation:
+Snapshots and Revisions are immutable. A later commit creates a new head but
+does not mutate older Snapshots. View generations and GPU residency are
+separate disposable state and may be reset independently.
 
 ~~~mermaid
 flowchart LR
-    S0["Snapshot at Revision 10"] --> T0["Terrain Surface at Revision 10"]
-    T0 --> X0["LandXML export at Revision 10"]
-    E1["Edit commit"] --> S1["Snapshot at Revision 11"]
-    S1 -. "does not mutate" .-> T0
-    S1 --> T1["Optional new Terrain Surface"]
+    SRC["Immutable Source"] --> R0["Root Revision"]
+    R0 --> R1["Classification Revision"]
+    R1 --> R2["Revert Revision"]
+    R0 --> S0["Historical Snapshot"]
+    R2 --> S2["Head Snapshot"]
+    IDX["Rebuildable index"] -. "accelerates exact reads" .-> S0
+    IDX -. "accelerates exact reads" .-> S2
+    VIEW["Disposable View/GPU state"] -. "never mutates" .-> R2
 ~~~
 
-Staleness is host-owned metadata in v0.1; the Workspace does not persist an Artifact catalog. An application may continue displaying the prior complete Terrain Surface while a new one is derived, but it must label the old Revision and use distinct render-protocol generations. One rendered frame never mixes mesh batches from different Revisions.
+## Deferred workflows
+
+Terrain derivation, Breaklines, edited Point-row streaming, LandXML export,
+autosave, screen selection, and product UI require later accepted designs.
+They are not implied by the current Workspace vocabulary.

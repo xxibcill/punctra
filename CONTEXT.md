@@ -1,10 +1,10 @@
 # Domain Context: Point-Cloud Foundation
 
-Status: renderer, adaptive View planning, Real Sources, and the narrow Spatial
-Index/out-of-core View slice are implemented; the narrow v0.5 Workspace is
-active; broader document, terrain, and product terms remain deferred
+Status: renderer, adaptive View planning, Real Sources, Spatial Index/out-of-
+core View, and the narrow v0.5 Workspace are implemented; broader document,
+terrain, and product terms remain deferred
 
-Punctra v0.4 builds on the reusable render engine, renderer-neutral View
+Punctra v0.5 builds on the reusable render engine, renderer-neutral View
 planner, and verified Source path described in the accepted [v0.1 renderer
 design](docs/design/render-engine-v0.1.md), [v0.2 planning
 design](docs/design/adaptive-view-planning-v0.2.md), and [v0.3 Real Sources
@@ -12,9 +12,10 @@ design](docs/design/real-sources-v0.3.md). The accepted [v0.4 Out-of-core View
 design](docs/design/out-of-core-view-v0.4.md) additionally implements Spatial
 Index and rebuildable Artifact behavior for its narrow scope. The accepted
 [v0.5 Durable document core design](docs/design/durable-document-core-v0.5.md)
-makes the narrow classification meanings of Workspace, Snapshot, Query, Point
-Set, Edit, Revert Edit, Revision, and Operation Identity current. Broader uses
-of those terms remain vocabulary research and do not imply product scope.
+implements the narrow classification meanings of Workspace, Snapshot, Query,
+Point Set, Edit, Revert Edit, Revision, and Operation Identity behind the one
+deep `point-workspace` crate. Broader uses of those terms remain vocabulary
+research and do not imply product scope.
 
 ## Artifact
 

@@ -1,152 +1,19 @@
 # Repository and Dependency Layout
 
-Status: broader platform layout deferred; the v0.1 renderer, v0.2 adaptive
-View planner, v0.3 Real Sources, and v0.4 Spatial Index modules are implemented
-under the
-[v0.1 renderer](../design/render-engine-v0.1.md),
-[v0.2 planning](../design/adaptive-view-planning-v0.2.md),
-[v0.3 Real Sources](../design/real-sources-v0.3.md), and
-[v0.4 Out-of-core View](../design/out-of-core-view-v0.4.md) scopes
+Status: current through v0.5; later crates are created only with accepted
+behavior and a caller
 
-The repository is one Cargo workspace containing independently buildable crates. A crate is created only when its implementation and at least one caller exist; the tree below is the intended destination, not a requirement to scaffold empty directories.
+The repository is one Cargo workspace. Each current crate is independently
+buildable and exposes a smaller public interface than its private
+implementation. No empty future crates are scaffolded.
 
-## Target layout
+## Current layout
 
 ~~~text
 Cargo.toml
 CONTEXT.md
-LICENSE-APACHE
-LICENSE-MIT
-
-crates/
-  point-contracts/
-    src/
-      lib.rs
-
-  foundation-runtime/
-    src/
-      lib.rs
-      job.rs
-      stream.rs
-      budget.rs
-
-  point-source/
-    src/
-      lib.rs
-      verification.rs
-      validation.rs
-
-  source-las/
-    src/
-      lib.rs
-      header.rs
-      records.rs
-      attributes.rs
-
-  source-copc/              # proposed and deferred; not in the v0.4 workspace
-    src/
-      lib.rs
-      hierarchy.rs
-      ranges.rs
-
-  source-memory/
-    src/
-      lib.rs
-
-  point-index/
-    benches/
-      index.rs
-    examples/
-      direct_use.rs
-    src/
-      lib.rs
-      error.rs
-      limits.rs
-      model.rs
-      persistence.rs
-      prepare.rs
-      read.rs
-      tree.rs
-    tests/
-      candidates.rs
-      interface.rs
-      persistence.rs
-
-  point-set/
-    src/
-      lib.rs
-      compress.rs
-      spill.rs
-      iterate.rs
-
-  point-revisions/
-    src/
-      lib.rs
-      journal.rs
-      commit.rs
-      recover.rs
-      overlay.rs
-
-  point-query/
-    src/
-      lib.rs
-      plan.rs
-      read.rs
-      overlay_join.rs
-      predicate.rs
-
-  render-protocol/
-    src/
-      lib.rs
-      camera.rs
-    tests/
-      contracts.rs
-      state_model.rs
-
-  point-view/
-    src/
-      lib.rs
-      planning.rs
-    tests/
-      planner.rs
-    benches/
-      planner.rs
-
-  terrain-model/
-    src/
-      lib.rs
-      thin.rs
-      constraints.rs
-      triangulate.rs
-      validate.rs
-
-  landxml/
-    src/
-      lib.rs
-      encode.rs
-      validate.rs
-
-  point-workspace/
-    src/
-      lib.rs
-      manifest.rs
-      open.rs
-      recovery.rs
-      jobs.rs
-
-  render-wgpu/
-    src/
-      lib.rs
-      frame.rs
-      gpu.rs
-      pick.rs
-      pipeline.rs
-      point.wgsl
-      renderer.rs
-      targets.rs
-    tests/
-      contracts.rs
-      offscreen.rs
+README.md
+ROADMAP.md
 
 apps/
   renderer-demo/
@@ -160,296 +27,284 @@ apps/
       headless_smoke.rs
       planner.rs
 
-  point-cli/
-    src/
-      main.rs
+crates/
+  foundation-runtime/
+    src/lib.rs
+    tests/contracts.rs
 
-  viewer-desktop/
-    src/
-      main.rs
-      app_state.rs
-      tools.rs
+  point-contracts/
+    src/lib.rs
+    tests/contracts.rs
 
-bindings/
-  point-python/          # add only with its first real caller
-
-test-support/
-  point-fixtures/
+  point-source/
     src/
       lib.rs
+      adapter.rs
+      error.rs
+      stream.rs
+    tests/interface.rs
 
-fixtures/
-  synthetic/
-  public-domain/
-  corrupt/
-  landxml/
+  source-memory/
+    src/lib.rs
+    examples/memory_source.rs
+    benches/read.rs
+    tests/interface.rs
 
-fuzz/
-  fuzz_targets/
+  source-las/
+    src/
+      lib.rs
+      decode.rs
+      format.rs
+    examples/inspect.rs
+    benches/read.rs
+    tests/
+      conformance.rs
+      point_formats.rs
 
-benches/
-  scenarios/
+  point-index/
+    src/
+      lib.rs
+      error.rs
+      limits.rs
+      model.rs
+      persistence.rs
+      prepare.rs
+      read.rs
+      tree.rs
+    examples/direct_use.rs
+    benches/index.rs
+    tests/
+      candidates.rs
+      interface.rs
+      persistence.rs
+
+  point-workspace/
+    src/
+      lib.rs
+      error.rs
+      limits.rs
+      model.rs
+      persistence.rs
+      point_set.rs
+      selection.rs
+      workspace.rs
+    examples/classify.rs
+    benches/document.rs
+    tests/
+      interface.rs
+      selection.rs
+      persistence.rs
+
+  render-protocol/
+    src/
+      lib.rs
+      camera.rs
+    tests/
+      contracts.rs
+      state_model.rs
+
+  point-view/
+    src/
+      lib.rs
+      planning.rs
+    benches/planner.rs
+    tests/planner.rs
+
+  render-wgpu/
+    src/
+      lib.rs
+      frame.rs
+      gpu.rs
+      pick.rs
+      pipeline.rs
+      renderer.rs
+      targets.rs
+      point.wgsl
+    tests/
+      contracts.rs
+      offscreen.rs
 
 docs/
   architecture/
+  design/
   adr/
-  formats/
+  research/
 ~~~
 
-Files inside one crate are private implementation structure, not extra public
-modules. For example, **point-index/prepare.rs**, **persistence.rs**, and
-**tree.rs** support the single `prepare` operation. Promoting every algorithm
-stage into its own crate would create shallow interfaces and reduce locality.
+Files inside a crate are private locality, not additional public modules. In
+particular, `point-workspace/selection.rs`, `point_set.rs`, and
+`persistence.rs` implement one deep caller-facing Workspace contract. They are
+not separate public crate seams.
 
 ## Cargo dependency direction
 
-The root manifest uses explicit workspace dependencies and denies wildcard versions. Each crate's manifest lists only the dependencies permitted by [modules.md](modules.md).
-
-The intended graph is:
+The current graph is:
 
 ~~~text
 point-contracts
 foundation-runtime
 
 point-source -> point-contracts + foundation-runtime
-source adapters -> point-source
+source-memory -> point-source + point-contracts + foundation-runtime
+source-las -> point-source + point-contracts + foundation-runtime
 point-index -> point-source + point-contracts + foundation-runtime
-point-set -> point-contracts + foundation-runtime
-point-revisions -> point-set + point-contracts + foundation-runtime
-point-query -> point-source + point-index + point-revisions
+point-workspace -> point-index + point-source + point-contracts + foundation-runtime
 render-protocol -> point-contracts
 point-view -> render-protocol
-terrain-model -> point-contracts + foundation-runtime
-landxml -> terrain-model + foundation-runtime
-point-workspace -> point-source + point-index + point-revisions + point-query
 render-wgpu -> render-protocol + point-contracts
-
-Application adapters compose the modules they directly need.
+renderer-demo -> source-las + point-index + point-view + render-protocol + render-wgpu
 ~~~
 
-The textual tree is a readability aid; the allowlist in [modules.md](modules.md) is normative.
+Development-only edges may add fixture adapters, `criterion`, LAS writers, or
+allocation instrumentation. They do not change the production authority graph.
 
-## Dependency enforcement
+Rules:
 
-Local verification should inspect Cargo metadata and reject any edge not
-present in the allowlist. This catches architectural drift that normal
-compilation accepts without requiring hosted CI.
+- root dependencies use explicit versions; wildcard versions are forbidden;
+- a lower crate cannot depend on `point-workspace` or `renderer-demo`;
+- a Source adapter cannot depend on an index, Workspace, or renderer;
+- only `render-wgpu` and the application that directly composes it may depend
+  on wgpu;
+- no headless foundation crate depends on a windowing stack; and
+- a feature flag cannot change identity, exactness, Revision, or persistence
+  semantics.
 
-Additional rules:
-
-- **point-contracts** cannot depend on I/O, async runtimes, wgpu, windowing, XML, or a point format.
-- **foundation-runtime** cannot depend on a point format, domain algorithm, async runtime, wgpu, or windowing.
-- A seam crate cannot depend on any of its adapters.
-- A lower module cannot depend on **point-workspace** or an application adapter.
-- Only **render-wgpu** and application adapters that directly compose it, such
-  as **renderer-demo**, may depend on wgpu.
-- Only application adapters choose concrete Source adapters.
-- No crate named common, utils, helpers, plugin, storage, or manager is allowed without an accepted architecture change explaining its one job.
-- Feature flags cannot create a reverse dependency or change correctness semantics.
-
-A small repository tool may enforce the graph:
-
-~~~text
-cargo metadata --format-version 1
-        |
-        v
-compare workspace package edges with docs/architecture/dependencies.toml
-        |
-        +-- exact match: continue
-        +-- unknown edge: fail CI
-~~~
-
-If this automation is implemented, the machine-readable allowlist becomes generated from, or checked against, [modules.md](modules.md) so the two cannot silently diverge.
+`cargo metadata --format-version 1` is the inspection source when checking the
+actual graph. No hosted CI is required or configured; checks run locally.
 
 ## Independent build and use
 
-Every crate provides:
-
-- crate-level documentation containing its one-job sentence;
-- one minimal direct-use example;
-- interface-level unit and integration tests;
-- a package-specific check command;
-- package-specific benchmark or complexity evidence when it handles Source-scale data; and
-- no requirement to initialize unrelated modules.
-
-Expected commands:
+Representative direct commands are:
 
 ~~~bash
-cargo check -p point-index
+cargo test -p point-source --all-features
+cargo run -p source-memory --example memory_source
+cargo run --release -p source-las --example inspect -- survey.laz
+
 cargo test -p point-index --all-features
 cargo run -p point-index --example direct_use
 cargo bench -p point-index --bench index
+
+cargo test -p point-workspace --all-features
+cargo run --release -p point-workspace --example classify -- \
+  survey.laz survey.laz.pidx survey.pcw CLASSIFICATION_ATTRIBUTE_ID
+cargo bench -p point-workspace --bench document
+
+cargo bench -p point-view --bench planner
 cargo test -p renderer-demo --test headless_smoke
+PUNCTRA_REQUIRE_GPU=1 cargo test -p render-wgpu --test offscreen
 PUNCTRA_REQUIRE_GPU=1 cargo test -p renderer-demo --test planner
-
-# Proposed commands once those deferred crates exist:
-cargo test -p point-revisions
-cargo test -p terrain-model
-cargo bench -p point-query
-cargo run -p point-cli -- inspect fixture.laz
 ~~~
 
-Examples of direct use:
+The Workspace direct example proves the one-deep-crate lifecycle without a GUI:
+LAS/LAZ open, index prepare/open, Workspace create, exact classification
+selection, classification commit, immediate-head Revert, and reopen.
 
-~~~rust
-// Decode without a Workspace.
-let source = source_las::open(path).await?;
-let mut batches = source.read(request)?;
-let batch = batches.next()?;
+## Private depth inside point-workspace
 
-// Index generated Points through the memory adapter, without a Workspace.
-let source = source_memory::open(generated_memory_source).await?;
-let index = point_index::prepare(
-    source,
-    target,
-    PrepareLimits::default(),
-).await?;
-
-// Derive terrain without a Source or Spatial Index.
-let surface = terrain_model::derive(
-    TerrainInput::detached(generated_batches, breaklines, content_hash),
-    recipe,
-    limits,
-).await?;
-
-// Encode a stored Terrain Surface fixture without the engine.
-let xml = LandXml::encode(&surface, options)?;
-
-// Draw synthetic render-protocol updates without opening point data.
-renderer.apply(&RenderUpdate::Reset { view_generation })?;
-renderer.apply(&RenderUpdate::Upsert { batch: synthetic_batch })?;
-let recorded = renderer.render(&mut encoder, &target, &frame)?;
-~~~
-
-## Private depth inside crates
-
-The external interface of a module should be much smaller than its implementation. For example:
+The public interface is compact:
 
 ~~~text
-point-query public interface
-  Snapshot.query(PointQuery) -> BatchStream<PointBatch, ExactPointSummary>
-
-private behavior hidden behind it
-  candidate planning
-  span coalescing
-  bounded reads
-  sparse overlay join
-  exact spatial predicates
-  Attribute predicates
-  stable merge order
-  exact count and provenance summary
-  cancellation and resource limits
+create/open -> Workspace
+Workspace -> head/snapshot/revision_info
+Snapshot -> select/select_point_ids -> PointSet
+PointSet -> metadata/ids
+Workspace -> commit/retry_operation/resolve_operation
 ~~~
 
-That ratio is module depth. Callers receive leverage from one operation, and query knowledge retains locality inside one crate.
+Private behavior hidden behind it includes:
 
-Do not expose:
+- complete candidate planning and exact Source predicates;
+- bounded Source reads and cumulative overlay joins;
+- Point-ID validation, sorting, deduplication, and span normalization;
+- in-memory Point Set growth, checked spill, repeated bounded reads, and
+  cleanup;
+- request/delta hashing and sparse before/after rows;
+- immutable manifest, intent, rejection, and Revision encodings;
+- no-replace publication, directory durability, lock ownership, and recovery;
+- cancellation/publication phase tracking; and
+- operation-specific memory, temporary, and durable ledgers.
 
-- persisted index pages or mutable node internals;
-- memory maps or borrowed decoder buffers;
-- journal frames or overlay tables;
-- triangulator half-edges;
-- GPU buffers or shader bindings;
-- cache directories or eviction internals; or
-- scheduler task handles.
-
-Expose stable domain values, operations, progress, and errors instead.
-
-## Features and platform isolation
-
-Keep optional heavy dependencies at adapter edges:
-
-- **source-las** owns LAS/LAZ codec dependencies.
-- A proposed **source-copc** adapter would own local COPC hierarchy and
-  byte-range decoding only; it is deferred and is not in the v0.4 workspace.
-- **landxml** owns XML encoding and validation dependencies.
-- **render-wgpu** owns wgpu and shader dependencies.
-- **viewer-desktop** owns windowing and UI dependencies.
-- **point-python** owns the Python binding dependency.
-
-Headless users that select **point-index**, **point-workspace**, **point-query**,
-or **terrain-model** must not compile wgpu or a windowing stack.
-
-Feature flags may select an adapter capability such as LAZ compression. Remote readers wait for a real caller and a separately reviewed trust and retry contract. Feature flags may not switch between two subtly different identity, Revision, Query, or topology semantics.
+Do not expose private index pages, Source decoder buffers, Point Set frames,
+overlay blocks, Revision frames, scratch paths, hard-link details, GPU buffers,
+or scheduler internals.
 
 ## Persisted directories
 
-A Workspace directory should make ownership visible:
+Index and Workspace storage are separate:
 
 ~~~text
-example.pcw/
-  manifest.json             # owned by point-workspace
-  revisions.pcrev           # committed Revisions and staged operations; owned by point-revisions
-  indexes/
-    source-id.pidx          # owned by point-index
-  cache/
-    ...                     # disposable; safe to remove
+survey.laz                    # immutable Source, host-owned
+survey.laz.pidx               # complete rebuildable point-index artifact
+survey.laz.pidx.work          # disposable/resumable index sidecar when present
+survey.laz.pidx.samples       # disposable index construction sidecar when present
+
+survey.pcw/
+  manifest.pwm               # point-workspace schema and lineage
+  workspace.lock             # exclusive session lock
+  operations/
+    <operation-id>.ready      # complete retryable intent
+    <operation-id>.reject     # definitive rejection
+  revisions/
+    <sequence>-<revision-id>.pwr
+  scratch/                    # recognized disposable stages and live Point Sets
 ~~~
 
 Ownership rules:
 
-- only **point-workspace** reads or writes the manifest, which records Workspace Identity and the one versioned SourceRecord returned by verification;
-- only **point-revisions** reads or writes the revision journal;
-- only **point-index** reads or writes its `.pidx` target and deterministic
-  `.work`, `.samples`, and `.tmp` siblings;
-- any process may request cache deletion through its owning module, but no module interprets another module's private cache; and
-- the one immutable Source remains outside the Workspace and is referenced by the manifest.
-
-Terrain Surfaces and LandXML outputs are host-owned values or files in v0.1. The Workspace does not persist an Artifact catalog.
+- only `point-index` interprets `.pidx` and its sidecars;
+- only `point-workspace` interprets the Workspace directory;
+- the Source remains outside the Workspace and is never rewritten;
+- a Point Set spill is temporary and retained only by live handles; and
+- View and GPU state are not persisted as authoritative document data.
 
 ## Versioning
 
-Use two separate version axes:
+Cargo semantic versions, persisted schema versions, and deterministic algorithm
+versions are separate axes. A Cargo `0.5` version does not imply disk schema
+version 5.
 
-1. Cargo semantic versions describe Rust interface compatibility.
-2. On-disk schema versions describe persisted representation compatibility.
+- Unknown persisted major versions fail explicitly.
+- Identity and persisted schema values remain opaque outside their owner.
+- A future migration must leave the prior representation recoverable until the
+  new representation is complete and durable.
+- Algorithm versions change when deterministic artifact meaning changes.
+- Golden fixtures are required when more than one persisted version is
+  supported.
 
-During 0.x development, crate releases may be synchronized for convenience, but callers must not assume that Cargo version 0.4 implies disk format 4.
-
-Rules:
-
-- identifiers and persisted schema versions are opaque outside their owner;
-- unknown persisted major versions fail explicitly;
-- migrations create a new representation and leave the old one recoverable until success;
-- golden fixtures from every supported persisted version stay in the repository; and
-- algorithm versions change whenever deterministic Artifact meaning changes.
+v0.5 creates one disk/semantic contract and does not claim migration or
+compaction.
 
 ## Implementation order
 
-Build vertical evidence in this order. The first three steps are implemented;
-later steps remain proposed unless an accepted versioned design says otherwise:
+Completed vertical slices are:
 
-1. **point-contracts**, **foundation-runtime**, **point-source**, and **source-memory** with conformance tests.
-2. **source-las** for small LAS, then bounded LAZ decoding.
-3. **point-index** with a synthetic oracle, persistence, interruption, and resume.
-4. **point-set** with forced spill, bounded iteration, and content hashing.
-5. **point-revisions** with sparse classification Edits and fault-injected recovery.
-6. **point-query** and **point-workspace** with exact Snapshot Queries.
-7. **render-protocol**, **point-view**, **render-wgpu**, and a minimal desktop adapter.
-8. Proposed, deferred **source-copc** using the same opaque verified Source and
-   foundation-index path.
-9. **terrain-model** with complete TerrainLimits and deterministic fixtures.
-10. **landxml** with independent parsing and semantic fixtures.
-11. Bindings and additional adapters only after the Rust interfaces settle.
+1. render protocol and wgpu engine;
+2. adaptive View planning;
+3. verified Source contracts with memory/LAS/LAZ adapters;
+4. complete persistent Spatial Index and real-cloud View composition; and
+5. one deep durable classification Workspace.
 
-Each step must produce a directly usable library and executable example. Avoid scaffolding later crates before their first behavior exists.
+The next accepted slice may add terrain behavior and the exact edited Point-row
+seam that its real caller needs. COPC, LandXML, UI, bindings, and other adapters
+remain deferred until their own evidence and designs exist.
 
-## Definition of ready for a module
+## Definition of ready for a crate
 
-A module is ready for other software to build on when:
+A crate is ready for another release to build on when:
 
-- its one-job sentence still describes every public operation;
-- public contracts document invariants, ordering, resource limits, errors, and effects;
-- the module passes its direct interface suite;
+- its one-job sentence describes every public operation;
+- invariants, ordering, limits, effects, and error certainty are documented;
+- direct interface tests exercise the public seam;
 - at least one real caller uses it without private access;
-- persisted formats have versioning and recovery tests where applicable;
-- Source-scale paths have a benchmark and enforced memory ceiling;
-- determinism is tested across repeat runs and worker counts where promised;
-- no disallowed dependency edge exists; and
-- deleting the module would force meaningful knowledge into more than one caller.
-
-The last test protects depth. A thin pass-through crate should be folded into its caller; a module that concentrates hard knowledge should stay independent.
+- persisted formats have corruption, interruption, and recovery coverage;
+- Source-scale work has benchmark and memory evidence;
+- promised determinism is tested across repeat runs and partitioning; and
+- the full relevant local verification sequence passes.
 
 ## Licensing
 
-For an open-source foundation, dual MIT and Apache-2.0 licensing provides a familiar permissive choice and an explicit patent grant. Third-party fixture and dependency licenses must be recorded separately; public point-cloud fixtures must include provenance and redistribution terms.
+All new crates and fixtures must be compatible with the repository's dual MIT
+or Apache-2.0 license. Production datasets, vendor SDKs, and third-party sample
+files require explicit redistribution rights; generated fixtures are the
+default repository evidence.
