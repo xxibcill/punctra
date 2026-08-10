@@ -403,6 +403,116 @@ fn projection_handles_extreme_width_without_overflow() {
 }
 
 #[test]
+fn projection_preserves_large_finite_error_priority() {
+    let field_of_view = std::f32::consts::FRAC_PI_2;
+    let camera = Camera::perspective(
+        [0.0; 3],
+        [0.0, 0.0, -1.0],
+        [0.0, 1.0, 0.0],
+        field_of_view,
+        1.0,
+        1.0e20,
+    )
+    .unwrap();
+    let point = [0.0, 0.0, -1.0e19];
+    let nodes = [
+        node(
+            1,
+            None,
+            bounds(point, point),
+            1.0e307,
+            1,
+            1,
+            1,
+            NodeStatus::Missing,
+        ),
+        node(
+            2,
+            None,
+            bounds(point, point),
+            1.0e308,
+            1,
+            1,
+            2,
+            NodeStatus::Missing,
+        ),
+    ];
+
+    let plan = planner(2.0, 0.25)
+        .plan(
+            &camera,
+            [100, 100],
+            AvailableNodes::new(generation(3, 3), &nodes),
+            PlanningBudget::new(1, 1, 1),
+        )
+        .unwrap();
+
+    assert_eq!(request_keys(&plan), vec![node_key(2)]);
+    let screen_error = plan.requests()[0].screen_space_error_pixels();
+    let pixel_scale = 100.0 / (2.0 * (f64::from(field_of_view) * 0.5).tan());
+    let expected = (1.0e308 / 1.0e19) * pixel_scale;
+    assert!(screen_error.is_finite());
+    assert!((screen_error / expected - 1.0).abs() < f64::EPSILON * 4.0);
+}
+
+#[test]
+fn projection_preserves_small_finite_error_priority() {
+    let field_of_view = f32::from_bits(std::f32::consts::PI.to_bits() - 1);
+    let camera = Camera::perspective(
+        [0.0; 3],
+        [0.0, 0.0, -1.0],
+        [0.0, 1.0, 0.0],
+        field_of_view,
+        1.0e-6,
+        1.0,
+    )
+    .unwrap();
+    let point = [0.0, 0.0, -1.0e-5];
+    let nodes = [
+        node(
+            1,
+            None,
+            bounds(point, point),
+            2.0e-317,
+            1,
+            1,
+            1,
+            NodeStatus::Missing,
+        ),
+        node(
+            2,
+            None,
+            bounds(point, point),
+            4.0e-317,
+            1,
+            1,
+            2,
+            NodeStatus::Missing,
+        ),
+    ];
+
+    let plan = planner(2.0, 0.25)
+        .plan(
+            &camera,
+            [1, 1],
+            AvailableNodes::new(generation(3, 4), &nodes),
+            GENEROUS_BUDGET,
+        )
+        .unwrap();
+
+    assert_eq!(request_keys(&plan), vec![node_key(2), node_key(1)]);
+    assert!(
+        plan.requests()
+            .iter()
+            .all(|request| request.screen_space_error_pixels() > 0.0)
+    );
+    assert!(
+        plan.requests()[0].screen_space_error_pixels()
+            > plan.requests()[1].screen_space_error_pixels()
+    );
+}
+
+#[test]
 fn projection_normalizes_large_camera_directions_without_overflow() {
     let camera = Camera::perspective(
         [0.0, 0.0, 0.0],

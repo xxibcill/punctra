@@ -278,8 +278,22 @@ impl Projection {
         let center_depth = self.forward.dot(center - self.eye);
         let depth_radius = self.forward.abs().dot(half_extent);
         let nearest_depth = (center_depth - depth_radius).max(self.near_distance);
-        node.geometric_error * self.pixel_scale / nearest_depth
+        multiply_divide(node.geometric_error, self.pixel_scale, nearest_depth)
     }
+}
+
+fn multiply_divide(left: f64, right: f64, divisor: f64) -> f64 {
+    let product = left * right;
+    if product.is_normal() || left == 0.0 || right == 0.0 {
+        return product / divisor;
+    }
+
+    let (left_fraction, left_exponent) = libm::frexp(left);
+    let (right_fraction, right_exponent) = libm::frexp(right);
+    let (divisor_fraction, divisor_exponent) = libm::frexp(divisor);
+    let fraction = left_fraction * right_fraction / divisor_fraction;
+    let exponent = left_exponent + right_exponent - divisor_exponent;
+    libm::scalbn(fraction, exponent)
 }
 
 fn axis_half_extent(min: f64, max: f64) -> f64 {
