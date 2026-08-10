@@ -324,12 +324,21 @@ impl Plane {
         );
         let scaled_support = support * PLANE_EVALUATION_SCALE;
         let scaled_origin = self.camera_origin * PLANE_EVALUATION_SCALE;
-        self.normal.dot(scaled_support - scaled_origin) + self.offset * PLANE_EVALUATION_SCALE < 0.0
+        let relative_support = scaled_support - scaled_origin;
+        let scaled_offset = self.offset * PLANE_EVALUATION_SCALE;
+        let evaluation = self.normal.dot(relative_support) + scaled_offset;
+        let subtraction_magnitude = scaled_support.abs() + scaled_origin.abs();
+        let evaluation_magnitude =
+            self.normal.abs().dot(subtraction_magnitude) + scaled_offset.abs();
+        let roundoff_bound = evaluation_magnitude * PLANE_EVALUATION_ROUNDOFF_FACTOR;
+        evaluation < -roundoff_bound
     }
 }
 
 // One eighth leaves headroom for opposite-sign subtraction and a three-axis unit-normal dot.
 const PLANE_EVALUATION_SCALE: f64 = 0.125;
+// Plane construction and evaluation use several rounded operations; expand the plane outward.
+const PLANE_EVALUATION_ROUNDOFF_FACTOR: f64 = f64::EPSILON * 16.0;
 
 #[derive(Clone, Copy, Debug)]
 struct Frustum {

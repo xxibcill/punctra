@@ -272,6 +272,35 @@ fn perspective_frustum_culls_all_six_planes_and_keeps_intersections() {
 }
 
 #[test]
+fn frustum_keeps_zero_volume_bounds_touching_a_side_plane() {
+    let depth = 5.990_738_311_191_579;
+    let half_field_of_view = f64::from(std::f32::consts::FRAC_PI_2) * 0.5;
+    let horizontal_limit = depth * half_field_of_view.tan();
+    let touching_point = [horizontal_limit, 0.0, -depth];
+    let node = node(
+        1,
+        None,
+        bounds(touching_point, touching_point),
+        0.0,
+        1,
+        1,
+        1,
+        NodeStatus::Missing,
+    );
+
+    let plan = planner(2.0, 0.25)
+        .plan(
+            &camera(),
+            [100, 100],
+            AvailableNodes::new(generation(2, 4), &[node]),
+            GENEROUS_BUDGET,
+        )
+        .unwrap();
+
+    assert_eq!(request_keys(&plan), vec![node_key(1)]);
+}
+
+#[test]
 fn frustum_culling_handles_opposite_extreme_coordinates() {
     let camera = Camera::perspective(
         [1.0e308, 1.0e308, 0.0],
