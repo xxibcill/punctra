@@ -10,6 +10,8 @@ All notable changes to Punctra are documented here. The project follows
 - Added point, byte, and batch-aware request planning with progressive parent
   Coverage and LOD hysteresis.
 - Added deterministic, generation-safe retention and retirement decisions.
+- Added one validated renderer-neutral viewport contract shared by planning
+  and rendering.
 - Upgraded the synthetic demo to represent more than 10 million logical Points
   under fixed renderer residency limits.
 - Added local CPU planner benchmarks and planner-to-renderer GPU acceptance

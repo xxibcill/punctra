@@ -8,12 +8,14 @@
 #![warn(missing_docs)]
 
 mod camera;
+mod viewport;
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use thiserror::Error;
 
 pub use camera::{Camera, CameraBasis, CameraError};
+pub use viewport::{Viewport, ViewportError};
 
 /// Estimated GPU bytes for one point in the protocol's residency model.
 ///

@@ -8,7 +8,7 @@ mod gpu_support;
 use render_protocol::{
     BatchKey, BatchVersion, ESTIMATED_GPU_BYTES_PER_POINT as POINT_BYTES, PointBatch, PointId,
     ProtocolError, RenderLimits, RenderPoint, RenderUpdate, ResidentResource, UpdateKind,
-    UpdateReport, ViewGenerationKey, ViewId,
+    UpdateReport, ViewGenerationKey, ViewId, Viewport,
 };
 use render_wgpu::{
     Camera, Frame, FrameReport, PickError, PickHit, PickPoll, PickRequest, PickTicket, PointStyle,
@@ -507,7 +507,7 @@ impl<'gpu> OffscreenRenderer<'gpu> {
     }
 
     fn try_render(&mut self, frame: &Frame) -> Result<RenderedFrame, RendererError> {
-        let target = ColorTarget::new(&self.gpu.device, frame.viewport());
+        let target = ColorTarget::new(&self.gpu.device, frame.viewport().dimensions());
         let mut encoder = self.encoder("punctra acceptance render encoder");
         let recorded_frame = self.renderer.render(&mut encoder, &target.view, frame)?;
         let report = recorded_frame.report();
@@ -528,8 +528,9 @@ impl<'gpu> OffscreenRenderer<'gpu> {
         first_frame: &Frame,
         second_frame: &Frame,
     ) -> (RenderedFrame, RenderedFrame) {
-        let first_target = ColorTarget::new(&self.gpu.device, first_frame.viewport());
-        let second_target = ColorTarget::new(&self.gpu.device, second_frame.viewport());
+        let first_target = ColorTarget::new(&self.gpu.device, first_frame.viewport().dimensions());
+        let second_target =
+            ColorTarget::new(&self.gpu.device, second_frame.viewport().dimensions());
         let mut encoder = self.encoder("punctra deferred frame acceptance encoder");
         let first_recorded_frame = self
             .renderer
@@ -772,9 +773,13 @@ fn frame_with_style(
         100.0,
     )
     .expect("the standard acceptance camera should be valid");
-    Frame::new(view_generation, camera, viewport)
-        .expect("the acceptance frame should be valid")
-        .with_style(style)
+    Frame::new(
+        view_generation,
+        camera,
+        Viewport::new(viewport[0], viewport[1]).unwrap(),
+    )
+    .expect("the acceptance frame should be valid")
+    .with_style(style)
 }
 
 fn precision_frame(view_generation: ViewGenerationKey) -> Frame {
@@ -789,7 +794,7 @@ fn precision_frame(view_generation: ViewGenerationKey) -> Frame {
     .expect("the precision camera should be valid");
     let style = PointStyle::new(5.0, [1.0; 3], [0.0, 0.0, 0.0, 1.0])
         .expect("the precision style should be valid");
-    Frame::new(view_generation, camera, [128, 128])
+    Frame::new(view_generation, camera, Viewport::new(128, 128).unwrap())
         .expect("the precision frame should be valid")
         .with_style(style)
 }
@@ -811,9 +816,13 @@ fn translated_frame(view_generation: ViewGenerationKey, horizontal_offset: f64) 
     .expect("the translated camera should be valid");
     let style = PointStyle::new(14.0, rgba8_to_linear_rgb(GREEN), [0.0, 0.0, 0.0, 1.0])
         .expect("the translated frame style should be valid");
-    Frame::new(view_generation, camera, VIEWPORT)
-        .expect("the translated frame should be valid")
-        .with_style(style)
+    Frame::new(
+        view_generation,
+        camera,
+        Viewport::new(VIEWPORT[0], VIEWPORT[1]).unwrap(),
+    )
+    .expect("the translated frame should be valid")
+    .with_style(style)
 }
 
 fn rgba8_to_linear_rgb(color: [u8; 4]) -> [f32; 3] {

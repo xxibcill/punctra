@@ -606,7 +606,7 @@ impl ViewPlanner {
     pub fn plan(
         &mut self,
         camera: &Camera,
-        viewport: [u32; 2],
+        viewport: Viewport,
         available_nodes: AvailableNodes<'_>,
         budget: PlanningBudget,
     ) -> Result<ViewPlan, PlanError>;

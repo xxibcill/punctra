@@ -2,7 +2,7 @@ use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, BinaryHeap};
 
 use glam::DVec3;
-use render_protocol::Camera;
+use render_protocol::{Camera, Viewport};
 
 use crate::{
     AvailableNode, AvailableNodes, AxisAlignedBox, NodeKey, NodeRequest, NodeStatus, PlanError,
@@ -12,14 +12,10 @@ use crate::{
 pub(super) fn plan(
     planner: &mut ViewPlanner,
     camera: &Camera,
-    viewport: [u32; 2],
+    viewport: Viewport,
     available_nodes: AvailableNodes<'_>,
     budget: PlanningBudget,
 ) -> Result<ViewPlan, PlanError> {
-    if viewport.contains(&0) {
-        return Err(PlanError::InvalidViewport);
-    }
-
     let projection = Projection::new(camera, viewport);
     let hierarchy = ProjectedHierarchy::new(available_nodes.nodes, &projection)?;
     let previous_refinements = if planner.active_generation == Some(available_nodes.view_generation)
@@ -219,7 +215,7 @@ struct Projection {
 }
 
 impl Projection {
-    fn new(camera: &Camera, viewport: [u32; 2]) -> Self {
+    fn new(camera: &Camera, viewport: Viewport) -> Self {
         let eye = DVec3::from_array(camera.eye());
         let world_basis = camera.world_basis();
         let forward = DVec3::from_array(world_basis.forward());
@@ -227,10 +223,10 @@ impl Projection {
         let up = DVec3::from_array(world_basis.up());
         let half_vertical_tangent =
             (f64::from(camera.vertical_field_of_view_radians()) * 0.5).tan();
-        let aspect_ratio = f64::from(viewport[0]) / f64::from(viewport[1]);
+        let aspect_ratio = f64::from(viewport.aspect_ratio());
         let near_distance = f64::from(camera.near_distance());
         let far_distance = f64::from(camera.far_distance());
-        let pixel_scale = f64::from(viewport[1]) / (2.0 * half_vertical_tangent);
+        let pixel_scale = f64::from(viewport.height()) / (2.0 * half_vertical_tangent);
         let frustum = Frustum::new(
             eye,
             forward,

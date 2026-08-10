@@ -10,6 +10,7 @@ use point_view::{
 use render_protocol::{
     BatchKey, BatchVersion, ESTIMATED_GPU_BYTES_PER_POINT as POINT_BYTES, PointBatch, PointId,
     ProtocolError, RenderLimits, RenderPoint, RenderUpdate, UpdateKind, ViewGenerationKey, ViewId,
+    Viewport,
 };
 use render_wgpu::{Camera, Frame, FrameReport, RendererConfig, RendererError, WgpuRenderer};
 
@@ -132,7 +133,7 @@ impl<'gpu> PlannerRenderer<'gpu> {
         self.planner
             .plan(
                 &self.camera,
-                VIEWPORT,
+                viewport(),
                 AvailableNodes::new(self.view_generation, nodes),
                 self.budget,
             )
@@ -168,7 +169,7 @@ impl<'gpu> PlannerRenderer<'gpu> {
     }
 
     fn render(&mut self) -> FrameReport {
-        let frame = Frame::new(self.view_generation, self.camera, VIEWPORT)
+        let frame = Frame::new(self.view_generation, self.camera, viewport())
             .expect("the shared planner camera should create a renderer frame");
         render_and_submit(self.gpu, &mut self.renderer, &frame)
     }
@@ -205,6 +206,10 @@ fn child_position(key: u64) -> [f32; 3] {
         RIGHT_CHILD_KEY => [0.5, 0.0, 0.0],
         _ => panic!("only fixture children should be requested"),
     }
+}
+
+fn viewport() -> Viewport {
+    Viewport::new(VIEWPORT[0], VIEWPORT[1]).unwrap()
 }
 
 fn hierarchy(

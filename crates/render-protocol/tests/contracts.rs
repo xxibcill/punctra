@@ -2,8 +2,27 @@
 
 use render_protocol::{
     BatchKey, BatchVersion, Camera, ESTIMATED_GPU_BYTES_PER_POINT, PointBatch, PointId,
-    ProtocolError, RenderPoint, ViewGenerationKey, ViewId,
+    ProtocolError, RenderPoint, ViewGenerationKey, ViewId, Viewport, ViewportError,
 };
+
+#[test]
+fn viewport_owns_physical_dimensions_and_projection_ratio() {
+    let viewport = Viewport::new(1_920, 1_080).unwrap();
+
+    assert_eq!(viewport.width(), 1_920);
+    assert_eq!(viewport.height(), 1_080);
+    assert_eq!(viewport.dimensions(), [1_920, 1_080]);
+    assert_eq!(
+        viewport.aspect_ratio().to_bits(),
+        (1_920_f32 / 1_080_f32).to_bits()
+    );
+    assert_eq!(
+        Viewport::new(1_920, 0),
+        Err(ViewportError::Empty {
+            dimensions: [1_920, 0],
+        })
+    );
+}
 
 #[test]
 fn camera_is_a_renderer_neutral_projection_contract() {

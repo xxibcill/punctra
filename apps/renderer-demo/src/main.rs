@@ -12,7 +12,9 @@ use std::{
 
 use orbit_camera::OrbitCamera;
 use point_view::{AvailableNodes, PlannerConfig, PlanningBudget, ResourceUsage, ViewPlanner};
-use render_protocol::{RenderLimits, RenderUpdate, UpdateReport, ViewGenerationKey, ViewId};
+use render_protocol::{
+    RenderLimits, RenderUpdate, UpdateReport, ViewGenerationKey, ViewId, Viewport,
+};
 use render_wgpu::{Camera, Frame, FrameReport, PointStyle, RendererConfig, WgpuRenderer};
 use synthetic::{
     LOGICAL_POINT_COUNT, RESIDENT_BATCH_BUDGET, RESIDENT_BYTE_BUDGET, RESIDENT_POINT_BUDGET,
@@ -309,7 +311,7 @@ impl Graphics {
         }
 
         let frame_started = Instant::now();
-        let viewport = [self.surface_config.width, self.surface_config.height];
+        let viewport = Viewport::new(self.surface_config.width, self.surface_config.height)?;
         let camera = self.camera.as_render_camera()?;
         self.stream_next_batch()?;
         self.plan_view(&camera, viewport)?;
@@ -385,7 +387,7 @@ impl Graphics {
         Ok(())
     }
 
-    fn plan_view(&mut self, camera: &Camera, viewport: [u32; 2]) -> DemoResult<()> {
+    fn plan_view(&mut self, camera: &Camera, viewport: Viewport) -> DemoResult<()> {
         let planning_nodes = self.scene.planning_nodes();
         let plan = self.planner.plan(
             camera,

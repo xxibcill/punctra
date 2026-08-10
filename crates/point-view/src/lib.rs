@@ -10,7 +10,7 @@
 use std::collections::BTreeSet;
 use std::num::NonZeroU64;
 
-use render_protocol::{BatchKey, BatchVersion, Camera, RenderUpdate, ViewGenerationKey};
+use render_protocol::{BatchKey, BatchVersion, Camera, RenderUpdate, ViewGenerationKey, Viewport};
 use thiserror::Error;
 
 mod planning;
@@ -562,12 +562,12 @@ impl ViewPlanner {
     ///
     /// # Errors
     ///
-    /// Returns [`PlanError`] when the viewport or supplied hierarchy snapshot
-    /// is invalid, or when conservative resource accounting overflows.
+    /// Returns [`PlanError`] when the supplied hierarchy snapshot is invalid or
+    /// conservative resource accounting overflows.
     pub fn plan(
         &mut self,
         camera: &Camera,
-        viewport: [u32; 2],
+        viewport: Viewport,
         available_nodes: AvailableNodes<'_>,
         budget: PlanningBudget,
     ) -> Result<ViewPlan, PlanError> {
@@ -622,9 +622,6 @@ pub enum PlanError {
         "maximum error must be finite and positive and hysteresis must be finite in [0, maximum)"
     )]
     InvalidPlannerConfig,
-    /// At least one viewport dimension was zero.
-    #[error("viewport dimensions must be nonzero")]
-    InvalidViewport,
     /// Two entries used the same hierarchy node key.
     #[error("node key {key:?} appears more than once")]
     DuplicateNodeKey {
