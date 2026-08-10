@@ -1,7 +1,7 @@
 # Repository and Dependency Layout
 
-Status: current through v0.5; later crates are created only with accepted
-behavior and a caller
+Status: current through the narrow v0.6 terrain/QA slice; later crates are
+created only with accepted behavior and a caller
 
 The repository is one Cargo workspace. Each current crate is independently
 buildable and exposes a smaller public interface than its private
@@ -26,6 +26,10 @@ apps/
     tests/
       headless_smoke.rs
       planner.rs
+
+  terrain-demo/
+    src/main.rs
+    tests/process.rs
 
 crates/
   foundation-runtime/
@@ -85,6 +89,7 @@ crates/
       limits.rs
       model.rs
       persistence.rs
+      point_rows.rs
       point_set.rs
       selection.rs
       workspace.rs
@@ -92,8 +97,28 @@ crates/
     benches/document.rs
     tests/
       interface.rs
+      row_stream.rs
       selection.rs
       persistence.rs
+
+  point-terrain/
+    src/
+      lib.rs
+      derive.rs
+      error.rs
+      landxml.rs
+      limits.rs
+      model.rs
+      qa.rs
+      triangulation.rs
+    examples/derive.rs
+    benches/terrain.rs
+    tests/
+      interface.rs
+      landxml.rs
+      qa.rs
+      resource.rs
+      topology.rs
 
   render-protocol/
     src/
@@ -132,9 +157,10 @@ docs/
 ~~~
 
 Files inside a crate are private locality, not additional public modules. In
-particular, `point-workspace/selection.rs`, `point_set.rs`, and
-`persistence.rs` implement one deep caller-facing Workspace contract. They are
-not separate public crate seams.
+particular, `point-workspace/selection.rs`, `point_rows.rs`, `point_set.rs`, and
+`persistence.rs` implement one deep caller-facing Workspace contract. Likewise,
+`point-terrain` keeps derivation, triangulation, QA, and LandXML encoding behind
+one public terrain seam. These files are not separate public crate seams.
 
 ## Cargo dependency direction
 
@@ -149,10 +175,12 @@ source-memory -> point-source + point-contracts + foundation-runtime
 source-las -> point-source + point-contracts + foundation-runtime
 point-index -> point-source + point-contracts + foundation-runtime
 point-workspace -> point-index + point-source + point-contracts + foundation-runtime
+point-terrain -> point-workspace + point-contracts + foundation-runtime
 render-protocol -> point-contracts
 point-view -> render-protocol
 render-wgpu -> render-protocol + point-contracts
 renderer-demo -> source-las + point-index + point-view + render-protocol + render-wgpu
+terrain-demo -> source-las + point-index + point-workspace + point-terrain + point-contracts
 ~~~
 
 Development-only edges may add fixture adapters, `criterion`, LAS writers, or
@@ -161,7 +189,8 @@ allocation instrumentation. They do not change the production authority graph.
 Rules:
 
 - root dependencies use explicit versions; wildcard versions are forbidden;
-- a lower crate cannot depend on `point-workspace` or `renderer-demo`;
+- a crate below the Workspace authority boundary cannot depend on
+  `point-workspace` or an application;
 - a Source adapter cannot depend on an index, Workspace, or renderer;
 - only `render-wgpu` and the application that directly composes it may depend
   on wgpu;
@@ -190,6 +219,11 @@ cargo run --release -p point-workspace --example classify -- \
   survey.laz survey.laz.pidx survey.pcw CLASSIFICATION_ATTRIBUTE_ID
 cargo bench -p point-workspace --bench document
 
+cargo test -p point-terrain --all-features
+cargo run -p point-terrain --example derive
+cargo bench -p point-terrain --bench terrain
+cargo test -p terrain-demo --test process
+
 cargo bench -p point-view --bench planner
 cargo test -p renderer-demo --test headless_smoke
 PUNCTRA_REQUIRE_GPU=1 cargo test -p render-wgpu --test offscreen
@@ -199,6 +233,8 @@ PUNCTRA_REQUIRE_GPU=1 cargo test -p renderer-demo --test planner
 The Workspace direct example proves the one-deep-crate lifecycle without a GUI:
 LAS/LAZ open, index prepare/open, Workspace create, exact classification
 selection, classification commit, immediate-head Revert, and reopen.
+The terrain example proves the public in-memory Source-to-LandXML composition;
+the `terrain-demo` process test proves the generated LAS/LAZ composition.
 
 ## Private depth inside point-workspace
 
@@ -208,6 +244,7 @@ The public interface is compact:
 create/open -> Workspace
 Workspace -> head/snapshot/revision_info
 Snapshot -> select/select_point_ids -> PointSet
+Snapshot -> point_rows -> SnapshotPointBatches
 PointSet -> metadata/ids
 Workspace -> commit/retry_operation/resolve_operation
 ~~~
@@ -216,6 +253,8 @@ Private behavior hidden behind it includes:
 
 - complete candidate planning and exact Source predicates;
 - bounded Source reads and cumulative overlay joins;
+- exact ordered Point-row filtering, row/content hashing, fused terminal
+  summary, and row-specific ledgers;
 - Point-ID validation, sorting, deduplication, and span normalization;
 - in-memory Point Set growth, checked spill, repeated bounded reads, and
   cleanup;
@@ -229,9 +268,26 @@ Do not expose private index pages, Source decoder buffers, Point Set frames,
 overlay blocks, Revision frames, scratch paths, hard-link details, GPU buffers,
 or scheduler internals.
 
+## Private depth inside point-terrain
+
+The public interface is also compact:
+
+~~~text
+derive(Snapshot, TerrainRecipe, TerrainLimits) -> TerrainSurface
+TerrainSurface -> descriptor/vertices/faces
+TerrainSurface -> check_points -> CheckPointReport
+TerrainSurface -> export_landxml -> LandXmlReceipt
+~~~
+
+Private behavior includes exact row ingestion, normalized predicate inputs,
+robust triangulation and canonicalization, topology validation, deterministic
+point location and compensated QA statistics, XML encoding, durable create-new
+publication, and operation-specific limits. No triangulator, point-locator, or
+exporter registry is public.
+
 ## Persisted directories
 
-Index and Workspace storage are separate:
+Index, Workspace, and caller-owned Export storage are separate:
 
 ~~~text
 survey.laz                    # immutable Source, host-owned
@@ -248,6 +304,8 @@ survey.pcw/
   revisions/
     <sequence>-<revision-id>.pwr
   scratch/                    # recognized disposable stages and live Point Sets
+
+existing-ground.xml          # caller-owned LandXML Export; never Workspace state
 ~~~
 
 Ownership rules:
@@ -256,13 +314,14 @@ Ownership rules:
 - only `point-workspace` interprets the Workspace directory;
 - the Source remains outside the Workspace and is never rewritten;
 - a Point Set spill is temporary and retained only by live handles; and
-- View and GPU state are not persisted as authoritative document data.
+- `TerrainSurface`, View, and GPU state are not persisted as authoritative
+  document data; LandXML is a caller-requested deliverable only.
 
 ## Versioning
 
-Cargo semantic versions, persisted schema versions, and deterministic algorithm
-versions are separate axes. A Cargo `0.5` version does not imply disk schema
-version 5.
+Cargo semantic versions, persisted schema versions, deterministic algorithm
+versions, and the LandXML subset version are separate axes. A Cargo `0.6`
+version does not imply disk schema or terrain algorithm version 6.
 
 - Unknown persisted major versions fail explicitly.
 - Identity and persisted schema values remain opaque outside their owner.
@@ -272,8 +331,9 @@ version 5.
 - Golden fixtures are required when more than one persisted version is
   supported.
 
-v0.5 creates one disk/semantic contract and does not claim migration or
-compaction.
+v0.6 does not change the Workspace disk schema and does not claim migration,
+compaction, or persisted Terrain Surfaces. Terrain algorithm version 1 and the
+supported LandXML subset evolve independently of Cargo versions.
 
 ## Implementation order
 
@@ -283,11 +343,13 @@ Completed vertical slices are:
 2. adaptive View planning;
 3. verified Source contracts with memory/LAS/LAZ adapters;
 4. complete persistent Spatial Index and real-cloud View composition; and
-5. one deep durable classification Workspace.
+5. one deep durable classification Workspace; and
+6. one exact Snapshot Point-row stream plus one deep deterministic Terrain/QA/
+   LandXML technical slice.
 
-The next accepted slice may add terrain behavior and the exact edited Point-row
-seam that its real caller needs. COPC, LandXML, UI, bindings, and other adapters
-remain deferred until their own evidence and designs exist.
+The next accepted slice may add only terrain or workflow behavior earned by its
+real caller and evidence. COPC, general LandXML, UI, bindings, and other
+adapters remain deferred until their own evidence and designs exist.
 
 ## Definition of ready for a crate
 

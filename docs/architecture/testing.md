@@ -1,6 +1,7 @@
 # Verification Strategy
 
-Status: implemented verification through v0.5; all gates run locally
+Status: implemented verification through the narrow v0.6 terrain/QA slice; all
+gates run locally
 
 Verification follows public contracts first. Private tests are used for fault
 injection and measured implementation boundaries that cannot be triggered
@@ -14,8 +15,9 @@ safely through the public API. Hosted CI is not configured.
 3. **Adapter conformance** runs one Source contract across memory, LAS, and LAZ.
 4. **Persistence tests** inject interruption, corruption, cancellation, panic,
    and lost acknowledgement at publication boundaries.
-5. **Composition tests** exercise Source-to-index, index-to-View, and
-   planner-to-renderer behavior without private cross-crate access.
+5. **Composition tests** exercise Source-to-index, index-to-View, Workspace-to-
+   Terrain, terrain-to-LandXML, and planner-to-renderer behavior without private
+   cross-crate access.
 6. **Benchmarks and resource gates** measure Source-scale time, heap,
    temporary bytes, durable growth, and GPU residency.
 7. **Required local GPU acceptance** proves the wgpu path when an adapter is
@@ -34,6 +36,8 @@ itself a persisted or public contract.
 - Include empty, singleton, boundary, duplicate, signed-zero, extreme finite,
   corrupt, truncated, and over-limit cases.
 - Use generated LAS and LAZ files for format-to-Workspace integration.
+- Use exact planar, cocircular, duplicate-XY, collinear, boundary, and gap
+  fixtures for Terrain/QA oracles.
 - Compare semantic values before exact bytes unless deterministic bytes are a
   stated contract.
 - Never commit licensed production data without redistribution rights.
@@ -91,7 +95,7 @@ LAS, and LAZ benchmarks enforce adapter-specific memory ceilings.
 
 ### point-workspace
 
-The v0.5 package has 61 tests: 19 integration tests through the public
+The v0.6 package has 67 tests: 25 integration tests through the public
 interface and 42 unit, fault-injection, and allocation gates. The public suites
 prove:
 
@@ -115,6 +119,12 @@ prove:
   Operation reconciliation;
 - idempotent retry with at most one Revision; and
 - fail-closed corruption plus recoverable recognized scratch.
+- exact ordered `Snapshot::point_rows` values at root, edited, historical, and
+  Revert Snapshots;
+- partition-independent row membership/content hashes matching Point Set
+  membership and identical generated LAS/LAZ row values; and
+- cumulative row limits, complete no-match behavior, fused error/cancellation,
+  and absence of a terminal summary after failure.
 
 Private persistence tests inject error, cancellation, panic, and lost
 acknowledgement at candidate stage/file-sync/close/read-only/revalidation,
@@ -126,6 +136,37 @@ complete new head; it never fabricates a partial Revision.
 The selection unit gate measures worker-equivalent allocation around the same
 private worker function used by the Job. Its observed peak was 6,292,224 bytes
 under a 64 MiB ceiling, with zero retained measured allocations.
+
+### point-terrain and terrain-demo
+
+`point-terrain` has 41 package tests—15 unit/private and 26 integration—plus
+one documentation test:
+
+- 15 unit/private tests cover canonical input keys, deterministic robust
+  predicates, cocircular tie-breaking, the pinned `delaunator` oracle, bounded
+  topology work, cancellation, diagnostics, allocation preflight, and injected
+  post-publication LandXML certainty boundaries;
+- four public interface tests cover canonical facts, inclusive Ground Input,
+  partition-independent hashes, and historical/Edit/Revert Snapshots;
+- two topology tests prove counter-clockwise canonical manifold Delaunay disks
+  and the canonical cocircular diagonal;
+- seven resource tests cover insufficient, duplicate/conflicting, collinear,
+  unsupported numeric, input/output/face/work/working/retained limits, and
+  cancellation without publication;
+- seven QA tests cover closed boundaries, stable face selection, ordered
+  positive/negative/zero residuals, explicit gaps, compensated statistics,
+  duplicate identities, every QA resource family, bounded input consumption,
+  cancellation, and result-sealing overlap; and
+- six LandXML tests cover deterministic independent semantic parsing, explicit
+  coordinate/date/time assumptions, every XML resource family, target conflict,
+  cancellation, and durable publication certainty.
+
+The `point-terrain` doctest and direct example compose the public Source/index/
+Workspace/Terrain/QA/LandXML APIs. `terrain-demo` has one process test that runs
+generated LAS and LAZ through the complete GPU-free caller, including explicit
+document date/time, unknown-CRS metric assertion, exact-ordinal classification
+correction, changed Ground Input, immediate-head Revert, exact restoration of
+geometry/topology/vertices/faces, and byte-identical Source data.
 
 ### render-protocol and point-view
 
@@ -193,6 +234,46 @@ The results are one-machine generated-fixture baselines, not universal latency
 claims. Licensed production LAS/LAZ, above-500-million-Point, and design-partner
 validation remain explicitly outstanding.
 
+## v0.6 benchmark and resource evidence
+
+The `point-terrain` Criterion benchmark composes a generated in-memory Source,
+complete index, Workspace Snapshot, Terrain Derivation, three detached Check
+Points, and durable LandXML export through public APIs. The default is 10,000
+Points; `PUNCTRA_TERRAIN_BENCH_POINTS` permits positive generated sizes up to
+1,000,000, with intended 10,000, 100,000, and 1,000,000 scales.
+
+The completed local evidence is the 10,000-Point run on the Apple M5 Pro
+(`Mac17,9`), 24 GiB, arm64, macOS 26.5.2 reference machine with Rust 1.90.0.
+Criterion reported:
+
+| Evidence | Local value |
+|---|---:|
+| Input / vertices / faces / hull vertices | 10,000 / 10,000 / 19,602 / 396 |
+| Derivation | 11.983–12.049 ms |
+| Derivation throughput | 829.97–834.53 Kpoints/s |
+| Detached QA | 94.907–95.164 us |
+| QA inputs / location work | 3 Check Points / 19,604 face tests |
+| Durable LandXML creation | 18.020–18.311 ms |
+| LandXML throughput / size | 53.650–54.518 MiB/s / 1,030,118 B |
+| Descriptor accounted peak working bytes | 135,790,592 B |
+| Descriptor retained Surface bytes | 1,034,176 B |
+| Descriptor topology steps | 521,494 |
+| QA accounted peak working bytes | 336 B |
+| Evidence record machine | `jjaes-MacBook-Pro.local` (`macos`/`aarch64`) |
+| One-shot Derivation / QA / LandXML | 13,371 / 125 / 14,656 us |
+| Observed worker heap | unclaimed (`worker_heap_measurement: null`) |
+
+Descriptor and QA bytes are explicit algorithm-accounting facts, not allocator
+observations. The null worker-heap field is retained rather than inferred from
+process RSS or an unrelated thread. One-shot times are retained separately from
+the Criterion intervals. The 100,000 and 1,000,000-Point modes are available
+but are not claimed as completed evidence here.
+
+These values are one-machine generated-fixture technical baselines. Licensed
+production LAS/LAZ, Sources above 500 million Points, named downstream Civil
+3D/Bentley round trips, partner tolerance, paid-use, and human-workflow evidence
+remain explicitly outstanding.
+
 ## Local verification lanes
 
 ### Change qualification
@@ -210,12 +291,15 @@ cargo bench -p source-memory --bench read
 cargo bench -p source-las --bench read
 cargo bench -p point-index --bench index
 cargo bench -p point-workspace --bench document
+cargo bench -p point-terrain --bench terrain
 
 cargo run -p source-memory --example memory_source
 cargo run -p point-index --example direct_use
 cargo run --release -p point-workspace --example classify -- \
   survey.laz survey.laz.pidx survey.pcw CLASSIFICATION_ATTRIBUTE_ID
+cargo run -p point-terrain --example derive
 
+cargo test -p terrain-demo --test process
 cargo test -p renderer-demo --test headless_smoke
 PUNCTRA_REQUIRE_GPU=1 cargo test -p render-wgpu --test offscreen
 PUNCTRA_REQUIRE_GPU=1 cargo test -p renderer-demo --test planner
@@ -226,6 +310,8 @@ Opt-in larger generated Workspace runs use:
 ~~~bash
 PUNCTRA_POINT_WORKSPACE_BENCH_POINTS=10000000 \
   cargo bench -p point-workspace --bench document
+PUNCTRA_TERRAIN_BENCH_POINTS=100000 \
+  cargo bench -p point-terrain --bench terrain
 ~~~
 
 ### Release qualification

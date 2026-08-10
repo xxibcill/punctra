@@ -1,7 +1,7 @@
 # Cross-Module Contracts and Invariants
 
-Status: v0.1 through v0.5 contracts implemented; later terrain/export
-contracts remain deferred
+Status: v0.1 through the narrow v0.6 terrain/QA contracts implemented; broader
+terrain/export contracts remain deferred
 
 The versioned designs in [`docs/design`](../design) control exact release
 scope. This document summarizes the invariants that cross current crate seams.
@@ -72,7 +72,8 @@ conservative index false positives.
 
 Render batches use a finite `f64` origin plus finite `f32` relative positions.
 Those display values are not authoritative input to exact selection, Edit, or
-future derivation.
+Terrain Derivation. Terrain consumes exact Source ticks plus the verified
+position transform through `Snapshot::point_rows`.
 
 Coordinate Reference may explicitly be unknown. No module guesses a CRS,
 vertical reference, axis order, or units.
@@ -140,7 +141,7 @@ claimed.
 ### Snapshot and exact selection
 
 A `Snapshot` is pinned to one immutable Revision and exposes exact Workspace,
-Source, and Revision provenance. v0.5 supports:
+Source, and Revision provenance. The implemented Query grammar supports:
 
 - `PointQuery::all()`;
 - `PointQuery::within(inclusive_world_bounds)`;
@@ -155,8 +156,24 @@ overlay through the pinned Revision, run final predicates, and publish a Point
 Set only after complete terminal Source verification.
 
 View samples, GPU picks, visibility, depth, and occlusion never exclude a
-Point. v0.5 has no polygon, corridor, frustum, screen-through, brush,
+Point. v0.6 has no polygon, corridor, frustum, screen-through, brush,
 visible-only, or occlusion Query.
+
+### Exact Snapshot Point rows
+
+`Snapshot::point_rows(PointQuery, PointRowLimits)` returns one pull-based
+`SnapshotPointBatches` stream. Each nonempty `SnapshotPointBatch` contains one
+Source identity, strictly increasing ordinals, exact quantized positions, and
+effective `U8` classification values with equal column lengths. Rows reflect
+every overlay through the pinned Revision and are identical across Source
+batch partitioning.
+
+The stream is provisional until `next()` returns terminal `None` and
+`summary()` exposes `SnapshotPointSummary`. That summary binds Snapshot
+provenance, normalized Query, candidate and exact counts, ordered Point-ID
+hash, and full row-content hash. Error or cancellation is fused and publishes
+no summary. Point-row streaming does not materialize a Point Set and exposes no
+general Attribute or overlay-storage seam.
 
 ### Point Set
 
@@ -240,6 +257,55 @@ corruption.
 Recognized incomplete scratch files are disposable. Recovery never opens a
 published immutable value for mutation.
 
+## Terrain Surface contract
+
+`point-terrain::derive` owns one immutable `Snapshot`, normalized
+`TerrainRecipe`, and `TerrainLimits` for the Job lifetime. It derives its Ground
+Input through `Snapshot::point_rows`: every exact row matching the explicit
+effective ground classification and optional inclusive bounds becomes one
+canonical `SurfaceVertex`. The result does not retain the Workspace session.
+
+The single-worker algorithm sorts exact tick/Point-Identity keys, rejects fewer
+than three Points, duplicate XY, conflicting elevation, collinear input,
+unsupported numeric ranges, and resource exhaustion, and uses deterministic
+robust orientation and in-circle signs. Every `SurfaceFace` is counter-
+clockwise, uses three distinct one-based `SurfaceVertexId` values, is
+canonically rotated and sorted, and belongs to one unconstrained manifold
+Delaunay disk over the convex hull. No partial Surface is published.
+
+`TerrainDescriptor` binds Snapshot provenance, normalized Recipe and hash,
+algorithm version, Source transform and Coordinate Reference, input/geometry/
+topology/artifact hashes, exact counts and bounds, and accounted resource
+facts. Equal Snapshot meaning and Recipe produce equal geometry and topology;
+Revision provenance remains distinct even after an Edit and Revert restore the
+same effective geometry.
+
+## Detached Check Point QA contract
+
+`TerrainSurface::check_points` accepts finite, uniquely identified detached
+observations already expressed in the Surface coordinate system and units.
+Closed face boundaries are covered; a point outside the convex hull produces
+an explicit `CheckPointOutcome::Gap`. For coverage, residual is observed Z
+minus interpolated Surface Z. Results preserve caller order and statistics use
+deterministic compensated accumulation. Failure, cancellation, or any limit
+breach publishes no partial `CheckPointReport`.
+
+## LandXML export contract
+
+`TerrainSurface::export_landxml` privately encodes one deterministic UTF-8
+LandXML 1.2 metric-metre TIN with explicit caller-supplied date/time, one
+Surface, consecutive point IDs, and canonical faces. Coordinates are written
+as northing, easting, elevation. The caller must establish that Source units
+are metres; an unknown Coordinate Reference requires an explicit metric-metre
+assertion. No unit or CRS transformation occurs.
+
+Export stages and syncs a bounded sibling file, reopens and verifies it, then
+publishes by no-replace hard link and syncs the parent. Before publication,
+failure leaves no target. Once publication starts, verification, sync, cleanup,
+or terminal-progress failure is conservatively `ExportIndeterminate`; a
+`LandXmlReceipt` is returned only after durable completion. The independent
+`roxmltree` acceptance parser is test-only and shares no encoder helpers.
+
 ## View and renderer contracts
 
 `point-view` is synchronous and renderer-neutral. For one frozen camera,
@@ -272,24 +338,32 @@ publication. Separate ledgers cover:
 - Workspace persisted counts/bytes, metadata, checksum buffers, and work;
 - selection candidates, input IDs, output Points, overlays, resident records,
   working memory, and cumulative spill bytes;
+- Point-row candidate facts, Source batches, overlays, emitted rows, batch
+  payload, working memory, and total rows;
 - Point-ID count, batch payload, read buffer, and working memory; and
 - commit selected/changed Points, input frames, block sizes, work, temporary
-  bytes, Revision bytes, and total durable bytes.
+  bytes, Revision bytes, and total durable bytes;
+- Ground Input rows, vertices/faces, topology work, overlapping working
+  allocations, and retained Surface bytes;
+- detached Check Point inputs/results, location work, and report bytes; and
+- LandXML vertices/faces, output/staging/token/buffer bytes, and publication
+  work.
 
 Temporary and durable storage are distinct. Overlapping old/new allocations
 are charged together. An indivisible block that cannot fit fails explicitly.
 
 ## Errors and diagnostics
 
-Errors distinguish invalid caller input, unsupported format, incompatible or
-changed Source, corruption, resource exhaustion, cancellation, lock conflict,
-I/O, prepublication runtime failure, poisoned mutation capability, and
-indeterminate recovery. Diagnostics are bounded and never embed unbounded
-external payloads.
+Errors distinguish invalid caller input, unsupported format or geometry,
+incompatible or changed Source, corruption, resource exhaustion, cancellation,
+lock/target conflict, I/O, prepublication runtime failure, poisoned mutation
+capability, and indeterminate durable certainty. Diagnostics are bounded and
+never embed unbounded external payloads. A Check Point gap is a successful
+explicit outcome, not an error.
 
 ## Deferred contracts
 
-Terrain topology, Breaklines, general edited Point-row streams, LandXML,
-persisted migration, multi-Source Workspaces, remote storage, and screen
-projection require later accepted designs. Their vocabulary in the roadmap is
-not a current public API promise.
+Breaklines, constrained or persisted terrain, general Attribute Point-row
+streams, general LandXML/import, persisted migration, multi-Source Workspaces,
+remote storage, and screen projection require later accepted designs. Their
+vocabulary in the roadmap is not a current public API promise.

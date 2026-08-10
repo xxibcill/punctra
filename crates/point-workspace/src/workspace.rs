@@ -19,15 +19,15 @@ use crate::model::{
     RecordedRejection, RevisionId, RevisionInfo, RevisionKind, SnapshotProvenance, WorkspaceId,
     WorkspaceSchema,
 };
-pub(crate) use crate::persistence::OverlayUsage;
 use crate::persistence::{
     CandidateFacts, Catalog, CatalogLimits, ClassificationRequestFacts, MANIFEST_BYTES,
-    ManifestFacts, OperationRecord, OverlayLimits, PersistedPointSetFacts, PersistenceError,
-    REJECTION_BYTES, ReadLimits, RejectionFacts, RevisionKind as PersistedRevisionKind,
-    RevisionRow, RowReadLimits, SealedRevision, Store, ValidatedRevision, WriteLimits,
+    ManifestFacts, OperationRecord, PersistedPointSetFacts, PersistenceError, REJECTION_BYTES,
+    ReadLimits, RejectionFacts, RevisionKind as PersistedRevisionKind, RevisionRow, RowReadLimits,
+    SealedRevision, Store, ValidatedRevision, WriteLimits,
     classification_request_digest as persisted_classification_request_digest,
     revert_request_digest as persisted_revert_request_digest,
 };
+pub(crate) use crate::persistence::{OverlayLimits, OverlayUsage};
 use crate::point_set::{PointSetRecord, PointSetRecordBatches};
 
 const SOURCE_CONTRACT_DOMAIN: &[u8] = b"punctra-workspace-source-contract-v1";
@@ -400,6 +400,23 @@ impl Snapshot {
         crate::selection::select_point_ids(self, ids, limits)
     }
 
+    /// Starts a bounded pull stream of exact Query rows at this Revision.
+    ///
+    /// Returned batches remain provisional until the stream reaches terminal
+    /// `None` and publishes its exact success summary.
+    ///
+    /// # Errors
+    ///
+    /// Returns a candidate-planning, Source, or resource failure before the
+    /// stream can be started.
+    pub fn point_rows(
+        &self,
+        query: crate::PointQuery,
+        limits: crate::PointRowLimits,
+    ) -> Result<crate::SnapshotPointBatches, WorkspaceError> {
+        crate::point_rows::start(self, query, limits)
+    }
+
     pub(crate) fn session(&self) -> Arc<Session> {
         Arc::clone(&self.session)
     }
@@ -457,16 +474,11 @@ impl Session {
         revision: RevisionId,
         first_ordinal: u64,
         values: &mut [u8],
-        limits: PointSetLimits,
+        limits: OverlayLimits,
         usage: &mut OverlayUsage,
         control: &OperationControl,
     ) -> Result<(), WorkspaceError> {
         control.check_cancelled()?;
-        let overlay_limits = OverlayLimits {
-            max_blocks: limits.max_overlay_segments(),
-            max_payload_bytes: limits.max_overlay_bytes(),
-            max_block_bytes: limits.max_working_bytes().min(limits.max_overlay_bytes()),
-        };
         self.catalog
             .read()
             .map_err(|_| WorkspaceError::Poisoned)?
@@ -474,7 +486,7 @@ impl Session {
                 revision.into_bytes(),
                 first_ordinal,
                 values,
-                overlay_limits,
+                limits,
                 usage,
                 control,
             )

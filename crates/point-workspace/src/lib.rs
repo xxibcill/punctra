@@ -11,18 +11,20 @@ mod error;
 mod limits;
 mod model;
 mod persistence;
+mod point_rows;
 mod point_set;
 mod selection;
 mod workspace;
 
 pub use error::{MAX_WORKSPACE_DIAGNOSTIC_BYTES, WorkspaceDiagnostic, WorkspaceError};
-pub use limits::{CommitLimits, OpenLimits, PointIdReadLimits, PointSetLimits};
+pub use limits::{CommitLimits, OpenLimits, PointIdReadLimits, PointRowLimits, PointSetLimits};
 pub use model::{
     CommitOutcome, CommitPhase, CommitReceipt, CommitRejection, CommitRequest, CommitUncertainty,
     OperationId, OperationResolution, PointQuery, PointSetMetadata, RecordedIntent,
     RecordedRejection, RevisionId, RevisionInfo, RevisionKind, SnapshotProvenance, WorkspaceId,
     WorkspaceSchema,
 };
+pub use point_rows::{SnapshotPointBatch, SnapshotPointBatches, SnapshotPointSummary};
 pub use point_set::{PointIdBatch, PointIdBatches, PointSet};
 pub use selection::PointSetJob;
 pub use workspace::{Snapshot, Workspace, WorkspaceJob, create, open};

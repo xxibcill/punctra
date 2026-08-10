@@ -2,12 +2,13 @@ use std::{mem, sync::Arc};
 
 use foundation_runtime::{Job, OperationControl, ProgressPhase, ProgressSnapshot};
 use point_contracts::{AttributeId, PointBatch, PointId, SourceId, WorldBounds};
+use point_index::CandidateLimits;
 use point_source::{AttributeSelection, ReadBudget, ReadRequest, SourceSpan};
 
 use crate::{
     PointQuery, PointSet, PointSetLimits, Snapshot, SnapshotProvenance, WorkspaceError,
     point_set::{PointSetBuilder, PointSetRecord},
-    workspace::{OverlayUsage, Session},
+    workspace::{OverlayLimits, OverlayUsage, Session},
 };
 
 const CANCELLATION_STRIDE: usize = 4_096;
@@ -33,7 +34,13 @@ fn run_select(
 ) -> Result<PointSet, WorkspaceError> {
     let provenance = *snapshot.provenance();
     let session = snapshot.session();
-    let spans = plan_query(&session, query, limits, control)?;
+    let spans = plan_query(
+        &session,
+        query,
+        limits.candidate_limits(),
+        limits.max_working_bytes(),
+        control,
+    )?;
     materialize(
         &session,
         provenance,
@@ -72,16 +79,17 @@ where
     })
 }
 
-fn plan_query(
+pub(crate) fn plan_query(
     session: &Session,
     query: PointQuery,
-    limits: PointSetLimits,
+    candidate_limits: CandidateLimits,
+    max_working_bytes: u64,
     control: &OperationControl,
 ) -> Result<Vec<SourceSpan>, WorkspaceError> {
     control.check_cancelled()?;
     require_peak(
-        limits.candidate_limits().max_working_bytes(),
-        limits.max_working_bytes(),
+        candidate_limits.max_working_bytes(),
+        max_working_bytes,
         "candidate planning working bytes",
     )?;
 
@@ -99,9 +107,7 @@ fn plan_query(
             "nonempty Spatial Index has no world bounds",
         ));
     };
-    let plan = session
-        .index()
-        .candidates(index_bounds, limits.candidate_limits())?;
+    let plan = session.index().candidates(index_bounds, candidate_limits)?;
     control.check_cancelled()?;
     validate_candidate_plan(
         plan.spans(),
@@ -109,7 +115,11 @@ fn plan_query(
         descriptor.source_point_count(),
         query.bounds().is_none(),
     )?;
-    copy_candidate_spans(plan.spans(), limits)
+    copy_candidate_spans(
+        plan.spans(),
+        candidate_limits.max_working_bytes(),
+        max_working_bytes,
+    )
 }
 
 fn validate_candidate_plan(
@@ -148,11 +158,11 @@ fn validate_candidate_plan(
 
 fn copy_candidate_spans(
     source: &[SourceSpan],
-    limits: PointSetLimits,
+    candidate_working_bytes: u64,
+    max_working_bytes: u64,
 ) -> Result<Vec<SourceSpan>, WorkspaceError> {
     let mut spans = Vec::new();
-    let candidate_bytes = limits.candidate_limits().max_working_bytes();
-    let available_copy_bytes = limits.max_working_bytes().saturating_sub(candidate_bytes);
+    let available_copy_bytes = max_working_bytes.saturating_sub(candidate_working_bytes);
     if !source.is_empty() {
         grow_working_vec(
             &mut spans,
@@ -414,7 +424,11 @@ fn process_batch(
         provenance.revision(),
         batch.first_ordinal(),
         &mut effective,
-        overlay_limits(limits, overlay_working),
+        OverlayLimits {
+            max_blocks: limits.max_overlay_segments(),
+            max_payload_bytes: limits.max_overlay_bytes(),
+            max_block_bytes: overlay_working.min(limits.max_overlay_bytes()),
+        },
         overlay_usage,
         control,
     )?;
@@ -483,20 +497,6 @@ fn copy_classification(
     )?;
     copied.extend_from_slice(values);
     Ok(copied)
-}
-
-fn overlay_limits(limits: PointSetLimits, working_bytes: u64) -> PointSetLimits {
-    PointSetLimits::new(
-        limits.candidate_limits(),
-        limits.source_read_budget(),
-        limits.max_input_point_ids(),
-        limits.max_output_points(),
-        limits.max_overlay_segments(),
-        limits.max_overlay_bytes(),
-        working_bytes,
-        limits.max_resident_bytes(),
-        limits.max_temporary_bytes(),
-    )
 }
 
 fn validate_summary(

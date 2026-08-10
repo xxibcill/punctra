@@ -1,11 +1,10 @@
 # Domain Context: Point-Cloud Foundation
 
 Status: renderer, adaptive View planning, Real Sources, Spatial Index/out-of-
-core View, and the narrow v0.5 Workspace are implemented; the narrow v0.6
-Terrain and Check Point QA meanings are accepted and implementation is in
-progress; broader terrain and product terms remain deferred
+core View, the narrow Workspace, and the v0.6 Terrain and Check Point QA slice
+are implemented; broader terrain and product terms remain deferred
 
-Punctra v0.5 builds on the reusable render engine, renderer-neutral View
+Punctra v0.6 builds on the reusable render engine, renderer-neutral View
 planner, and verified Source path described in the accepted [v0.1 renderer
 design](docs/design/render-engine-v0.1.md), [v0.2 planning
 design](docs/design/adaptive-view-planning-v0.2.md), and [v0.3 Real Sources
@@ -16,10 +15,10 @@ Index and rebuildable Artifact behavior for its narrow scope. The accepted
 implements the narrow classification meanings of Workspace, Snapshot, Query,
 Point Set, Edit, Revert Edit, Revision, and Operation Identity behind the one
 deep `point-workspace` crate. Broader uses of those terms remain vocabulary
-research and do not imply product scope. The accepted [v0.6 Terrain and QA
+research and do not imply product scope. The implemented [v0.6 Terrain and QA
 benchmark design](docs/design/terrain-qa-benchmark-v0.6.md) fixes the narrow
 meanings of Ground Input, Terrain Surface, Check Point, Residual, and Terrain
-Gap used by the implementation now in progress.
+Gap used by `Snapshot::point_rows`, `point-terrain`, and `terrain-demo`.
 
 ## Artifact
 

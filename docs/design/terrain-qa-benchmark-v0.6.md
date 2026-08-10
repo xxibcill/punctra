@@ -1,8 +1,9 @@
 # Terrain and QA Benchmark Design (v0.6)
 
-Status: accepted on 2026-08-10; implementation in progress
+Status: accepted and implemented on 2026-08-10; repository technical slice
+locally verified
 
-This design is authoritative for Punctra v0.6. It accepts one narrow technical
+This design is authoritative for Punctra v0.6. It records one narrow technical
 slice from a revision-pinned LAS/LAZ Workspace to one CPU-authoritative terrain
 deliverable. The roadmap remains evidence-led: accepting this design does not
 claim licensed production-data, design-partner, downstream-application, or
@@ -10,7 +11,7 @@ human-time evidence that has not been collected.
 
 ## Outcome
 
-v0.6 adds one deep `point-terrain` module that:
+v0.6 adds one deep `point-terrain` crate that:
 
 1. reads exact position and effective-classification rows from one immutable
    Workspace Snapshot;
@@ -33,7 +34,7 @@ Workspace overlay separately, and callers do not reconstruct that join.
 
 ## Evidence boundary
 
-The accepted implementation can prove deterministic topology, exact Snapshot
+The implemented repository evidence proves deterministic topology, exact Snapshot
 input, hard resource ceilings, explicit degenerate-geometry failures, Check
 Point arithmetic, atomic create-new export, independent semantic XML parsing,
 and unchanged Source bytes on generated fixtures.
@@ -172,14 +173,16 @@ impl TerrainRecipe {
 
 impl TerrainSurface {
     pub fn descriptor(&self) -> &TerrainDescriptor;
-    pub fn vertices(&self) -> &[TerrainVertex];
-    pub fn faces(&self) -> &[TerrainFace];
+    pub fn vertices(&self) -> &[SurfaceVertex];
+    pub fn faces(&self) -> &[SurfaceFace];
 
-    pub fn check_points(
+    pub fn check_points<I>(
         &self,
-        check_points: CheckPointSet,
+        check_points: I,
         limits: CheckPointLimits,
-    ) -> CheckPointJob;
+    ) -> CheckPointJob
+    where
+        I: IntoIterator<Item = CheckPoint>;
 
     pub fn export_landxml(
         &self,
@@ -209,15 +212,17 @@ names, and timestamps are execution facts and never Recipe or topology facts.
 The implementation supports one worker in v0.6 and exposes no worker-count
 option.
 
-`TerrainDescriptor` records the Snapshot provenance, normalized Recipe digest,
-terrain algorithm version, Source transform and Coordinate Reference, input
-Point count, vertex count, face count, inclusive terrain bounds, and canonical
-geometry/topology hashes. Cargo version, terrain algorithm version, and
-LandXML subset version evolve independently.
+`TerrainDescriptor` records the Snapshot provenance, normalized Recipe and
+digest, terrain algorithm version, Source transform and Coordinate Reference,
+input/vertex/face/hull counts, inclusive terrain bounds, canonical input,
+geometry, topology, and Artifact hashes, and accounted peak working bytes,
+retained Surface bytes, and topology steps. Cargo version, terrain algorithm
+version, and LandXML subset version evolve independently.
 
-`TerrainVertex` records one Source-aware Point Identity and its exact Source
-position ticks. `TerrainFace` records three zero-based vertex indices into the
-public canonical vertex slice. No face owns copied positions.
+`SurfaceVertex` records one one-based `SurfaceVertexId`, one Source-aware Point
+Identity, and its exact Source position ticks. `SurfaceFace` records one one-
+based `SurfaceFaceId` and three one-based vertex identities in counter-clockwise
+order. No face owns copied positions.
 
 ## Ground Input
 
@@ -506,13 +511,16 @@ println!("exported {} bytes", receipt.byte_length());
 ```
 
 Classification correction remains a separate explicit host action before the
-next `derive` call. `terrain-demo` owns its path selection, Check Point input
-parsing, Operation recovery record, reporting, and exit codes. Those policies
-do not enter foundation interfaces.
+next `derive` call. `terrain-demo` owns its Source/index/Workspace/export paths,
+optional built-in covered/gap QA sample, explicit LandXML date/time and unknown-
+CRS metric assertion, optional exact-ordinal classification correction/Revert
+exercise, reporting, and exit codes. Those policies do not enter foundation
+interfaces.
 
 ## Verification and acceptance
 
-All verification runs locally. v0.6 implementation is complete only when:
+All verification runs locally. The completed v0.6 technical slice satisfies
+these repository acceptance gates:
 
 - public Point-row tests show exact positions and effective classification at
   root, changed, historical, and Revert Snapshots;
@@ -540,14 +548,55 @@ All verification runs locally. v0.6 implementation is complete only when:
   examples, package benchmarks, existing process smoke, and required local GPU
   regressions pass as documented in `CONTRIBUTING.md`.
 
-The terrain benchmark records input/vertex/face counts, retained and peak
-working bytes, predicate work, Derivation time, Check Point time, LandXML time
-and bytes, and the named local machine. It is generated-fixture technical
-evidence, not a production-scale or workflow-value claim.
+The terrain benchmark records input/vertex/face counts, retained and accounted
+peak working bytes, topology steps, Derivation time, Check Point time and face-
+location work, LandXML time and bytes, and the named local machine. It is
+generated-fixture technical evidence, not a production-scale or workflow-value
+claim. Its `worker_heap_measurement` is explicitly null, so the benchmark does
+not claim an observed worker-heap value.
+
+### Implemented repository evidence
+
+- `point-workspace` has 67 tests: 42 unit/fault/allocation tests and 25 public
+  integration tests, including six exact Point-row stream tests.
+- `point-terrain` has 41 package tests—15 unit/private and 26 integration—plus
+  one documentation test across interface, topology, resource, detached-QA,
+  LandXML, robust-algorithm, and publication-fault suites.
+- `terrain-demo` has one process test that runs generated LAS and LAZ through
+  the complete GPU-free caller. LAS/LAZ correction, re-Derivation, immediate-
+  head Revert, and restored geometry meaning are covered while Source bytes
+  remain unchanged.
+- Formatting, strict workspace lint, workspace tests, warning-free
+  documentation, every declared example/benchmark/process smoke, and required
+  local GPU gates complete through the commands in `CONTRIBUTING.md`.
+
+On the local Apple M5 Pro (`Mac17,9`), 24 GiB, arm64, macOS 26.5.2 reference
+machine with Rust 1.90.0, the completed 10,000-Point Criterion run measured:
+
+| Evidence | Local value |
+|---|---:|
+| Input / vertices / faces / hull vertices | 10,000 / 10,000 / 19,602 / 396 |
+| Derivation | 11.983–12.049 ms (829.97–834.53 Kpoints/s) |
+| Detached QA | 94.907–95.164 us for 3 Check Points / 19,604 face tests |
+| Durable LandXML creation | 18.020–18.311 ms / 53.650–54.518 MiB/s |
+| LandXML bytes | 1,030,118 B |
+| Descriptor accounted peak working bytes | 135,790,592 B |
+| Descriptor retained Surface bytes | 1,034,176 B |
+| Descriptor topology steps | 521,494 |
+| QA accounted peak working bytes | 336 B |
+| Evidence record machine | `jjaes-MacBook-Pro.local` (`macos`/`aarch64`) |
+| One-shot Derivation / QA / LandXML | 13,371 / 125 / 14,656 us |
+| Observed worker heap | unclaimed (`worker_heap_measurement: null`) |
+
+Only the completed 10,000-Point generated run is claimed. The benchmark also
+supports 100,000 and 1,000,000 generated Points, but no result at those scales
+is inferred here. One-shot values are reported separately from Criterion
+intervals. Licensed production, above-500-million-Point, partner,
+downstream-application, paid-use, and human-time evidence remains outstanding.
 
 ## Delivery slices
 
-Implementation proceeds in four coherent slices:
+Implementation was delivered in four coherent slices:
 
 1. exact `Snapshot::point_rows`, its limits, terminal summary, and root/overlay
    public tests;

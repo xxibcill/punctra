@@ -1,6 +1,7 @@
 # Runtime Workflows
 
-Status: implemented through v0.5; terrain and export workflows deferred
+Status: implemented through the narrow v0.6 terrain/QA slice; broader terrain
+and export workflows deferred
 
 The host composes sibling modules explicitly. Lower crates never call back into
 an application, discover a Source for a Workspace, submit a GPU queue, or infer
@@ -211,7 +212,63 @@ sequenceDiagram
 The host never invents a replacement identity for the same logical request.
 `Retryable` contains a complete durable intent; no live Point Set is needed.
 
-## 7. Prepare and render a View
+## 7. Stream exact Ground Input and derive a Terrain Surface
+
+~~~mermaid
+sequenceDiagram
+    participant HOST as Host
+    participant SNAP as Snapshot
+    participant ROWS as SnapshotPointBatches
+    participant TER as point-terrain
+
+    HOST->>TER: derive(Snapshot, TerrainRecipe, TerrainLimits)
+    TER->>SNAP: point_rows(ground Query, PointRowLimits)
+    SNAP-->>TER: pull-based exact row stream
+    loop bounded nonempty batches
+        TER->>ROWS: next()
+        ROWS-->>TER: Point Identity + ticks + effective class
+        TER->>TER: account, normalize, hash, and stage Ground Input
+    end
+    TER->>ROWS: terminal next() + summary()
+    TER->>TER: robust deterministic triangulation and final validation
+    TER-->>HOST: immutable TerrainSurface
+~~~
+
+Rows are provisional until the stream publishes its complete terminal summary.
+The single worker canonicalizes exact ticks and Point Identity, rejects
+unsupported degeneracy, charges overlapping working/result allocations, and
+publishes no partial Surface after error or cancellation. Classification
+correction is a separate existing Workspace commit; immediate-head Revert and
+a later Derivation can restore equal geometry while retaining distinct Revision
+provenance. Source bytes remain unchanged.
+
+## 8. Evaluate detached QA and create LandXML
+
+~~~mermaid
+sequenceDiagram
+    participant HOST as Host
+    participant TER as TerrainSurface
+    participant DISK as Caller export directory
+
+    HOST->>TER: check_points(detached observations, limits)
+    TER->>TER: validate identities; locate closed faces; interpolate
+    TER-->>HOST: ordered samples/gaps + compensated residual statistics
+
+    HOST->>TER: export_landxml(target, explicit options, limits)
+    TER->>DISK: create/sync/reopen/verify bounded sibling stage
+    TER->>DISK: no-replace publish target + sync parent
+    TER->>DISK: remove stage + sync cleanup
+    TER-->>HOST: LandXmlReceipt after durable completion
+~~~
+
+Residual is observed Z minus Surface Z. Outside-hull positions are explicit
+gaps. LandXML coordinates are northing, easting, elevation and require caller-
+established metric-metre Source coordinates; no transformation or clock read
+occurs. Once target publication starts, any inability to prove final
+verification, durability, cleanup, or terminal acknowledgement is reported as
+indeterminate rather than success.
+
+## 9. Prepare and render a View
 
 View planning remains separate from exact Workspace selection. The current
 real-cloud host bridge reads `PreparedIndex` directly.
@@ -244,7 +301,7 @@ The host owns scheduling, staging, update ordering, queue submission, and device
 polling. A node becomes Resident only after a complete accepted Upsert. Parent
 Coverage remains until the planner emits its exact conditional retirement.
 
-## 8. Cancellation and crash matrix
+## 10. Cancellation and crash matrix
 
 | Operation | Safe cancellation boundary | Permitted residue | Published truth |
 |---|---|---|---|
@@ -252,14 +309,19 @@ Coverage remains until the planner emits its exact conditional retirement.
 | Index prepare | After synced checksummed work frame; before artifact publication | Verified work prefix and recognized sidecars | Existing target or one complete new target |
 | Workspace create/open | Before manifest/session publication; recovery becomes noncancellable once durable create is visible | Recognized scratch/partial pre-manifest directory | No Workspace, or one complete reopenable Workspace |
 | Exact selection | Between candidate/Source/overlay/Point Set blocks | Live disposable spill owned by Job | No Point Set, or one sealed complete Point Set |
+| Snapshot Point rows | Between candidate/Source/overlay/output blocks | Private in-memory partial batch only | No summary, or one complete terminal summary |
 | Revision commit | Before publication; afterward certainty is conservative | Complete ready/rejection/Revision links and recognized scratch | Rejected old head, Committed new head, or Indeterminate until reopen |
+| Terrain Derivation | Between rows, sort/predicate/topology blocks, and before final seal | Private in-memory working allocations | No Surface, or one complete immutable Surface |
+| Detached QA | Between inputs and bounded face-location work | Private partial results | No report, or one complete report |
+| LandXML export | Before target publication; afterward certainty is conservative | Recognized sibling stage and possibly one complete target | No target, one complete target plus receipt, or ExportIndeterminate |
 | View planning | Before returning a plan | None | Old planner history or one complete new plan |
 | GPU frame | Host-controlled frame/device boundary | Disposable GPU allocations | Workspace unchanged |
 
-## 9. Staleness
+## 11. Staleness
 
 Snapshots and Revisions are immutable. A later commit creates a new head but
-does not mutate older Snapshots. View generations and GPU residency are
+does not mutate older Snapshots. Derived Surfaces remain immutable even when a
+later Revision restores equal geometry. View generations and GPU residency are
 separate disposable state and may be reset independently.
 
 ~~~mermaid
@@ -271,11 +333,15 @@ flowchart LR
     R2 --> S2["Head Snapshot"]
     IDX["Rebuildable index"] -. "accelerates exact reads" .-> S0
     IDX -. "accelerates exact reads" .-> S2
+    S0 --> T0["Immutable Terrain Surface"]
+    S2 --> T2["Later immutable Terrain Surface"]
+    T2 --> XML["Caller-owned LandXML Export"]
     VIEW["Disposable View/GPU state"] -. "never mutates" .-> R2
 ~~~
 
 ## Deferred workflows
 
-Terrain derivation, Breaklines, edited Point-row streaming, LandXML export,
-autosave, screen selection, and product UI require later accepted designs.
-They are not implied by the current Workspace vocabulary.
+Breakline/constrained or persisted terrain, general Attribute Point-row
+streaming, general LandXML/import, autosave, screen selection, and product UI
+require later accepted designs. They are not implied by the current Workspace
+or Terrain vocabulary.

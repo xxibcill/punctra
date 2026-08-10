@@ -1,9 +1,11 @@
 [workspace]
 members = [
     "apps/renderer-demo",
+    "apps/terrain-demo",
     "crates/foundation-runtime",
     "crates/point-contracts",
     "crates/point-index",
+    "crates/point-terrain",
     "crates/point-workspace",
     "crates/point-source",
     "crates/point-view",
@@ -15,7 +17,7 @@ members = [
 resolver = "3"
 
 [workspace.package]
-version = "0.6.0-alpha.1"
+version = "0.6.0"
 edition = "2024"
 rust-version = "1.90"
 license = "MIT OR Apache-2.0"
@@ -26,6 +28,7 @@ allocation-counter = "=0.8.1"
 blake3 = "1.8.6"
 bytemuck = { version = "1.25.2", features = ["derive"] }
 criterion = "0.7.0"
+delaunator = "=1.1.0"
 foundation-runtime = { path = "crates/foundation-runtime" }
 getrandom = "0.3.4"
 glam = "0.33.3"
@@ -34,11 +37,14 @@ laz = "=0.12.2"
 pollster = "1.0.1"
 point-contracts = { path = "crates/point-contracts" }
 point-index = { path = "crates/point-index" }
+point-terrain = { path = "crates/point-terrain" }
 point-workspace = { path = "crates/point-workspace" }
 point-source = { path = "crates/point-source" }
 point-view = { path = "crates/point-view" }
 render-protocol = { path = "crates/render-protocol" }
 render-wgpu = { path = "crates/render-wgpu" }
+robust = "=1.2.0"
+roxmltree = "=0.21.1"
 serde = { version = "1.0.229", features = ["derive", "rc"] }
 source-las = { path = "crates/source-las" }
 source-memory = { path = "crates/source-memory" }

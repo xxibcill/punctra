@@ -8,12 +8,13 @@ dates. Candidate releases may be split, merged, reordered, renamed, or skipped
 as technical and customer evidence changes. Milestone outcomes and dependency
 order matter more than version numbers.
 
-Only an **Active** release has committed scope. Punctra v0.1 through v0.5 are
-complete. The narrow [v0.6 Terrain and QA benchmark
-design](docs/design/terrain-qa-benchmark-v0.6.md) is accepted and implementation
-is in progress. Work beyond that exact design remains proposed; broader
+Only an **Active** release has committed scope. Punctra v0.1 through v0.6 are
+complete repository technical slices. The narrow [v0.6 Terrain and QA
+benchmark design](docs/design/terrain-qa-benchmark-v0.6.md) is implemented and
+locally verified. Work beyond that exact design remains proposed; broader
 terrain, export, general editing, and application UI are not silently made
-current scope by appearing here.
+current scope by appearing here. Completing v0.6 does not complete a product,
+partner, interoperability, or commercial milestone.
 
 ## Working direction
 
@@ -61,19 +62,19 @@ Roadmap status labels are:
 
 ## Scope and evidence checkpoint
 
-Status: **v0.6 technical slice accepted and in progress; external product
-evidence remains outstanding**
+Status: **v0.6 repository technical slice complete; external product evidence
+remains outstanding**
 
 The [implemented v0.5 design](docs/design/durable-document-core-v0.5.md) places
 exact classification selection, temporary Point Sets, sparse Revisions, and
 Operation recovery behind one deep `point-workspace` interface. Repository
-tests and generated-source benchmarks close that technical slice. The accepted
-[v0.6 design](docs/design/terrain-qa-benchmark-v0.6.md) now authorizes only its
-one-worker in-memory unconstrained TIN, detached Check Point residual, and
-metric-metre LandXML points/faces path. It does not authorize broader terrain,
-screen selection, general Edit, or product-application proposals, and neither
-v0.5 nor v0.6 repository evidence substitutes for licensed field data or
-partner validation.
+tests and generated-source benchmarks close that technical slice. The
+implemented [v0.6 design](docs/design/terrain-qa-benchmark-v0.6.md) adds only
+its exact `Snapshot::point_rows` input, one-worker in-memory unconstrained TIN,
+detached Check Point residual, and metric-metre LandXML points/faces path. It
+does not authorize broader terrain, screen selection, general Edit, or product-
+application proposals, and neither v0.5 nor v0.6 repository evidence
+substitutes for licensed field data or partner validation.
 
 Useful evidence for proceeding includes:
 
@@ -93,8 +94,9 @@ module. The detailed discovery signals and pivot criteria live in the
 
 ## Release sequence
 
-There are four provisional pre-v1 release themes after the completed v0.5. This
-is a working count, not a requirement to publish exactly four more releases.
+There are three provisional pre-v1 release themes after the completed v0.6.
+This is a working count, not a requirement to publish exactly three more
+releases.
 
 ### v0.1 — Renderer foundation
 
@@ -260,12 +262,12 @@ part of v0.5. Exact scope and verification rules are recorded in the
 
 ### v0.6 — Terrain and QA benchmark
 
-Status: **Active — accepted design; implementation in progress**
+Status: **Complete — repository technical slice only**
 
-Accepted outcome: complete the first headless LAS/LAZ-to-terrain technical
+Implemented outcome: complete the first headless LAS/LAZ-to-terrain technical
 benchmark on one narrow, explicitly supported workflow.
 
-Accepted scope:
+Delivered scope:
 
 - one narrow exact `Snapshot::point_rows` stream containing Point Identity,
   exact position ticks, and effective `U8` classification;
@@ -284,8 +286,9 @@ Accepted scope:
 - one headless `terrain-demo` application exercising generated LAS and LAZ
   through Workspace, terrain, QA, and export.
 
-The accepted implementation supports one worker. Terrain Surfaces are immutable
-in-memory Artifacts and are not persisted or resumable. Breaklines, Profiles,
+The implementation supports one worker. Terrain Surfaces are immutable in-
+memory Artifacts and are not persisted or resumable. Public topology uses
+canonical `SurfaceVertex` and `SurfaceFace` values. Breaklines, Profiles,
 Source residual Queries, classifiers, boundaries/holes, CRS or unit
 transformation, non-metre exports, and general LandXML remain outside v0.6.
 
@@ -302,6 +305,17 @@ Evidence of readiness:
 - generated LAS and LAZ complete the headless caller path while Source bytes
   remain unchanged through classification correction and Revert.
 
+The local 10,000-Point generated benchmark measured Derivation at
+11.983–12.049 ms (829.97–834.53 Kpoints/s), detached QA at 94.907–95.164 us
+for three Check Points and 19,604 face tests, and durable 1,030,118-byte
+LandXML creation at 18.020–18.311 ms (53.650–54.518 MiB/s). The descriptor
+reported 135,790,592 accounted peak working bytes, 1,034,176 retained Surface
+bytes, and 521,494 topology steps; QA reported 336 accounted peak working
+bytes. The named `jjaes-MacBook-Pro.local` evidence record separately reported
+one-shot Derivation/QA/LandXML times of 13,371/125/14,656 us. These are
+algorithm-accounting and local timing facts. `worker_heap_measurement` is
+explicitly `null`, so no observed worker-heap value is claimed.
+
 The working product target is five-times faster time to first use and 50% less
 human production time on the specific large-project workflows where customer
 evidence supports those comparisons. Accuracy cannot be traded for speed.
@@ -310,8 +324,9 @@ tolerances, downstream Civil 3D/Bentley round trips, paid use, and published
 human-time comparisons remain explicitly outstanding and are not v0.6
 repository acceptance claims.
 
-Exact interface, invariants, verification, and exclusions are recorded in the
-[accepted v0.6 design](docs/design/terrain-qa-benchmark-v0.6.md).
+Exact interface, invariants, verification, evidence limits, and exclusions are
+recorded in the [implemented v0.6
+design](docs/design/terrain-qa-benchmark-v0.6.md).
 
 ### v0.7 — Design-partner alpha
 
