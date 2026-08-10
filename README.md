@@ -48,6 +48,14 @@ persistence, general LandXML, or coordinate transformation. This repository
 completion is not a claim of product, partner, licensed-data, or downstream-
 application acceptance.
 
+Version 0.7 is now the active, deliberately technical slice described by the
+accepted [Technical partner-alpha readiness
+design](docs/design/technical-alpha-readiness-v0.7.md). It adds exact Revision
+Audit and Edit Footprint facts, restart-safe LandXML reconciliation, linked
+child cancellation, and one private durable Workflow Run inside
+`terrain-demo`. It does not add Breaklines or claim partner, production-data,
+downstream-application, paid-use, or human-workflow acceptance.
+
 Later direction is described in the [living roadmap](ROADMAP.md). Its release
 themes are adjustable and do not expand accepted implementation scope by
 themselves.

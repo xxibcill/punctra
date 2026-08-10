@@ -3,6 +3,18 @@
 All notable changes to Punctra are documented here. The project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased - 0.7.0
+
+- Accepted the v0.7 technical partner-alpha readiness design. The active
+  repository slice covers linked child cancellation, exact Revision Audit and
+  Edit Footprint facts, idempotent LandXML ensure/reconciliation, and one
+  private durable `terrain-demo` Workflow Run with bounded checkpoints,
+  reports, and recovery actions.
+- Deferred durable Breaklines because they require both a Workspace persisted-
+  schema evolution and a new constrained-triangulation kernel. External
+  partner, licensed-data, downstream, paid-use, and human-time evidence remains
+  outstanding and is not a v0.7 repository acceptance claim.
+
 ## 0.6.0 - 2026-08-10
 
 - Added the exact classification-aware `Snapshot::point_rows` pull stream with

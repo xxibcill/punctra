@@ -2,7 +2,8 @@
 
 Status: renderer, adaptive View planning, Real Sources, Spatial Index/out-of-
 core View, the narrow Workspace, and the v0.6 Terrain and Check Point QA slice
-are implemented; broader terrain and product terms remain deferred
+are implemented; the narrow v0.7 technical-readiness workflow is active;
+broader terrain and product terms remain deferred
 
 Punctra v0.6 builds on the reusable render engine, renderer-neutral View
 planner, and verified Source path described in the accepted [v0.1 renderer
@@ -19,6 +20,11 @@ research and do not imply product scope. The implemented [v0.6 Terrain and QA
 benchmark design](docs/design/terrain-qa-benchmark-v0.6.md) fixes the narrow
 meanings of Ground Input, Terrain Surface, Check Point, Residual, and Terrain
 Gap used by `Snapshot::point_rows`, `point-terrain`, and `terrain-demo`.
+The accepted [v0.7 technical-readiness
+design](docs/design/technical-alpha-readiness-v0.7.md) additionally fixes the
+narrow meanings of Workflow Run, Run Checkpoint, Revision Audit, Edit
+Footprint, Surface Change Envelope, and Recovery Action. Those terms describe
+one headless technical path and do not imply a partner-facing product.
 
 ## Artifact
 

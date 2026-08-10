@@ -9,12 +9,12 @@ as technical and customer evidence changes. Milestone outcomes and dependency
 order matter more than version numbers.
 
 Only an **Active** release has committed scope. Punctra v0.1 through v0.6 are
-complete repository technical slices. The narrow [v0.6 Terrain and QA
-benchmark design](docs/design/terrain-qa-benchmark-v0.6.md) is implemented and
-locally verified. Work beyond that exact design remains proposed; broader
-terrain, export, general editing, and application UI are not silently made
-current scope by appearing here. Completing v0.6 does not complete a product,
-partner, interoperability, or commercial milestone.
+complete repository technical slices. The narrow [v0.7 Technical partner-alpha
+readiness design](docs/design/technical-alpha-readiness-v0.7.md) is accepted
+and active. It strengthens restart and audit behavior without claiming the
+external partner evidence required by the product milestone. Broader terrain,
+export, general editing, and application UI are not silently made current
+scope by appearing here.
 
 ## Working direction
 
@@ -62,8 +62,8 @@ Roadmap status labels are:
 
 ## Scope and evidence checkpoint
 
-Status: **v0.6 repository technical slice complete; external product evidence
-remains outstanding**
+Status: **v0.7 repository technical-readiness slice active; external product
+evidence remains outstanding**
 
 The [implemented v0.5 design](docs/design/durable-document-core-v0.5.md) places
 exact classification selection, temporary Point Sets, sparse Revisions, and
@@ -330,7 +330,16 @@ design](docs/design/terrain-qa-benchmark-v0.6.md).
 
 ### v0.7 — Design-partner alpha
 
-Status: **Candidate**
+Status: **Active technical-readiness slice; external design-partner milestone
+evidence remains outstanding**
+
+Accepted repository outcome: implement the exact restart, audit, and
+reconciliation guarantees in the [v0.7 design](docs/design/technical-alpha-readiness-v0.7.md).
+The slice adds no Breaklines or new public workflow crate. It proves that the
+existing narrow LAS/LAZ correction-to-terrain path can record its Operation
+Identity before mutation, resume through one private Workflow Run journal,
+derive an exact Revision Audit/Edit Footprint, reconcile a byte-identical
+LandXML target without overwrite, and publish bounded actionable diagnostics.
 
 Candidate outcome: turn the benchmark path into something partners can use on
 real projects while keeping the supported workflow narrow.
