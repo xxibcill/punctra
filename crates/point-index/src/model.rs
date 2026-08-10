@@ -279,7 +279,7 @@ impl PrepareReport {
 /// Complete conservative candidate spans and exact plan facts.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CandidatePlan {
-    spans: Vec<SourceSpan>,
+    spans: Box<[SourceSpan]>,
     candidate_point_count: u64,
     visited_node_count: u64,
 }
@@ -381,7 +381,7 @@ fn candidates(
 ) -> Result<CandidatePlan, IndexError> {
     let Some(root) = hierarchy.root() else {
         return Ok(CandidatePlan {
-            spans: Vec::new(),
+            spans: Box::new([]),
             candidate_point_count: 0,
             visited_node_count: 0,
         });
@@ -453,7 +453,7 @@ fn candidates(
         });
     }
     Ok(CandidatePlan {
-        spans,
+        spans: spans.into_boxed_slice(),
         candidate_point_count: candidate_points,
         visited_node_count: visited,
     })
