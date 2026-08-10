@@ -37,7 +37,18 @@ struct NodeLayout {
 struct SyntheticNode {
     node: AvailableNode,
     layout: NodeLayout,
-    latest_version: u64,
+    latest_version: BatchVersion,
+}
+
+impl SyntheticNode {
+    fn next_version(self) -> BatchVersion {
+        let version = self
+            .latest_version
+            .get()
+            .checked_add(1)
+            .expect("the interactive demo cannot exhaust batch versions");
+        BatchVersion::new(version)
+    }
 }
 
 #[derive(Debug)]
@@ -60,7 +71,7 @@ impl SyntheticScene {
                     nodes.push(SyntheticNode {
                         node: make_node(layout)?,
                         layout,
-                        latest_version: 0,
+                        latest_version: BatchVersion::new(0),
                     });
                 }
             }
@@ -98,15 +109,11 @@ impl SyntheticScene {
                 continue;
             }
 
-            let version = node
-                .latest_version
-                .checked_add(1)
-                .expect("the interactive demo cannot exhaust batch versions");
             let batch = make_batch(
                 self.view_generation,
                 node.node,
                 node.layout,
-                BatchVersion::new(version),
+                node.next_version(),
             )?;
             return Ok(Some(batch));
         }
@@ -114,21 +121,15 @@ impl SyntheticScene {
     }
 
     pub(crate) fn mark_resident(&mut self, batch_key: BatchKey, version: BatchVersion) {
-        let key =
-            NodeKey::new(batch_key.get()).expect("synthetic batch keys are nonzero node keys");
-        let index = node_index(key);
-        let node = &mut self.nodes[index];
+        let node = self.node_for_batch_mut(batch_key);
         debug_assert_eq!(node.node.status(), NodeStatus::Requested);
-        debug_assert_eq!(version.get(), node.latest_version + 1);
-        node.latest_version = version.get();
+        debug_assert_eq!(version, node.next_version());
+        node.latest_version = version;
         node.node = node.node.with_status(NodeStatus::Resident { version });
     }
 
     pub(crate) fn mark_retired(&mut self, batch_key: BatchKey, expected_version: BatchVersion) {
-        let key =
-            NodeKey::new(batch_key.get()).expect("synthetic batch keys are nonzero node keys");
-        let index = node_index(key);
-        let node = &mut self.nodes[index].node;
+        let node = &mut self.node_for_batch_mut(batch_key).node;
         debug_assert_eq!(
             node.status(),
             NodeStatus::Resident {
@@ -136,6 +137,13 @@ impl SyntheticScene {
             }
         );
         *node = node.with_status(NodeStatus::Missing);
+    }
+
+    fn node_for_batch_mut(&mut self, batch_key: BatchKey) -> &mut SyntheticNode {
+        let key =
+            NodeKey::new(batch_key.get()).expect("synthetic batch keys are nonzero node keys");
+        let index = node_index(key);
+        &mut self.nodes[index]
     }
 
     pub(crate) fn resident_batches(&self) -> u64 {

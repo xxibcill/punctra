@@ -28,6 +28,7 @@ foundation-runtime = { path = "crates/foundation-runtime" }
 glam = "0.33.3"
 las = { version = "=0.10.0", features = ["laz"] }
 laz = "=0.12.2"
+libm = "0.2.16"
 pollster = "1.0.1"
 point-contracts = { path = "crates/point-contracts" }
 point-source = { path = "crates/point-source" }

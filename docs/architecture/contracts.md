@@ -515,7 +515,7 @@ impl ViewPlanner {
     pub fn plan(
         &mut self,
         camera: &Camera,
-        viewport: [u32; 2],
+        viewport: Viewport,
         available_nodes: AvailableNodes<'_>,
         budget: PlanningBudget,
     ) -> Result<ViewPlan, PlanError>;
@@ -550,9 +550,9 @@ no dependency on `ViewInput`, **point-query**, or a Spatial Index.
 The host explicitly begins renderer state with `RenderUpdate::Reset`, converts
 materialized requested nodes into `PointBatch` Upserts, and applies plan
 retirements as conditional Remove updates. A render `Frame` supplies the exact
-generation, camera, and viewport to draw; a mismatched generation returns
-`ViewGenerationMismatch`. Mesh rendering remains outside the implemented
-renderer and planner contracts.
+generation, camera, and validated `Viewport` to draw; a mismatched generation
+returns `ViewGenerationMismatch`. Mesh rendering remains outside the
+implemented renderer and planner contracts.
 
 ## Terrain contract
 

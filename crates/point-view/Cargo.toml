@@ -9,6 +9,7 @@ repository.workspace = true
 
 [dependencies]
 glam.workspace = true
+libm.workspace = true
 render-protocol.workspace = true
 thiserror.workspace = true
 

@@ -1569,6 +1569,7 @@ version = "0.3.0"
 dependencies = [
  "criterion",
  "glam",
+ "libm",
  "render-protocol",
  "thiserror 2.0.20",
 ]
