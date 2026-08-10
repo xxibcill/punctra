@@ -120,10 +120,7 @@ impl SyntheticScene {
     }
 
     pub(crate) fn mark_resident(&mut self, batch_key: BatchKey, version: BatchVersion) {
-        let key =
-            NodeKey::new(batch_key.get()).expect("synthetic batch keys are nonzero node keys");
-        let index = node_index(key);
-        let node = &mut self.nodes[index];
+        let node = self.node_for_batch_mut(batch_key);
         debug_assert_eq!(node.node.status(), NodeStatus::Requested);
         debug_assert_eq!(version, node.next_version());
         node.latest_version = version;
@@ -131,10 +128,7 @@ impl SyntheticScene {
     }
 
     pub(crate) fn mark_retired(&mut self, batch_key: BatchKey, expected_version: BatchVersion) {
-        let key =
-            NodeKey::new(batch_key.get()).expect("synthetic batch keys are nonzero node keys");
-        let index = node_index(key);
-        let node = &mut self.nodes[index].node;
+        let node = &mut self.node_for_batch_mut(batch_key).node;
         debug_assert_eq!(
             node.status(),
             NodeStatus::Resident {
@@ -142,6 +136,13 @@ impl SyntheticScene {
             }
         );
         *node = node.with_status(NodeStatus::Missing);
+    }
+
+    fn node_for_batch_mut(&mut self, batch_key: BatchKey) -> &mut SyntheticNode {
+        let key =
+            NodeKey::new(batch_key.get()).expect("synthetic batch keys are nonzero node keys");
+        let index = node_index(key);
+        &mut self.nodes[index]
     }
 
     pub(crate) fn resident_batches(&self) -> u64 {
