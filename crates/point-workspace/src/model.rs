@@ -1,6 +1,8 @@
 use std::fmt;
 
-use point_contracts::{AttributeDataType, AttributeId, ContentHash, SourceId, WorldBounds};
+use point_contracts::{
+    AttributeDataType, AttributeDefinition, AttributeId, ContentHash, SourceId, WorldBounds,
+};
 use point_source::Source;
 use serde::{Deserialize, Serialize};
 
@@ -236,7 +238,10 @@ impl WorkspaceSchema {
         self.classification
     }
 
-    pub(crate) fn validate_source(self, source: &Source) -> Result<(), WorkspaceError> {
+    pub(crate) fn classification_definition(
+        self,
+        source: &Source,
+    ) -> Result<&AttributeDefinition, WorkspaceError> {
         let Some(definition) = source.metadata().attributes().get(self.classification) else {
             return Err(WorkspaceError::incompatible(format!(
                 "Source does not contain classification Attribute {}",
@@ -250,7 +255,7 @@ impl WorkspaceSchema {
                 definition.data_type()
             )));
         }
-        Ok(())
+        Ok(definition)
     }
 }
 

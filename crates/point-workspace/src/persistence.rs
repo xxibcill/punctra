@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use blake3::Hasher;
 use foundation_runtime::OperationControl;
+use point_contracts::MAX_ATTRIBUTE_NAME_BYTES;
 use thiserror::Error;
 
 use crate::{
@@ -18,6 +19,7 @@ pub(crate) const WORKSPACE_ID_BYTES: usize = 16;
 pub(crate) const OPERATION_ID_BYTES: usize = 16;
 pub(crate) const REVISION_ID_BYTES: usize = 32;
 pub(crate) const DIGEST_BYTES: usize = 32;
+pub(crate) const ATTRIBUTE_DATA_TYPE_U8: u8 = 1;
 
 const DISK_VERSION: u32 = 1;
 const SEMANTIC_VERSION: u32 = 1;
@@ -26,7 +28,7 @@ const REVISION_MAGIC: &[u8; 8] = b"PWSREV01";
 const BLOCK_MAGIC: &[u8; 8] = b"PWSBLK01";
 const FOOTER_MAGIC: &[u8; 8] = b"PWSEND01";
 const REJECTION_MAGIC: &[u8; 8] = b"PWSREJ01";
-pub(crate) const MANIFEST_BYTES: usize = 220;
+pub(crate) const MANIFEST_BYTES: usize = 228 + MAX_ATTRIBUTE_NAME_BYTES;
 const REVISION_HEADER_BYTES: usize = 384;
 const BLOCK_HEADER_BYTES: usize = 72;
 const ROW_BYTES: usize = 10;
@@ -100,12 +102,20 @@ type RevisionEntry = (u64, RevisionBytes, PathBuf);
 type OperationEntry = (OperationBytes, OperationFileKind, PathBuf);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct PersistedAttributeDefinition {
+    pub(crate) id: u32,
+    pub(crate) name_len: u32,
+    pub(crate) name: [u8; MAX_ATTRIBUTE_NAME_BYTES],
+    pub(crate) data_type: u8,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct ManifestFacts {
     pub(crate) workspace: WorkspaceBytes,
     pub(crate) source: DigestBytes,
     pub(crate) source_point_count: u64,
     pub(crate) position_transform_bits: [u64; 6],
-    pub(crate) classification_attribute: u32,
+    pub(crate) classification: PersistedAttributeDefinition,
     pub(crate) root_revision: RevisionBytes,
     pub(crate) source_contract: DigestBytes,
 }
@@ -1754,7 +1764,7 @@ fn validate_candidate_request(
             classification_request_digest(ClassificationRequestFacts {
                 workspace: candidate.workspace,
                 source: candidate.source,
-                classification_attribute: manifest.classification_attribute,
+                classification_attribute: manifest.classification.id,
                 point_set_workspace: candidate.workspace,
                 point_set_source: candidate.source,
                 parent: candidate.parent,
@@ -2597,7 +2607,11 @@ fn encode_manifest(facts: &ManifestFacts) -> [u8; MANIFEST_BYTES] {
     for value in facts.position_transform_bits {
         bytes.u64(value);
     }
-    bytes.u32(facts.classification_attribute);
+    bytes.u32(facts.classification.id);
+    bytes.u32(facts.classification.name_len);
+    bytes.push(&facts.classification.name);
+    bytes.u8(facts.classification.data_type);
+    bytes.push(&[0_u8; 3]);
     bytes.push(&facts.root_revision);
     bytes.push(&facts.source_contract);
     let checksum = domain_hash(MANIFEST_DOMAIN, bytes.written());
@@ -2624,7 +2638,18 @@ fn decode_manifest(
     for value in &mut position_transform_bits {
         *value = decoder.u64()?;
     }
-    let classification_attribute = decoder.u32()?;
+    let classification_id = decoder.u32()?;
+    let classification_name_len = decoder.u32()?;
+    let classification_name = decoder.array()?;
+    let classification_data_type = decoder.u8()?;
+    decoder.zeroes(3)?;
+    validate_persisted_attribute_definition(
+        classification_id,
+        classification_name_len,
+        &classification_name,
+        classification_data_type,
+        path,
+    )?;
     let root_revision = decoder.array()?;
     let source_contract = decoder.array()?;
     decoder.finish()?;
@@ -2633,10 +2658,40 @@ fn decode_manifest(
         source,
         source_point_count,
         position_transform_bits,
-        classification_attribute,
+        classification: PersistedAttributeDefinition {
+            id: classification_id,
+            name_len: classification_name_len,
+            name: classification_name,
+            data_type: classification_data_type,
+        },
         root_revision,
         source_contract,
     })
+}
+
+fn validate_persisted_attribute_definition(
+    id: u32,
+    name_len: u32,
+    name: &[u8; MAX_ATTRIBUTE_NAME_BYTES],
+    data_type: u8,
+    path: &Path,
+) -> Result<(), PersistenceError> {
+    let name_len = usize::try_from(name_len)
+        .ok()
+        .filter(|length| (1..=MAX_ATTRIBUTE_NAME_BYTES).contains(length))
+        .ok_or_else(|| corrupt_value(path, "classification Attribute name length is invalid"))?;
+    let definition_name = std::str::from_utf8(&name[..name_len])
+        .map_err(|_| corrupt_value(path, "classification Attribute name is not UTF-8"))?;
+    if id == 0 || definition_name.trim().is_empty() {
+        return corrupt(path, "classification Attribute definition is invalid");
+    }
+    if name[name_len..].iter().any(|byte| *byte != 0) {
+        return corrupt(path, "classification Attribute name padding is not zero");
+    }
+    if data_type != ATTRIBUTE_DATA_TYPE_U8 {
+        return incompatible(path, "classification Attribute type is not U8");
+    }
+    Ok(())
 }
 
 fn encode_revision_header(facts: &RevisionFacts) -> [u8; REVISION_HEADER_BYTES] {
@@ -3697,12 +3752,19 @@ mod tests {
     }
 
     fn manifest() -> ManifestFacts {
+        let mut classification_name = [0_u8; MAX_ATTRIBUTE_NAME_BYTES];
+        classification_name[..14].copy_from_slice(b"classification");
         ManifestFacts {
             workspace: [1; WORKSPACE_ID_BYTES],
             source: [2; DIGEST_BYTES],
             source_point_count: 42,
             position_transform_bits: [1, 2, 3, 4, 5, 6],
-            classification_attribute: 7,
+            classification: PersistedAttributeDefinition {
+                id: 7,
+                name_len: 14,
+                name: classification_name,
+                data_type: ATTRIBUTE_DATA_TYPE_U8,
+            },
             root_revision: [3; REVISION_ID_BYTES],
             source_contract: [4; DIGEST_BYTES],
         }
@@ -3727,7 +3789,7 @@ mod tests {
         facts.request_digest = classification_request_digest(ClassificationRequestFacts {
             workspace: facts.workspace,
             source: facts.source,
-            classification_attribute: manifest().classification_attribute,
+            classification_attribute: manifest().classification.id,
             point_set_workspace: facts.workspace,
             point_set_source: facts.source,
             parent: facts.parent,

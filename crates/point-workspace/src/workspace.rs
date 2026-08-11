@@ -7,7 +7,10 @@ use std::task::{Context, Poll};
 
 use blake3::Hasher;
 use foundation_runtime::{Job, OperationControl, OperationHandle};
-use point_contracts::{AttributeId, ContentHash, PointId, SourceId};
+use point_contracts::{
+    AttributeDataType, AttributeDefinition, AttributeId, ContentHash, MAX_ATTRIBUTE_NAME_BYTES,
+    PointId, SourceId,
+};
 use point_index::PreparedIndex;
 use point_source::Source;
 
@@ -21,10 +24,11 @@ use crate::model::{
 };
 pub(crate) use crate::persistence::OverlayUsage;
 use crate::persistence::{
-    CandidateFacts, Catalog, CatalogLimits, ClassificationRequestFacts, MANIFEST_BYTES,
-    ManifestFacts, OperationRecord, OverlayLimits, PersistedPointSetFacts, PersistenceError,
-    REJECTION_BYTES, ReadLimits, RejectionFacts, RevisionKind as PersistedRevisionKind,
-    RevisionRow, RowReadLimits, SealedRevision, Store, ValidatedRevision, WriteLimits,
+    ATTRIBUTE_DATA_TYPE_U8, CandidateFacts, Catalog, CatalogLimits, ClassificationRequestFacts,
+    MANIFEST_BYTES, ManifestFacts, OperationRecord, OverlayLimits, PersistedAttributeDefinition,
+    PersistedPointSetFacts, PersistenceError, REJECTION_BYTES, ReadLimits, RejectionFacts,
+    RevisionKind as PersistedRevisionKind, RevisionRow, RowReadLimits, SealedRevision, Store,
+    ValidatedRevision, WriteLimits,
     classification_request_digest as persisted_classification_request_digest,
     revert_request_digest as persisted_revert_request_digest,
 };
@@ -1603,15 +1607,15 @@ fn create_workspace(
     control: &OperationControl,
 ) -> Result<Workspace, WorkspaceError> {
     control.check_cancelled()?;
-    schema.validate_source(index.source())?;
+    let classification = schema.classification_definition(index.source())?;
     validate_root_limits(limits)?;
     let identity = WorkspaceId::generate()?;
-    let source_contract = source_contract(index.source(), schema);
+    let source_contract = source_contract(index.source(), classification);
     let root_revision = root_revision(identity, index.source().identity(), source_contract)?;
     let manifest = manifest_facts(
         identity,
         index.source(),
-        schema,
+        classification,
         root_revision,
         source_contract,
     );
@@ -1647,10 +1651,10 @@ fn open_workspace(
     let store = Store::open(root).map_err(map_persistence)?;
     let manifest = store.read_manifest().map_err(map_persistence)?;
     let identity = WorkspaceId::from_bytes(manifest.workspace)?;
-    let classification = AttributeId::new(manifest.classification_attribute)?;
+    let classification = AttributeId::new(manifest.classification.id)?;
     let schema = WorkspaceSchema::new(classification);
-    schema.validate_source(index.source())?;
-    validate_manifest(&manifest, index.source(), schema)?;
+    let classification = schema.classification_definition(index.source())?;
+    validate_manifest(&manifest, index.source(), classification)?;
     control.check_cancelled()?;
     let catalog = store
         .recover(&manifest, catalog_limits(limits)?, control)
@@ -1737,7 +1741,7 @@ fn catalog_limits(limits: OpenLimits) -> Result<CatalogLimits, WorkspaceError> {
 fn manifest_facts(
     identity: WorkspaceId,
     source: &Source,
-    schema: WorkspaceSchema,
+    classification: &AttributeDefinition,
     root_revision: RevisionId,
     source_contract: [u8; 32],
 ) -> ManifestFacts {
@@ -1756,7 +1760,7 @@ fn manifest_facts(
             scale[1].to_bits(),
             scale[2].to_bits(),
         ],
-        classification_attribute: schema.classification().get(),
+        classification: persisted_attribute_definition(classification),
         root_revision: root_revision.into_bytes(),
         source_contract,
     }
@@ -1765,9 +1769,9 @@ fn manifest_facts(
 fn validate_manifest(
     manifest: &ManifestFacts,
     source: &Source,
-    schema: WorkspaceSchema,
+    classification: &AttributeDefinition,
 ) -> Result<(), WorkspaceError> {
-    let expected_contract = source_contract(source, schema);
+    let expected_contract = source_contract(source, classification);
     let expected_transform = source.metadata().position_transform();
     let expected_offset = expected_transform.offset();
     let expected_scale = expected_transform.scale();
@@ -1782,7 +1786,7 @@ fn validate_manifest(
     if manifest.source != source.identity().into_bytes()
         || manifest.source_point_count != source.metadata().point_count()
         || manifest.position_transform_bits != expected_transform_bits
-        || manifest.classification_attribute != schema.classification().get()
+        || manifest.classification != persisted_attribute_definition(classification)
         || manifest.source_contract != expected_contract
     {
         return Err(WorkspaceError::incompatible(
@@ -1799,7 +1803,7 @@ fn validate_manifest(
     Ok(())
 }
 
-fn source_contract(source: &Source, schema: WorkspaceSchema) -> [u8; 32] {
+fn source_contract(source: &Source, classification: &AttributeDefinition) -> [u8; 32] {
     let transform = source.metadata().position_transform();
     let mut hasher = Hasher::new();
     hasher.update(SOURCE_CONTRACT_DOMAIN);
@@ -1808,8 +1812,27 @@ fn source_contract(source: &Source, schema: WorkspaceSchema) -> [u8; 32] {
     for value in transform.offset().into_iter().chain(transform.scale()) {
         hasher.update(&value.to_bits().to_le_bytes());
     }
-    hasher.update(&schema.classification().get().to_le_bytes());
+    let definition = persisted_attribute_definition(classification);
+    hasher.update(&definition.id.to_le_bytes());
+    hasher.update(&definition.name_len.to_le_bytes());
+    hasher.update(&definition.name[..classification.name().len()]);
+    hasher.update(&[definition.data_type]);
     *hasher.finalize().as_bytes()
+}
+
+fn persisted_attribute_definition(
+    definition: &AttributeDefinition,
+) -> PersistedAttributeDefinition {
+    debug_assert_eq!(definition.data_type(), AttributeDataType::U8);
+    let mut name = [0_u8; MAX_ATTRIBUTE_NAME_BYTES];
+    name[..definition.name().len()].copy_from_slice(definition.name().as_bytes());
+    PersistedAttributeDefinition {
+        id: definition.id().get(),
+        name_len: u32::try_from(definition.name().len())
+            .expect("validated Attribute names fit in u32"),
+        name,
+        data_type: ATTRIBUTE_DATA_TYPE_U8,
+    }
 }
 
 fn root_revision(
@@ -2043,6 +2066,59 @@ mod tests {
             drop(fault);
             drop(store);
         }
+    }
+
+    #[test]
+    fn manifest_rechecks_the_complete_classification_definition() {
+        use point_contracts::{
+            AttributeColumn, AttributeColumns, AttributeValues, CoordinateReference,
+            PositionTransform,
+        };
+        use source_memory::MemorySource;
+
+        let classification = AttributeId::new(7).expect("classification identity");
+        let definition =
+            AttributeDefinition::new(classification, "classification", AttributeDataType::U8)
+                .expect("classification definition");
+        let columns = AttributeColumns::new(
+            vec![
+                AttributeColumn::new(definition, AttributeValues::u8(vec![0]))
+                    .expect("classification column"),
+            ],
+            1,
+        )
+        .expect("aligned columns");
+        let source = source_memory::open(
+            MemorySource::from_columns(
+                PositionTransform::new([0.0; 3], [1.0; 3]).expect("transform"),
+                CoordinateReference::Unknown,
+                vec![[0, 0, 0]],
+                columns,
+            )
+            .expect("memory Source"),
+        )
+        .blocking_wait()
+        .expect("open Source");
+        let persisted_definition = source
+            .metadata()
+            .attributes()
+            .get(classification)
+            .expect("classification definition");
+        let identity = WorkspaceId::from_bytes([1; 16]).expect("Workspace identity");
+        let contract = source_contract(&source, persisted_definition);
+        let root = root_revision(identity, source.identity(), contract).expect("root Revision");
+        let manifest = manifest_facts(identity, &source, persisted_definition, root, contract);
+        let renamed = AttributeDefinition::new(
+            classification,
+            "semantic_classification",
+            AttributeDataType::U8,
+        )
+        .expect("renamed definition");
+
+        assert!(matches!(
+            validate_manifest(&manifest, &source, &renamed),
+            Err(WorkspaceError::Incompatible { .. })
+        ));
     }
 
     // End-to-end fixture intentionally keeps create, reject, reopen, and
