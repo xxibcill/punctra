@@ -175,8 +175,8 @@ cover:
   artifact, hierarchy, resident metadata, candidate, display batch, index
   buffer, span, and emitted-Point limits;
 - fused cancellation and Source failures with no terminal summary;
-- warm opening, Source mismatch, corrupt/truncated complete targets, and
-  post-open sample mutation;
+- warm opening, Source mismatch, corrupt/truncated complete targets,
+  checksum-valid non-recipe sample ordinals, and post-open sample mutation;
 - incompatible/corrupt work headers, invalid or incomplete suffix truncation,
   durable-prefix resume, and cancellation followed by byte-identical completion;
   and

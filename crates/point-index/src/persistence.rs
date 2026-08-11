@@ -2352,36 +2352,188 @@ fn validate_persisted_samples(
     limits: PrepareLimits,
     control: &OperationControl,
 ) -> Result<(), IndexError> {
-    for node in hierarchy.nodes() {
-        control.check_cancelled()?;
-        if node.coverage_complete() {
-            continue;
+    let Some(root) = hierarchy.root() else {
+        return Ok(());
+    };
+    if root.coverage_complete() {
+        return Ok(());
+    }
+    let leaf_count = canonical_leaf_count(source.metadata().point_count());
+    let maximum_depth = usize::try_from(
+        u64::from(u64::BITS - leaf_count.saturating_sub(1).leading_zeros()).saturating_add(1),
+    )
+    .unwrap_or(usize::MAX);
+    let validator = ArtifactSampleValidator {
+        reader,
+        nodes: hierarchy.nodes(),
+        transform: source.metadata().position_transform(),
+        maximum_depth,
+        limits,
+        control,
+    };
+    validator.validate_subtree(root, 1, 0)?;
+    Ok(())
+}
+
+struct ArtifactSampleValidator<'validation> {
+    reader: &'validation ArtifactReader,
+    nodes: &'validation [IndexNode],
+    transform: PositionTransform,
+    maximum_depth: usize,
+    limits: PrepareLimits,
+    control: &'validation OperationControl,
+}
+
+impl ArtifactSampleValidator<'_> {
+    fn validate_subtree(
+        &self,
+        node: &IndexNode,
+        depth: usize,
+        retained_bytes: u64,
+    ) -> Result<Vec<u64>, IndexError> {
+        self.control.check_cancelled()?;
+        if depth > self.maximum_depth {
+            return Err(IndexError::CorruptArtifact {
+                reason: "hierarchy depth differs from the balanced median-split recipe",
+            });
         }
-        require(
-            node.display_point_count.saturating_mul(SAMPLE_BYTES),
-            limits.max_build_working_bytes(),
-            IndexLimit::ArtifactValidationWorkingBytes,
+        let Some([left_id, right_id]) = node.children else {
+            let span = node.source_span.ok_or(IndexError::CorruptArtifact {
+                reason: "leaf node has no Source span",
+            })?;
+            let point_count = usize::try_from(span.point_count())
+                .map_err(|_| self.allocation_limit(usize::MAX, mem::size_of::<(u64, u64)>()))?;
+            return self.select_bottom_k(
+                span.first_ordinal()..span.end_ordinal(),
+                point_count,
+                usize::try_from(span.point_count().min(MAX_NODE_SAMPLES)).unwrap_or(4_096),
+                retained_bytes,
+            );
+        };
+
+        let left_node = resolve_child(self.nodes, node, left_id)?;
+        let right_node = resolve_child(self.nodes, node, right_id)?;
+        let left = self.validate_subtree(left_node, depth.saturating_add(1), retained_bytes)?;
+        let left_bytes = allocated_bytes(left.capacity(), mem::size_of::<u64>());
+        let right = self.validate_subtree(
+            right_node,
+            depth.saturating_add(1),
+            retained_bytes.saturating_add(left_bytes),
         )?;
-        let samples = reader.read_sample_block(
+        let right_bytes = allocated_bytes(right.capacity(), mem::size_of::<u64>());
+        let expected = self.select_bottom_k(
+            left.iter().chain(&right).copied(),
+            left.len().saturating_add(right.len()),
+            usize::try_from(node.display_point_count).unwrap_or(4_096),
+            retained_bytes
+                .saturating_add(left_bytes)
+                .saturating_add(right_bytes),
+        )?;
+        drop(left);
+        drop(right);
+        self.validate_node_samples(node, &expected, retained_bytes)?;
+        Ok(expected)
+    }
+
+    fn select_bottom_k(
+        &self,
+        ordinals: impl Iterator<Item = u64>,
+        candidate_count: usize,
+        capacity: usize,
+        retained_bytes: u64,
+    ) -> Result<Vec<u64>, IndexError> {
+        let mut selected = self.reserved_vec(candidate_count, retained_bytes)?;
+        for (index, ordinal) in ordinals.enumerate() {
+            if index.is_multiple_of(4_096) {
+                self.control.check_cancelled()?;
+            }
+            selected.push((ordinal_priority(ordinal), ordinal));
+        }
+        if selected.len() > capacity {
+            selected.select_nth_unstable(capacity);
+            selected.truncate(capacity);
+        }
+        let selected_bytes = allocated_bytes(selected.capacity(), mem::size_of::<(u64, u64)>());
+        let mut expected =
+            self.reserved_vec(capacity, retained_bytes.saturating_add(selected_bytes))?;
+        expected.extend(selected.into_iter().map(|(_, ordinal)| ordinal));
+        expected.sort_unstable();
+        Ok(expected)
+    }
+
+    fn validate_node_samples(
+        &self,
+        node: &IndexNode,
+        expected: &[u64],
+        retained_bytes: u64,
+    ) -> Result<(), IndexError> {
+        let expected_bytes = allocated_bytes(expected.len(), mem::size_of::<u64>());
+        let actual_bytes = node
+            .display_point_count
+            .saturating_mul(u64::try_from(mem::size_of::<IndexSample>()).unwrap_or(u64::MAX));
+        self.require_memory(
+            retained_bytes
+                .saturating_add(expected_bytes)
+                .saturating_add(actual_bytes),
+        )?;
+        let samples = self.reader.read_sample_block(
             node.sample_offset,
             node.display_point_count,
             node.sample_checksum,
-            limits.max_build_working_bytes(),
+            self.limits.max_build_working_bytes(),
         )?;
-        if samples.iter().any(|sample| {
-            sample.ordinal() >= source.metadata().point_count()
-                || !samples_within_bounds(
-                    std::slice::from_ref(sample),
-                    source.metadata().position_transform(),
-                    node.bounds,
-                )
-        }) {
+        if !expected
+            .iter()
+            .copied()
+            .eq(samples.iter().map(|sample| sample.ordinal()))
+        {
             return Err(IndexError::CorruptArtifact {
-                reason: "internal sample identity or position is outside its node",
+                reason: "internal samples differ from the stable bottom-k descendant recipe",
             });
         }
+        if !samples_within_bounds(&samples, self.transform, node.bounds) {
+            return Err(IndexError::CorruptArtifact {
+                reason: "internal sample position is outside its node",
+            });
+        }
+        Ok(())
     }
-    Ok(())
+
+    fn reserved_vec<T>(&self, capacity: usize, retained_bytes: u64) -> Result<Vec<T>, IndexError> {
+        self.require_memory(
+            retained_bytes.saturating_add(allocated_bytes(capacity, mem::size_of::<T>())),
+        )?;
+        let mut values = Vec::new();
+        values
+            .try_reserve_exact(capacity)
+            .map_err(|_| self.allocation_limit(capacity, mem::size_of::<T>()))?;
+        self.require_memory(
+            retained_bytes.saturating_add(allocated_bytes(values.capacity(), mem::size_of::<T>())),
+        )?;
+        Ok(values)
+    }
+
+    fn require_memory(&self, required: u64) -> Result<(), IndexError> {
+        require(
+            required,
+            self.limits.max_build_working_bytes(),
+            IndexLimit::ArtifactValidationWorkingBytes,
+        )
+    }
+
+    fn allocation_limit(&self, capacity: usize, item_bytes: usize) -> IndexError {
+        IndexError::ResourceLimit {
+            limit: IndexLimit::ArtifactValidationWorkingBytes,
+            required: allocated_bytes(capacity, item_bytes),
+            allowed: self.limits.max_build_working_bytes(),
+        }
+    }
+}
+
+fn allocated_bytes(capacity: usize, item_bytes: usize) -> u64 {
+    u64::try_from(capacity)
+        .unwrap_or(u64::MAX)
+        .saturating_mul(u64::try_from(item_bytes).unwrap_or(u64::MAX))
 }
 
 fn union_bounds(left: WorldBounds, right: WorldBounds) -> Result<WorldBounds, IndexError> {

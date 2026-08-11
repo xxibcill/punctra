@@ -4,6 +4,9 @@
 //! It returns conservative Source spans for spatial candidates and bounded,
 //! display-only samples for hierarchical rendering. The retained
 //! [`point_source::Source`] remains authoritative for complete Point values.
+//! Complete artifacts are trusted local caches: their unkeyed checksums detect
+//! corruption, not deliberate rewriting. Discard and rebuild an artifact that
+//! came from untrusted or adversarial storage.
 //!
 //! ```no_run
 //! use point_index::{CandidateLimits, PrepareLimits, prepare};

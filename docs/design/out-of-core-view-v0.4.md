@@ -242,9 +242,16 @@ sample spool removed, followed by a second parent-directory sync. This is
 deliberately not rename-and-replace behavior.
 
 Opening validates lengths, counts, versions, Source binding, checksum, node
-topology, nested bounds, Source-span coverage, and the caller's hierarchy and
-resident-byte limits before returning `PreparedIndex`. No incomplete artifact
-can answer candidates or View reads.
+topology, nested bounds, Source-span coverage, exact bottom-k sample ordinals
+from descendant spans, and the caller's hierarchy and resident-byte limits
+before returning `PreparedIndex`. No incomplete artifact can answer candidates
+or View reads.
+
+Complete artifacts are trusted local rebuildable caches. Their unkeyed BLAKE3
+checksums detect accidental corruption and concurrent mutation; they do not
+authenticate bytes deliberately rewritten by an adversary. Warm opening does
+not reread Source Points, so an artifact obtained from untrusted storage must be
+discarded and rebuilt from the verified Source rather than opened in place.
 
 ## Progressive View bridge
 

@@ -427,11 +427,18 @@ adapter, builder, artifact, hierarchy, candidate, index-buffer, display-batch,
 and emitted-Point ceilings separate. **point-view**, not **point-index**, owns
 camera culling, screen-error policy, budgets, priority, and refinement.
 
-The complete artifact is checksummed and Source/version-bound. A synced
-temporary sibling is published with an atomic no-replace hard link; an existing
-or racing target is rejected rather than overwritten. The parent directory is
-synced before disposable work, sample-spool, and temporary files are removed.
-This is not rename-and-replace behavior.
+The complete artifact is checksummed and Source/version-bound. Opening verifies
+the deterministic bottom-k sample ordinals against their descendant Source
+spans without rereading Source Points. A synced temporary sibling is published
+with an atomic no-replace hard link; an existing or racing target is rejected
+rather than overwritten. The parent directory is synced before disposable
+work, sample-spool, and temporary files are removed. This is not
+rename-and-replace behavior.
+
+Complete artifacts are trusted local rebuildable caches. Their unkeyed BLAKE3
+checksums detect accidental corruption and concurrent mutation, not deliberate
+adversarial rewriting. An artifact obtained from untrusted storage is discarded
+and rebuilt from the verified Source.
 
 ## Revision and Snapshot contract
 

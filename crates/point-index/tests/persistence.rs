@@ -192,6 +192,49 @@ fn mutation_after_open_is_detected_by_the_node_sample_checksum() {
 }
 
 #[test]
+fn warm_open_rejects_checksum_valid_samples_outside_the_bottom_k_recipe() {
+    let ticks = clustered_ticks(BLOCK_POINTS + 1);
+    let source = open_source(ticks.clone());
+    let target = TemporaryTarget::new("non-recipe-samples");
+    let index = prepare(source.clone(), target.path(), PrepareLimits::default())
+        .blocking_wait()
+        .unwrap();
+    let root = index.hierarchy().root().unwrap();
+    let mut root_samples = samples(&read_node(&index, root.id(), NodeReadBudget::default()));
+    let replacement = (0..u64::try_from(ticks.len()).unwrap())
+        .find(|ordinal| {
+            root_samples
+                .binary_search_by_key(ordinal, |sample| sample.0)
+                .is_err()
+        })
+        .expect("the bounded root sample excludes one Source ordinal");
+    root_samples[0] = (replacement, ticks[usize::try_from(replacement).unwrap()]);
+    root_samples.sort_unstable_by_key(|sample| sample.0);
+
+    let mut artifact = fs::read(target.path()).unwrap();
+    let root_record = 208;
+    let sample_offset = usize::try_from(read_u64(&artifact, root_record + 112)).unwrap();
+    let sample_end = sample_offset + root_samples.len() * 32;
+    let encoded_samples = encode_sample_pair(&root_samples);
+    artifact[sample_offset..sample_end].copy_from_slice(&encoded_samples);
+    let mut sample_hasher = blake3::Hasher::new();
+    sample_hasher.update(b"punctra-index-samples-v1");
+    sample_hasher.update(&encoded_samples);
+    artifact[root_record + 136..root_record + 168]
+        .copy_from_slice(sample_hasher.finalize().as_bytes());
+    let artifact_checksum_offset = artifact.len() - 32;
+    let artifact_checksum = blake3::hash(&artifact[..artifact_checksum_offset]);
+    artifact[artifact_checksum_offset..].copy_from_slice(artifact_checksum.as_bytes());
+
+    let forged = target.copied_target("forged-samples.pidx");
+    fs::write(&forged, artifact).unwrap();
+    assert!(matches!(
+        prepare(source, forged, PrepareLimits::default()).blocking_wait(),
+        Err(IndexError::CorruptArtifact { .. })
+    ));
+}
+
+#[test]
 fn cold_build_limits_fail_without_a_partial_target_and_preserve_only_valid_work() {
     assert!(matches!(
         PrepareLimits::new(0, 24),
@@ -484,6 +527,10 @@ fn encode_sample_pair(samples: &[(u64, [i64; 3])]) -> Vec<u8> {
         }
     }
     bytes
+}
+
+fn read_u64(bytes: &[u8], offset: usize) -> u64 {
+    u64::from_le_bytes(bytes[offset..offset + 8].try_into().unwrap())
 }
 
 fn assert_resource_error(result: &Result<point_index::PreparedIndex, IndexError>) {
