@@ -1,4 +1,4 @@
-use std::{mem, sync::Arc};
+use std::sync::Arc;
 
 use blake3::Hasher;
 use foundation_runtime::{
@@ -14,7 +14,8 @@ use point_source::{
 use crate::{
     PointQuery, PointRowLimits, Snapshot, SnapshotProvenance, WorkspaceError,
     selection::plan_query,
-    workspace::{OverlayLimits, OverlayUsage, Session},
+    util::allocation_bytes,
+    workspace::{EffectiveClassificationBudget, OverlayUsage, Session},
 };
 
 const CANCELLATION_STRIDE: usize = 4_096;
@@ -274,59 +275,24 @@ impl SnapshotPointBatches {
     }
 
     fn prepare_batch(&mut self, batch: PointBatch) -> Result<PendingBatch, WorkspaceError> {
-        let source_values = batch
-            .attributes()
-            .get(self.classification)
-            .and_then(|column| column.values().as_u8())
-            .ok_or_else(|| {
-                WorkspaceError::incompatible(
-                    "classification Source column is absent or no longer U8",
-                )
-            })?;
         let base_without_effective = self
             .retained_span_bytes
             .saturating_add(batch.estimated_payload_bytes())
             .saturating_add(self.source_budget.max_adapter_working_bytes());
-        require_working(
-            base_without_effective
-                .saturating_add(u64::try_from(source_values.len()).unwrap_or(u64::MAX)),
-            self.limits,
-            "effective classification working bytes",
-        )?;
-        let mut effective = Vec::new();
-        effective
-            .try_reserve_exact(source_values.len())
-            .map_err(|_| WorkspaceError::ResourceLimit {
-                limit: "effective classification allocation",
-                required: u64::try_from(source_values.len()).unwrap_or(u64::MAX),
-                allowed: self.limits.max_working_bytes(),
-            })?;
-        let effective_bytes = allocation_bytes::<u8>(effective.capacity());
-        let base_working_bytes = base_without_effective.saturating_add(effective_bytes);
-        require_working(
-            base_working_bytes,
-            self.limits,
-            "Snapshot Point Source batch working bytes",
-        )?;
-        effective.extend_from_slice(source_values);
-
-        let overlay_working_bytes = self
-            .limits
-            .max_working_bytes()
-            .saturating_sub(base_working_bytes);
-        self.session.apply_overlays(
+        let effective = self.session.effective_classifications(
             self.provenance.revision(),
-            batch.first_ordinal(),
-            &mut effective,
-            OverlayLimits {
-                max_blocks: self.limits.max_overlay_segments(),
-                max_payload_bytes: self.limits.max_overlay_bytes(),
-                max_block_bytes: overlay_working_bytes.min(self.limits.max_overlay_bytes()),
-            },
+            &batch,
+            base_without_effective,
+            EffectiveClassificationBudget::new(
+                self.limits.max_working_bytes(),
+                self.limits.max_overlay_segments(),
+                self.limits.max_overlay_bytes(),
+            ),
             &mut self.overlay_usage,
             &self.control,
         )?;
-        self.control.check_cancelled()?;
+        let effective_bytes = allocation_bytes::<u8>(effective.capacity());
+        let base_working_bytes = base_without_effective.saturating_add(effective_bytes);
 
         Ok(PendingBatch {
             batch,
@@ -879,12 +845,6 @@ fn require_working(
         });
     }
     Ok(())
-}
-
-fn allocation_bytes<T>(values: usize) -> u64 {
-    u64::try_from(values)
-        .unwrap_or(u64::MAX)
-        .saturating_mul(u64::try_from(mem::size_of::<T>()).unwrap_or(u64::MAX))
 }
 
 fn domain_hasher(domain: &[u8]) -> Hasher {

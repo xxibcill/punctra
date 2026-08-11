@@ -9,7 +9,7 @@ use crate::{
     PointQuery, PointSet, PointSetLimits, Snapshot, SnapshotProvenance, WorkspaceError,
     point_set::{PointSetBuilder, PointSetRecord},
     util::allocation_bytes,
-    workspace::{OverlayLimits, OverlayUsage, Session},
+    workspace::{EffectiveClassificationBudget, OverlayUsage, Session},
 };
 
 const CANCELLATION_STRIDE: usize = 4_096;
@@ -398,42 +398,27 @@ fn process_batch(
     builder: &mut PointSetBuilder,
     overlay_usage: &mut OverlayUsage,
 ) -> Result<(), WorkspaceError> {
-    let source_values = batch
-        .attributes()
-        .get(classification)
-        .and_then(|column| column.values().as_u8())
-        .ok_or_else(|| {
-            WorkspaceError::incompatible("classification Source column is absent or no longer U8")
-        })?;
     let before_effective = retained_span_bytes
         .saturating_add(batch.estimated_payload_bytes())
         .saturating_add(budget.max_adapter_working_bytes())
         .saturating_add(builder.resident_bytes());
-    let mut effective = copy_classification(source_values, before_effective, limits)?;
+    debug_assert_eq!(classification, session.classification_attribute());
+    let effective = session.effective_classifications(
+        provenance.revision(),
+        batch,
+        before_effective,
+        EffectiveClassificationBudget::new(
+            limits.max_working_bytes(),
+            limits.max_overlay_segments(),
+            limits.max_overlay_bytes(),
+        ),
+        overlay_usage,
+        control,
+    )?;
     let batch_base = retained_span_bytes
         .saturating_add(batch.estimated_payload_bytes())
         .saturating_add(budget.max_adapter_working_bytes())
         .saturating_add(allocation_bytes::<u8>(effective.capacity()));
-    let before_overlay = batch_base.saturating_add(builder.resident_bytes());
-    require_peak(
-        before_overlay,
-        limits.max_working_bytes(),
-        "selection batch working bytes",
-    )?;
-    let overlay_working = limits.max_working_bytes().saturating_sub(before_overlay);
-    session.apply_overlays(
-        provenance.revision(),
-        batch.first_ordinal(),
-        &mut effective,
-        OverlayLimits {
-            max_blocks: limits.max_overlay_segments(),
-            max_payload_bytes: limits.max_overlay_bytes(),
-            max_block_bytes: overlay_working.min(limits.max_overlay_bytes()),
-        },
-        overlay_usage,
-        control,
-    )?;
-    control.check_cancelled()?;
 
     for (row, &effective_classification) in effective.iter().enumerate() {
         if row % CANCELLATION_STRIDE == 0 {
@@ -471,33 +456,6 @@ fn process_batch(
         )?;
     }
     Ok(())
-}
-
-fn copy_classification(
-    values: &[u8],
-    existing_working_bytes: u64,
-    limits: PointSetLimits,
-) -> Result<Vec<u8>, WorkspaceError> {
-    require_peak(
-        existing_working_bytes.saturating_add(u64::try_from(values.len()).unwrap_or(u64::MAX)),
-        limits.max_working_bytes(),
-        "effective classification working bytes",
-    )?;
-    let mut copied = Vec::new();
-    copied
-        .try_reserve_exact(values.len())
-        .map_err(|_| WorkspaceError::ResourceLimit {
-            limit: "effective classification working bytes",
-            required: u64::try_from(values.len()).unwrap_or(u64::MAX),
-            allowed: limits.max_working_bytes(),
-        })?;
-    require_peak(
-        existing_working_bytes.saturating_add(allocation_bytes::<u8>(copied.capacity())),
-        limits.max_working_bytes(),
-        "effective classification working bytes",
-    )?;
-    copied.extend_from_slice(values);
-    Ok(copied)
 }
 
 fn validate_summary(

@@ -9,7 +9,7 @@ use blake3::Hasher;
 use foundation_runtime::{Job, OperationControl, OperationHandle};
 use point_contracts::{
     AttributeDataType, AttributeDefinition, AttributeId, ContentHash, MAX_ATTRIBUTE_NAME_BYTES,
-    PointId, SourceId,
+    PointBatch, PointId, SourceId,
 };
 use point_index::PreparedIndex;
 use point_source::Source;
@@ -33,6 +33,7 @@ use crate::persistence::{
 };
 pub(crate) use crate::persistence::{OverlayLimits, OverlayUsage};
 use crate::point_set::{PointSetRecord, PointSetRecordBatches};
+use crate::util::allocation_bytes;
 
 const SOURCE_CONTRACT_DOMAIN: &[u8] = b"punctra-workspace-source-contract-v1";
 const ROOT_REVISION_DOMAIN: &[u8] = b"punctra-workspace-root-revision-v1";
@@ -514,6 +515,27 @@ pub(crate) struct Session {
     writer_waiters: std::sync::atomic::AtomicUsize,
 }
 
+#[derive(Clone, Copy)]
+pub(crate) struct EffectiveClassificationBudget {
+    working_bytes: u64,
+    overlay_blocks: u64,
+    overlay_bytes: u64,
+}
+
+impl EffectiveClassificationBudget {
+    pub(crate) const fn new(
+        max_working_bytes: u64,
+        max_overlay_blocks: u64,
+        max_overlay_bytes: u64,
+    ) -> Self {
+        Self {
+            working_bytes: max_working_bytes,
+            overlay_blocks: max_overlay_blocks,
+            overlay_bytes: max_overlay_bytes,
+        }
+    }
+}
+
 impl Session {
     fn ensure_mutable(&self) -> Result<(), WorkspaceError> {
         if self.poisoned.load(Ordering::SeqCst) {
@@ -536,6 +558,44 @@ impl Session {
 
     pub(crate) fn scratch_path(&self) -> &Path {
         self.store.scratch()
+    }
+
+    pub(crate) fn effective_classifications(
+        &self,
+        revision: RevisionId,
+        batch: &PointBatch,
+        existing_working_bytes: u64,
+        budget: EffectiveClassificationBudget,
+        usage: &mut OverlayUsage,
+        control: &OperationControl,
+    ) -> Result<Vec<u8>, WorkspaceError> {
+        let source_values = batch
+            .attributes()
+            .get(self.classification_attribute())
+            .and_then(|column| column.values().as_u8())
+            .ok_or_else(|| {
+                WorkspaceError::incompatible(
+                    "classification Source column is absent or no longer U8",
+                )
+            })?;
+        let mut effective =
+            copy_classifications(source_values, existing_working_bytes, budget.working_bytes)?;
+        let overlay_working_bytes = budget.working_bytes.saturating_sub(
+            existing_working_bytes.saturating_add(allocation_bytes::<u8>(effective.capacity())),
+        );
+        self.apply_overlays(
+            revision,
+            batch.first_ordinal(),
+            &mut effective,
+            OverlayLimits {
+                max_blocks: budget.overlay_blocks,
+                max_payload_bytes: budget.overlay_bytes,
+                max_block_bytes: overlay_working_bytes.min(budget.overlay_bytes),
+            },
+            usage,
+            control,
+        )?;
+        Ok(effective)
     }
 
     pub(crate) fn apply_overlays(
@@ -602,6 +662,43 @@ impl Session {
             .ok_or(WorkspaceError::UnknownRevision { revision })?;
         revision_info_from_persisted(persisted)
     }
+}
+
+fn copy_classifications(
+    source_values: &[u8],
+    existing_working_bytes: u64,
+    max_working_bytes: u64,
+) -> Result<Vec<u8>, WorkspaceError> {
+    let source_bytes = u64::try_from(source_values.len()).unwrap_or(u64::MAX);
+    require_effective_working(
+        existing_working_bytes.saturating_add(source_bytes),
+        max_working_bytes,
+    )?;
+    let mut effective = Vec::new();
+    effective
+        .try_reserve_exact(source_values.len())
+        .map_err(|_| WorkspaceError::ResourceLimit {
+            limit: "effective classification working bytes",
+            required: source_bytes,
+            allowed: max_working_bytes,
+        })?;
+    require_effective_working(
+        existing_working_bytes.saturating_add(allocation_bytes::<u8>(effective.capacity())),
+        max_working_bytes,
+    )?;
+    effective.extend_from_slice(source_values);
+    Ok(effective)
+}
+
+fn require_effective_working(required: u64, allowed: u64) -> Result<(), WorkspaceError> {
+    if required > allowed {
+        return Err(WorkspaceError::ResourceLimit {
+            limit: "effective classification working bytes",
+            required,
+            allowed,
+        });
+    }
+    Ok(())
 }
 
 fn run_commit(
