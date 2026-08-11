@@ -20,6 +20,46 @@ use support::{
     samples,
 };
 
+const V1_ARTIFACT: &[u8] = include_bytes!("fixtures/v1/one-point.pidx");
+const V1_WORK: &[u8] = include_bytes!("fixtures/v1/one-point.pidx.work");
+
+#[test]
+fn disk_v1_golden_fixtures_open_and_resume_without_reencoding_the_input() {
+    let source = open_source(clustered_ticks(1));
+
+    let complete_target = TemporaryTarget::new("v1-golden-complete");
+    fs::write(complete_target.path(), V1_ARTIFACT).unwrap();
+    let opened = prepare(
+        source.clone(),
+        complete_target.path(),
+        PrepareLimits::default(),
+    )
+    .blocking_wait()
+    .unwrap();
+    assert_eq!(
+        opened.prepare_report().disposition(),
+        PrepareDisposition::Opened
+    );
+    assert_eq!(opened.prepare_report().source_points_read(), 0);
+    let root = opened.hierarchy().root().unwrap();
+    let read = read_node(&opened, root.id(), NodeReadBudget::default());
+    assert_eq!(samples(&read).len(), 1);
+    assert_eq!(fs::read(complete_target.path()).unwrap(), V1_ARTIFACT);
+
+    let work_target = TemporaryTarget::new("v1-golden-work");
+    fs::write(work_target.work_path(), V1_WORK).unwrap();
+    let resumed = prepare(source, work_target.path(), PrepareLimits::default())
+        .blocking_wait()
+        .unwrap();
+    assert_eq!(
+        resumed.prepare_report().disposition(),
+        PrepareDisposition::Resumed
+    );
+    assert_eq!(resumed.prepare_report().durable_points_reused(), 1);
+    assert_eq!(resumed.prepare_report().source_points_read(), 0);
+    assert_eq!(fs::read(work_target.path()).unwrap(), V1_ARTIFACT);
+}
+
 #[test]
 fn complete_artifacts_open_warm_and_reject_incompatible_corrupt_or_truncated_bytes() {
     let ticks = clustered_ticks(BLOCK_POINTS + 11);
