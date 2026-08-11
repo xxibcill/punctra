@@ -24,6 +24,28 @@ const V1_ARTIFACT: &[u8] = include_bytes!("fixtures/v1/one-point.pidx");
 const V1_WORK: &[u8] = include_bytes!("fixtures/v1/one-point.pidx.work");
 
 #[test]
+fn cold_build_preserves_preexisting_adjacent_files() {
+    let target = TemporaryTarget::new("preexisting-adjacent-files");
+    let temporary = target.copied_target("fixture.pidx.tmp");
+    let samples = target.copied_target("fixture.pidx.samples");
+    let temporary_sentinel = b"caller-owned temporary file";
+    let samples_sentinel = b"caller-owned sample file";
+    fs::write(&temporary, temporary_sentinel).unwrap();
+    fs::write(&samples, samples_sentinel).unwrap();
+
+    prepare(
+        open_source(clustered_ticks(1)),
+        target.path(),
+        PrepareLimits::default(),
+    )
+    .blocking_wait()
+    .unwrap();
+
+    assert_eq!(fs::read(temporary).unwrap(), temporary_sentinel);
+    assert_eq!(fs::read(samples).unwrap(), samples_sentinel);
+}
+
+#[test]
 fn disk_v1_golden_fixtures_open_and_resume_without_reencoding_the_input() {
     let source = open_source(clustered_ticks(1));
 

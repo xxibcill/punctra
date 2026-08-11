@@ -4,7 +4,10 @@ use std::{
     io::{Read, Seek, SeekFrom, Write},
     mem,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex, MutexGuard},
+    sync::{
+        Arc, Mutex, MutexGuard,
+        atomic::{AtomicU64, Ordering},
+    },
 };
 
 use blake3::Hasher;
@@ -34,6 +37,9 @@ const ARTIFACT_CHECKSUM_BYTES: u64 = 32;
 const HASH_BUFFER_BYTES: u64 = 64 * 1024;
 const SAMPLE_HASH_DOMAIN: &[u8] = b"punctra-index-samples-v1";
 const ORDINAL_HASH_DOMAIN: u64 = 0x706e_6374_7261_0401;
+const TEMPORARY_CREATE_ATTEMPTS: usize = 128;
+
+static NEXT_TEMPORARY_FILE: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone)]
 pub(crate) struct ArtifactReader {
@@ -1234,6 +1240,71 @@ struct SampleLocation {
     checksum: [u8; 32],
 }
 
+struct OwnedTemporaryFile {
+    file: Option<File>,
+    path: PathBuf,
+    owned: bool,
+}
+
+impl OwnedTemporaryFile {
+    fn create(target: &Path, role: &str, read: bool) -> Result<Self, IndexError> {
+        let mut last_path = None;
+        for _ in 0..TEMPORARY_CREATE_ATTEMPTS {
+            let sequence = NEXT_TEMPORARY_FILE.fetch_add(1, Ordering::Relaxed);
+            let suffix = format!(".{role}.{}.{sequence}", std::process::id());
+            let path = sibling_path(target, &suffix)?;
+            match OpenOptions::new()
+                .read(read)
+                .write(true)
+                .create_new(true)
+                .open(&path)
+            {
+                Ok(file) => {
+                    return Ok(Self {
+                        file: Some(file),
+                        path,
+                        owned: true,
+                    });
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                    last_path = Some(path);
+                }
+                Err(error) => return Err(IndexError::io("create", &path, error)),
+            }
+        }
+        let path = last_path.expect("temporary creation attempts are nonzero");
+        Err(IndexError::io(
+            "create",
+            &path,
+            std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                "could not reserve a unique temporary file name",
+            ),
+        ))
+    }
+
+    fn file_mut(&mut self) -> &mut File {
+        self.file.as_mut().expect("owned temporary file is open")
+    }
+
+    fn close_and_remove(mut self, operation: &'static str) -> Result<(), IndexError> {
+        self.file.take();
+        fs::remove_file(&self.path)
+            .map_err(|error| IndexError::io(operation, &self.path, error))?;
+        self.owned = false;
+        Ok(())
+    }
+}
+
+impl Drop for OwnedTemporaryFile {
+    fn drop(&mut self) {
+        self.file.take();
+        if self.owned {
+            let _ = fs::remove_file(&self.path);
+        }
+    }
+}
+
 #[allow(clippy::too_many_lines)]
 pub(crate) fn finalize(
     source: &Source,
@@ -1250,17 +1321,8 @@ pub(crate) fn finalize(
             reason: "target appeared while its index was being built",
         });
     }
-    let spool_path = sibling_path(target, ".samples")?;
-    let temporary_path = sibling_path(target, ".tmp")?;
-    reject_symlink(&spool_path, "sample spool")?;
-    reject_symlink(&temporary_path, "temporary artifact")?;
-    let mut spool = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .open(&spool_path)
-        .map_err(|error| IndexError::io("create", &spool_path, error))?;
+    let mut spool = OwnedTemporaryFile::create(target, "samples", true)?;
+    let spool_path = spool.path.clone();
     let mut locations = Vec::new();
     locations
         .try_reserve_exact(plan.nodes.len())
@@ -1287,8 +1349,8 @@ pub(crate) fn finalize(
                 .expect("planned internal nodes have two children");
             let left = locations[left].expect("reverse root-first order resolves child samples");
             let right = locations[right].expect("reverse root-first order resolves child samples");
-            let left_samples = read_location(work, &mut spool, &spool_path, left)?;
-            let right_samples = read_location(work, &mut spool, &spool_path, right)?;
+            let left_samples = read_location(work, spool.file_mut(), &spool_path, left)?;
+            let right_samples = read_location(work, spool.file_mut(), &spool_path, right)?;
             let retained_bytes =
                 retained_finalization_metadata_bytes(work, plan, locations.capacity());
             let samples = merge_samples(
@@ -1303,11 +1365,12 @@ pub(crate) fn finalize(
                     reason: "merged internal sample count differs from recipe",
                 });
             }
-            append_spool_samples(work, &mut spool, &spool_path, &samples, limits)?
+            append_spool_samples(work, spool.file_mut(), &spool_path, &samples, limits)?
         };
         locations[index] = Some(location);
     }
     spool
+        .file_mut()
         .sync_data()
         .map_err(|error| IndexError::io("flush", &spool_path, error))?;
 
@@ -1370,15 +1433,11 @@ pub(crate) fn finalize(
         sample_offset,
         sample_bytes,
     );
-    let mut temporary = OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .open(&temporary_path)
-        .map_err(|error| IndexError::io("create", &temporary_path, error))?;
+    let mut temporary = OwnedTemporaryFile::create(target, "tmp", false)?;
+    let temporary_path = temporary.path.clone();
     let mut artifact_hasher = Hasher::new();
     write_hashed(
-        &mut temporary,
+        temporary.file_mut(),
         &temporary_path,
         &mut artifact_hasher,
         &header,
@@ -1405,7 +1464,7 @@ pub(crate) fn finalize(
             persisted_location.map_or([0; 32], |location| location.checksum),
         );
         write_hashed(
-            &mut temporary,
+            temporary.file_mut(),
             &temporary_path,
             &mut artifact_hasher,
             &record,
@@ -1417,9 +1476,9 @@ pub(crate) fn finalize(
         }
         control.check_cancelled()?;
         let location = locations[index].expect("internal node sample location exists");
-        let samples = read_location(work, &mut spool, &spool_path, location)?;
+        let samples = read_location(work, spool.file_mut(), &spool_path, location)?;
         write_samples_hashed(
-            &mut temporary,
+            temporary.file_mut(),
             &temporary_path,
             &mut artifact_hasher,
             &samples,
@@ -1427,10 +1486,12 @@ pub(crate) fn finalize(
     }
     let checksum = artifact_hasher.finalize();
     temporary
+        .file_mut()
         .write_all(checksum.as_bytes())
-        .and_then(|()| temporary.sync_all())
+        .and_then(|()| temporary.file_mut().sync_all())
         .map_err(|error| IndexError::io("finish and flush", &temporary_path, error))?;
     let actual_bytes = temporary
+        .file_mut()
         .metadata()
         .map_err(|error| IndexError::io("inspect", &temporary_path, error))?
         .len();
@@ -1455,12 +1516,10 @@ pub(crate) fn finalize(
         Err(error) => return Err(IndexError::io("atomically publish", target, error)),
     }
     sync_parent(target)?;
-    fs::remove_file(&temporary_path)
-        .map_err(|error| IndexError::io("remove published temporary", &temporary_path, error))?;
+    temporary.close_and_remove("remove published temporary")?;
     fs::remove_file(&work.path)
         .map_err(|error| IndexError::io("remove completed work file", &work.path, error))?;
-    fs::remove_file(&spool_path)
-        .map_err(|error| IndexError::io("remove sample spool", &spool_path, error))?;
+    spool.close_and_remove("remove sample spool")?;
     sync_parent(target)?;
     Ok(())
 }
