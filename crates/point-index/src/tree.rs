@@ -4,7 +4,7 @@ use foundation_runtime::OperationControl;
 use point_contracts::WorldBounds;
 use point_source::SourceSpan;
 
-use crate::{IndexError, PrepareLimits};
+use crate::{IndexError, IndexLimit, PrepareLimits, limits::require};
 
 pub(crate) const BLOCK_POINTS: u64 = 65_536;
 pub(crate) const MAX_NODE_SAMPLES: u64 = 4_096;
@@ -61,11 +61,15 @@ pub(crate) fn plan(
         .checked_mul(2)
         .and_then(|value| value.checked_sub(1))
         .unwrap_or(u64::MAX);
-    require(node_count, limits.max_hierarchy_nodes(), "hierarchy nodes")?;
+    require(
+        node_count,
+        limits.max_hierarchy_nodes(),
+        IndexLimit::HierarchyNodes,
+    )?;
     preflight_memory(leaf_count, node_count, limits.max_build_working_bytes())?;
 
     let node_capacity = usize::try_from(node_count).map_err(|_| IndexError::ResourceLimit {
-        limit: "addressable hierarchy nodes",
+        limit: IndexLimit::AddressableHierarchyNodes,
         required: node_count,
         allowed: usize::MAX as u64,
     })?;
@@ -288,32 +292,21 @@ fn preflight_memory(leaf_count: u64, node_count: u64, allowed: u64) -> Result<()
                 .saturating_mul(SAMPLE_BYTES)
                 .saturating_mul(3),
         );
-    require(required, allowed, "build working bytes")
+    require(required, allowed, IndexLimit::BuildWorkingBytes)
 }
 
 fn reserved_vec<T>(capacity: usize, allowed: u64) -> Result<Vec<T>, IndexError> {
     let required = u64::try_from(capacity)
         .unwrap_or(u64::MAX)
         .saturating_mul(u64::try_from(mem::size_of::<T>()).unwrap_or(u64::MAX));
-    require(required, allowed, "build working bytes")?;
+    require(required, allowed, IndexLimit::BuildWorkingBytes)?;
     let mut values = Vec::new();
     values
         .try_reserve_exact(capacity)
         .map_err(|_| IndexError::ResourceLimit {
-            limit: "build working bytes",
+            limit: IndexLimit::BuildWorkingBytes,
             required,
             allowed,
         })?;
     Ok(values)
-}
-
-fn require(required: u64, allowed: u64, limit: &'static str) -> Result<(), IndexError> {
-    if required > allowed {
-        return Err(IndexError::ResourceLimit {
-            limit,
-            required,
-            allowed,
-        });
-    }
-    Ok(())
 }

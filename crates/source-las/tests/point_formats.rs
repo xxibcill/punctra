@@ -1,6 +1,6 @@
 //! Exact field coverage for every supported LAS and LAZ point-record format.
 
-use std::fs;
+use std::fs::{self, FileTimes, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -13,6 +13,7 @@ use point_source::{ReadBudget, ReadRequest, SourceError, SourceSpan};
 
 const EXTRA_BYTES_WIDTH: u16 = 2;
 const POINT_COUNT: usize = 2;
+const CANCELLATION_FIXTURE_POINTS: usize = 5_000;
 static NEXT_DIRECTORY: AtomicU64 = AtomicU64::new(0);
 
 #[test]
@@ -57,6 +58,72 @@ fn layered_waveform_laz_formats_are_explicitly_unsupported() {
             other => panic!("LAZ point format {point_format} returned {other}"),
         }
     }
+}
+
+#[test]
+fn conflicting_las_1_4_point_counts_are_corrupt() {
+    let directory = FixtureDirectory::new();
+    let path = directory.path().join("conflicting-point-counts.las");
+    write_fixture(&path, 8);
+
+    let mut bytes = fs::read(&path).unwrap();
+    assert_eq!(
+        u32::from_le_bytes(bytes[107..111].try_into().unwrap()),
+        u32::try_from(POINT_COUNT).unwrap()
+    );
+    bytes[107..111].copy_from_slice(&1_u32.to_le_bytes());
+    fs::write(&path, bytes).unwrap();
+
+    assert!(matches!(
+        source_las::open(&path).blocking_wait(),
+        Err(SourceError::CorruptSource { .. })
+    ));
+}
+
+#[test]
+fn verified_source_reads_from_immutable_bytes() {
+    let directory = FixtureDirectory::new();
+    let path = directory.path().join("immutable-source.las");
+    write_fixture(&path, 8);
+    let source = source_las::open(&path).blocking_wait().unwrap();
+    let original_modified = fs::metadata(&path).unwrap().modified().unwrap();
+
+    let mut bytes = fs::read(&path).unwrap();
+    let point_offset =
+        usize::try_from(u32::from_le_bytes(bytes[96..100].try_into().unwrap())).unwrap();
+    bytes[point_offset..point_offset + 4].copy_from_slice(&(-5_i32).to_le_bytes());
+    fs::write(&path, bytes).unwrap();
+    OpenOptions::new()
+        .write(true)
+        .open(&path)
+        .unwrap()
+        .set_times(FileTimes::new().set_modified(original_modified))
+        .unwrap();
+
+    let mut batches = source.points().unwrap();
+    let batch = batches.next().unwrap().unwrap();
+    assert_eq!(batch.positions().ticks()[0], ticks(0));
+}
+
+#[test]
+fn permissive_budget_still_allows_cancellation_between_decode_quanta() {
+    let directory = FixtureDirectory::new();
+    let path = directory.path().join("cancellation-quanta.las");
+    write_cancellation_fixture(&path);
+    let source = source_las::open(&path).blocking_wait().unwrap();
+    let permissive = point_source::ReadBudget::new(u64::MAX, u64::MAX)
+        .unwrap()
+        .with_max_adapter_working_bytes(u64::MAX);
+    let mut batches = source
+        .read(point_source::ReadRequest::all().budget(permissive))
+        .unwrap();
+
+    let first = batches.next().unwrap().unwrap();
+    assert!(first.len() < CANCELLATION_FIXTURE_POINTS);
+    batches.handle().cancel();
+    assert!(matches!(batches.next(), Err(SourceError::Cancelled)));
+    assert!(batches.next().unwrap().is_none());
+    assert!(batches.summary().is_none());
 }
 
 fn assert_supported_format(directory: &FixtureDirectory, point_format: u8, extension: &str) {
@@ -249,6 +316,23 @@ fn write_fixture(path: &Path, point_format: u8) {
     let mut writer = Writer::from_path(path, builder.into_header().unwrap()).unwrap();
     for row in 0..POINT_COUNT {
         writer.write_point(point(format, row)).unwrap();
+    }
+    writer.close().unwrap();
+}
+
+fn write_cancellation_fixture(path: &Path) {
+    let mut builder = Builder::from((1, 4));
+    builder.point_format = Format::new(0).unwrap();
+    let mut writer = Writer::from_path(path, builder.into_header().unwrap()).unwrap();
+    for row in 0..CANCELLATION_FIXTURE_POINTS {
+        writer
+            .write_point(Point {
+                x: f64::from(u32::try_from(row).unwrap()),
+                return_number: 1,
+                number_of_returns: 1,
+                ..Point::default()
+            })
+            .unwrap();
     }
     writer.close().unwrap();
 }

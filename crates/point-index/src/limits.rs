@@ -1,4 +1,4 @@
-use crate::IndexError;
+use crate::{IndexError, IndexLimit};
 
 const DEFAULT_BATCH_POINTS: u64 = 65_536;
 const DEFAULT_BATCH_BYTES: u64 = 8 * 1024 * 1024;
@@ -13,6 +13,17 @@ const DEFAULT_CANDIDATE_POINTS: u64 = u64::MAX;
 const DEFAULT_CANDIDATE_BYTES: u64 = 16 * 1024 * 1024;
 const DEFAULT_DISPLAY_BYTES: u64 = 8 * 1024 * 1024;
 const DEFAULT_INDEX_BUFFER_BYTES: u64 = 16 * 1024 * 1024;
+
+pub(crate) fn require(required: u64, allowed: u64, limit: IndexLimit) -> Result<(), IndexError> {
+    if required > allowed {
+        return Err(IndexError::ResourceLimit {
+            limit,
+            required,
+            allowed,
+        });
+    }
+    Ok(())
+}
 
 /// Separate hard limits for index preparation and opening.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -40,12 +51,12 @@ impl PrepareLimits {
     ) -> Result<Self, IndexError> {
         if max_source_batch_points == 0 {
             return Err(IndexError::InvalidLimit {
-                limit: "max_source_batch_points",
+                limit: IndexLimit::MaxSourceBatchPoints,
             });
         }
         if max_source_batch_payload_bytes == 0 {
             return Err(IndexError::InvalidLimit {
-                limit: "max_source_batch_payload_bytes",
+                limit: IndexLimit::MaxSourceBatchPayloadBytes,
             });
         }
         Ok(Self {
@@ -246,12 +257,12 @@ impl NodeReadBudget {
     ) -> Result<Self, IndexError> {
         if max_emitted_points == 0 {
             return Err(IndexError::InvalidLimit {
-                limit: "max_emitted_points",
+                limit: IndexLimit::MaxEmittedPoints,
             });
         }
         if max_display_batch_bytes == 0 {
             return Err(IndexError::InvalidLimit {
-                limit: "max_display_batch_bytes",
+                limit: IndexLimit::MaxDisplayBatchBytes,
             });
         }
         Ok(Self {

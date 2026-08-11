@@ -10,12 +10,77 @@ use std::{
 };
 
 use foundation_runtime::RuntimeError;
-use point_index::{IndexError, NodeReadBudget, PrepareDisposition, PrepareLimits, prepare};
+use point_index::{
+    IndexError, IndexLimit, NodeReadBudget, PrepareDisposition, PrepareLimits, prepare,
+};
+use point_source::ReadLimit;
 
 use support::{
     BLOCK_POINTS, TemporaryTarget, clustered_ticks, open_controlled_source, open_source, read_node,
     samples,
 };
+
+const V1_ARTIFACT: &[u8] = include_bytes!("fixtures/v1/one-point.pidx");
+const V1_WORK: &[u8] = include_bytes!("fixtures/v1/one-point.pidx.work");
+
+#[test]
+fn cold_build_preserves_preexisting_adjacent_files() {
+    let target = TemporaryTarget::new("preexisting-adjacent-files");
+    let temporary = target.copied_target("fixture.pidx.tmp");
+    let samples = target.copied_target("fixture.pidx.samples");
+    let temporary_sentinel = b"caller-owned temporary file";
+    let samples_sentinel = b"caller-owned sample file";
+    fs::write(&temporary, temporary_sentinel).unwrap();
+    fs::write(&samples, samples_sentinel).unwrap();
+
+    prepare(
+        open_source(clustered_ticks(1)),
+        target.path(),
+        PrepareLimits::default(),
+    )
+    .blocking_wait()
+    .unwrap();
+
+    assert_eq!(fs::read(temporary).unwrap(), temporary_sentinel);
+    assert_eq!(fs::read(samples).unwrap(), samples_sentinel);
+}
+
+#[test]
+fn disk_v1_golden_fixtures_open_and_resume_without_reencoding_the_input() {
+    let source = open_source(clustered_ticks(1));
+
+    let complete_target = TemporaryTarget::new("v1-golden-complete");
+    fs::write(complete_target.path(), V1_ARTIFACT).unwrap();
+    let opened = prepare(
+        source.clone(),
+        complete_target.path(),
+        PrepareLimits::default(),
+    )
+    .blocking_wait()
+    .unwrap();
+    assert_eq!(
+        opened.prepare_report().disposition(),
+        PrepareDisposition::Opened
+    );
+    assert_eq!(opened.prepare_report().source_points_read(), 0);
+    let root = opened.hierarchy().root().unwrap();
+    let read = read_node(&opened, root.id(), NodeReadBudget::default());
+    assert_eq!(samples(&read).len(), 1);
+    assert_eq!(fs::read(complete_target.path()).unwrap(), V1_ARTIFACT);
+
+    let work_target = TemporaryTarget::new("v1-golden-work");
+    fs::write(work_target.work_path(), V1_WORK).unwrap();
+    let resumed = prepare(source, work_target.path(), PrepareLimits::default())
+        .blocking_wait()
+        .unwrap();
+    assert_eq!(
+        resumed.prepare_report().disposition(),
+        PrepareDisposition::Resumed
+    );
+    assert_eq!(resumed.prepare_report().durable_points_reused(), 1);
+    assert_eq!(resumed.prepare_report().source_points_read(), 0);
+    assert_eq!(fs::read(work_target.path()).unwrap(), V1_ARTIFACT);
+}
 
 #[test]
 fn complete_artifacts_open_warm_and_reject_incompatible_corrupt_or_truncated_bytes() {
@@ -127,26 +192,74 @@ fn mutation_after_open_is_detected_by_the_node_sample_checksum() {
 }
 
 #[test]
+fn warm_open_rejects_checksum_valid_samples_outside_the_bottom_k_recipe() {
+    let ticks = clustered_ticks(BLOCK_POINTS + 1);
+    let source = open_source(ticks.clone());
+    let target = TemporaryTarget::new("non-recipe-samples");
+    let index = prepare(source.clone(), target.path(), PrepareLimits::default())
+        .blocking_wait()
+        .unwrap();
+    let root = index.hierarchy().root().unwrap();
+    let mut root_samples = samples(&read_node(&index, root.id(), NodeReadBudget::default()));
+    let replacement = (0..u64::try_from(ticks.len()).unwrap())
+        .find(|ordinal| {
+            root_samples
+                .binary_search_by_key(ordinal, |sample| sample.0)
+                .is_err()
+        })
+        .expect("the bounded root sample excludes one Source ordinal");
+    root_samples[0] = (replacement, ticks[usize::try_from(replacement).unwrap()]);
+    root_samples.sort_unstable_by_key(|sample| sample.0);
+
+    let mut artifact = fs::read(target.path()).unwrap();
+    let root_record = 208;
+    let sample_offset = usize::try_from(read_u64(&artifact, root_record + 112)).unwrap();
+    let sample_end = sample_offset + root_samples.len() * 32;
+    let encoded_samples = encode_sample_pair(&root_samples);
+    artifact[sample_offset..sample_end].copy_from_slice(&encoded_samples);
+    let mut sample_hasher = blake3::Hasher::new();
+    sample_hasher.update(b"punctra-index-samples-v1");
+    sample_hasher.update(&encoded_samples);
+    artifact[root_record + 136..root_record + 168]
+        .copy_from_slice(sample_hasher.finalize().as_bytes());
+    let artifact_checksum_offset = artifact.len() - 32;
+    let artifact_checksum = blake3::hash(&artifact[..artifact_checksum_offset]);
+    artifact[artifact_checksum_offset..].copy_from_slice(artifact_checksum.as_bytes());
+
+    let forged = target.copied_target("forged-samples.pidx");
+    fs::write(&forged, artifact).unwrap();
+    assert!(matches!(
+        prepare(source, forged, PrepareLimits::default()).blocking_wait(),
+        Err(IndexError::CorruptArtifact { .. })
+    ));
+}
+
+#[test]
 fn cold_build_limits_fail_without_a_partial_target_and_preserve_only_valid_work() {
     assert!(matches!(
         PrepareLimits::new(0, 24),
         Err(IndexError::InvalidLimit {
-            limit: "max_source_batch_points"
+            limit: IndexLimit::MaxSourceBatchPoints
         })
     ));
     assert!(matches!(
         PrepareLimits::new(1, 0),
         Err(IndexError::InvalidLimit {
-            limit: "max_source_batch_payload_bytes"
+            limit: IndexLimit::MaxSourceBatchPayloadBytes
         })
     ));
 
     let one_point = open_source(clustered_ticks(1));
     let incomplete_header = TemporaryTarget::new("limit-incomplete-header");
     let limit = PrepareLimits::default().with_max_incomplete_bytes(199);
-    assert_resource_error(
-        &prepare(one_point.clone(), incomplete_header.path(), limit).blocking_wait(),
-    );
+    assert!(matches!(
+        prepare(one_point.clone(), incomplete_header.path(), limit).blocking_wait(),
+        Err(IndexError::ResourceLimit {
+            limit: IndexLimit::IncompleteIndexBytes,
+            required: 200,
+            allowed: 199,
+        })
+    ));
     assert!(!incomplete_header.path().exists());
     assert!(!incomplete_header.work_path().exists());
 
@@ -173,7 +286,7 @@ fn cold_build_limits_fail_without_a_partial_target_and_preserve_only_valid_work(
         prepare(one_point.clone(), source_payload.path(), limit).blocking_wait(),
         Err(IndexError::Source(
             point_source::SourceError::ResourceLimit {
-                limit: "batch payload bytes",
+                limit: ReadLimit::BatchPayloadBytes,
                 required: 24,
                 allowed: 23,
             }
@@ -214,6 +327,44 @@ fn cold_build_limits_fail_without_a_partial_target_and_preserve_only_valid_work(
         u64::try_from(BLOCK_POINTS + 1).unwrap()
     );
     assert_eq!(resumed.prepare_report().source_points_read(), 0);
+}
+
+#[test]
+fn concurrent_prepares_have_one_exclusive_writer() {
+    let source = open_source(clustered_ticks(BLOCK_POINTS * 2 + 1));
+    let target = TemporaryTarget::new("concurrent-prepare-owner");
+    let slow_limits = PrepareLimits::new(1, 24).unwrap();
+    let first = prepare(source.clone(), target.path(), slow_limits);
+    let first_handle = first.handle();
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while fs::metadata(target.work_path()).map_or(true, |metadata| metadata.len() < 200) {
+        assert!(
+            Instant::now() < deadline,
+            "first prepare did not initialize its work file"
+        );
+        thread::sleep(Duration::from_millis(1));
+    }
+
+    assert!(matches!(
+        prepare(source.clone(), target.path(), PrepareLimits::default()).blocking_wait(),
+        Err(IndexError::PreparationInProgress { .. })
+    ));
+    assert!(!target.path().exists());
+
+    first_handle.cancel();
+    assert!(matches!(
+        first.blocking_wait(),
+        Err(IndexError::Runtime(RuntimeError::Cancelled))
+    ));
+    assert!(target.work_path().exists());
+
+    let resumed = prepare(source, target.path(), PrepareLimits::default())
+        .blocking_wait()
+        .unwrap();
+    assert_eq!(
+        resumed.prepare_report().disposition(),
+        PrepareDisposition::Built
+    );
 }
 
 #[test]
@@ -376,6 +527,10 @@ fn encode_sample_pair(samples: &[(u64, [i64; 3])]) -> Vec<u8> {
         }
     }
     bytes
+}
+
+fn read_u64(bytes: &[u8], offset: usize) -> u64 {
+    u64::from_le_bytes(bytes[offset..offset + 8].try_into().unwrap())
 }
 
 fn assert_resource_error(result: &Result<point_index::PreparedIndex, IndexError>) {

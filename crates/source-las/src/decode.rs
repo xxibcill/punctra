@@ -10,15 +10,17 @@ use point_contracts::{
     QuantizedPositions, SourceId, WorldBounds,
 };
 use point_source::adapter::{AdapterRead, AdapterReadRequest, ReadAdapter};
-use point_source::{ReadBudget, SourceError, SourceSpan};
+use point_source::{ReadBudget, ReadLimit, SourceError, SourceSpan};
 
 use crate::format::{
-    AttributeKind, AttributePlan, Compression, FileWitness, LasLayout, LazSeekMode, classify_io,
+    AttributeKind, AttributePlan, Compression, FileWitness, LasLayout, LazSeekMode,
+    SourceFileWitness, classify_io,
 };
 
 const FIXED_DECODER_WORKING_BYTES: u64 = 64 * 1024;
 const VERIFICATION_WORKING_BYTES: u64 = 64 * 1024 * 1024;
 const VERIFICATION_ROWS: u64 = 16_384;
+const READ_CANCELLATION_WORKING_BYTES: u64 = 8 * 1_024 * 1_024;
 
 #[cfg(not(test))]
 type DecoderInput = File;
@@ -62,15 +64,19 @@ impl Seek for DecoderInput {
 
 pub(crate) struct LasReadAdapter {
     file: Arc<File>,
-    witness: FileWitness,
+    source_witness: SourceFileWitness,
     layout: Arc<LasLayout>,
 }
 
 impl LasReadAdapter {
-    pub(crate) fn new(file: Arc<File>, witness: FileWitness, layout: Arc<LasLayout>) -> Self {
+    pub(crate) fn new(
+        file: Arc<File>,
+        source_witness: SourceFileWitness,
+        layout: Arc<LasLayout>,
+    ) -> Self {
         Self {
             file,
-            witness,
+            source_witness,
             layout,
         }
     }
@@ -83,15 +89,18 @@ impl ReadAdapter for LasReadAdapter {
         source: SourceId,
         reporter: OperationReporter,
     ) -> Result<Box<dyn AdapterRead>, SourceError> {
-        self.witness.ensure_file(&self.file)?;
+        self.source_witness.ensure_unchanged()?;
         let selected = selected_attributes(&self.layout, request.attributes().explicit())?;
-        let max_rows = batch_rows(&self.layout, &selected, request.budget())?;
+        let max_rows = batch_rows(
+            &self.layout,
+            request.budget(),
+            request.max_output_batch_points(),
+        )?;
         let decoder = RecordDecoder::new(&self.file, &self.layout)?;
         let spans = request.spans().to_vec();
         let next_ordinal = spans.first().map_or(0, |span| span.first_ordinal());
         Ok(Box::new(LasRead {
-            file: Arc::clone(&self.file),
-            witness: self.witness.clone(),
+            source_witness: self.source_witness.clone(),
             layout: Arc::clone(&self.layout),
             decoder,
             reporter,
@@ -120,38 +129,24 @@ fn selected_attributes(
                 .iter()
                 .find(|attribute| attribute.definition.id() == *id)
                 .cloned()
-                .ok_or(SourceError::UnknownAttribute { attribute: *id })
+                .ok_or_else(|| {
+                    SourceError::unsupported_schema(format!(
+                        "Source does not contain requested Attribute {id:?}"
+                    ))
+                })
         })
         .collect()
 }
 
 fn batch_rows(
     layout: &LasLayout,
-    selected: &[AttributePlan],
     budget: ReadBudget,
+    max_output_batch_points: u64,
 ) -> Result<u64, SourceError> {
-    let canonical_row_bytes = selected.iter().try_fold(24_u64, |bytes, attribute| {
-        bytes
-            .checked_add(u64::from(attribute.definition.data_type().element_bytes()))
-            .ok_or(SourceError::ResourceLimit {
-                limit: "canonical Point payload bytes",
-                required: u64::MAX,
-                allowed: budget.max_batch_payload_bytes(),
-            })
-    })?;
-    let rows_by_payload = budget.max_batch_payload_bytes() / canonical_row_bytes;
-    if rows_by_payload == 0 {
-        return Err(SourceError::ResourceLimit {
-            limit: "batch payload bytes",
-            required: canonical_row_bytes,
-            allowed: budget.max_batch_payload_bytes(),
-        });
-    }
-
     let fixed = FIXED_DECODER_WORKING_BYTES
         .checked_add(layout.compression.decoder_bytes())
         .ok_or(SourceError::ResourceLimit {
-            limit: "adapter working bytes",
+            limit: ReadLimit::AdapterWorkingBytes,
             required: u64::MAX,
             allowed: budget.max_adapter_working_bytes(),
         })?;
@@ -160,27 +155,27 @@ fn batch_rows(
     let required = fixed
         .checked_add(record_len)
         .ok_or(SourceError::ResourceLimit {
-            limit: "adapter working bytes",
+            limit: ReadLimit::AdapterWorkingBytes,
             required: u64::MAX,
             allowed: budget.max_adapter_working_bytes(),
         })?;
     if required > budget.max_adapter_working_bytes() {
         return Err(SourceError::ResourceLimit {
-            limit: "adapter working bytes",
+            limit: ReadLimit::AdapterWorkingBytes,
             required,
             allowed: budget.max_adapter_working_bytes(),
         });
     }
-    let rows_by_working = (budget.max_adapter_working_bytes() - fixed) / record_len;
-    Ok(budget
-        .max_batch_points()
-        .min(rows_by_payload)
-        .min(rows_by_working))
+    let interruptible_working_bytes = budget
+        .max_adapter_working_bytes()
+        .min(READ_CANCELLATION_WORKING_BYTES)
+        .max(required);
+    let rows_by_working = (interruptible_working_bytes - fixed) / record_len;
+    Ok(max_output_batch_points.min(rows_by_working))
 }
 
 struct LasRead {
-    file: Arc<File>,
-    witness: FileWitness,
+    source_witness: SourceFileWitness,
     layout: Arc<LasLayout>,
     decoder: RecordDecoder,
     reporter: OperationReporter,
@@ -202,7 +197,7 @@ impl AdapterRead for LasRead {
         if let Err(error) = self.reporter.check_cancelled().map_err(SourceError::from) {
             return self.fail(error);
         }
-        if let Err(error) = self.witness.ensure_file(&self.file) {
+        if let Err(error) = self.source_witness.ensure_unchanged() {
             return self.fail(error);
         }
         let Some(span) = self.spans.get(self.span_index).copied() else {
@@ -240,7 +235,7 @@ impl AdapterRead for LasRead {
         if let Err(error) = self.reporter.check_cancelled().map_err(SourceError::from) {
             return self.fail(error);
         }
-        if let Err(error) = self.witness.ensure_file(&self.file) {
+        if let Err(error) = self.source_witness.ensure_unchanged() {
             return self.fail(error);
         }
         self.advance(point_count, span.end_ordinal());
@@ -260,8 +255,8 @@ impl LasRead {
     }
 
     fn decode_failure(&self, message: &str) -> SourceError {
-        self.witness
-            .ensure_file(&self.file)
+        self.source_witness
+            .ensure_unchanged()
             .err()
             .unwrap_or_else(|| {
                 SourceError::corrupt(format!(
@@ -523,7 +518,7 @@ pub(crate) fn scan_bounds(
     let fixed = FIXED_DECODER_WORKING_BYTES
         .checked_add(layout.compression.decoder_bytes())
         .ok_or(SourceError::ResourceLimit {
-            limit: "verification working bytes",
+            limit: ReadLimit::VerificationWorkingBytes,
             required: u64::MAX,
             allowed: VERIFICATION_WORKING_BYTES,
         })?;
@@ -532,13 +527,13 @@ pub(crate) fn scan_bounds(
     let required = fixed
         .checked_add(record_len)
         .ok_or(SourceError::ResourceLimit {
-            limit: "verification working bytes",
+            limit: ReadLimit::VerificationWorkingBytes,
             required: u64::MAX,
             allowed: VERIFICATION_WORKING_BYTES,
         })?;
     if required > VERIFICATION_WORKING_BYTES {
         return Err(SourceError::ResourceLimit {
-            limit: "verification working bytes",
+            limit: ReadLimit::VerificationWorkingBytes,
             required,
             allowed: VERIFICATION_WORKING_BYTES,
         });

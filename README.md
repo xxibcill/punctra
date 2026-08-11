@@ -54,7 +54,8 @@ let mut renderer = WgpuRenderer::new(&device, config)?;
 renderer.apply(&RenderUpdate::Reset { view_generation })?;
 renderer.apply(&RenderUpdate::Upsert { batch })?;
 
-let frame = Frame::new(view_generation, camera, [width, height])?;
+let viewport = Viewport::new(width, height)?;
+let frame = Frame::new(view_generation, camera, viewport)?;
 let recorded_frame = renderer.render(&mut encoder, &target, &frame)?;
 let report = recorded_frame.report();
 queue.submit([encoder.finish()]);
