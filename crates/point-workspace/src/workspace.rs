@@ -25,7 +25,7 @@ use crate::model::{
 pub(crate) use crate::persistence::OverlayUsage;
 use crate::persistence::{
     ATTRIBUTE_DATA_TYPE_U8, CandidateFacts, Catalog, CatalogLimits, ClassificationRequestFacts,
-    MANIFEST_BYTES, ManifestFacts, OperationRecord, OverlayLimits, PersistedAttributeDefinition,
+    MANIFEST_BYTES, ManifestFacts, OverlayLimits, PersistedAttributeDefinition,
     PersistedPointSetFacts, PersistenceError, REJECTION_BYTES, ReadLimits, RejectionFacts,
     RevisionKind as PersistedRevisionKind, RevisionRow, RowReadLimits, SealedRevision, Store,
     ValidatedRevision, WriteLimits,
@@ -652,28 +652,22 @@ fn run_retry(
     );
     let result = (|| {
         session.ensure_mutable()?;
-        let (committed, record) = operation_state(session, operation)?;
-        if let Some(committed) = committed {
-            if let Some(outcome) = commit_sync_uncertainty(session, operation, false) {
-                return Ok(outcome);
-            }
-            return Ok(CommitOutcome::Committed(receipt_from_revision(&committed)?));
+        let state = operation_state(session, operation)?;
+        if let Err(uncertainty) = state.sync_durable_directory(session, operation) {
+            return Ok(CommitOutcome::Indeterminate(uncertainty));
         }
-        let Some(record) = record else {
-            return Err(WorkspaceError::OperationNotRetryable { operation });
+        let ready = match state {
+            OperationState::Committed(committed) => {
+                return Ok(CommitOutcome::Committed(receipt_from_revision(&committed)?));
+            }
+            OperationState::Rejected(rejection) => {
+                return Ok(CommitOutcome::Rejected(rejection_reason(rejection)?));
+            }
+            OperationState::Ready(ready) => ready,
+            OperationState::NotRecorded => {
+                return Err(WorkspaceError::OperationNotRetryable { operation });
+            }
         };
-        if let Some(rejection) = record.rejection {
-            if let Some(outcome) = commit_sync_uncertainty(session, operation, true) {
-                return Ok(outcome);
-            }
-            return Ok(CommitOutcome::Rejected(rejection_reason(rejection)?));
-        }
-        let ready = record
-            .ready
-            .ok_or(WorkspaceError::OperationNotRetryable { operation })?;
-        if let Some(outcome) = commit_sync_uncertainty(session, operation, true) {
-            return Ok(outcome);
-        }
         enforce_ready_limits(&ready, limits)?;
         commit_ready(session, &ready, limits, 0, phase, control)
     })();
@@ -988,85 +982,93 @@ fn existing_operation(
     phase: &PublicationPhase,
     control: &OperationControl,
 ) -> Result<Option<CommitOutcome>, WorkspaceError> {
-    let (committed, record) = operation_state(session, operation)?;
-    if let Some(committed) = committed {
-        if committed.request_digest() != request_digest {
-            return Ok(Some(CommitOutcome::Rejected(
-                CommitRejection::OperationConflict,
-            )));
-        }
-        if let Some(outcome) = commit_sync_uncertainty(session, operation, false) {
-            return Ok(Some(outcome));
-        }
-        return Ok(Some(CommitOutcome::Committed(receipt_from_revision(
-            &committed,
-        )?)));
-    }
-    let Some(record) = record else {
+    let state = operation_state(session, operation)?;
+    let Some(existing_digest) = state.request_digest() else {
         return Ok(None);
     };
-    if let Some(rejection) = record.rejection {
-        if rejection.request_digest != request_digest {
-            return Ok(Some(CommitOutcome::Rejected(
-                CommitRejection::OperationConflict,
-            )));
-        }
-        if let Some(outcome) = commit_sync_uncertainty(session, operation, true) {
-            return Ok(Some(outcome));
-        }
-        return Ok(Some(CommitOutcome::Rejected(rejection_reason(rejection)?)));
-    }
-    let Some(ready) = record.ready else {
-        return Ok(None);
-    };
-    if ready.request_digest() != request_digest {
+    if existing_digest != request_digest {
         return Ok(Some(CommitOutcome::Rejected(
             CommitRejection::OperationConflict,
         )));
     }
-    if let Some(outcome) = commit_sync_uncertainty(session, operation, true) {
-        return Ok(Some(outcome));
+    if let Err(uncertainty) = state.sync_durable_directory(session, operation) {
+        return Ok(Some(CommitOutcome::Indeterminate(uncertainty)));
     }
-    Ok(Some(commit_ready(
-        session, &ready, limits, 0, phase, control,
-    )?))
+    match state {
+        OperationState::Committed(committed) => Ok(Some(CommitOutcome::Committed(
+            receipt_from_revision(&committed)?,
+        ))),
+        OperationState::Rejected(rejection) => {
+            Ok(Some(CommitOutcome::Rejected(rejection_reason(rejection)?)))
+        }
+        OperationState::Ready(ready) => Ok(Some(commit_ready(
+            session, &ready, limits, 0, phase, control,
+        )?)),
+        OperationState::NotRecorded => Ok(None),
+    }
+}
+
+enum OperationState {
+    Committed(Arc<ValidatedRevision>),
+    Rejected(RejectionFacts),
+    Ready(Arc<ValidatedRevision>),
+    NotRecorded,
+}
+
+impl OperationState {
+    fn request_digest(&self) -> Option<[u8; 32]> {
+        match self {
+            Self::Committed(revision) | Self::Ready(revision) => Some(revision.request_digest()),
+            Self::Rejected(rejection) => Some(rejection.request_digest),
+            Self::NotRecorded => None,
+        }
+    }
+
+    fn sync_durable_directory(
+        &self,
+        session: &Session,
+        operation: OperationId,
+    ) -> Result<(), CommitUncertainty> {
+        let (result, phase) = match self {
+            Self::Committed(_) => (
+                session.store.sync_revisions(),
+                CommitPhase::RevisionDirectorySync,
+            ),
+            Self::Rejected(_) | Self::Ready(_) => (
+                session.store.sync_operations(),
+                CommitPhase::OperationPublication,
+            ),
+            Self::NotRecorded => return Ok(()),
+        };
+        result.map_err(|error| {
+            CommitUncertainty::new(operation, phase, map_persistence(error).to_string())
+        })
+    }
 }
 
 fn operation_state(
     session: &Session,
     operation: OperationId,
-) -> Result<(Option<Arc<ValidatedRevision>>, Option<OperationRecord>), WorkspaceError> {
+) -> Result<OperationState, WorkspaceError> {
     let catalog = session
         .catalog
         .read()
         .map_err(|_| WorkspaceError::Poisoned)?;
-    Ok((
-        catalog.committed_operation(operation.into_bytes()).cloned(),
-        catalog.operation(operation.into_bytes()).cloned(),
-    ))
-}
-
-fn commit_sync_uncertainty(
-    session: &Session,
-    operation: OperationId,
-    operation_directory: bool,
-) -> Option<CommitOutcome> {
-    let result = if operation_directory {
-        session.store.sync_operations()
-    } else {
-        session.store.sync_revisions()
+    if let Some(committed) = catalog.committed_operation(operation.into_bytes()) {
+        return Ok(OperationState::Committed(Arc::clone(committed)));
+    }
+    let Some(record) = catalog.operation(operation.into_bytes()) else {
+        return Ok(OperationState::NotRecorded);
     };
-    result.err().map(|error| {
-        CommitOutcome::Indeterminate(CommitUncertainty::new(
-            operation,
-            if operation_directory {
-                CommitPhase::OperationPublication
-            } else {
-                CommitPhase::RevisionDirectorySync
-            },
-            map_persistence(error).to_string(),
-        ))
-    })
+    if let Some(rejection) = record.rejection {
+        return Ok(OperationState::Rejected(rejection));
+    }
+    Ok(record
+        .ready
+        .as_ref()
+        .map_or(OperationState::NotRecorded, |ready| {
+            OperationState::Ready(Arc::clone(ready))
+        }))
 }
 
 struct PointSetRows<'a> {
@@ -1573,47 +1575,25 @@ fn resolve_operation(
         .lock()
         .map_err(|_| WorkspaceError::Poisoned)?;
     session.ensure_mutable()?;
-    let (committed, record) = operation_state(session, operation)?;
-    if let Some(committed) = committed {
-        if let Err(error) = session.store.sync_revisions() {
-            session.poisoned.store(true, Ordering::SeqCst);
-            return Ok(OperationResolution::Indeterminate(CommitUncertainty::new(
-                operation,
-                CommitPhase::RevisionDirectorySync,
-                map_persistence(error).to_string(),
-            )));
-        }
-        return Ok(OperationResolution::Committed(receipt_from_revision(
-            &committed,
-        )?));
-    }
-    let Some(record) = record else {
-        return Ok(OperationResolution::NotRecorded);
-    };
-    if let Some(rejection) = record.rejection {
-        if let Err(error) = session.store.sync_operations() {
-            session.poisoned.store(true, Ordering::SeqCst);
-            return Ok(OperationResolution::Indeterminate(CommitUncertainty::new(
-                operation,
-                CommitPhase::OperationPublication,
-                map_persistence(error).to_string(),
-            )));
-        }
-        return Ok(OperationResolution::Rejected(recorded_rejection(
-            rejection,
-        )?));
-    }
-    let Some(ready) = record.ready else {
-        return Ok(OperationResolution::NotRecorded);
-    };
-    if let Err(error) = session.store.sync_operations() {
+    let state = operation_state(session, operation)?;
+    if let Err(uncertainty) = state.sync_durable_directory(session, operation) {
         session.poisoned.store(true, Ordering::SeqCst);
-        return Ok(OperationResolution::Indeterminate(CommitUncertainty::new(
-            operation,
-            CommitPhase::OperationPublication,
-            map_persistence(error).to_string(),
-        )));
+        return Ok(OperationResolution::Indeterminate(uncertainty));
     }
+    let ready = match state {
+        OperationState::Committed(committed) => {
+            return Ok(OperationResolution::Committed(receipt_from_revision(
+                &committed,
+            )?));
+        }
+        OperationState::Rejected(rejection) => {
+            return Ok(OperationResolution::Rejected(recorded_rejection(
+                rejection,
+            )?));
+        }
+        OperationState::Ready(ready) => ready,
+        OperationState::NotRecorded => return Ok(OperationResolution::NotRecorded),
+    };
     let intent = recorded_intent(session, &ready)?;
     if intent.parent().revision() == current_head(session)? {
         return Ok(OperationResolution::Retryable(Box::new(intent)));
