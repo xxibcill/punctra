@@ -124,7 +124,14 @@ pub(crate) enum Compression {
     Laz {
         vlr: laz::LazVlr,
         decoder_bytes: u64,
+        seek_mode: LazSeekMode,
     },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum LazSeekMode {
+    FixedChunks { points_per_chunk: u64 },
+    Sequential,
 }
 
 impl Compression {
@@ -643,8 +650,34 @@ fn compression(
     let vlr = laz::LazVlr::from_buffer(&record.data)
         .map_err(|error| SourceError::corrupt(error.to_string()))?;
     validate_laz_items(&vlr, facts.format, facts.record_len)?;
-    let decoder_bytes = preflight_chunk_table(file, facts, &record.data, &vlr)?;
-    Ok(Compression::Laz { vlr, decoder_bytes })
+    let compressor = laz_compressor(&record.data)?;
+    let decoder_bytes = preflight_chunk_table(file, facts, compressor, &vlr)?;
+    let seek_mode = laz_seek_mode(compressor, &vlr);
+    Ok(Compression::Laz {
+        vlr,
+        decoder_bytes,
+        seek_mode,
+    })
+}
+
+fn laz_compressor(vlr_bytes: &[u8]) -> Result<u16, SourceError> {
+    let bytes = vlr_bytes
+        .get(0..2)
+        .ok_or_else(|| SourceError::corrupt("truncated LASzip VLR"))?;
+    bytes
+        .try_into()
+        .map(u16::from_le_bytes)
+        .map_err(slice_error)
+}
+
+fn laz_seek_mode(compressor: u16, vlr: &laz::LazVlr) -> LazSeekMode {
+    if matches!(compressor, 2 | 3) && !vlr.uses_variable_size_chunks() {
+        LazSeekMode::FixedChunks {
+            points_per_chunk: u64::from(vlr.chunk_size()),
+        }
+    } else {
+        LazSeekMode::Sequential
+    }
 }
 
 fn validate_laz_items(
@@ -692,13 +725,9 @@ fn validate_laz_items(
 fn preflight_chunk_table(
     file: &mut File,
     facts: FileLayoutFacts,
-    laz_vlr_bytes: &[u8],
+    compressor: u16,
     vlr: &laz::LazVlr,
 ) -> Result<u64, SourceError> {
-    let compressor = laz_vlr_bytes
-        .get(0..2)
-        .ok_or_else(|| SourceError::corrupt("truncated LASzip VLR"))?;
-    let compressor = u16::from_le_bytes(compressor.try_into().map_err(slice_error)?);
     let model_bytes = laz_decoder_model_bytes(vlr)?;
     if compressor == 1 {
         return Ok(model_bytes);
@@ -815,7 +844,14 @@ fn preflight_chunks(
     let mut chunk_start = point_data_start;
     let mut max_chunk_bytes = 0_u64;
     let mut encoded_points = 0_u64;
-    for entry in table {
+    let fixed_layered_chunk_size = if layered && !vlr.uses_variable_size_chunks() {
+        let chunk_size = u64::from(vlr.chunk_size());
+        validate_fixed_chunk_table(table.len(), point_count, chunk_size)?;
+        Some(chunk_size)
+    } else {
+        None
+    };
+    for (chunk_index, entry) in table.as_ref().iter().enumerate() {
         let chunk_end = chunk_start
             .checked_add(entry.byte_count)
             .ok_or_else(|| SourceError::corrupt("LASzip chunk offset overflows"))?;
@@ -825,14 +861,19 @@ fn preflight_chunks(
             ));
         }
         if layered {
+            let chunk_points =
+                preflight_layered_chunk(file, chunk_start, entry.byte_count, record_len, vlr)?;
+            if let Some(chunk_size) = fixed_layered_chunk_size {
+                validate_fixed_layered_chunk_count(
+                    chunk_index,
+                    table.len(),
+                    chunk_points,
+                    point_count,
+                    chunk_size,
+                )?;
+            }
             encoded_points = encoded_points
-                .checked_add(preflight_layered_chunk(
-                    file,
-                    chunk_start,
-                    entry.byte_count,
-                    record_len,
-                    vlr,
-                )?)
+                .checked_add(chunk_points)
                 .ok_or_else(|| SourceError::corrupt("LASzip Point count overflows"))?;
         }
         max_chunk_bytes = max_chunk_bytes.max(entry.byte_count);
@@ -848,19 +889,69 @@ fn preflight_chunks(
             "LASzip layered chunk Point counts differ from the LAS header",
         ));
     }
-    if !layered {
-        let chunk_size = u64::from(vlr.chunk_size());
-        if chunk_size == 0 {
-            return Err(SourceError::corrupt("LASzip chunk size is zero"));
-        }
-        let expected_chunks = point_count.div_ceil(chunk_size);
-        if u64::try_from(table.len()).ok() != Some(expected_chunks) {
+    if !layered && vlr.uses_variable_size_chunks() {
+        let encoded_points = table.as_ref().iter().try_fold(0_u64, |points, entry| {
+            (entry.point_count != 0)
+                .then(|| points.checked_add(entry.point_count))
+                .flatten()
+        });
+        if encoded_points != Some(point_count) {
             return Err(SourceError::corrupt(
-                "LASzip chunk count differs from the LAS header Point count",
+                "LASzip variable chunk Point counts differ from the LAS header",
             ));
         }
+    } else if !layered {
+        let chunk_size = u64::from(vlr.chunk_size());
+        validate_fixed_chunk_table(table.len(), point_count, chunk_size)?;
     }
     Ok(max_chunk_bytes)
+}
+
+fn validate_fixed_chunk_table(
+    table_len: usize,
+    point_count: u64,
+    chunk_size: u64,
+) -> Result<(), SourceError> {
+    if chunk_size == 0 {
+        return Err(SourceError::corrupt("LASzip chunk size is zero"));
+    }
+    let expected_chunks = point_count.div_ceil(chunk_size);
+    if u64::try_from(table_len).ok() != Some(expected_chunks) {
+        return Err(SourceError::corrupt(
+            "LASzip chunk count differs from the LAS header Point count",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_fixed_layered_chunk_count(
+    chunk_index: usize,
+    chunk_count: usize,
+    actual_points: u64,
+    point_count: u64,
+    chunk_size: u64,
+) -> Result<(), SourceError> {
+    let is_final = chunk_index
+        .checked_add(1)
+        .is_some_and(|index| index == chunk_count);
+    let expected_points = if is_final {
+        let preceding_chunks = u64::try_from(chunk_index)
+            .ok()
+            .and_then(|index| index.checked_mul(chunk_size))
+            .ok_or_else(|| SourceError::corrupt("LASzip chunk Point count overflows"))?;
+        point_count
+            .checked_sub(preceding_chunks)
+            .filter(|remaining| *remaining != 0)
+            .ok_or_else(|| SourceError::corrupt("LASzip final chunk Point count is invalid"))?
+    } else {
+        chunk_size
+    };
+    if actual_points != expected_points {
+        return Err(SourceError::corrupt(
+            "LASzip layered chunk Point count differs from fixed chunk boundaries",
+        ));
+    }
+    Ok(())
 }
 
 fn preflight_layered_chunk(
@@ -1231,4 +1322,67 @@ fn las_text(bytes: &[u8], field: &str) -> Result<String, SourceError> {
         SourceError::corrupt(format!("{field} contains invalid UTF-8: {error}"))
     })?;
     Ok(text.trim_end_matches(['\0', ' ']).to_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn metadata_budget_is_shared_across_file_sections() {
+        let mut budget = MetadataReadBudget::new();
+        budget
+            .reserve_records(MAX_METADATA_RECORDS as u64 - 1)
+            .unwrap();
+        budget.reserve_records(1).unwrap();
+        assert!(matches!(
+            budget.reserve_records(1),
+            Err(SourceError::CorruptSource { .. })
+        ));
+
+        let mut budget = MetadataReadBudget::new();
+        budget
+            .reserve_payload(MAX_SOURCE_METADATA_PAYLOAD_BYTES as u64 - 1)
+            .unwrap();
+        budget.reserve_payload(1).unwrap();
+        assert!(matches!(
+            budget.reserve_payload(1),
+            Err(SourceError::CorruptSource { .. })
+        ));
+    }
+
+    #[test]
+    fn codec_seek_mode_requires_a_fixed_chunked_organization() {
+        let fixed = laz::LazVlrBuilder::default()
+            .with_point_format(0, 0)
+            .unwrap()
+            .with_fixed_chunk_size(123)
+            .build();
+        assert_eq!(
+            laz_seek_mode(2, &fixed),
+            LazSeekMode::FixedChunks {
+                points_per_chunk: 123
+            }
+        );
+        assert_eq!(laz_seek_mode(1, &fixed), LazSeekMode::Sequential);
+
+        let variable = laz::LazVlrBuilder::default()
+            .with_point_format(0, 0)
+            .unwrap()
+            .with_variable_chunk_size()
+            .build();
+        assert_eq!(laz_seek_mode(2, &variable), LazSeekMode::Sequential);
+        assert_eq!(laz_seek_mode(3, &variable), LazSeekMode::Sequential);
+    }
+
+    #[test]
+    fn fixed_layered_chunk_counts_must_match_vlr_boundaries() {
+        validate_fixed_chunk_table(2, 4, 2).unwrap();
+        validate_fixed_layered_chunk_count(0, 2, 2, 4, 2).unwrap();
+        validate_fixed_layered_chunk_count(1, 2, 2, 4, 2).unwrap();
+
+        assert!(validate_fixed_layered_chunk_count(0, 2, 1, 4, 2).is_err());
+        assert!(validate_fixed_layered_chunk_count(1, 2, 3, 4, 2).is_err());
+        assert!(validate_fixed_chunk_table(3, 4, 2).is_err());
+    }
 }

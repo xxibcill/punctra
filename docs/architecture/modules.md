@@ -1,10 +1,11 @@
 # Module Catalog
 
-Status: broader platform proposal deferred; the current renderer, View, and
-Source modules are implemented under the
+Status: broader platform proposal deferred; the current renderer, View,
+Source, and narrow Spatial Index modules are implemented under the
 [v0.1 renderer](../design/render-engine-v0.1.md),
-[v0.2 planning](../design/adaptive-view-planning-v0.2.md), and
-[v0.3 Real Sources](../design/real-sources-v0.3.md) scopes
+[v0.2 planning](../design/adaptive-view-planning-v0.2.md),
+[v0.3 Real Sources](../design/real-sources-v0.3.md), and
+[v0.4 Out-of-core View](../design/out-of-core-view-v0.4.md) scopes
 
 This document is the ownership map. Each crate below is one logical module with one job. The job sentence is normative: if new behavior does not fit it, that behavior does not belong in the module.
 
@@ -17,7 +18,7 @@ This document is the ownership map. Each crate below is one logical module with 
 | **point-contracts** | Define and validate lossless Point values and stable spatial provenance. | None | IDs, Point Batches, spatial metadata, provenance |
 | **foundation-runtime** | Standardize bounded execution control for long foundation operations. | Operation closure or producer | Jobs, batch streams, budgets, progress, cancellation |
 | **point-source** | Provide verified bounded canonical read access to one immutable Source. | Source candidate, open options, and read request | Opaque verified Source, Source Record, and Point Batches |
-| **point-index** | Provide a rebuildable persistent mapping from spatial requests to candidate Source ranges. | Verified Source, index target, expectation, and build options | Complete Spatial Index and bounded read plans |
+| **point-index** | Provide a rebuildable persistent mapping from spatial requests to candidate Source ranges. | Verified Source, target path, and `PrepareLimits` | Complete `PreparedIndex`, conservative plans, and bounded display streams |
 | **point-set** | Materialize exact Point Identities as immutable bounded-memory Point Sets. | Exact Point Batch stream with terminal Snapshot provenance | Spillable Point Set handle |
 | **point-revisions** | Persist sparse Edits and resolve immutable Revision state. | Revision target, Operation Identity, expected Revision, and Edit Batch | Commit resolution and Revision view |
 | **point-query** | Provide bounded revision-pinned reads from one Snapshot. | Source, Spatial Index, Revision view, read request | Snapshot, exact Point or Breakline streams, ViewInput |
@@ -274,10 +275,15 @@ An index may reorder storage for speed, but it must carry the original Point Ide
 
 It owns:
 
-- resumable index construction for Sources without a useful hierarchy;
-- spatial node bounds, point counts, Source spans, and geometric-error summaries;
-- checksummed index persistence and recovery; and
-- deterministic conservative Region traversal and hierarchy reads.
+- deterministic 65,536-Point Source-block construction and binary BVH planning;
+- exact node bounds, covered/display counts, stable identities, and conservative
+  geometric-error summaries;
+- bounded deterministic internal display samples and complete Source-backed
+  leaf reads;
+- append-only checksummed work, valid-prefix recovery, complete artifact
+  verification, and no-replace publication; and
+- deterministic conservative inclusive-box traversal to sorted disjoint Source
+  spans.
 
 It does not own:
 
@@ -285,62 +291,56 @@ It does not own:
 - exact attribute filtering;
 - Revision overlays;
 - authoritative Point Identity;
-- camera rendering; or
+- camera/View policy, renderer packing, or GPU state; or
 - Source bytes.
 
-Conceptual interface:
+Implemented interface:
 
 ~~~rust
-pub enum IndexOpen {
-    Ready(IndexArtifact),
-    Missing,
-    Incompatible(IndexMismatch),
-}
+pub fn prepare(
+    source: Source,
+    target: impl AsRef<Path>,
+    limits: PrepareLimits,
+) -> Job<PreparedIndex, IndexError>;
 
-pub fn open_index(
-    target: IndexTarget,
-    expectation: IndexExpectation,
-) -> Job<IndexOpen, IndexError>;
-
-impl IndexBuilder {
-    pub fn build_or_resume(
-        source: Source,
-        target: IndexTarget,
-        options: IndexOptions,
-    ) -> Job<IndexArtifact, IndexError>;
-}
-
-impl IndexArtifact {
+impl PreparedIndex {
     pub fn descriptor(&self) -> &IndexDescriptor;
+    pub fn hierarchy(&self) -> &IndexHierarchy;
+    pub fn prepare_report(&self) -> &PrepareReport;
 
-    pub fn exact_candidates(
+    pub fn candidates(
         &self,
-        region: &Region,
-    ) -> Result<Box<dyn BatchStream<
-        Batch = SourceSpanBatch,
-        Summary = ExactPlanSummary,
-        Error = IndexError,
-    >>>;
+        bounds: WorldBounds,
+        limits: CandidateLimits,
+    ) -> Result<CandidatePlan, IndexError>;
 
-    pub fn hierarchy(
+    pub fn read_node(
         &self,
-        request: HierarchyRequest,
-    ) -> Result<IndexNodeBatch>;
+        node: IndexNodeId,
+        budget: NodeReadBudget,
+    ) -> Result<IndexPointBatches, IndexError>;
 }
 ~~~
 
-open_index is the only public reader of the persisted index representation. It verifies identity, schema, completeness, and checksums before returning Ready. IndexDescriptor exposes immutable Artifact Identity, Source Identity, Source point count, build options, and index schema version without exposing nodes or pages. Missing and Incompatible are explicit rebuildable states; corrupt or interrupted data is never returned as a partial IndexArtifact.
+`prepare` verifies and opens a compatible complete target, otherwise resumes a
+compatible work file or builds from the beginning. Corrupt or incompatible
+existing targets fail without replacement. It publishes only after a complete
+artifact is synced and atomically hard-linked to a previously absent target;
+there is no public builder, open-status enum, filesystem abstraction, or page
+interface.
 
-An exact read plan is a bounded stream of conservative candidate-span batches. The Query module performs exact spatial and Attribute tests. False positives are allowed; false negatives are not. An incomplete index returns IndexIncomplete instead of an exact plan.
+`PreparedIndex` retains its verified `Source`. `IndexDescriptor` exposes Source
+binding, transform/bounds, recipe/disk versions, counts, and artifact checksum.
+`IndexHierarchy` exposes a complete root-first immutable node snapshot.
+`CandidatePlan` is complete or an error and contains sorted disjoint Source
+spans. `IndexPointBatches` emits exact-position `IndexSample` values: sampled
+internal-node Coverage comes from the artifact, while complete leaves are read
+from the Source. These are display-only batches, not exact Query results.
 
-The builder reads stable logical Source spans through the opaque, verified
-`Source` and checkpoints the next ordinal, builder state, and Source Identity.
-Calling `build_or_resume` after restart verifies the checkpoint and resumes the
-scan. The proposed foundation index deliberately treats COPC through the same
-canonical Source seam; native-hierarchy import waits for a second real
-producer before gaining a seam.
-
-The index exposes hierarchy facts only. **point-view** owns camera culling, screen error, point budgets, priority, and refinement policy.
+The proposed foundation index deliberately treats a future COPC adapter through
+the same canonical Source seam; native-hierarchy import waits for a second real
+producer before gaining a seam. **point-view** owns camera culling, screen error,
+point budgets, priority, and refinement policy.
 
 **Independent proof:** build an index from **source-memory** and compare every complete candidate plan with a sequential-scan oracle. No file decoder, Revision store, Workspace, or renderer is required.
 
@@ -491,7 +491,7 @@ Conceptual interface:
 impl QueryEngine {
     pub fn new(
         source: Source,
-        index: Option<Arc<IndexArtifact>>,
+        index: Option<Arc<PreparedIndex>>,
         revisions: Arc<RevisionStore>,
     ) -> Result<Self>;
 
@@ -544,7 +544,7 @@ impl ViewInput {
 ~~~
 
 `QueryEngine::new` verifies that the opaque `Source` metadata, optional
-`IndexArtifact`, and `RevisionStore` carry the same Source Identity and that
+`PreparedIndex`, and `RevisionStore` carry the same Source Identity and that
 Source point count, editable Attribute schema, and Coordinate Reference equal
 the persisted Revision Source Contract. It rejects the composition before any
 Snapshot is created. `pin` accepts only a Revision Identity and obtains its
@@ -769,7 +769,7 @@ impl LandXml {
 }
 ~~~
 
-The module emits explicit vertices and faces so consumers receive the derived topology rather than silently retriangulating points. A host adapter that writes a file is responsible for temporary-file creation, consuming the bounded byte stream, flush, sync, and atomic rename.
+The module emits explicit vertices and faces so consumers receive the derived topology rather than silently retriangulating points. A host adapter that writes a file is responsible for temporary-file creation, consuming the bounded byte stream, flush, sync, and atomic target replacement.
 
 **Independent proof:** encode a stored Terrain Surface fixture into an in-memory byte buffer and validate it without loading any point cloud.
 
@@ -939,6 +939,7 @@ Adapters translate host concepts; they do not reimplement domain behavior.
 
 | Adapter | Its only job | Depends on |
 |---|---|---|
+| **renderer-demo** | Privately compose synthetic or indexed LAS/LAZ hierarchy materialization with View planning and rendering. | source-las, point-index, point-view, render-protocol, render-wgpu |
 | **point-cli** | Translate command-line arguments, progress, and exit codes into module calls. | point-workspace and the Point Set, terrain, or LandXML modules used by the command |
 | **viewer-desktop** | Translate window input and application state into Workspace, View, terrain, and renderer calls. | point-workspace, point-set, point-view, terrain-model, render-protocol, render-wgpu |
 | **point-python** later | Translate Python values, iteration, exceptions, and cancellation into foundation-module calls. | only the modules exposed by the binding |
@@ -982,7 +983,7 @@ In particular:
 
 ## Public seams and private locality
 
-The implemented foundation exposes four reusable seams:
+The implemented foundation exposes five reusable seams:
 
 1. **render-protocol** camera, point-batch, generation, and versioned update
    values;
@@ -990,10 +991,12 @@ The implemented foundation exposes four reusable seams:
    snapshot and returns requests, required retention, and exact retirements;
 3. **render-wgpu**'s explicit update and frame interfaces; and
 4. the v0.3 **point-source** opaque verified `Source`, `SourceRecord`, and
-   bounded `PointBatches` interface.
+   bounded `PointBatches` interface; and
+5. v0.4 **point-index** `prepare`, `PreparedIndex`, conservative candidate
+   planning, immutable hierarchy facts, and display-only node streams.
 
-The Spatial Index, Query, Revision, and Workspace seams described elsewhere in
-this document remain part of the deferred broader platform proposal. They are
-not prerequisites for using the current Source, planner, or renderer.
+The Query, Revision, and Workspace seams described elsewhere in this document
+remain part of the deferred broader platform proposal. They are not
+prerequisites for using the current Source, index, planner, or renderer.
 
 Filesystem storage, scheduling, index page layout, terrain predicates, and journal framing remain private. Publishing those details would reduce locality and freeze decisions before multiple adapters prove a useful seam.

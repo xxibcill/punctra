@@ -1,0 +1,27 @@
+[package]
+name = "point-index"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Deterministic persistent spatial index for verified Punctra Sources"
+
+[dependencies]
+blake3.workspace = true
+foundation-runtime.workspace = true
+point-contracts.workspace = true
+point-source.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+allocation-counter.workspace = true
+criterion.workspace = true
+source-memory = { workspace = true, features = ["test-support"] }
+
+[[bench]]
+name = "index"
+harness = false
+
+[lints]
+workspace = true

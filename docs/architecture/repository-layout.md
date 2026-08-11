@@ -1,10 +1,12 @@
 # Repository and Dependency Layout
 
-Status: broader platform layout deferred; the v0.1 renderer, v0.2 adaptive View
-planner, and v0.3 Real Sources modules are implemented under the
+Status: broader platform layout deferred; the v0.1 renderer, v0.2 adaptive
+View planner, v0.3 Real Sources, and v0.4 Spatial Index modules are implemented
+under the
 [v0.1 renderer](../design/render-engine-v0.1.md),
-[v0.2 planning](../design/adaptive-view-planning-v0.2.md), and
-[v0.3 Real Sources](../design/real-sources-v0.3.md) scopes
+[v0.2 planning](../design/adaptive-view-planning-v0.2.md),
+[v0.3 Real Sources](../design/real-sources-v0.3.md), and
+[v0.4 Out-of-core View](../design/out-of-core-view-v0.4.md) scopes
 
 The repository is one Cargo workspace containing independently buildable crates. A crate is created only when its implementation and at least one caller exist; the tree below is the intended destination, not a requirement to scaffold empty directories.
 
@@ -41,7 +43,7 @@ crates/
       records.rs
       attributes.rs
 
-  source-copc/              # proposed and deferred; not in the v0.3 workspace
+  source-copc/              # proposed and deferred; not in the v0.4 workspace
     src/
       lib.rs
       hierarchy.rs
@@ -52,12 +54,23 @@ crates/
       lib.rs
 
   point-index/
+    benches/
+      index.rs
+    examples/
+      direct_use.rs
     src/
       lib.rs
-      build.rs
-      disk_format.rs
-      recover.rs
-      select.rs
+      error.rs
+      limits.rs
+      model.rs
+      persistence.rs
+      prepare.rs
+      read.rs
+      tree.rs
+    tests/
+      candidates.rs
+      interface.rs
+      persistence.rs
 
   point-set/
     src/
@@ -140,8 +153,11 @@ apps/
     src/
       main.rs
       orbit_camera.rs
+      real_cloud.rs
+      scene.rs
       synthetic.rs
     tests/
+      headless_smoke.rs
       planner.rs
 
   point-cli/
@@ -180,7 +196,10 @@ docs/
   formats/
 ~~~
 
-Files inside one crate are private implementation structure, not extra public modules. For example, **point-index/build.rs** and **point-index/select.rs** support the single point-index job. Promoting every algorithm stage into its own crate would create shallow interfaces and reduce locality.
+Files inside one crate are private implementation structure, not extra public
+modules. For example, **point-index/prepare.rs**, **persistence.rs**, and
+**tree.rs** support the single `prepare` operation. Promoting every algorithm
+stage into its own crate would create shallow interfaces and reduce locality.
 
 ## Cargo dependency direction
 
@@ -212,7 +231,9 @@ The textual tree is a readability aid; the allowlist in [modules.md](modules.md)
 
 ## Dependency enforcement
 
-CI should inspect Cargo metadata and reject any edge not present in the allowlist. This catches architectural drift that normal compilation accepts.
+Local verification should inspect Cargo metadata and reject any edge not
+present in the allowlist. This catches architectural drift that normal
+compilation accepts without requiring hosted CI.
 
 Additional rules:
 
@@ -220,7 +241,8 @@ Additional rules:
 - **foundation-runtime** cannot depend on a point format, domain algorithm, async runtime, wgpu, or windowing.
 - A seam crate cannot depend on any of its adapters.
 - A lower module cannot depend on **point-workspace** or an application adapter.
-- Only **render-wgpu** and the desktop adapter may depend on wgpu.
+- Only **render-wgpu** and application adapters that directly compose it, such
+  as **renderer-demo**, may depend on wgpu.
 - Only application adapters choose concrete Source adapters.
 - No crate named common, utils, helpers, plugin, storage, or manager is allowed without an accepted architecture change explaining its one job.
 - Feature flags cannot create a reverse dependency or change correctness semantics.
@@ -254,6 +276,13 @@ Expected commands:
 
 ~~~bash
 cargo check -p point-index
+cargo test -p point-index --all-features
+cargo run -p point-index --example direct_use
+cargo bench -p point-index --bench index
+cargo test -p renderer-demo --test headless_smoke
+PUNCTRA_REQUIRE_GPU=1 cargo test -p renderer-demo --test planner
+
+# Proposed commands once those deferred crates exist:
 cargo test -p point-revisions
 cargo test -p terrain-model
 cargo bench -p point-query
@@ -270,10 +299,10 @@ let batch = batches.next()?;
 
 // Index generated Points through the memory adapter, without a Workspace.
 let source = source_memory::open(generated_memory_source).await?;
-let index = point_index::IndexBuilder::build_or_resume(
+let index = point_index::prepare(
     source,
     target,
-    options,
+    PrepareLimits::default(),
 ).await?;
 
 // Derive terrain without a Source or Spatial Index.
@@ -316,7 +345,7 @@ That ratio is module depth. Callers receive leverage from one operation, and que
 
 Do not expose:
 
-- index pages or node structs;
+- persisted index pages or mutable node internals;
 - memory maps or borrowed decoder buffers;
 - journal frames or overlay tables;
 - triangulator half-edges;
@@ -332,13 +361,14 @@ Keep optional heavy dependencies at adapter edges:
 
 - **source-las** owns LAS/LAZ codec dependencies.
 - A proposed **source-copc** adapter would own local COPC hierarchy and
-  byte-range decoding only; it is deferred and is not in the v0.3 workspace.
+  byte-range decoding only; it is deferred and is not in the v0.4 workspace.
 - **landxml** owns XML encoding and validation dependencies.
 - **render-wgpu** owns wgpu and shader dependencies.
 - **viewer-desktop** owns windowing and UI dependencies.
 - **point-python** owns the Python binding dependency.
 
-Headless users that select **point-workspace**, **point-query**, or **terrain-model** must not compile wgpu or a windowing stack.
+Headless users that select **point-index**, **point-workspace**, **point-query**,
+or **terrain-model** must not compile wgpu or a windowing stack.
 
 Feature flags may select an adapter capability such as LAZ compression. Remote readers wait for a real caller and a separately reviewed trust and retry contract. Feature flags may not switch between two subtly different identity, Revision, Query, or topology semantics.
 
@@ -351,7 +381,7 @@ example.pcw/
   manifest.json             # owned by point-workspace
   revisions.pcrev           # committed Revisions and staged operations; owned by point-revisions
   indexes/
-    source-id.pcidx         # owned by point-index
+    source-id.pidx          # owned by point-index
   cache/
     ...                     # disposable; safe to remove
 ~~~
@@ -360,7 +390,8 @@ Ownership rules:
 
 - only **point-workspace** reads or writes the manifest, which records Workspace Identity and the one versioned SourceRecord returned by verification;
 - only **point-revisions** reads or writes the revision journal;
-- only **point-index** reads or writes pcidx files;
+- only **point-index** reads or writes its `.pidx` target and deterministic
+  `.work`, `.samples`, and `.tmp` siblings;
 - any process may request cache deletion through its owning module, but no module interprets another module's private cache; and
 - the one immutable Source remains outside the Workspace and is referenced by the manifest.
 
@@ -385,7 +416,8 @@ Rules:
 
 ## Implementation order
 
-Build vertical evidence in this order:
+Build vertical evidence in this order. The first three steps are implemented;
+later steps remain proposed unless an accepted versioned design says otherwise:
 
 1. **point-contracts**, **foundation-runtime**, **point-source**, and **source-memory** with conformance tests.
 2. **source-las** for small LAS, then bounded LAZ decoding.

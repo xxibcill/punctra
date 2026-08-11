@@ -16,15 +16,25 @@ pub(crate) struct OrbitCamera {
     azimuth: f64,
     elevation: f64,
     radius: f64,
+    min_radius: f64,
+    max_radius: f64,
+    far_distance: f32,
 }
 
 impl OrbitCamera {
-    pub(crate) const fn new(target: [f64; 3], radius: f64) -> Self {
+    #[allow(clippy::cast_possible_truncation)]
+    pub(crate) fn new(target: [f64; 3], radius: f64) -> Self {
+        let min_radius = MIN_RADIUS.min((radius * 0.01).max(0.01));
+        let max_radius = MAX_RADIUS.max(radius * 4.0);
+        let far_distance = FAR_DISTANCE.max((max_radius * 2.0) as f32);
         Self {
             target,
             azimuth: -FRAC_PI_4,
             elevation: FRAC_PI_6,
             radius,
+            min_radius,
+            max_radius,
+            far_distance,
         }
     }
 
@@ -36,7 +46,7 @@ impl OrbitCamera {
 
     pub(crate) fn zoom(&mut self, lines: f64) {
         let zoom_factor = (-lines * ZOOM_EXPONENT_PER_LINE).exp();
-        self.radius = (self.radius * zoom_factor).clamp(MIN_RADIUS, MAX_RADIUS);
+        self.radius = (self.radius * zoom_factor).clamp(self.min_radius, self.max_radius);
     }
 
     pub(crate) fn reset(&mut self, radius: f64) {
@@ -57,7 +67,7 @@ impl OrbitCamera {
             [0.0, 0.0, 1.0],
             std::f32::consts::FRAC_PI_4,
             0.5,
-            FAR_DISTANCE,
+            self.far_distance,
         )
     }
 }

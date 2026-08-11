@@ -1,20 +1,23 @@
 # Point-Cloud Foundation Architecture
 
-Status: broader platform proposal deferred; the v0.1 renderer, v0.2 adaptive
-View planner, and v0.3 Real Sources are implemented
+Status: broader platform proposal deferred; v0.1 through v0.4 are implemented
 
 > Punctra's accepted current contracts are the reusable
 > [v0.1 render engine](../design/render-engine-v0.1.md), renderer-neutral
 > [v0.2 adaptive View planner](../design/adaptive-view-planning-v0.2.md), and
-> completed [v0.3 Real Sources path](../design/real-sources-v0.3.md). Where this
-> older proposal differs from the v0.3 Source interface, the accepted v0.3
-> design controls. The remaining broader document is research for possible host
-> projects, not the current implementation plan.
+> completed [v0.3 Real Sources path](../design/real-sources-v0.3.md), plus the
+> completed [v0.4 Out-of-core View path](../design/out-of-core-view-v0.4.md). Where
+> this older proposal differs from those accepted interfaces and boundaries,
+> the versioned designs control. The remaining broader document is research for
+> possible host projects, not the current implementation plan.
 
 The implemented v0.3 adapters are `source-memory` and `source-las`.
 `source-las` supports LAS point-data record formats 0–10 and LAZ formats 0–8;
 LAZ formats 9 and 10 are explicitly unsupported pending exact layered
 WavePacket14 codec support. `source-copc` remains a proposed, deferred adapter.
+The implemented v0.4 `point-index` prepares one complete deterministic
+fixed-block BVH and the private `renderer-demo` bridge consumes it; the broader
+Workspace, Query, Revision, terrain, and export modules below remain proposed.
 
 This package defines a reusable, headless foundation for very large point-cloud documents. It is aimed at learning, experimentation, and reuse by desktop applications, command-line tools, language bindings, and future research code.
 
@@ -35,9 +38,11 @@ Independence does not mean a network process. These are in-process Rust librarie
 
 ## Goals
 
-- Open immutable LAS, LAZ, and COPC Sources without loading the whole Source.
+- Open immutable LAS and LAZ Sources without loading the whole Source; keep
+  COPC proposed until its adapter exists.
 - Preserve stable Point Identity and exact Attributes.
-- Build or consume a resumable Spatial Index.
+- Build, resume, reopen, query, and progressively read one complete Spatial
+  Index under explicit limits.
 - Stream bounded, Revision-pinned Queries.
 - Materialize exact, spillable Point Sets without requiring all identities in memory.
 - Store sparse Edits as crash-safe immutable Revisions.

@@ -181,6 +181,7 @@ fn hierarchy_validation_is_deterministic_and_atomic() {
             GENEROUS_BUDGET,
         )
         .unwrap();
+    assert!(empty.demanded_nodes().is_empty());
     assert!(empty.requests().is_empty());
     assert!(empty.retained_nodes().is_empty());
     assert!(empty.retirements().is_empty());
@@ -980,6 +981,10 @@ fn unaffordable_missing_root_does_not_block_an_affordable_refinement() {
         )
         .unwrap();
 
+    assert_eq!(
+        demanded_keys(&plan),
+        vec![node_key(1), node_key(4), node_key(5), node_key(2)]
+    );
     assert_eq!(request_keys(&plan), vec![node_key(4), node_key(5)]);
     assert_eq!(retained_keys(&plan), vec![node_key(3)]);
     assert!(plan.retirements().is_empty());
@@ -1022,6 +1027,7 @@ fn in_flight_work_is_reserved_and_never_requested_twice() {
             PlanningBudget::new(11, 110, 2),
         )
         .unwrap();
+    assert_eq!(demanded_keys(&exact), vec![node_key(1), node_key(2)]);
     assert_eq!(request_keys(&exact), vec![node_key(2)]);
     assert_eq!(exact.resource_usage().point_count(), 11);
 
@@ -1033,8 +1039,122 @@ fn in_flight_work_is_reserved_and_never_requested_twice() {
             PlanningBudget::new(10, 110, 2),
         )
         .unwrap();
+    assert_eq!(demanded_keys(&constrained), vec![node_key(1), node_key(2)]);
     assert!(constrained.requests().is_empty());
     assert_eq!(constrained.resource_usage().point_count(), 5);
+}
+
+#[test]
+fn demand_includes_missing_and_requested_targets_in_planner_priority_order() {
+    let generation = generation(9, 1);
+    let nodes = [
+        node(
+            3,
+            None,
+            box_at(1.0, 0.0, -10.0),
+            2.0,
+            1,
+            10,
+            3,
+            NodeStatus::Missing,
+        ),
+        node(
+            2,
+            None,
+            box_at(0.0, 0.0, -10.0),
+            3.0,
+            1,
+            10,
+            2,
+            NodeStatus::Requested,
+        ),
+        node(
+            1,
+            None,
+            box_at(-1.0, 0.0, -10.0),
+            2.0,
+            1,
+            10,
+            1,
+            NodeStatus::Missing,
+        ),
+        node(4, None, box_at(0.0, 1.0, -10.0), 4.0, 1, 10, 4, resident(1)),
+    ];
+
+    let plan = planner(100.0, 1.0)
+        .plan(
+            &camera(),
+            viewport(100, 100),
+            AvailableNodes::new(generation, &nodes),
+            GENEROUS_BUDGET,
+        )
+        .unwrap();
+
+    assert_eq!(
+        demanded_keys(&plan),
+        vec![node_key(2), node_key(1), node_key(3)]
+    );
+    assert_eq!(request_keys(&plan), vec![node_key(1), node_key(3)]);
+}
+
+#[test]
+fn camera_changes_remove_stale_requested_nodes_from_demand() {
+    let generation = generation(9, 2);
+    let nodes = [
+        node(
+            1,
+            None,
+            box_at(0.0, 0.0, -10.0),
+            1.0,
+            1,
+            10,
+            1,
+            NodeStatus::Requested,
+        ),
+        node(
+            2,
+            None,
+            box_at(20.0, 0.0, -10.0),
+            1.0,
+            1,
+            10,
+            2,
+            NodeStatus::Requested,
+        ),
+    ];
+    let mut planner = planner(100.0, 1.0);
+
+    let first = planner
+        .plan(
+            &camera(),
+            viewport(100, 100),
+            AvailableNodes::new(generation, &nodes),
+            GENEROUS_BUDGET,
+        )
+        .unwrap();
+    assert_eq!(demanded_keys(&first), vec![node_key(1)]);
+    assert!(first.requests().is_empty());
+
+    let moved_camera = Camera::perspective(
+        [20.0, 0.0, 0.0],
+        [20.0, 0.0, -1.0],
+        [0.0, 1.0, 0.0],
+        std::f32::consts::FRAC_PI_2,
+        1.0,
+        100.0,
+    )
+    .unwrap();
+    let moved = planner
+        .plan(
+            &moved_camera,
+            viewport(100, 100),
+            AvailableNodes::new(generation, &nodes),
+            GENEROUS_BUDGET,
+        )
+        .unwrap();
+
+    assert_eq!(demanded_keys(&moved), vec![node_key(2)]);
+    assert!(moved.requests().is_empty());
 }
 
 #[test]
@@ -1133,6 +1253,7 @@ fn requests_and_output_lists_are_input_order_independent() {
         request_keys(&first),
         vec![node_key(3), node_key(1), node_key(2)]
     );
+    assert_eq!(demanded_keys(&first), request_keys(&first));
     assert_eq!(retained_keys(&first), vec![node_key(4)]);
     assert_eq!(retirement_batches(&first), vec![BatchKey::new(5)]);
 }
@@ -1413,6 +1534,10 @@ fn request_keys(plan: &point_view::ViewPlan) -> Vec<NodeKey> {
         .iter()
         .map(|request| request.node())
         .collect()
+}
+
+fn demanded_keys(plan: &point_view::ViewPlan) -> Vec<NodeKey> {
+    plan.demanded_nodes().to_vec()
 }
 
 fn retained_keys(plan: &point_view::ViewPlan) -> Vec<NodeKey> {

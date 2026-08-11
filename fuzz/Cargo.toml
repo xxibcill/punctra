@@ -1,0 +1,28 @@
+[package]
+name = "punctra-persistence-fuzz"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.90"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+blake3 = "1.8.6"
+libfuzzer-sys = "0.4"
+point-contracts = { path = "../crates/point-contracts" }
+point-index = { path = "../crates/point-index" }
+point-source = { path = "../crates/point-source" }
+source-memory = { path = "../crates/source-memory" }
+tempfile = "=3.24.0"
+
+[[bin]]
+name = "index_persistence"
+path = "fuzz_targets/index_persistence.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]
+members = ["."]

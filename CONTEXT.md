@@ -1,17 +1,20 @@
 # Domain Context: Point-Cloud Foundation
 
-Status: renderer, adaptive View-planning, and Real Sources terms are
-implemented; broader Workspace and terrain terms are deferred
+Status: renderer, adaptive View planning, Real Sources, and the narrow Spatial
+Index/out-of-core View slice are implemented; broader Workspace and terrain
+terms are deferred
 
-Punctra v0.3 implements the reusable render engine, renderer-neutral View
+Punctra v0.4 builds on the reusable render engine, renderer-neutral View
 planner, and verified Source path described in the accepted [v0.1 renderer
 design](docs/design/render-engine-v0.1.md), [v0.2 planning
 design](docs/design/adaptive-view-planning-v0.2.md), and [v0.3 Real Sources
-design](docs/design/real-sources-v0.3.md). The definitions of Source, Source
-Identity, Point, Point Identity, Attribute, Point Batch, Coordinate Reference,
-View, Coverage, and View Batch below are canonical. The remaining terms are
-retained as vocabulary research for possible host projects and do not imply
-current product scope.
+design](docs/design/real-sources-v0.3.md). The accepted [v0.4 Out-of-core View
+design](docs/design/out-of-core-view-v0.4.md) additionally implements Spatial
+Index and rebuildable Artifact behavior for its narrow scope. The definitions
+of Source, Source Identity, Point, Point Identity, Attribute, Point Batch,
+Coordinate Reference, Artifact, Spatial Index, View, Coverage, and View Batch
+below are canonical. The remaining terms are retained as vocabulary research
+for possible host projects and do not imply current product scope.
 
 ## Artifact
 
@@ -149,6 +152,11 @@ _Avoid:_ byte range, chunk, index node
 ## Spatial Index
 
 A rebuildable Artifact that maps spatial requests to candidate Source ranges. A Spatial Index accelerates access but never defines Point Identity or authoritative geometry.
+
+In v0.4, it also stores checksummed exact-position samples for partial View
+Coverage at internal hierarchy nodes. Those display samples are not canonical
+Point Batches or complete Query results; complete leaf values still come from
+the verified Source.
 
 _Avoid:_ database, source of truth
 
