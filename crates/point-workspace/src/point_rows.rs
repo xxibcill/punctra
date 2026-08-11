@@ -86,14 +86,6 @@ impl SnapshotPointBatch {
     pub fn is_empty(&self) -> bool {
         self.ordinals.is_empty()
     }
-
-    /// Returns the exact logical payload bytes in all three row columns.
-    #[must_use]
-    pub fn estimated_payload_bytes(&self) -> u64 {
-        u64::try_from(self.len())
-            .unwrap_or(u64::MAX)
-            .saturating_mul(ROW_PAYLOAD_BYTES)
-    }
 }
 
 /// Exact terminal facts for one successfully completed Snapshot Point read.

@@ -102,7 +102,10 @@ fn assert_batch_contract(batch: &SnapshotPointBatch, limits: PointRowLimits) {
     assert_eq!(batch.len(), batch.positions().len());
     assert_eq!(batch.len(), batch.effective_classifications().len());
     assert!(u64::try_from(batch.len()).unwrap() <= limits.max_batch_points());
-    assert!(batch.estimated_payload_bytes() <= limits.max_batch_payload_bytes());
+    let payload_bytes = u64::try_from(batch.len())
+        .unwrap_or(u64::MAX)
+        .saturating_mul(ROW_BYTES);
+    assert!(payload_bytes <= limits.max_batch_payload_bytes());
     assert!(batch.ordinals().windows(2).all(|pair| pair[0] < pair[1]));
     for row in 0..batch.len() {
         assert_eq!(
