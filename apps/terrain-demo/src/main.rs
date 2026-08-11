@@ -152,7 +152,34 @@ fn exercise_classification_correction_and_revert(
         correction_operation,
         recovery,
     )?;
-    let changed = derive_ground(workspace.snapshot(correction_revision)?)?;
+    let changed: AppResult<TerrainSurface> = (|| {
+        let changed = derive_ground(workspace.snapshot(correction_revision)?)?;
+        validate_changed_surface(baseline, &changed)?;
+        Ok(changed)
+    })();
+
+    let revert_operation = OperationId::generate()?;
+    let (workspace, revert_revision) = commit_with_recovery(
+        workspace,
+        CommitRequest::revert_head(revert_operation, correction_revision),
+        "immediate-head Revert",
+        revert_operation,
+        recovery,
+    )?;
+    let restored = derive_ground(workspace.snapshot(revert_revision)?)?;
+    validate_restored_surface(baseline, &restored)?;
+    let changed = changed?;
+
+    println!(
+        "Classification correction and Revert\n  corrected Point ordinal: {ordinal}\n  correction Revision: {correction_revision}\n  changed Ground Input Points: {}\n  changed geometry hash: {}\n  Revert Revision: {revert_revision}\n  restored Ground Input Points: {}\n  restored geometry/topology hashes: yes",
+        changed.descriptor().input_point_count(),
+        changed.descriptor().geometry_hash(),
+        restored.descriptor().input_point_count(),
+    );
+    Ok(restored)
+}
+
+fn validate_changed_surface(baseline: &TerrainSurface, changed: &TerrainSurface) -> AppResult<()> {
     let expected_changed_count = baseline
         .descriptor()
         .input_point_count()
@@ -166,16 +193,13 @@ fn exercise_classification_correction_and_revert(
         )
         .into());
     }
+    Ok(())
+}
 
-    let revert_operation = OperationId::generate()?;
-    let (workspace, revert_revision) = commit_with_recovery(
-        workspace,
-        CommitRequest::revert_head(revert_operation, correction_revision),
-        "immediate-head Revert",
-        revert_operation,
-        recovery,
-    )?;
-    let restored = derive_ground(workspace.snapshot(revert_revision)?)?;
+fn validate_restored_surface(
+    baseline: &TerrainSurface,
+    restored: &TerrainSurface,
+) -> AppResult<()> {
     let restored_hashes = restored.descriptor().geometry_hash()
         == baseline.descriptor().geometry_hash()
         && restored.descriptor().topology_hash() == baseline.descriptor().topology_hash();
@@ -188,14 +212,7 @@ fn exercise_classification_correction_and_revert(
         )
         .into());
     }
-
-    println!(
-        "Classification correction and Revert\n  corrected Point ordinal: {ordinal}\n  correction Revision: {correction_revision}\n  changed Ground Input Points: {}\n  changed geometry hash: {}\n  Revert Revision: {revert_revision}\n  restored Ground Input Points: {}\n  restored geometry/topology hashes: yes",
-        changed.descriptor().input_point_count(),
-        changed.descriptor().geometry_hash(),
-        restored.descriptor().input_point_count(),
-    );
-    Ok(restored)
+    Ok(())
 }
 
 fn derive_ground(snapshot: point_workspace::Snapshot) -> AppResult<TerrainSurface> {

@@ -75,6 +75,33 @@ fn generated_las_and_laz_run_the_complete_host_without_a_gpu() {
     }
 }
 
+#[test]
+fn failed_changed_derivation_still_reverts_the_workspace() {
+    let directory = TestDirectory::new().expect("create test directory");
+    let source = directory.path().join("minimal-ground.las");
+    let index = directory.path().join("minimal-ground.pidx");
+    let workspace = directory.path().join("minimal-ground.pcw");
+    let target = directory.path().join("minimal-ground.xml");
+    write_minimal_ground_fixture(&source).expect("write minimal Ground fixture");
+
+    let correction = run_host(&source, &index, &workspace, &target, true, true);
+    assert!(!correction.status.success());
+    assert!(
+        String::from_utf8_lossy(&correction.stderr)
+            .contains("terrain requires at least three Ground Input Points; found 2"),
+        "{}",
+        diagnostics(&correction),
+    );
+    assert!(!recovery_record_path(&workspace).exists());
+    assert!(!target.exists());
+
+    let reopened = run_host(&source, &index, &workspace, &target, true, false);
+    assert_success(&reopened);
+    let stdout = String::from_utf8_lossy(&reopened.stdout);
+    assert!(stdout.contains("Ground Input Points: 3"), "{stdout}");
+    assert!(target.exists());
+}
+
 fn recovery_record_path(workspace: &Path) -> PathBuf {
     let mut path = workspace.as_os_str().to_os_string();
     path.push(".recovery");
@@ -205,6 +232,45 @@ fn write_fixture(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
             return_number: 1,
             number_of_returns: 1,
             classification: Classification::Ground,
+            ..Point::default()
+        })?;
+    }
+    writer.close()?;
+    Ok(())
+}
+
+fn write_minimal_ground_fixture(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    let mut builder = Builder::from((1, 4));
+    builder.point_format = Format::new(0)?;
+    builder.transforms = Vector {
+        x: Transform {
+            scale: 0.01,
+            offset: 0.0,
+        },
+        y: Transform {
+            scale: 0.01,
+            offset: 0.0,
+        },
+        z: Transform {
+            scale: 0.01,
+            offset: 0.0,
+        },
+    };
+    let mut writer = Writer::from_path(path, builder.into_header()?)?;
+    for ([x, y, z], classification) in [
+        ([-20.0, -20.0, 0.0], Classification::Unclassified),
+        ([-10.0, -10.0, 0.0], Classification::Unclassified),
+        ([0.0, 0.0, 0.0], Classification::Ground),
+        ([10.0, 0.0, 1.0], Classification::Ground),
+        ([0.0, 10.0, 2.0], Classification::Ground),
+    ] {
+        writer.write_point(Point {
+            x,
+            y,
+            z,
+            return_number: 1,
+            number_of_returns: 1,
+            classification,
             ..Point::default()
         })?;
     }
