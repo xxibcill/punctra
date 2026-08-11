@@ -4,7 +4,7 @@ use foundation_runtime::OperationControl;
 use point_contracts::WorldBounds;
 use point_source::SourceSpan;
 
-use crate::{IndexError, IndexLimit, PrepareLimits};
+use crate::{IndexError, IndexLimit, PrepareLimits, limits::require};
 
 pub(crate) const BLOCK_POINTS: u64 = 65_536;
 pub(crate) const MAX_NODE_SAMPLES: u64 = 4_096;
@@ -309,15 +309,4 @@ fn reserved_vec<T>(capacity: usize, allowed: u64) -> Result<Vec<T>, IndexError> 
             allowed,
         })?;
     Ok(values)
-}
-
-fn require(required: u64, allowed: u64, limit: IndexLimit) -> Result<(), IndexError> {
-    if required > allowed {
-        return Err(IndexError::ResourceLimit {
-            limit,
-            required,
-            allowed,
-        });
-    }
-    Ok(())
 }

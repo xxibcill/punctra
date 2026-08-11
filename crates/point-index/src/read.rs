@@ -6,6 +6,7 @@ use point_source::{AttributeSelection, PointBatches, ReadBudget, ReadRequest, So
 
 use crate::{
     DisplayCoverage, IndexError, IndexLimit, IndexNode, IndexNodeId, NodeReadBudget, PreparedIndex,
+    limits::require,
 };
 
 const SAMPLE_BYTES: u64 = 32;
@@ -486,15 +487,4 @@ fn max_batch_points(node: &IndexNode, budget: NodeReadBudget) -> Result<u64, Ind
         });
     }
     Ok(points)
-}
-
-fn require(required: u64, allowed: u64, limit: IndexLimit) -> Result<(), IndexError> {
-    if required > allowed {
-        return Err(IndexError::ResourceLimit {
-            limit,
-            required,
-            allowed,
-        });
-    }
-    Ok(())
 }

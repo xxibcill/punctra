@@ -15,6 +15,7 @@ use point_source::{Source, SourceSpan};
 use crate::{
     DisplayCoverage, IndexDescriptor, IndexError, IndexHierarchy, IndexLimit, IndexNode,
     IndexNodeId, PrepareLimits,
+    limits::require,
     model::{DISK_VERSION, RECIPE_VERSION},
     read::IndexSample,
     tree::{BLOCK_POINTS, LeafRecord, MAX_NODE_SAMPLES, SAMPLE_BYTES, TreePlan},
@@ -1211,17 +1212,6 @@ fn same_optional_bounds_bits(left: Option<WorldBounds>, right: Option<WorldBound
             .all(|(left, right)| left.to_bits() == right.to_bits()),
         _ => false,
     }
-}
-
-fn require(required: u64, allowed: u64, limit: IndexLimit) -> Result<(), IndexError> {
-    if required > allowed {
-        return Err(IndexError::ResourceLimit {
-            limit,
-            required,
-            allowed,
-        });
-    }
-    Ok(())
 }
 
 fn lock_recovering<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {

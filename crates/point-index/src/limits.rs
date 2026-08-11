@@ -14,6 +14,17 @@ const DEFAULT_CANDIDATE_BYTES: u64 = 16 * 1024 * 1024;
 const DEFAULT_DISPLAY_BYTES: u64 = 8 * 1024 * 1024;
 const DEFAULT_INDEX_BUFFER_BYTES: u64 = 16 * 1024 * 1024;
 
+pub(crate) fn require(required: u64, allowed: u64, limit: IndexLimit) -> Result<(), IndexError> {
+    if required > allowed {
+        return Err(IndexError::ResourceLimit {
+            limit,
+            required,
+            allowed,
+        });
+    }
+    Ok(())
+}
+
 /// Separate hard limits for index preparation and opening.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[allow(clippy::struct_field_names)]
