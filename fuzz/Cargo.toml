@@ -9,6 +9,7 @@ publish = false
 cargo-fuzz = true
 
 [dependencies]
+blake3 = "1.8.6"
 libfuzzer-sys = "0.4"
 point-contracts = { path = "../crates/point-contracts" }
 point-index = { path = "../crates/point-index" }
