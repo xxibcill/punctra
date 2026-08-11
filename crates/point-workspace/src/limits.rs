@@ -23,37 +23,95 @@ pub struct OpenLimits {
 }
 
 impl OpenLimits {
-    /// Creates explicit ceilings for one complete open or create operation.
+    /// Creates a fail-closed limit set with every ceiling set to zero.
     ///
     /// Every zero permits only zero use of that resource. Because a valid
     /// Workspace has a nonempty manifest and root Revision, zero manifest or
     /// Revision capacity makes every existing Workspace fail explicitly.
     #[must_use]
-    #[allow(clippy::too_many_arguments)]
-    pub const fn new(
-        max_manifest_bytes: u64,
-        max_operation_records: u64,
-        max_revision_files: u64,
-        max_revision_blocks: u64,
-        max_revision_rows: u64,
-        max_revision_block_bytes: u64,
-        max_single_file_bytes: u64,
-        max_total_persisted_bytes: u64,
-        max_working_bytes: u64,
-        max_resident_metadata_bytes: u64,
-    ) -> Self {
+    pub const fn new() -> Self {
         Self {
-            max_manifest_bytes,
-            max_operation_records,
-            max_revision_files,
-            max_revision_blocks,
-            max_revision_rows,
-            max_revision_block_bytes,
-            max_single_file_bytes,
-            max_total_persisted_bytes,
-            max_working_bytes,
-            max_resident_metadata_bytes,
+            max_manifest_bytes: 0,
+            max_operation_records: 0,
+            max_revision_files: 0,
+            max_revision_blocks: 0,
+            max_revision_rows: 0,
+            max_revision_block_bytes: 0,
+            max_single_file_bytes: 0,
+            max_total_persisted_bytes: 0,
+            max_working_bytes: 0,
+            max_resident_metadata_bytes: 0,
         }
+    }
+
+    /// Sets the maximum accepted manifest file length.
+    #[must_use]
+    pub const fn with_max_manifest_bytes(mut self, value: u64) -> Self {
+        self.max_manifest_bytes = value;
+        self
+    }
+
+    /// Sets the maximum combined durable intent and rejection records.
+    #[must_use]
+    pub const fn with_max_operation_records(mut self, value: u64) -> Self {
+        self.max_operation_records = value;
+        self
+    }
+
+    /// Sets the maximum immutable Revision files, including the root.
+    #[must_use]
+    pub const fn with_max_revision_files(mut self, value: u64) -> Self {
+        self.max_revision_files = value;
+        self
+    }
+
+    /// Sets the maximum checksummed Revision blocks scanned in total.
+    #[must_use]
+    pub const fn with_max_revision_blocks(mut self, value: u64) -> Self {
+        self.max_revision_blocks = value;
+        self
+    }
+
+    /// Sets the cumulative changed-row ceiling across all Revisions.
+    #[must_use]
+    pub const fn with_max_revision_rows(mut self, value: u64) -> Self {
+        self.max_revision_rows = value;
+        self
+    }
+
+    /// Sets the maximum encoded payload bytes in one Revision block.
+    #[must_use]
+    pub const fn with_max_revision_block_bytes(mut self, value: u64) -> Self {
+        self.max_revision_block_bytes = value;
+        self
+    }
+
+    /// Sets the maximum accepted length of any one persisted file.
+    #[must_use]
+    pub const fn with_max_single_file_bytes(mut self, value: u64) -> Self {
+        self.max_single_file_bytes = value;
+        self
+    }
+
+    /// Sets the cumulative persisted-byte ceiling charged during open.
+    #[must_use]
+    pub const fn with_max_total_persisted_bytes(mut self, value: u64) -> Self {
+        self.max_total_persisted_bytes = value;
+        self
+    }
+
+    /// Sets the peak temporary working-memory ceiling.
+    #[must_use]
+    pub const fn with_max_working_bytes(mut self, value: u64) -> Self {
+        self.max_working_bytes = value;
+        self
+    }
+
+    /// Sets the retained Revision and operation metadata ceiling.
+    #[must_use]
+    pub const fn with_max_resident_metadata_bytes(mut self, value: u64) -> Self {
+        self.max_resident_metadata_bytes = value;
+        self
     }
 
     /// Returns the maximum accepted manifest file length.
@@ -119,18 +177,17 @@ impl OpenLimits {
 
 impl Default for OpenLimits {
     fn default() -> Self {
-        Self::new(
-            MIB,
-            100_000,
-            100_001,
-            10_000_000,
-            100_000_000,
-            4 * MIB,
-            4 * GIB,
-            64 * GIB,
-            128 * MIB,
-            128 * MIB,
-        )
+        Self::new()
+            .with_max_manifest_bytes(MIB)
+            .with_max_operation_records(100_000)
+            .with_max_revision_files(100_001)
+            .with_max_revision_blocks(10_000_000)
+            .with_max_revision_rows(100_000_000)
+            .with_max_revision_block_bytes(4 * MIB)
+            .with_max_single_file_bytes(4 * GIB)
+            .with_max_total_persisted_bytes(64 * GIB)
+            .with_max_working_bytes(128 * MIB)
+            .with_max_resident_metadata_bytes(128 * MIB)
     }
 }
 
@@ -457,7 +514,7 @@ pub struct CommitLimits {
 }
 
 impl CommitLimits {
-    /// Creates explicit commit ceilings.
+    /// Creates a fail-closed limit set with every ceiling set to zero.
     ///
     /// Each value is a hard ceiling. Selected Points and input frames are
     /// charged even when many rows are unchanged. Zero selected, changed,
@@ -465,29 +522,81 @@ impl CommitLimits {
     /// publication of a nonempty Edit. Temporary bytes are cumulative across
     /// all staging files; working bytes are peak simultaneous memory.
     #[must_use]
-    #[allow(clippy::too_many_arguments)]
-    pub const fn new(
-        max_selected_points: u64,
-        max_changed_points: u64,
-        max_input_frames: u64,
-        max_block_points: u64,
-        max_block_bytes: u64,
-        max_working_bytes: u64,
-        max_temporary_bytes: u64,
-        max_revision_bytes: u64,
-        max_total_durable_bytes: u64,
-    ) -> Self {
+    pub const fn new() -> Self {
         Self {
-            max_selected_points,
-            max_changed_points,
-            max_input_frames,
-            max_block_points,
-            max_block_bytes,
-            max_working_bytes,
-            max_temporary_bytes,
-            max_revision_bytes,
-            max_total_durable_bytes,
+            max_selected_points: 0,
+            max_changed_points: 0,
+            max_input_frames: 0,
+            max_block_points: 0,
+            max_block_bytes: 0,
+            max_working_bytes: 0,
+            max_temporary_bytes: 0,
+            max_revision_bytes: 0,
+            max_total_durable_bytes: 0,
         }
+    }
+
+    /// Sets the maximum selected Points inspected by one commit.
+    #[must_use]
+    pub const fn with_max_selected_points(mut self, value: u64) -> Self {
+        self.max_selected_points = value;
+        self
+    }
+
+    /// Sets the maximum Points whose effective value may change.
+    #[must_use]
+    pub const fn with_max_changed_points(mut self, value: u64) -> Self {
+        self.max_changed_points = value;
+        self
+    }
+
+    /// Sets the maximum Point Set or prior-Revision frames consumed.
+    #[must_use]
+    pub const fn with_max_input_frames(mut self, value: u64) -> Self {
+        self.max_input_frames = value;
+        self
+    }
+
+    /// Sets the maximum change rows in one checksummed Revision block.
+    #[must_use]
+    pub const fn with_max_block_points(mut self, value: u64) -> Self {
+        self.max_block_points = value;
+        self
+    }
+
+    /// Sets the maximum encoded bytes in one Revision block.
+    #[must_use]
+    pub const fn with_max_block_bytes(mut self, value: u64) -> Self {
+        self.max_block_bytes = value;
+        self
+    }
+
+    /// Sets the combined peak commit working-memory ceiling.
+    #[must_use]
+    pub const fn with_max_working_bytes(mut self, value: u64) -> Self {
+        self.max_working_bytes = value;
+        self
+    }
+
+    /// Sets the cumulative commit staging-byte ceiling.
+    #[must_use]
+    pub const fn with_max_temporary_bytes(mut self, value: u64) -> Self {
+        self.max_temporary_bytes = value;
+        self
+    }
+
+    /// Sets the maximum final immutable Revision file length.
+    #[must_use]
+    pub const fn with_max_revision_bytes(mut self, value: u64) -> Self {
+        self.max_revision_bytes = value;
+        self
+    }
+
+    /// Sets the maximum total durable Workspace bytes after publication.
+    #[must_use]
+    pub const fn with_max_total_durable_bytes(mut self, value: u64) -> Self {
+        self.max_total_durable_bytes = value;
+        self
     }
 
     /// Returns the maximum selected Points inspected by one commit.
@@ -547,17 +656,16 @@ impl CommitLimits {
 
 impl Default for CommitLimits {
     fn default() -> Self {
-        Self::new(
-            10_000_000,
-            10_000_000,
-            1_000_000,
-            65_536,
-            4 * MIB,
-            128 * MIB,
-            2 * GIB,
-            2 * GIB,
-            64 * GIB,
-        )
+        Self::new()
+            .with_max_selected_points(10_000_000)
+            .with_max_changed_points(10_000_000)
+            .with_max_input_frames(1_000_000)
+            .with_max_block_points(65_536)
+            .with_max_block_bytes(4 * MIB)
+            .with_max_working_bytes(128 * MIB)
+            .with_max_temporary_bytes(2 * GIB)
+            .with_max_revision_bytes(2 * GIB)
+            .with_max_total_durable_bytes(64 * GIB)
     }
 }
 
@@ -613,7 +721,16 @@ mod tests {
 
     #[test]
     fn commit_limits_charge_selected_changed_and_durable_growth_separately() {
-        let limits = CommitLimits::new(10, 4, 2, 3, 30, 40, 50, 60, 70);
+        let limits = CommitLimits::new()
+            .with_max_selected_points(10)
+            .with_max_changed_points(4)
+            .with_max_input_frames(2)
+            .with_max_block_points(3)
+            .with_max_block_bytes(30)
+            .with_max_working_bytes(40)
+            .with_max_temporary_bytes(50)
+            .with_max_revision_bytes(60)
+            .with_max_total_durable_bytes(70);
         assert_eq!(limits.max_selected_points(), 10);
         assert_eq!(limits.max_changed_points(), 4);
         assert_eq!(limits.max_input_frames(), 2);

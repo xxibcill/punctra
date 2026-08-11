@@ -7,14 +7,19 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use blake3::Hasher;
 use foundation_runtime::OperationControl;
+use point_contracts::MAX_ATTRIBUTE_NAME_BYTES;
 use thiserror::Error;
 
-use crate::error::WorkspaceError;
+use crate::{
+    error::WorkspaceError,
+    util::{allocation_bytes, encode_hex},
+};
 
 pub(crate) const WORKSPACE_ID_BYTES: usize = 16;
 pub(crate) const OPERATION_ID_BYTES: usize = 16;
 pub(crate) const REVISION_ID_BYTES: usize = 32;
 pub(crate) const DIGEST_BYTES: usize = 32;
+pub(crate) const ATTRIBUTE_DATA_TYPE_U8: u8 = 1;
 
 const DISK_VERSION: u32 = 1;
 const SEMANTIC_VERSION: u32 = 1;
@@ -23,7 +28,7 @@ const REVISION_MAGIC: &[u8; 8] = b"PWSREV01";
 const BLOCK_MAGIC: &[u8; 8] = b"PWSBLK01";
 const FOOTER_MAGIC: &[u8; 8] = b"PWSEND01";
 const REJECTION_MAGIC: &[u8; 8] = b"PWSREJ01";
-pub(crate) const MANIFEST_BYTES: usize = 220;
+pub(crate) const MANIFEST_BYTES: usize = 228 + MAX_ATTRIBUTE_NAME_BYTES;
 const REVISION_HEADER_BYTES: usize = 384;
 const BLOCK_HEADER_BYTES: usize = 72;
 const ROW_BYTES: usize = 10;
@@ -97,12 +102,20 @@ type RevisionEntry = (u64, RevisionBytes, PathBuf);
 type OperationEntry = (OperationBytes, OperationFileKind, PathBuf);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct PersistedAttributeDefinition {
+    pub(crate) id: u32,
+    pub(crate) name_len: u32,
+    pub(crate) name: [u8; MAX_ATTRIBUTE_NAME_BYTES],
+    pub(crate) data_type: u8,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct ManifestFacts {
     pub(crate) workspace: WorkspaceBytes,
     pub(crate) source: DigestBytes,
     pub(crate) source_point_count: u64,
     pub(crate) position_transform_bits: [u64; 6],
-    pub(crate) classification_attribute: u32,
+    pub(crate) classification: PersistedAttributeDefinition,
     pub(crate) root_revision: RevisionBytes,
     pub(crate) source_contract: DigestBytes,
 }
@@ -468,8 +481,8 @@ impl Drop for SealedRevision {
 
 #[derive(Clone, Debug)]
 pub(crate) struct ValidatedRevision {
-    pub(crate) path: PathBuf,
-    pub(crate) facts: RevisionFacts,
+    path: PathBuf,
+    facts: RevisionFacts,
     blocks: Arc<Vec<BlockMetadata>>,
 }
 
@@ -663,6 +676,42 @@ impl Catalog {
 }
 
 impl ValidatedRevision {
+    pub(crate) const fn operation(&self) -> OperationBytes {
+        self.facts.candidate.operation
+    }
+
+    pub(crate) const fn request_digest(&self) -> DigestBytes {
+        self.facts.candidate.request_digest
+    }
+
+    pub(crate) const fn parent(&self) -> RevisionBytes {
+        self.facts.candidate.parent
+    }
+
+    pub(crate) const fn sequence(&self) -> u64 {
+        self.facts.candidate.sequence
+    }
+
+    pub(crate) const fn kind(&self) -> RevisionKind {
+        self.facts.candidate.kind
+    }
+
+    pub(crate) const fn point_set(&self) -> Option<PersistedPointSetFacts> {
+        self.facts.candidate.point_set
+    }
+
+    pub(crate) const fn revision(&self) -> RevisionBytes {
+        self.facts.revision
+    }
+
+    pub(crate) const fn row_count(&self) -> u64 {
+        self.facts.row_count
+    }
+
+    pub(crate) const fn block_count(&self) -> u64 {
+        self.facts.block_count
+    }
+
     pub(crate) const fn file_bytes(&self) -> u64 {
         self.facts.body_bytes + FOOTER_BYTES as u64
     }
@@ -1715,7 +1764,7 @@ fn validate_candidate_request(
             classification_request_digest(ClassificationRequestFacts {
                 workspace: candidate.workspace,
                 source: candidate.source,
-                classification_attribute: manifest.classification_attribute,
+                classification_attribute: manifest.classification.id,
                 point_set_workspace: candidate.workspace,
                 point_set_source: candidate.source,
                 parent: candidate.parent,
@@ -2003,7 +2052,7 @@ fn bounded_directory_child_path(
 }
 
 fn vector_bytes<T>(capacity: usize) -> u64 {
-    u64::try_from(capacity.saturating_mul(std::mem::size_of::<T>())).unwrap_or(u64::MAX)
+    allocation_bytes::<T>(capacity)
 }
 
 fn reserve_vec_transition<T>(
@@ -2558,7 +2607,11 @@ fn encode_manifest(facts: &ManifestFacts) -> [u8; MANIFEST_BYTES] {
     for value in facts.position_transform_bits {
         bytes.u64(value);
     }
-    bytes.u32(facts.classification_attribute);
+    bytes.u32(facts.classification.id);
+    bytes.u32(facts.classification.name_len);
+    bytes.push(&facts.classification.name);
+    bytes.u8(facts.classification.data_type);
+    bytes.push(&[0_u8; 3]);
     bytes.push(&facts.root_revision);
     bytes.push(&facts.source_contract);
     let checksum = domain_hash(MANIFEST_DOMAIN, bytes.written());
@@ -2585,7 +2638,18 @@ fn decode_manifest(
     for value in &mut position_transform_bits {
         *value = decoder.u64()?;
     }
-    let classification_attribute = decoder.u32()?;
+    let classification_id = decoder.u32()?;
+    let classification_name_len = decoder.u32()?;
+    let classification_name = decoder.array()?;
+    let classification_data_type = decoder.u8()?;
+    decoder.zeroes(3)?;
+    validate_persisted_attribute_definition(
+        classification_id,
+        classification_name_len,
+        &classification_name,
+        classification_data_type,
+        path,
+    )?;
     let root_revision = decoder.array()?;
     let source_contract = decoder.array()?;
     decoder.finish()?;
@@ -2594,10 +2658,40 @@ fn decode_manifest(
         source,
         source_point_count,
         position_transform_bits,
-        classification_attribute,
+        classification: PersistedAttributeDefinition {
+            id: classification_id,
+            name_len: classification_name_len,
+            name: classification_name,
+            data_type: classification_data_type,
+        },
         root_revision,
         source_contract,
     })
+}
+
+fn validate_persisted_attribute_definition(
+    id: u32,
+    name_len: u32,
+    name: &[u8; MAX_ATTRIBUTE_NAME_BYTES],
+    data_type: u8,
+    path: &Path,
+) -> Result<(), PersistenceError> {
+    let name_len = usize::try_from(name_len)
+        .ok()
+        .filter(|length| (1..=MAX_ATTRIBUTE_NAME_BYTES).contains(length))
+        .ok_or_else(|| corrupt_value(path, "classification Attribute name length is invalid"))?;
+    let definition_name = std::str::from_utf8(&name[..name_len])
+        .map_err(|_| corrupt_value(path, "classification Attribute name is not UTF-8"))?;
+    if id == 0 || definition_name.trim().is_empty() {
+        return corrupt(path, "classification Attribute definition is invalid");
+    }
+    if name[name_len..].iter().any(|byte| *byte != 0) {
+        return corrupt(path, "classification Attribute name padding is not zero");
+    }
+    if data_type != ATTRIBUTE_DATA_TYPE_U8 {
+        return incompatible(path, "classification Attribute type is not U8");
+    }
+    Ok(())
 }
 
 fn encode_revision_header(facts: &RevisionFacts) -> [u8; REVISION_HEADER_BYTES] {
@@ -2998,16 +3092,6 @@ fn parse_operation_name(name: &str) -> Option<(OperationBytes, OperationFileKind
     Some((decode_hex(stem)?, OperationFileKind::Reject))
 }
 
-fn encode_hex(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut result = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        result.push(char::from(HEX[usize::from(byte >> 4)]));
-        result.push(char::from(HEX[usize::from(byte & 0x0f)]));
-    }
-    result
-}
-
 fn decode_hex<const N: usize>(text: &str) -> Option<[u8; N]> {
     if text.len() != N * 2 {
         return None;
@@ -3053,9 +3137,24 @@ fn create_temporary(
 // Cleanup deliberately recognizes only canonical lowercase private filenames.
 #[allow(clippy::case_sensitive_file_extension_comparisons)]
 fn is_recognized_scratch(name: &str) -> bool {
-    (name.starts_with("revision-") || name.starts_with("reject-") || name.starts_with("manifest-"))
-        && name.ends_with(".tmp")
-        || name.starts_with("point-set-") && name.ends_with(".pset")
+    const RANDOM_HEX_BYTES: usize = 16 * 2;
+    [
+        ("revision-", ".tmp"),
+        ("reject-", ".tmp"),
+        ("manifest-", ".tmp"),
+        ("point-set-", ".pset"),
+    ]
+    .into_iter()
+    .any(|(prefix, suffix)| {
+        name.strip_prefix(prefix)
+            .and_then(|remainder| remainder.strip_suffix(suffix))
+            .is_some_and(|nonce| {
+                nonce.len() == RANDOM_HEX_BYTES
+                    && nonce
+                        .bytes()
+                        .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+            })
+    })
 }
 
 fn acquire_lock(root: &Path) -> Result<File, PersistenceError> {
@@ -3493,6 +3592,7 @@ pub(crate) mod test_fault {
         Error,
         Cancel,
         Panic,
+        PauseThenContinue,
         PauseThenPanic,
     }
 
@@ -3601,22 +3701,29 @@ pub(crate) mod test_fault {
             )),
             Some((Action::Cancel, _)) => Err(PersistenceError::Cancelled),
             Some((Action::Panic, _)) => panic!("injected panic at {point:?}"),
+            Some((Action::PauseThenContinue, pause)) => {
+                pause_until_released(&pause);
+                Ok(())
+            }
             Some((Action::PauseThenPanic, pause)) => {
-                let mut flags = pause
-                    .flags
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner);
-                flags.0 = true;
-                pause.changed.notify_all();
-                while !flags.1 {
-                    flags = pause
-                        .changed
-                        .wait(flags)
-                        .unwrap_or_else(std::sync::PoisonError::into_inner);
-                }
-                drop(flags);
+                pause_until_released(&pause);
                 panic!("injected paused panic at {point:?}");
             }
+        }
+    }
+
+    fn pause_until_released(pause: &PauseState) {
+        let mut flags = pause
+            .flags
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        flags.0 = true;
+        pause.changed.notify_all();
+        while !flags.1 {
+            flags = pause
+                .changed
+                .wait(flags)
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
         }
     }
 }
@@ -3653,12 +3760,19 @@ mod tests {
     }
 
     fn manifest() -> ManifestFacts {
+        let mut classification_name = [0_u8; MAX_ATTRIBUTE_NAME_BYTES];
+        classification_name[..14].copy_from_slice(b"classification");
         ManifestFacts {
             workspace: [1; WORKSPACE_ID_BYTES],
             source: [2; DIGEST_BYTES],
             source_point_count: 42,
             position_transform_bits: [1, 2, 3, 4, 5, 6],
-            classification_attribute: 7,
+            classification: PersistedAttributeDefinition {
+                id: 7,
+                name_len: 14,
+                name: classification_name,
+                data_type: ATTRIBUTE_DATA_TYPE_U8,
+            },
             root_revision: [3; REVISION_ID_BYTES],
             source_contract: [4; DIGEST_BYTES],
         }
@@ -3683,7 +3797,7 @@ mod tests {
         facts.request_digest = classification_request_digest(ClassificationRequestFacts {
             workspace: facts.workspace,
             source: facts.source,
-            classification_attribute: manifest().classification_attribute,
+            classification_attribute: manifest().classification.id,
             point_set_workspace: facts.workspace,
             point_set_source: facts.source,
             parent: facts.parent,
@@ -3901,6 +4015,27 @@ mod tests {
     }
 
     #[test]
+    fn scratch_name_requires_canonical_width_and_lower_hex() {
+        for name in [
+            "revision-deadbeefdeadbeefdeadbeefdeadbeef.tmp",
+            "reject-deadbeefdeadbeefdeadbeefdeadbeef.tmp",
+            "manifest-deadbeefdeadbeefdeadbeefdeadbeef.tmp",
+            "point-set-deadbeefdeadbeefdeadbeefdeadbeef.pset",
+        ] {
+            assert!(is_recognized_scratch(name), "canonical name {name}");
+        }
+        for name in [
+            "revision-user-backup.tmp",
+            "revision-deadbeef.tmp",
+            "revision-DEADBEEFDEADBEEFDEADBEEFDEADBEEF.tmp",
+            "revision-deadbeefdeadbeefdeadbeefdeadbeef.pset",
+            "point-set-deadbeefdeadbeefdeadbeefdeadbeef.tmp",
+        ] {
+            assert!(!is_recognized_scratch(name), "noncanonical name {name}");
+        }
+    }
+
+    #[test]
     fn empty_candidate_needs_no_block_capacity_and_sealed_drop_cleans_stage() {
         let directory = TestDirectory::new();
         let store = initialized_store(&directory);
@@ -3938,8 +4073,12 @@ mod tests {
         File::create(directory.path().join("workspace.lock")).expect("partial lock");
         fs::create_dir(directory.path().join("operations")).expect("partial operations");
         fs::create_dir(directory.path().join("scratch")).expect("partial scratch");
-        File::create(directory.path().join("scratch/revision-deadbeef.tmp"))
-            .expect("recognized partial stage");
+        File::create(
+            directory
+                .path()
+                .join("scratch/revision-deadbeefdeadbeefdeadbeefdeadbeef.tmp"),
+        )
+        .expect("recognized partial stage");
 
         let mut store = Store::create(directory.path()).expect("resume recognized partial create");
         assert!(directory.path().join("revisions").is_dir());
@@ -3954,6 +4093,20 @@ mod tests {
             .expect("complete resumed create");
         drop(store);
         assert!(directory.path().join("manifest.pwm").is_file());
+    }
+
+    #[test]
+    fn create_preserves_noncanonical_scratch_files() {
+        let directory = TestDirectory::new();
+        fs::create_dir(directory.path()).expect("partial root");
+        File::create(directory.path().join("workspace.lock")).expect("partial lock");
+        fs::create_dir(directory.path().join("operations")).expect("partial operations");
+        fs::create_dir(directory.path().join("scratch")).expect("partial scratch");
+        let sentinel = directory.path().join("scratch/revision-user-backup.tmp");
+        File::create(&sentinel).expect("noncanonical scratch sentinel");
+
+        assert!(Store::create(directory.path()).is_err());
+        assert!(sentinel.is_file());
     }
 
     #[test]

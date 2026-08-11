@@ -11,13 +11,13 @@ use point_contracts::{
     PositionTransform, QuantizedPositions, SourceId, SourceMetadata, WorldBounds,
 };
 use point_source::adapter::{
-    AdapterRead, AdapterReadRequest, AdapterVerified, CandidateAdapter, FullVerification,
-    ReadAdapter,
+    AdapterContract, AdapterRead, AdapterReadRequest, AdapterVerified, CandidateAdapter,
+    FullVerification, ReadAdapter,
 };
 use point_source::{
     AttributeSelection, MAX_ADAPTER_NAME_BYTES, MAX_ADAPTER_VERSION_BYTES, MAX_FAST_TOKEN_BYTES,
     MAX_INPUT_ATTRIBUTE_IDS, MAX_INPUT_SOURCE_SPANS, MAX_LOGICAL_ORDER_BYTES,
-    MAX_SOURCE_DIAGNOSTIC_BYTES, OpenOptions, ReadBudget, ReadRequest, SourceCandidate,
+    MAX_SOURCE_DIAGNOSTIC_BYTES, OpenOptions, ReadBudget, ReadLimit, ReadRequest, SourceCandidate,
     SourceDiagnostic, SourceError, SourcePreview, SourceSpan, VerificationPolicy,
 };
 
@@ -57,9 +57,7 @@ impl FakeCandidate {
     fn verified_with_hash(&self, content_hash: ContentHash) -> AdapterVerified {
         let reader: Arc<dyn ReadAdapter> = self.reader.clone();
         AdapterVerified::new(
-            "fake",
-            self.adapter_version,
-            "input row order",
+            AdapterContract::new("fake", self.adapter_version, "input row order").unwrap(),
             Arc::new(self.metadata.clone()),
             content_hash,
             FAST_TOKEN.to_vec(),
@@ -512,6 +510,24 @@ fn attribute_ids_are_resolved_sorted_and_deduplicated_for_adapter_and_summary() 
 }
 
 #[test]
+fn unavailable_requested_attribute_is_an_unsupported_schema() {
+    let fixture = fixture();
+    let source = fixture
+        .candidate(63, FastBehavior::Match)
+        .open(OpenOptions::identify())
+        .blocking_wait()
+        .unwrap();
+    let unavailable = AttributeId::new(999).unwrap();
+
+    let Err(error) =
+        source.read(ReadRequest::all().attributes(AttributeSelection::only([unavailable])))
+    else {
+        panic!("the unavailable Attribute must fail before reading");
+    };
+    assert!(matches!(error, SourceError::UnsupportedSchema { .. }));
+}
+
+#[test]
 fn max_spans_applies_after_overlap_normalization() {
     let fixture = fixture();
     let source = fixture
@@ -552,7 +568,7 @@ fn max_spans_applies_after_overlap_normalization() {
     assert!(matches!(
         disjoint,
         Err(SourceError::ResourceLimit {
-            limit: "normalized Source spans",
+            limit: ReadLimit::NormalizedSourceSpans,
             required: 2,
             allowed: 1,
         })
@@ -587,7 +603,7 @@ fn raw_span_safety_cap_does_not_eagerly_poll_known_oversized_input() {
     assert!(matches!(
         result,
         Err(SourceError::ResourceLimit {
-            limit: "input Source spans",
+            limit: ReadLimit::InputSourceSpans,
             ..
         })
     ));
@@ -622,7 +638,7 @@ fn attribute_selection_is_bounded_before_collection() {
     assert!(matches!(
         result,
         Err(SourceError::ResourceLimit {
-            limit: "input Attribute identities",
+            limit: ReadLimit::InputAttributeIdentities,
             ..
         })
     ));
@@ -645,7 +661,7 @@ fn total_point_budget_is_enforced_before_adapter_start() {
     assert!(matches!(
         result,
         Err(SourceError::ResourceLimit {
-            limit: "requested Point count",
+            limit: ReadLimit::RequestedPoints,
             required: 3,
             allowed: 2,
         })
@@ -661,7 +677,11 @@ fn empty_selection_completes_with_exact_facts_and_complete_progress() {
         .blocking_wait()
         .unwrap();
     let mut points = source
-        .read(ReadRequest::all().spans(std::iter::empty::<SourceSpan>()))
+        .read(
+            ReadRequest::all()
+                .spans(std::iter::empty::<SourceSpan>())
+                .budget(ReadBudget::new(1, 1).unwrap()),
+        )
         .unwrap();
     let control = points.handle();
 
@@ -727,13 +747,47 @@ fn point_budget_failure_is_fused_without_summary() {
     assert!(matches!(
         points.next(),
         Err(SourceError::ResourceLimit {
-            limit: "batch Points",
+            limit: ReadLimit::BatchPoints,
             ..
         })
     ));
     assert!(points.next().unwrap().is_none());
     assert!(points.summary().is_none());
     assert_ne!(control.progress().phase(), ProgressPhase::COMPLETE);
+}
+
+#[test]
+fn canonical_payload_budget_is_resolved_before_adapter_start() {
+    let fixture = fixture();
+    let source = fixture
+        .candidate(5, FastBehavior::Match)
+        .open(OpenOptions::identify())
+        .blocking_wait()
+        .unwrap();
+
+    let two_point_payload = 2 * (24 + 2);
+    let _points = source
+        .read(
+            ReadRequest::all()
+                .spans([SourceSpan::new(0, 2).unwrap()])
+                .budget(ReadBudget::new(u64::MAX, two_point_payload).unwrap()),
+        )
+        .unwrap();
+    assert_eq!(fixture.reader.last_request().max_output_batch_points(), 2);
+
+    let result = source.read(
+        ReadRequest::all()
+            .spans([SourceSpan::new(0, 1).unwrap()])
+            .budget(ReadBudget::new(1, 25).unwrap()),
+    );
+    assert!(matches!(
+        result,
+        Err(SourceError::ResourceLimit {
+            limit: ReadLimit::BatchPayloadBytes,
+            required: 26,
+            allowed: 25,
+        })
+    ));
 }
 
 #[test]
@@ -874,6 +928,36 @@ fn source_record_deserialization_enforces_all_adapter_owned_bounds() {
 }
 
 #[test]
+fn adapter_contract_validates_identity_fields_once() {
+    let contract = AdapterContract::new("adapter", "1", "input row order").unwrap();
+    assert_eq!(contract.name(), "adapter");
+    assert_eq!(contract.version(), "1");
+    assert_eq!(contract.logical_order(), "input row order");
+
+    for invalid in [
+        AdapterContract::new(" ", "1", "input row order"),
+        AdapterContract::new("adapter", " ", "input row order"),
+        AdapterContract::new("adapter", "1", " "),
+        AdapterContract::new(
+            "x".repeat(MAX_ADAPTER_NAME_BYTES + 1),
+            "1",
+            "input row order",
+        ),
+        AdapterContract::new(
+            "adapter",
+            "x".repeat(MAX_ADAPTER_VERSION_BYTES + 1),
+            "input row order",
+        ),
+        AdapterContract::new("adapter", "1", "x".repeat(MAX_LOGICAL_ORDER_BYTES + 1)),
+    ] {
+        assert!(matches!(
+            invalid,
+            Err(SourceError::SourceContractMismatch { .. })
+        ));
+    }
+}
+
+#[test]
 fn runtime_cancellation_has_one_domain_error() {
     assert!(matches!(
         SourceError::from(RuntimeError::Cancelled),
@@ -883,6 +967,32 @@ fn runtime_cancellation_has_one_domain_error() {
         SourceError::from(RuntimeError::WorkerPanicked),
         SourceError::Runtime(RuntimeError::WorkerPanicked)
     ));
+}
+
+#[test]
+fn read_limits_have_stable_public_names() {
+    for (limit, expected) in [
+        (ReadLimit::MaxBatchPoints, "max batch Points"),
+        (ReadLimit::MaxBatchPayloadBytes, "max batch payload bytes"),
+        (ReadLimit::RequestedPoints, "requested Point count"),
+        (ReadLimit::InputSourceSpans, "input Source spans"),
+        (ReadLimit::NormalizedSourceSpans, "normalized Source spans"),
+        (
+            ReadLimit::InputAttributeIdentities,
+            "input Attribute identities",
+        ),
+        (ReadLimit::BatchPoints, "batch Points"),
+        (ReadLimit::PointPayloadBytes, "Point payload bytes"),
+        (ReadLimit::BatchPayloadBytes, "batch payload bytes"),
+        (ReadLimit::AdapterWorkingBytes, "adapter working bytes"),
+        (
+            ReadLimit::VerificationWorkingBytes,
+            "verification working bytes",
+        ),
+        (ReadLimit::EmittedPoints, "emitted Point count"),
+    ] {
+        assert_eq!(limit.to_string(), expected);
+    }
 }
 
 #[test]

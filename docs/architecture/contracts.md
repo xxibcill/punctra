@@ -102,6 +102,13 @@ support. COPC and remote reads remain deferred.
 artifact or deterministically building/resuming one. A complete artifact is
 checksummed, Source-bound, synced, and published without replacement.
 
+The v0.4 persisted recipe fixes Source blocks at no more than 65,536 Points,
+uses a longest-centroid-extent median-split binary BVH with nonzero root-first
+node identities, and retains at most 4,096 deterministic exact `(ordinal,
+ticks)` samples per internal node. Disk version 1 stores multibyte integers and
+persisted `f64` bit patterns little-endian; magic values, Source identities,
+and BLAKE3 checksums retain their declared byte order.
+
 `PreparedIndex` retains the verified Source and exposes it by shared reference.
 Its candidate plan is a complete, sorted, disjoint set of Source spans that may
 contain false positives but must not omit any exact world-box match.
@@ -109,6 +116,12 @@ contain false positives but must not omit any exact world-box match.
 Internal-node samples provide bounded display Coverage only. Complete leaf
 reads come from the retained Source. Neither samples nor hierarchy membership
 define Point Identity or exact Workspace Query results.
+
+Opening verifies deterministic bottom-k sample ordinals against descendant
+Source spans without rereading Source Points. Complete index artifacts are
+trusted local rebuildable caches: their unkeyed BLAKE3 checksums detect
+accidental corruption and concurrent mutation, not adversarial rewriting.
+Untrusted artifacts are discarded and rebuilt from the verified Source.
 
 ## Workspace contract
 

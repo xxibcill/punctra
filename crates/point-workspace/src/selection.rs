@@ -1,4 +1,4 @@
-use std::{mem, sync::Arc};
+use std::sync::Arc;
 
 use foundation_runtime::{Job, OperationControl, ProgressPhase, ProgressSnapshot};
 use point_contracts::{AttributeId, PointBatch, PointId, SourceId, WorldBounds};
@@ -8,6 +8,7 @@ use point_source::{AttributeSelection, ReadBudget, ReadRequest, SourceSpan};
 use crate::{
     PointQuery, PointSet, PointSetLimits, Snapshot, SnapshotProvenance, WorkspaceError,
     point_set::{PointSetBuilder, PointSetRecord},
+    util::allocation_bytes,
     workspace::{OverlayLimits, OverlayUsage, Session},
 };
 
@@ -569,12 +570,6 @@ fn require_peak(required: u64, allowed: u64, limit: &'static str) -> Result<(), 
         });
     }
     Ok(())
-}
-
-fn allocation_bytes<T>(values: usize) -> u64 {
-    u64::try_from(values)
-        .unwrap_or(u64::MAX)
-        .saturating_mul(u64::try_from(mem::size_of::<T>()).unwrap_or(u64::MAX))
 }
 
 fn grow_working_vec<T>(

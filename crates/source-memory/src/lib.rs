@@ -35,16 +35,15 @@ use blake3::Hasher;
 use foundation_runtime::{OperationReporter, ProgressPhase, ProgressSnapshot};
 use point_contracts::{
     AttributeColumn, AttributeColumns, AttributeDataType, AttributeId, AttributeSchema,
-    AttributeValues, ContentHash, ContractError, CoordinateReference, PointBatch,
-    PositionTransform, QuantizedPositions, SourceMetadata, WorldBounds,
+    AttributeValues, AttributeValuesView, ContentHash, ContractError, CoordinateReference,
+    PointBatch, PositionTransform, QuantizedPositions, SourceMetadata, WorldBounds,
 };
 use point_source::adapter::{
-    AdapterRead, AdapterReadRequest, AdapterVerified, CandidateAdapter, FullVerification,
-    ReadAdapter,
+    AdapterContract, AdapterRead, AdapterReadRequest, AdapterVerified, CandidateAdapter,
+    FullVerification, ReadAdapter,
 };
 use point_source::{
-    AttributeSelection, OpenOptions, ReadBudget, SourceCandidate, SourceError, SourceJob,
-    SourcePreview,
+    AttributeSelection, OpenOptions, SourceCandidate, SourceError, SourceJob, SourcePreview,
 };
 use thiserror::Error;
 
@@ -268,9 +267,8 @@ impl CandidateAdapter for MemoryCandidate {
 
 fn verified(state: &Arc<MemoryState>, epoch: u64, content_hash: ContentHash) -> AdapterVerified {
     AdapterVerified::new(
-        ADAPTER_NAME,
-        ADAPTER_VERSION,
-        LOGICAL_ORDER,
+        AdapterContract::new(ADAPTER_NAME, ADAPTER_VERSION, LOGICAL_ORDER)
+            .expect("the static memory adapter contract is valid"),
         Arc::clone(&state.metadata),
         content_hash,
         epoch.to_le_bytes().to_vec(),
@@ -295,12 +293,13 @@ impl ReadAdapter for MemoryReadAdapter {
     ) -> Result<Box<dyn AdapterRead>, SourceError> {
         ensure_unchanged(&self.state, self.verified_epoch)?;
         let selected_attributes = selected_attributes(&self.state.metadata, request.attributes());
+        let max_rows = request.max_output_batch_points();
         Ok(Box::new(MemoryRead {
             state: Arc::clone(&self.state),
             verified_epoch: self.verified_epoch,
             spans: request.spans().to_vec(),
             selected_attributes,
-            budget: request.budget(),
+            max_rows,
             source,
             reporter,
             span_index: 0,
@@ -318,7 +317,7 @@ struct MemoryRead {
     verified_epoch: u64,
     spans: Vec<point_source::SourceSpan>,
     selected_attributes: Vec<AttributeId>,
-    budget: ReadBudget,
+    max_rows: u64,
     source: point_contracts::SourceId,
     reporter: OperationReporter,
     span_index: usize,
@@ -346,12 +345,7 @@ impl AdapterRead for MemoryRead {
         }
 
         let remaining = span.end_ordinal() - self.next_ordinal;
-        let mut point_count = batch_point_count(
-            remaining,
-            self.budget,
-            &self.state.metadata,
-            &self.selected_attributes,
-        )?;
+        let mut point_count = remaining.min(self.max_rows);
         if corrupt_ordinal > self.next_ordinal && corrupt_ordinal < self.next_ordinal + point_count
         {
             point_count = corrupt_ordinal - self.next_ordinal;
@@ -432,38 +426,6 @@ fn projected_columns(
         })
         .collect::<Result<Vec<_>, SourceError>>()?;
     AttributeColumns::new(projected, rows.end - rows.start).map_err(contract_as_source)
-}
-
-fn batch_point_count(
-    remaining: u64,
-    budget: ReadBudget,
-    metadata: &SourceMetadata,
-    selected: &[AttributeId],
-) -> Result<u64, SourceError> {
-    let bytes_per_point = selected.iter().try_fold(24_u64, |total, &id| {
-        let definition = metadata
-            .attributes()
-            .get(id)
-            .ok_or(SourceError::UnknownAttribute { attribute: id })?;
-        total
-            .checked_add(u64::from(definition.data_type().element_bytes()))
-            .ok_or(SourceError::ResourceLimit {
-                limit: "Point payload bytes",
-                required: u64::MAX,
-                allowed: budget.max_batch_payload_bytes(),
-            })
-    })?;
-    let points_by_bytes = budget.max_batch_payload_bytes() / bytes_per_point;
-    if points_by_bytes == 0 {
-        return Err(SourceError::ResourceLimit {
-            limit: "batch payload bytes",
-            required: bytes_per_point,
-            allowed: budget.max_batch_payload_bytes(),
-        });
-    }
-    Ok(remaining
-        .min(budget.max_batch_points())
-        .min(points_by_bytes))
 }
 
 fn ensure_unchanged(state: &MemoryState, verified_epoch: u64) -> Result<(), SourceError> {
@@ -663,81 +625,21 @@ fn hash_values(
     values: &AttributeValues,
     reporter: &OperationReporter,
 ) -> Result<(), SourceError> {
-    hash_attribute_type(hasher, values.data_type());
-    hash_len(hasher, values.len())?;
-    match values.data_type() {
-        AttributeDataType::I8 => {
-            hash_numeric(
-                hasher,
-                values.as_i8().expect("type-matched values"),
-                reporter,
-            )?;
-        }
-        AttributeDataType::U8 => {
-            hash_raw_bytes(
-                hasher,
-                values.as_u8().expect("type-matched values"),
-                reporter,
-            )?;
-        }
-        AttributeDataType::I16 => {
-            hash_numeric(
-                hasher,
-                values.as_i16().expect("type-matched values"),
-                reporter,
-            )?;
-        }
-        AttributeDataType::U16 => {
-            hash_numeric(
-                hasher,
-                values.as_u16().expect("type-matched values"),
-                reporter,
-            )?;
-        }
-        AttributeDataType::I32 => {
-            hash_numeric(
-                hasher,
-                values.as_i32().expect("type-matched values"),
-                reporter,
-            )?;
-        }
-        AttributeDataType::U32 => {
-            hash_numeric(
-                hasher,
-                values.as_u32().expect("type-matched values"),
-                reporter,
-            )?;
-        }
-        AttributeDataType::I64 => {
-            hash_numeric(
-                hasher,
-                values.as_i64().expect("type-matched values"),
-                reporter,
-            )?;
-        }
-        AttributeDataType::U64 => {
-            hash_numeric(
-                hasher,
-                values.as_u64().expect("type-matched values"),
-                reporter,
-            )?;
-        }
-        AttributeDataType::F32 => {
-            hash_numeric(
-                hasher,
-                values.as_f32().expect("type-matched values"),
-                reporter,
-            )?;
-        }
-        AttributeDataType::F64 => {
-            hash_numeric(
-                hasher,
-                values.as_f64().expect("type-matched values"),
-                reporter,
-            )?;
-        }
-        AttributeDataType::FixedBytes(_) => {
-            let (_, payload) = values.as_fixed_bytes().expect("type-matched values");
+    let view = values.view();
+    hash_attribute_type(hasher, view.data_type());
+    hash_len(hasher, view.len())?;
+    match view {
+        AttributeValuesView::I8(values) => hash_numeric(hasher, values, reporter)?,
+        AttributeValuesView::U8(values) => hash_raw_bytes(hasher, values, reporter)?,
+        AttributeValuesView::I16(values) => hash_numeric(hasher, values, reporter)?,
+        AttributeValuesView::U16(values) => hash_numeric(hasher, values, reporter)?,
+        AttributeValuesView::I32(values) => hash_numeric(hasher, values, reporter)?,
+        AttributeValuesView::U32(values) => hash_numeric(hasher, values, reporter)?,
+        AttributeValuesView::I64(values) => hash_numeric(hasher, values, reporter)?,
+        AttributeValuesView::U64(values) => hash_numeric(hasher, values, reporter)?,
+        AttributeValuesView::F32(values) => hash_numeric(hasher, values, reporter)?,
+        AttributeValuesView::F64(values) => hash_numeric(hasher, values, reporter)?,
+        AttributeValuesView::FixedBytes { payload, .. } => {
             hash_raw_bytes(hasher, payload, reporter)?;
         }
     }

@@ -4,7 +4,7 @@ use point_contracts::{PositionTransform, SourceId, WorldBounds};
 use point_source::{Source, SourceSpan};
 
 use crate::{
-    CandidateLimits, IndexError, NodeReadBudget,
+    CandidateLimits, IndexError, IndexLimit, NodeReadBudget,
     persistence::ArtifactReader,
     read::{self, IndexPointBatches},
 };
@@ -279,7 +279,7 @@ impl PrepareReport {
 /// Complete conservative candidate spans and exact plan facts.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CandidatePlan {
-    spans: Vec<SourceSpan>,
+    spans: Box<[SourceSpan]>,
     candidate_point_count: u64,
     visited_node_count: u64,
 }
@@ -390,7 +390,7 @@ fn candidates(
 ) -> Result<CandidatePlan, IndexError> {
     let Some(root) = hierarchy.root() else {
         return Ok(CandidatePlan {
-            spans: Vec::new(),
+            spans: Box::new([]),
             candidate_point_count: 0,
             visited_node_count: 0,
         });
@@ -409,7 +409,7 @@ fn candidates(
         visited = checked_limit(
             visited,
             1,
-            "visited hierarchy nodes",
+            IndexLimit::VisitedHierarchyNodes,
             limits.max_visited_nodes(),
         )?;
         check_working_bytes(
@@ -427,7 +427,7 @@ fn candidates(
             candidate_points = checked_limit(
                 candidate_points,
                 span.point_count(),
-                "candidate Points",
+                IndexLimit::CandidatePoints,
                 limits.max_candidate_points(),
             )?;
             push_span_charged(
@@ -456,13 +456,13 @@ fn candidates(
     let output_count = u64::try_from(spans.len()).unwrap_or(u64::MAX);
     if output_count > limits.max_output_spans() {
         return Err(IndexError::ResourceLimit {
-            limit: "candidate Source spans",
+            limit: IndexLimit::CandidateSourceSpans,
             required: output_count,
             allowed: limits.max_output_spans(),
         });
     }
     Ok(CandidatePlan {
-        spans,
+        spans: spans.into_boxed_slice(),
         candidate_point_count: candidate_points,
         visited_node_count: visited,
     })
@@ -471,7 +471,7 @@ fn candidates(
 fn checked_limit(
     current: u64,
     added: u64,
-    limit: &'static str,
+    limit: IndexLimit,
     allowed: u64,
 ) -> Result<u64, IndexError> {
     let required = current.saturating_add(added);
@@ -499,7 +499,7 @@ fn check_working_bytes(
     let required = stack_bytes.saturating_add(span_bytes);
     if required > allowed {
         return Err(IndexError::ResourceLimit {
-            limit: "candidate working bytes",
+            limit: IndexLimit::CandidateWorkingBytes,
             required,
             allowed,
         });
@@ -518,7 +518,7 @@ fn push_charged(
         stack
             .try_reserve_exact(1)
             .map_err(|_| IndexError::ResourceLimit {
-                limit: "candidate working bytes",
+                limit: IndexLimit::CandidateWorkingBytes,
                 required: allowed.saturating_add(1),
                 allowed,
             })?;
@@ -539,7 +539,7 @@ fn push_span_charged(
         spans
             .try_reserve_exact(1)
             .map_err(|_| IndexError::ResourceLimit {
-                limit: "candidate working bytes",
+                limit: IndexLimit::CandidateWorkingBytes,
                 required: allowed.saturating_add(1),
                 allowed,
             })?;
@@ -564,7 +564,7 @@ fn preflight_capacity<Stack, Span>(
         );
     if required > allowed {
         return Err(IndexError::ResourceLimit {
-            limit: "candidate working bytes",
+            limit: IndexLimit::CandidateWorkingBytes,
             required,
             allowed,
         });

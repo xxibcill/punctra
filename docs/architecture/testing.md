@@ -86,8 +86,8 @@ LAS, and LAZ benchmarks enforce adapter-specific memory ceilings.
 - candidate spans are sorted, disjoint, and bounded;
 - build/resume produces deterministic descriptor and artifact bytes;
 - valid-prefix recovery resumes at the exact durable boundary;
-- incompatible, corrupt, truncated, over-limit, and racing targets fail
-  without replacement;
+- incompatible, corrupt, truncated, over-limit, racing, and checksum-valid
+  non-recipe-sample targets fail without replacement;
 - display samples and exact leaves preserve Source-aware identities/ticks;
 - LAZ fixed-chunk seeks cross chunk boundaries exactly; and
 - process smoke covers Full verification, Built then Opened index paths, and

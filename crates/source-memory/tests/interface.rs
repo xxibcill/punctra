@@ -7,8 +7,8 @@ use point_contracts::{
     PositionTransform, SourceMetadata, WorldBounds,
 };
 use point_source::{
-    AttributeSelection, OpenOptions, ReadBudget, ReadRequest, Source, SourceError, SourceSpan,
-    VerificationPolicy,
+    AttributeSelection, OpenOptions, ReadBudget, ReadLimit, ReadRequest, Source, SourceError,
+    SourceSpan, VerificationPolicy,
 };
 use source_memory::{MemoryFaultControl, MemorySource, open, open_with};
 
@@ -101,17 +101,40 @@ fn every_batch_obeys_point_and_payload_byte_budgets() {
     assert_eq!(batch_sizes(&source, byte_limited), vec![2; 6]);
 
     let too_small = ReadBudget::new(99, BYTES_PER_POINT - 1).unwrap();
-    let mut failed = source.read(ReadRequest::all().budget(too_small)).unwrap();
     assert!(matches!(
-        failed.next(),
+        source.read(ReadRequest::all().budget(too_small)),
         Err(SourceError::ResourceLimit {
-            limit: "batch payload bytes",
+            limit: ReadLimit::BatchPayloadBytes,
             required: BYTES_PER_POINT,
             allowed,
         }) if allowed == BYTES_PER_POINT - 1
     ));
-    assert!(failed.next().unwrap().is_none());
-    assert!(failed.summary().is_none());
+}
+
+#[test]
+fn permissive_budget_still_allows_cancellation_between_internal_quanta() {
+    const ROWS: usize = 20_000;
+
+    let ticks = (0..ROWS)
+        .map(|row| [i64::try_from(row).unwrap(), 0, 0])
+        .collect();
+    let input = MemorySource::from_columns(
+        PositionTransform::new([0.0; 3], [1.0; 3]).unwrap(),
+        CoordinateReference::Unknown,
+        ticks,
+        AttributeColumns::empty(ROWS),
+    )
+    .unwrap();
+    let source = open(input).blocking_wait().unwrap();
+    let permissive = ReadBudget::new(u64::MAX, u64::MAX).unwrap();
+    let mut batches = source.read(ReadRequest::all().budget(permissive)).unwrap();
+
+    let first = batches.next().unwrap().unwrap();
+    assert!(first.len() < ROWS);
+    batches.handle().cancel();
+    assert!(matches!(batches.next(), Err(SourceError::Cancelled)));
+    assert!(batches.next().unwrap().is_none());
+    assert!(batches.summary().is_none());
 }
 
 #[test]

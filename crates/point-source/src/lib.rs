@@ -31,8 +31,8 @@ pub mod adapter;
 mod error;
 mod stream;
 
-use adapter::{AdapterVerified, CandidateAdapter, FullVerification, ReadAdapter};
-pub use error::{MAX_SOURCE_DIAGNOSTIC_BYTES, SourceDiagnostic, SourceError};
+use adapter::{AdapterContract, AdapterVerified, CandidateAdapter, FullVerification, ReadAdapter};
+pub use error::{MAX_SOURCE_DIAGNOSTIC_BYTES, ReadLimit, SourceDiagnostic, SourceError};
 pub use point_contracts::{MAX_ATTRIBUTE_DEFINITIONS, MAX_LOGICAL_ORDER_BYTES};
 pub use stream::{PointBatches, SourceReadSummary};
 
@@ -47,6 +47,9 @@ const DEFAULT_BATCH_POINTS: u64 = 65_536;
 const DEFAULT_BATCH_BYTES: u64 = 8 * 1024 * 1024;
 const DEFAULT_MAX_SPANS: u64 = 65_536;
 const DEFAULT_ADAPTER_WORKING_BYTES: u64 = 16 * 1024 * 1024;
+const READ_CANCELLATION_POINTS: u64 = 4_096;
+const READ_CANCELLATION_PAYLOAD_BYTES: u64 = 4 * 1024 * 1024;
+const POSITION_PAYLOAD_BYTES_PER_POINT: u64 = 24;
 
 /// Hard safety cap on raw Source spans accepted before normalization.
 ///
@@ -161,9 +164,8 @@ pub struct SourceRecord {
     version: u32,
     source: SourceId,
     content_hash: ContentHash,
-    adapter_name: String,
-    adapter_version: String,
-    logical_order: String,
+    #[serde(flatten)]
+    adapter_contract: AdapterContract,
     metadata: Arc<SourceMetadata>,
     fast_token: Vec<u8>,
 }
@@ -186,13 +188,17 @@ impl<'de> Deserialize<'de> for SourceRecord {
         D: Deserializer<'de>,
     {
         let wire = SourceRecordWire::deserialize(deserializer)?;
+        let adapter_contract = AdapterContract::new(
+            wire.adapter_name.0,
+            wire.adapter_version.0,
+            wire.logical_order.0,
+        )
+        .map_err(serde::de::Error::custom)?;
         Ok(Self {
             version: wire.version,
             source: wire.source,
             content_hash: wire.content_hash,
-            adapter_name: wire.adapter_name.0,
-            adapter_version: wire.adapter_version.0,
-            logical_order: wire.logical_order.0,
+            adapter_contract,
             metadata: Arc::new(wire.metadata),
             fast_token: wire.fast_token.0,
         })
@@ -357,19 +363,25 @@ impl SourceRecord {
     /// Returns the concrete adapter name.
     #[must_use]
     pub fn adapter_name(&self) -> &str {
-        &self.adapter_name
+        self.adapter_contract.name()
     }
 
     /// Returns the concrete adapter contract version.
     #[must_use]
     pub fn adapter_version(&self) -> &str {
-        &self.adapter_version
+        self.adapter_contract.version()
     }
 
     /// Returns the adapter's canonical Point ordering rule.
     #[must_use]
     pub fn logical_order(&self) -> &str {
-        &self.logical_order
+        self.adapter_contract.logical_order()
+    }
+
+    /// Returns the validated concrete adapter identity contract.
+    #[must_use]
+    pub const fn adapter_contract(&self) -> &AdapterContract {
+        &self.adapter_contract
     }
 
     /// Returns verified canonical Source metadata.
@@ -644,12 +656,12 @@ impl ReadBudget {
     ) -> Result<Self, SourceError> {
         if max_batch_points == 0 {
             return Err(SourceError::InvalidBudget {
-                limit: "max_batch_points",
+                limit: ReadLimit::MaxBatchPoints,
             });
         }
         if max_batch_payload_bytes == 0 {
             return Err(SourceError::InvalidBudget {
-                limit: "max_batch_payload_bytes",
+                limit: ReadLimit::MaxBatchPayloadBytes,
             });
         }
         Ok(Self {
@@ -815,7 +827,7 @@ fn open_source(
     control.check_cancelled()?;
     let (verified, expected) = verify_adapter(adapter, options, control)?;
     control.check_cancelled()?;
-    validate_adapter_identity(&verified)?;
+    validate_adapter_verified(&verified)?;
     let source_id = derive_source_id(&verified);
 
     if let Some(record) = expected.as_ref() {
@@ -886,7 +898,7 @@ fn try_fast_match(
         ) => return Ok(None),
         Err(error) => return Err(error),
     };
-    validate_adapter_identity(&verified)?;
+    validate_adapter_verified(&verified)?;
     let source = derive_source_id(&verified);
     match validate_record(record, source, &verified) {
         Ok(()) => Ok(Some(verified)),
@@ -895,33 +907,7 @@ fn try_fast_match(
     }
 }
 
-fn validate_adapter_identity(verified: &AdapterVerified) -> Result<(), SourceError> {
-    for (name, value, max_bytes) in [
-        (
-            "adapter name",
-            verified.adapter_name(),
-            MAX_ADAPTER_NAME_BYTES,
-        ),
-        (
-            "adapter version",
-            verified.adapter_version(),
-            MAX_ADAPTER_VERSION_BYTES,
-        ),
-        (
-            "logical order",
-            verified.logical_order(),
-            MAX_LOGICAL_ORDER_BYTES,
-        ),
-    ] {
-        if value.trim().is_empty() {
-            return Err(SourceError::contract(format!("{name} is empty")));
-        }
-        if value.len() > max_bytes {
-            return Err(SourceError::contract(format!(
-                "{name} exceeds its {max_bytes}-byte limit"
-            )));
-        }
-    }
+fn validate_adapter_verified(verified: &AdapterVerified) -> Result<(), SourceError> {
     if verified.fast_token().len() > MAX_FAST_TOKEN_BYTES {
         return Err(SourceError::contract(format!(
             "Fast evidence exceeds its {MAX_FAST_TOKEN_BYTES}-byte limit"
@@ -940,10 +926,7 @@ fn validate_record(
             "content fingerprint differs from the record",
         ));
     }
-    if verified.adapter_name() != record.adapter_name
-        || verified.adapter_version() != record.adapter_version
-        || verified.logical_order() != record.logical_order
-    {
+    if verified.contract() != record.adapter_contract() {
         return Err(SourceError::changed(
             "adapter name, version, or logical-order rule differs from the record",
         ));
@@ -964,9 +947,10 @@ fn validate_record(
 fn derive_source_id(verified: &AdapterVerified) -> SourceId {
     let mut hasher = Hasher::new();
     hasher.update(SOURCE_ID_DOMAIN);
-    hash_text(&mut hasher, verified.adapter_name());
-    hash_text(&mut hasher, verified.adapter_version());
-    hash_text(&mut hasher, verified.logical_order());
+    let contract = verified.contract();
+    hash_text(&mut hasher, contract.name());
+    hash_text(&mut hasher, contract.version());
+    hash_text(&mut hasher, contract.logical_order());
     hasher.update(verified.content_hash().as_bytes());
     SourceId::new(*hasher.finalize().as_bytes())
 }
@@ -982,7 +966,7 @@ fn publish_source(source: SourceId, verified: AdapterVerified) -> Result<Source,
     let provenance = SourceProvenance::new(
         source,
         parts.content_hash,
-        parts.logical_order.clone(),
+        parts.contract.logical_order().to_owned(),
         SOURCE_CONTRACT_VERSION,
     )
     .map_err(|error| SourceError::contract(error.to_string()))?;
@@ -990,9 +974,7 @@ fn publish_source(source: SourceId, verified: AdapterVerified) -> Result<Source,
         version: SOURCE_RECORD_VERSION,
         source,
         content_hash: parts.content_hash,
-        adapter_name: parts.adapter_name,
-        adapter_version: parts.adapter_version,
-        logical_order: parts.logical_order,
+        adapter_contract: parts.contract,
         metadata: Arc::clone(&parts.metadata),
         fast_token: parts.fast_token,
     };
@@ -1024,6 +1006,7 @@ pub(crate) struct NormalizedRead {
     pub(crate) attributes: AttributeSelection,
     pub(crate) budget: ReadBudget,
     pub(crate) exact_count: u64,
+    pub(crate) max_output_batch_points: u64,
 }
 
 fn normalize_request(
@@ -1035,19 +1018,24 @@ fn normalize_request(
         count
             .checked_add(span.point_count())
             .ok_or(SourceError::ResourceLimit {
-                limit: "requested Point count",
+                limit: ReadLimit::RequestedPoints,
                 required: u64::MAX,
                 allowed: request.budget.max_points(),
             })
     })?;
     if exact_count > request.budget.max_points() {
         return Err(SourceError::ResourceLimit {
-            limit: "requested Point count",
+            limit: ReadLimit::RequestedPoints,
             required: exact_count,
             allowed: request.budget.max_points(),
         });
     }
     let expected_attributes = resolve_attributes(metadata, &request.attributes)?;
+    let max_output_batch_points = if exact_count == 0 {
+        0
+    } else {
+        max_output_batch_points(metadata, &expected_attributes, request.budget)?
+    };
     let attributes = AttributeSelection::resolved(expected_attributes.clone());
     Ok(NormalizedRead {
         spans: Arc::from(spans),
@@ -1055,7 +1043,48 @@ fn normalize_request(
         attributes,
         budget: request.budget,
         exact_count,
+        max_output_batch_points,
     })
+}
+
+fn max_output_batch_points(
+    metadata: &SourceMetadata,
+    attributes: &[AttributeId],
+    budget: ReadBudget,
+) -> Result<u64, SourceError> {
+    let bytes_per_point =
+        attributes
+            .iter()
+            .try_fold(POSITION_PAYLOAD_BYTES_PER_POINT, |total, &attribute| {
+                let definition = metadata.attributes().get(attribute).ok_or_else(|| {
+                    SourceError::unsupported_schema(format!(
+                        "Source does not contain requested Attribute {attribute:?}"
+                    ))
+                })?;
+                total
+                    .checked_add(u64::from(definition.data_type().element_bytes()))
+                    .ok_or(SourceError::ResourceLimit {
+                        limit: ReadLimit::PointPayloadBytes,
+                        required: u64::MAX,
+                        allowed: budget.max_batch_payload_bytes(),
+                    })
+            })?;
+    if bytes_per_point > budget.max_batch_payload_bytes() {
+        return Err(SourceError::ResourceLimit {
+            limit: ReadLimit::BatchPayloadBytes,
+            required: bytes_per_point,
+            allowed: budget.max_batch_payload_bytes(),
+        });
+    }
+
+    let interruptible_payload_bytes = budget
+        .max_batch_payload_bytes()
+        .min(READ_CANCELLATION_PAYLOAD_BYTES)
+        .max(bytes_per_point);
+    Ok(budget
+        .max_batch_points()
+        .min(READ_CANCELLATION_POINTS)
+        .min(interruptible_payload_bytes / bytes_per_point))
 }
 
 fn normalize_spans(
@@ -1069,7 +1098,7 @@ fn normalize_spans(
         SpanSelection::Spans(spans) => spans,
         SpanSelection::TooManyInputSpans { at_least } => {
             return Err(SourceError::ResourceLimit {
-                limit: "input Source spans",
+                limit: ReadLimit::InputSourceSpans,
                 required: at_least,
                 allowed: u64::try_from(MAX_INPUT_SOURCE_SPANS).unwrap_or(u64::MAX),
             });
@@ -1099,7 +1128,7 @@ fn normalize_spans(
     let normalized_count = u64::try_from(normalized.len()).unwrap_or(u64::MAX);
     if normalized_count > budget.max_spans() {
         return Err(SourceError::ResourceLimit {
-            limit: "normalized Source spans",
+            limit: ReadLimit::NormalizedSourceSpans,
             required: normalized_count,
             allowed: budget.max_spans(),
         });
@@ -1124,14 +1153,16 @@ fn resolve_attributes(
             attributes.dedup();
             for &attribute in &attributes {
                 if metadata.attributes().get(attribute).is_none() {
-                    return Err(SourceError::UnknownAttribute { attribute });
+                    return Err(SourceError::unsupported_schema(format!(
+                        "Source does not contain requested Attribute {attribute:?}"
+                    )));
                 }
             }
             Ok(attributes)
         }
         AttributeSelectionKind::TooManyInputAttributes { at_least } => {
             Err(SourceError::ResourceLimit {
-                limit: "input Attribute identities",
+                limit: ReadLimit::InputAttributeIdentities,
                 required: *at_least,
                 allowed: u64::try_from(MAX_INPUT_ATTRIBUTE_IDS).unwrap_or(u64::MAX),
             })

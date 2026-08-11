@@ -12,6 +12,7 @@ use point_contracts::{ContentHash, PointId, SourceId};
 
 use crate::{
     PointIdReadLimits, PointSetLimits, PointSetMetadata, SnapshotProvenance, WorkspaceError,
+    util::{allocation_bytes, encode_hex},
     workspace::Session,
 };
 
@@ -58,11 +59,7 @@ impl PointIdBatch {
 /// Repeatable, bounded Point Identity batches from one immutable Point Set.
 pub struct PointIdBatches {
     source: SourceId,
-    cursor: PointSetRecordCursor,
-    max_batch_records: usize,
-    remaining: u64,
-    limits: PointIdReadLimits,
-    terminal: bool,
+    reader: PointSetBatchReader,
 }
 
 impl PointIdBatches {
@@ -77,61 +74,10 @@ impl PointIdBatches {
     /// cannot be read within the declared limits.
     #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> Result<Option<PointIdBatch>, WorkspaceError> {
-        if self.terminal {
-            return Ok(None);
-        }
-        if let Err(error) = self.cursor.verify_storage() {
-            return self.fail(error);
-        }
-        let target = match batch_target(self.max_batch_records, self.remaining) {
-            Ok(target) => target,
-            Err(error) => return self.fail(error),
-        };
-        let mut ids =
-            match allocate_batch::<PointId>(target, self.limits, self.cursor.read_buffer_bytes()) {
-                Ok(ids) => ids,
-                Err(error) => return self.fail(error),
-            };
-        while ids.len() < target {
-            let output_bytes = allocation_bytes::<PointId>(ids.capacity());
-            let record = match self.cursor.next_record(output_bytes, self.limits) {
-                Ok(Some(record)) => record,
-                Ok(None) => {
-                    return self.fail(WorkspaceError::invalid_point_set(
-                        "Point Set ended before its sealed count",
-                    ));
-                }
-                Err(error) => return self.fail(error),
-            };
-            ids.push(PointId::new(self.source, record.ordinal));
-        }
-        let Ok(emitted) = u64::try_from(ids.len()) else {
-            return self.fail(WorkspaceError::invalid_point_set(
-                "Point Set batch length does not fit u64",
-            ));
-        };
-        self.remaining -= emitted;
-        if !ids.is_empty() {
-            if let Err(error) = self.cursor.verify_storage() {
-                return self.fail(error);
-            }
-            return Ok(Some(PointIdBatch { ids }));
-        }
-        match self.cursor.next_record(0, self.limits) {
-            Ok(None) => {
-                self.terminal = true;
-                Ok(None)
-            }
-            Ok(Some(_)) => self.fail(WorkspaceError::invalid_point_set(
-                "Point Set contains records beyond its sealed count",
-            )),
-            Err(error) => self.fail(error),
-        }
-    }
-
-    fn fail<T>(&mut self, error: WorkspaceError) -> Result<T, WorkspaceError> {
-        self.terminal = true;
-        Err(error)
+        let source = self.source;
+        self.reader
+            .next_mapped(|record| PointId::new(source, record.ordinal))
+            .map(|batch| batch.map(|ids| PointIdBatch { ids }))
     }
 }
 
@@ -158,15 +104,9 @@ impl PointSet {
         let exact_count = self.inner.metadata.exact_count();
         require_read_count(exact_count, limits)?;
         let cursor = PointSetRecordCursor::new(self.clone(), limits)?;
-        let max_batch_records =
-            bounded_batch_records(limits, exact_count, cursor.read_buffer_bytes())?;
         Ok(PointIdBatches {
             source: self.inner.metadata.provenance().source(),
-            cursor,
-            max_batch_records,
-            remaining: exact_count,
-            limits,
-            terminal: false,
+            reader: PointSetBatchReader::new(cursor, exact_count, limits)?,
         })
     }
 
@@ -224,11 +164,7 @@ pub(crate) struct PointSetRecord {
 }
 
 pub(crate) struct PointSetRecordBatches {
-    cursor: PointSetRecordCursor,
-    max_batch_records: usize,
-    remaining: u64,
-    limits: PointIdReadLimits,
-    terminal: bool,
+    reader: PointSetBatchReader,
 }
 
 impl PointSetRecordBatches {
@@ -236,18 +172,46 @@ impl PointSetRecordBatches {
         let exact_count = owner.metadata().exact_count();
         require_read_count(exact_count, limits)?;
         let cursor = PointSetRecordCursor::new(owner, limits)?;
-        let max_read_buffer_bytes = cursor.read_buffer_bytes();
+        Ok(Self {
+            reader: PointSetBatchReader::new(cursor, exact_count, limits)?,
+        })
+    }
+
+    #[allow(clippy::should_implement_trait)]
+    pub(crate) fn next(&mut self) -> Result<Option<Vec<PointSetRecord>>, WorkspaceError> {
+        self.reader.next_mapped(std::convert::identity)
+    }
+}
+
+struct PointSetBatchReader {
+    cursor: PointSetRecordCursor,
+    max_batch_records: usize,
+    remaining: u64,
+    limits: PointIdReadLimits,
+    terminal: bool,
+}
+
+impl PointSetBatchReader {
+    fn new(
+        cursor: PointSetRecordCursor,
+        exact_count: u64,
+        limits: PointIdReadLimits,
+    ) -> Result<Self, WorkspaceError> {
+        let max_batch_records =
+            bounded_batch_records(limits, exact_count, cursor.read_buffer_bytes())?;
         Ok(Self {
             cursor,
-            max_batch_records: bounded_batch_records(limits, exact_count, max_read_buffer_bytes)?,
+            max_batch_records,
             remaining: exact_count,
             limits,
             terminal: false,
         })
     }
 
-    #[allow(clippy::should_implement_trait)]
-    pub(crate) fn next(&mut self) -> Result<Option<Vec<PointSetRecord>>, WorkspaceError> {
+    fn next_mapped<T>(
+        &mut self,
+        map_record: impl Fn(PointSetRecord) -> T,
+    ) -> Result<Option<Vec<T>>, WorkspaceError> {
         if self.terminal {
             return Ok(None);
         }
@@ -258,16 +222,13 @@ impl PointSetRecordBatches {
             Ok(target) => target,
             Err(error) => return self.fail(error),
         };
-        let mut records = match allocate_batch::<PointSetRecord>(
-            target,
-            self.limits,
-            self.cursor.read_buffer_bytes(),
-        ) {
-            Ok(records) => records,
-            Err(error) => return self.fail(error),
-        };
-        while records.len() < target {
-            let output_bytes = allocation_bytes::<PointSetRecord>(records.capacity());
+        let mut batch =
+            match allocate_batch::<T>(target, self.limits, self.cursor.read_buffer_bytes()) {
+                Ok(batch) => batch,
+                Err(error) => return self.fail(error),
+            };
+        while batch.len() < target {
+            let output_bytes = allocation_bytes::<T>(batch.capacity());
             let record = match self.cursor.next_record(output_bytes, self.limits) {
                 Ok(Some(record)) => record,
                 Ok(None) => {
@@ -277,19 +238,19 @@ impl PointSetRecordBatches {
                 }
                 Err(error) => return self.fail(error),
             };
-            records.push(record);
+            batch.push(map_record(record));
         }
-        let Ok(emitted) = u64::try_from(records.len()) else {
+        let Ok(emitted) = u64::try_from(batch.len()) else {
             return self.fail(WorkspaceError::invalid_point_set(
                 "Point Set batch length does not fit u64",
             ));
         };
         self.remaining -= emitted;
-        if !records.is_empty() {
+        if !batch.is_empty() {
             if let Err(error) = self.cursor.verify_storage() {
                 return self.fail(error);
             }
-            return Ok(Some(records));
+            return Ok(Some(batch));
         }
         match self.cursor.next_record(0, self.limits) {
             Ok(None) => {
@@ -1218,7 +1179,7 @@ fn create_spill_file(scratch: &Path) -> Result<(PathBuf, File), WorkspaceError> 
     for _ in 0..RANDOM_NAME_ATTEMPTS {
         let mut random = [0_u8; 16];
         getrandom::fill(&mut random).map_err(WorkspaceError::random)?;
-        let name = format!("point-set-{}.pset", hex(&random));
+        let name = format!("point-set-{}.pset", encode_hex(&random));
         let path = scratch.join(name);
         match OpenOptions::new()
             .create_new(true)
@@ -1293,12 +1254,6 @@ fn batch_record_bytes(records: usize) -> u64 {
     allocation_bytes::<PointSetRecord>(records)
 }
 
-fn allocation_bytes<T>(values: usize) -> u64 {
-    u64::try_from(values)
-        .unwrap_or(u64::MAX)
-        .saturating_mul(u64::try_from(mem::size_of::<T>()).unwrap_or(u64::MAX))
-}
-
 fn checked_add_with_limit(
     current: u64,
     added: u64,
@@ -1316,16 +1271,6 @@ fn checked_add_with_limit(
     Ok(required)
 }
 
-fn hex(bytes: &[u8]) -> String {
-    const DIGITS: &[u8; 16] = b"0123456789abcdef";
-    let mut encoded = String::with_capacity(bytes.len().saturating_mul(2));
-    for &byte in bytes {
-        encoded.push(char::from(DIGITS[usize::from(byte >> 4)]));
-        encoded.push(char::from(DIGITS[usize::from(byte & 0x0f)]));
-    }
-    encoded
-}
-
 #[cfg(test)]
 mod tests {
     use std::{
@@ -1337,9 +1282,12 @@ mod tests {
 
     use super::{
         PointSetRecord, SpillReader, SpillWriter, content_hasher, decode_record, encode_record,
-        grow_resident_records, hex, point_id_hasher, resident_record_bytes, update_hashes,
+        grow_resident_records, point_id_hasher, resident_record_bytes, update_hashes,
     };
-    use crate::{PointIdReadLimits, PointSetMetadata, RevisionId, SnapshotProvenance, WorkspaceId};
+    use crate::{
+        PointIdReadLimits, PointSetMetadata, RevisionId, SnapshotProvenance, WorkspaceId,
+        util::encode_hex,
+    };
 
     #[test]
     fn record_encoding_is_exact_and_round_trips() {
@@ -1359,7 +1307,7 @@ mod tests {
 
     #[test]
     fn spill_names_use_lowercase_fixed_width_hex() {
-        assert_eq!(hex(&[0, 1, 0xab, 0xff]), "0001abff");
+        assert_eq!(encode_hex(&[0, 1, 0xab, 0xff]), "0001abff");
     }
 
     #[test]

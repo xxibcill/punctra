@@ -14,6 +14,7 @@ mod persistence;
 mod point_rows;
 mod point_set;
 mod selection;
+mod util;
 mod workspace;
 
 pub use error::{MAX_WORKSPACE_DIAGNOSTIC_BYTES, WorkspaceDiagnostic, WorkspaceError};
@@ -27,4 +28,4 @@ pub use model::{
 pub use point_rows::{SnapshotPointBatch, SnapshotPointBatches, SnapshotPointSummary};
 pub use point_set::{PointIdBatch, PointIdBatches, PointSet};
 pub use selection::PointSetJob;
-pub use workspace::{Snapshot, Workspace, WorkspaceJob, create, open};
+pub use workspace::{CommitJob, Snapshot, Workspace, WorkspaceJob, create, open};

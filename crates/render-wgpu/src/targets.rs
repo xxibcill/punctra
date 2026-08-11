@@ -1,3 +1,5 @@
+use render_protocol::Viewport;
+
 use crate::pipeline::{DEPTH_FORMAT, PICK_FORMAT};
 
 #[derive(Default)]
@@ -6,14 +8,14 @@ pub(crate) struct RenderTargets {
 }
 
 impl RenderTargets {
-    pub(crate) fn depth(&mut self, device: &wgpu::Device, viewport: [u32; 2]) -> &DepthTarget {
+    pub(crate) fn depth(&mut self, device: &wgpu::Device, viewport: Viewport) -> &DepthTarget {
         &self.for_viewport(device, viewport).depth
     }
 
     pub(crate) fn depth_and_pick(
         &mut self,
         device: &wgpu::Device,
-        viewport: [u32; 2],
+        viewport: Viewport,
     ) -> (&DepthTarget, &PickTarget) {
         let targets = self.for_viewport(device, viewport);
         let pick = targets
@@ -22,7 +24,7 @@ impl RenderTargets {
         (&targets.depth, pick)
     }
 
-    fn for_viewport(&mut self, device: &wgpu::Device, viewport: [u32; 2]) -> &mut ViewportTargets {
+    fn for_viewport(&mut self, device: &wgpu::Device, viewport: Viewport) -> &mut ViewportTargets {
         let matches = self
             .current
             .as_ref()
@@ -41,7 +43,7 @@ impl RenderTargets {
 }
 
 struct ViewportTargets {
-    viewport: [u32; 2],
+    viewport: Viewport,
     depth: DepthTarget,
     pick: Option<PickTarget>,
 }
@@ -52,7 +54,7 @@ pub(crate) struct DepthTarget {
 }
 
 impl DepthTarget {
-    fn new(device: &wgpu::Device, viewport: [u32; 2]) -> Self {
+    fn new(device: &wgpu::Device, viewport: Viewport) -> Self {
         let (texture, view) = create_target(
             device,
             viewport,
@@ -77,7 +79,7 @@ pub(crate) struct PickTarget {
 }
 
 impl PickTarget {
-    fn new(device: &wgpu::Device, viewport: [u32; 2]) -> Self {
+    fn new(device: &wgpu::Device, viewport: Viewport) -> Self {
         let (texture, view) = create_target(
             device,
             viewport,
@@ -99,7 +101,7 @@ impl PickTarget {
 
 fn create_target(
     device: &wgpu::Device,
-    viewport: [u32; 2],
+    viewport: Viewport,
     label: &'static str,
     format: wgpu::TextureFormat,
     usage: wgpu::TextureUsages,
@@ -118,10 +120,10 @@ fn create_target(
     (texture, view)
 }
 
-const fn texture_extent(viewport: [u32; 2]) -> wgpu::Extent3d {
+const fn texture_extent(viewport: Viewport) -> wgpu::Extent3d {
     wgpu::Extent3d {
-        width: viewport[0],
-        height: viewport[1],
+        width: viewport.width(),
+        height: viewport.height(),
         depth_or_array_layers: 1,
     }
 }

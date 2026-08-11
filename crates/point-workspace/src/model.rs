@@ -1,6 +1,8 @@
 use std::fmt;
 
-use point_contracts::{AttributeDataType, AttributeId, ContentHash, SourceId, WorldBounds};
+use point_contracts::{
+    AttributeDataType, AttributeDefinition, AttributeId, ContentHash, SourceId, WorldBounds,
+};
 use point_source::Source;
 use serde::{Deserialize, Serialize};
 
@@ -236,7 +238,10 @@ impl WorkspaceSchema {
         self.classification
     }
 
-    pub(crate) fn validate_source(self, source: &Source) -> Result<(), WorkspaceError> {
+    pub(crate) fn classification_definition(
+        self,
+        source: &Source,
+    ) -> Result<&AttributeDefinition, WorkspaceError> {
         let Some(definition) = source.metadata().attributes().get(self.classification) else {
             return Err(WorkspaceError::incompatible(format!(
                 "Source does not contain classification Attribute {}",
@@ -250,7 +255,7 @@ impl WorkspaceSchema {
                 definition.data_type()
             )));
         }
-        Ok(())
+        Ok(definition)
     }
 }
 
@@ -413,26 +418,16 @@ impl PointQuery {
 
     /// Adds equality against the Snapshot's effective classification value.
     #[must_use]
-    pub const fn with_classification_eq(mut self, value: u8) -> Self {
+    pub const fn classification_is(mut self, value: u8) -> Self {
         self.classification_eq = Some(value);
         self
     }
 
-    /// Adds equality against the Snapshot's effective classification value.
-    #[must_use]
-    pub const fn classification_is(self, value: u8) -> Self {
-        self.with_classification_eq(value)
-    }
-
-    /// Returns inclusive bounds, or `None` for all Source Points.
-    #[must_use]
-    pub const fn bounds(self) -> Option<WorldBounds> {
+    pub(crate) const fn bounds(self) -> Option<WorldBounds> {
         self.bounds
     }
 
-    /// Returns the optional effective-classification equality value.
-    #[must_use]
-    pub const fn classification_eq(self) -> Option<u8> {
+    pub(crate) const fn classification_eq(self) -> Option<u8> {
         self.classification_eq
     }
 }
@@ -515,17 +510,11 @@ impl CommitRequest {
 
     /// Requests an inverse Edit for the immediate head Revision.
     #[must_use]
-    pub fn revert(operation: OperationId, expected_head: RevisionId) -> Self {
+    pub fn revert_head(operation: OperationId, expected_head: RevisionId) -> Self {
         Self {
             operation,
             kind: CommitRequestKind::Revert { expected_head },
         }
-    }
-
-    /// Requests an inverse Edit for the immediate head Revision.
-    #[must_use]
-    pub fn revert_head(operation: OperationId, expected_head: RevisionId) -> Self {
-        Self::revert(operation, expected_head)
     }
 
     /// Returns the caller-owned durable Operation Identity.
