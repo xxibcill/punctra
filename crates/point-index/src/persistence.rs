@@ -48,69 +48,144 @@ impl ArtifactReader {
         expected_checksum: [u8; 32],
         max_buffer_bytes: u64,
     ) -> Result<Vec<IndexSample>, IndexError> {
-        let byte_count = count
-            .checked_mul(SAMPLE_BYTES)
-            .ok_or(IndexError::CorruptArtifact {
-                reason: "sample block length overflowed",
-            })?;
-        let capacity = usize::try_from(count).map_err(|_| IndexError::ResourceLimit {
-            limit: "addressable sample Points",
-            required: count,
-            allowed: usize::MAX as u64,
-        })?;
-        let mut samples = Vec::new();
-        samples
-            .try_reserve_exact(capacity)
-            .map_err(|_| IndexError::ResourceLimit {
-                limit: "sample buffer bytes",
-                required: byte_count,
-                allowed: byte_count,
-            })?;
-        let actual_bytes = u64::try_from(samples.capacity())
+        let mut file = lock_recovering(&self.file);
+        read_persisted_samples(
+            &mut file,
+            self.path.as_ref(),
+            offset,
+            count,
+            expected_checksum,
+            SampleReadContext::ArtifactAfterOpen { max_buffer_bytes },
+        )
+    }
+}
+
+#[derive(Clone, Copy)]
+enum SampleReadContext {
+    ArtifactAfterOpen { max_buffer_bytes: u64 },
+    Work,
+}
+
+impl SampleReadContext {
+    fn byte_count(self, count: u64) -> Result<u64, IndexError> {
+        match self {
+            Self::ArtifactAfterOpen { .. } => {
+                count
+                    .checked_mul(SAMPLE_BYTES)
+                    .ok_or(IndexError::CorruptArtifact {
+                        reason: "sample block length overflowed",
+                    })
+            }
+            Self::Work => Ok(count.saturating_mul(SAMPLE_BYTES)),
+        }
+    }
+
+    fn capacity(self, count: u64) -> Result<usize, IndexError> {
+        usize::try_from(count).map_err(|_| match self {
+            Self::ArtifactAfterOpen { .. } => IndexError::ResourceLimit {
+                limit: "addressable sample Points",
+                required: count,
+                allowed: usize::MAX as u64,
+            },
+            Self::Work => corrupt("work", "sample count is not addressable"),
+        })
+    }
+
+    fn enforce_buffer_limit(self, capacity: usize) -> Result<(), IndexError> {
+        let Self::ArtifactAfterOpen { max_buffer_bytes } = self else {
+            return Ok(());
+        };
+        let actual_bytes = u64::try_from(capacity)
             .unwrap_or(u64::MAX)
             .saturating_mul(u64::try_from(mem::size_of::<IndexSample>()).unwrap_or(u64::MAX));
-        require(actual_bytes, max_buffer_bytes, "index sample buffer bytes")?;
-        let mut hasher = Hasher::new();
-        hasher.update(SAMPLE_HASH_DOMAIN);
-        let mut file = lock_recovering(&self.file);
-        file.seek(SeekFrom::Start(offset))
-            .map_err(|error| IndexError::io("seek in", self.path.as_ref().clone(), error))?;
-        for _ in 0..count {
-            let mut encoded = [0_u8; 32];
-            file.read_exact(&mut encoded).map_err(|error| {
-                if error.kind() == std::io::ErrorKind::UnexpectedEof {
-                    IndexError::CorruptArtifact {
-                        reason: "node sample block was truncated after open",
-                    }
-                } else {
-                    IndexError::io("read", self.path.as_ref().clone(), error)
-                }
-            })?;
-            hasher.update(&encoded);
-            let mut decoder = Decoder::artifact(&encoded);
-            let ordinal = decoder.u64("sample ordinal")?;
-            let ticks = [
-                decoder.i64("sample x ticks")?,
-                decoder.i64("sample y ticks")?,
-                decoder.i64("sample z ticks")?,
-            ];
-            samples.push(IndexSample::new(ordinal, ticks));
-        }
-        if *hasher.finalize().as_bytes() != expected_checksum {
-            return Err(IndexError::CorruptArtifact {
-                reason: "node sample checksum differs after open",
-            });
-        }
-        if samples
-            .windows(2)
-            .any(|pair| pair[0].ordinal() >= pair[1].ordinal())
-        {
-            return Err(IndexError::CorruptArtifact {
-                reason: "samples are not sorted and unique",
-            });
-        }
-        Ok(samples)
+        require(actual_bytes, max_buffer_bytes, "index sample buffer bytes")
     }
+
+    fn decoder(self, bytes: &[u8]) -> Decoder<'_> {
+        match self {
+            Self::ArtifactAfterOpen { .. } => Decoder::artifact(bytes),
+            Self::Work => Decoder::work(bytes),
+        }
+    }
+
+    fn read_error(self, path: &Path, error: std::io::Error) -> IndexError {
+        if matches!(self, Self::ArtifactAfterOpen { .. })
+            && error.kind() == std::io::ErrorKind::UnexpectedEof
+        {
+            IndexError::CorruptArtifact {
+                reason: "node sample block was truncated after open",
+            }
+        } else {
+            IndexError::io("read", path, error)
+        }
+    }
+
+    fn checksum_error(self) -> IndexError {
+        match self {
+            Self::ArtifactAfterOpen { .. } => IndexError::CorruptArtifact {
+                reason: "node sample checksum differs after open",
+            },
+            Self::Work => corrupt("work", "sample block checksum or order differs"),
+        }
+    }
+
+    fn order_error(self) -> IndexError {
+        match self {
+            Self::ArtifactAfterOpen { .. } => IndexError::CorruptArtifact {
+                reason: "samples are not sorted and unique",
+            },
+            Self::Work => corrupt("work", "sample block checksum or order differs"),
+        }
+    }
+}
+
+fn read_persisted_samples(
+    file: &mut File,
+    path: &Path,
+    offset: u64,
+    count: u64,
+    expected_checksum: [u8; 32],
+    context: SampleReadContext,
+) -> Result<Vec<IndexSample>, IndexError> {
+    let byte_count = context.byte_count(count)?;
+    let mut samples = Vec::new();
+    samples
+        .try_reserve_exact(context.capacity(count)?)
+        .map_err(|_| IndexError::ResourceLimit {
+            limit: "sample buffer bytes",
+            required: byte_count,
+            allowed: byte_count,
+        })?;
+    context.enforce_buffer_limit(samples.capacity())?;
+
+    file.seek(SeekFrom::Start(offset))
+        .map_err(|error| IndexError::io("seek in", path, error))?;
+    let mut hasher = Hasher::new();
+    hasher.update(SAMPLE_HASH_DOMAIN);
+    for _ in 0..count {
+        let mut encoded = [0_u8; 32];
+        file.read_exact(&mut encoded)
+            .map_err(|error| context.read_error(path, error))?;
+        hasher.update(&encoded);
+        let mut decoder = context.decoder(&encoded);
+        let ordinal = decoder.u64("sample ordinal")?;
+        let ticks = [
+            decoder.i64("sample x ticks")?,
+            decoder.i64("sample y ticks")?,
+            decoder.i64("sample z ticks")?,
+        ];
+        samples.push(IndexSample::new(ordinal, ticks));
+    }
+    if *hasher.finalize().as_bytes() != expected_checksum {
+        return Err(context.checksum_error());
+    }
+    if samples
+        .windows(2)
+        .any(|pair| pair[0].ordinal() >= pair[1].ordinal())
+    {
+        return Err(context.order_error());
+    }
+    Ok(samples)
 }
 
 pub(crate) struct OpenArtifact {
@@ -1443,73 +1518,23 @@ fn read_location(
     location: SampleLocation,
 ) -> Result<Vec<IndexSample>, IndexError> {
     match location.storage {
-        SampleStorage::Work => read_samples_from(
+        SampleStorage::Work => read_persisted_samples(
             &mut work.file,
             &work.path,
             location.offset,
             location.count,
             location.checksum,
-            "work",
+            SampleReadContext::Work,
         ),
-        SampleStorage::Spool => read_samples_from(
+        SampleStorage::Spool => read_persisted_samples(
             spool,
             spool_path,
             location.offset,
             location.count,
             location.checksum,
-            "work",
+            SampleReadContext::Work,
         ),
     }
-}
-
-fn read_samples_from(
-    file: &mut File,
-    path: &Path,
-    offset: u64,
-    count: u64,
-    expected_checksum: [u8; 32],
-    kind: &'static str,
-) -> Result<Vec<IndexSample>, IndexError> {
-    let capacity =
-        usize::try_from(count).map_err(|_| corrupt(kind, "sample count is not addressable"))?;
-    let mut samples = Vec::new();
-    samples
-        .try_reserve_exact(capacity)
-        .map_err(|_| IndexError::ResourceLimit {
-            limit: "sample buffer bytes",
-            required: count.saturating_mul(SAMPLE_BYTES),
-            allowed: count.saturating_mul(SAMPLE_BYTES),
-        })?;
-    file.seek(SeekFrom::Start(offset))
-        .map_err(|error| IndexError::io("seek in", path, error))?;
-    let mut hasher = Hasher::new();
-    hasher.update(SAMPLE_HASH_DOMAIN);
-    for _ in 0..count {
-        let mut encoded = [0_u8; 32];
-        file.read_exact(&mut encoded)
-            .map_err(|error| IndexError::io("read", path, error))?;
-        hasher.update(&encoded);
-        let mut decoder = if kind == "artifact" {
-            Decoder::artifact(&encoded)
-        } else {
-            Decoder::work(&encoded)
-        };
-        let ordinal = decoder.u64("sample ordinal")?;
-        let ticks = [
-            decoder.i64("sample x ticks")?,
-            decoder.i64("sample y ticks")?,
-            decoder.i64("sample z ticks")?,
-        ];
-        samples.push(IndexSample::new(ordinal, ticks));
-    }
-    if *hasher.finalize().as_bytes() != expected_checksum
-        || samples
-            .windows(2)
-            .any(|pair| pair[0].ordinal() >= pair[1].ordinal())
-    {
-        return Err(corrupt(kind, "sample block checksum or order differs"));
-    }
-    Ok(samples)
 }
 
 fn encode_artifact_header(
