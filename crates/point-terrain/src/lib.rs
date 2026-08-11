@@ -40,6 +40,7 @@ mod error;
 mod landxml;
 mod limits;
 mod model;
+mod numeric;
 mod qa;
 mod triangulation;
 

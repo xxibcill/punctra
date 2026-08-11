@@ -6,6 +6,7 @@ use robust::{Coord, orient2d};
 use crate::{
     CheckPoint, CheckPointJob, CheckPointLimits, CheckPointOutcome, CheckPointReport,
     CheckPointResult, ResidualStatistics, SurfaceFace, TerrainError, TerrainSurface,
+    numeric::canonical_zero,
 };
 
 const CANCELLATION_STRIDE: usize = 1_024;
@@ -352,10 +353,6 @@ fn xy(position: [f64; 3]) -> Coord<f64> {
         x: position[0],
         y: position[1],
     }
-}
-
-fn canonical_zero(value: f64) -> f64 {
-    if value == 0.0 { 0.0 } else { value }
 }
 
 #[derive(Default)]

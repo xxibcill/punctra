@@ -10,7 +10,10 @@ use blake3::Hasher;
 use foundation_runtime::{Job, OperationControl, ProgressPhase, ProgressSnapshot};
 use point_contracts::ContentHash;
 
-use crate::{LandXmlJob, LandXmlLimits, LandXmlReceipt, TerrainError, TerrainSurface};
+use crate::{
+    LandXmlJob, LandXmlLimits, LandXmlReceipt, TerrainError, TerrainSurface,
+    numeric::canonical_zero,
+};
 
 const LANDXML_NAMESPACE: &str = "http://www.landxml.org/schema/LandXML-1.2";
 const XML_SCHEMA_NAMESPACE: &str = "http://www.w3.org/2001/XMLSchema-instance";
@@ -886,10 +889,6 @@ fn escaped_len(value: &str) -> Result<usize, TerrainError> {
             .checked_add(added)
             .ok_or_else(|| TerrainError::numeric("escaped LandXML text length overflowed"))
     })
-}
-
-fn canonical_zero(value: f64) -> f64 {
-    if value == 0.0 { 0.0 } else { value }
 }
 
 struct BoundedHashWriter {
