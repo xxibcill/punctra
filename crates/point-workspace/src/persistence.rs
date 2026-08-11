@@ -471,8 +471,8 @@ impl Drop for SealedRevision {
 
 #[derive(Clone, Debug)]
 pub(crate) struct ValidatedRevision {
-    pub(crate) path: PathBuf,
-    pub(crate) facts: RevisionFacts,
+    path: PathBuf,
+    facts: RevisionFacts,
     blocks: Arc<Vec<BlockMetadata>>,
 }
 
@@ -666,6 +666,42 @@ impl Catalog {
 }
 
 impl ValidatedRevision {
+    pub(crate) const fn operation(&self) -> OperationBytes {
+        self.facts.candidate.operation
+    }
+
+    pub(crate) const fn request_digest(&self) -> DigestBytes {
+        self.facts.candidate.request_digest
+    }
+
+    pub(crate) const fn parent(&self) -> RevisionBytes {
+        self.facts.candidate.parent
+    }
+
+    pub(crate) const fn sequence(&self) -> u64 {
+        self.facts.candidate.sequence
+    }
+
+    pub(crate) const fn kind(&self) -> RevisionKind {
+        self.facts.candidate.kind
+    }
+
+    pub(crate) const fn point_set(&self) -> Option<PersistedPointSetFacts> {
+        self.facts.candidate.point_set
+    }
+
+    pub(crate) const fn revision(&self) -> RevisionBytes {
+        self.facts.revision
+    }
+
+    pub(crate) const fn row_count(&self) -> u64 {
+        self.facts.row_count
+    }
+
+    pub(crate) const fn block_count(&self) -> u64 {
+        self.facts.block_count
+    }
+
     pub(crate) const fn file_bytes(&self) -> u64 {
         self.facts.body_bytes + FOOTER_BYTES as u64
     }

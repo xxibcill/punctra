@@ -745,7 +745,7 @@ fn commit_revert(
             revision: expected_head,
         })?;
     require(
-        head.facts.row_count,
+        head.row_count(),
         limits.max_changed_points(),
         "changed Points",
     )?;
@@ -839,20 +839,20 @@ fn commit_ready(
     phase: &PublicationPhase,
     control: &OperationControl,
 ) -> Result<CommitOutcome, WorkspaceError> {
-    let expected = RevisionId::from_bytes(ready.facts.candidate.parent)?;
+    let expected = RevisionId::from_bytes(ready.parent())?;
     let actual = current_head(session)?;
     if expected != actual {
         return record_rejection(
             session,
-            OperationId::from_bytes(ready.facts.candidate.operation)?,
-            ready.facts.candidate.request_digest,
+            OperationId::from_bytes(ready.operation())?,
+            ready.request_digest(),
             CommitRejection::StaleHead { expected, actual },
             limits,
             phase,
             control,
         );
     }
-    if ready.facts.candidate.sequence != next_sequence(session)? {
+    if ready.sequence() != next_sequence(session)? {
         return Err(WorkspaceError::corrupt(
             "ready payload sequence is not the next linear Revision",
         ));
@@ -913,7 +913,7 @@ fn existing_operation(
 ) -> Result<Option<CommitOutcome>, WorkspaceError> {
     let (committed, record) = operation_state(session, operation)?;
     if let Some(committed) = committed {
-        if committed.facts.candidate.request_digest != request_digest {
+        if committed.request_digest() != request_digest {
             return Ok(Some(CommitOutcome::Rejected(
                 CommitRejection::OperationConflict,
             )));
@@ -942,7 +942,7 @@ fn existing_operation(
     let Some(ready) = record.ready else {
         return Ok(None);
     };
-    if ready.facts.candidate.request_digest != request_digest {
+    if ready.request_digest() != request_digest {
         return Ok(Some(CommitOutcome::Rejected(
             CommitRejection::OperationConflict,
         )));
@@ -1308,7 +1308,7 @@ fn enforce_ready_limits(
     ready: &ValidatedRevision,
     limits: CommitLimits,
 ) -> Result<(), WorkspaceError> {
-    if let Some(point_set) = ready.facts.candidate.point_set {
+    if let Some(point_set) = ready.point_set() {
         require(
             point_set.exact_count,
             limits.max_selected_points(),
@@ -1316,12 +1316,12 @@ fn enforce_ready_limits(
         )?;
     }
     require(
-        ready.facts.row_count,
+        ready.row_count(),
         limits.max_changed_points(),
         "changed Points",
     )?;
     require(
-        ready.facts.block_count,
+        ready.block_count(),
         limits.max_input_frames(),
         "ready input frames",
     )?;
@@ -1343,7 +1343,7 @@ fn enforce_ready_limits(
 }
 
 fn receipt_from_revision(revision: &ValidatedRevision) -> Result<CommitReceipt, WorkspaceError> {
-    let operation = OperationId::from_bytes(revision.facts.candidate.operation)?;
+    let operation = OperationId::from_bytes(revision.operation())?;
     Ok(CommitReceipt::new(
         operation,
         revision_info_from_persisted(revision)?,
@@ -1438,26 +1438,25 @@ fn recorded_intent(
     session: &Session,
     ready: &ValidatedRevision,
 ) -> Result<RecordedIntent, WorkspaceError> {
-    let candidate = ready.facts.candidate;
-    let operation = OperationId::from_bytes(candidate.operation)?;
-    let parent_revision = RevisionId::from_bytes(candidate.parent)?;
+    let operation = OperationId::from_bytes(ready.operation())?;
+    let parent_revision = RevisionId::from_bytes(ready.parent())?;
     let parent = SnapshotProvenance::new(
         session.identity,
         session.source().identity(),
         parent_revision,
     );
-    let revision = RevisionId::from_bytes(ready.facts.revision)?;
-    let kind = match candidate.kind {
+    let revision = RevisionId::from_bytes(ready.revision())?;
+    let kind = match ready.kind() {
         PersistedRevisionKind::SetClassification(value) => RevisionKind::SetClassification {
             value,
-            changed_points: ready.facts.row_count,
+            changed_points: ready.row_count(),
         },
         PersistedRevisionKind::Revert => RevisionKind::Revert {
             reverted_revision: parent_revision,
-            changed_points: ready.facts.row_count,
+            changed_points: ready.row_count(),
         },
     };
-    let point_set = candidate.point_set.map(|facts| {
+    let point_set = ready.point_set().map(|facts| {
         PointSetMetadata::new(
             parent,
             facts.exact_count,
@@ -1467,10 +1466,10 @@ fn recorded_intent(
     });
     Ok(RecordedIntent::new(
         operation,
-        ContentHash::new(candidate.request_digest),
+        ContentHash::new(ready.request_digest()),
         parent,
         revision,
-        candidate.sequence,
+        ready.sequence(),
         kind,
         point_set,
     ))
@@ -1829,26 +1828,25 @@ fn root_revision(
 fn revision_info_from_persisted(
     persisted: &crate::persistence::ValidatedRevision,
 ) -> Result<RevisionInfo, WorkspaceError> {
-    let facts = persisted.facts;
-    let id = RevisionId::from_bytes(facts.revision)?;
-    let parent = RevisionId::from_bytes(facts.candidate.parent)?;
-    let operation = crate::model::OperationId::from_bytes(facts.candidate.operation)?;
-    let kind = match facts.candidate.kind {
+    let id = RevisionId::from_bytes(persisted.revision())?;
+    let parent = RevisionId::from_bytes(persisted.parent())?;
+    let operation = crate::model::OperationId::from_bytes(persisted.operation())?;
+    let kind = match persisted.kind() {
         crate::persistence::RevisionKind::SetClassification(value) => {
             RevisionKind::SetClassification {
                 value,
-                changed_points: facts.row_count,
+                changed_points: persisted.row_count(),
             }
         }
         crate::persistence::RevisionKind::Revert => RevisionKind::Revert {
             reverted_revision: parent,
-            changed_points: facts.row_count,
+            changed_points: persisted.row_count(),
         },
     };
     Ok(RevisionInfo::new(
         id,
         Some(parent),
-        facts.candidate.sequence,
+        persisted.sequence(),
         Some(operation),
         kind,
     ))
