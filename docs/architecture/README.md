@@ -1,6 +1,8 @@
 # Point-Cloud Foundation Architecture
 
 Status: v0.1 through the narrow v0.7 technical-readiness slice implemented;
+the v0.8 repository qualification design is Active and its bounded file-
+comparison slices are implemented; Run binding, evidence publication, and
 broader terrain, export, and product layers remain deferred
 
 The accepted versioned designs are authoritative:
@@ -12,6 +14,7 @@ The accepted versioned designs are authoritative:
 - [v0.5 Durable document core](../design/durable-document-core-v0.5.md)
 - [v0.6 Terrain and QA benchmark](../design/terrain-qa-benchmark-v0.6.md)
 - [v0.7 Technical partner-alpha readiness](../design/technical-alpha-readiness-v0.7.md)
+- [v0.8 Repository interoperability qualification](../design/design-partner-mvp-v0.8.md)
 
 The current foundation is headless and embeddable. It reads immutable Sources,
 prepares a complete rebuildable Spatial Index, resolves progressive display,
@@ -219,6 +222,11 @@ persistent terrain, general export/import, networking, autosave policy, and
 product UI remain outside v0.7. Licensed-data, partner, named downstream-
 application, above-500-million-Point, and human-workflow evidence also remains
 outstanding.
+
+The accepted v0.8 design adds a private `terrain-demo` semantic LandXML
+comparison module and CLI without changing the public foundation shape. Its
+Run binding and separate evidence artifact remain pending; every v0.7 journal
+and report contract remains unchanged.
 
 ## Document map
 

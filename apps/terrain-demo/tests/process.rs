@@ -33,6 +33,36 @@ fn thin_process_starts_resumes_and_inspects_one_durable_run() {
     let report = fs::read(fixture.run_root.join("audit.json")).expect("read process audit report");
     let landxml = fs::read(fixture.run_root.join("terrain.xml")).expect("read process LandXML");
     assert_landxml(&landxml);
+    let returned = fixture.directory.path().join("returned.xml");
+    fs::write(&returned, &landxml).expect("write distinct returned LandXML fixture");
+    let compared = Command::new(env!("CARGO_BIN_EXE_terrain-demo"))
+        .arg("compare-landxml")
+        .args(["--application", "generated-fixture"])
+        .args(["--application-version", "test-only"])
+        .args(["--settings-profile", "metric-tin"])
+        .args(["--horizontal-tolerance-metres", "1e-18"])
+        .args(["--vertical-tolerance-metres", "0"])
+        .arg(fixture.run_root.join("terrain.xml"))
+        .arg(&returned)
+        .output()
+        .expect("compare process LandXML");
+    assert_success(&compared);
+    let comparison = String::from_utf8_lossy(&compared.stdout);
+    for expected in [
+        "LandXML semantic comparison passed",
+        "caller-declared application generated-fixture",
+        "horizontal tolerance metres 1e-18",
+        "exact bytes true",
+        "topology matches true",
+        "run bound false",
+        "canonical evidence published false",
+        "external application execution verified false",
+    ] {
+        assert!(
+            comparison.contains(expected),
+            "missing {expected:?}\n{comparison}"
+        );
+    }
 
     let inspected = Command::new(env!("CARGO_BIN_EXE_terrain-demo"))
         .arg("inspect")
@@ -108,6 +138,7 @@ fn process_help_and_invalid_input_are_bounded_and_do_not_create_a_run() {
     let help = String::from_utf8_lossy(&help.stdout);
     assert!(help.contains("terrain-demo start|resume"));
     assert!(help.contains("terrain-demo inspect"));
+    assert!(help.contains("terrain-demo compare-landxml"));
     assert!(help.len() < 4 * 1024);
 
     let fixture = ProcessFixture::new("invalid");
@@ -121,10 +152,28 @@ fn process_help_and_invalid_input_are_bounded_and_do_not_create_a_run() {
     assert!(diagnostic.contains("Run ID must contain exactly 32 hexadecimal characters"));
     assert!(diagnostic.len() < 2 * 1024);
     assert!(!fixture.run_root.join("run.pwf").exists());
+
+    let invalid_comparison = Command::new(env!("CARGO_BIN_EXE_terrain-demo"))
+        .arg("compare-landxml")
+        .output()
+        .expect("run invalid comparison request");
+    assert!(!invalid_comparison.status.success());
+    let diagnostic = String::from_utf8_lossy(&invalid_comparison.stderr);
+    assert!(
+        diagnostic.contains("PRT_INVALID_INPUT at landxml-round-trip-comparison"),
+        "{diagnostic}"
+    );
+    assert!(
+        diagnostic.contains(
+            "recovery: correct the declaration or LandXML input, then retry the comparison"
+        ),
+        "{diagnostic}"
+    );
+    assert!(!diagnostic.contains("start a new Run"), "{diagnostic}");
 }
 
 struct ProcessFixture {
-    _directory: TestDirectory,
+    directory: TestDirectory,
     source: PathBuf,
     index: PathBuf,
     workspace: PathBuf,
@@ -158,7 +207,7 @@ impl ProcessFixture {
         let baseline = workspace_handle.head().provenance().revision().into_bytes();
         drop(workspace_handle);
         Self {
-            _directory: directory,
+            directory,
             source,
             index,
             workspace,

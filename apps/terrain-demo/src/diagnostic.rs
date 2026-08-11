@@ -20,6 +20,9 @@ pub(crate) enum FailureCode {
     JournalConflict,
     JournalCorrupt,
     OutputConflict,
+    RoundTripInvalidInput,
+    RoundTripResourceLimit,
+    RoundTripSemanticMismatch,
     PublicationIndeterminate,
     Io,
     Internal,
@@ -39,6 +42,9 @@ impl FailureCode {
             Self::JournalConflict => "PWF_JOURNAL_CONFLICT",
             Self::JournalCorrupt => "PWF_JOURNAL_CORRUPT",
             Self::OutputConflict => "PWF_OUTPUT_CONFLICT",
+            Self::RoundTripInvalidInput => "PRT_INVALID_INPUT",
+            Self::RoundTripResourceLimit => "PRT_RESOURCE_LIMIT",
+            Self::RoundTripSemanticMismatch => "PRT_SEMANTIC_MISMATCH",
             Self::PublicationIndeterminate => "PWF_PUBLICATION_INDETERMINATE",
             Self::Io => "PWF_IO",
             Self::Internal => "PWF_INTERNAL",
@@ -65,6 +71,7 @@ pub(crate) enum WorkflowStage {
     Report,
     Complete,
     Inspect,
+    RoundTrip,
 }
 
 impl WorkflowStage {
@@ -87,6 +94,7 @@ impl WorkflowStage {
             Self::Report => "report-ensure",
             Self::Complete => "complete-checkpoint",
             Self::Inspect => "inspect",
+            Self::RoundTrip => "landxml-round-trip-comparison",
         }
     }
 }
@@ -155,6 +163,9 @@ pub(crate) enum RecoveryAction {
     ResolveRecordedOperationByResuming,
     RemoveOrRenameConflictingTarget,
     RestoreExpectedSource,
+    CorrectRoundTripInput,
+    UseSupportedRoundTripSize,
+    ReviewReturnedLandXml,
     StopAndPreserve,
 }
 
@@ -174,6 +185,15 @@ impl RecoveryAction {
                 "remove or rename the conflicting caller-owned target, then resume"
             }
             Self::RestoreExpectedSource => "restore the expected immutable Source, then resume",
+            Self::CorrectRoundTripInput => {
+                "correct the declaration or LandXML input, then retry the comparison"
+            }
+            Self::UseSupportedRoundTripSize => {
+                "use inputs within the named comparison limit or preserve them for a later slice"
+            }
+            Self::ReviewReturnedLandXml => {
+                "review the downstream export settings or reject the returned deliverable"
+            }
             Self::StopAndPreserve => "stop and preserve all Run and Workspace files",
         }
     }
@@ -270,6 +290,10 @@ impl WorkflowFailure {
             error,
             RecoveryAction::CorrectInvalidRequest,
         )
+    }
+
+    pub(crate) fn diagnostic(&self) -> &str {
+        &self.diagnostic.0
     }
 
     /// Returns the stable machine-readable failure code.

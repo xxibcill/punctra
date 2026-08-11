@@ -1,11 +1,13 @@
 # Domain Context: Point-Cloud Foundation
 
 Status: renderer, adaptive View planning, Real Sources, Spatial Index/out-of-
-core View, the narrow Workspace, and the v0.6 Terrain and Check Point QA slice
-are implemented; the narrow v0.7 technical-readiness Workflow Run is also
-implemented; broader terrain and product terms remain deferred
+core View, the narrow Workspace, v0.6 Terrain and Check Point QA, and the v0.7
+technical-readiness Workflow Run are implemented; the narrow v0.8 repository
+Interoperability Qualification design is Active and its bounded file-
+comparison slices are implemented, while Run-bound evidence remains pending;
+broader terrain and product terms remain deferred
 
-Punctra v0.7 builds on the reusable render engine, renderer-neutral View
+Punctra v0.8 builds on the reusable render engine, renderer-neutral View
 planner, and verified Source path described in the accepted [v0.1 renderer
 design](docs/design/render-engine-v0.1.md), [v0.2 planning
 design](docs/design/adaptive-view-planning-v0.2.md), and [v0.3 Real Sources
@@ -25,6 +27,12 @@ design](docs/design/technical-alpha-readiness-v0.7.md) additionally fixes the
 narrow meanings of Workflow Run, Run Checkpoint, Revision Audit, Edit
 Footprint, Surface Change Envelope, and Recovery Action. Those terms describe
 one headless technical path and do not imply a partner-facing product.
+The accepted [v0.8 repository interoperability qualification
+design](docs/design/design-partner-mvp-v0.8.md) fixes the meanings of
+Downstream Declaration, Interoperability Qualification, Round-Trip Evidence,
+and Tolerance Profile for the post-Run verifier. The initial comparator exists,
+but those terms do not imply that Run-bound evidence was published or that a
+downstream product was exercised.
 
 ## Artifact
 
@@ -70,6 +78,14 @@ The act of producing an Artifact from one explicit input provenance and one Reci
 
 _Avoid:_ processing when the specific operation is derivation
 
+## Downstream Declaration
+
+The caller's exact application label, version label, and settings associated
+with one returned deliverable. It records what the caller asserts and is not
+proof that the application ran or applied those settings.
+
+_Avoid:_ supported application, verified configuration, application evidence
+
 ## Edit
 
 An intentional logical change to Workspace state, such as changing Point classifications or adding a Breakline. An Edit is recorded rather than applied to Source bytes.
@@ -105,6 +121,14 @@ The complete set of Snapshot Points selected by one explicit effective ground
 classification and optional Region for a Terrain Derivation.
 
 _Avoid:_ visible ground, display Points, inferred terrain Points
+
+## Interoperability Qualification
+
+A bounded semantic comparison between one authoritative exported deliverable
+and one caller-returned deliverable under an explicit Tolerance Profile. It
+qualifies the compared artifacts, not an application, vendor, firm, or product.
+
+_Avoid:_ certification, application support, partner acceptance
 
 ## Operation Identity
 
@@ -207,6 +231,15 @@ target Revision, or imply general history rewriting.
 
 _Avoid:_ rollback, head rewind, delete history
 
+## Round-Trip Evidence
+
+An immutable record binding an original Export, a caller-returned deliverable,
+its Downstream Declaration, Tolerance Profile, and complete qualification
+result. It is technical artifact evidence, not proof of paid use or customer
+acceptance.
+
+_Avoid:_ application certification, pilot evidence, acceptance report
+
 ## Run Checkpoint
 
 An immutable checksummed frame proving that one Workflow phase fact was
@@ -276,6 +309,14 @@ position. A Terrain Gap is not an elevation and is never silently filled by
 extrapolation.
 
 _Avoid:_ zero elevation, missing value when absence of surface Coverage matters
+
+## Tolerance Profile
+
+The caller-declared inclusive horizontal and vertical differences permitted by
+one Interoperability Qualification. It is recorded exactly and is never
+inferred from coordinates, display precision, or a downstream application.
+
+_Avoid:_ fuzz, epsilon, automatic tolerance
 
 ## View
 

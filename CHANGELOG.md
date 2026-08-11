@@ -3,7 +3,28 @@
 All notable changes to Punctra are documented here. The project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased - 0.7.0
+## Unreleased - 0.8.0-alpha.1
+
+- Accepted and activated the narrow v0.8 repository interoperability-
+  qualification design. The planned private `terrain-demo` path will compare a
+  caller-returned semantic LandXML 1.2 TIN with one Complete v0.7 Run and emit
+  a separate bounded canonical Round-Trip Evidence record.
+- Fixed the caller declaration, bounded fail-closed parsing, explicit metric-
+  metre unit checks, unique tolerance mapping, ambiguity rejection, exact face-
+  topology comparison, no-overwrite evidence publication, and external-
+  evidence boundaries before the pending Run-bound publication slice.
+- Implemented the first two private delivery slices: bounded regular-file and
+  DOM-backed LandXML subset parsing, unique tolerance matching, normalized TIN
+  topology comparison, focused portability and semantic regressions, and an
+  explicitly non-Run-bound `compare-landxml` CLI/process path. Its output
+  states that canonical evidence was not published and external application
+  execution was not verified.
+- Bumped workspace version metadata to `0.8.0-alpha.1`. This initial work does
+  not implement Run binding or evidence publication, alter the v0.7 eight-frame
+  journal or `audit.json`, complete the product MVP, or claim actual Civil 3D,
+  Bentley, partner, paid-pilot, conversion, or labor-savings evidence.
+
+## 0.7.0-alpha.1 - 2026-08-11
 
 - Implemented the v0.7 technical partner-alpha readiness design as a repository
   technical-readiness slice. `foundation-runtime` Jobs can now wait with direct

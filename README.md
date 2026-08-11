@@ -49,8 +49,8 @@ persistence, general LandXML, or coordinate transformation. This repository
 completion is not a claim of product, partner, licensed-data, or downstream-
 application acceptance.
 
-Version 0.7 completes the deliberately technical slice described by the
-implemented [Technical partner-alpha readiness
+Version 0.7.0-alpha.1 completes the deliberately technical slice described by
+the implemented [Technical partner-alpha readiness
 design](docs/design/technical-alpha-readiness-v0.7.md). It adds exact Revision
 Audit and Edit Footprint facts, restart-safe LandXML reconciliation, linked
 child cancellation, and one durable eight-checkpoint Workflow Run inside
@@ -60,9 +60,19 @@ with one safe recovery action. It does not add Breaklines or establish the
 external design-partner, production-data, downstream-application, paid-use,
 or human-workflow evidence required by the product milestone.
 
-Later direction is described in the [living roadmap](ROADMAP.md). Its release
-themes are adjustable and do not expand accepted implementation scope by
-themselves.
+Version 0.8.0-alpha.1 starts the accepted, Active
+[repository interoperability qualification
+design](docs/design/design-partner-mvp-v0.8.md). Its narrow planned repository
+slice is a private `terrain-demo` semantic LandXML 1.2 round-trip verifier and
+separate canonical evidence output. The bounded file-to-file comparison core
+and explicitly non-evidence `compare-landxml` CLI are now implemented. Durable
+Run binding and canonical evidence publication remain pending; the v0.7
+journal and `audit.json` are unchanged, and no actual Civil 3D, Bentley,
+partner, paid-pilot, conversion, or labor-savings test is claimed.
+
+Later direction and the exact external product gates are described in the
+[living roadmap](ROADMAP.md). Its candidate themes do not expand accepted
+implementation scope by themselves.
 
 ## Embedding model
 
@@ -218,6 +228,27 @@ Operation Identity. Journal-only status inspection requires only the Run root:
 ```bash
 cargo run --release -p terrain-demo -- inspect run-root
 ```
+
+The first v0.8 slice can compare that exact export with a returned LandXML at
+a separate resolved path while ignoring Point/face order, Point renumbering,
+and triangle winding. On Unix and Windows it also rejects a returned hard link
+to the reference file; other platforms fail closed when stable file identity
+is unavailable:
+
+```bash
+cargo run --release -p terrain-demo -- compare-landxml \
+  --application "CALLER-DECLARED APP" \
+  --application-version "CALLER-DECLARED VERSION" \
+  --settings-profile "CALLER-DECLARED SETTINGS" \
+  --horizontal-tolerance-metres 0.001 \
+  --vertical-tolerance-metres 0.001 \
+  run-root/terrain.xml returned.xml
+```
+
+This command rejects unit drift, out-of-tolerance coordinate drift, ambiguous
+vertex matches, and topology drift. Its summary is deliberately marked as not
+Run-bound and not canonical evidence; the application/version/settings labels
+are caller declarations, not proof that the named application ran.
 
 The fixed Run-root children are `run.pwf`, `run.lock`, `terrain.xml`, and
 `audit.json`. Existing exact XML/report bytes reconcile; different caller-owned

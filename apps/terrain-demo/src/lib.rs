@@ -7,6 +7,7 @@ mod cli;
 mod diagnostic;
 mod journal;
 mod report;
+mod roundtrip;
 mod workflow;
 
 pub use cli::run_cli;

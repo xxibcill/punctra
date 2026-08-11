@@ -1,7 +1,7 @@
 # Punctra Roadmap
 
 Status: living guidance
-Last reviewed: 2026-08-10
+Last reviewed: 2026-08-11
 
 This roadmap communicates direction, not a delivery promise. It has no fixed
 dates. Candidate releases may be split, merged, reordered, renamed, or skipped
@@ -9,12 +9,13 @@ as technical and customer evidence changes. Milestone outcomes and dependency
 order matter more than version numbers.
 
 Only an **Active** release has committed scope. Punctra v0.1 through v0.7 are
-complete repository technical slices. The implemented [v0.7 Technical
-partner-alpha readiness design](docs/design/technical-alpha-readiness-v0.7.md)
-strengthens restart and audit behavior without claiming the external partner
-evidence required by the product milestone. No later candidate is made active
-merely by appearing here; broader terrain, export, general editing, and
-application UI remain uncommitted until an accepted design says otherwise.
+complete repository technical slices. v0.8 is Active only for the narrow
+[repository interoperability qualification
+design](docs/design/design-partner-mvp-v0.8.md): a private post-Run semantic
+LandXML 1.2 comparison and separate evidence record. The bounded file-
+comparison slices are implemented; Run binding, evidence publication, and all
+external product evidence remain outstanding. Broader terrain, export, general
+editing, downstream automation, and application UI remain uncommitted.
 
 ## Working direction
 
@@ -62,8 +63,8 @@ Roadmap status labels are:
 
 ## Scope and evidence checkpoint
 
-Status: **v0.7 repository technical-readiness slice complete; external product
-evidence remains outstanding**
+Status: **v0.8 repository interoperability-qualification slice Active; file
+comparison implemented, Run-bound evidence and product evidence outstanding**
 
 The [implemented v0.5 design](docs/design/durable-document-core-v0.5.md) places
 exact classification selection, temporary Point Sets, sparse Revisions, and
@@ -83,6 +84,14 @@ Footprint, and exact LandXML/report targets reconcile without overwrite. Its
 generated tests and benchmark establish only those technical guarantees; they
 do not satisfy any external evidence item below.
 
+The accepted v0.8 slice does not broaden that workflow. It adds one private,
+post-Run verifier that will compare the exact v0.7 metric-metre LandXML TIN with
+a caller-returned LandXML 1.2 file under declared tolerances and publish a
+separate canonical evidence record. Caller-declared application/version/
+settings labels are not proof that the application ran. The v0.7 journal and
+`audit.json` remain unchanged, and milestone-start documentation is not
+implementation acceptance.
+
 Useful evidence for proceeding includes:
 
 - screen-shared workflows with current users that identify the actual expensive
@@ -101,9 +110,9 @@ module. The detailed discovery signals and pivot criteria live in the
 
 ## Release sequence
 
-There are two provisional pre-v1 release themes after the completed v0.7.
-This is a working count, not a requirement to publish exactly two more
-releases.
+There is one Active pre-v1 repository slice and one provisional theme after the
+completed v0.7. This is a working count, not a requirement to publish exactly
+two more releases.
 
 ### v0.1 — Renderer foundation
 
@@ -372,31 +381,44 @@ tests are intentionally not relabeled as those facts.
 
 ### v0.8 — Design-partner MVP
 
-Status: **Candidate**
+Status: **Active — narrow repository qualification only; product MVP remains
+outstanding**
 
-Candidate outcome: complete the design-partner MVP milestone and demonstrate
-that the workflow has commercial value, not only technical novelty.
+Accepted repository outcome: implement the exact bounded post-Run verifier and
+evidence contract in the [v0.8 design](docs/design/design-partner-mvp-v0.8.md).
+The private `terrain-demo` path will:
 
-Likely scope:
+- require a Complete, unchanged v0.7 Run and leave its eight-frame journal,
+  `terrain.xml`, and `audit.json` untouched;
+- accept a caller-returned LandXML 1.2 file plus caller-declared downstream
+  application, version, settings, and horizontal/vertical metre tolerances;
+- parse the original and returned TINs under cumulative hard limits, rejecting
+  malformed, unsupported, partial, ambiguous, or raced input without recovery;
+- fail closed on unit drift, unmatched or multiply matched vertices, tolerance
+  drift, and any added, removed, duplicated, or changed face topology; and
+- create or exactly reconcile a bounded canonical Round-Trip Evidence record
+  outside the Run root without overwriting different data.
 
-- reliable round trips for the explicitly supported Civil 3D or Bentley
-  versions and settings;
-- install, update, licensing, and support diagnostics if a distributable product
-  is in scope;
-- documented limits and recovery procedures; and
-- partner-specific polish that generalizes across the supported datasets.
+This Active scope does not automate or claim a run through Civil 3D, Bentley
+software, or another named application. Repository-generated XML variants can
+complete technical tests only.
 
-Evidence of readiness:
+The product-level design-partner MVP requires all of these external gates:
 
-- the same export path works in at least three firms' actual pipelines without
-  bespoke code repair;
-- at least three paid pilots provide production evidence;
-- at least two partners convert or document enough labor savings to justify
-  overlapping incumbent software; and
-- supported workflows pass the full local verification and partner regression
-  suites.
+- **three distinct firms** use the same supported export path in their actual
+  production pipelines without bespoke code repair and accept the deliverable;
+- **three distinct paid pilots** have both payment and production-use evidence;
+  and
+- **two distinct pilot firms** either convert to continuing paid use or
+  document measured labor savings sufficient to justify overlapping incumbent
+  software.
 
-Commercial signals guide prioritization; they do not replace correctness tests.
+Multiple runs at one firm count once per gate. Free evaluations, synthetic
+runs, declarations, letters of intent, projected savings, and repository test
+fixtures do not count. A passing verifier record is necessary technical
+evidence for a qualified round trip but alone satisfies none of the three
+external gates. Commercial signals guide prioritization; they do not replace
+correctness tests.
 
 ### v0.9 — Trust and v1 candidate
 
@@ -441,7 +463,7 @@ a reason to publish v1.
 |---|---|---|
 | Renderer and planning foundations | v0.1–v0.2 | Reusable bounded display engine and adaptive View planner. |
 | Benchmark/demo | v0.3–v0.6 | Headless technical path from verified LAS/LAZ to one narrow terrain deliverable; external workflow evidence remains separate. |
-| Design-partner MVP | v0.7–v0.8 | Candidate recoverable production workflow; partner datasets and paid use remain required external evidence. |
+| Design-partner MVP | v0.7–v0.8 | Active repository interoperability qualification; product completion still requires three firms, three paid pilots, and two conversion-or-measured-savings firms. |
 | Trustworthy v1 | v0.9–v1.0 | Explicitly supported, regression-tested, maintainable compatibility surface. |
 
 ## Deferred until evidence changes
