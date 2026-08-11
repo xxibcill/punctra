@@ -219,6 +219,10 @@ impl CommitJob {
     ///
     /// Returns only failures known to precede durable publication. A failure
     /// after publication begins becomes `CommitOutcome::Indeterminate`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if this Job has already returned its result through `Future` polling.
     pub fn blocking_wait(mut self) -> Result<CommitOutcome, WorkspaceError> {
         let inner = self.inner.take().expect("CommitJob result is not consumed");
         let result = inner.blocking_wait();

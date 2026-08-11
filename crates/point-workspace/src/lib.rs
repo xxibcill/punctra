@@ -26,4 +26,4 @@ pub use model::{
 };
 pub use point_set::{PointIdBatch, PointIdBatches, PointSet};
 pub use selection::PointSetJob;
-pub use workspace::{Snapshot, Workspace, WorkspaceJob, create, open};
+pub use workspace::{CommitJob, Snapshot, Workspace, WorkspaceJob, create, open};
