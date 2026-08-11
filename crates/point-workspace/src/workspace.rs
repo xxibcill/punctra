@@ -600,21 +600,7 @@ fn run_commit(
     control: &OperationControl,
     abandoned: &Arc<AtomicBool>,
 ) -> Result<CommitOutcome, WorkspaceError> {
-    session.ensure_mutable()?;
-    control.check_cancelled()?;
-    #[cfg(test)]
-    session.writer_waiters.fetch_add(1, Ordering::SeqCst);
-    let writer = session.writer.lock();
-    #[cfg(test)]
-    session.writer_waiters.fetch_sub(1, Ordering::SeqCst);
-    let _writer = writer.map_err(|_| WorkspaceError::Poisoned)?;
-    let mut certainty = MutationCertaintyGuard::with_abandonment(
-        Arc::clone(&session.poisoned),
-        Arc::clone(phase),
-        Arc::clone(abandoned),
-    );
-    let result = (|| {
-        session.ensure_mutable()?;
+    run_guarded_mutation(session, phase, control, abandoned, || {
         let (operation, kind) = request.into_parts();
         match kind {
             CommitRequestKind::SetClassification { points, value } => {
@@ -624,9 +610,7 @@ fn run_commit(
                 commit_revert(session, operation, expected_head, limits, phase, control)
             }
         }
-    })();
-    certainty.observe(&result);
-    result
+    })
 }
 
 fn run_retry(
@@ -637,21 +621,7 @@ fn run_retry(
     control: &OperationControl,
     abandoned: &Arc<AtomicBool>,
 ) -> Result<CommitOutcome, WorkspaceError> {
-    session.ensure_mutable()?;
-    control.check_cancelled()?;
-    #[cfg(test)]
-    session.writer_waiters.fetch_add(1, Ordering::SeqCst);
-    let writer = session.writer.lock();
-    #[cfg(test)]
-    session.writer_waiters.fetch_sub(1, Ordering::SeqCst);
-    let _writer = writer.map_err(|_| WorkspaceError::Poisoned)?;
-    let mut certainty = MutationCertaintyGuard::with_abandonment(
-        Arc::clone(&session.poisoned),
-        Arc::clone(phase),
-        Arc::clone(abandoned),
-    );
-    let result = (|| {
-        session.ensure_mutable()?;
+    run_guarded_mutation(session, phase, control, abandoned, || {
         let state = operation_state(session, operation)?;
         if let Err(uncertainty) = state.sync_durable_directory(session, operation) {
             return Ok(CommitOutcome::Indeterminate(uncertainty));
@@ -670,7 +640,36 @@ fn run_retry(
         };
         enforce_ready_limits(&ready, limits)?;
         commit_ready(session, &ready, limits, 0, phase, control)
-    })();
+    })
+}
+
+fn run_guarded_mutation<F>(
+    session: &Arc<Session>,
+    phase: &Arc<PublicationPhase>,
+    control: &OperationControl,
+    abandoned: &Arc<AtomicBool>,
+    work: F,
+) -> Result<CommitOutcome, WorkspaceError>
+where
+    F: FnOnce() -> Result<CommitOutcome, WorkspaceError>,
+{
+    session.ensure_mutable()?;
+    control.check_cancelled()?;
+    #[cfg(test)]
+    session.writer_waiters.fetch_add(1, Ordering::SeqCst);
+    let writer = session.writer.lock();
+    #[cfg(test)]
+    session.writer_waiters.fetch_sub(1, Ordering::SeqCst);
+    let _writer = writer.map_err(|_| WorkspaceError::Poisoned)?;
+    let mut certainty = MutationCertaintyGuard::with_abandonment(
+        Arc::clone(&session.poisoned),
+        Arc::clone(phase),
+        Arc::clone(abandoned),
+    );
+    let result = match session.ensure_mutable() {
+        Ok(()) => work(),
+        Err(error) => Err(error),
+    };
     certainty.observe(&result);
     result
 }
