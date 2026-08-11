@@ -2143,7 +2143,7 @@ mod tests {
         let unknown = RevisionId::from_bytes([13; 32]).expect("opaque expected Revision");
         let stale = reopened
             .commit(
-                CommitRequest::revert(stale_operation, unknown),
+                CommitRequest::revert_head(stale_operation, unknown),
                 CommitLimits::default(),
             )
             .blocking_wait()
