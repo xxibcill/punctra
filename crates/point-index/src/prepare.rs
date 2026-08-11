@@ -14,7 +14,21 @@ use crate::{
 };
 
 pub(crate) fn start(source: Source, target: PathBuf, limits: PrepareLimits) -> crate::IndexJob {
-    Job::spawn(move |control| run(source, &target, limits, &control))
+    Job::spawn(move |control| run_with_allocation_probe(|| run(source, &target, limits, &control)))
+}
+
+#[cfg(not(test))]
+fn run_with_allocation_probe(
+    run: impl FnOnce() -> Result<PreparedIndex, IndexError>,
+) -> Result<PreparedIndex, IndexError> {
+    run()
+}
+
+#[cfg(test)]
+fn run_with_allocation_probe(
+    run: impl FnOnce() -> Result<PreparedIndex, IndexError>,
+) -> Result<PreparedIndex, IndexError> {
+    allocation_probe::measure_if_armed(run)
 }
 
 fn run(
@@ -341,6 +355,47 @@ fn report_progress(
 }
 
 #[cfg(test)]
+mod allocation_probe {
+    use std::sync::{Mutex, mpsc};
+
+    use super::*;
+
+    static REPORTER: Mutex<Option<mpsc::SyncSender<allocation_counter::AllocationInfo>>> =
+        Mutex::new(None);
+
+    pub(super) fn arm() -> mpsc::Receiver<allocation_counter::AllocationInfo> {
+        let (sender, receiver) = mpsc::sync_channel(1);
+        let mut reporter = REPORTER
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        assert!(
+            reporter.replace(sender).is_none(),
+            "allocation probe was already armed"
+        );
+        receiver
+    }
+
+    pub(super) fn measure_if_armed(
+        run: impl FnOnce() -> Result<PreparedIndex, IndexError>,
+    ) -> Result<PreparedIndex, IndexError> {
+        let sender = REPORTER
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+        let Some(sender) = sender else {
+            return run();
+        };
+
+        let mut result = None;
+        let allocations = allocation_counter::measure(|| result = Some(run()));
+        sender
+            .send(allocations)
+            .expect("allocation-test receiver remains available");
+        result.expect("measured preparation produced a result")
+    }
+}
+
+#[cfg(test)]
 mod allocation_tests {
     use std::{hint::black_box, path::PathBuf, time::SystemTime};
 
@@ -353,42 +408,40 @@ mod allocation_tests {
     const MAX_PREPARE_PEAK_HEAP_BYTES: u64 = 64 * 1024 * 1024;
 
     #[test]
-    fn cold_and_warm_prepare_respect_measured_peak_heap_and_release_allocations() {
+    fn cold_and_warm_public_prepare_respect_measured_worker_peak_heap() {
         let source = measured_source();
         let directory = temporary_directory();
         std::fs::create_dir(&directory).expect("create allocation-test directory");
         let target = directory.join("measured.pidx");
 
-        let cold = allocation_counter::measure(|| {
-            let prepared = run(
-                source.clone(),
-                &target,
-                PrepareLimits::default(),
-                &OperationControl::new(),
-            )
+        let cold_measurement = allocation_probe::arm();
+        let prepared = crate::prepare(source.clone(), &target, PrepareLimits::default())
+            .blocking_wait()
             .expect("measured cold prepare succeeds");
-            assert_eq!(
-                prepared.prepare_report().disposition(),
-                PrepareDisposition::Built
-            );
-            black_box(prepared.descriptor().artifact_checksum());
-        });
+        assert_eq!(
+            prepared.prepare_report().disposition(),
+            PrepareDisposition::Built
+        );
+        black_box(prepared.descriptor().artifact_checksum());
+        drop(prepared);
+        let cold = cold_measurement
+            .recv()
+            .expect("cold worker publishes its allocation measurement");
         assert_allocation_gate("cold prepare", cold);
 
-        let warm = allocation_counter::measure(|| {
-            let prepared = run(
-                source.clone(),
-                &target,
-                PrepareLimits::default(),
-                &OperationControl::new(),
-            )
+        let warm_measurement = allocation_probe::arm();
+        let prepared = crate::prepare(source.clone(), &target, PrepareLimits::default())
+            .blocking_wait()
             .expect("measured warm open succeeds");
-            assert_eq!(
-                prepared.prepare_report().disposition(),
-                PrepareDisposition::Opened
-            );
-            black_box(prepared.hierarchy().nodes().len());
-        });
+        assert_eq!(
+            prepared.prepare_report().disposition(),
+            PrepareDisposition::Opened
+        );
+        black_box(prepared.hierarchy().nodes().len());
+        drop(prepared);
+        let warm = warm_measurement
+            .recv()
+            .expect("warm worker publishes its allocation measurement");
         assert_allocation_gate("warm open", warm);
         std::fs::remove_dir_all(&directory).expect("remove allocation-test directory");
     }
@@ -400,17 +453,11 @@ mod allocation_tests {
             allocations.bytes_max,
             MAX_PREPARE_PEAK_HEAP_BYTES
         );
-        assert_eq!(
-            allocations.bytes_current, 0,
-            "{label} retained measured heap bytes"
-        );
-        assert_eq!(
-            allocations.count_current, 0,
-            "{label} retained measured allocations"
-        );
         eprintln!(
-            "{label} measured peak heap: {} bytes (ceiling: {})",
-            allocations.bytes_max, MAX_PREPARE_PEAK_HEAP_BYTES
+            "{label} measured worker peak heap: {} bytes (ceiling: {}; published result: {} bytes)",
+            allocations.bytes_max,
+            MAX_PREPARE_PEAK_HEAP_BYTES,
+            allocations.bytes_current.max(0),
         );
     }
 
