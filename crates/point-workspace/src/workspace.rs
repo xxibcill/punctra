@@ -2013,34 +2013,20 @@ mod tests {
 
     #[test]
     fn manifest_requires_exact_single_file_capacity() {
-        let below = OpenLimits::new(
-            MANIFEST_BYTES as u64,
-            0,
-            1,
-            0,
-            0,
-            0,
-            MANIFEST_BYTES as u64 - 1,
-            MANIFEST_BYTES as u64,
-            0,
-            0,
-        );
+        let below = OpenLimits::new()
+            .with_max_manifest_bytes(MANIFEST_BYTES as u64)
+            .with_max_revision_files(1)
+            .with_max_single_file_bytes(MANIFEST_BYTES as u64 - 1)
+            .with_max_total_persisted_bytes(MANIFEST_BYTES as u64);
         assert!(matches!(
             validate_root_limits(below),
             Err(WorkspaceError::ResourceLimit { .. })
         ));
-        let exact = OpenLimits::new(
-            MANIFEST_BYTES as u64,
-            0,
-            1,
-            0,
-            0,
-            0,
-            MANIFEST_BYTES as u64,
-            MANIFEST_BYTES as u64,
-            0,
-            0,
-        );
+        let exact = OpenLimits::new()
+            .with_max_manifest_bytes(MANIFEST_BYTES as u64)
+            .with_max_revision_files(1)
+            .with_max_single_file_bytes(MANIFEST_BYTES as u64)
+            .with_max_total_persisted_bytes(MANIFEST_BYTES as u64);
         validate_root_limits(exact).expect("exact manifest single-file boundary");
     }
 
