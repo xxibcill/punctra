@@ -9,7 +9,10 @@ use blake3::Hasher;
 use foundation_runtime::OperationControl;
 use thiserror::Error;
 
-use crate::error::WorkspaceError;
+use crate::{
+    error::WorkspaceError,
+    util::{allocation_bytes, encode_hex},
+};
 
 pub(crate) const WORKSPACE_ID_BYTES: usize = 16;
 pub(crate) const OPERATION_ID_BYTES: usize = 16;
@@ -2003,7 +2006,7 @@ fn bounded_directory_child_path(
 }
 
 fn vector_bytes<T>(capacity: usize) -> u64 {
-    u64::try_from(capacity.saturating_mul(std::mem::size_of::<T>())).unwrap_or(u64::MAX)
+    allocation_bytes::<T>(capacity)
 }
 
 fn reserve_vec_transition<T>(
@@ -2996,16 +2999,6 @@ fn parse_operation_name(name: &str) -> Option<(OperationBytes, OperationFileKind
     }
     let stem = name.strip_suffix(".reject")?;
     Some((decode_hex(stem)?, OperationFileKind::Reject))
-}
-
-fn encode_hex(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut result = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        result.push(char::from(HEX[usize::from(byte >> 4)]));
-        result.push(char::from(HEX[usize::from(byte & 0x0f)]));
-    }
-    result
 }
 
 fn decode_hex<const N: usize>(text: &str) -> Option<[u8; N]> {

@@ -12,6 +12,7 @@ use point_contracts::{ContentHash, PointId, SourceId};
 
 use crate::{
     PointIdReadLimits, PointSetLimits, PointSetMetadata, SnapshotProvenance, WorkspaceError,
+    util::{allocation_bytes, encode_hex},
     workspace::Session,
 };
 
@@ -1178,7 +1179,7 @@ fn create_spill_file(scratch: &Path) -> Result<(PathBuf, File), WorkspaceError> 
     for _ in 0..RANDOM_NAME_ATTEMPTS {
         let mut random = [0_u8; 16];
         getrandom::fill(&mut random).map_err(WorkspaceError::random)?;
-        let name = format!("point-set-{}.pset", hex(&random));
+        let name = format!("point-set-{}.pset", encode_hex(&random));
         let path = scratch.join(name);
         match OpenOptions::new()
             .create_new(true)
@@ -1253,12 +1254,6 @@ fn batch_record_bytes(records: usize) -> u64 {
     allocation_bytes::<PointSetRecord>(records)
 }
 
-fn allocation_bytes<T>(values: usize) -> u64 {
-    u64::try_from(values)
-        .unwrap_or(u64::MAX)
-        .saturating_mul(u64::try_from(mem::size_of::<T>()).unwrap_or(u64::MAX))
-}
-
 fn checked_add_with_limit(
     current: u64,
     added: u64,
@@ -1276,16 +1271,6 @@ fn checked_add_with_limit(
     Ok(required)
 }
 
-fn hex(bytes: &[u8]) -> String {
-    const DIGITS: &[u8; 16] = b"0123456789abcdef";
-    let mut encoded = String::with_capacity(bytes.len().saturating_mul(2));
-    for &byte in bytes {
-        encoded.push(char::from(DIGITS[usize::from(byte >> 4)]));
-        encoded.push(char::from(DIGITS[usize::from(byte & 0x0f)]));
-    }
-    encoded
-}
-
 #[cfg(test)]
 mod tests {
     use std::{
@@ -1297,9 +1282,12 @@ mod tests {
 
     use super::{
         PointSetRecord, SpillReader, SpillWriter, content_hasher, decode_record, encode_record,
-        grow_resident_records, hex, point_id_hasher, resident_record_bytes, update_hashes,
+        grow_resident_records, point_id_hasher, resident_record_bytes, update_hashes,
     };
-    use crate::{PointIdReadLimits, PointSetMetadata, RevisionId, SnapshotProvenance, WorkspaceId};
+    use crate::{
+        PointIdReadLimits, PointSetMetadata, RevisionId, SnapshotProvenance, WorkspaceId,
+        util::encode_hex,
+    };
 
     #[test]
     fn record_encoding_is_exact_and_round_trips() {
@@ -1319,7 +1307,7 @@ mod tests {
 
     #[test]
     fn spill_names_use_lowercase_fixed_width_hex() {
-        assert_eq!(hex(&[0, 1, 0xab, 0xff]), "0001abff");
+        assert_eq!(encode_hex(&[0, 1, 0xab, 0xff]), "0001abff");
     }
 
     #[test]
