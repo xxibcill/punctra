@@ -877,7 +877,18 @@ fn preflight_chunks(
             "LASzip layered chunk Point counts differ from the LAS header",
         ));
     }
-    if !layered {
+    if !layered && vlr.uses_variable_size_chunks() {
+        let encoded_points = table.as_ref().iter().try_fold(0_u64, |points, entry| {
+            (entry.point_count != 0)
+                .then(|| points.checked_add(entry.point_count))
+                .flatten()
+        });
+        if encoded_points != Some(point_count) {
+            return Err(SourceError::corrupt(
+                "LASzip variable chunk Point counts differ from the LAS header",
+            ));
+        }
+    } else if !layered {
         let chunk_size = u64::from(vlr.chunk_size());
         if chunk_size == 0 {
             return Err(SourceError::corrupt("LASzip chunk size is zero"));
