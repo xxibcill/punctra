@@ -5,6 +5,31 @@ All notable changes to Punctra are documented here. The project follows
 
 ## Unreleased
 
+## 0.5.0 - 2026-08-10
+
+- Added one deep `point-workspace` crate over a complete `PreparedIndex` and
+  its retained verified Source, with exclusive local Workspace locking and
+  immutable root and historical Snapshots.
+- Added exact All, inclusive world-box, and bounded explicit-Point-ID selection
+  with effective-classification equality, conservative index planning, exact
+  Source rechecks, and cumulative hard limits.
+- Added immutable process-scoped Point Sets with deterministic ordering,
+  repeatable bounded Point-ID batches, automatic checksummed spill, corruption
+  detection, and final-handle cleanup.
+- Added sparse uniform `U8` classification Revisions, no-op rejection,
+  immediate-head Revert as a new inverse Revision, and unchanged Source bytes
+  and non-classification values.
+- Added caller-owned durable Operation Identity, immutable ready/rejection
+  records, no-replace Revision publication, retry without a live Point Set,
+  and fail-closed committed/rejected/retryable/not-recorded/indeterminate
+  reconciliation.
+- Added 61 package tests—19 integration tests through the public interface and
+  42 unit, fault-injection, and allocation gates—plus generated LAS/LAZ
+  end-to-end coverage, a direct classification/Revert example, and a default
+  one-million-Point resource and Revision benchmark.
+- Recorded one-machine generated-fixture evidence; licensed production-data,
+  above-500-million-Point, and design-partner evidence remain outstanding.
+
 ## 0.4.0 - 2026-08-10
 
 - Added `point-index` with one deterministic 65,536-Point fixed-block BVH,

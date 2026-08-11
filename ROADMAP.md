@@ -8,11 +8,10 @@ dates. Candidate releases may be split, merged, reordered, renamed, or skipped
 as technical and customer evidence changes. Milestone outcomes and dependency
 order matter more than version numbers.
 
-Only an **Active** release has committed scope. Punctra v0.1 through v0.4 are
-complete. No later release is active until it receives a separate accepted
-design or architecture decision. In particular, Workspace behavior, editing,
-terrain, export, and general application UI are not silently made current scope
-by appearing here.
+Only an **Active** release has committed scope. Punctra v0.1 through v0.5 are
+complete. Work beyond the accepted v0.5 design remains proposed. In
+particular, terrain, export, general editing, and application UI are not
+silently made current scope by appearing here.
 
 ## Working direction
 
@@ -60,15 +59,16 @@ Roadmap status labels are:
 
 ## Scope and evidence checkpoint
 
-Status: **v0.4 technical slice complete; external product evidence remains outstanding**
+Status: **v0.5 technical slice complete; external product evidence remains outstanding**
 
-The [implemented v0.4 design](docs/design/out-of-core-view-v0.4.md) places one
-rebuildable Spatial Index in Punctra and keeps View materialization in the host
-demo. Repository tests and generated-source benchmarks close that technical
-slice. They do not authorize the broader Workspace, Query, Edit, terrain, or
-product-application proposal, and they are not a substitute for licensed field
-data or partner validation. Those later boundaries still require their own
-evidence and accepted designs.
+The [implemented v0.5 design](docs/design/durable-document-core-v0.5.md) places
+exact classification selection, temporary Point Sets, sparse Revisions, and
+Operation recovery behind one deep `point-workspace` interface. Repository
+tests and generated-source benchmarks close that technical slice. They do not
+authorize screen selection, general Edit, terrain, export, or product-
+application proposals, and they are not a substitute for licensed field data
+or partner validation. Those later boundaries still require their own evidence
+and accepted designs.
 
 Useful evidence for proceeding includes:
 
@@ -88,8 +88,8 @@ module. The detailed discovery signals and pivot criteria live in the
 
 ## Release sequence
 
-There are five provisional pre-v1 release themes after the completed v0.4. This
-is a working count, not a requirement to publish exactly five more releases.
+There are four provisional pre-v1 release themes after the completed v0.5. This
+is a working count, not a requirement to publish exactly four more releases.
 
 ### v0.1 — Renderer foundation
 
@@ -206,28 +206,52 @@ Exact scope and verification rules are recorded in the
 
 ### v0.5 — Durable document core
 
-Status: **Candidate**
+Status: **Complete**
 
-Candidate outcome: make exact selections and reversible classification Edits
-without changing immutable Source bytes.
+Implemented outcome: make exact classification selections and reversible
+classification Edits durable without changing immutable Source bytes.
 
-Likely scope:
+Delivered scope:
 
-- exact revision-pinned spatial and attribute Queries;
-- spillable, immutable Point Sets;
-- sparse classification Edits, immutable Revisions, undo, and crash recovery;
-- coherent Source, index, Snapshot, and operation lifecycle through a Workspace;
-  and
-- exact CPU confirmation of provisional display picks.
+- one deep headless Workspace over one complete Spatial Index and its verified
+  Source;
+- exact revision-pinned All, inclusive world-box, and bounded explicit-Point-ID
+  selection with an optional effective-classification predicate;
+- process-scoped immutable Point Sets with bounded automatic spill;
+- sparse uniform classification Edits, immutable linear Revisions,
+  immediate-head Revert, and crash recovery; and
+- durable caller-owned Operation Identity with committed, rejected, retryable,
+  not-recorded, and indeterminate reconciliation.
 
-Evidence of readiness:
+Repository acceptance evidence:
 
-- Point Identity survives decode, index, View, pick, Query, Point Set, commit,
-  and reopen;
+- Point Identity survives Source decode, index, exact Point-ID confirmation,
+  Point Set, classification commit, Revert, and reopen;
 - forced-spill and hard-budget tests keep memory and temporary storage bounded;
 - fault injection at persistence boundaries exposes either the complete old or
   complete new state; and
 - recovery and retry by Operation Identity never duplicate a commit.
+
+The package has 61 tests: 19 integration tests through the public interface and
+42 unit, fault-injection, and allocation gates. Generated LAS and LAZ fixtures
+exercise selection, commit, Revert, reopen, and unchanged Source bytes.
+Persistence fault injection covers staging, hard-link, directory-sync, cleanup,
+cancellation, panic, and lost-acknowledgement boundaries. The default
+one-million-Point generated benchmark and all declared Criterion cases
+completed on the named local reference machine; exact selection's separate
+131,073-Point worker-equivalent allocation gate peaked at 6,292,224 bytes under
+its 64 MiB ceiling, and the one-million-Point forced-spill payload was
+9,009,182 bytes. The one-million-Point benchmark reports sampled process RSS
+and does not claim worker heap.
+
+Licensed production-cloud, above-500-million-Point, workflow-observation, and
+design-partner evidence remain explicitly outstanding. The generated fixture
+results do not satisfy those external gates.
+
+Complete screen-through/brush selection, general Attribute or position edits,
+durable named Point Sets, Breaklines, branches, merge, and compaction are not
+part of v0.5. Exact scope and verification rules are recorded in the
+[v0.5 Durable document core design](docs/design/durable-document-core-v0.5.md).
 
 ### v0.6 — Terrain and QA benchmark
 

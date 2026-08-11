@@ -315,6 +315,15 @@ pub struct PreparedIndex {
 }
 
 impl PreparedIndex {
+    /// Returns the authoritative verified Source retained by this complete index.
+    ///
+    /// Exact downstream operations use this handle so an index cannot be paired
+    /// accidentally with a different Source instance.
+    #[must_use]
+    pub const fn source(&self) -> &Source {
+        &self.source
+    }
+
     /// Returns deterministic complete-artifact facts.
     #[must_use]
     pub const fn descriptor(&self) -> &IndexDescriptor {
