@@ -3592,6 +3592,7 @@ pub(crate) mod test_fault {
         Error,
         Cancel,
         Panic,
+        PauseThenContinue,
         PauseThenPanic,
     }
 
@@ -3700,22 +3701,29 @@ pub(crate) mod test_fault {
             )),
             Some((Action::Cancel, _)) => Err(PersistenceError::Cancelled),
             Some((Action::Panic, _)) => panic!("injected panic at {point:?}"),
+            Some((Action::PauseThenContinue, pause)) => {
+                pause_until_released(&pause);
+                Ok(())
+            }
             Some((Action::PauseThenPanic, pause)) => {
-                let mut flags = pause
-                    .flags
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner);
-                flags.0 = true;
-                pause.changed.notify_all();
-                while !flags.1 {
-                    flags = pause
-                        .changed
-                        .wait(flags)
-                        .unwrap_or_else(std::sync::PoisonError::into_inner);
-                }
-                drop(flags);
+                pause_until_released(&pause);
                 panic!("injected paused panic at {point:?}");
             }
+        }
+    }
+
+    fn pause_until_released(pause: &PauseState) {
+        let mut flags = pause
+            .flags
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        flags.0 = true;
+        pause.changed.notify_all();
+        while !flags.1 {
+            flags = pause
+                .changed
+                .wait(flags)
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
         }
     }
 }

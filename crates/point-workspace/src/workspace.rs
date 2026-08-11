@@ -70,7 +70,9 @@ pub struct CommitJob {
     operation: OperationId,
     phase: Arc<PublicationPhase>,
     session: Arc<Session>,
-    inner: Job<CommitOutcome, WorkspaceError>,
+    abandoned: Arc<AtomicBool>,
+    handle: OperationHandle,
+    inner: Option<Job<CommitOutcome, WorkspaceError>>,
 }
 
 impl Workspace {
@@ -124,7 +126,9 @@ impl Workspace {
         CommitJob::spawn(
             Arc::clone(&self.session),
             operation,
-            move |session, phase, control| run_commit(&session, request, limits, &phase, &control),
+            move |session, phase, control, abandoned| {
+                run_commit(&session, request, limits, &phase, &control, &abandoned)
+            },
         )
     }
 
@@ -134,7 +138,9 @@ impl Workspace {
         CommitJob::spawn(
             Arc::clone(&self.session),
             operation,
-            move |session, phase, control| run_retry(&session, operation, limits, &phase, &control),
+            move |session, phase, control, abandoned| {
+                run_retry(&session, operation, limits, &phase, &control, &abandoned)
+            },
         )
     }
 
@@ -170,34 +176,41 @@ impl CommitJob {
                 Arc<Session>,
                 Arc<PublicationPhase>,
                 OperationControl,
+                Arc<AtomicBool>,
             ) -> Result<CommitOutcome, WorkspaceError>
             + Send
             + 'static,
     {
         let phase = Arc::new(PublicationPhase::new());
+        let abandoned = Arc::new(AtomicBool::new(false));
         let worker_session = Arc::clone(&session);
         let worker_phase = Arc::clone(&phase);
+        let worker_abandoned = Arc::clone(&abandoned);
         let inner = Job::spawn(move |control| {
-            let mut certainty = MutationCertaintyGuard::new(
+            let mut certainty = MutationCertaintyGuard::with_abandonment(
                 Arc::clone(&worker_session.poisoned),
                 Arc::clone(&worker_phase),
+                Arc::clone(&worker_abandoned),
             );
-            let result = work(worker_session, worker_phase, control);
+            let result = work(worker_session, worker_phase, control, worker_abandoned);
             certainty.observe(&result);
             result
         });
+        let handle = inner.handle();
         Self {
             operation,
             phase,
             session,
-            inner,
+            abandoned,
+            handle,
+            inner: Some(inner),
         }
     }
 
     /// Returns a cloneable runtime observation and cancellation capability.
     #[must_use]
     pub fn handle(&self) -> OperationHandle {
-        self.inner.handle()
+        self.handle.clone()
     }
 
     /// Waits for a certainty-preserving terminal commit result.
@@ -206,8 +219,9 @@ impl CommitJob {
     ///
     /// Returns only failures known to precede durable publication. A failure
     /// after publication begins becomes `CommitOutcome::Indeterminate`.
-    pub fn blocking_wait(self) -> Result<CommitOutcome, WorkspaceError> {
-        let result = self.inner.blocking_wait();
+    pub fn blocking_wait(mut self) -> Result<CommitOutcome, WorkspaceError> {
+        let inner = self.inner.take().expect("CommitJob result is not consumed");
+        let result = inner.blocking_wait();
         finish_commit_result(
             self.operation,
             self.phase.as_ref(),
@@ -221,14 +235,35 @@ impl Future for CommitJob {
     type Output = Result<CommitOutcome, WorkspaceError>;
 
     fn poll(mut self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Self::Output> {
-        match Pin::new(&mut self.inner).poll(context) {
+        let poll = Pin::new(
+            self.inner
+                .as_mut()
+                .expect("a completed CommitJob must not be polled again"),
+        )
+        .poll(context);
+        match poll {
             Poll::Pending => Poll::Pending,
-            Poll::Ready(result) => Poll::Ready(finish_commit_result(
-                self.operation,
-                self.phase.as_ref(),
-                self.session.as_ref(),
-                result,
-            )),
+            Poll::Ready(result) => {
+                self.inner.take();
+                Poll::Ready(finish_commit_result(
+                    self.operation,
+                    self.phase.as_ref(),
+                    self.session.as_ref(),
+                    result,
+                ))
+            }
+        }
+    }
+}
+
+impl Drop for CommitJob {
+    fn drop(&mut self) {
+        if self.inner.is_some() {
+            self.abandoned.store(true, Ordering::SeqCst);
+            self.handle.cancel();
+            if self.phase.current().is_some() {
+                self.session.poisoned.store(true, Ordering::SeqCst);
+            }
         }
     }
 }
@@ -239,7 +274,7 @@ impl std::fmt::Debug for CommitJob {
             .debug_struct("CommitJob")
             .field("operation", &self.operation)
             .field("phase", &self.phase.current())
-            .field("handle", &self.inner.handle())
+            .field("handle", &self.handle)
             .finish_non_exhaustive()
     }
 }
@@ -249,15 +284,32 @@ struct PublicationPhase(AtomicU8);
 struct MutationCertaintyGuard {
     poisoned: Arc<AtomicBool>,
     phase: Arc<PublicationPhase>,
+    abandoned: Option<Arc<AtomicBool>>,
     armed: bool,
     force_poison: bool,
 }
 
 impl MutationCertaintyGuard {
+    #[cfg(test)]
     fn new(poisoned: Arc<AtomicBool>, phase: Arc<PublicationPhase>) -> Self {
         Self {
             poisoned,
             phase,
+            abandoned: None,
+            armed: true,
+            force_poison: false,
+        }
+    }
+
+    fn with_abandonment(
+        poisoned: Arc<AtomicBool>,
+        phase: Arc<PublicationPhase>,
+        abandoned: Arc<AtomicBool>,
+    ) -> Self {
+        Self {
+            poisoned,
+            phase,
+            abandoned: Some(abandoned),
             armed: true,
             force_poison: false,
         }
@@ -272,6 +324,15 @@ impl MutationCertaintyGuard {
     }
 
     fn observe(&mut self, result: &Result<CommitOutcome, WorkspaceError>) {
+        if self.phase.current().is_some()
+            && self
+                .abandoned
+                .as_ref()
+                .is_some_and(|abandoned| abandoned.load(Ordering::SeqCst))
+        {
+            self.force_poison();
+            return;
+        }
         match result {
             Ok(CommitOutcome::Committed(_) | CommitOutcome::Rejected(_)) => self.disarm(),
             Ok(CommitOutcome::Indeterminate(_)) => self.force_poison(),
@@ -533,6 +594,7 @@ fn run_commit(
     limits: CommitLimits,
     phase: &Arc<PublicationPhase>,
     control: &OperationControl,
+    abandoned: &Arc<AtomicBool>,
 ) -> Result<CommitOutcome, WorkspaceError> {
     session.ensure_mutable()?;
     control.check_cancelled()?;
@@ -542,8 +604,11 @@ fn run_commit(
     #[cfg(test)]
     session.writer_waiters.fetch_sub(1, Ordering::SeqCst);
     let _writer = writer.map_err(|_| WorkspaceError::Poisoned)?;
-    let mut certainty =
-        MutationCertaintyGuard::new(Arc::clone(&session.poisoned), Arc::clone(phase));
+    let mut certainty = MutationCertaintyGuard::with_abandonment(
+        Arc::clone(&session.poisoned),
+        Arc::clone(phase),
+        Arc::clone(abandoned),
+    );
     let result = (|| {
         session.ensure_mutable()?;
         let (operation, kind) = request.into_parts();
@@ -566,6 +631,7 @@ fn run_retry(
     limits: CommitLimits,
     phase: &Arc<PublicationPhase>,
     control: &OperationControl,
+    abandoned: &Arc<AtomicBool>,
 ) -> Result<CommitOutcome, WorkspaceError> {
     session.ensure_mutable()?;
     control.check_cancelled()?;
@@ -575,8 +641,11 @@ fn run_retry(
     #[cfg(test)]
     session.writer_waiters.fetch_sub(1, Ordering::SeqCst);
     let _writer = writer.map_err(|_| WorkspaceError::Poisoned)?;
-    let mut certainty =
-        MutationCertaintyGuard::new(Arc::clone(&session.poisoned), Arc::clone(phase));
+    let mut certainty = MutationCertaintyGuard::with_abandonment(
+        Arc::clone(&session.poisoned),
+        Arc::clone(phase),
+        Arc::clone(abandoned),
+    );
     let result = (|| {
         session.ensure_mutable()?;
         let (committed, record) = operation_state(session, operation)?;
@@ -2245,6 +2314,21 @@ mod tests {
 
     #[test]
     fn dropping_commit_during_post_ready_panic_poisoned_retained_workspace() {
+        assert_dropped_commit_poisons(
+            FaultPoint::OperationLostAcknowledgement,
+            test_fault::Action::PauseThenPanic,
+        );
+    }
+
+    #[test]
+    fn dropping_completed_post_publication_commit_poisons_retained_workspace() {
+        assert_dropped_commit_poisons(
+            FaultPoint::RevisionLostAcknowledgement,
+            test_fault::Action::PauseThenContinue,
+        );
+    }
+
+    fn assert_dropped_commit_poisons(point: FaultPoint, action: test_fault::Action) {
         use point_contracts::{
             AttributeColumn, AttributeColumns, AttributeDataType, AttributeDefinition,
             AttributeValues, CoordinateReference, PositionTransform,
@@ -2299,11 +2383,7 @@ mod tests {
             .blocking_wait()
             .expect("select Point Set");
 
-        let fault = test_fault::Guard::install(
-            &workspace_path,
-            FaultPoint::OperationLostAcknowledgement,
-            test_fault::Action::PauseThenPanic,
-        );
+        let fault = test_fault::Guard::install(&workspace_path, point, action);
         let job = workspace.commit(
             CommitRequest::set_classification(
                 OperationId::from_bytes([1; 16]).expect("first Operation"),
