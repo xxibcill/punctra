@@ -745,6 +745,67 @@ mod tests {
     }
 
     #[test]
+    fn bridge_rejects_an_oversized_advertised_node_before_staging() {
+        let directory = TestDirectory::new().unwrap();
+        let mut scene = fixture_scene(directory.path()).unwrap();
+        let original_metrics = scene.metrics();
+        let oversized = requested_available(
+            scene.planning_nodes[0],
+            STAGING_POINT_BUDGET.saturating_add(1),
+        );
+        queue_available(&mut scene, 0, oversized);
+
+        let error = scene.next_batch().unwrap_err();
+
+        assert!(error.to_string().contains("node staging Points exceeded"));
+        assert_eq!(scene.planning_nodes[0].status(), NodeStatus::Missing);
+        assert_eq!(scene.nodes[0].latest_issued_version, 0);
+        assert_eq!(scene.metrics(), original_metrics);
+    }
+
+    #[test]
+    fn bridge_rejects_terminal_summary_count_and_coverage_mismatches() {
+        let directory = TestDirectory::new().unwrap();
+
+        let mut count_mismatch = fixture_scene(directory.path()).unwrap();
+        let original_metrics = count_mismatch.metrics();
+        let advertised = requested_available(
+            count_mismatch.planning_nodes[0],
+            count_mismatch.planning_nodes[0]
+                .point_count()
+                .saturating_add(1),
+        );
+        queue_available(&mut count_mismatch, 0, advertised);
+        let error = count_mismatch.next_batch().unwrap_err();
+        assert!(error.to_string().contains("terminal summary did not match"));
+        assert_eq!(count_mismatch.metrics(), original_metrics);
+        assert_eq!(
+            count_mismatch.planning_nodes[0].status(),
+            NodeStatus::Missing
+        );
+
+        let mut coverage_mismatch = fixture_scene(directory.path()).unwrap();
+        assert_eq!(
+            coverage_mismatch.nodes[0].coverage,
+            DisplayCoverage::Complete
+        );
+        coverage_mismatch.nodes[0].coverage = DisplayCoverage::Sampled;
+        let original_metrics = coverage_mismatch.metrics();
+        let advertised = requested_available(
+            coverage_mismatch.planning_nodes[0],
+            coverage_mismatch.planning_nodes[0].point_count(),
+        );
+        queue_available(&mut coverage_mismatch, 0, advertised);
+        let error = coverage_mismatch.next_batch().unwrap_err();
+        assert!(error.to_string().contains("terminal summary did not match"));
+        assert_eq!(coverage_mismatch.metrics(), original_metrics);
+        assert_eq!(
+            coverage_mismatch.planning_nodes[0].status(),
+            NodeStatus::Missing
+        );
+    }
+
+    #[test]
     fn camera_change_prunes_an_already_requested_real_node() {
         let directory = TestDirectory::new().unwrap();
         let mut scene = fixture_scene(directory.path()).unwrap();
@@ -878,6 +939,28 @@ mod tests {
         )
         .blocking_wait()?;
         RealCloudScene::new(TEST_GENERATION, index)
+    }
+
+    fn requested_available(original: AvailableNode, point_count: u64) -> AvailableNode {
+        let estimated_bytes = point_count
+            .checked_mul(ESTIMATED_GPU_BYTES_PER_POINT)
+            .unwrap();
+        AvailableNode::new(
+            original.key(),
+            original.parent(),
+            original.bounds(),
+            original.geometric_error(),
+            point_count,
+            estimated_bytes,
+            original.batch_key(),
+            NodeStatus::Requested,
+        )
+        .unwrap()
+    }
+
+    fn queue_available(scene: &mut RealCloudScene, index: usize, available: AvailableNode) {
+        scene.planning_nodes[index] = available;
+        scene.pending.push_back(available.key());
     }
 
     fn visible_camera(scene: &RealCloudScene) -> Camera {
