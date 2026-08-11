@@ -1506,7 +1506,28 @@ pub(crate) fn finalize(
             reason: "target appeared before atomic publication",
         });
     }
-    match fs::hard_link(&temporary_path, target) {
+    publish_no_replace(&temporary_path, target)?;
+    sync_parent(target)?;
+    temporary.close_and_remove("remove published temporary")?;
+    fs::remove_file(&work.path)
+        .map_err(|error| IndexError::io("remove completed work file", &work.path, error))?;
+    spool.close_and_remove("remove sample spool")?;
+    sync_parent(target)?;
+    Ok(())
+}
+
+fn publish_no_replace(temporary: &Path, target: &Path) -> Result<(), IndexError> {
+    publish_no_replace_with(temporary, target, |source, destination| {
+        fs::hard_link(source, destination)
+    })
+}
+
+fn publish_no_replace_with(
+    temporary: &Path,
+    target: &Path,
+    hard_link: impl FnOnce(&Path, &Path) -> std::io::Result<()>,
+) -> Result<(), IndexError> {
+    match hard_link(temporary, target) {
         Ok(()) => {}
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
             return Err(IndexError::IncompatibleArtifact {
@@ -1515,12 +1536,6 @@ pub(crate) fn finalize(
         }
         Err(error) => return Err(IndexError::io("atomically publish", target, error)),
     }
-    sync_parent(target)?;
-    temporary.close_and_remove("remove published temporary")?;
-    fs::remove_file(&work.path)
-        .map_err(|error| IndexError::io("remove completed work file", &work.path, error))?;
-    spool.close_and_remove("remove sample spool")?;
-    sync_parent(target)?;
     Ok(())
 }
 
@@ -2577,5 +2592,32 @@ fn reject_complete_symlink(path: &Path) -> Result<(), IndexError> {
         }),
         Ok(_) => Ok(()),
         Err(error) => Err(IndexError::io("inspect", path, error)),
+    }
+}
+
+#[cfg(test)]
+mod publication_tests {
+    use super::*;
+
+    #[test]
+    fn publication_error_retains_operation_target_and_os_error() {
+        let temporary = Path::new("fixture.pidx.tmp.123.1");
+        let target = Path::new("fixture.pidx");
+        let error = publish_no_replace_with(temporary, target, |_, _| {
+            Err(std::io::Error::from_raw_os_error(13))
+        })
+        .unwrap_err();
+
+        let IndexError::Io {
+            operation,
+            path,
+            source,
+        } = error
+        else {
+            panic!("publication failure lost its filesystem error category");
+        };
+        assert_eq!(operation, "atomically publish");
+        assert_eq!(path, target);
+        assert_eq!(source.raw_os_error(), Some(13));
     }
 }
