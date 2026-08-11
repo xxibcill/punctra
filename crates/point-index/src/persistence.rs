@@ -1637,7 +1637,10 @@ fn reject_symlink(path: &Path, kind: &'static str) -> Result<(), IndexError> {
 }
 
 fn sync_parent(path: &Path) -> Result<(), IndexError> {
-    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
     File::open(parent)
         .and_then(|directory| directory.sync_all())
         .map_err(|error| IndexError::io("flush parent directory of", path, error))

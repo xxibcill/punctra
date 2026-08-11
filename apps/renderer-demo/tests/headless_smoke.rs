@@ -41,6 +41,22 @@ fn las_and_laz_headless_smoke_full_verify_build_open_and_upload_one_node() {
     }
 }
 
+#[test]
+fn default_bare_index_target_builds_in_the_working_directory() {
+    let directory = TestDirectory::new().unwrap();
+    let source_name = "fixture.las";
+    write_las(&directory.path().join(source_name)).unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_renderer-demo"))
+        .current_dir(directory.path())
+        .args(["--smoke", source_name])
+        .output()
+        .unwrap();
+
+    assert_smoke_output(&output, "Built");
+    assert!(directory.path().join("fixture.las.pidx").is_file());
+}
+
 fn run_smoke(source: &Path, index: &Path) -> std::process::Output {
     Command::new(env!("CARGO_BIN_EXE_renderer-demo"))
         .args(["--smoke"])
