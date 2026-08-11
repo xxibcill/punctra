@@ -191,7 +191,7 @@ fn evaluate_check_points(
     limits: CheckPointLimits,
 ) -> CheckPointReport {
     surface
-        .check_points(check_points.iter().copied(), limits)
+        .check_points(check_points.to_vec(), limits)
         .blocking_wait()
         .expect("benchmark detached QA succeeds")
 }

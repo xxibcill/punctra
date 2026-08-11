@@ -182,7 +182,7 @@ impl TerrainSurface {
         limits: CheckPointLimits,
     ) -> CheckPointJob
     where
-        I: IntoIterator<Item = CheckPoint>;
+        I: IntoIterator<Item = CheckPoint> + Send + 'static;
 
     pub fn export_landxml(
         &self,

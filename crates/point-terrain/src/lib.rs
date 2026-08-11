@@ -68,7 +68,7 @@ impl TerrainSurface {
     #[must_use]
     pub fn check_points<I>(&self, check_points: I, limits: CheckPointLimits) -> CheckPointJob
     where
-        I: IntoIterator<Item = CheckPoint>,
+        I: IntoIterator<Item = CheckPoint> + Send + 'static,
     {
         qa::start(self, check_points, limits)
     }

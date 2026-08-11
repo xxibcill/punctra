@@ -17,12 +17,12 @@ pub(crate) fn start<I>(
     limits: CheckPointLimits,
 ) -> CheckPointJob
 where
-    I: IntoIterator<Item = CheckPoint>,
+    I: IntoIterator<Item = CheckPoint> + Send + 'static,
 {
-    let collected = collect_check_points(check_points, limits);
     let surface = surface.clone();
     Job::spawn(move |control| {
-        let (check_points, collection_bytes) = collected?;
+        let (check_points, collection_bytes) =
+            collect_check_points(check_points, limits, &control)?;
         evaluate(&surface, check_points, collection_bytes, limits, &control)
     })
 }
@@ -30,16 +30,23 @@ where
 fn collect_check_points<I>(
     check_points: I,
     limits: CheckPointLimits,
+    control: &OperationControl,
 ) -> Result<(Vec<CheckPoint>, u64), TerrainError>
 where
     I: IntoIterator<Item = CheckPoint>,
 {
+    control.check_cancelled()?;
     let mut input = check_points.into_iter();
     let lower_bound = u64::try_from(input.size_hint().0).unwrap_or(u64::MAX);
     require_count(lower_bound, limits)?;
 
     let mut collected = Vec::new();
-    for check_point in input.by_ref() {
+    loop {
+        let next = input.next();
+        control.check_cancelled()?;
+        let Some(check_point) = next else {
+            break;
+        };
         let next_count = u64::try_from(collected.len())
             .unwrap_or(u64::MAX)
             .saturating_add(1);

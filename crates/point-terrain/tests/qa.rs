@@ -7,7 +7,9 @@ use std::{
     sync::{
         Arc,
         atomic::{AtomicUsize, Ordering},
+        mpsc::{Receiver, SyncSender, sync_channel},
     },
+    time::Duration,
 };
 
 use foundation_runtime::ProgressPhase;
@@ -244,7 +246,7 @@ fn duplicate_identities_and_every_qa_resource_family_fail_without_a_report() {
 }
 
 #[test]
-fn count_limit_collects_only_max_plus_one_synchronously() {
+fn count_limit_collects_only_max_plus_one_in_the_worker() {
     let (_fixture, surface) = planar_surface("qa-count");
     let pulls = Arc::new(AtomicUsize::new(0));
     let input = UnhintedCheckPoints {
@@ -257,10 +259,10 @@ fn count_limit_collects_only_max_plus_one_synchronously() {
         input,
         CheckPointLimits::new(2, u64::MAX, u64::MAX, u64::MAX),
     );
-    assert_eq!(pulls.load(Ordering::Relaxed), 3);
     let error = job
         .blocking_wait()
         .expect_err("third Check Point exceeds the count limit");
+    assert_eq!(pulls.load(Ordering::Relaxed), 3);
     assert!(matches!(
         error,
         TerrainError::ResourceLimit {
@@ -269,6 +271,30 @@ fn count_limit_collects_only_max_plus_one_synchronously() {
             allowed: 2,
         }
     ));
+}
+
+#[test]
+fn cancellation_during_input_collection_returns_no_report() {
+    let (_fixture, surface) = planar_surface("qa-collection-cancel");
+    let (started_sender, started_receiver) = sync_channel(0);
+    let (release_sender, release_receiver) = sync_channel(0);
+    let input = GatedCheckPoints {
+        started: Some(started_sender),
+        release: release_receiver,
+        yielded: false,
+    };
+    let job = surface.check_points(input, CheckPointLimits::default());
+    let handle = job.handle();
+    started_receiver
+        .recv_timeout(Duration::from_secs(5))
+        .expect("worker begins Check Point input collection");
+    handle.cancel();
+    release_sender
+        .send(())
+        .expect("release the worker's in-flight iterator pull");
+
+    assert!(matches!(job.blocking_wait(), Err(TerrainError::Cancelled)));
+    assert_ne!(handle.progress().phase(), ProgressPhase::COMPLETE);
 }
 
 #[test]
@@ -331,6 +357,32 @@ struct UnhintedCheckPoints {
     next_id: u64,
     remaining: usize,
     pulls: Arc<AtomicUsize>,
+}
+
+struct GatedCheckPoints {
+    started: Option<SyncSender<()>>,
+    release: Receiver<()>,
+    yielded: bool,
+}
+
+impl Iterator for GatedCheckPoints {
+    type Item = CheckPoint;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.yielded {
+            return None;
+        }
+        self.started
+            .take()
+            .expect("fixture iterator starts once")
+            .send(())
+            .expect("test waits for collection to start");
+        self.release
+            .recv()
+            .expect("test releases the blocked iterator");
+        self.yielded = true;
+        Some(check_point(1, [1.0, 1.0, 0.0]))
+    }
 }
 
 impl Iterator for UnhintedCheckPoints {
