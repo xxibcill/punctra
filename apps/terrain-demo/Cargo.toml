@@ -9,6 +9,7 @@ repository.workspace = true
 publish = false
 
 [dependencies]
+blake3.workspace = true
 point-contracts.workspace = true
 point-index.workspace = true
 point-terrain.workspace = true

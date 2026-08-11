@@ -2199,6 +2199,7 @@ dependencies = [
 name = "terrain-demo"
 version = "0.6.0"
 dependencies = [
+ "blake3",
  "las",
  "point-contracts",
  "point-index",

@@ -33,6 +33,7 @@ fn generated_las_and_laz_run_the_complete_host_without_a_gpu() {
         let built = run_host(&source, &index, &workspace, &target, true, true);
         assert_success(&built);
         assert_bounded_summary(&built, "Built", "created");
+        assert!(!recovery_record_path(&workspace).exists());
         assert_eq!(
             fs::read(&source).expect("reread generated Source after correction and Revert"),
             source_bytes,
@@ -58,6 +59,7 @@ fn generated_las_and_laz_run_the_complete_host_without_a_gpu() {
         let opened = run_host(&source, &index, &workspace, &target, true, true);
         assert_success(&opened);
         assert_bounded_summary(&opened, "Opened", "opened");
+        assert!(!recovery_record_path(&workspace).exists());
         assert_eq!(
             fs::read(&source)
                 .expect("reread generated Source after reopened correction and Revert"),
@@ -71,6 +73,12 @@ fn generated_las_and_laz_run_the_complete_host_without_a_gpu() {
         }
         previous_xml = Some(second_xml);
     }
+}
+
+fn recovery_record_path(workspace: &Path) -> PathBuf {
+    let mut path = workspace.as_os_str().to_os_string();
+    path.push(".recovery");
+    PathBuf::from(path)
 }
 
 fn run_host(
