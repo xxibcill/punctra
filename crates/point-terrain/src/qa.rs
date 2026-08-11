@@ -291,6 +291,9 @@ fn locate(
             ));
         }
         let triangle = face_world(surface, face)?;
+        let Some((triangle, query)) = normalize_xy(triangle, query) else {
+            continue;
+        };
         if contains_closed(triangle, query) {
             let surface_z = interpolate_z(triangle, query)?;
             let residual = canonical_zero(position[2] - surface_z);
@@ -324,6 +327,52 @@ fn face_world(surface: &TerrainSurface, face: SurfaceFace) -> Result<[[f64; 3]; 
         }
     }
     Ok(world)
+}
+
+fn normalize_xy(
+    mut triangle: [[f64; 3]; 3],
+    point: Coord<f64>,
+) -> Option<([[f64; 3]; 3], Coord<f64>)> {
+    let minimum_x = triangle
+        .iter()
+        .map(|position| position[0])
+        .reduce(f64::min)?;
+    let maximum_x = triangle
+        .iter()
+        .map(|position| position[0])
+        .reduce(f64::max)?;
+    let minimum_y = triangle
+        .iter()
+        .map(|position| position[1])
+        .reduce(f64::min)?;
+    let maximum_y = triangle
+        .iter()
+        .map(|position| position[1])
+        .reduce(f64::max)?;
+    if point.x < minimum_x || point.x > maximum_x || point.y < minimum_y || point.y > maximum_y {
+        return None;
+    }
+
+    let scale = triangle
+        .iter()
+        .flat_map(|position| [position[0].abs(), position[1].abs()])
+        .reduce(f64::max)?;
+    if scale == 0.0 {
+        return None;
+    }
+    let origin = Coord {
+        x: triangle[0][0] / scale,
+        y: triangle[0][1] / scale,
+    };
+    for position in &mut triangle {
+        position[0] = position[0] / scale - origin.x;
+        position[1] = position[1] / scale - origin.y;
+    }
+    let point = Coord {
+        x: point.x / scale - origin.x,
+        y: point.y / scale - origin.y,
+    };
+    Some((triangle, point))
 }
 
 fn contains_closed(triangle: [[f64; 3]; 3], point: Coord<f64>) -> bool {

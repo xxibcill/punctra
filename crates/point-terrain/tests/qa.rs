@@ -13,6 +13,7 @@ use std::{
 };
 
 use foundation_runtime::ProgressPhase;
+use point_contracts::PositionTransform;
 use point_terrain::{
     CheckPoint, CheckPointId, CheckPointLimits, CheckPointOutcome, SurfaceFaceId, SurfaceVertexId,
     TerrainError, TerrainSurface,
@@ -206,6 +207,38 @@ fn compensated_statistics_retain_small_residuals_across_large_cancellation() {
         statistics.root_mean_square().expect("covered RMS"),
         (2.0e32_f64 / 3.0).sqrt(),
     );
+}
+
+#[test]
+fn finite_extreme_world_coordinates_remain_sampleable() {
+    let transform = PositionTransform::new([0.0; 3], [1.0e200, 1.0e200, 1.0])
+        .expect("finite extreme transform is valid");
+    let fixture = TerrainFixture::with_transform(
+        "qa-extreme-world",
+        transform,
+        vec![[0, 0, 0], [1, 0, 0], [0, 1, 0]],
+        vec![2; 3],
+    );
+    let surface = derive_surface(fixture.snapshot(), 2);
+
+    let report = surface
+        .check_points(
+            [check_point(1, [2.0e199, 2.0e199, 0.0])],
+            CheckPointLimits::default(),
+        )
+        .blocking_wait()
+        .expect("finite world geometry is supported");
+
+    let CheckPointOutcome::Sampled {
+        surface_z,
+        residual,
+        ..
+    } = report.results()[0].outcome()
+    else {
+        panic!("interior Check Point must not become a gap at large world magnitudes");
+    };
+    assert_eq!(surface_z.to_bits(), 0.0_f64.to_bits());
+    assert_eq!(residual.to_bits(), 0.0_f64.to_bits());
 }
 
 #[test]
