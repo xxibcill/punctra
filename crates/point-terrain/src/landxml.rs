@@ -272,8 +272,6 @@ fn finish_publication<H: PublicationHook>(
         expected_hash: expected.hash,
     })?;
     if published != *expected {
-        let _ = fs::remove_file(completion.target);
-        let _ = sync_directory(completion.parent);
         return Err(TerrainError::ExportIndeterminate {
             expected_hash: expected.hash,
         });
@@ -1075,6 +1073,21 @@ mod tests {
         }
     }
 
+    struct CorruptTargetHook(PathBuf);
+
+    impl PublicationHook for CorruptTargetHook {
+        fn reach(
+            &self,
+            boundary: PublicationBoundary,
+            _control: &OperationControl,
+        ) -> io::Result<()> {
+            if boundary == PublicationBoundary::TargetVerification {
+                fs::write(&self.0, b"corrupted after publication")?;
+            }
+            Ok(())
+        }
+    }
+
     #[test]
     fn pre_link_failure_and_cancellation_publish_nothing_and_clean_the_stage() {
         let fixture = ExportFixture::new("pre-link");
@@ -1146,6 +1159,32 @@ mod tests {
             assert_ne!(control.progress().phase(), ProgressPhase::COMPLETE);
             fixture.assert_no_stages();
         }
+    }
+
+    #[test]
+    fn verification_mismatch_is_indeterminate_and_preserves_the_target() {
+        let fixture = ExportFixture::new("verification-mismatch");
+        let target = fixture.path("corrupted.xml");
+        let control = OperationControl::new();
+        let failure = publish(
+            &fixture.surface,
+            &target,
+            &options(),
+            LandXmlLimits::default(),
+            &control,
+            &CorruptTargetHook(target.clone()),
+        )
+        .expect_err("post-link verification mismatch returns no receipt");
+        let TerrainError::ExportIndeterminate { expected_hash } = failure else {
+            panic!("post-link verification mismatch must be indeterminate");
+        };
+        let published = fs::read(&target).expect("indeterminate target remains inspectable");
+        assert_ne!(
+            expected_hash,
+            ContentHash::new(*blake3::hash(&published).as_bytes())
+        );
+        assert_ne!(control.progress().phase(), ProgressPhase::COMPLETE);
+        fixture.assert_no_stages();
     }
 
     fn options() -> LandXmlOptions {
