@@ -10,7 +10,9 @@ use std::{
 };
 
 use foundation_runtime::RuntimeError;
-use point_index::{IndexError, NodeReadBudget, PrepareDisposition, PrepareLimits, prepare};
+use point_index::{
+    IndexError, IndexLimit, NodeReadBudget, PrepareDisposition, PrepareLimits, prepare,
+};
 use point_source::ReadLimit;
 
 use support::{
@@ -132,22 +134,27 @@ fn cold_build_limits_fail_without_a_partial_target_and_preserve_only_valid_work(
     assert!(matches!(
         PrepareLimits::new(0, 24),
         Err(IndexError::InvalidLimit {
-            limit: "max_source_batch_points"
+            limit: IndexLimit::MaxSourceBatchPoints
         })
     ));
     assert!(matches!(
         PrepareLimits::new(1, 0),
         Err(IndexError::InvalidLimit {
-            limit: "max_source_batch_payload_bytes"
+            limit: IndexLimit::MaxSourceBatchPayloadBytes
         })
     ));
 
     let one_point = open_source(clustered_ticks(1));
     let incomplete_header = TemporaryTarget::new("limit-incomplete-header");
     let limit = PrepareLimits::default().with_max_incomplete_bytes(199);
-    assert_resource_error(
-        &prepare(one_point.clone(), incomplete_header.path(), limit).blocking_wait(),
-    );
+    assert!(matches!(
+        prepare(one_point.clone(), incomplete_header.path(), limit).blocking_wait(),
+        Err(IndexError::ResourceLimit {
+            limit: IndexLimit::IncompleteIndexBytes,
+            required: 200,
+            allowed: 199,
+        })
+    ));
     assert!(!incomplete_header.path().exists());
     assert!(!incomplete_header.work_path().exists());
 

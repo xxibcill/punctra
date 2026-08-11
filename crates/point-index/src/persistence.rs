@@ -13,8 +13,8 @@ use point_contracts::{PositionTransform, SourceId, WorldBounds};
 use point_source::{Source, SourceSpan};
 
 use crate::{
-    DisplayCoverage, IndexDescriptor, IndexError, IndexHierarchy, IndexNode, IndexNodeId,
-    PrepareLimits,
+    DisplayCoverage, IndexDescriptor, IndexError, IndexHierarchy, IndexLimit, IndexNode,
+    IndexNodeId, PrepareLimits,
     model::{DISK_VERSION, RECIPE_VERSION},
     read::IndexSample,
     tree::{BLOCK_POINTS, LeafRecord, MAX_NODE_SAMPLES, SAMPLE_BYTES, TreePlan},
@@ -83,7 +83,7 @@ impl SampleReadContext {
     fn capacity(self, count: u64) -> Result<usize, IndexError> {
         usize::try_from(count).map_err(|_| match self {
             Self::ArtifactAfterOpen { .. } => IndexError::ResourceLimit {
-                limit: "addressable sample Points",
+                limit: IndexLimit::AddressableSamplePoints,
                 required: count,
                 allowed: usize::MAX as u64,
             },
@@ -98,7 +98,11 @@ impl SampleReadContext {
         let actual_bytes = u64::try_from(capacity)
             .unwrap_or(u64::MAX)
             .saturating_mul(u64::try_from(mem::size_of::<IndexSample>()).unwrap_or(u64::MAX));
-        require(actual_bytes, max_buffer_bytes, "index sample buffer bytes")
+        require(
+            actual_bytes,
+            max_buffer_bytes,
+            IndexLimit::IndexSampleBufferBytes,
+        )
     }
 
     fn decoder(self, bytes: &[u8]) -> Decoder<'_> {
@@ -152,7 +156,7 @@ fn read_persisted_samples(
     samples
         .try_reserve_exact(context.capacity(count)?)
         .map_err(|_| IndexError::ResourceLimit {
-            limit: "sample buffer bytes",
+            limit: IndexLimit::SampleBufferBytes,
             required: byte_count,
             allowed: byte_count,
         })?;
@@ -241,7 +245,7 @@ impl WorkFile {
                 .saturating_add(payload_bytes)
                 .saturating_add(FRAME_PREFIX_BYTES),
             limits.max_build_working_bytes(),
-            "build working bytes",
+            IndexLimit::BuildWorkingBytes,
         )?;
         validate_frame_values(span, bounds, samples)?;
         if span.first_ordinal() != self.durable_points {
@@ -261,7 +265,7 @@ impl WorkFile {
                 .saturating_add(payload_bytes)
                 .saturating_add(FRAME_PREFIX_BYTES),
             limits.max_build_working_bytes(),
-            "build working bytes",
+            IndexLimit::BuildWorkingBytes,
         )?;
         if self.leaves.len() == self.leaves.capacity() {
             return Err(IndexError::CorruptWork {
@@ -271,14 +275,14 @@ impl WorkFile {
         let payload = encode_frame_payload(span, bounds, samples);
         let payload_length =
             u32::try_from(payload.len()).map_err(|_| IndexError::ResourceLimit {
-                limit: "work frame payload bytes",
+                limit: IndexLimit::WorkFramePayloadBytes,
                 required: u64::try_from(payload.len()).unwrap_or(u64::MAX),
                 allowed: u64::from(u32::MAX),
             })?;
         let frame_bytes = FRAME_PREFIX_BYTES
             .checked_add(u64::from(payload_length))
             .ok_or(IndexError::ResourceLimit {
-                limit: "incomplete index bytes",
+                limit: IndexLimit::IncompleteIndexBytes,
                 required: u64::MAX,
                 allowed: limits.max_incomplete_bytes(),
             })?;
@@ -289,7 +293,7 @@ impl WorkFile {
         require(
             frame_offset.saturating_add(frame_bytes),
             limits.max_incomplete_bytes(),
-            "incomplete index bytes",
+            IndexLimit::IncompleteIndexBytes,
         )?;
 
         let mut prefix = Vec::with_capacity(usize::try_from(FRAME_PREFIX_BYTES).unwrap_or(40));
@@ -414,7 +418,7 @@ fn preflight_work_initialization(
     require(
         WORK_HEADER_BYTES,
         limits.max_incomplete_bytes(),
-        "incomplete index bytes",
+        IndexLimit::IncompleteIndexBytes,
     )?;
     let leaf_count = canonical_leaf_count(source.metadata().point_count());
     let leaf_bytes =
@@ -422,7 +426,7 @@ fn preflight_work_initialization(
     require(
         leaf_bytes.saturating_add(WORK_HEADER_BYTES),
         limits.max_build_working_bytes(),
-        "build working bytes",
+        IndexLimit::BuildWorkingBytes,
     )
 }
 
@@ -441,7 +445,7 @@ fn scan_work(
     require(
         file_bytes,
         limits.max_incomplete_bytes(),
-        "incomplete index bytes",
+        IndexLimit::IncompleteIndexBytes,
     )?;
     if file_bytes < WORK_HEADER_BYTES {
         return Err(IndexError::CorruptWork {
@@ -467,7 +471,7 @@ fn scan_work(
     require(
         leaf_bytes.saturating_add(scan_buffers),
         limits.max_build_working_bytes(),
-        "build working bytes",
+        IndexLimit::BuildWorkingBytes,
     )?;
     let mut header = vec![0; usize::try_from(WORK_HEADER_BYTES).unwrap_or(200)];
     file.seek(SeekFrom::Start(0))
@@ -482,7 +486,7 @@ fn scan_work(
     require(
         leaf_bytes.saturating_add(scan_buffers),
         limits.max_build_working_bytes(),
-        "build working bytes",
+        IndexLimit::BuildWorkingBytes,
     )?;
 
     let mut next_frame = WORK_HEADER_BYTES;
@@ -643,7 +647,7 @@ pub(crate) fn merge_samples(
     selected
         .try_reserve_exact(retained)
         .map_err(|_| IndexError::ResourceLimit {
-            limit: "build working bytes",
+            limit: IndexLimit::BuildWorkingBytes,
             required: u64::try_from(retained).unwrap_or(u64::MAX).saturating_mul(
                 u64::try_from(mem::size_of::<(u64, u64, [i64; 3])>()).unwrap_or(u64::MAX),
             ),
@@ -675,7 +679,7 @@ pub(crate) fn merge_samples(
     require(
         before_output,
         limits.max_build_working_bytes(),
-        "build working bytes",
+        IndexLimit::BuildWorkingBytes,
     )?;
     for sample in left.iter().chain(right.iter()).copied() {
         retain_bottom_k(
@@ -692,7 +696,7 @@ pub(crate) fn merge_samples(
     samples
         .try_reserve_exact(retained)
         .map_err(|_| IndexError::ResourceLimit {
-            limit: "build working bytes",
+            limit: IndexLimit::BuildWorkingBytes,
             required: u64::try_from(retained)
                 .unwrap_or(u64::MAX)
                 .saturating_mul(SAMPLE_BYTES),
@@ -718,7 +722,7 @@ pub(crate) fn merge_samples(
     require(
         actual_peak,
         limits.max_build_working_bytes(),
-        "build working bytes",
+        IndexLimit::BuildWorkingBytes,
     )?;
     samples.extend(
         selected
@@ -877,7 +881,7 @@ fn has_expected_sample_ordinals(
     selected
         .try_reserve_exact(capacity)
         .map_err(|_| IndexError::ResourceLimit {
-            limit: "build working bytes",
+            limit: IndexLimit::BuildWorkingBytes,
             required: u64::try_from(capacity)
                 .unwrap_or(u64::MAX)
                 .saturating_mul(u64::try_from(mem::size_of::<(u64, u64)>()).unwrap_or(u64::MAX)),
@@ -895,7 +899,7 @@ fn has_expected_sample_ordinals(
     ordinals
         .try_reserve_exact(capacity)
         .map_err(|_| IndexError::ResourceLimit {
-            limit: "build working bytes",
+            limit: IndexLimit::BuildWorkingBytes,
             required: u64::try_from(capacity)
                 .unwrap_or(u64::MAX)
                 .saturating_mul(u64::try_from(mem::size_of::<u64>()).unwrap_or(8)),
@@ -925,7 +929,7 @@ fn reserve_leaf_metadata(
     let expected_leaf_count = canonical_leaf_count(point_count);
     let leaf_capacity =
         usize::try_from(expected_leaf_count).map_err(|_| IndexError::ResourceLimit {
-            limit: "addressable work frames",
+            limit: IndexLimit::AddressableWorkFrames,
             required: expected_leaf_count,
             allowed: usize::MAX as u64,
         })?;
@@ -934,13 +938,13 @@ fn reserve_leaf_metadata(
     require(
         leaf_bytes,
         limits.max_build_working_bytes(),
-        "build working bytes",
+        IndexLimit::BuildWorkingBytes,
     )?;
     let mut leaves = Vec::new();
     leaves
         .try_reserve_exact(leaf_capacity)
         .map_err(|_| IndexError::ResourceLimit {
-            limit: "build working bytes",
+            limit: IndexLimit::BuildWorkingBytes,
             required: leaf_bytes,
             allowed: limits.max_build_working_bytes(),
         })?;
@@ -949,7 +953,7 @@ fn reserve_leaf_metadata(
             .unwrap_or(u64::MAX)
             .saturating_mul(u64::try_from(mem::size_of::<LeafRecord>()).unwrap_or(u64::MAX)),
         limits.max_build_working_bytes(),
-        "build working bytes",
+        IndexLimit::BuildWorkingBytes,
     )?;
     Ok(leaves)
 }
@@ -991,7 +995,7 @@ fn decode_samples(
     samples
         .try_reserve_exact(capacity)
         .map_err(|_| IndexError::ResourceLimit {
-            limit: "sample buffer bytes",
+            limit: IndexLimit::SampleBufferBytes,
             required: expected_bytes,
             allowed: expected_bytes,
         })?;
@@ -1209,7 +1213,7 @@ fn same_optional_bounds_bits(left: Option<WorldBounds>, right: Option<WorldBound
     }
 }
 
-fn require(required: u64, allowed: u64, limit: &'static str) -> Result<(), IndexError> {
+fn require(required: u64, allowed: u64, limit: IndexLimit) -> Result<(), IndexError> {
     if required > allowed {
         return Err(IndexError::ResourceLimit {
             limit,
@@ -1271,7 +1275,7 @@ pub(crate) fn finalize(
     locations
         .try_reserve_exact(plan.nodes.len())
         .map_err(|_| IndexError::ResourceLimit {
-            limit: "build working bytes",
+            limit: IndexLimit::BuildWorkingBytes,
             required: finalization_working_bytes(work, plan),
             allowed: limits.max_build_working_bytes(),
         })?;
@@ -1325,7 +1329,7 @@ pub(crate) fn finalize(
             count.checked_add(node.display_point_count)
         })
         .ok_or(IndexError::ResourceLimit {
-            limit: "artifact sample Points",
+            limit: IndexLimit::ArtifactSamplePoints,
             required: u64::MAX,
             allowed: limits.max_artifact_bytes() / SAMPLE_BYTES,
         })?;
@@ -1334,7 +1338,7 @@ pub(crate) fn finalize(
         node_count
             .checked_mul(NODE_RECORD_BYTES)
             .ok_or(IndexError::ResourceLimit {
-                limit: "artifact bytes",
+                limit: IndexLimit::ArtifactBytes,
                 required: u64::MAX,
                 allowed: limits.max_artifact_bytes(),
             })?;
@@ -1342,7 +1346,7 @@ pub(crate) fn finalize(
         internal_sample_count
             .checked_mul(SAMPLE_BYTES)
             .ok_or(IndexError::ResourceLimit {
-                limit: "artifact bytes",
+                limit: IndexLimit::ArtifactBytes,
                 required: u64::MAX,
                 allowed: limits.max_artifact_bytes(),
             })?;
@@ -1350,7 +1354,7 @@ pub(crate) fn finalize(
         ARTIFACT_HEADER_BYTES
             .checked_add(node_table_bytes)
             .ok_or(IndexError::ResourceLimit {
-                limit: "artifact bytes",
+                limit: IndexLimit::ArtifactBytes,
                 required: u64::MAX,
                 allowed: limits.max_artifact_bytes(),
             })?;
@@ -1358,14 +1362,14 @@ pub(crate) fn finalize(
         .checked_add(sample_bytes)
         .and_then(|value| value.checked_add(ARTIFACT_CHECKSUM_BYTES))
         .ok_or(IndexError::ResourceLimit {
-            limit: "artifact bytes",
+            limit: IndexLimit::ArtifactBytes,
             required: u64::MAX,
             allowed: limits.max_artifact_bytes(),
         })?;
     require(
         artifact_bytes,
         limits.max_artifact_bytes(),
-        "artifact bytes",
+        IndexLimit::ArtifactBytes,
     )?;
 
     let header = encode_artifact_header(
@@ -1492,7 +1496,7 @@ fn append_spool_samples(
     require(
         work_bytes.saturating_add(offset).saturating_add(bytes),
         limits.max_incomplete_bytes(),
-        "incomplete and sample-spool bytes",
+        IndexLimit::IncompleteAndSampleSpoolBytes,
     )?;
     let mut hasher = Hasher::new();
     hasher.update(SAMPLE_HASH_DOMAIN);
@@ -1689,7 +1693,7 @@ fn preflight_finalization_with_locations(
     require(
         required,
         limits.max_build_working_bytes(),
-        "build working bytes",
+        IndexLimit::BuildWorkingBytes,
     )
 }
 
@@ -1768,7 +1772,7 @@ pub(crate) fn open_complete(
     require(
         artifact_bytes,
         limits.max_artifact_bytes(),
-        "artifact bytes",
+        IndexLimit::ArtifactBytes,
     )?;
     let minimum_bytes = ARTIFACT_HEADER_BYTES.saturating_add(ARTIFACT_CHECKSUM_BYTES);
     if artifact_bytes < minimum_bytes {
@@ -1779,7 +1783,7 @@ pub(crate) fn open_complete(
     require(
         artifact_verification_buffer_bytes(artifact_bytes),
         limits.max_build_working_bytes(),
-        "artifact verification working bytes",
+        IndexLimit::ArtifactVerificationWorkingBytes,
     )?;
     let artifact_checksum =
         verify_artifact_checksum(&mut file, target, artifact_bytes, limits, control)?;
@@ -1795,7 +1799,7 @@ pub(crate) fn open_complete(
     require(
         header.node_count,
         limits.max_hierarchy_nodes(),
-        "hierarchy nodes",
+        IndexLimit::HierarchyNodes,
     )?;
     let expected_leaf_count = canonical_leaf_count(header.point_count);
     let expected_node_count = if expected_leaf_count == 0 {
@@ -1819,11 +1823,11 @@ pub(crate) fn open_complete(
     require(
         metadata_bytes,
         limits.max_resident_metadata_bytes(),
-        "resident index metadata bytes",
+        IndexLimit::ResidentIndexMetadataBytes,
     )?;
     let node_capacity =
         usize::try_from(header.node_count).map_err(|_| IndexError::ResourceLimit {
-            limit: "addressable hierarchy nodes",
+            limit: IndexLimit::AddressableHierarchyNodes,
             required: header.node_count,
             allowed: usize::MAX as u64,
         })?;
@@ -1831,7 +1835,7 @@ pub(crate) fn open_complete(
     nodes
         .try_reserve_exact(node_capacity)
         .map_err(|_| IndexError::ResourceLimit {
-            limit: "resident index metadata bytes",
+            limit: IndexLimit::ResidentIndexMetadataBytes,
             required: metadata_bytes,
             allowed: limits.max_resident_metadata_bytes(),
         })?;
@@ -1841,7 +1845,7 @@ pub(crate) fn open_complete(
     require(
         actual_metadata_bytes,
         limits.max_resident_metadata_bytes(),
-        "resident index metadata bytes",
+        IndexLimit::ResidentIndexMetadataBytes,
     )?;
     file.seek(SeekFrom::Start(header.node_table_offset))
         .map_err(|error| IndexError::io("seek to node table in", target, error))?;
@@ -1866,7 +1870,7 @@ pub(crate) fn open_complete(
     require(
         hierarchy.estimated_resident_bytes(),
         limits.max_resident_metadata_bytes(),
-        "resident index metadata bytes",
+        IndexLimit::ResidentIndexMetadataBytes,
     )?;
     let reader = ArtifactReader {
         file: Arc::new(Mutex::new(file)),
@@ -2003,14 +2007,14 @@ fn verify_artifact_checksum(
     buffer
         .try_reserve_exact(buffer_length)
         .map_err(|_| IndexError::ResourceLimit {
-            limit: "artifact verification working bytes",
+            limit: IndexLimit::ArtifactVerificationWorkingBytes,
             required: u64::try_from(buffer_length).unwrap_or(u64::MAX),
             allowed: limits.max_build_working_bytes(),
         })?;
     require(
         u64::try_from(buffer.capacity()).unwrap_or(u64::MAX),
         limits.max_build_working_bytes(),
-        "artifact verification working bytes",
+        IndexLimit::ArtifactVerificationWorkingBytes,
     )?;
     buffer.resize(buffer_length, 0);
     file.seek(SeekFrom::Start(0))
@@ -2189,13 +2193,13 @@ fn validate_topology(
     require(
         leaf_bytes.saturating_add(MAX_NODE_SAMPLES.saturating_mul(SAMPLE_BYTES)),
         limits.max_build_working_bytes(),
-        "artifact validation working bytes",
+        IndexLimit::ArtifactValidationWorkingBytes,
     )?;
     let mut leaf_spans = Vec::new();
     leaf_spans
         .try_reserve_exact(usize::try_from(leaf_count).unwrap_or(usize::MAX))
         .map_err(|_| IndexError::ResourceLimit {
-            limit: "artifact validation working bytes",
+            limit: IndexLimit::ArtifactValidationWorkingBytes,
             required: leaf_bytes,
             allowed: limits.max_build_working_bytes(),
         })?;
@@ -2205,7 +2209,7 @@ fn validate_topology(
     require(
         actual_leaf_bytes.saturating_add(MAX_NODE_SAMPLES.saturating_mul(SAMPLE_BYTES)),
         limits.max_build_working_bytes(),
-        "artifact validation working bytes",
+        IndexLimit::ArtifactValidationWorkingBytes,
     )?;
     for (index, node) in nodes.iter().enumerate() {
         if index % 4_096 == 0 {
@@ -2307,7 +2311,7 @@ fn validate_persisted_samples(
         require(
             node.display_point_count.saturating_mul(SAMPLE_BYTES),
             limits.max_build_working_bytes(),
-            "artifact validation working bytes",
+            IndexLimit::ArtifactValidationWorkingBytes,
         )?;
         let samples = reader.read_sample_block(
             node.sample_offset,

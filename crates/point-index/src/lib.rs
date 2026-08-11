@@ -34,7 +34,7 @@ use std::path::Path;
 use foundation_runtime::Job;
 use point_source::Source;
 
-pub use error::IndexError;
+pub use error::{IndexError, IndexLimit};
 pub use limits::{CandidateLimits, NodeReadBudget, PrepareLimits};
 pub use model::{
     CandidatePlan, DisplayCoverage, IndexDescriptor, IndexHierarchy, IndexNode, IndexNodeId,

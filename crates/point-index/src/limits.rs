@@ -1,4 +1,4 @@
-use crate::IndexError;
+use crate::{IndexError, IndexLimit};
 
 const DEFAULT_BATCH_POINTS: u64 = 65_536;
 const DEFAULT_BATCH_BYTES: u64 = 8 * 1024 * 1024;
@@ -40,12 +40,12 @@ impl PrepareLimits {
     ) -> Result<Self, IndexError> {
         if max_source_batch_points == 0 {
             return Err(IndexError::InvalidLimit {
-                limit: "max_source_batch_points",
+                limit: IndexLimit::MaxSourceBatchPoints,
             });
         }
         if max_source_batch_payload_bytes == 0 {
             return Err(IndexError::InvalidLimit {
-                limit: "max_source_batch_payload_bytes",
+                limit: IndexLimit::MaxSourceBatchPayloadBytes,
             });
         }
         Ok(Self {
@@ -246,12 +246,12 @@ impl NodeReadBudget {
     ) -> Result<Self, IndexError> {
         if max_emitted_points == 0 {
             return Err(IndexError::InvalidLimit {
-                limit: "max_emitted_points",
+                limit: IndexLimit::MaxEmittedPoints,
             });
         }
         if max_display_batch_bytes == 0 {
             return Err(IndexError::InvalidLimit {
-                limit: "max_display_batch_bytes",
+                limit: IndexLimit::MaxDisplayBatchBytes,
             });
         }
         Ok(Self {

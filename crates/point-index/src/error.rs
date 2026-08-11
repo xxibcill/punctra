@@ -1,8 +1,110 @@
-use std::{io, path::PathBuf};
+use std::{fmt, io, path::PathBuf};
 
 use foundation_runtime::RuntimeError;
 use point_source::SourceError;
 use thiserror::Error;
+
+/// Stable identity of a caller or implementation index limit.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum IndexLimit {
+    /// Nonzero Source batch Point ceiling accepted by [`crate::PrepareLimits`].
+    MaxSourceBatchPoints,
+    /// Nonzero Source batch payload ceiling accepted by [`crate::PrepareLimits`].
+    MaxSourceBatchPayloadBytes,
+    /// Nonzero emitted-Point ceiling accepted by [`crate::NodeReadBudget`].
+    MaxEmittedPoints,
+    /// Nonzero display-batch byte ceiling accepted by [`crate::NodeReadBudget`].
+    MaxDisplayBatchBytes,
+    /// Sample Point count representable by the current process.
+    AddressableSamplePoints,
+    /// Memory retained while reading persisted index samples.
+    IndexSampleBufferBytes,
+    /// Memory allocated for a sample buffer.
+    SampleBufferBytes,
+    /// Index construction working memory.
+    BuildWorkingBytes,
+    /// Encoded payload bytes in one incomplete-index frame.
+    WorkFramePayloadBytes,
+    /// Bytes retained in an incomplete index.
+    IncompleteIndexBytes,
+    /// Combined bytes retained by an incomplete index and sample spool.
+    IncompleteAndSampleSpoolBytes,
+    /// Work-frame count representable by the current process.
+    AddressableWorkFrames,
+    /// Sample Point count representable by the artifact format.
+    ArtifactSamplePoints,
+    /// Complete artifact bytes.
+    ArtifactBytes,
+    /// Hierarchy node count.
+    HierarchyNodes,
+    /// Hierarchy node count representable by the current process.
+    AddressableHierarchyNodes,
+    /// Resident index metadata bytes.
+    ResidentIndexMetadataBytes,
+    /// Memory used to verify an artifact checksum.
+    ArtifactVerificationWorkingBytes,
+    /// Memory used to validate an artifact after opening it.
+    ArtifactValidationWorkingBytes,
+    /// Hierarchy nodes visited by candidate planning.
+    VisitedHierarchyNodes,
+    /// Source Points covered by a candidate plan.
+    CandidatePoints,
+    /// Source spans emitted by a candidate plan.
+    CandidateSourceSpans,
+    /// Candidate-planning working memory.
+    CandidateWorkingBytes,
+    /// Display Points emitted by one node read.
+    EmittedDisplayPoints,
+    /// Source spans used by one node read.
+    SourceSpans,
+    /// Source Points in one batch used by a node read.
+    SourceBatchPoints,
+    /// Source payload bytes in one batch used by a node read.
+    SourceBatchPayloadBytes,
+    /// Display bytes in one emitted batch.
+    DisplayBatchBytes,
+    /// Memory used to buffer persisted index samples.
+    IndexBufferBytes,
+    /// Display Points in one emitted batch.
+    DisplayBatchPoints,
+}
+
+impl fmt::Display for IndexLimit {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::MaxSourceBatchPoints => "max_source_batch_points",
+            Self::MaxSourceBatchPayloadBytes => "max_source_batch_payload_bytes",
+            Self::MaxEmittedPoints => "max_emitted_points",
+            Self::MaxDisplayBatchBytes => "max_display_batch_bytes",
+            Self::AddressableSamplePoints => "addressable sample Points",
+            Self::IndexSampleBufferBytes => "index sample buffer bytes",
+            Self::SampleBufferBytes => "sample buffer bytes",
+            Self::BuildWorkingBytes => "build working bytes",
+            Self::WorkFramePayloadBytes => "work frame payload bytes",
+            Self::IncompleteIndexBytes => "incomplete index bytes",
+            Self::IncompleteAndSampleSpoolBytes => "incomplete and sample-spool bytes",
+            Self::AddressableWorkFrames => "addressable work frames",
+            Self::ArtifactSamplePoints => "artifact sample Points",
+            Self::ArtifactBytes => "artifact bytes",
+            Self::HierarchyNodes => "hierarchy nodes",
+            Self::AddressableHierarchyNodes => "addressable hierarchy nodes",
+            Self::ResidentIndexMetadataBytes => "resident index metadata bytes",
+            Self::ArtifactVerificationWorkingBytes => "artifact verification working bytes",
+            Self::ArtifactValidationWorkingBytes => "artifact validation working bytes",
+            Self::VisitedHierarchyNodes => "visited hierarchy nodes",
+            Self::CandidatePoints => "candidate Points",
+            Self::CandidateSourceSpans => "candidate Source spans",
+            Self::CandidateWorkingBytes => "candidate working bytes",
+            Self::EmittedDisplayPoints => "emitted display Points",
+            Self::SourceSpans => "Source spans",
+            Self::SourceBatchPoints => "Source batch Points",
+            Self::SourceBatchPayloadBytes => "Source batch payload bytes",
+            Self::DisplayBatchBytes => "display batch bytes",
+            Self::IndexBufferBytes => "index buffer bytes",
+            Self::DisplayBatchPoints => "display batch Points",
+        })
+    }
+}
 
 /// Failure while preparing, opening, querying, or reading an index.
 #[derive(Debug, Error)]
@@ -15,15 +117,15 @@ pub enum IndexError {
     /// A required hard limit was zero.
     #[error("{limit} must be greater than zero")]
     InvalidLimit {
-        /// Invalid limit name.
-        limit: &'static str,
+        /// Invalid limit identity.
+        limit: IndexLimit,
     },
 
     /// Work or retained output exceeded one caller-selected hard limit.
     #[error("index exceeded {limit}: required {required}, limit {allowed}")]
     ResourceLimit {
-        /// Exceeded resource name.
-        limit: &'static str,
+        /// Exceeded resource identity.
+        limit: IndexLimit,
         /// Minimum resource amount required.
         required: u64,
         /// Caller-selected maximum.

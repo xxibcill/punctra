@@ -5,7 +5,7 @@ use point_contracts::{PositionTransform, WorldBounds};
 use point_source::{AttributeSelection, ReadBudget, ReadRequest, Source, SourceSpan};
 
 use crate::{
-    IndexError, PrepareDisposition, PrepareLimits, PrepareReport, PreparedIndex,
+    IndexError, IndexLimit, PrepareDisposition, PrepareLimits, PrepareReport, PreparedIndex,
     persistence::{
         WorkFile, finalize, open_complete, open_or_create_work, ordinal_priority, target_exists,
     },
@@ -216,13 +216,13 @@ impl BlockAccumulator {
             .saturating_add(output_bytes);
         if required > limits.max_build_working_bytes() {
             return Err(IndexError::ResourceLimit {
-                limit: "build working bytes",
+                limit: IndexLimit::BuildWorkingBytes,
                 required,
                 allowed: limits.max_build_working_bytes(),
             });
         }
         let capacity = usize::try_from(retained).map_err(|_| IndexError::ResourceLimit {
-            limit: "addressable sample Points",
+            limit: IndexLimit::AddressableSamplePoints,
             required: retained,
             allowed: usize::MAX as u64,
         })?;
@@ -230,7 +230,7 @@ impl BlockAccumulator {
         selected
             .try_reserve_exact(capacity)
             .map_err(|_| IndexError::ResourceLimit {
-                limit: "build working bytes",
+                limit: IndexLimit::BuildWorkingBytes,
                 required: heap_bytes,
                 allowed: limits.max_build_working_bytes(),
             })?;
@@ -244,7 +244,7 @@ impl BlockAccumulator {
             .saturating_add(output_bytes);
         if actual_required > limits.max_build_working_bytes() {
             return Err(IndexError::ResourceLimit {
-                limit: "build working bytes",
+                limit: IndexLimit::BuildWorkingBytes,
                 required: actual_required,
                 allowed: limits.max_build_working_bytes(),
             });
@@ -309,7 +309,7 @@ impl BlockAccumulator {
         samples
             .try_reserve_exact(selection_limit)
             .map_err(|_| IndexError::ResourceLimit {
-                limit: "build working bytes",
+                limit: IndexLimit::BuildWorkingBytes,
                 required: u64::try_from(selection_limit)
                     .unwrap_or(u64::MAX)
                     .saturating_mul(SAMPLE_BYTES),
@@ -329,7 +329,7 @@ impl BlockAccumulator {
             .saturating_add(output_bytes);
         if required > self.max_build_working_bytes {
             return Err(IndexError::ResourceLimit {
-                limit: "build working bytes",
+                limit: IndexLimit::BuildWorkingBytes,
                 required,
                 allowed: self.max_build_working_bytes,
             });
