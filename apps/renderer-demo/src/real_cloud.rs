@@ -153,38 +153,29 @@ impl RealCloudScene {
     ) -> SceneResult<()> {
         let mut next_pending = VecDeque::new();
         let mut reserved_host_bytes = 0;
-        for key in self.pending.iter().copied() {
-            if demanded_nodes.contains(&key) {
-                let available = self.planning_nodes[self.node_index(key)];
-                if available.status() == NodeStatus::Requested
-                    && !admit_queued_node(
-                        &mut next_pending,
-                        key,
-                        queued_node_reservation(available)?,
-                        &mut reserved_host_bytes,
-                        budget,
-                    )?
-                {
-                    break;
-                }
+        debug_assert!(
+            requests
+                .iter()
+                .all(|request| demanded_nodes.contains(&request.node()))
+        );
+        for key in demanded_nodes.iter().copied() {
+            let was_pending = self.pending.contains(&key);
+            let newly_requested = requests.iter().any(|request| request.node() == key);
+            if !was_pending && !newly_requested {
+                continue;
             }
-        }
-        for key in requests.iter().map(|request| request.node()) {
-            debug_assert!(demanded_nodes.contains(&key));
-            if demanded_nodes.contains(&key) && !next_pending.contains(&key) {
-                let status = self.planning_nodes[self.node_index(key)].status();
-                let available = self.planning_nodes[self.node_index(key)];
-                if matches!(status, NodeStatus::Missing | NodeStatus::Requested)
-                    && !admit_queued_node(
-                        &mut next_pending,
-                        key,
-                        queued_node_reservation(available)?,
-                        &mut reserved_host_bytes,
-                        budget,
-                    )?
-                {
-                    break;
-                }
+            let available = self.planning_nodes[self.node_index(key)];
+            if matches!(
+                available.status(),
+                NodeStatus::Missing | NodeStatus::Requested
+            ) && !admit_queued_node(
+                &mut next_pending,
+                key,
+                queued_node_reservation(available)?,
+                &mut reserved_host_bytes,
+                budget,
+            )? {
+                break;
             }
         }
 
@@ -742,6 +733,49 @@ mod tests {
         );
         assert_eq!(pending, VecDeque::from([first]));
         assert_eq!(reserved_host_bytes, node_reservation);
+    }
+
+    #[test]
+    fn retained_requests_follow_the_current_planner_priority() {
+        let directory = TestDirectory::new().unwrap();
+        let mut scene = fixture_scene(directory.path()).unwrap();
+        let first = scene.planning_nodes[0];
+        let second_key = NodeKey::new(2).unwrap();
+        let second = AvailableNode::new(
+            second_key,
+            Some(first.key()),
+            first.bounds(),
+            first.geometric_error(),
+            first.point_count(),
+            first.estimated_bytes(),
+            BatchKey::new(second_key.get()),
+            NodeStatus::Requested,
+        )
+        .unwrap();
+        scene.planning_nodes[0] = first.with_status(NodeStatus::Requested);
+        scene.planning_nodes.push(second);
+        scene.nodes.push(RealNode {
+            index_id: IndexNodeId::new(second_key.get()).unwrap(),
+            coverage: scene.nodes[0].coverage,
+            covered_source_point_count: scene.nodes[0].covered_source_point_count,
+            latest_issued_version: 0,
+        });
+        scene.pending = VecDeque::from([first.key(), second_key]);
+
+        scene
+            .reconcile_requests_with_budget(
+                &[second_key, first.key()],
+                &[],
+                QueueBudget {
+                    max_nodes: 1,
+                    max_host_bytes: u64::MAX,
+                },
+            )
+            .unwrap();
+
+        assert_eq!(scene.pending, VecDeque::from([second_key]));
+        assert_eq!(scene.planning_nodes[0].status(), NodeStatus::Missing);
+        assert_eq!(scene.planning_nodes[1].status(), NodeStatus::Requested);
     }
 
     #[test]
