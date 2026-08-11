@@ -13,6 +13,7 @@ use point_source::{
 
 use crate::{
     PointQuery, PointRowLimits, Snapshot, SnapshotProvenance, WorkspaceError,
+    point_id_hash::CanonicalPointIdHasher,
     selection::plan_query,
     util::allocation_bytes,
     workspace::{EffectiveClassificationBudget, OverlayUsage, Session},
@@ -24,7 +25,6 @@ const POSITION_PAYLOAD_BYTES: u64 = 24;
 const CLASSIFICATION_PAYLOAD_BYTES: u64 = 1;
 const ROW_PAYLOAD_BYTES: u64 =
     ORDINAL_PAYLOAD_BYTES + POSITION_PAYLOAD_BYTES + CLASSIFICATION_PAYLOAD_BYTES;
-const POINT_ID_HASH_DOMAIN: &[u8] = b"punctra-point-set-ids-v1";
 const CONTENT_HASH_DOMAIN: &[u8] = b"punctra-snapshot-point-rows-v1";
 const SPAN_HASH_DOMAIN: &[u8] = b"punctra-selection-spans-v1";
 
@@ -188,7 +188,7 @@ pub struct SnapshotPointBatches {
     examined_points: u64,
     emitted_points: u64,
     previous_ordinal: Option<u64>,
-    point_id_hasher: Hasher,
+    point_id_hasher: CanonicalPointIdHasher,
     content_hasher: Hasher,
     summary: Option<SnapshotPointSummary>,
     terminal: bool,
@@ -486,7 +486,7 @@ impl SnapshotPointBatches {
                 ));
             }
             let ordinal_bytes = ordinal.to_le_bytes();
-            self.point_id_hasher.update(&ordinal_bytes);
+            self.point_id_hasher.update(ordinal);
             self.content_hasher.update(&ordinal_bytes);
             for coordinate in ticks {
                 self.content_hasher.update(&coordinate.to_le_bytes());
@@ -559,7 +559,7 @@ impl SnapshotPointBatches {
             query: self.query,
             candidate_point_count: self.expected_spans.point_count,
             exact_count: self.emitted_points,
-            point_id_hash: ContentHash::new(*self.point_id_hasher.finalize().as_bytes()),
+            point_id_hash: self.point_id_hasher.finalize(),
             content_hash: ContentHash::new(*self.content_hasher.finalize().as_bytes()),
         });
         self.terminal = true;
@@ -658,8 +658,7 @@ pub(crate) fn start(
         .budget(source_budget);
     let source = session.source().read(request)?;
 
-    let mut point_id_hasher = domain_hasher(POINT_ID_HASH_DOMAIN);
-    point_id_hasher.update(provenance.source().as_bytes());
+    let point_id_hasher = CanonicalPointIdHasher::new(provenance.source());
     let mut content_hasher = domain_hasher(CONTENT_HASH_DOMAIN);
     content_hasher.update(provenance.workspace().as_bytes());
     content_hasher.update(provenance.source().as_bytes());

@@ -11,6 +11,7 @@ mod error;
 mod limits;
 mod model;
 mod persistence;
+mod point_id_hash;
 mod point_rows;
 mod point_set;
 mod selection;
