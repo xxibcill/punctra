@@ -156,14 +156,16 @@ impl RealCloudScene {
         for key in self.pending.iter().copied() {
             if demanded_nodes.contains(&key) {
                 let available = self.planning_nodes[self.node_index(key)];
-                if available.status() == NodeStatus::Requested {
-                    push_queued_node(
+                if available.status() == NodeStatus::Requested
+                    && !admit_queued_node(
                         &mut next_pending,
                         key,
                         queued_node_reservation(available)?,
                         &mut reserved_host_bytes,
                         budget,
-                    )?;
+                    )?
+                {
+                    break;
                 }
             }
         }
@@ -171,15 +173,17 @@ impl RealCloudScene {
             debug_assert!(demanded_nodes.contains(&key));
             if demanded_nodes.contains(&key) && !next_pending.contains(&key) {
                 let status = self.planning_nodes[self.node_index(key)].status();
-                if matches!(status, NodeStatus::Missing | NodeStatus::Requested) {
-                    let available = self.planning_nodes[self.node_index(key)];
-                    push_queued_node(
+                let available = self.planning_nodes[self.node_index(key)];
+                if matches!(status, NodeStatus::Missing | NodeStatus::Requested)
+                    && !admit_queued_node(
                         &mut next_pending,
                         key,
                         queued_node_reservation(available)?,
                         &mut reserved_host_bytes,
                         budget,
-                    )?;
+                    )?
+                {
+                    break;
                 }
             }
         }
@@ -427,36 +431,56 @@ impl RealCloudScene {
     }
 }
 
-fn push_queued_node(
+/// Admits one node or defers it when only the aggregate queue budget is full.
+///
+/// A node that cannot fit an otherwise empty queue is a configuration error.
+/// Once at least one higher-priority node is retained, reaching either aggregate
+/// limit is normal backpressure and the caller leaves the remaining nodes for a
+/// later plan.
+fn admit_queued_node(
     pending: &mut VecDeque<NodeKey>,
     key: NodeKey,
     node_reservation: u64,
     reserved_host_bytes: &mut u64,
     budget: QueueBudget,
-) -> SceneResult<()> {
+) -> SceneResult<bool> {
+    if budget.max_nodes == 0 {
+        return Err(resource_limit("queued nodes", budget.max_nodes));
+    }
+    ensure_queue_bytes(1, node_reservation, budget.max_host_bytes)?;
+
     let required_nodes = u64::try_from(pending.len())
         .unwrap_or(u64::MAX)
         .saturating_add(1);
     if required_nodes > budget.max_nodes {
-        return Err(resource_limit("queued nodes", budget.max_nodes));
+        return Ok(false);
     }
     let next_reservations = reserved_host_bytes
         .checked_add(node_reservation)
         .ok_or_else(|| invalid_data("queued node host reservations overflowed"))?;
     if pending.len() == pending.capacity() {
-        ensure_queue_bytes(
-            pending.len().saturating_add(1),
-            next_reservations,
-            budget.max_host_bytes,
-        )?;
-        pending
-            .try_reserve_exact(1)
+        let required_capacity = pending.len().saturating_add(1);
+        let mut grown = VecDeque::new();
+        grown
+            .try_reserve_exact(required_capacity)
             .map_err(|error| invalid_data(format!("could not reserve request queue: {error}")))?;
+        if queue_charge(grown.capacity(), next_reservations)? > budget.max_host_bytes {
+            if pending.is_empty() {
+                return Err(resource_limit(
+                    "request queue host bytes",
+                    budget.max_host_bytes,
+                ));
+            }
+            return Ok(false);
+        }
+        grown.extend(pending.iter().copied());
+        *pending = grown;
+    } else if queue_charge(pending.capacity(), next_reservations)? > budget.max_host_bytes {
+        return Ok(false);
     }
-    ensure_queue_bytes(pending.capacity(), next_reservations, budget.max_host_bytes)?;
     pending.push_back(key);
     *reserved_host_bytes = next_reservations;
-    Ok(())
+    Ok(true)
 }
 
 fn queued_node_reservation(available: AvailableNode) -> SceneResult<u64> {
@@ -466,21 +490,24 @@ fn queued_node_reservation(available: AvailableNode) -> SceneResult<u64> {
 }
 
 fn ensure_queue_bytes(capacity: usize, reservations: u64, allowed: u64) -> SceneResult<()> {
+    if queue_charge(capacity, reservations)? > allowed {
+        return Err(resource_limit("request queue host bytes", allowed));
+    }
+    Ok(())
+}
+
+fn queue_charge(capacity: usize, reservations: u64) -> SceneResult<u64> {
     let capacity =
         u64::try_from(capacity).map_err(|_| invalid_data("request queue capacity overflowed"))?;
     let node_bytes = u64::try_from(mem::size_of::<NodeKey>())
         .map_err(|_| invalid_data("request queue node size does not fit u64"))?;
     let container_bytes = u64::try_from(mem::size_of::<VecDeque<NodeKey>>())
         .map_err(|_| invalid_data("request queue container size does not fit u64"))?;
-    let required = capacity
+    capacity
         .checked_mul(node_bytes)
         .and_then(|bytes| bytes.checked_add(container_bytes))
         .and_then(|bytes| bytes.checked_add(reservations))
-        .ok_or_else(|| invalid_data("request queue byte charge overflowed"))?;
-    if required > allowed {
-        return Err(resource_limit("request queue host bytes", allowed));
-    }
-    Ok(())
+        .ok_or_else(|| invalid_data("request queue byte charge overflowed"))
 }
 
 fn node_key(id: IndexNodeId) -> SceneResult<NodeKey> {
@@ -675,6 +702,46 @@ mod tests {
         assert!(scene.pending.is_empty());
         assert_eq!(scene.planning_nodes[0].status(), original_status);
         assert_eq!(scene.metrics(), original_metrics);
+    }
+
+    #[test]
+    fn queue_admission_defers_after_the_priority_prefix_fills_host_budget() {
+        let first = NodeKey::new(1).unwrap();
+        let second = NodeKey::new(2).unwrap();
+        let node_reservation = 1_024;
+        let mut pending = VecDeque::new();
+        let mut reserved_host_bytes = 0;
+
+        assert!(
+            admit_queued_node(
+                &mut pending,
+                first,
+                node_reservation,
+                &mut reserved_host_bytes,
+                QueueBudget {
+                    max_nodes: 2,
+                    max_host_bytes: u64::MAX,
+                },
+            )
+            .unwrap()
+        );
+        let one_node_bytes = queue_charge(pending.capacity(), reserved_host_bytes).unwrap();
+
+        assert!(
+            !admit_queued_node(
+                &mut pending,
+                second,
+                node_reservation,
+                &mut reserved_host_bytes,
+                QueueBudget {
+                    max_nodes: 2,
+                    max_host_bytes: one_node_bytes,
+                },
+            )
+            .unwrap()
+        );
+        assert_eq!(pending, VecDeque::from([first]));
+        assert_eq!(reserved_host_bytes, node_reservation);
     }
 
     #[test]
