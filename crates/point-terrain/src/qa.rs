@@ -418,7 +418,7 @@ struct ResidualAccumulator {
     minimum: Option<f64>,
     maximum: Option<f64>,
     sum: CompensatedSum,
-    squared_sum: CompensatedSum,
+    squared_sum: ScaledSquareSum,
 }
 
 impl ResidualAccumulator {
@@ -438,7 +438,7 @@ impl ResidualAccumulator {
                 self.minimum = Some(self.minimum.map_or(residual, |value| value.min(residual)));
                 self.maximum = Some(self.maximum.map_or(residual, |value| value.max(residual)));
                 self.sum.add(residual)?;
-                self.squared_sum.add(residual * residual)?;
+                self.squared_sum.add(residual)?;
             }
         }
         Ok(())
@@ -451,15 +451,45 @@ impl ResidualAccumulator {
         }
         let count = self.covered_count as f64;
         let sum = self.sum.total();
-        let squared_sum = self.squared_sum.total();
         ResidualStatistics::new(
             self.covered_count,
             self.gap_count,
             self.minimum,
             self.maximum,
             Some(canonical_zero(sum / count)),
-            Some(canonical_zero((squared_sum / count).sqrt())),
+            Some(self.squared_sum.root_mean_square(count)),
         )
+    }
+}
+
+#[derive(Default)]
+struct ScaledSquareSum {
+    scale: f64,
+    normalized_sum: CompensatedSum,
+}
+
+impl ScaledSquareSum {
+    fn add(&mut self, value: f64) -> Result<(), TerrainError> {
+        let magnitude = value.abs();
+        if magnitude == 0.0 {
+            return Ok(());
+        }
+        if magnitude > self.scale {
+            let ratio = self.scale / magnitude;
+            let prior_sum = self.normalized_sum.total() * ratio * ratio;
+            self.scale = magnitude;
+            self.normalized_sum = CompensatedSum::default();
+            self.normalized_sum.add(1.0)?;
+            self.normalized_sum.add(prior_sum)?;
+        } else {
+            let ratio = magnitude / self.scale;
+            self.normalized_sum.add(ratio * ratio)?;
+        }
+        Ok(())
+    }
+
+    fn root_mean_square(&self, count: f64) -> f64 {
+        canonical_zero(self.scale * (self.normalized_sum.total() / count).sqrt())
     }
 }
 

@@ -210,6 +210,28 @@ fn compensated_statistics_retain_small_residuals_across_large_cancellation() {
 }
 
 #[test]
+fn root_mean_square_accepts_large_finite_residuals() {
+    let fixture = TerrainFixture::new(
+        "qa-large-rms",
+        vec![[0, 0, 0], [10, 0, 0], [0, 10, 0]],
+        vec![2; 3],
+    );
+    let surface = derive_surface(fixture.snapshot(), 2);
+
+    let report = surface
+        .check_points(
+            [check_point(1, [0.0, 0.0, 1.0e200])],
+            CheckPointLimits::default(),
+        )
+        .blocking_wait()
+        .expect("a representable RMS must not overflow during accumulation");
+
+    let statistics = report.statistics();
+    assert_eq!(statistics.mean(), Some(1.0e200));
+    assert_eq!(statistics.root_mean_square(), Some(1.0e200));
+}
+
+#[test]
 fn finite_extreme_world_coordinates_remain_sampleable() {
     let transform = PositionTransform::new([0.0; 3], [1.0e200, 1.0e200, 1.0])
         .expect("finite extreme transform is valid");
