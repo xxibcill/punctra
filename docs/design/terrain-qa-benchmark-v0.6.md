@@ -371,8 +371,9 @@ then written with a deterministic finite round-tripping decimal encoding. The
 profile assumes Source X is easting, Y is northing, and Z is elevation; the
 LandXML coordinate tuple is encoded in its required northing, easting,
 elevation order. The caller must use this export only when the Source
-coordinates are already metric metres. The exporter performs no unit or CRS
-transformation and never guesses an unknown Coordinate Reference.
+coordinates are already metric metres and must make that assertion explicitly.
+The exporter performs no unit or CRS transformation and never interprets the
+opaque declared-or-unknown Coordinate Reference.
 
 Document date and time are explicit `LandXmlOptions` facts. The encoder never
 reads the system clock, infers them from filesystem metadata, or injects another
@@ -504,7 +505,7 @@ let receipt = terrain.export_landxml(
         "Existing Ground",
         "2026-08-10",
         "00:00:00Z",
-    )?,
+    )?.assert_coordinates_are_metric_metres(),
     LandXmlLimits::default(),
 ).blocking_wait()?;
 println!("exported {} bytes", receipt.byte_length());

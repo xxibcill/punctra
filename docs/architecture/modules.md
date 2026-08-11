@@ -273,7 +273,7 @@ turning host policy into another foundation interface.
 The application Full-verifies a supported LAS/LAZ Source, prepares or opens its
 Spatial Index, creates or opens one Workspace, derives the class-2 Terrain,
 optionally evaluates a built-in covered/gap QA sample, and durably creates the
-supported LandXML file with explicit document date/time. Unknown Coordinate
+supported LandXML file with explicit document date/time. The opaque Coordinate
 Reference requires the caller's explicit metric-metre assertion. Its optional
 `--exercise-correction-revert ORDINAL` path performs one exact classification
 correction, re-Derivation, immediate-head Revert, and exact Surface-restoration

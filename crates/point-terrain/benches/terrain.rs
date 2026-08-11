@@ -299,7 +299,7 @@ fn check_point(id: u64, position: [f64; 3]) -> CheckPoint {
 fn asserted_landxml_options() -> LandXmlOptions {
     LandXmlOptions::metric_metres("Punctra Terrain Benchmark", "2026-08-10", "12:34:56Z")
         .expect("benchmark LandXML options are valid")
-        .allow_unknown_coordinate_reference_as_metric_metres()
+        .assert_coordinates_are_metric_metres()
 }
 
 #[allow(clippy::too_many_arguments)]

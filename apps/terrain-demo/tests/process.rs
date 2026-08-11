@@ -46,7 +46,7 @@ fn generated_las_and_laz_run_the_complete_host_without_a_gpu() {
         assert!(!missing_assertion.status.success());
         assert!(
             String::from_utf8_lossy(&missing_assertion.stderr)
-                .contains("unknown Source reference requires an explicit metric-metre assertion"),
+                .contains("Source coordinates require an explicit metric-metre assertion"),
             "{}",
             diagnostics(&missing_assertion),
         );
@@ -78,7 +78,7 @@ fn run_host(
     index: &Path,
     workspace: &Path,
     target: &Path,
-    assert_unknown_metric: bool,
+    assert_metric: bool,
     exercise_correction_revert: bool,
 ) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_terrain-demo"));
@@ -97,8 +97,8 @@ fn run_host(
     if exercise_correction_revert {
         command.args(["--exercise-correction-revert", "4"]);
     }
-    if assert_unknown_metric {
-        command.arg("--assert-unknown-crs-metric");
+    if assert_metric {
+        command.arg("--assert-crs-metric");
     }
     command.output().expect("run terrain-demo process")
 }

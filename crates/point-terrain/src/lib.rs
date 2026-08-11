@@ -23,7 +23,7 @@
 //!     "2026-08-10",
 //!     "00:00:00Z",
 //! )?
-//! .allow_unknown_coordinate_reference_as_metric_metres();
+//! .assert_coordinates_are_metric_metres();
 //! let receipt = surface
 //!     .export_landxml("existing-ground.xml", options, LandXmlLimits::default())
 //!     .blocking_wait()?;

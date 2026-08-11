@@ -34,7 +34,7 @@ fn planar_surface(label: &str) -> (TerrainFixture, TerrainSurface) {
 fn asserted_options(name: &str) -> LandXmlOptions {
     LandXmlOptions::metric_metres(name, "2026-08-10", "12:34:56Z")
         .expect("fixture LandXML options are valid")
-        .allow_unknown_coordinate_reference_as_metric_metres()
+        .assert_coordinates_are_metric_metres()
 }
 
 #[test]
@@ -44,11 +44,11 @@ fn options_require_bounded_xml_text_and_explicit_valid_root_date_time() {
     assert_eq!(options.surface_name(), "Existing Ground");
     assert_eq!(options.document_date(), "2024-02-29");
     assert_eq!(options.document_time(), "00:00:00Z");
-    assert!(!options.allows_unknown_coordinate_reference());
+    assert!(!options.coordinates_are_metric_metres_asserted());
     assert!(
         options
-            .allow_unknown_coordinate_reference_as_metric_metres()
-            .allows_unknown_coordinate_reference()
+            .assert_coordinates_are_metric_metres()
+            .coordinates_are_metric_metres_asserted()
     );
 
     for (name, date, time) in [
@@ -67,7 +67,7 @@ fn options_require_bounded_xml_text_and_explicit_valid_root_date_time() {
 }
 
 #[test]
-fn unknown_coordinate_reference_requires_the_explicit_metric_metre_assertion() {
+fn source_coordinates_require_the_explicit_metric_metre_assertion() {
     let (_fixture, surface) = planar_surface("landxml-reference");
     assert!(surface.descriptor().coordinate_reference().is_unknown());
     let output = TemporaryOutput::new("reference");

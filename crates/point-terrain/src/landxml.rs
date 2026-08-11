@@ -52,7 +52,7 @@ pub struct LandXmlOptions {
     surface_name: Box<str>,
     document_date: Box<str>,
     document_time: Box<str>,
-    allow_unknown_coordinate_reference: bool,
+    coordinates_are_metric_metres: bool,
 }
 
 impl LandXmlOptions {
@@ -81,18 +81,18 @@ impl LandXmlOptions {
             surface_name: surface_name.into_boxed_str(),
             document_date: document_date.into_boxed_str(),
             document_time: document_time.into_boxed_str(),
-            allow_unknown_coordinate_reference: false,
+            coordinates_are_metric_metres: false,
         })
     }
 
-    /// Explicitly asserts that an unknown Source reference uses metric metres.
+    /// Explicitly asserts that Source coordinates use metric metres.
     ///
-    /// This does not infer, transform, or attach a Coordinate Reference. It is
-    /// the caller's checked assertion that Source X/Y/Z already mean easting,
-    /// northing, and elevation in metres.
+    /// The Coordinate Reference is opaque to this crate, so the exporter does
+    /// not infer or transform its units. This is the caller's checked assertion
+    /// that Source X/Y/Z already mean easting, northing, and elevation in metres.
     #[must_use]
-    pub fn allow_unknown_coordinate_reference_as_metric_metres(mut self) -> Self {
-        self.allow_unknown_coordinate_reference = true;
+    pub fn assert_coordinates_are_metric_metres(mut self) -> Self {
+        self.coordinates_are_metric_metres = true;
         self
     }
 
@@ -114,10 +114,10 @@ impl LandXmlOptions {
         &self.document_time
     }
 
-    /// Reports the explicit unknown-reference metric-metre assertion.
+    /// Reports the explicit Source-coordinate metric-metre assertion.
     #[must_use]
-    pub const fn allows_unknown_coordinate_reference(&self) -> bool {
-        self.allow_unknown_coordinate_reference
+    pub const fn coordinates_are_metric_metres_asserted(&self) -> bool {
+        self.coordinates_are_metric_metres
     }
 }
 
@@ -423,12 +423,10 @@ fn validate_export(
         surface.descriptor().face_count(),
         limits.max_faces(),
     )?;
-    if surface.descriptor().coordinate_reference().is_unknown()
-        && !options.allows_unknown_coordinate_reference()
-    {
+    if !options.coordinates_are_metric_metres_asserted() {
         return Err(TerrainError::invalid(
-            "LandXML Coordinate Reference",
-            "unknown Source reference requires an explicit metric-metre assertion",
+            "LandXML Source coordinates",
+            "Source coordinates require an explicit metric-metre assertion",
         ));
     }
     let escaped_name_bytes = escaped_len(options.surface_name())?;
@@ -1187,10 +1185,48 @@ mod tests {
         fixture.assert_no_stages();
     }
 
+    #[test]
+    fn declared_non_metric_reference_requires_an_explicit_metric_assertion() {
+        let coordinate_reference = CoordinateReference::wkt(
+            "PROJCRS[\"Local feet\",CS[Cartesian,3],LENGTHUNIT[\"foot\",0.3048]]",
+        )
+        .expect("fixture Coordinate Reference is valid");
+        let fixture =
+            ExportFixture::with_coordinate_reference("declared-feet", coordinate_reference);
+        let target = fixture.path("feet.xml");
+        let failure = publish(
+            &fixture.surface,
+            &target,
+            &LandXmlOptions::metric_metres("Feet", "2026-08-10", "12:34:56Z")
+                .expect("fixture LandXML options are valid"),
+            LandXmlLimits::default(),
+            &OperationControl::new(),
+            &ProductionPublicationHook,
+        )
+        .expect_err("opaque declared units are not guessed as metres");
+        assert!(matches!(failure, TerrainError::InvalidArgument { .. }));
+        assert!(!target.exists());
+
+        let receipt = publish(
+            &fixture.surface,
+            &target,
+            &LandXmlOptions::metric_metres("Feet", "2026-08-10", "12:34:56Z")
+                .expect("fixture LandXML options are valid")
+                .assert_coordinates_are_metric_metres(),
+            LandXmlLimits::default(),
+            &OperationControl::new(),
+            &ProductionPublicationHook,
+        )
+        .expect("explicitly asserted coordinates export deterministically");
+        assert!(receipt.byte_length() > 0);
+        assert!(target.exists());
+        fixture.assert_no_stages();
+    }
+
     fn options() -> LandXmlOptions {
         LandXmlOptions::metric_metres("Fault Fixture", "2026-08-10", "12:34:56Z")
             .expect("fault fixture options are valid")
-            .allow_unknown_coordinate_reference_as_metric_metres()
+            .assert_coordinates_are_metric_metres()
     }
 
     struct ExportFixture {
@@ -1200,6 +1236,13 @@ mod tests {
 
     impl ExportFixture {
         fn new(label: &str) -> Self {
+            Self::with_coordinate_reference(label, CoordinateReference::Unknown)
+        }
+
+        fn with_coordinate_reference(
+            label: &str,
+            coordinate_reference: CoordinateReference,
+        ) -> Self {
             static NEXT_DIRECTORY: AtomicU64 = AtomicU64::new(1);
             let sequence = NEXT_DIRECTORY.fetch_add(1, Ordering::Relaxed);
             let directory = std::env::temp_dir().join(format!(
@@ -1223,7 +1266,7 @@ mod tests {
             let transform =
                 PositionTransform::new([0.0; 3], [1.0; 3]).expect("fixture transform is valid");
             let memory =
-                MemorySource::from_columns(transform, CoordinateReference::Unknown, ticks, columns)
+                MemorySource::from_columns(transform, coordinate_reference, ticks, columns)
                     .expect("fixture Source is valid");
             let source = source_memory::open(memory)
                 .blocking_wait()

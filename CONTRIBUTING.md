@@ -74,16 +74,16 @@ cargo run --release -p point-workspace --example classify -- \
   path/to/source.laz path/to/source.pidx path/to/workspace.pcw \
   CLASSIFICATION_ATTRIBUTE_ID
 cargo run --release -p terrain-demo -- \
-  --date 2026-08-10 --time 00:00:00Z --qa-sample \
+  --date 2026-08-10 --time 00:00:00Z --qa-sample --assert-crs-metric \
   --exercise-correction-revert 4 \
   path/to/source.laz path/to/source.pidx path/to/workspace.pcw \
   path/to/existing-ground.xml
 ```
 
 `terrain-demo` requires metric-metre coordinates and performs no transformation.
-For a Source whose Coordinate Reference is explicitly unknown, the caller may
-add `--assert-unknown-crs-metric` only when that unit assertion is independently
-known to be true.
+The caller may add `--assert-crs-metric` only when that unit assertion is
+independently known to be true; the Coordinate Reference remains opaque to the
+exporter whether it is declared or unknown.
 `--exercise-correction-revert ORDINAL` requires that Source ordinal to be in
 the current class-2 Ground Input. It commits class 1, derives the changed
 Surface, appends an immediate-head Revert, and fails unless the original

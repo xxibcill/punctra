@@ -34,7 +34,7 @@ struct RunCommand {
     document_date: String,
     document_time: String,
     qa_sample: bool,
-    assert_unknown_crs_metric: bool,
+    assert_crs_metric: bool,
     correction_revert_ordinal: Option<u64>,
 }
 
@@ -51,7 +51,7 @@ impl Command {
         let mut document_date = None;
         let mut document_time = None;
         let mut qa_sample = false;
-        let mut assert_unknown_crs_metric = false;
+        let mut assert_crs_metric = false;
         let mut correction_revert_ordinal = None;
         let mut positional_only = false;
 
@@ -66,9 +66,9 @@ impl Command {
             } else if !positional_only && argument == OsStr::new("--qa-sample") {
                 require_new_flag(qa_sample, "--qa-sample")?;
                 qa_sample = true;
-            } else if !positional_only && argument == OsStr::new("--assert-unknown-crs-metric") {
-                require_new_flag(assert_unknown_crs_metric, "--assert-unknown-crs-metric")?;
-                assert_unknown_crs_metric = true;
+            } else if !positional_only && argument == OsStr::new("--assert-crs-metric") {
+                require_new_flag(assert_crs_metric, "--assert-crs-metric")?;
+                assert_crs_metric = true;
             } else if !positional_only && argument == OsStr::new("--exercise-correction-revert") {
                 let value = required_option_value(&mut arguments, "--exercise-correction-revert")?;
                 let ordinal = value.parse::<u64>().map_err(|_| {
@@ -116,7 +116,7 @@ impl Command {
             document_time: document_time
                 .ok_or_else(|| invalid_input("missing required --time HH:MM:SSZ"))?,
             qa_sample,
-            assert_unknown_crs_metric,
+            assert_crs_metric,
             correction_revert_ordinal,
         }))
     }
@@ -181,8 +181,8 @@ fn run(command: RunCommand) -> AppResult<()> {
 
     let mut options =
         LandXmlOptions::metric_metres(SURFACE_NAME, command.document_date, command.document_time)?;
-    if command.assert_unknown_crs_metric {
-        options = options.allow_unknown_coordinate_reference_as_metric_metres();
+    if command.assert_crs_metric {
+        options = options.assert_coordinates_are_metric_metres();
     }
     let receipt = surface
         .export_landxml(&command.landxml, options, LandXmlLimits::default())
@@ -473,8 +473,7 @@ fn print_usage() {
             "\n",
             "Optional:\n",
             "  --qa-sample             Evaluate one Surface vertex and one deliberate gap\n",
-            "  --assert-unknown-crs-metric\n",
-            "                           Assert unknown Source X/Y/Z are metric metres\n",
+            "  --assert-crs-metric     Assert Source X/Y/Z are metric metres\n",
             "  --exercise-correction-revert ORDINAL\n",
             "                           Set one exact Ground Point to class 1, derive, Revert, and verify restoration\n",
             "  -h, --help              Show this help\n",

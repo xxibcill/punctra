@@ -308,9 +308,9 @@ breach publishes no partial `CheckPointReport`.
 `TerrainSurface::export_landxml` privately encodes one deterministic UTF-8
 LandXML 1.2 metric-metre TIN with explicit caller-supplied date/time, one
 Surface, consecutive point IDs, and canonical faces. Coordinates are written
-as northing, easting, elevation. The caller must establish that Source units
-are metres; an unknown Coordinate Reference requires an explicit metric-metre
-assertion. No unit or CRS transformation occurs.
+as northing, easting, elevation. The caller must explicitly assert that Source
+units are metres because the declared-or-unknown Coordinate Reference remains
+opaque to the exporter. No unit or CRS transformation occurs.
 
 Export stages and syncs a bounded sibling file, reopens and verifies it, then
 publishes by no-replace hard link and syncs the parent. Before publication,

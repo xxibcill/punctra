@@ -175,12 +175,12 @@ cargo run -p point-terrain --example derive
 ```
 
 Run the headless real LAS/LAZ terrain path. The Source must already use metric
-metres; `--assert-unknown-crs-metric` is an explicit caller assertion, not CRS
+metres; `--assert-crs-metric` is an explicit caller assertion, not CRS
 inference:
 
 ```bash
 cargo run --release -p terrain-demo -- \
-  --date 2026-08-10 --time 00:00:00Z --qa-sample \
+  --date 2026-08-10 --time 00:00:00Z --qa-sample --assert-crs-metric \
   --exercise-correction-revert 4 \
   survey.laz survey.laz.pidx survey.pcw existing-ground.xml
 ```
