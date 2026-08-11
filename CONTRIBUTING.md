@@ -20,6 +20,9 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace --all-features
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps
+cargo fmt --manifest-path fuzz/Cargo.toml --all --check
+cargo check --manifest-path fuzz/Cargo.toml --bin index_persistence
+cargo test --manifest-path fuzz/Cargo.toml --lib
 cargo bench -p point-view --bench planner
 cargo bench -p source-memory --bench read
 cargo bench -p source-las --bench read
@@ -48,6 +51,15 @@ cargo run --release -p renderer-demo -- --smoke path/to/source.laz path/to/sourc
 GPU acceptance tests use any available headless wgpu adapter. They skip when no
 adapter is present unless `PUNCTRA_REQUIRE_GPU=1`. Run all verification locally;
 the repository does not use hosted CI.
+
+The stable fuzz-crate test runs the checked-in short corpus through the same
+bounded harness as libFuzzer. Longer local campaigns may use `cargo-fuzz` and a
+nightly toolchain:
+
+```bash
+cargo +nightly fuzz run index_persistence fuzz/corpus/index_persistence -- \
+    -max_len=262144 -timeout=5
+```
 
 Keep public behavior documented, add interface-level tests for changes, avoid
 unsafe code, and preserve caller-owned wgpu submission.
