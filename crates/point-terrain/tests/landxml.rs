@@ -79,7 +79,12 @@ fn source_coordinates_require_the_explicit_metric_metre_assertion() {
         .blocking_wait()
         .expect_err("unknown reference is not guessed");
 
-    assert!(matches!(error, TerrainError::InvalidArgument { .. }));
+    assert!(matches!(
+        error,
+        TerrainError::UnsupportedMetricExport { reason }
+            if reason.as_str()
+                == "Source coordinates require an explicit metric-metre assertion"
+    ));
     assert!(!target.exists());
     output.assert_no_stages();
 }

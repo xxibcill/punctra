@@ -424,8 +424,7 @@ fn validate_export(
         limits.max_faces(),
     )?;
     if !options.coordinates_are_metric_metres_asserted() {
-        return Err(TerrainError::invalid(
-            "LandXML Source coordinates",
+        return Err(TerrainError::unsupported_metric_export(
             "Source coordinates require an explicit metric-metre assertion",
         ));
     }
@@ -1204,7 +1203,10 @@ mod tests {
             &ProductionPublicationHook,
         )
         .expect_err("opaque declared units are not guessed as metres");
-        assert!(matches!(failure, TerrainError::InvalidArgument { .. }));
+        assert!(matches!(
+            failure,
+            TerrainError::UnsupportedMetricExport { .. }
+        ));
         assert!(!target.exists());
 
         let receipt = publish(
