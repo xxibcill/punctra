@@ -357,12 +357,13 @@ existing narrow LAS/LAZ correction-to-terrain path can:
 - emit bounded structured failures naming stage, certainty, known identities,
   and exactly one safe recovery action.
 
-Repository evidence includes 33 `terrain-demo` tests—18 unit/private, 12
+Repository evidence includes 35 `terrain-demo` tests—18 unit/private, 14
 workflow-facade, and three process—every eight-frame resume prefix, 12 public
 limit families, generated LAS/LAZ semantic-projection checks, scoped fault and
-representative cancellation/corruption coverage, and a five-mode generated
-10,000-Point benchmark. The completed Run used a 2,804-byte journal and
-11,435-byte report with 114 semantic limit facts.
+representative cancellation/corruption coverage, known-identity validation,
+dropped-Workflow recovery, and a five-mode generated 10,000-Point benchmark.
+The completed Run used a 2,804-byte journal and 11,435-byte report with 114
+semantic limit facts.
 
 The product-level design-partner alpha outcome is not complete. Partner
 tolerances, production datasets, downstream deliverable checks, paid use, and

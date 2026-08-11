@@ -309,11 +309,12 @@ Change Envelope, QA, LandXML/report reconciliation, and one-action structured
 failures. The fixed Run root contains `run.pwf`, `run.lock`, `terrain.xml`, and
 `audit.json`. No Terrain Surface or audit cache is persisted.
 
-**Independent proof:** 33 package tests—18 unit/private, 12 workflow-facade,
+**Independent proof:** 35 package tests—18 unit/private, 14 workflow-facade,
 and three process—cover every eight-frame restart prefix, one-Revision
 idempotence, exact report/XML conflict and recovery, 12 public limit families,
 LAS/LAZ semantic projection, Source immutability, stale/mismatched state,
-Retryable intent, cancellation, and CLI diagnostics. The generated
+Retryable intent, cancellation, identity-bearing Run-root validation,
+dropped-Workflow recovery, and CLI diagnostics. The generated
 10k/100k/1M-capable Criterion benchmark has five
 cold/restart/reconciliation modes. Its evidence is generated-only and does not
 claim worker heap or external acceptance.

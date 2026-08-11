@@ -479,7 +479,7 @@ fn run(
     start: bool,
     control: &OperationControl,
 ) -> Result<WorkflowReceipt, WorkflowFailure> {
-    validate_run_root(&paths.run_root)?;
+    validate_run_root(&paths.run_root, base_context(request))?;
     let witness = DirectoryWitness::capture(&paths.run_root)
         .map_err(|error| io_failure(WorkflowStage::Validate, error, base_context(request)))?;
     let _lock = RunLock::acquire(&paths.lock())
@@ -2526,13 +2526,17 @@ fn lock_failure(error: io::Error, context: FailureContext) -> WorkflowFailure {
     )
 }
 
-fn validate_run_root(path: &Path) -> Result<(), WorkflowFailure> {
+fn validate_run_root(path: &Path, context: FailureContext) -> Result<(), WorkflowFailure> {
     let metadata = fs::symlink_metadata(path)
-        .map_err(|error| io_failure(WorkflowStage::Validate, error, FailureContext::default()))?;
+        .map_err(|error| io_failure(WorkflowStage::Validate, error, context))?;
     if !metadata.file_type().is_dir() {
-        return Err(WorkflowFailure::invalid(
+        return Err(WorkflowFailure::new(
+            FailureCode::InvalidRequest,
             WorkflowStage::Validate,
+            Certainty::PrePublication,
+            context,
             "Run root must be an existing non-symlink directory",
+            RecoveryAction::CorrectInvalidRequest,
         ));
     }
     Ok(())

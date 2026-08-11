@@ -602,8 +602,8 @@ pre-link cancellation/failure, exact and conflicting `AlreadyExists` races,
 post-link replacement, target kind, staging/working limits, and stage/parent
 directory identity.
 
-The `terrain-demo` package has 33 tests: 18 unit/private tests, 12 public
-workflow-facade tests, and three process tests. The 15 public/process tests
+The `terrain-demo` package has 35 tests: 18 unit/private tests, 14 public
+workflow-facade tests, and three process tests. The 17 public/process tests
 prove:
 
 - every prefix of the eight checkpoints resumes to the same final report and
@@ -614,15 +614,18 @@ prove:
   `semantic_results_hash` projections where Point meaning is identical, while
   full reports retain and honestly differ on exact Source, Workspace, Run,
   Operation, and Revision identities;
-- immediate parent cancellation publishes no false Complete checkpoint and
-  leaves Source bytes unchanged;
+- immediate parent cancellation and an active dropped Workflow publish no
+  false Complete checkpoint, remain resumable, and leave Source bytes
+  unchanged;
 - 12 public resource-limit families stop with `PWF_RESOURCE_LIMIT` and can be
   retried or resumed as their durable prefix permits;
 - stale head, differently bound recorded rejection, changed Source, changed
   Workspace identity, and deterministic Retryable Workspace intent fail or
   recover without inventing another Operation identity;
 - `Workspace::schema().classification()` rejects any Attribute other than
-  Source Attribute 6 before Run or Workspace mutation; and
+  Source Attribute 6 before Run or Workspace mutation;
+- Run-root validation failures retain the already-known Run, Operation, and
+  baseline Revision identities; and
 - `start`, `resume`, and `inspect` expose bounded structured CLI diagnostics.
 
 These exhaustive labels apply only to the named application-defined boundary

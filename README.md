@@ -346,10 +346,11 @@ external gate remains outstanding.
 
 ## v0.7 benchmark evidence
 
-`terrain-demo` has 33 package tests: 18 unit/private fault and contract tests,
-12 public workflow-facade tests, and three process tests. The public suites
-cover every eight-frame resume prefix and 12 limit families; the private fault
-scope is documented precisely in the [verification strategy](docs/architecture/testing.md).
+`terrain-demo` has 35 package tests: 18 unit/private fault and contract tests,
+14 public workflow-facade tests, and three process tests. The public suites
+cover every eight-frame resume prefix, 12 limit families, known-identity
+validation, and dropped-Workflow recovery; the private fault scope is
+documented precisely in the [verification strategy](docs/architecture/testing.md).
 
 The checked-in `terrain-demo` Criterion benchmark exercises five restart modes
 through the public workflow facade with generated local LAS data. The local

@@ -5,6 +5,8 @@ mod support;
 use std::{
     fs::{self, OpenOptions},
     path::{Path, PathBuf},
+    thread,
+    time::{Duration, Instant},
 };
 
 use point_contracts::{AttributeId, PointId};
@@ -288,6 +290,54 @@ fn cancelling_the_parent_run_never_publishes_a_false_complete_checkpoint() {
         );
     }
     assert_eq!(fs::read(&fixture.source).unwrap(), source_before);
+}
+
+#[test]
+fn run_root_validation_reports_known_intent_identities() {
+    let fixture = WorkflowFixture::new("run-root-identities", "las", 64, 62);
+    fs::remove_dir(&fixture.run_root).expect("remove empty caller-owned Run root");
+
+    let error = start_run(
+        fixture.paths.clone(),
+        fixture.intent.clone(),
+        WorkflowLimits::default(),
+    )
+    .blocking_wait()
+    .expect_err("a missing Run root must fail before publication");
+
+    assert_eq!(error.stage(), "validate");
+    assert_eq!(error.run(), Some(fixture.intent.run()));
+    assert_eq!(error.operation(), Some(fixture.intent.operation()));
+    assert_eq!(error.revision(), Some(fixture.intent.baseline_revision()));
+}
+
+#[test]
+fn dropping_an_active_workflow_never_publishes_complete_and_can_resume() {
+    let fixture = WorkflowFixture::new("drop-active", "las", 100_000, 63);
+    let source_before = fs::read(&fixture.source).expect("read drop-test Source fixture");
+    let job = start_run(
+        fixture.paths.clone(),
+        fixture.intent.clone(),
+        WorkflowLimits::default(),
+    );
+    let handle = job.handle();
+    wait_for_journal_frames(&fixture.journal(), 3);
+
+    drop(job);
+
+    assert!(handle.token().is_cancelled());
+    let status = wait_for_unlocked_status(&fixture.run_root);
+    assert!(
+        !status.is_complete(),
+        "dropping an active workflow must not publish Complete",
+    );
+    let receipt = fixture.resume();
+    assert_eq!(receipt.frame_count(), EXPECTED_FRAME_COUNT as u64);
+    fixture.assert_single_operation_revision(receipt);
+    assert_eq!(
+        fs::read(&fixture.source).expect("reread drop-test Source fixture"),
+        source_before,
+    );
 }
 
 #[test]
@@ -814,6 +864,40 @@ impl WorkflowFixture {
 
 fn read(path: &Path, artifact: &str) -> Vec<u8> {
     fs::read(path).unwrap_or_else(|error| panic!("read {artifact} {}: {error}", path.display()))
+}
+
+fn wait_for_journal_frames(path: &Path, minimum: usize) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        if let Ok(bytes) = fs::read(path)
+            && let Ok(ends) = journal_frame_ends(&bytes)
+            && ends.len() >= minimum
+        {
+            assert!(
+                ends.len() < EXPECTED_FRAME_COUNT,
+                "workflow completed before the drop-test cancellation point",
+            );
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "workflow did not reach journal frame {minimum} before timeout",
+        );
+        thread::sleep(Duration::from_millis(1));
+    }
+}
+
+fn wait_for_unlocked_status(run_root: &Path) -> terrain_demo::WorkflowStatus {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        match inspect_run(run_root, WorkflowLimits::default()) {
+            Ok(status) => return status,
+            Err(error) if error.stage() == "lock" && Instant::now() < deadline => {
+                thread::sleep(Duration::from_millis(1));
+            }
+            Err(error) => panic!("inspect dropped workflow: {error}"),
+        }
+    }
 }
 
 fn one_input_point_selection_limits() -> PointSetLimits {

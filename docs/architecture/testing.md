@@ -170,8 +170,8 @@ for create, reconcile, conflict, races, symlink/non-regular rejection,
 publication faults, post-link cancellation certainty, and lost
 acknowledgement.
 
-`terrain-demo` has 33 package tests: 18 unit/private tests, 12 through the
-public workflow facade, and three through the process boundary. The 15 public/
+`terrain-demo` has 35 package tests: 18 unit/private tests, 14 through the
+public workflow facade, and three through the process boundary. The 17 public/
 process tests cover:
 
 - every prefix of the eight-frame journal resuming to the same receipt and one
@@ -181,14 +181,16 @@ process tests cover:
 - exact report reconciliation/conflict and LandXML/report recovery;
 - generated LAS/LAZ equality of the named source-independent semantic
   projection while full identity-bearing reports honestly differ;
-- immediate parent cancellation without a false `Complete` checkpoint and
-  unchanged Source bytes;
+- immediate parent cancellation and an active dropped Workflow without a false
+  `Complete` checkpoint, with resumability and unchanged Source bytes;
 - 12 public limit families, stale baseline, differently bound recorded
   rejection, changed Source, changed Workspace identity, and deterministic
   Retryable intent;
 - rejection of an existing Workspace whose public
   `schema().classification()` is not Source Attribute 6, before Run or
-  Workspace mutation; and
+  Workspace mutation;
+- Run-root validation failures retaining the already-known Run, Operation, and
+  baseline Revision identities; and
 - bounded `start`, `resume`, and `inspect` CLI output and structured failures.
 
 This is representative public recovery evidence, not an exhaustive injected

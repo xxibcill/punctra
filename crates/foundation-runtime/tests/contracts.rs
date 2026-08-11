@@ -196,6 +196,40 @@ fn dropping_a_running_job_requests_cancellation() {
 }
 
 #[test]
+fn dropping_a_workflow_job_cancels_its_awaited_child() {
+    let (child_started_sender, child_started_receiver) = mpsc::sync_channel(0);
+    let (child_cancelled_sender, child_cancelled_receiver) = mpsc::sync_channel(0);
+    let workflow = Job::<(), RuntimeError>::spawn(move |workflow_control| {
+        let child = Job::<(), RuntimeError>::spawn(move |child_control| {
+            child_started_sender
+                .send(())
+                .expect("the workflow test should still be waiting for its child");
+            loop {
+                if let Err(error) = child_control.check_cancelled() {
+                    child_cancelled_sender
+                        .send(())
+                        .expect("the workflow test should still observe child cancellation");
+                    return Err(error);
+                }
+                std::thread::park_timeout(Duration::from_millis(1));
+            }
+        });
+        child.blocking_wait_cancelled_by(&workflow_control.token())
+    });
+    let workflow_handle = workflow.handle();
+    child_started_receiver
+        .recv()
+        .expect("the awaited child should report startup");
+
+    drop(workflow);
+
+    child_cancelled_receiver
+        .recv_timeout(Duration::from_secs(1))
+        .expect("dropping the workflow should cancel its awaited child");
+    assert!(workflow_handle.token().is_cancelled());
+}
+
+#[test]
 fn progress_rejects_invalid_and_regressing_snapshots() {
     let owner = OperationControl::new();
     let reporter = owner.reporter();

@@ -31,12 +31,13 @@ All notable changes to Punctra are documented here. The project follows
 - Added bounded structured Workflow failures with stable code, stage,
   publication certainty, known Run/Source/Workspace/Operation/Revision
   identities, and exactly one safe recovery action.
-- Added 33 `terrain-demo` package tests—18 unit/private, 12 public workflow-
+- Added 35 `terrain-demo` package tests—18 unit/private, 14 public workflow-
   facade, and three process tests—covering every eight-frame resume prefix,
   single-Revision reconciliation, exact report conflict handling, 12 public
   limit families,
   LAS/LAZ semantic projection with honest identity differences, Source
-  immutability, stale/mismatched state, Retryable intent, cancellation, and CLI
+  immutability, stale/mismatched state, Retryable intent, cancellation,
+  identity-bearing Run-root validation, dropped-Workflow recovery, and CLI
   diagnostics. Private tests exhaust the application-defined journal Intent
   publication, `Complete` append-before-write/before-sync/after-sync lost-
   acknowledgement, and report post-link boundary sets. Report pre-link
