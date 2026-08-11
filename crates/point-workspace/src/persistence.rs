@@ -3053,9 +3053,24 @@ fn create_temporary(
 // Cleanup deliberately recognizes only canonical lowercase private filenames.
 #[allow(clippy::case_sensitive_file_extension_comparisons)]
 fn is_recognized_scratch(name: &str) -> bool {
-    (name.starts_with("revision-") || name.starts_with("reject-") || name.starts_with("manifest-"))
-        && name.ends_with(".tmp")
-        || name.starts_with("point-set-") && name.ends_with(".pset")
+    const RANDOM_HEX_BYTES: usize = 16 * 2;
+    [
+        ("revision-", ".tmp"),
+        ("reject-", ".tmp"),
+        ("manifest-", ".tmp"),
+        ("point-set-", ".pset"),
+    ]
+    .into_iter()
+    .any(|(prefix, suffix)| {
+        name.strip_prefix(prefix)
+            .and_then(|remainder| remainder.strip_suffix(suffix))
+            .is_some_and(|nonce| {
+                nonce.len() == RANDOM_HEX_BYTES
+                    && nonce
+                        .bytes()
+                        .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+            })
+    })
 }
 
 fn acquire_lock(root: &Path) -> Result<File, PersistenceError> {
@@ -3901,6 +3916,27 @@ mod tests {
     }
 
     #[test]
+    fn scratch_name_requires_canonical_width_and_lower_hex() {
+        for name in [
+            "revision-deadbeefdeadbeefdeadbeefdeadbeef.tmp",
+            "reject-deadbeefdeadbeefdeadbeefdeadbeef.tmp",
+            "manifest-deadbeefdeadbeefdeadbeefdeadbeef.tmp",
+            "point-set-deadbeefdeadbeefdeadbeefdeadbeef.pset",
+        ] {
+            assert!(is_recognized_scratch(name), "canonical name {name}");
+        }
+        for name in [
+            "revision-user-backup.tmp",
+            "revision-deadbeef.tmp",
+            "revision-DEADBEEFDEADBEEFDEADBEEFDEADBEEF.tmp",
+            "revision-deadbeefdeadbeefdeadbeefdeadbeef.pset",
+            "point-set-deadbeefdeadbeefdeadbeefdeadbeef.tmp",
+        ] {
+            assert!(!is_recognized_scratch(name), "noncanonical name {name}");
+        }
+    }
+
+    #[test]
     fn empty_candidate_needs_no_block_capacity_and_sealed_drop_cleans_stage() {
         let directory = TestDirectory::new();
         let store = initialized_store(&directory);
@@ -3938,8 +3974,12 @@ mod tests {
         File::create(directory.path().join("workspace.lock")).expect("partial lock");
         fs::create_dir(directory.path().join("operations")).expect("partial operations");
         fs::create_dir(directory.path().join("scratch")).expect("partial scratch");
-        File::create(directory.path().join("scratch/revision-deadbeef.tmp"))
-            .expect("recognized partial stage");
+        File::create(
+            directory
+                .path()
+                .join("scratch/revision-deadbeefdeadbeefdeadbeefdeadbeef.tmp"),
+        )
+        .expect("recognized partial stage");
 
         let mut store = Store::create(directory.path()).expect("resume recognized partial create");
         assert!(directory.path().join("revisions").is_dir());
@@ -3954,6 +3994,20 @@ mod tests {
             .expect("complete resumed create");
         drop(store);
         assert!(directory.path().join("manifest.pwm").is_file());
+    }
+
+    #[test]
+    fn create_preserves_noncanonical_scratch_files() {
+        let directory = TestDirectory::new();
+        fs::create_dir(directory.path()).expect("partial root");
+        File::create(directory.path().join("workspace.lock")).expect("partial lock");
+        fs::create_dir(directory.path().join("operations")).expect("partial operations");
+        fs::create_dir(directory.path().join("scratch")).expect("partial scratch");
+        let sentinel = directory.path().join("scratch/revision-user-backup.tmp");
+        File::create(&sentinel).expect("noncanonical scratch sentinel");
+
+        assert!(Store::create(directory.path()).is_err());
+        assert!(sentinel.is_file());
     }
 
     #[test]
