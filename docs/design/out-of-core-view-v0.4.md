@@ -215,6 +215,9 @@ union.
 The target is one immutable complete artifact. A deterministic sibling work
 file is an append-only sequence of Source-block frames. Each complete frame
 contains its Source Span, exact bounds, bounded leaf sample, and BLAKE3 checksum.
+Disk version 1 stores all multibyte integer fields and the raw bit patterns of
+all `f64` fields in little-endian order. Fixed magic bytes, Source identities,
+and BLAKE3 checksum bytes retain their declared byte order.
 
 After interruption, `prepare`:
 

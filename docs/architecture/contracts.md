@@ -390,7 +390,10 @@ The v0.4 persisted recipe is fixed: consecutive Source blocks contain at most
 65,536 Points, a longest-centroid-extent median split builds one binary BVH,
 node identities are nonzero and root-first, and each internal node retains at
 most 4,096 deterministic exact `(ordinal, ticks)` display samples. The disk and
-recipe versions are separate from the Cargo version.
+recipe versions are separate from the Cargo version. Disk version 1 encodes
+every multibyte integer and every persisted `f64` bit pattern in little-endian
+byte order. Magic values, Source identities, and 32-byte BLAKE3 checksums are
+stored as byte strings in their declared order and are never endian-swapped.
 
 `IndexDescriptor` exposes the bound Source Identity and point count, exact
 position transform and optional world bounds, recipe and disk versions,
