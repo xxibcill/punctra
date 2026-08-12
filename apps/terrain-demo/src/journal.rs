@@ -18,6 +18,8 @@ use std::{
 use blake3::Hasher;
 use thiserror::Error;
 
+use crate::publication::{DirectoryWitness, StageGuard, same_file_identity, sync_directory};
+
 const HEADER_MAGIC: &[u8; 8] = b"PTWFJ001";
 const FRAME_MAGIC: &[u8; 4] = b"PWF1";
 const DISK_VERSION: u32 = 1;
@@ -2226,133 +2228,6 @@ fn create_stage(parent: &Path) -> Result<(StageGuard, File), JournalError> {
     Err(JournalError::Entropy)
 }
 
-struct StageGuard {
-    path: Option<PathBuf>,
-    parent: PathBuf,
-    identity: fs::Metadata,
-}
-
-impl StageGuard {
-    fn new(path: PathBuf, parent: PathBuf, identity: fs::Metadata) -> Self {
-        Self {
-            path: Some(path),
-            parent,
-            identity,
-        }
-    }
-
-    fn path(&self) -> &Path {
-        self.path
-            .as_deref()
-            .expect("a live journal stage has a path")
-    }
-
-    fn verify(&self) -> io::Result<()> {
-        let metadata = fs::symlink_metadata(self.path())?;
-        if metadata.file_type().is_file() && same_file_identity(&self.identity, &metadata) {
-            Ok(())
-        } else {
-            Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "journal stage identity changed",
-            ))
-        }
-    }
-
-    fn remove(&mut self) -> io::Result<()> {
-        let Some(path) = self.path.as_ref() else {
-            return Ok(());
-        };
-        self.verify()?;
-        fs::remove_file(path)?;
-        self.path = None;
-        Ok(())
-    }
-
-    fn discard(&mut self) {
-        if self.path.is_some() && self.verify().is_ok() && self.remove().is_ok() {
-            let _ = sync_directory(&self.parent);
-        }
-    }
-}
-
-impl Drop for StageGuard {
-    fn drop(&mut self) {
-        self.discard();
-    }
-}
-
-struct DirectoryWitness {
-    path: PathBuf,
-    #[cfg(unix)]
-    device: u64,
-    #[cfg(unix)]
-    inode: u64,
-}
-
-impl DirectoryWitness {
-    fn capture(path: &Path) -> io::Result<Self> {
-        let metadata = fs::symlink_metadata(path)?;
-        if !metadata.file_type().is_dir() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "journal parent is not a non-symlink directory",
-            ));
-        }
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::MetadataExt as _;
-
-            Ok(Self {
-                path: path.to_path_buf(),
-                device: metadata.dev(),
-                inode: metadata.ino(),
-            })
-        }
-        #[cfg(not(unix))]
-        {
-            let _ = metadata;
-            Ok(Self {
-                path: path.to_path_buf(),
-            })
-        }
-    }
-
-    fn verify(&self) -> io::Result<()> {
-        let current = Self::capture(&self.path)?;
-        #[cfg(unix)]
-        if current.device != self.device || current.inode != self.inode {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "journal parent directory identity changed",
-            ));
-        }
-        Ok(())
-    }
-}
-
-#[cfg(unix)]
-fn same_file_identity(left: &fs::Metadata, right: &fs::Metadata) -> bool {
-    use std::os::unix::fs::MetadataExt as _;
-
-    left.dev() == right.dev() && left.ino() == right.ino()
-}
-
-#[cfg(windows)]
-fn same_file_identity(left: &fs::Metadata, right: &fs::Metadata) -> bool {
-    use std::os::windows::fs::MetadataExt as _;
-
-    left.volume_serial_number().is_some()
-        && left.volume_serial_number() == right.volume_serial_number()
-        && left.file_index().is_some()
-        && left.file_index() == right.file_index()
-}
-
-#[cfg(not(any(unix, windows)))]
-fn same_file_identity(_left: &fs::Metadata, _right: &fs::Metadata) -> bool {
-    false
-}
-
 fn map_lock_error(error: std::fs::TryLockError) -> JournalError {
     let source: io::Error = error.into();
     if source.kind() == io::ErrorKind::WouldBlock {
@@ -2360,10 +2235,6 @@ fn map_lock_error(error: std::fs::TryLockError) -> JournalError {
     } else {
         JournalError::io("lock journal", Path::new("journal"), source)
     }
-}
-
-fn sync_directory(path: &Path) -> io::Result<()> {
-    File::open(path)?.sync_all()
 }
 
 fn target_parent(path: &Path) -> &Path {

@@ -6,6 +6,7 @@
 mod cli;
 mod diagnostic;
 mod journal;
+mod publication;
 mod report;
 mod workflow;
 

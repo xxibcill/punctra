@@ -17,7 +17,10 @@ use point_terrain::{CheckPointOutcome, CheckPointReport, LandXmlReceipt, Terrain
 use point_workspace::RevisionAudit;
 use thiserror::Error;
 
-use crate::journal::{Digest, WorkflowRunId};
+use crate::{
+    journal::{Digest, WorkflowRunId},
+    publication::{DirectoryWitness, StageGuard, same_file_identity, sync_directory},
+};
 
 const REPORT_SCHEMA: &str = "punctra.terrain-workflow.audit.v1";
 const REPORT_HASH_DOMAIN: &[u8] = b"punctra-terrain-workflow-report-bytes-v1";
@@ -977,28 +980,6 @@ fn same_file_state(left: &fs::Metadata, right: &fs::Metadata) -> bool {
         )
 }
 
-#[cfg(unix)]
-fn same_file_identity(left: &fs::Metadata, right: &fs::Metadata) -> bool {
-    use std::os::unix::fs::MetadataExt;
-
-    left.dev() == right.dev() && left.ino() == right.ino()
-}
-
-#[cfg(windows)]
-fn same_file_identity(left: &fs::Metadata, right: &fs::Metadata) -> bool {
-    use std::os::windows::fs::MetadataExt;
-
-    left.file_attributes() == right.file_attributes()
-        && left.creation_time() == right.creation_time()
-        && left.last_write_time() == right.last_write_time()
-        && left.file_size() == right.file_size()
-}
-
-#[cfg(not(any(unix, windows)))]
-fn same_file_identity(_left: &fs::Metadata, _right: &fs::Metadata) -> bool {
-    false
-}
-
 fn validate_limits(limits: ReportLimits) -> Result<(), ReportError> {
     require(1, limits.max_output_bytes, "report output bytes")?;
     require(1, limits.max_staging_bytes, "report staging bytes")?;
@@ -1061,119 +1042,6 @@ fn create_stage(
     Err(ReportError::Invalid(
         "report staging name space is exhausted",
     ))
-}
-
-fn sync_directory(path: &Path) -> io::Result<()> {
-    File::open(path)?.sync_all()
-}
-
-struct DirectoryWitness {
-    path: PathBuf,
-    #[cfg(unix)]
-    device: u64,
-    #[cfg(unix)]
-    inode: u64,
-}
-
-impl DirectoryWitness {
-    fn capture(path: &Path) -> io::Result<Self> {
-        let metadata = fs::symlink_metadata(path)?;
-        if !metadata.file_type().is_dir() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "report parent is not a non-symlink directory",
-            ));
-        }
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::MetadataExt;
-
-            Ok(Self {
-                path: path.to_path_buf(),
-                device: metadata.dev(),
-                inode: metadata.ino(),
-            })
-        }
-        #[cfg(not(unix))]
-        {
-            let _ = metadata;
-            Ok(Self {
-                path: path.to_path_buf(),
-            })
-        }
-    }
-
-    fn verify(&self) -> io::Result<()> {
-        let current = Self::capture(&self.path)?;
-        #[cfg(unix)]
-        if current.device != self.device || current.inode != self.inode {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "report parent directory identity changed",
-            ));
-        }
-        Ok(())
-    }
-}
-
-struct StageGuard {
-    path: Option<PathBuf>,
-    parent: PathBuf,
-    identity: fs::Metadata,
-}
-
-impl StageGuard {
-    fn new(path: PathBuf, parent: PathBuf, identity: fs::Metadata) -> Self {
-        Self {
-            path: Some(path),
-            parent,
-            identity,
-        }
-    }
-
-    fn path(&self) -> &Path {
-        self.path
-            .as_deref()
-            .expect("a live report stage has a path")
-    }
-
-    fn verify(&self) -> io::Result<()> {
-        let metadata = fs::symlink_metadata(self.path())?;
-        if metadata.file_type().is_file() && same_file_identity(&self.identity, &metadata) {
-            Ok(())
-        } else {
-            Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "report stage identity changed",
-            ))
-        }
-    }
-
-    fn remove(&mut self) -> io::Result<()> {
-        let Some(path) = self.path.as_ref() else {
-            return Ok(());
-        };
-        self.verify()?;
-        match fs::remove_file(path) {
-            Ok(()) => {}
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-            Err(error) => return Err(error),
-        }
-        self.path = None;
-        Ok(())
-    }
-
-    fn discard(&mut self) {
-        if self.path.is_some() && self.verify().is_ok() && self.remove().is_ok() {
-            let _ = sync_directory(&self.parent);
-        }
-    }
-}
-
-impl Drop for StageGuard {
-    fn drop(&mut self) {
-        self.discard();
-    }
 }
 
 #[cfg(unix)]
