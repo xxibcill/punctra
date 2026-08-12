@@ -381,10 +381,7 @@ fn finish_publication(
                 ))
             }
         })
-        .map_err(|error| {
-            remove_mismatched_target_if_owned(stage.path(), target, parent);
-            indeterminate(target, expected.hash, error)
-        })?;
+        .map_err(|error| indeterminate(target, expected.hash, error))?;
     require_post_link_boundary(
         hook,
         PublicationBoundary::ParentSync,
@@ -1044,26 +1041,6 @@ fn create_stage(
     ))
 }
 
-#[cfg(unix)]
-fn remove_mismatched_target_if_owned(stage: &Path, target: &Path, parent: &Path) {
-    let Ok(stage_metadata) = fs::symlink_metadata(stage) else {
-        return;
-    };
-    let Ok(target_metadata) = fs::symlink_metadata(target) else {
-        return;
-    };
-    if stage_metadata.file_type().is_file()
-        && target_metadata.file_type().is_file()
-        && same_file_identity(&stage_metadata, &target_metadata)
-        && fs::remove_file(target).is_ok()
-    {
-        let _ = sync_directory(parent);
-    }
-}
-
-#[cfg(not(unix))]
-fn remove_mismatched_target_if_owned(_stage: &Path, _target: &Path, _parent: &Path) {}
-
 struct Hex<'a>(&'a [u8]);
 
 impl fmt::Display for Hex<'_> {
@@ -1090,6 +1067,11 @@ mod tests {
             target: &'a Path,
             bytes: &'a [u8],
             replace: bool,
+        },
+        ModifyInPlace {
+            boundary: PublicationBoundary,
+            target: &'a Path,
+            bytes: &'a [u8],
         },
     }
 
@@ -1120,6 +1102,11 @@ mod tests {
                     }
                     write_synced(target, bytes)
                 }
+                TestAction::ModifyInPlace {
+                    boundary: expected,
+                    target,
+                    bytes,
+                } if boundary == expected => overwrite_synced(target, bytes),
                 _ => Ok(()),
             }
         }
@@ -1298,6 +1285,33 @@ mod tests {
         directory.assert_no_stages();
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn post_link_in_place_modification_is_preserved() {
+        let directory = Directory::new("in-place-modification");
+        let target = directory.path.join("audit.json");
+        let concurrent_bytes = b"concurrent writer bytes\n";
+        let (mut stage, expected) = directory.prepared(b"canonical report\n");
+        let failure = publish_prepared(
+            &target,
+            &mut stage,
+            expected,
+            &OperationControl::new(),
+            &TestHook(TestAction::ModifyInPlace {
+                boundary: PublicationBoundary::TargetVerification,
+                target: &target,
+                bytes: concurrent_bytes,
+            }),
+        )
+        .expect_err("a modified post-link target has no receipt");
+        assert!(matches!(failure, ReportError::Indeterminate { .. }));
+        assert_eq!(fs::read(&target).unwrap(), concurrent_bytes);
+        drop(stage);
+        assert_eq!(fs::read(&target).unwrap(), concurrent_bytes);
+        fs::remove_file(target).unwrap();
+        directory.assert_no_stages();
+    }
+
     #[test]
     fn stage_guard_never_removes_a_replacement_path() {
         let directory = Directory::new("stage-replacement");
@@ -1428,11 +1442,18 @@ mod tests {
         sync_directory(path.parent().unwrap())
     }
 
+    fn overwrite_synced(path: &Path, bytes: &[u8]) -> io::Result<()> {
+        let mut file = OpenOptions::new().write(true).truncate(true).open(path)?;
+        file.write_all(bytes)?;
+        file.sync_all()
+    }
+
     const fn action_name(action: TestAction<'_>) -> &'static str {
         match action {
             TestAction::Failure(_) => "failure",
             TestAction::Cancellation(_) => "cancellation",
             TestAction::Install { .. } => "install",
+            TestAction::ModifyInPlace { .. } => "modify-in-place",
         }
     }
 
