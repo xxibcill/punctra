@@ -232,6 +232,31 @@ fn root_mean_square_accepts_large_finite_residuals() {
 }
 
 #[test]
+fn mean_accepts_repeated_large_finite_residuals() {
+    let fixture = TerrainFixture::new(
+        "qa-large-mean",
+        vec![[0, 0, 0], [10, 0, 0], [0, 10, 0]],
+        vec![2; 3],
+    );
+    let surface = derive_surface(fixture.snapshot(), 2);
+
+    let report = surface
+        .check_points(
+            [
+                check_point(1, [0.0, 0.0, 1.0e308]),
+                check_point(2, [0.0, 0.0, 1.0e308]),
+            ],
+            CheckPointLimits::default(),
+        )
+        .blocking_wait()
+        .expect("a representable mean must not overflow during accumulation");
+
+    let statistics = report.statistics();
+    assert_eq!(statistics.mean(), Some(1.0e308));
+    assert_eq!(statistics.root_mean_square(), Some(1.0e308));
+}
+
+#[test]
 fn finite_extreme_world_coordinates_remain_sampleable() {
     let transform = PositionTransform::new([0.0; 3], [1.0e200, 1.0e200, 1.0])
         .expect("finite extreme transform is valid");

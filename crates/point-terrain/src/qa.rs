@@ -423,7 +423,7 @@ struct ResidualAccumulator {
     gap_count: u64,
     minimum: Option<f64>,
     maximum: Option<f64>,
-    sum: CompensatedSum,
+    sum: ScaledSum,
     squared_sum: ScaledSquareSum,
 }
 
@@ -456,15 +456,50 @@ impl ResidualAccumulator {
             return ResidualStatistics::new(0, self.gap_count, None, None, None, None);
         }
         let count = self.covered_count as f64;
-        let sum = self.sum.total();
         ResidualStatistics::new(
             self.covered_count,
             self.gap_count,
             self.minimum,
             self.maximum,
-            Some(canonical_zero(sum / count)),
+            Some(self.sum.mean(count)),
             Some(self.squared_sum.root_mean_square(count)),
         )
+    }
+}
+
+#[derive(Default)]
+struct ScaledSum {
+    scale: f64,
+    normalized_sum: CompensatedSum,
+}
+
+impl ScaledSum {
+    fn add(&mut self, value: f64) -> Result<(), TerrainError> {
+        let magnitude = value.abs();
+        if magnitude == 0.0 {
+            return Ok(());
+        }
+        if magnitude > self.scale {
+            let prior_sum = self.normalized_sum.total() * (self.scale / magnitude);
+            self.scale = magnitude;
+            self.normalized_sum = CompensatedSum::default();
+            self.normalized_sum.add(value.signum())?;
+            self.normalized_sum.add(prior_sum)?;
+        } else {
+            self.normalized_sum.add(value / self.scale)?;
+        }
+        Ok(())
+    }
+
+    fn mean(&self, count: f64) -> f64 {
+        let normalized = self.normalized_sum.total();
+        let sum = self.scale * normalized;
+        let mean = if sum.is_finite() {
+            sum / count
+        } else {
+            self.scale * (normalized / count)
+        };
+        canonical_zero(mean)
     }
 }
 
