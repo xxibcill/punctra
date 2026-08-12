@@ -307,7 +307,7 @@ The allowlist is stricter than what Cargo can compile:
 | `point-view` | `render-protocol` and narrow math/value dependencies |
 | `render-wgpu` | `render-protocol`, `point-contracts` |
 | `renderer-demo` | only the Source/index/View/render crates it composes |
-| `terrain-demo` | only the Source/index/Workspace/terrain crates it composes |
+| `terrain-demo` | only the Source/index/Workspace/terrain crates it composes and narrow private recovery-record checksum dependencies |
 
 Additional rules:
 
