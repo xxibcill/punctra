@@ -1365,10 +1365,22 @@ fn unique_point_match(
     max_comparisons: u64,
     facts: &mut ComparisonFacts,
 ) -> Result<usize, RoundTripFailure> {
-    let low = reference.position[0] - tolerances.horizontal_metres();
-    let high = reference.position[0] + tolerances.horizontal_metres();
-    let start = returned_by_easting.partition_point(|index| returned[*index].position[0] < low);
-    let end = returned_by_easting.partition_point(|index| returned[*index].position[0] <= high);
+    let reference_easting = reference.position[0];
+    let horizontal_tolerance = tolerances.horizontal_metres();
+    let start = returned_by_easting.partition_point(|index| {
+        easting_is_below_window(
+            returned[*index].position[0],
+            reference_easting,
+            horizontal_tolerance,
+        )
+    });
+    let end = returned_by_easting.partition_point(|index| {
+        !easting_is_above_window(
+            returned[*index].position[0],
+            reference_easting,
+            horizontal_tolerance,
+        )
+    });
     let mut matched = None;
     for returned_index in &returned_by_easting[start..end] {
         facts.comparison_count = facts.comparison_count.saturating_add(1);
@@ -1393,6 +1405,14 @@ fn unique_point_match(
             "a REFERENCE vertex has no RETURNED match within the declared tolerances",
         )
     })
+}
+
+fn easting_is_below_window(candidate: f64, reference: f64, tolerance: f64) -> bool {
+    candidate < reference && reference - candidate > tolerance
+}
+
+fn easting_is_above_window(candidate: f64, reference: f64, tolerance: f64) -> bool {
+    candidate > reference && candidate - reference > tolerance
 }
 
 fn points_within_tolerance(
@@ -1564,6 +1584,29 @@ mod tests {
         assert!((report.max_northing_drift_metres() - 0.04).abs() < 1.0e-12);
         assert!((report.max_horizontal_drift_metres() - 0.05).abs() < 1.0e-12);
         assert!((report.max_vertical_drift_metres() - 0.02).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn inclusive_horizontal_boundary_survives_spatial_lookup_rounding() {
+        let fixture = Fixture::new("inclusive-horizontal-boundary");
+        let reference_points = &[("1", "0 -10 1"), ("2", "20 0 2"), ("3", "0 10 3")];
+        let returned_points = &[("1", "0 -3.9 1"), ("2", "20 0 2"), ("3", "0 10 3")];
+        let reference_xml = landxml(reference_points, &["1 2 3"], false);
+        let returned_xml = landxml(returned_points, &["1 2 3"], false);
+        let (reference, returned) = fixture.write_pair(&reference_xml, &returned_xml);
+
+        let report = verify(
+            &reference,
+            &returned,
+            tolerances(6.1, 0.0),
+            default_limits(),
+        )
+        .expect("the inclusive horizontal boundary is a candidate");
+
+        assert_eq!(
+            report.max_horizontal_drift_metres().to_bits(),
+            6.1_f64.to_bits()
+        );
     }
 
     #[test]
