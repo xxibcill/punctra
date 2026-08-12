@@ -752,7 +752,7 @@ fn parse_surface(
         }
     })?;
     reject_xinclude(side, &document)?;
-    check_xml_text_bytes(side, &document, limits.xml_text_bytes)?;
+    check_xml_text_bytes(side, text, &document, limits.xml_text_bytes)?;
     parse_landxml_document(side, &document, limits)
 }
 
@@ -770,6 +770,7 @@ fn reject_xinclude(side: InputSide, document: &Document<'_>) -> Result<(), Round
 
 fn check_xml_text_bytes(
     side: InputSide,
+    source: &str,
     document: &Document<'_>,
     allowed: u64,
 ) -> Result<(), RoundTripFailure> {
@@ -779,12 +780,59 @@ fn check_xml_text_bytes(
             total = add_text_bytes(side, total, text.len(), allowed)?;
         }
         if node.is_element() {
-            for attribute in node.attributes() {
-                total = add_text_bytes(side, total, attribute.value().len(), allowed)?;
-            }
+            total = add_text_bytes(
+                side,
+                total,
+                element_attribute_bytes(side, source, node)?,
+                allowed,
+            )?;
         }
     }
     Ok(())
+}
+
+fn element_attribute_bytes(
+    side: InputSide,
+    source: &str,
+    node: Node<'_, '_>,
+) -> Result<usize, RoundTripFailure> {
+    let range = node.range();
+    let bytes = source.as_bytes();
+    let mut cursor = range.start.saturating_add(1);
+    while cursor < range.end
+        && !bytes[cursor].is_ascii_whitespace()
+        && bytes[cursor] != b'/'
+        && bytes[cursor] != b'>'
+    {
+        cursor += 1;
+    }
+    let attributes_start = cursor;
+    let mut quote = None;
+    while cursor < range.end {
+        match (quote, bytes[cursor]) {
+            (Some(expected), actual) if actual == expected => quote = None,
+            (None, actual @ (b'\'' | b'"')) => quote = Some(actual),
+            (None, b'>') => break,
+            (Some(_) | None, _) => {}
+        }
+        cursor += 1;
+    }
+    if cursor == range.end {
+        return Err(RoundTripFailure::invalid(format_args!(
+            "{side} XML element has no complete start tag"
+        )));
+    }
+    let mut attributes_end = cursor;
+    while attributes_end > attributes_start && bytes[attributes_end - 1].is_ascii_whitespace() {
+        attributes_end -= 1;
+    }
+    if attributes_end > attributes_start && bytes[attributes_end - 1] == b'/' {
+        attributes_end -= 1;
+        while attributes_end > attributes_start && bytes[attributes_end - 1].is_ascii_whitespace() {
+            attributes_end -= 1;
+        }
+    }
+    Ok(attributes_end.saturating_sub(attributes_start))
 }
 
 fn add_text_bytes(
@@ -1929,6 +1977,37 @@ mod tests {
             let returned = fixture.write(&format!("returned-{index}.xml"), &xml);
             assert_kind(
                 verify(&reference, &returned, tolerances(0.0, 0.0), *limits),
+                RoundTripFailureKind::ResourceLimit,
+            );
+        }
+    }
+
+    #[test]
+    fn attribute_names_and_namespace_declarations_are_text_bounded() {
+        let fixture = Fixture::new("attribute-text-limits");
+        let xml = landxml(REFERENCE_POINTS, REFERENCE_FACES, false);
+        let long_name = "a".repeat(1_500);
+        let long_namespace = format!("urn:generated:{}", "n".repeat(1_500));
+        let variants = [
+            xml.replace(
+                "<Surface name=\"Ground\">",
+                &format!("<Surface name=\"Ground\" {long_name}=\"\">"),
+            ),
+            xml.replace(
+                "<Surface name=\"Ground\">",
+                &format!("<Surface name=\"Ground\" xmlns:ignored=\"{long_namespace}\">"),
+            ),
+        ];
+        for (index, returned_xml) in variants.iter().enumerate() {
+            let reference = fixture.write(&format!("reference-attribute-{index}.xml"), &xml);
+            let returned = fixture.write(&format!("returned-attribute-{index}.xml"), returned_xml);
+            assert_kind(
+                verify(
+                    &reference,
+                    &returned,
+                    tolerances(0.0, 0.0),
+                    RoundTripLimits::new(10_000, 1_000, 1_000, 10, 10, 100),
+                ),
                 RoundTripFailureKind::ResourceLimit,
             );
         }
