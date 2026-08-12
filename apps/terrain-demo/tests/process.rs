@@ -172,6 +172,70 @@ fn process_help_and_invalid_input_are_bounded_and_do_not_create_a_run() {
     assert!(!diagnostic.contains("start a new Run"), "{diagnostic}");
 }
 
+#[test]
+fn round_trip_process_failures_preserve_public_mappings() {
+    let directory = TestDirectory::new("round-trip-failures").expect("create comparison fixture");
+    let reference = directory.path().join("reference.xml");
+    let returned = directory.path().join("returned.xml");
+    fs::write(&reference, comparison_landxml("0 0 0")).expect("write reference LandXML");
+    fs::write(&returned, comparison_landxml("0 0 1")).expect("write returned LandXML");
+
+    let resource_failure = comparison_process(&reference, &returned, &"x".repeat(129));
+    assert_round_trip_failure(
+        &resource_failure,
+        "PRT_RESOURCE_LIMIT",
+        "use inputs within the named comparison limit or preserve them for a later slice",
+    );
+
+    let semantic_failure = comparison_process(&reference, &returned, "generated-fixture");
+    assert_round_trip_failure(
+        &semantic_failure,
+        "PRT_SEMANTIC_MISMATCH",
+        "review the downstream export settings or reject the returned deliverable",
+    );
+}
+
+fn comparison_process(reference: &PathBuf, returned: &PathBuf, application: &str) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_terrain-demo"))
+        .arg("compare-landxml")
+        .args(["--application", application])
+        .args(["--application-version", "test-only"])
+        .args(["--settings-profile", "metric-tin"])
+        .args(["--horizontal-tolerance-metres", "0"])
+        .args(["--vertical-tolerance-metres", "0"])
+        .arg(reference)
+        .arg(returned)
+        .output()
+        .expect("run LandXML comparison")
+}
+
+fn assert_round_trip_failure(output: &Output, code: &str, recovery: &str) {
+    assert!(!output.status.success(), "comparison must fail");
+    let diagnostic = String::from_utf8_lossy(&output.stderr);
+    for expected in [
+        &format!("{code} at landxml-round-trip-comparison"),
+        "certainty=pre-publication",
+        &format!("recovery: {recovery}"),
+    ] {
+        assert!(
+            diagnostic.contains(expected),
+            "missing {expected:?}\n{diagnostic}"
+        );
+    }
+}
+
+fn comparison_landxml(first_point: &str) -> String {
+    format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\
+<LandXML xmlns=\"{LANDXML_NAMESPACE}\" version=\"1.2\">\
+<Units><Metric linearUnit=\"meter\"/></Units>\
+<Surfaces><Surface name=\"Generated\"><Definition surfType=\"TIN\">\
+<Pnts><P id=\"1\">{first_point}</P><P id=\"2\">0 1 0</P><P id=\"3\">1 0 0</P></Pnts>\
+<Faces><F>1 2 3</F></Faces>\
+</Definition></Surface></Surfaces></LandXML>"
+    )
+}
+
 struct ProcessFixture {
     directory: TestDirectory,
     source: PathBuf,
