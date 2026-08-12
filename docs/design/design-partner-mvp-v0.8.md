@@ -1,7 +1,8 @@
 # Repository Interoperability Qualification Design (v0.8)
 
-Status: **Accepted and Active — bounded file-comparison slices implemented;
-Run-bound evidence publication and external product evidence remain outstanding**
+Status: **Accepted but incomplete alpha — bounded file-comparison slices
+implemented; remaining repository scope inherited by active v0.9; external
+product evidence remains outstanding**
 
 This design is authoritative for the narrow Punctra v0.8 repository slice. It
 starts from the completed `0.7.0-alpha.1` technical-readiness work and adds one
@@ -9,12 +10,16 @@ post-Run interoperability qualification path. It does not complete the
 design-partner MVP, claim that a named downstream application was exercised,
 or turn `terrain-demo` into a supported product.
 
-The active repository outcome is deliberately smaller than the product
+The accepted repository outcome was deliberately smaller than the product
 milestone: privately parse a caller-returned LandXML 1.2 TIN, compare it with
 the exact LandXML produced by one Complete v0.7 Workflow Run, and publish a
 bounded canonical Round-Trip Evidence record. The caller, not Punctra,
 declares the downstream application, version, settings, and comparison
 tolerances.
+
+The v0.8 alpha stopped after delivery slices 1 and 2. It is not relabeled
+Complete. Delivery slices 3 and 4 are inherited as prerequisite closure work
+by the active [v0.9 Trust and v1 Candidate design](trust-v1-candidate-v0.9.md).
 
 ## Why this is the next slice
 

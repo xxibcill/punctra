@@ -3,6 +3,29 @@
 All notable changes to Punctra are documented here. The project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased - 0.9.0-alpha.1
+
+- Started the accepted v0.9 Trust and v1 Candidate repository design from the
+  exact `926ba7f` v0.8 alpha base. v0.8 remains an incomplete alpha rather
+  than being relabeled Complete; its Run-bound qualification and canonical
+  evidence work is an explicit prerequisite within v0.9.
+- Fixed the initial trust scope around the existing narrow headless workflow:
+  extend the inherited owner-local Spatial Index v1 fixtures to the remaining
+  persisted-v1 compatibility surface, qualify recovery and disk-failure
+  behavior, publish a support matrix, review public interfaces, and reproduce
+  local resource and performance evidence. No new format, Edit, terrain, UI,
+  networking, or transformation family is authorized.
+- Mapped Spatial Index filesystem failures at the private Workflow seam to the
+  stable `PWF_IO` category with the existing restore-disk-and-resume action
+  instead of misclassifying them as internal failures. The current index API
+  exposes no publication-phase witness, so the Workflow reports conservative
+  `index-target` indeterminate certainty and requires reconciliation by
+  resuming. The
+  bounded diagnostic retains the rendered index operation, path, and operating-
+  system error, subject to its 1,024-byte cap. Safe recovery of a partially
+  written initial `.work` header remains an explicit v0.9 hardening gate; this
+  slice does not delete that path.
+
 ## Unreleased - 0.8.0-alpha.1
 
 - Accepted and activated the narrow v0.8 repository interoperability-

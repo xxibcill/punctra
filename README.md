@@ -60,15 +60,30 @@ with one safe recovery action. It does not add Breaklines or establish the
 external design-partner, production-data, downstream-application, paid-use,
 or human-workflow evidence required by the product milestone.
 
-Version 0.8.0-alpha.1 starts the accepted, Active
+Version 0.8.0-alpha.1 started the accepted
 [repository interoperability qualification
 design](docs/design/design-partner-mvp-v0.8.md). Its narrow planned repository
 slice is a private `terrain-demo` semantic LandXML 1.2 round-trip verifier and
 separate canonical evidence output. The bounded file-to-file comparison core
 and explicitly non-evidence `compare-landxml` CLI are now implemented. Durable
-Run binding and canonical evidence publication remain pending; the v0.7
-journal and `audit.json` are unchanged, and no actual Civil 3D, Bentley,
-partner, paid-pilot, conversion, or labor-savings test is claimed.
+Run binding and canonical evidence publication remain pending. This alpha is
+not relabeled Complete; its remaining accepted repository work is inherited as
+a prerequisite by v0.9. The v0.7 journal and `audit.json` are unchanged, and
+no actual Civil 3D, Bentley, partner, paid-pilot, conversion, or labor-savings
+test is claimed.
+
+Version 0.9.0-alpha.1 starts the accepted, Active [Trust and v1 Candidate
+design](docs/design/trust-v1-candidate-v0.9.md). It narrows work to qualifying
+the existing headless workflow for a maintainable compatibility and support
+promise: close the inherited Run-bound qualification gap, freeze owner-local
+persisted-v1 fixtures beyond the inherited Spatial Index goldens, harden
+recovery and disk-failure behavior, publish the exact support matrix, and
+reproduce local resource and performance evidence. The first hardening slice
+preserves Spatial Index filesystem failures as recoverable `PWF_IO` diagnostics
+through `terrain-demo`, including bounded operation/path/error rendering. It
+deliberately does not delete a partially written initial `.work` header: an
+ownership-safe recovery protocol for that case remains a v0.9 readiness gate.
+This work adds no new product feature family.
 
 Later direction and the exact external product gates are described in the
 [living roadmap](ROADMAP.md). Its candidate themes do not expand accepted
@@ -443,7 +458,7 @@ PUNCTRA_REQUIRE_GPU=1 cargo test -p render-wgpu --test offscreen
 PUNCTRA_REQUIRE_GPU=1 cargo test -p renderer-demo --test planner
 ```
 
-Punctra currently targets Rust 1.90 and wgpu 30. The demo requires a graphics
+Punctra currently targets Rust 1.90 and wgpu 30. The renderer demo requires a graphics
 adapter supported by wgpu; renderer-neutral protocol tests do not.
 
 GPU-backed tests are separated from renderer-neutral contract tests so the

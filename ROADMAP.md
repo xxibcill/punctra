@@ -1,7 +1,7 @@
 # Punctra Roadmap
 
 Status: living guidance
-Last reviewed: 2026-08-11
+Last reviewed: 2026-08-12
 
 This roadmap communicates direction, not a delivery promise. It has no fixed
 dates. Candidate releases may be split, merged, reordered, renamed, or skipped
@@ -9,13 +9,15 @@ as technical and customer evidence changes. Milestone outcomes and dependency
 order matter more than version numbers.
 
 Only an **Active** release has committed scope. Punctra v0.1 through v0.7 are
-complete repository technical slices. v0.8 is Active only for the narrow
-[repository interoperability qualification
-design](docs/design/design-partner-mvp-v0.8.md): a private post-Run semantic
-LandXML 1.2 comparison and separate evidence record. The bounded file-
-comparison slices are implemented; Run binding, evidence publication, and all
-external product evidence remain outstanding. Broader terrain, export, general
-editing, downstream automation, and application UI remain uncommitted.
+complete repository technical slices. v0.8 remains an incomplete alpha: its
+bounded file-comparison slices are implemented, while Run binding, evidence
+publication, and all external product evidence remain outstanding. That
+accepted repository work is folded forward as a prerequisite of the Active
+[v0.9 Trust and v1 Candidate
+design](docs/design/trust-v1-candidate-v0.9.md), not relabeled Complete. v0.9
+qualifies only the existing narrow workflow for a compatibility and support
+promise. Broader terrain, export, general editing, downstream automation, and
+application UI remain uncommitted.
 
 ## Working direction
 
@@ -63,8 +65,9 @@ Roadmap status labels are:
 
 ## Scope and evidence checkpoint
 
-Status: **v0.8 repository interoperability-qualification slice Active; file
-comparison implemented, Run-bound evidence and product evidence outstanding**
+Status: **v0.9 Trust and v1 Candidate repository slice Active; inherited v0.8
+Run-bound evidence, compatibility qualification, and product evidence
+outstanding**
 
 The [implemented v0.5 design](docs/design/durable-document-core-v0.5.md) places
 exact classification selection, temporary Point Sets, sparse Revisions, and
@@ -84,13 +87,24 @@ Footprint, and exact LandXML/report targets reconcile without overwrite. Its
 generated tests and benchmark establish only those technical guarantees; they
 do not satisfy any external evidence item below.
 
-The accepted v0.8 slice does not broaden that workflow. It adds one private,
-post-Run verifier that will compare the exact v0.7 metric-metre LandXML TIN with
-a caller-returned LandXML 1.2 file under declared tolerances and publish a
-separate canonical evidence record. Caller-declared application/version/
-settings labels are not proof that the application ran. The v0.7 journal and
-`audit.json` remain unchanged, and milestone-start documentation is not
-implementation acceptance.
+The accepted v0.8 slice did not broaden that workflow. Its implemented private
+comparator can compare the exact v0.7 metric-metre LandXML TIN with a caller-
+returned LandXML 1.2 file under declared tolerances. Complete-Run binding and
+separate canonical evidence publication remain unimplemented. Rather than
+invent a completion claim, v0.9 inherits those gates before any trust-readiness
+claim. Caller-declared application/version/settings labels are not proof that
+the application ran. The v0.7 journal and `audit.json` remain unchanged, and
+milestone-start documentation is not implementation acceptance.
+
+The accepted v0.9 slice adds no new feature family. It extends the inherited
+Spatial Index v1 goldens across the remaining persisted-v1 compatibility
+surface, distinguishes authoritative, rebuildable, and temporary artifacts,
+hardens recovery and filesystem failure behavior, publishes the exact support
+matrix, reviews only exercised public interfaces, and reproduces local
+resource/performance gates. Its first implemented hardening preserves Index
+filesystem failures as recoverable I/O diagnostics through the private
+Workflow seam. Ownership-safe recovery of a partially written initial work
+header remains outstanding.
 
 Useful evidence for proceeding includes:
 
@@ -110,9 +124,9 @@ module. The detailed discovery signals and pivot criteria live in the
 
 ## Release sequence
 
-There is one Active pre-v1 repository slice and one provisional theme after the
-completed v0.7. This is a working count, not a requirement to publish exactly
-two more releases.
+There is one Active pre-v1 repository slice after the completed v0.7 and
+incomplete v0.8 alpha. This is a working count, not a requirement to publish
+exactly this release sequence.
 
 ### v0.1 — Renderer foundation
 
@@ -381,12 +395,13 @@ tests are intentionally not relabeled as those facts.
 
 ### v0.8 — Design-partner MVP
 
-Status: **Active — narrow repository qualification only; product MVP remains
-outstanding**
+Status: **Incomplete alpha — bounded file comparison implemented; remaining
+repository qualification merged into v0.9; product MVP remains outstanding**
 
-Accepted repository outcome: implement the exact bounded post-Run verifier and
+The accepted repository outcome was the exact bounded post-Run verifier and
 evidence contract in the [v0.8 design](docs/design/design-partner-mvp-v0.8.md).
-The private `terrain-demo` path will:
+The implemented alpha provides the private bounded semantic comparison core
+and explicitly non-evidence `compare-landxml` command. The remaining path must:
 
 - require a Complete, unchanged v0.7 Run and leave its eight-frame journal,
   `terrain.xml`, and `audit.json` untouched;
@@ -399,7 +414,7 @@ The private `terrain-demo` path will:
 - create or exactly reconcile a bounded canonical Round-Trip Evidence record
   outside the Run root without overwriting different data.
 
-This Active scope does not automate or claim a run through Civil 3D, Bentley
+This inherited scope does not automate or claim a run through Civil 3D, Bentley
 software, or another named application. Repository-generated XML variants can
 complete technical tests only.
 
@@ -422,29 +437,42 @@ correctness tests.
 
 ### v0.9 — Trust and v1 candidate
 
-Status: **Candidate**
+Status: **Active — accepted repository trust qualification only**
 
-Candidate outcome: qualify the proven scope for a v1 compatibility and support
-promise without adding another major feature family.
+Accepted outcome: qualify the proven scope for a v1 compatibility and support
+promise without adding another major feature family, as fixed by the
+[v0.9 design](docs/design/trust-v1-candidate-v0.9.md).
 
-Likely scope:
+Committed scope:
 
-- a tested, published CRS, vertical-reference, unit, and precision support
-  matrix;
-- robust terrain and export edge cases from the production regression corpus;
-- persisted-schema migration and recovery fixtures;
-- disk exhaustion, corrupt input, cancellation, device loss, and GPU-unavailable
-  behavior;
-- performance across declared commodity workstation classes;
-- public API review, documentation, examples, upgrade notes, and support
-  playbooks; and
-- local review packages or audit metadata where partners require them.
+- close the inherited v0.8 Complete-Run binding and canonical-evidence gates
+  before making any v0.9 readiness claim;
+- publish a tested CRS, vertical-reference, unit, precision, format, platform,
+  and device support matrix for the existing workflow;
+- retain the inherited Spatial Index v1 goldens and complete owner-local
+  persisted-v1 compatibility/recovery fixtures without inventing a second
+  schema or migration;
+- cover disk exhaustion, corrupt input, cancellation, device loss, and GPU-
+  unavailable behavior only where the supported module or host seam owns it;
+- reproduce performance and resource ceilings on declared local workstation
+  classes; and
+- review exercised public interfaces, documentation, examples, upgrade notes,
+  and support playbooks.
+
+The first implemented trust slice makes `terrain-demo` report Index filesystem
+failures as `PWF_IO` with bounded rendering of the operation, path, and
+operating-system error. Because the index error does not expose its publication
+boundary, certainty is conservatively `indeterminate(index-target)` and
+resuming performs the required reconciliation. It does not delete incomplete
+index work. A later recovery slice must make an initial partial header safely
+retryable without check-then-unlink cleanup or deletion of racing replacements.
 
 Evidence of readiness:
 
 - no unresolved correctness or data-loss failure exists in the supported
   workflow;
-- every supported persisted version has upgrade and recovery coverage;
+- every supported persisted version has frozen reopen and recovery coverage,
+  plus upgrade coverage when a second version actually exists;
 - resource ceilings and performance claims are reproducible locally; and
 - unsupported formats, transformations, and device capabilities fail clearly.
 
@@ -463,8 +491,8 @@ a reason to publish v1.
 |---|---|---|
 | Renderer and planning foundations | v0.1–v0.2 | Reusable bounded display engine and adaptive View planner. |
 | Benchmark/demo | v0.3–v0.6 | Headless technical path from verified LAS/LAZ to one narrow terrain deliverable; external workflow evidence remains separate. |
-| Design-partner MVP | v0.7–v0.8 | Active repository interoperability qualification; product completion still requires three firms, three paid pilots, and two conversion-or-measured-savings firms. |
-| Trustworthy v1 | v0.9–v1.0 | Explicitly supported, regression-tested, maintainable compatibility surface. |
+| Design-partner MVP | v0.7–v0.8 | v0.7 repository readiness complete; v0.8 remains an incomplete qualification alpha and product completion still requires three firms, three paid pilots, and two conversion-or-measured-savings firms. |
+| Trustworthy v1 | v0.9–v1.0 | Active qualification toward an explicitly supported, regression-tested, maintainable compatibility surface. |
 
 ## Deferred until evidence changes
 

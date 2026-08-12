@@ -1,7 +1,7 @@
 # Runtime Workflows
 
-Status: implemented through the narrow v0.7 technical-readiness slice; broader
-terrain and export workflows deferred
+Status: v0.7 durable Run and v0.8 bounded comparison implemented; Active v0.9
+qualification inherits Run-bound evidence; broader workflows deferred
 
 The host composes sibling modules explicitly. Lower crates never call back into
 an application, discover a Source for a Workspace, submit a GPU queue, or infer

@@ -103,6 +103,7 @@ impl WorkflowStage {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum PublicationPhase {
     JournalIntent,
+    IndexTarget,
     WorkspaceOperation,
     WorkspaceRevision,
     WorkspaceDirectorySync,
@@ -116,6 +117,7 @@ impl PublicationPhase {
     const fn as_str(self) -> &'static str {
         match self {
             Self::JournalIntent => "journal-intent",
+            Self::IndexTarget => "index-target",
             Self::WorkspaceOperation => "workspace-operation",
             Self::WorkspaceRevision => "workspace-revision",
             Self::WorkspaceDirectorySync => "workspace-directory-sync",

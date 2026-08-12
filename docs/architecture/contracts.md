@@ -1,7 +1,7 @@
 # Cross-Module Contracts and Invariants
 
-Status: v0.1 through the narrow v0.7 technical-readiness contracts implemented;
-broader terrain/export contracts remain deferred
+Status: existing contracts under Active v0.9 trust qualification; inherited
+Run-bound evidence and broader terrain/export contracts remain outstanding
 
 The versioned designs in [`docs/design`](../design) control exact release
 scope. This document summarizes the invariants that cross current crate seams.

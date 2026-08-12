@@ -1,7 +1,7 @@
 # Module Catalog
 
-Status: current through the narrow v0.7 technical-readiness slice; broader
-terrain and export modules deferred
+Status: current module ownership under the Active v0.9 trust qualification;
+broader terrain and export modules deferred
 
 This is the ownership map for implemented crates. Each crate has one public
 job. Several private files may cooperate behind one deep interface; private
@@ -27,7 +27,7 @@ file boundaries are not public module promises.
 
 `source-copc`, constrained or persisted terrain, general LandXML, general
 application UI, bindings, and remote storage are not implemented modules in
-v0.7.
+v0.9.
 
 ## 1. point-contracts
 

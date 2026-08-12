@@ -2,12 +2,13 @@
 
 Status: renderer, adaptive View planning, Real Sources, Spatial Index/out-of-
 core View, the narrow Workspace, v0.6 Terrain and Check Point QA, and the v0.7
-technical-readiness Workflow Run are implemented; the narrow v0.8 repository
-Interoperability Qualification design is Active and its bounded file-
-comparison slices are implemented, while Run-bound evidence remains pending;
-broader terrain and product terms remain deferred
+technical-readiness Workflow Run are implemented; v0.8 remains an incomplete
+interoperability-qualification alpha with bounded file comparison implemented;
+the narrow v0.9 Trust and v1 Candidate design is Active and inherits its
+Run-bound evidence closure before compatibility-readiness claims; broader
+terrain and product terms remain deferred
 
-Punctra v0.8 builds on the reusable render engine, renderer-neutral View
+Punctra v0.9 builds on the reusable render engine, renderer-neutral View
 planner, and verified Source path described in the accepted [v0.1 renderer
 design](docs/design/render-engine-v0.1.md), [v0.2 planning
 design](docs/design/adaptive-view-planning-v0.2.md), and [v0.3 Real Sources
@@ -33,6 +34,12 @@ Downstream Declaration, Interoperability Qualification, Round-Trip Evidence,
 and Tolerance Profile for the post-Run verifier. The initial comparator exists,
 but those terms do not imply that Run-bound evidence was published or that a
 downstream product was exercised.
+The accepted [v0.9 Trust and v1 Candidate
+design](docs/design/trust-v1-candidate-v0.9.md) fixes compatibility and support
+claims to the formats, persisted versions, platforms, limits, and failure
+behavior actually covered by frozen fixtures and reproducible local evidence.
+It does not create a broader product or silently promote the incomplete v0.8
+alpha.
 
 ## Artifact
 

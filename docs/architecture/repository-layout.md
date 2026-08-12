@@ -1,7 +1,7 @@
 # Repository and Dependency Layout
 
-Status: current through the narrow v0.7 technical-readiness slice; later crates
-are created only with accepted behavior and a caller
+Status: current under the Active v0.9 trust qualification; later crates are
+created only with accepted behavior and a caller
 
 The repository is one Cargo workspace. Each current crate is independently
 buildable and exposes a smaller public interface than its private
@@ -349,21 +349,23 @@ Ownership rules:
 
 Cargo semantic versions, persisted schema versions, deterministic algorithm
 versions, and LandXML/journal/report format versions are separate axes. A Cargo
-`0.7` version does not imply Workspace disk schema or terrain algorithm version
-7.
+`0.9` version does not imply Workspace disk schema or terrain algorithm version
+9.
 
 - Unknown persisted major versions fail explicitly.
 - Identity and persisted schema values remain opaque outside their owner.
 - A future migration must leave the prior representation recoverable until the
   new representation is complete and durable.
 - Algorithm versions change when deterministic artifact meaning changes.
-- Golden fixtures are required when more than one persisted version is
-  supported.
+- Golden fixtures are required before a persisted compatibility promise or a
+  second persisted version is accepted.
 
-v0.7 does not change the Workspace disk schema and does not claim migration,
-compaction, or persisted Terrain Surfaces. Terrain algorithm version 1,
-Workspace schema version 1, Workflow journal version 1, and the supported
-LandXML/report subsets evolve independently of Cargo versions.
+v0.9 begins without changing any persisted schema and does not invent a
+migration solely to exercise migration machinery. Source Record version 1,
+Spatial Index disk/recipe version 1, Workspace disk/semantic version 1,
+Terrain algorithm version 1, Workflow journal version 1, and the supported
+LandXML/report subsets evolve independently of Cargo versions. Frozen fixtures
+must precede any future second persisted version.
 
 ## Implementation order
 

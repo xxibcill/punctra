@@ -1,8 +1,9 @@
 # Point-Cloud Foundation Architecture
 
 Status: v0.1 through the narrow v0.7 technical-readiness slice implemented;
-the v0.8 repository qualification design is Active and its bounded file-
-comparison slices are implemented; Run binding, evidence publication, and
+v0.8 is an incomplete repository-qualification alpha with bounded file
+comparison implemented; the v0.9 Trust and v1 Candidate design is Active and
+inherits Run binding and evidence publication before trust-readiness claims;
 broader terrain, export, and product layers remain deferred
 
 The accepted versioned designs are authoritative:
@@ -15,6 +16,7 @@ The accepted versioned designs are authoritative:
 - [v0.6 Terrain and QA benchmark](../design/terrain-qa-benchmark-v0.6.md)
 - [v0.7 Technical partner-alpha readiness](../design/technical-alpha-readiness-v0.7.md)
 - [v0.8 Repository interoperability qualification](../design/design-partner-mvp-v0.8.md)
+- [v0.9 Trust and v1 Candidate](../design/trust-v1-candidate-v0.9.md)
 
 The current foundation is headless and embeddable. It reads immutable Sources,
 prepares a complete rebuildable Spatial Index, resolves progressive display,

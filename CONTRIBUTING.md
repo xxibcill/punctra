@@ -19,12 +19,18 @@ cancellation, exact Revision Audit and Edit Footprint facts, exact LandXML
 ensure/reconciliation, and the private durable `terrain-demo` Workflow Run,
 canonical report, and structured recovery diagnostics. The accepted
 [v0.8 repository interoperability qualification
-scope](docs/design/design-partner-mvp-v0.8.md) additionally permits the private,
-bounded `terrain-demo` LandXML comparison reader. Apart from that explicit
-exception, external format decoding belongs only in accepted Source adapter
-crates. Networking, screen selection, general editing, constrained or
-persistent terrain, general export, Source rewriting, and general host UI
-remain in callers or future projects unless the scope is explicitly revised.
+scope](docs/design/design-partner-mvp-v0.8.md) implements the private, bounded
+`terrain-demo` LandXML comparison reader but remains an incomplete alpha; its
+Run-bound evidence closure is inherited by the Active
+[v0.9 Trust and v1 Candidate
+scope](docs/design/trust-v1-candidate-v0.9.md). That v0.9 scope permits
+compatibility fixtures, recovery and failure hardening, support-matrix
+documentation, interface review, and reproducible local qualification for the
+existing narrow workflow. Apart from the explicit v0.8 reader exception,
+external format decoding belongs only in accepted Source adapter crates.
+Networking, screen selection, general editing, constrained or persistent
+terrain, general export, Source rewriting, and general host UI remain in
+callers or future projects unless the scope is explicitly revised.
 
 ## Local verification
 

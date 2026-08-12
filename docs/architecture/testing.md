@@ -1,7 +1,7 @@
 # Verification Strategy
 
-Status: implemented verification through the narrow v0.7 technical-readiness
-slice; all gates run locally
+Status: implemented verification through the v0.8 bounded comparator slices;
+v0.9 compatibility and recovery qualification Active; all gates run locally
 
 Verification follows public contracts first. Private tests are used for fault
 injection and measured implementation boundaries that cannot be triggered

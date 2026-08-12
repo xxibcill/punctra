@@ -2399,6 +2399,14 @@ fn index_failure(
             error,
             RecoveryAction::StopAndPreserve,
         ),
+        error @ IndexError::Io { .. } => WorkflowFailure::new(
+            FailureCode::Io,
+            stage,
+            Certainty::Indeterminate(PublicationPhase::IndexTarget),
+            context,
+            error,
+            RecoveryAction::RetryAfterRestoringDisk,
+        ),
         error => phase_failure(stage, error, context),
     }
 }
@@ -3037,11 +3045,45 @@ mod workflow_test_support;
 
 #[cfg(test)]
 mod tests {
+    use std::io;
+
     use super::*;
     use point_contracts::AttributeId;
     use point_workspace::{WorkspaceSchema, create};
 
     use super::workflow_test_support::{TestDirectory, write_las_family_fixture};
+
+    #[test]
+    fn index_io_failure_preserves_the_recoverable_workflow_taxonomy() {
+        let error = IndexError::Io {
+            operation: "write and flush",
+            path: PathBuf::from("fixture.pidx.work"),
+            source: io::Error::new(io::ErrorKind::StorageFull, "disk is full"),
+        };
+        assert_eq!(
+            error.to_string(),
+            "failed to write and flush fixture.pidx.work: disk is full"
+        );
+        let failure = index_failure(
+            WorkflowStage::Index,
+            error,
+            &OperationControl::new(),
+            FailureContext::default(),
+        );
+
+        assert_eq!(failure.code(), "PWF_IO");
+        assert_eq!(failure.stage(), "index");
+        assert_eq!(failure.certainty(), "indeterminate");
+        assert_eq!(failure.publication_phase(), Some("index-target"));
+        assert_eq!(
+            failure.recovery_action(),
+            "restore disk capacity or permissions, then resume the same Run"
+        );
+        assert_eq!(
+            failure.diagnostic(),
+            "failed to write and flush fixture.pidx.work: disk is full"
+        );
+    }
 
     #[test]
     fn run_root_witness_detects_same_path_replacement() {
