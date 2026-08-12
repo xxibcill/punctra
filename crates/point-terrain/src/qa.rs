@@ -272,7 +272,7 @@ fn locate(
     control: &OperationControl,
 ) -> Result<CheckPointOutcome, TerrainError> {
     let position = check_point.position();
-    let query = Coord {
+    let world_query = Coord {
         x: position[0],
         y: position[1],
     };
@@ -290,12 +290,31 @@ fn locate(
                 limits.max_face_tests(),
             ));
         }
-        let triangle = face_world(surface, face)?;
-        let Some((triangle, query)) = normalize_xy(triangle, query) else {
-            continue;
+        let world_triangle = face_world(surface, face)?;
+        let (triangle, query, elevation_origin) = match normalize_xy(world_triangle, world_query) {
+            NormalizedFace::Outside => continue,
+            NormalizedFace::Candidate { triangle, query } => (triangle, query, 0.0),
+            NormalizedFace::Degenerate => {
+                let frame = face_local(surface, face)?;
+                let local_query = Coord {
+                    x: position[0] - frame.world_origin[0],
+                    y: position[1] - frame.world_origin[1],
+                };
+                let NormalizedFace::Candidate { triangle, query } =
+                    normalize_xy(frame.triangle, local_query)
+                else {
+                    continue;
+                };
+                (triangle, query, frame.world_origin[2])
+            }
         };
         if contains_closed(triangle, query) {
-            let surface_z = interpolate_z(triangle, query)?;
+            let surface_z = canonical_zero(elevation_origin + interpolate_z(triangle, query)?);
+            if !surface_z.is_finite() {
+                return Err(TerrainError::numeric(
+                    "interpolated Surface elevation is not finite",
+                ));
+            }
             let residual = canonical_zero(position[2] - surface_z);
             if !residual.is_finite() {
                 return Err(TerrainError::numeric("Check Point residual is not finite"));
@@ -308,6 +327,11 @@ fn locate(
         }
     }
     Ok(CheckPointOutcome::Gap)
+}
+
+struct LocalFaceFrame {
+    triangle: [[f64; 3]; 3],
+    world_origin: [f64; 3],
 }
 
 fn face_world(surface: &TerrainSurface, face: SurfaceFace) -> Result<[[f64; 3]; 3], TerrainError> {
@@ -329,28 +353,92 @@ fn face_world(surface: &TerrainSurface, face: SurfaceFace) -> Result<[[f64; 3]; 
     Ok(world)
 }
 
-fn normalize_xy(
-    mut triangle: [[f64; 3]; 3],
-    point: Coord<f64>,
-) -> Option<([[f64; 3]; 3], Coord<f64>)> {
+fn face_local(surface: &TerrainSurface, face: SurfaceFace) -> Result<LocalFaceFrame, TerrainError> {
+    let transform = surface.descriptor().position_transform();
+    let mut ticks = [[0; 3]; 3];
+    for (slot, vertex) in face.vertices().into_iter().enumerate() {
+        let Some(vertex) = surface.vertices().get(vertex.zero_based()) else {
+            return Err(TerrainError::topology(
+                "a Surface face references a missing vertex",
+            ));
+        };
+        ticks[slot] = vertex.ticks();
+    }
+
+    let world_origin = transform.world_f64(ticks[0]);
+    if world_origin
+        .iter()
+        .any(|coordinate| !coordinate.is_finite())
+    {
+        return Err(TerrainError::numeric(
+            "a Surface vertex world position is not finite",
+        ));
+    }
+
+    let scale = transform.scale();
+    let mut triangle = [[0.0; 3]; 3];
+    for (slot, position) in ticks.into_iter().enumerate() {
+        for axis in 0..3 {
+            triangle[slot][axis] = scaled_tick_delta(position[axis], ticks[0][axis], scale[axis]);
+        }
+        if triangle[slot]
+            .iter()
+            .any(|coordinate| !coordinate.is_finite())
+        {
+            return Err(TerrainError::numeric(
+                "a Surface vertex local position is not finite",
+            ));
+        }
+    }
+    Ok(LocalFaceFrame {
+        triangle,
+        world_origin,
+    })
+}
+
+#[allow(
+    clippy::cast_precision_loss,
+    reason = "Surface calculations intentionally use the nearest representable f64 tick delta"
+)]
+fn scaled_tick_delta(tick: i64, origin: i64, scale: f64) -> f64 {
+    let delta = tick
+        .checked_sub(origin)
+        .map_or_else(|| i128::from(tick) - i128::from(origin), i128::from);
+    delta as f64 * scale
+}
+
+enum NormalizedFace {
+    Outside,
+    Degenerate,
+    Candidate {
+        triangle: [[f64; 3]; 3],
+        query: Coord<f64>,
+    },
+}
+
+fn normalize_xy(mut triangle: [[f64; 3]; 3], point: Coord<f64>) -> NormalizedFace {
     let minimum_x = triangle
         .iter()
         .map(|position| position[0])
-        .reduce(f64::min)?;
+        .reduce(f64::min)
+        .expect("a face always has three positions");
     let maximum_x = triangle
         .iter()
         .map(|position| position[0])
-        .reduce(f64::max)?;
+        .reduce(f64::max)
+        .expect("a face always has three positions");
     let minimum_y = triangle
         .iter()
         .map(|position| position[1])
-        .reduce(f64::min)?;
+        .reduce(f64::min)
+        .expect("a face always has three positions");
     let maximum_y = triangle
         .iter()
         .map(|position| position[1])
-        .reduce(f64::max)?;
+        .reduce(f64::max)
+        .expect("a face always has three positions");
     if point.x < minimum_x || point.x > maximum_x || point.y < minimum_y || point.y > maximum_y {
-        return None;
+        return NormalizedFace::Outside;
     }
 
     let origin = Coord {
@@ -368,9 +456,10 @@ fn normalize_xy(
     let scale = triangle
         .iter()
         .flat_map(|position| [position[0].abs(), position[1].abs()])
-        .reduce(f64::max)?;
+        .reduce(f64::max)
+        .expect("a face always has planar coordinates");
     if scale == 0.0 {
-        return None;
+        return NormalizedFace::Degenerate;
     }
     for position in &mut triangle {
         position[0] /= scale;
@@ -378,7 +467,13 @@ fn normalize_xy(
     }
     point.x /= scale;
     point.y /= scale;
-    Some((triangle, point))
+    if orient2d(xy(triangle[0]), xy(triangle[1]), xy(triangle[2])) == 0.0 {
+        return NormalizedFace::Degenerate;
+    }
+    NormalizedFace::Candidate {
+        triangle,
+        query: point,
+    }
 }
 
 fn contains_closed(triangle: [[f64; 3]; 3], point: Coord<f64>) -> bool {
@@ -393,7 +488,7 @@ fn interpolate_z(triangle: [[f64; 3]; 3], point: Coord<f64>) -> Result<f64, Terr
     let denominator = (b[1] - c[1]) * (a[0] - c[0]) + (c[0] - b[0]) * (a[1] - c[1]);
     if !denominator.is_finite() || denominator == 0.0 {
         return Err(TerrainError::numeric(
-            "a Surface face cannot be interpolated in world coordinates",
+            "a Surface face cannot be interpolated in normalized coordinates",
         ));
     }
     let a_weight =

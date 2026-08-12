@@ -317,6 +317,34 @@ fn large_world_offsets_do_not_collapse_a_valid_surface_face() {
 }
 
 #[test]
+fn rounded_world_vertices_remain_sampleable_in_the_surface_local_frame() {
+    let transform = PositionTransform::new([1.0e20, 1.0e20, 0.0], [1.0; 3])
+        .expect("finite offset transform is valid");
+    let fixture = TerrainFixture::with_transform(
+        "qa-rounded-world-vertices",
+        transform,
+        vec![[0, 0, 0], [1, 0, 0], [0, 1, 0]],
+        vec![2; 3],
+    );
+    let surface = derive_surface(fixture.snapshot(), 2);
+    let vertex = transform.world_f64([0, 0, 0]);
+
+    let report = surface
+        .check_points([check_point(1, vertex)], CheckPointLimits::default())
+        .blocking_wait()
+        .expect("a rounded Surface vertex remains sampleable");
+
+    assert!(matches!(
+        report.results()[0].outcome(),
+        CheckPointOutcome::Sampled {
+            surface_z: 0.0,
+            residual: 0.0,
+            ..
+        }
+    ));
+}
+
+#[test]
 fn duplicate_identities_and_every_qa_resource_family_fail_without_a_report() {
     let (_fixture, surface) = planar_surface("qa-limits");
     let surface = &surface;
