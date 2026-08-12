@@ -2611,6 +2611,10 @@ struct DirectoryWitness {
     device: u64,
     #[cfg(unix)]
     inode: u64,
+    #[cfg(windows)]
+    volume_serial_number: u32,
+    #[cfg(windows)]
+    file_index: u64,
 }
 
 impl DirectoryWitness {
@@ -2631,19 +2635,47 @@ impl DirectoryWitness {
                 inode: metadata.ino(),
             })
         }
-        #[cfg(not(unix))]
+        #[cfg(windows)]
         {
-            let _ = metadata;
+            use std::os::windows::fs::MetadataExt;
+
+            let volume_serial_number = metadata.volume_serial_number().ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "Run root volume identity is unavailable",
+                )
+            })?;
+            let file_index = metadata.file_index().ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "Run root file identity is unavailable",
+                )
+            })?;
             Ok(Self {
                 path: path.to_path_buf(),
+                volume_serial_number,
+                file_index,
             })
         }
+        #[cfg(not(any(unix, windows)))]
+        Ok(Self {
+            path: path.to_path_buf(),
+        })
     }
 
     fn verify(&self) -> io::Result<()> {
         let current = Self::capture(&self.path)?;
         #[cfg(unix)]
         if current.device != self.device || current.inode != self.inode {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Run root directory identity changed",
+            ));
+        }
+        #[cfg(windows)]
+        if current.volume_serial_number != self.volume_serial_number
+            || current.file_index != self.file_index
+        {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "Run root directory identity changed",
@@ -2778,6 +2810,23 @@ mod tests {
     use point_workspace::{WorkspaceSchema, create};
 
     use super::workflow_test_support::{TestDirectory, write_las_family_fixture};
+
+    #[test]
+    fn run_root_witness_detects_same_path_replacement() {
+        let directory = TestDirectory::new("run-root-witness").expect("create test directory");
+        let run_root = directory.path().join("run-root");
+        let moved_root = directory.path().join("moved-run-root");
+        fs::create_dir(&run_root).expect("create witnessed Run root");
+        let witness = DirectoryWitness::capture(&run_root).expect("capture Run root identity");
+
+        fs::rename(&run_root, &moved_root).expect("move witnessed Run root");
+        fs::create_dir(&run_root).expect("install same-path replacement");
+
+        assert!(witness.verify().is_err());
+
+        fs::remove_dir(&run_root).expect("remove replacement Run root");
+        fs::rename(&moved_root, &run_root).expect("restore witnessed Run root");
+    }
 
     #[test]
     fn post_link_landxml_failure_remains_indeterminate_after_parent_cancellation() {
