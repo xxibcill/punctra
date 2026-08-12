@@ -546,6 +546,13 @@ fn run(
         validate_supplied_intent(journal.intent(), request, path_bindings)?;
         Some(journal)
     };
+    let entry_retained_bytes = run_entry_retained_bytes(request, resumed_journal.as_ref());
+    require_workflow_bytes(
+        entry_retained_bytes,
+        limits.max_aggregate_working_bytes,
+        WorkflowStage::Source,
+        base_context(request),
+    )?;
 
     let source = source_las::open(&paths.source)
         .blocking_wait_cancelled_by(&control.token())
@@ -570,7 +577,7 @@ fn run(
         ));
     }
     require_workflow_bytes(
-        request_retained_bytes(request)
+        entry_retained_bytes
             .saturating_add(limits.prepare.max_source_batch_payload_bytes())
             .saturating_add(limits.prepare.max_adapter_working_bytes())
             .saturating_add(limits.prepare.max_build_working_bytes())
@@ -589,7 +596,7 @@ fn run(
     let mut context = base_context(request);
     context.source = Some(source_id);
     require_workflow_bytes(
-        request_retained_bytes(request)
+        entry_retained_bytes
             .saturating_add(limits.prepare.max_resident_metadata_bytes())
             .saturating_add(limits.open.max_working_bytes())
             .saturating_add(limits.open.max_resident_metadata_bytes()),
@@ -648,10 +655,9 @@ fn run(
         ));
     }
     require_workflow_bytes(
-        request_retained_bytes(request)
+        entry_retained_bytes
             .saturating_add(limits.prepare.max_resident_metadata_bytes())
             .saturating_add(limits.open.max_resident_metadata_bytes())
-            .saturating_add(resumed_journal.as_ref().map_or(0, Journal::retained_bytes))
             .saturating_add(limits.rows.max_working_bytes()),
         limits.max_aggregate_working_bytes,
         WorkflowStage::Selection,
@@ -668,7 +674,7 @@ fn run(
     verify_run_binding(&lock, &witness)
         .map_err(|error| io_failure(WorkflowStage::Selection, error, context))?;
     require_workflow_bytes(
-        request_retained_bytes(request)
+        entry_retained_bytes
             .saturating_add(limits.prepare.max_resident_metadata_bytes())
             .saturating_add(limits.open.max_resident_metadata_bytes())
             .saturating_add(limits.journal.max_working_bytes),
@@ -2809,6 +2815,10 @@ fn workflow_retained_bytes(
         .saturating_add(request_retained_bytes(request))
 }
 
+fn run_entry_retained_bytes(request: &WorkflowRunIntent, journal: Option<&Journal>) -> u64 {
+    request_retained_bytes(request).saturating_add(journal.map_or(0, Journal::retained_bytes))
+}
+
 fn request_retained_bytes(request: &WorkflowRunIntent) -> u64 {
     usize_u64(std::mem::size_of::<WorkflowRunIntent>())
         .saturating_add(
@@ -3061,6 +3071,58 @@ mod tests {
         assert!(facts.iter().any(|fact| {
             fact.name == "journal.max_path_binding_bytes" && fact.value == PATH_BINDING_BYTES
         }));
+    }
+
+    #[test]
+    fn resumed_run_entry_bytes_include_the_open_journal() {
+        let directory = TestDirectory::new("resume-entry-bytes").expect("create test directory");
+        let run = WorkflowRunId::new([1; 16]).expect("nonzero Run identity");
+        let operation = test_operation(2);
+        let baseline = RevisionId::from_bytes([3; 32]).expect("nonzero Revision identity");
+        let request = WorkflowRunIntent::new(
+            run,
+            operation,
+            baseline,
+            [7],
+            1,
+            TerrainRecipe::new(2),
+            [],
+            LandXmlOptions::metric_metres("Ground", "2026-08-12", "00:00:00Z")
+                .expect("valid deterministic LandXML options")
+                .assert_coordinates_are_metric_metres(),
+        )
+        .expect("create Workflow intent");
+        let durable = DurableIntent::new(
+            run,
+            [4; 32],
+            [5; 16],
+            baseline.into_bytes(),
+            operation.into_bytes(),
+            vec![7].into_boxed_slice(),
+            2,
+            1,
+            None,
+            Vec::new().into_boxed_slice(),
+            "Ground".into(),
+            "2026-08-12".into(),
+            "00:00:00Z".into(),
+            true,
+            [[6; 32], [7; 32], [8; 32], [9; 32]],
+            JournalLimits::default(),
+        )
+        .expect("create durable Workflow intent");
+        let journal = Journal::create(
+            &directory.path().join("run.pwf"),
+            durable,
+            JournalLimits::default(),
+        )
+        .expect("create Run journal");
+
+        assert_eq!(
+            run_entry_retained_bytes(&request, Some(&journal)),
+            request_retained_bytes(&request).saturating_add(journal.retained_bytes())
+        );
+        assert!(journal.retained_bytes() > 0);
     }
 
     #[test]
