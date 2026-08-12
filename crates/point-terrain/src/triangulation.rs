@@ -817,58 +817,19 @@ fn cancellable_sort(
     meter: &mut WorkMeter,
     control: &OperationControl,
 ) -> Result<(), TriangulationFailure> {
-    let length = values.len();
-    let mut width = 1_usize;
-    let mut source_is_values = true;
-
-    while width < length {
-        let (source, target) = if source_is_values {
-            (&values[..], &mut scratch[..])
-        } else {
-            (&scratch[..], &mut values[..])
-        };
-        let mut start = 0_usize;
-        while start < length {
-            let middle = start.saturating_add(width).min(length);
-            let end = middle.saturating_add(width).min(length);
-            merge_distance_run(source, target, start, middle, end, meter, control)?;
-            start = end;
+    let output = crate::sort::merge_sort_by(values, scratch, DistanceKey::compare, || {
+        meter.charge(control)
+    })
+    .map_err(|error| match error {
+        crate::sort::MergeSortError::ScratchLength => {
+            TriangulationFailure::Invariant("distance-sort scratch length differs from its input")
         }
-        source_is_values = !source_is_values;
-        width = width.saturating_mul(2);
-    }
-
-    if !source_is_values {
+        crate::sort::MergeSortError::Step(error) => error,
+    })?;
+    if output == crate::sort::MergeSortOutput::Scratch {
         for (output, input) in values.iter_mut().zip(scratch.iter().copied()) {
             meter.charge(control)?;
             *output = input;
-        }
-    }
-    Ok(())
-}
-
-#[allow(clippy::too_many_arguments)]
-fn merge_distance_run(
-    source: &[DistanceKey],
-    target: &mut [DistanceKey],
-    start: usize,
-    middle: usize,
-    end: usize,
-    meter: &mut WorkMeter,
-    control: &OperationControl,
-) -> Result<(), TriangulationFailure> {
-    let mut left = start;
-    let mut right = middle;
-    for output in &mut target[start..end] {
-        meter.charge(control)?;
-        if right >= end
-            || (left < middle && source[left].compare(source[right]) != Ordering::Greater)
-        {
-            *output = source[left];
-            left += 1;
-        } else {
-            *output = source[right];
-            right += 1;
         }
     }
     Ok(())

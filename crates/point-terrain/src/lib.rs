@@ -42,6 +42,7 @@ mod limits;
 mod model;
 mod numeric;
 mod qa;
+mod sort;
 mod triangulation;
 
 pub use derive::derive;

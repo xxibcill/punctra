@@ -488,45 +488,20 @@ fn merge_sort<T: Copy + Ord>(
         "cancellable sort working bytes",
     )?;
     scratch.extend_from_slice(values);
-    let mut width = 1_usize;
-    let mut data_in_values = true;
-    while width < values.len() {
-        if data_in_values {
-            merge_pass(values, &mut scratch, width, limits, work, control)?;
-        } else {
-            merge_pass(&scratch, values, width, limits, work, control)?;
+    let output = crate::sort::merge_sort_by(
+        values,
+        &mut scratch,
+        |left, right| left.cmp(&right),
+        || work.charge(1, limits.max_work_units(), control),
+    )
+    .map_err(|error| match error {
+        crate::sort::MergeSortError::ScratchLength => {
+            TerrainError::topology("cancellable sort scratch length differs from its input")
         }
-        data_in_values = !data_in_values;
-        width = width.saturating_mul(2);
-    }
-    if !data_in_values {
+        crate::sort::MergeSortError::Step(error) => error,
+    })?;
+    if output == crate::sort::MergeSortOutput::Scratch {
         mem::swap(values, &mut scratch);
-    }
-    Ok(())
-}
-
-fn merge_pass<T: Copy + Ord>(
-    source: &[T],
-    destination: &mut [T],
-    width: usize,
-    limits: TerrainLimits,
-    work: &mut WorkMeter,
-    control: &OperationControl,
-) -> Result<(), TerrainError> {
-    for first in (0..source.len()).step_by(width.saturating_mul(2)) {
-        let middle = first.saturating_add(width).min(source.len());
-        let end = middle.saturating_add(width).min(source.len());
-        let (mut left, mut right) = (first, middle);
-        for slot in &mut destination[first..end] {
-            work.charge(1, limits.max_work_units(), control)?;
-            if right == end || (left < middle && source[left] <= source[right]) {
-                *slot = source[left];
-                left += 1;
-            } else {
-                *slot = source[right];
-                right += 1;
-            }
-        }
     }
     Ok(())
 }
