@@ -731,6 +731,22 @@ fn advance(
         context,
     )?;
     context.revision = Some(revision.id());
+    let revision_fact = RevisionResolved {
+        operation: request.operation.into_bytes(),
+        revision: revision.id().into_bytes(),
+        parent: revision.parent().unwrap_or(baseline_id).into_bytes(),
+        sequence: revision.sequence(),
+        kind: 1,
+    };
+    record(
+        journal,
+        witness,
+        control,
+        Checkpoint::RevisionResolved(revision_fact),
+        WorkflowStage::ResolveOperation,
+        context,
+    )?;
+
     require_workflow_bytes(
         workflow_retained_bytes(journal, request, limits)
             .saturating_add(limits.audit.max_working_bytes()),
@@ -751,22 +767,6 @@ fn advance(
         expected_metadata.point_id_hash(),
         context,
     )?;
-    let revision_fact = RevisionResolved {
-        operation: request.operation.into_bytes(),
-        revision: revision.id().into_bytes(),
-        parent: revision.parent().unwrap_or(baseline_id).into_bytes(),
-        sequence: revision.sequence(),
-        kind: 1,
-    };
-    record(
-        journal,
-        witness,
-        control,
-        Checkpoint::RevisionResolved(revision_fact),
-        WorkflowStage::ResolveOperation,
-        context,
-    )?;
-
     let audit_fact = audit_checkpoint(&audit);
     record(
         journal,

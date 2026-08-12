@@ -1019,6 +1019,13 @@ fn resource_limit_problem(label: &str, identity: u8, limits: &WorkflowLimits) ->
         let status = inspect_run(&fixture.run_root, WorkflowLimits::default())
             .unwrap_or_else(|error| panic!("{label}: inspect limited Run: {error}"));
         assert!(!status.is_complete(), "{label}: false Complete checkpoint");
+        if label == "audit-limit" {
+            assert_eq!(
+                status.frame_count(),
+                2,
+                "the resolved Revision must be durable before its audit starts",
+            );
+        }
         fixture.resume()
     } else {
         fixture.start()
