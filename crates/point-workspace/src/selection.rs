@@ -108,7 +108,12 @@ pub(crate) fn plan_query(
             "nonempty Spatial Index has no world bounds",
         ));
     };
-    let plan = session.index().candidates(index_bounds, candidate_limits)?;
+    let cancellation = control.token();
+    let plan = session.index().candidates_with_cancellation(
+        index_bounds,
+        candidate_limits,
+        &cancellation,
+    )?;
     control.check_cancelled()?;
     validate_candidate_plan(
         plan.spans(),
