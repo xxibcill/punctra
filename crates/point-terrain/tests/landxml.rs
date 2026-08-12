@@ -138,6 +138,14 @@ fn deterministic_bytes_round_trip_through_an_independent_semantic_parser() {
         surface.descriptor().artifact_hash()
     );
     assert_eq!(
+        first_receipt.recipe_hash(),
+        surface.descriptor().recipe_hash()
+    );
+    assert_eq!(
+        first_receipt.input_hash(),
+        surface.descriptor().input_hash()
+    );
+    assert_eq!(
         first_receipt.geometry_hash(),
         surface.descriptor().geometry_hash()
     );

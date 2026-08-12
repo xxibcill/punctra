@@ -322,6 +322,8 @@ fn finish_publication<H: PublicationHook>(
         })?;
     Ok(LandXmlReceipt::new(
         surface.descriptor().artifact_hash(),
+        surface.descriptor().recipe_hash(),
+        surface.descriptor().input_hash(),
         surface.descriptor().geometry_hash(),
         surface.descriptor().topology_hash(),
         expected.hash,
