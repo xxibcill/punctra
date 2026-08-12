@@ -14,6 +14,7 @@ mod persistence;
 mod point_id_hash;
 mod point_rows;
 mod point_set;
+mod query;
 mod selection;
 mod util;
 mod workspace;

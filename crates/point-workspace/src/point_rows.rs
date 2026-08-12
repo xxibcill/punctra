@@ -14,6 +14,7 @@ use point_source::{
 use crate::{
     PointQuery, PointRowLimits, Snapshot, SnapshotProvenance, WorkspaceError,
     point_id_hash::CanonicalPointIdHasher,
+    query::{SpanFacts, matches_query},
     selection::plan_query,
     util::allocation_bytes,
     workspace::{EffectiveClassificationBudget, OverlayUsage, Session},
@@ -26,7 +27,6 @@ const CLASSIFICATION_PAYLOAD_BYTES: u64 = 1;
 const ROW_PAYLOAD_BYTES: u64 =
     ORDINAL_PAYLOAD_BYTES + POSITION_PAYLOAD_BYTES + CLASSIFICATION_PAYLOAD_BYTES;
 const CONTENT_HASH_DOMAIN: &[u8] = b"punctra-snapshot-point-rows-v1";
-const SPAN_HASH_DOMAIN: &[u8] = b"punctra-selection-spans-v1";
 
 /// One nonempty bounded batch of exact rows from an immutable Snapshot.
 ///
@@ -298,7 +298,7 @@ impl SnapshotPointBatches {
             "Source span handoff working bytes",
         )?;
 
-        let retained_span_bytes = allocation_bytes::<SourceSpan>(expected_spans.span_count);
+        let retained_span_bytes = allocation_bytes::<SourceSpan>(expected_spans.span_count());
         require_working(
             retained_span_bytes.saturating_add(self.source_budget.max_adapter_working_bytes()),
             self.limits,
@@ -400,7 +400,7 @@ impl SnapshotPointBatches {
             if (end - start).is_multiple_of(CANCELLATION_STRIDE) {
                 self.control.check_cancelled()?;
             }
-            if matches_query(self.query, &pending.batch, &pending.effective, end) {
+            if matches_query(self.query, &pending.batch, &pending.effective, end)? {
                 if batch_capacity == 0 {
                     return Err(self.zero_output_capacity_error());
                 }
@@ -428,7 +428,7 @@ impl SnapshotPointBatches {
             if (row - scan.start).is_multiple_of(CANCELLATION_STRIDE) {
                 self.control.check_cancelled()?;
             }
-            if !matches_query(self.query, &pending.batch, &pending.effective, row) {
+            if !matches_query(self.query, &pending.batch, &pending.effective, row)? {
                 continue;
             }
             let row_offset = u64::try_from(row).map_err(|_| {
@@ -588,7 +588,7 @@ impl SnapshotPointBatches {
         ) {
             return self.fail(error);
         }
-        if self.examined_points != expected_spans.point_count {
+        if self.examined_points != expected_spans.point_count() {
             return self.fail(WorkspaceError::incompatible(
                 "Snapshot Point stream ended before every candidate was examined",
             ));
@@ -596,14 +596,14 @@ impl SnapshotPointBatches {
         if let Err(error) = self.control.check_cancelled() {
             return self.fail(error.into());
         }
-        if let Err(error) = self.control.complete_progress(expected_spans.point_count) {
+        if let Err(error) = self.control.complete_progress(expected_spans.point_count()) {
             return self.fail(error.into());
         }
         self.source = None;
         self.summary = Some(SnapshotPointSummary {
             provenance: self.provenance,
             query: self.query,
-            candidate_point_count: expected_spans.point_count,
+            candidate_point_count: expected_spans.point_count(),
             exact_count: self.emitted_points,
             point_id_hash: self.point_id_hasher.finalize(),
             content_hash: ContentHash::new(*self.content_hasher.finalize().as_bytes()),
@@ -614,7 +614,7 @@ impl SnapshotPointBatches {
 
     fn expected_points(&self) -> Result<u64, WorkspaceError> {
         self.expected_spans
-            .map(|spans| spans.point_count)
+            .map(SpanFacts::point_count)
             .ok_or_else(|| {
                 WorkspaceError::incompatible("Snapshot Point candidate facts are unavailable")
             })
@@ -792,22 +792,6 @@ fn output_allocation_error(rows: usize, limits: PointRowLimits) -> WorkspaceErro
     }
 }
 
-fn matches_query(query: PointQuery, batch: &PointBatch, effective: &[u8], row: usize) -> bool {
-    let matches_bounds = query.bounds().is_none_or(|bounds| {
-        let world = batch
-            .positions()
-            .transform()
-            .world_f64(batch.positions().ticks()[row]);
-        let min = bounds.min();
-        let max = bounds.max();
-        (0..3).all(|axis| world[axis] >= min[axis] && world[axis] <= max[axis])
-    });
-    matches_bounds
-        && query
-            .classification_eq()
-            .is_none_or(|value| effective[row] == value)
-}
-
 fn validate_source_summary(
     summary: Option<&SourceReadSummary>,
     provenance: &point_contracts::SourceProvenance,
@@ -820,7 +804,7 @@ fn validate_source_summary(
     })?;
     let actual = SpanFacts::new(summary.spans())?;
     if summary.provenance() != provenance
-        || summary.exact_count() != expected.point_count
+        || summary.exact_count() != expected.point_count()
         || summary.attributes() != [classification]
         || summary.budget() != budget
         || actual != expected
@@ -830,36 +814,6 @@ fn validate_source_summary(
         ));
     }
     Ok(())
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct SpanFacts {
-    span_count: usize,
-    point_count: u64,
-    hash: [u8; 32],
-}
-
-impl SpanFacts {
-    fn new(spans: &[SourceSpan]) -> Result<Self, WorkspaceError> {
-        let mut point_count = 0_u64;
-        let mut hasher = domain_hasher(SPAN_HASH_DOMAIN);
-        for span in spans {
-            point_count = point_count.checked_add(span.point_count()).ok_or(
-                WorkspaceError::ResourceLimit {
-                    limit: "candidate Points",
-                    required: u64::MAX,
-                    allowed: u64::MAX - 1,
-                },
-            )?;
-            hasher.update(&span.first_ordinal().to_le_bytes());
-            hasher.update(&span.point_count().to_le_bytes());
-        }
-        Ok(Self {
-            span_count: spans.len(),
-            point_count,
-            hash: *hasher.finalize().as_bytes(),
-        })
-    }
 }
 
 fn require_working(
