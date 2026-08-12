@@ -1132,7 +1132,7 @@ fn advance(
         )
     })?;
     verify_run_binding(lock, witness)
-        .map_err(|error| io_failure(WorkflowStage::Complete, error, context))?;
+        .map_err(|error| checkpoint_binding_failure(WorkflowStage::Complete, error, context))?;
     Ok(WorkflowReceipt {
         run: request.run,
         operation: request.operation,
@@ -2079,20 +2079,28 @@ fn record(
         .record(checkpoint)
         .map(|_| ())
         .map_err(|error| journal_failure(stage, error, context))?;
-    verify_run_binding(lock, witness).map_err(|error| {
-        WorkflowFailure::new(
-            FailureCode::PublicationIndeterminate,
-            stage,
-            Certainty::Indeterminate(if stage == WorkflowStage::Complete {
-                PublicationPhase::CompleteCheckpoint
-            } else {
-                PublicationPhase::JournalCheckpoint
-            }),
-            context,
-            error,
-            RecoveryAction::ResumeSameRun,
-        )
-    })
+    verify_run_binding(lock, witness)
+        .map_err(|error| checkpoint_binding_failure(stage, error, context))
+}
+
+fn checkpoint_binding_failure(
+    stage: WorkflowStage,
+    error: io::Error,
+    context: FailureContext,
+) -> WorkflowFailure {
+    let publication_phase = if stage == WorkflowStage::Complete {
+        PublicationPhase::CompleteCheckpoint
+    } else {
+        PublicationPhase::JournalCheckpoint
+    };
+    WorkflowFailure::new(
+        FailureCode::PublicationIndeterminate,
+        stage,
+        Certainty::Indeterminate(publication_phase),
+        context,
+        error,
+        RecoveryAction::ResumeSameRun,
+    )
 }
 
 fn bounds_bits(bounds: Option<WorldBounds>) -> Option<[[u64; 2]; 3]> {
@@ -3047,6 +3055,24 @@ mod tests {
         assert!(facts.iter().any(|fact| {
             fact.name == "journal.max_path_binding_bytes" && fact.value == PATH_BINDING_BYTES
         }));
+    }
+
+    #[test]
+    fn post_complete_binding_failure_preserves_indeterminate_certainty() {
+        let failure = checkpoint_binding_failure(
+            WorkflowStage::Complete,
+            io::Error::new(io::ErrorKind::InvalidData, "Run binding changed"),
+            FailureContext::default(),
+        );
+
+        assert_eq!(failure.code(), "PWF_PUBLICATION_INDETERMINATE");
+        assert_eq!(failure.stage(), "complete-checkpoint");
+        assert_eq!(failure.certainty(), "indeterminate");
+        assert_eq!(failure.publication_phase(), Some("complete-checkpoint"));
+        assert_eq!(
+            failure.recovery_action(),
+            "resume the same Run with the same identities and paths"
+        );
     }
 
     #[test]
