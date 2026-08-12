@@ -9,16 +9,16 @@ as technical and customer evidence changes. Milestone outcomes and dependency
 order matter more than version numbers.
 
 There is currently no **Active** repository release. Punctra v0.1 through v0.9
-are Complete repository technical slices. v0.8 is Complete only for the narrow
-[repository interoperability qualification
-design](docs/design/design-partner-mvp-v0.8.md): a private post-Run semantic
-LandXML 1.2 comparison and separate evidence record. Its Run binding, bounded
-streaming comparison, canonical pass/fail evidence publication, and local
-verification were completed under v0.9. v0.9 is Complete and repository-
-verified only for the existing narrow [Trust and v1 Candidate
-design](docs/design/trust-v1-candidate-v0.9.md); it does not publish v1 or
-satisfy external product evidence. Broader terrain, export, general editing,
-downstream automation, and application UI remain uncommitted.
+are Complete repository technical slices. The repository-only qualification
+defined by v0.8 is Complete: its bounded streaming LandXML 1.2 comparison,
+Complete-Run binding, canonical pass/fail evidence publication, and local
+verification are implemented, with the final inherited gates closed under
+v0.9. v0.9 is Complete and repository-verified only for the existing narrow
+[Trust and v1 Candidate
+design](docs/design/trust-v1-candidate-v0.9.md). Neither release status
+publishes v1 or satisfies external product evidence. v0.10 through v0.20
+remain uncommitted Candidate themes; each needs evidence and an accepted
+design before implementation.
 
 ## Working direction
 
@@ -64,10 +64,20 @@ Roadmap status labels are:
 | **Candidate** | Plausible later direction, subject to evidence and an accepted scope. |
 | **Deferred** | Intentionally outside the current path. |
 
+Release status and external evidence maturity are separate. A repository
+release can be Complete while every product gate remains outstanding.
+
+| Evidence maturity | Meaning |
+|---|---|
+| **Repository-verified** | The accepted design, local verification, fixtures, and declared benchmarks pass. |
+| **Field-qualified** | Representative licensed or sanitized production data and observed workflows satisfy the declared scale and usability envelope. |
+| **Partner-validated** | Real partner projects repeatedly satisfy their tolerance and accepted-deliverable checks. |
+| **Support-qualified** | The declared compatibility, migration, operational, workstation, and support matrices are maintainable. |
+
 ## Scope and evidence checkpoint
 
-Status: **v0.8 repository interoperability-qualification slice Complete; v0.9
-Trust and v1 Candidate repository slice Complete and repository-verified; all
+Status: **v0.8 repository interoperability qualification Complete; v0.9 Trust
+and v1 Candidate repository slice Complete and repository-verified; all
 external product evidence outstanding**
 
 The [implemented v0.5 design](docs/design/durable-document-core-v0.5.md) places
@@ -88,20 +98,33 @@ Footprint, and exact LandXML/report targets reconcile without overwrite. Its
 generated tests and benchmark establish only those technical guarantees; they
 do not satisfy any external evidence item below.
 
-The implemented v0.8 slice does not broaden that workflow. It adds one private,
-post-Run verifier that compares the exact v0.7 metric-metre LandXML TIN with
-a caller-returned LandXML 1.2 file under declared tolerances and publish a
-separate canonical evidence record. Caller-declared application/version/
-settings labels are not proof that the application ran. The v0.7 journal and
-`audit.json` remain unchanged, and milestone-start documentation is not
-implementation acceptance.
+The repository-only v0.8 qualification is Complete and does not broaden that
+workflow. Its private verifier compares the exact v0.7 metric-metre LandXML
+TIN with a caller-returned LandXML 1.2 file under declared tolerances. The
+inherited Complete-Run binding, bounded streaming input-witness, and canonical
+evidence-publication gates were closed and verified under v0.9. Caller-
+declared application/version/settings labels are not proof that the
+application ran. The v0.7 journal and `audit.json` remain unchanged.
+
+The implemented v0.9 slice adds no new feature family. It extends the inherited
+Spatial Index v1 goldens across the remaining persisted-v1 compatibility
+surface, distinguishes authoritative, rebuildable, and temporary artifacts,
+hardens recovery and filesystem failure behavior, publishes the exact support
+matrix, reviews only exercised public interfaces, and reproduces local
+resource/performance gates. Index filesystem failures remain recoverable,
+bounded I/O diagnostics through the private Workflow seam. Ownership-safe
+initial work publication writes and syncs the complete header through an owned
+descriptor, publishes no-replace, verifies the bound file before append or
+resume, and retains valid owned incomplete work. It does not use
+check-then-unlink cleanup or delete racing replacements. The inherited
+partial-header gate is closed.
 
 Useful evidence for proceeding includes:
 
 - screen-shared workflows with current users that identify the actual expensive
   step;
-- several sanitized production LAS/LAZ datasets from unrelated firms, including
-  datasets above 500 million Points;
+- five permitted production LAS/LAZ datasets from at least three unrelated
+  firms, including at least two Sources above 500 million Points;
 - customer accuracy, coordinate, QA, and downstream export requirements;
 - a measured baseline for time to first use, attended editing time, unattended
   processing time, and rework; and
@@ -111,12 +134,17 @@ Useful evidence for proceeding includes:
 If the evidence points elsewhere, revise this roadmap before building the next
 module. The detailed discovery signals and pivot criteria live in the
 [market-validation research](docs/research/saas-point-cloud-market-validation.md#customer-tests-and-kill-criteria).
+Production-data access, downstream observations, and paid-pilot evidence are
+long-lead work. Collection may begin during v0.9 without activating or silently
+expanding any later repository release.
 
 ## Release sequence
 
-There is no Active repository slice after the completed v0.9. v1.0 remains a
-provisional Candidate. This is a working sequence, not a requirement to
-publish the next numbered release.
+There is no Active repository release after the completed v0.9. Eleven
+provisional Candidate themes, v0.10 through v0.20, extend the path after v0.9.
+This is a planning sequence, not a
+requirement to publish every number or to publish v1 after v0.20. Candidates
+may be narrowed, split, merged, reordered, or stopped before becoming Active.
 
 ### v0.1 — Renderer foundation
 
@@ -386,21 +414,23 @@ tests are intentionally not relabeled as those facts.
 ### v0.8 — Design-partner MVP
 
 Status: **Complete — repository interoperability-qualification slice only;
-product MVP remains outstanding**
+final repository gates delivered under v0.9; product MVP remains outstanding**
 
-Implemented repository outcome: the exact bounded post-Run verifier and
-evidence contract in the [v0.8 design](docs/design/design-partner-mvp-v0.8.md).
-The private `terrain-demo` path:
+The repository-only outcome fixed by the
+[v0.8 design](docs/design/design-partner-mvp-v0.8.md) is Complete. The private
+bounded semantic comparison core and explicitly non-evidence
+`compare-landxml` command remain available. The qualifying private
+`terrain-demo verify-round-trip` path:
 
-- require a Complete, unchanged v0.7 Run and leave its eight-frame journal,
+- requires a Complete, unchanged v0.7 Run and leaves its eight-frame journal,
   `terrain.xml`, and `audit.json` untouched;
-- accept a caller-returned LandXML 1.2 file plus caller-declared downstream
+- accepts a caller-returned LandXML 1.2 file plus caller-declared downstream
   application, version, settings, and horizontal/vertical metre tolerances;
-- parse the original and returned TINs under cumulative hard limits, rejecting
+- parses the original and returned TINs under cumulative hard limits, rejecting
   malformed, unsupported, partial, ambiguous, or raced input without recovery;
-- fail closed on unit drift, unmatched or multiply matched vertices, tolerance
+- fails closed on unit drift, unmatched or multiply matched vertices, tolerance
   drift, and any added, removed, duplicated, or changed face topology; and
-- create or exactly reconcile a bounded canonical Round-Trip Evidence record
+- creates or exactly reconciles a bounded canonical Round-Trip Evidence record
   outside the Run root without overwriting different data.
 
 This implemented scope does not automate or claim a run through Civil 3D, Bentley
@@ -429,24 +459,24 @@ correctness tests.
 Status: **Complete — repository-verified trust/v1-candidate slice only;
 external product evidence outstanding**
 
-Implemented outcome: qualify the proven repository scope for a v1
-compatibility and support promise without adding another major feature family,
-as fixed by the
+Implemented outcome: qualify the proven repository scope for a v1 compatibility and support
+promise without adding another major feature family, as fixed by the
 [v0.9 design](docs/design/trust-v1-candidate-v0.9.md).
 
 Delivered scope:
 
 - closed the inherited v0.8 Complete-Run binding and canonical-evidence gates;
-- published a tested CRS, vertical-reference, unit, precision, format,
-  platform, and device support matrix for the existing workflow;
-- retained the Spatial Index v1 goldens and completed owner-local persisted-v1
-  compatibility and recovery fixtures without inventing a second schema;
+- published a tested CRS, vertical-reference, unit, precision, format, platform,
+  and device support matrix for the existing workflow;
+- retained the inherited Spatial Index v1 goldens and completed owner-local
+  persisted-v1 compatibility/recovery fixtures without inventing a second
+  schema;
 - covered disk exhaustion, corrupt input, cancellation, device loss, and GPU-
   unavailable behavior where the supported module or host seam owns it;
 - reproduced performance and resource ceilings on the declared local
   workstation; and
-- reviewed exercised public interfaces, documentation, examples, upgrade
-  notes, and support playbooks.
+- reviewed exercised public interfaces, documentation, examples, upgrade notes,
+  and support playbooks.
 
 Index filesystem failures remain bounded `PWF_IO` diagnostics with
 conservative publication certainty and reconciliation through resume. Initial
@@ -467,23 +497,432 @@ Repository evidence of readiness:
 Acceptance and local command evidence are recorded in the
 [v0.9.0 release record](docs/releases/v0.9.0.md).
 
+## Standing boundaries for v0.10–v0.20
+
+- GPU display remains disposable and non-authoritative. Exact inspection,
+  selection, Edit, terrain, QA, and export use revision-pinned CPU values.
+- Opening and viewing a large Source is not evidence that deriving its complete
+  terrain fits the same resource envelope. Measure and report those paths
+  separately.
+- The proposed desktop host supports one narrow survey-to-terrain workflow. It
+  is not a general CAD, BIM, point-cloud, or geospatial editor.
+- Visual quality means a clear professional inspection View, not Cesium parity,
+  photorealism, a globe, 3D Tiles, texture streaming, or rendering every Point
+  simultaneously.
+- Coordinate systems, units, vertical references, transformations, downstream
+  products, and settings are explicit supported profiles. Nothing is guessed.
+- Repository status and external evidence maturity are recorded separately.
+  Tests, generated data, free evaluations, and declarations do not become
+  partner, paid-use, or accepted-deliverable evidence.
+- Every Candidate needs an accepted design with one coherent outcome, explicit
+  non-goals, local verification, and an activation gate before implementation.
+
+## Open-source library adoption track
+
+Punctra is intended to remain useful as an embeddable Rust library, not only as
+the implementation behind its own desktop host. Public attention, independent
+adoption, and funding are not inferred from repository completeness. The
+following are explicit exit requirements for the corresponding Candidate
+releases; they do not expand a release's technical feature scope.
+
+| Release | Open-source adoption exit requirement |
+|---|---|
+| **v0.10** | Publish one accurate public description, repository topics and homepage, an approved screenshot or short demonstration, a reproducible viewing benchmark, and a five-minute “view your first LAS/LAZ Source” guide. Clearly separate current capabilities from roadmap claims. |
+| **v0.11** | Provide a minimal third-party renderer integration example that does not depend on demo-private state, plus focused rustdoc explaining host ownership, provisional GPU picks, exact CPU confirmation, and resource limits. |
+| **v0.12** | Define and exercise the crates.io/docs.rs packaging path for the supported library crates. Package metadata, licenses, minimum supported Rust version, feature flags, dependency roles, and pre-v1 compatibility expectations must be explicit. |
+| **v0.13** | Publish a reproducible out-of-core terrain example and resource report that distinguishes Source viewing, indexing, and full Terrain Derivation and does not extrapolate beyond measured data. |
+| **v0.14** | Publish one end-to-end QA example whose documentation lets an adopter trace every displayed profile, residual, tolerance, and gap to authoritative inputs. |
+| **v0.15** | Publish a constrained-terrain example and non-goals guide covering the exact supported constraint grammar, failure cases, and boundary between Punctra and general CAD authoring. |
+| **v0.16** | Publish the exact named downstream integration guide and only customer-approved, anonymized round-trip evidence. Do not present declared application labels or repository fixtures as observed interoperability. |
+| **v0.17** | At least one independent adopter, outside the maintainer and repository demos, completes the documented library quickstart or embedding path; record setup time, failures, unclear APIs, and resulting documentation fixes. |
+| **v0.18** | Publish contributor onboarding, issue and pull-request templates, a code of conduct, security-reporting policy, support channels, and a small set of genuinely bounded contributor issues. Document which help is community support and which is paid product support. |
+| **v0.19** | Publish the reviewed public API surface, semantic-versioning and deprecation policy, compatibility matrix, migration or rebuild guidance, release notes, and locally reproducible verification commands for downstream maintainers. |
+| **v0.20** | Complete an open-source release-readiness review covering the landing page, quickstart, API docs, examples, changelog, known limitations, support expectations, and approved showcase material. Add a funding or GitHub Sponsors path only with transparent goals and only after independent use exists; funding is not a v1 correctness gate. |
+
+Adoption evidence is counted conservatively. Stars, downloads, praise, generated
+examples, and maintainer-run integrations are useful signals but do not equal
+independent production use. No release is delayed merely to reach a vanity
+metric, and no benchmark or customer dataset is published without permission.
+
+### v0.10 — Field qualification and professional inspection View
+
+Status: **Candidate**
+
+Candidate outcome: qualify Source opening and viewing on representative field
+data while making known survey features clear enough for professional
+inspection.
+
+Activation gate:
+
+- obtain permission to inspect at least one licensed or sanitized production
+  dataset and observe the workflow, workstation, failure mode, and current time
+  baseline it represents.
+
+Likely scope:
+
+- RGB, intensity, classification, and elevation display modes;
+- bounded versioned display samples carrying only the Attributes needed by the
+  selected modes;
+- evidence-selected point appearance, contrast, depth enhancement,
+  perspective/orthographic navigation, and explicit loading/LOD status;
+- actionable Source, index, GPU, and resource-limit diagnostics; and
+- a reproducible corpus runner for open, index, first-use, navigation,
+  residency, memory, and disk measurements.
+
+Candidate exit evidence:
+
+- a permitted corpus contains five projects from at least three unrelated
+  firms, including at least two Sources above 500 million Points, without
+  implying permission to redistribute them;
+- every display mode has exact CPU-to-GPU mapping tests and tolerant local GPU
+  image regressions;
+- declared workstation resource ceilings hold for the measured viewing path;
+  and
+- observed users can locate known features without mistaking sampled display
+  values for exact results.
+
+### v0.11 — Exact interactive review and ground correction
+
+Status: **Candidate**
+
+Candidate outcome: connect the progressive View to exact inspection and
+reversible ground-classification correction in one narrow desktop workflow.
+
+Activation gate:
+
+- v0.10 evidence identifies interactive inspection or classification
+  correction as a material source of attended time or rework.
+
+Likely scope:
+
+- CPU-confirmed inspection after provisional GPU picking;
+- an evidence-selected subset of screen-through, polygon, and brush selection;
+- exact effective-classification filtering at a pinned Revision;
+- visible Point Set, Revision, changed-region, Revert, and recovery state; and
+- ground-classification painting without general Attribute or position edits.
+
+Candidate exit evidence:
+
+- every accepted selection matches a sequential CPU oracle, including boundary
+  and stale-Revision cases;
+- Point Identity survives display hint, exact Query, spill, Edit, Revert, and
+  reopen;
+- overlays are traceable to exact Point Sets rather than resident LOD samples;
+  and
+- interruption and recovery reopen into one documented, unambiguous state.
+
+### v0.12 — Explicit spatial-reference contract
+
+Status: **Candidate**
+
+Candidate outcome: support the coordinate, linear-unit, and vertical-reference
+profile selected by field evidence without silent assumptions.
+
+Activation gate:
+
+- the production corpus identifies one recurring profile that the existing
+  metric-metre path cannot represent correctly.
+
+Likely scope:
+
+- explicit horizontal reference, vertical reference, axis, unit, precision,
+  and provenance metadata at every authoritative boundary;
+- one evidence-selected transformation path only if required by the workflow;
+- deterministic conversion and tolerance rules shared by Query, terrain, QA,
+  and export; and
+- clear rejection of missing, ambiguous, unsupported, or contradictory
+  metadata.
+
+Candidate exit evidence:
+
+- published support fixtures match independent reference coordinates and
+  control-point calculations within declared tolerances;
+- reopen, Revision, Surface, QA, and export retain the same explicit reference
+  identity and conversion provenance;
+- unit and axis drift fail closed; and
+- no fixture or product path depends on automatic CRS or datum guessing.
+
+### v0.13 — Persistent production-scale terrain
+
+Status: **Candidate**
+
+Candidate outcome: replace v0.6's single-worker in-memory Surface with a
+bounded, durable terrain path for the field-qualified scale envelope.
+
+Activation gate:
+
+- field measurements establish the required AOI size, ground-Point count,
+  latency, memory, temporary storage, and supported workstation classes.
+
+Likely scope:
+
+- explicit AOIs and deterministic bounded-memory or out-of-core Derivation;
+- checksummed persistent Surface Artifacts with Snapshot, spatial-reference,
+  algorithm-version, and provenance bindings;
+- resumable work, safe publication, reopen, stale-artifact detection, and
+  explicit rebuild decisions; and
+- bounded parallel execution only where supported worker counts reproduce a
+  canonical result.
+
+Candidate exit evidence:
+
+- uninterrupted, resumed, and supported-worker runs reproduce canonical
+  topology and descriptors;
+- fault fixtures cover truncation, corruption, cancellation, disk exhaustion,
+  checkpoint boundaries, and publication certainty;
+- retained and temporary storage remain within declared hard limits; and
+- at least two above-500-million-Point Source projects from unrelated firms
+  complete their declared terrain AOIs and pass their accepted accuracy
+  baselines; benchmarks publish that measured envelope without extrapolating
+  from Source-viewing or small generated runs.
+
+### v0.14 — Exact terrain QA and correction loop
+
+Status: **Candidate**
+
+Candidate outcome: let a surveyor locate, explain, correct, and recheck terrain
+defects without treating display colors as measurements.
+
+Activation gate:
+
+- observed acceptance work identifies the exact QA views, tolerances, and
+  reports that change a deliverable decision or reduce repeated inspection.
+
+Likely scope:
+
+- exact profiles or cross-sections for the accepted workflow;
+- Source-Point residual Queries, detached Check Point results, and bounded
+  visualizations of those authoritative values;
+- stale-Surface and changed-region tracking after classification correction;
+- repeatable correct, re-derive, compare, and Revert flow; and
+- QA evidence with explicit units, gaps, tolerances, Snapshot, Surface, and
+  operation provenance.
+
+Candidate exit evidence:
+
+- numeric results match analytic and independent reference fixtures within
+  declared tolerances;
+- every displayed profile or residual resolves to an authoritative frozen
+  Snapshot/Surface pair;
+- stale results cannot be presented as current after an Edit; and
+- observed trials measure time to find, explain, and correct seeded or known
+  defects.
+
+### v0.15 — Evidence-selected terrain constraints
+
+Status: **Candidate**
+
+Candidate outcome: add only the constraint behavior proven necessary for the
+selected terrain and downstream-delivery workflow.
+
+Activation gate:
+
+- field evidence shows that missing Breaklines, boundaries, or holes—not
+  classification, QA, scale, or coordinate handling—is the next recurring
+  source of unacceptable terrain or rework.
+
+Likely scope:
+
+- one narrow revisioned constraint grammar containing only the selected kinds;
+- exact snapping, noding, validation, audit, Revert, and recovery rules;
+- deterministic constrained terrain integrated with persistent Surface
+  provenance; and
+- explicit rejection of self-intersection, ambiguity, unsupported topology,
+  and tolerance-dependent degeneracy.
+
+Candidate exit evidence:
+
+- independent fixtures prove every supported constraint changes topology as
+  specified and survives reopen and Revert;
+- input order, interruption, resume, and supported worker count do not change
+  canonical output;
+- adversarial near-degenerate cases fail deterministically; and
+- the scope does not grow into general linework or CAD authoring.
+
+### v0.16 — Named downstream interoperability
+
+Status: **Candidate**
+
+Candidate outcome: deliver one exact terrain profile to one named downstream
+application version and settings matrix chosen from partner evidence.
+
+The working hypothesis is Autodesk Civil 3D. The activation gate must still
+name the exact supported version and settings from observed evidence.
+
+Activation gate:
+
+- multiple observed firms use the same named downstream profile and agree on
+  units, references, precision, topology, constraints, and acceptance checks.
+
+Likely scope:
+
+- the exact LandXML subset needed by the selected product/version/settings;
+- deterministic points, faces, units, references, precision, and only the
+  v0.15 constraints required by that profile;
+- strict Complete-Run binding and no-replace canonical round-trip evidence; and
+- bounded semantic comparison of the exported and caller-returned deliverable.
+
+Candidate exit evidence:
+
+- fixtures cover accepted, malformed, ambiguous, partial, raced, unit-drift,
+  reference-drift, tolerance-drift, and topology-drift cases;
+- the same unmodified export is accepted in three firms' observed production
+  round trips without bespoke code repair;
+- application, version, and settings declarations are not represented as
+  proof unless matching external execution evidence exists; and
+- no claim is made for both Autodesk and Bentley ecosystems or for a generic
+  exporter framework.
+
+### v0.17 — Narrow design-partner alpha
+
+Status: **Candidate**
+
+Candidate outcome: package the field-qualified path as one usable end-to-end
+desktop workflow for selected design partners.
+
+Activation gate:
+
+- v0.10 through v0.16 identify a stable repeated workflow and at least one
+  partner willing to use the declared supported profile on production work.
+
+Likely scope:
+
+- open, inspect, correct, derive, QA, and export through one focused host;
+- installable packaging for a declared platform and workstation envelope;
+- autosave policy, progress, cancellation, recovery, safe retry, and actionable
+  diagnostics; and
+- consent-aware local evidence capture without uploading Source data.
+
+Candidate exit evidence:
+
+- partners complete the supported workflow on representative projects and can
+  distinguish exact, stale, sampled, running, failed, and recovered states;
+- every failure names the Source or Artifact, operation, phase, certainty, and
+  one safe recovery action;
+- packaging, reopen, cancellation, and recovery pass local acceptance on each
+  supported machine class; and
+- requests outside the narrow workflow are recorded rather than silently added.
+
+### v0.18 — Design-partner MVP and operations
+
+Status: **Candidate**
+
+Candidate outcome: make the narrow alpha repeatable to install, operate,
+support, and evaluate across several firms.
+
+Activation gate:
+
+- alpha projects repeatedly produce acceptable deliverables and the delivery,
+  update, licensing, privacy, and support model has been explicitly selected.
+
+Likely scope:
+
+- reproducible installation, update, rollback, configuration, and diagnostic
+  collection for the declared support matrix;
+- licensing only if the selected delivery model requires it;
+- corpus regression, support playbooks, issue evidence, and recovery drills;
+  and
+- workflow measurement that separates time to first use, attended work,
+  unattended work, rework, and downstream acceptance.
+
+Candidate exit evidence:
+
+- repository acceptance proves the declared packaging and operational paths;
+- external evidence separately carries forward the v0.8 product gates: three
+  firms use the same supported path, three paid pilots reach production use,
+  and two firms convert or document sufficient measured labor savings;
+- multiple runs at one firm, free trials, fixtures, projected savings, and
+  declarations do not multiply or substitute for those external gates; and
+- accuracy and accepted-deliverable checks remain non-negotiable when measuring
+  speed or labor reduction.
+
+### v0.19 — Expanded-scope compatibility and support qualification
+
+Status: **Candidate**
+
+Candidate outcome: freeze new feature families and qualify the expanded
+workflow for a maintainable compatibility and support promise.
+
+Activation gate:
+
+- the v0.18 workflow is Partner-validated and its exact supported surface is
+  narrow enough to maintain.
+
+Likely scope:
+
+- final format, coordinate, precision, platform, device, workstation, and
+  downstream-product support matrices;
+- persisted-schema compatibility, migration only where a second version
+  exists, upgrade/rollback fixtures, and artifact ownership policy;
+- fault injection, resource/performance reproduction, security review, public
+  interface review, upgrade notes, and support playbooks; and
+- removal or explicit deferral of experimental paths outside the promise.
+
+Candidate exit evidence:
+
+- no known open release-blocking correctness or data-loss defect remains in the
+  declared support matrix;
+- the enumerated recovery contract passes its fault-injection fixtures;
+- old supported Artifacts reopen or follow a tested explicit migration/rebuild
+  path; and
+- declared workstation ceilings and downstream round trips reproduce locally.
+
+### v0.20 — Product v1 release candidate and production soak
+
+Status: **Candidate**
+
+Candidate outcome: hold the qualified scope stable long enough to decide
+whether it deserves the v1 compatibility and support promise.
+
+Activation gate:
+
+- v0.19 is Support-qualified and design partners have scheduled representative
+  production work within the declared matrix.
+
+Likely scope:
+
+- feature freeze, release-candidate packaging, upgrade/rollback rehearsal, and
+  extended production soak;
+- full local regression, GPU acceptance, fault, resource, performance, and
+  downstream-compatibility reproduction;
+- user, administrator, recovery, support, and upgrade documentation; and
+- final review of support capacity, known limitations, and compatibility
+  commitments.
+
+Candidate exit evidence:
+
+- repeated partner projects produce accepted deliverables without bespoke code
+  repair inside the supported profile;
+- release-candidate installation, update, rollback, recovery, and diagnostics
+  pass across the declared machine matrix;
+- no known release-blocking correctness, recovery, security, or support defect
+  remains; and
+- the evidence record supports an explicit ship, extend-soak, narrow, or stop
+  decision. Completing v0.20 does not automatically publish v1.
+
 ### v1.0 — Trustworthy supported scope
 
 Status: **Candidate**
 
 Release v1 when the narrow supported workflow repeatedly produces accepted
-deliverables, recovery guarantees are proven, resource use is bounded, and the
-public compatibility promise can be maintained. Completing v0.9 is not by
-itself a reason to publish v1.
+deliverables, the enumerated recovery contract passes its fixtures, resource
+use is bounded, and the public compatibility promise can be maintained.
+Neither the v0.9 repository trust baseline nor completion of the provisional
+v0.20 theme is by itself a reason to publish v1.
 
 ## Product milestone map
 
-| Product milestone | Candidate releases | Outcome |
-|---|---|---|
-| Renderer and planning foundations | v0.1–v0.2 | Reusable bounded display engine and adaptive View planner. |
-| Benchmark/demo | v0.3–v0.6 | Headless technical path from verified LAS/LAZ to one narrow terrain deliverable; external workflow evidence remains separate. |
-| Design-partner MVP | v0.7–v0.8 | Complete repository interoperability qualification; product completion still requires three firms, three paid pilots, and two conversion-or-measured-savings firms. |
-| Trustworthy v1 | v0.9–v1.0 | v0.9 repository trust baseline Complete and repository-verified; v1.0 remains Candidate and requires external acceptance plus supported-scope qualification. |
+| Product milestone | Release range | Delivery state | Outcome |
+|---|---|---|---|
+| Renderer and planning foundations | v0.1–v0.2 | Complete; repository-verified | Reusable bounded display engine and adaptive View planner. |
+| Source, document, terrain, and workflow baseline | v0.3–v0.7 | Complete; repository-verified only | Headless technical path from verified LAS/LAZ to one narrow resumable terrain deliverable; field and product evidence remains separate. |
+| Qualifier and trust baseline | v0.8–v0.9 | Complete; repository-verified only | Inherited qualification gates closed and the existing narrow repository compatibility surface hardened; all external product evidence remains outstanding. |
+| Field inspection and exact correction | v0.10–v0.11 | Candidate | Qualify representative Sources and connect a professional View to CPU-authoritative review and reversible correction. |
+| Spatial contract and production terrain | v0.12–v0.13 | Candidate | Make reference semantics explicit before persisting a bounded production-scale Surface. |
+| Terrain acceptance tooling | v0.14–v0.15 | Candidate | Add exact QA and only the constraints earned by field evidence. |
+| Downstream and partner product | v0.16–v0.18 | Candidate | Qualify one named downstream profile, then package and validate one narrow partner workflow. |
+| Product v1 qualification | v0.19–v1.0 | Candidate | Freeze, support-qualify, soak, and explicitly decide whether the maintained scope deserves v1. |
+| Open-source library adoption | v0.10–v0.20 | Candidate, cross-cutting | Progress from an accurate public story and first-file quickstart to independent adoption, contributor readiness, stable integration guidance, and an evidence-backed funding path. |
 
 ## Deferred until evidence changes
 
@@ -493,10 +932,15 @@ The current path does not include:
 - general CAD or BIM authoring;
 - AI feature extraction or a broad classification suite;
 - automatic CRS or vertical-datum guessing;
+- broad coordinate-transformation coverage added without a selected workflow;
 - multi-Source Workspaces;
 - raw-cloud hosting, cloud collaboration, or distributed execution;
 - remote Source reads or networking policy;
-- a public plugin registry or generic export framework;
+- a public plugin registry, generic export framework, or simultaneous Autodesk
+  and Bentley compatibility promise;
+- Cesium visual/platform parity, globe-scale 3D Tiles, global imagery or
+  terrain, texture streaming, photorealistic meshes, or rendering every Point
+  simultaneously;
 - runtime point schemas, arbitrary shaders, or GPU-authoritative geometry; or
 - broad format support added only for completeness.
 
@@ -508,11 +952,13 @@ forward only when a real caller or partner workflow earns their seams.
 Review this file when a release starts, finishes, or materially changes
 direction. A roadmap update should:
 
-1. mark completed evidence rather than only completed code;
+1. record repository delivery status and external evidence maturity separately;
 2. identify the single Active release, if one exists;
 3. move unsupported ideas to Deferred instead of leaving ambiguous promises;
 4. link the accepted design or ADR for newly Active scope; and
-5. record why a release was split, merged, reordered, or stopped.
+5. record why a release was split, merged, reordered, or stopped; and
+6. update open-source adoption evidence without treating popularity metrics as
+   product, correctness, or release acceptance.
 
 The broader candidate architecture is described in
 [docs/architecture](docs/architecture/README.md). It is a source of design
