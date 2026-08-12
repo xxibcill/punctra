@@ -256,6 +256,15 @@ The optional target defaults to `SOURCE.pidx`:
 cargo run --release -p renderer-demo -- survey.laz survey.laz.pidx
 ```
 
+The repository includes a compact, attributed real-world sample:
+
+```bash
+cargo run --release -p renderer-demo -- examples/data/stadium-utm.laz
+```
+
+See [`examples/data/README.md`](examples/data/README.md) for its provenance and
+license.
+
 The same Source/index/planner/materializer path has a GPU-free process smoke
 mode that accepts one atomic CPU-model Upsert:
 
