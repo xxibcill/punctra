@@ -801,8 +801,8 @@ fn validate_surface(
     surface: Node<'_, '_>,
     limits: RoundTripLimits,
 ) -> Result<ParsedSurface, RoundTripFailure> {
-    if surface.attribute("name").is_none_or(str::is_empty) {
-        return Err(schema_error(side, "Surface requires a nonempty name"));
+    if surface.attribute("name").is_none() {
+        return Err(schema_error(side, "Surface requires a name attribute"));
     }
     validate_allowed_children(side, surface, &["Definition"])?;
     let definition = unique_child(side, surface, "Definition")?;
@@ -1557,6 +1557,26 @@ mod tests {
         assert!(report.topology_matches());
         assert_eq!(report.vertex_count(), 4);
         assert_eq!(report.face_count(), 2);
+    }
+
+    #[test]
+    fn empty_surface_name_is_ignored_semantic_metadata() {
+        let fixture = Fixture::new("empty-surface-name");
+        let reference_xml = landxml(REFERENCE_POINTS, REFERENCE_FACES, false);
+        let returned_xml =
+            reference_xml.replacen("<Surface name=\"Ground\">", "<Surface name=\"\">", 1);
+        let (reference, returned) = fixture.write_pair(&reference_xml, &returned_xml);
+
+        let report = verify(
+            &reference,
+            &returned,
+            tolerances(0.0, 0.0),
+            default_limits(),
+        )
+        .expect("an empty surface name does not change terrain semantics");
+
+        assert!(!report.exact_bytes());
+        assert!(report.topology_matches());
     }
 
     #[test]
