@@ -784,8 +784,9 @@ fn advance(
         .blocking_wait_cancelled_by(&control.token())
         .map_err(|error| workspace_failure(WorkflowStage::Selection, error, control, context))?;
     if expected_points.metadata().exact_count() != usize_u64(request.correction_ordinals.len()) {
-        return Err(WorkflowFailure::invalid(
+        return Err(WorkflowFailure::invalid_with_context(
             WorkflowStage::Selection,
+            context,
             "one or more explicit ordinals do not exist",
         ));
     }
@@ -1361,8 +1362,9 @@ fn validate_ground_ordinals(
         for ordinal in batch.ordinals() {
             if let Some(expected) = request.correction_ordinals.get(next_requested) {
                 if expected < ordinal {
-                    return Err(WorkflowFailure::invalid(
+                    return Err(WorkflowFailure::invalid_with_context(
                         WorkflowStage::Selection,
+                        context,
                         "a correction ordinal is not Ground in the expected baseline",
                     ));
                 }
@@ -1373,8 +1375,9 @@ fn validate_ground_ordinals(
         }
     }
     if next_requested != request.correction_ordinals.len() {
-        return Err(WorkflowFailure::invalid(
+        return Err(WorkflowFailure::invalid_with_context(
             WorkflowStage::Selection,
+            context,
             "every correction ordinal must be Ground in the expected baseline and Recipe bounds",
         ));
     }

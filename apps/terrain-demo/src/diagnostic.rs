@@ -264,11 +264,19 @@ impl WorkflowFailure {
     }
 
     pub(crate) fn invalid(stage: WorkflowStage, error: impl fmt::Display) -> Self {
+        Self::invalid_with_context(stage, FailureContext::default(), error)
+    }
+
+    pub(crate) fn invalid_with_context(
+        stage: WorkflowStage,
+        context: FailureContext,
+        error: impl fmt::Display,
+    ) -> Self {
         Self::new(
             FailureCode::InvalidRequest,
             stage,
             Certainty::PrePublication,
-            FailureContext::default(),
+            context,
             error,
             RecoveryAction::CorrectInvalidRequest,
         )
@@ -426,5 +434,28 @@ mod tests {
         assert!(text.contains("workspace-revision"));
         assert!(text.contains("operation=020202"));
         assert!(text.contains("resolve the recorded Operation"));
+    }
+
+    #[test]
+    fn invalid_failure_can_preserve_known_identities() {
+        let context = FailureContext {
+            run: Some(WorkflowRunId::new([1; 16]).unwrap()),
+            source: Some(SourceId::new([2; 32])),
+            workspace: Some(WorkspaceId::from_bytes([3; 16]).unwrap()),
+            operation: Some(OperationId::from_bytes([4; 16]).unwrap()),
+            revision: Some(RevisionId::from_bytes([5; 32]).unwrap()),
+        };
+
+        let failure = WorkflowFailure::invalid_with_context(
+            WorkflowStage::Selection,
+            context,
+            "invalid selection",
+        );
+
+        assert_eq!(failure.run(), context.run);
+        assert_eq!(failure.source(), context.source);
+        assert_eq!(failure.workspace(), context.workspace);
+        assert_eq!(failure.operation(), context.operation);
+        assert_eq!(failure.revision(), context.revision);
     }
 }
