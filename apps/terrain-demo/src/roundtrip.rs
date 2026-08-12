@@ -28,6 +28,27 @@ const DEFAULT_MAX_POINTS: u64 = 2_000_000;
 const DEFAULT_MAX_FACES: u64 = 4_000_000;
 const DEFAULT_MAX_COMPARISONS: u64 = 32_000_000;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum InputSide {
+    Reference,
+    Returned,
+}
+
+impl InputSide {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Reference => "REFERENCE",
+            Self::Returned => "RETURNED",
+        }
+    }
+}
+
+impl fmt::Display for InputSide {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct RoundTripDeclaration {
     application: Box<str>,
@@ -301,12 +322,13 @@ pub(crate) fn verify_landxml_round_trip(
 ) -> Result<RoundTripReport, RoundTripFailure> {
     validate_limits(limits)?;
     reject_same_path(reference_path, returned_path)?;
-    let reference_file = read_regular_file("REFERENCE", reference_path, limits.file_bytes)?;
-    let returned_file = read_regular_file("RETURNED", returned_path, limits.file_bytes)?;
+    let reference_file =
+        read_regular_file(InputSide::Reference, reference_path, limits.file_bytes)?;
+    let returned_file = read_regular_file(InputSide::Returned, returned_path, limits.file_bytes)?;
     reject_same_file(&reference_file, &returned_file)?;
 
-    let reference_surface = parse_surface("REFERENCE", &reference_file.bytes, limits)?;
-    let returned_surface = parse_surface("RETURNED", &returned_file.bytes, limits)?;
+    let reference_surface = parse_surface(InputSide::Reference, &reference_file.bytes, limits)?;
+    let returned_surface = parse_surface(InputSide::Returned, &returned_file.bytes, limits)?;
     let comparison = compare_surfaces(
         &reference_surface,
         &returned_surface,
@@ -401,7 +423,7 @@ struct FileSnapshot {
 }
 
 fn read_regular_file(
-    side: &str,
+    side: InputSide,
     path: &Path,
     max_file_bytes: u64,
 ) -> Result<FileSnapshot, RoundTripFailure> {
@@ -461,7 +483,7 @@ fn read_regular_file(
 // and unsupported platforms fail closed; Unix always supplies device/inode.
 #[allow(clippy::unnecessary_wraps)]
 fn require_file_identity(
-    _side: &str,
+    _side: InputSide,
     metadata: &Metadata,
 ) -> Result<FileIdentity, RoundTripFailure> {
     Ok(FileIdentity::from_metadata(metadata))
@@ -469,7 +491,7 @@ fn require_file_identity(
 
 #[cfg(windows)]
 fn require_file_identity(
-    side: &str,
+    side: InputSide,
     metadata: &Metadata,
 ) -> Result<FileIdentity, RoundTripFailure> {
     FileIdentity::from_metadata(metadata).ok_or_else(|| {
@@ -481,7 +503,7 @@ fn require_file_identity(
 
 #[cfg(not(any(unix, windows)))]
 fn require_file_identity(
-    side: &str,
+    side: InputSide,
     _metadata: &Metadata,
 ) -> Result<FileIdentity, RoundTripFailure> {
     Err(RoundTripFailure::invalid(format_args!(
@@ -489,7 +511,7 @@ fn require_file_identity(
     )))
 }
 
-fn check_file_bytes(side: &str, actual: u64, allowed: u64) -> Result<(), RoundTripFailure> {
+fn check_file_bytes(side: InputSide, actual: u64, allowed: u64) -> Result<(), RoundTripFailure> {
     if actual > allowed {
         return Err(RoundTripFailure::resource(format_args!(
             "{side} file bytes required {actual}; limit is {allowed}"
@@ -499,7 +521,7 @@ fn check_file_bytes(side: &str, actual: u64, allowed: u64) -> Result<(), RoundTr
 }
 
 fn read_bounded_bytes(
-    side: &str,
+    side: InputSide,
     file: &mut File,
     expected_bytes: u64,
     max_file_bytes: u64,
@@ -631,7 +653,7 @@ struct ParsedSurface {
 }
 
 fn parse_surface(
-    side: &str,
+    side: InputSide,
     bytes: &[u8],
     limits: RoundTripLimits,
 ) -> Result<ParsedSurface, RoundTripFailure> {
@@ -665,7 +687,7 @@ fn parse_surface(
     parse_landxml_document(side, &document, limits)
 }
 
-fn reject_xinclude(side: &str, document: &Document<'_>) -> Result<(), RoundTripFailure> {
+fn reject_xinclude(side: InputSide, document: &Document<'_>) -> Result<(), RoundTripFailure> {
     if document
         .descendants()
         .any(|node| node.is_element() && node.tag_name().namespace() == Some(XINCLUDE_NAMESPACE))
@@ -678,7 +700,7 @@ fn reject_xinclude(side: &str, document: &Document<'_>) -> Result<(), RoundTripF
 }
 
 fn check_xml_text_bytes(
-    side: &str,
+    side: InputSide,
     document: &Document<'_>,
     allowed: u64,
 ) -> Result<(), RoundTripFailure> {
@@ -697,7 +719,7 @@ fn check_xml_text_bytes(
 }
 
 fn add_text_bytes(
-    side: &str,
+    side: InputSide,
     current: u64,
     additional: usize,
     allowed: u64,
@@ -712,7 +734,7 @@ fn add_text_bytes(
 }
 
 fn parse_landxml_document(
-    side: &str,
+    side: InputSide,
     document: &Document<'_>,
     limits: RoundTripLimits,
 ) -> Result<ParsedSurface, RoundTripFailure> {
@@ -734,7 +756,7 @@ fn parse_landxml_document(
     validate_surface(side, surface, limits)
 }
 
-fn validate_root_children(side: &str, root: Node<'_, '_>) -> Result<(), RoundTripFailure> {
+fn validate_root_children(side: InputSide, root: Node<'_, '_>) -> Result<(), RoundTripFailure> {
     validate_allowed_children(side, root, &["Units", "Project", "Application", "Surfaces"])?;
     unique_child(side, root, "Surfaces")?;
     at_most_one_child(side, root, "Project")?;
@@ -742,7 +764,7 @@ fn validate_root_children(side: &str, root: Node<'_, '_>) -> Result<(), RoundTri
     Ok(())
 }
 
-fn validate_metric_units(side: &str, units: Node<'_, '_>) -> Result<(), RoundTripFailure> {
+fn validate_metric_units(side: InputSide, units: Node<'_, '_>) -> Result<(), RoundTripFailure> {
     validate_allowed_children(side, units, &["Metric"]).map_err(|_| unit_drift(side))?;
     let metric = unique_child(side, units, "Metric").map_err(|_| unit_drift(side))?;
     validate_allowed_children(side, metric, &[]).map_err(|_| unit_drift(side))?;
@@ -752,14 +774,14 @@ fn validate_metric_units(side: &str, units: Node<'_, '_>) -> Result<(), RoundTri
     Ok(())
 }
 
-fn unit_drift(side: &str) -> RoundTripFailure {
+fn unit_drift(side: InputSide) -> RoundTripFailure {
     RoundTripFailure::mismatch(format_args!(
         "{side} units do not declare exactly one Metric linearUnit=\"meter\""
     ))
 }
 
 fn validate_surface(
-    side: &str,
+    side: InputSide,
     surface: Node<'_, '_>,
     limits: RoundTripLimits,
 ) -> Result<ParsedSurface, RoundTripFailure> {
@@ -786,7 +808,7 @@ fn validate_surface(
 }
 
 fn parse_points(
-    side: &str,
+    side: InputSide,
     pnts: Node<'_, '_>,
     max_points: u64,
 ) -> Result<(Vec<Point>, BTreeMap<u64, usize>), RoundTripFailure> {
@@ -815,7 +837,7 @@ fn parse_points(
     Ok((points, point_ids))
 }
 
-fn parse_point_id(side: &str, node: Node<'_, '_>) -> Result<u64, RoundTripFailure> {
+fn parse_point_id(side: InputSide, node: Node<'_, '_>) -> Result<u64, RoundTripFailure> {
     let value = node
         .attribute("id")
         .ok_or_else(|| schema_error(side, "every P requires an id"))?;
@@ -830,7 +852,7 @@ fn parse_point_id(side: &str, node: Node<'_, '_>) -> Result<u64, RoundTripFailur
     Ok(id)
 }
 
-fn parse_position(side: &str, node: Node<'_, '_>) -> Result<[f64; 3], RoundTripFailure> {
+fn parse_position(side: InputSide, node: Node<'_, '_>) -> Result<[f64; 3], RoundTripFailure> {
     let text = simple_text(side, node, "P")?;
     let mut values = text.split_whitespace();
     let northing = parse_coordinate(side, values.next())?;
@@ -857,7 +879,7 @@ fn parse_position(side: &str, node: Node<'_, '_>) -> Result<[f64; 3], RoundTripF
     ])
 }
 
-fn parse_coordinate(side: &str, value: Option<&str>) -> Result<f64, RoundTripFailure> {
+fn parse_coordinate(side: InputSide, value: Option<&str>) -> Result<f64, RoundTripFailure> {
     value
         .ok_or_else(|| schema_error(side, "P must contain exactly northing easting elevation"))?
         .parse()
@@ -865,7 +887,7 @@ fn parse_coordinate(side: &str, value: Option<&str>) -> Result<f64, RoundTripFai
 }
 
 fn parse_faces(
-    side: &str,
+    side: InputSide,
     faces: Node<'_, '_>,
     points: &[Point],
     point_ids: &BTreeMap<u64, usize>,
@@ -896,7 +918,7 @@ fn parse_faces(
 }
 
 fn parse_face(
-    side: &str,
+    side: InputSide,
     node: Node<'_, '_>,
     point_ids: &BTreeMap<u64, usize>,
 ) -> Result<[usize; 3], RoundTripFailure> {
@@ -918,14 +940,18 @@ fn parse_face(
     Ok([resolve(a)?, resolve(b)?, resolve(c)?])
 }
 
-fn parse_face_id(side: &str, value: Option<&str>) -> Result<u64, RoundTripFailure> {
+fn parse_face_id(side: InputSide, value: Option<&str>) -> Result<u64, RoundTripFailure> {
     value
         .ok_or_else(|| schema_error(side, "F must contain exactly three point IDs"))?
         .parse()
         .map_err(|_| RoundTripFailure::invalid(format_args!("{side} F references are invalid")))
 }
 
-fn validate_face(side: &str, face: [usize; 3], points: &[Point]) -> Result<(), RoundTripFailure> {
+fn validate_face(
+    side: InputSide,
+    face: [usize; 3],
+    points: &[Point],
+) -> Result<(), RoundTripFailure> {
     if face[0] == face[1] || face[1] == face[2] || face[0] == face[2] {
         return Err(RoundTripFailure::invalid(format_args!(
             "{side} contains a face with repeated point references"
@@ -1076,7 +1102,7 @@ fn nonnegative_shift(value: i32) -> usize {
 }
 
 fn check_item_limit(
-    side: &str,
+    side: InputSide,
     item: &str,
     actual: usize,
     allowed: u64,
@@ -1090,7 +1116,7 @@ fn check_item_limit(
 }
 
 fn simple_text<'a>(
-    side: &str,
+    side: InputSide,
     node: Node<'a, '_>,
     element: &str,
 ) -> Result<&'a str, RoundTripFailure> {
@@ -1114,7 +1140,7 @@ fn simple_text<'a>(
 }
 
 fn validate_allowed_children(
-    side: &str,
+    side: InputSide,
     parent: Node<'_, '_>,
     allowed: &[&str],
 ) -> Result<(), RoundTripFailure> {
@@ -1135,7 +1161,7 @@ fn validate_allowed_children(
     Ok(())
 }
 
-fn require_tag(side: &str, node: Node<'_, '_>, name: &str) -> Result<(), RoundTripFailure> {
+fn require_tag(side: InputSide, node: Node<'_, '_>, name: &str) -> Result<(), RoundTripFailure> {
     if !node.has_tag_name((LANDXML_NAMESPACE, name)) {
         return Err(schema_error(side, "root is not LandXML 1.2"));
     }
@@ -1143,7 +1169,7 @@ fn require_tag(side: &str, node: Node<'_, '_>, name: &str) -> Result<(), RoundTr
 }
 
 fn unique_child<'a, 'input>(
-    side: &str,
+    side: InputSide,
     parent: Node<'a, 'input>,
     name: &str,
 ) -> Result<Node<'a, 'input>, RoundTripFailure> {
@@ -1160,7 +1186,11 @@ fn unique_child<'a, 'input>(
     Ok(child)
 }
 
-fn at_most_one_child(side: &str, parent: Node<'_, '_>, name: &str) -> Result<(), RoundTripFailure> {
+fn at_most_one_child(
+    side: InputSide,
+    parent: Node<'_, '_>,
+    name: &str,
+) -> Result<(), RoundTripFailure> {
     if element_children(parent)
         .filter(|node| node.has_tag_name((LANDXML_NAMESPACE, name)))
         .count()
@@ -1177,7 +1207,7 @@ fn element_children<'a, 'input>(node: Node<'a, 'input>) -> impl Iterator<Item = 
     node.children().filter(Node::is_element)
 }
 
-fn schema_error(side: &str, message: &'static str) -> RoundTripFailure {
+fn schema_error(side: InputSide, message: &'static str) -> RoundTripFailure {
     RoundTripFailure::invalid(format_args!("{side} schema is unsupported: {message}"))
 }
 
