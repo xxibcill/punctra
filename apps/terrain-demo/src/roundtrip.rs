@@ -3,7 +3,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     error::Error,
-    fmt::{self, Write as _},
+    fmt,
     fs::{self, File, Metadata},
     io::{Read as _, Seek as _, SeekFrom},
     path::Path,
@@ -13,13 +13,13 @@ use num_bigint::BigInt;
 use robust::{Coord, orient2d};
 use roxmltree::{Document, Node, ParsingOptions};
 
+use crate::bounded_diagnostic::BoundedDiagnostic;
+
 const LANDXML_NAMESPACE: &str = "http://www.landxml.org/schema/LandXML-1.2";
 const XINCLUDE_NAMESPACE: &str = "http://www.w3.org/2001/XInclude";
-const MAX_DIAGNOSTIC_BYTES: usize = 1_024;
 const MAX_APPLICATION_BYTES: usize = 128;
 const MAX_VERSION_BYTES: usize = 128;
 const MAX_SETTINGS_PROFILE_BYTES: usize = 1_024;
-const ELLIPSIS: &str = "...";
 
 const DEFAULT_MAX_FILE_BYTES: u64 = 256 * 1_024 * 1_024;
 const DEFAULT_MAX_XML_NODES: u64 = 8_000_000;
@@ -212,13 +212,13 @@ impl RoundTripFailure {
     }
 
     pub(crate) fn diagnostic(&self) -> &str {
-        &self.diagnostic.0
+        self.diagnostic.as_str()
     }
 }
 
 impl fmt::Display for RoundTripFailure {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(formatter, "{}: {}", self.kind.as_str(), self.diagnostic.0)
+        write!(formatter, "{}: {}", self.kind.as_str(), self.diagnostic)
     }
 }
 
@@ -1437,58 +1437,6 @@ fn canonical_face(mut face: [usize; 3]) -> [usize; 3] {
 
 const fn canonical_zero(value: f64) -> f64 {
     if value == 0.0 { 0.0 } else { value }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct BoundedDiagnostic(Box<str>);
-
-impl BoundedDiagnostic {
-    fn new(message: impl fmt::Display) -> Self {
-        let mut output = CappedFormatter::new();
-        let _ = write!(&mut output, "{message}");
-        Self(output.text.into_boxed_str())
-    }
-}
-
-struct CappedFormatter {
-    text: String,
-    truncated: bool,
-}
-
-impl CappedFormatter {
-    fn new() -> Self {
-        let mut text = String::new();
-        let _ = text.try_reserve_exact(MAX_DIAGNOSTIC_BYTES);
-        Self {
-            text,
-            truncated: false,
-        }
-    }
-}
-
-impl fmt::Write for CappedFormatter {
-    fn write_str(&mut self, value: &str) -> fmt::Result {
-        if self.truncated {
-            return Ok(());
-        }
-        let remaining = MAX_DIAGNOSTIC_BYTES.saturating_sub(self.text.len());
-        if value.len() <= remaining {
-            self.text.push_str(value);
-            return Ok(());
-        }
-        let mut end = remaining;
-        while !value.is_char_boundary(end) {
-            end -= 1;
-        }
-        self.text.push_str(&value[..end]);
-        let target = MAX_DIAGNOSTIC_BYTES - ELLIPSIS.len();
-        while self.text.len() > target {
-            self.text.pop();
-        }
-        self.text.push_str(ELLIPSIS);
-        self.truncated = true;
-        Ok(())
-    }
 }
 
 #[cfg(test)]

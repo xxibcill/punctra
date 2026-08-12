@@ -1,13 +1,12 @@
-use std::fmt::{self, Write as _};
+use std::fmt;
 
 use foundation_runtime::RuntimeError;
 use point_contracts::SourceId;
 use point_workspace::{OperationId, RevisionId, WorkspaceId};
 
-use crate::journal::WorkflowRunId;
-
-const MAX_DIAGNOSTIC_BYTES: usize = 1_024;
-const ELLIPSIS: &str = "...";
+#[cfg(test)]
+use crate::bounded_diagnostic::MAX_DIAGNOSTIC_BYTES;
+use crate::{bounded_diagnostic::BoundedDiagnostic, journal::WorkflowRunId};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum FailureCode {
@@ -202,58 +201,6 @@ impl RecoveryAction {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-struct BoundedDiagnostic(Box<str>);
-
-impl BoundedDiagnostic {
-    fn new(message: impl fmt::Display) -> Self {
-        let mut output = CappedFormatter::new();
-        let _ = write!(&mut output, "{message}");
-        Self(output.text.into_boxed_str())
-    }
-}
-
-struct CappedFormatter {
-    text: String,
-    truncated: bool,
-}
-
-impl CappedFormatter {
-    fn new() -> Self {
-        let mut text = String::new();
-        let _ = text.try_reserve_exact(MAX_DIAGNOSTIC_BYTES);
-        Self {
-            text,
-            truncated: false,
-        }
-    }
-}
-
-impl fmt::Write for CappedFormatter {
-    fn write_str(&mut self, value: &str) -> fmt::Result {
-        if self.truncated {
-            return Ok(());
-        }
-        let remaining = MAX_DIAGNOSTIC_BYTES.saturating_sub(self.text.len());
-        if value.len() <= remaining {
-            self.text.push_str(value);
-            return Ok(());
-        }
-        let mut end = remaining;
-        while !value.is_char_boundary(end) {
-            end -= 1;
-        }
-        self.text.push_str(&value[..end]);
-        let target = MAX_DIAGNOSTIC_BYTES - ELLIPSIS.len();
-        while self.text.len() > target {
-            self.text.pop();
-        }
-        self.text.push_str(ELLIPSIS);
-        self.truncated = true;
-        Ok(())
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
 /// Bounded structured Workflow failure with exactly one safe recovery action.
 pub struct WorkflowFailure {
     pub(crate) code: FailureCode,
@@ -303,7 +250,7 @@ impl WorkflowFailure {
     }
 
     pub(crate) fn diagnostic(&self) -> &str {
-        &self.diagnostic.0
+        self.diagnostic.as_str()
     }
 
     /// Returns the stable machine-readable failure code.
@@ -405,12 +352,6 @@ impl fmt::Display for WorkflowFailure {
             self.diagnostic,
             self.action.as_str()
         )
-    }
-}
-
-impl fmt::Display for BoundedDiagnostic {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&self.0)
     }
 }
 

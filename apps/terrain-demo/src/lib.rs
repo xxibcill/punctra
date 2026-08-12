@@ -3,6 +3,7 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+mod bounded_diagnostic;
 mod cli;
 mod diagnostic;
 mod journal;
