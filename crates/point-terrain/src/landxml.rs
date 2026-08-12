@@ -1239,10 +1239,10 @@ fn same_file_identity(left: &fs::Metadata, right: &fs::Metadata) -> bool {
 fn same_file_identity(left: &fs::Metadata, right: &fs::Metadata) -> bool {
     use std::os::windows::fs::MetadataExt;
 
-    left.file_attributes() == right.file_attributes()
-        && left.creation_time() == right.creation_time()
-        && left.last_write_time() == right.last_write_time()
-        && left.file_size() == right.file_size()
+    left.volume_serial_number().is_some()
+        && left.volume_serial_number() == right.volume_serial_number()
+        && left.file_index().is_some()
+        && left.file_index() == right.file_index()
 }
 
 #[cfg(not(any(unix, windows)))]
@@ -1681,10 +1681,7 @@ fn same_directory_identity(left: &fs::Metadata, right: &fs::Metadata) -> bool {
 
 #[cfg(windows)]
 fn same_directory_identity(left: &fs::Metadata, right: &fs::Metadata) -> bool {
-    use std::os::windows::fs::MetadataExt;
-
-    left.file_attributes() == right.file_attributes()
-        && left.creation_time() == right.creation_time()
+    same_file_identity(left, right)
 }
 
 #[cfg(not(any(unix, windows)))]
@@ -1803,6 +1800,25 @@ mod tests {
 
     use super::*;
     use crate::{TerrainLimits, TerrainRecipe};
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_identity_distinguishes_distinct_same_content_files() {
+        let fixture = ExportFixture::new("windows-identity");
+        let original = fixture.path("original.bin");
+        let linked = fixture.path("linked.bin");
+        let distinct = fixture.path("distinct.bin");
+        fs::write(&original, b"same bytes").expect("write original identity fixture");
+        fs::hard_link(&original, &linked).expect("create same-file hard link");
+        fs::write(&distinct, b"same bytes").expect("write distinct identity fixture");
+
+        let original = fs::metadata(original).expect("inspect original identity");
+        let linked = fs::metadata(linked).expect("inspect linked identity");
+        let distinct = fs::metadata(distinct).expect("inspect distinct identity");
+
+        assert!(same_file_identity(&original, &linked));
+        assert!(!same_file_identity(&original, &distinct));
+    }
 
     const GROUND: u8 = 2;
 
