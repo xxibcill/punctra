@@ -21,6 +21,14 @@ const GROUND: u8 = 2;
 
 static NEXT_OUTPUT: AtomicU64 = AtomicU64::new(1);
 
+struct BorrowedText<'a>(&'a str);
+
+impl AsRef<str> for BorrowedText<'_> {
+    fn as_ref(&self) -> &str {
+        self.0
+    }
+}
+
 fn planar_surface(label: &str) -> (TerrainFixture, TerrainSurface) {
     let fixture = TerrainFixture::new(
         label,
@@ -39,8 +47,12 @@ fn asserted_options(name: &str) -> LandXmlOptions {
 
 #[test]
 fn options_require_bounded_xml_text_and_explicit_valid_root_date_time() {
-    let options = LandXmlOptions::metric_metres("Existing Ground", "2024-02-29", "00:00:00Z")
-        .expect("leap-day options are valid");
+    let options = LandXmlOptions::metric_metres(
+        BorrowedText("Existing Ground"),
+        BorrowedText("2024-02-29"),
+        BorrowedText("00:00:00Z"),
+    )
+    .expect("leap-day options are valid");
     assert_eq!(options.surface_name(), "Existing Ground");
     assert_eq!(options.document_date(), "2024-02-29");
     assert_eq!(options.document_time(), "00:00:00Z");
@@ -64,6 +76,39 @@ fn options_require_bounded_xml_text_and_explicit_valid_root_date_time() {
         assert!(LandXmlOptions::metric_metres(name, date, time).is_err());
     }
     assert!(LandXmlOptions::metric_metres("x".repeat(1_025), "2026-08-10", "00:00:00Z").is_err());
+}
+
+#[test]
+fn target_path_is_checked_before_the_export_job_copies_it() {
+    let (_fixture, surface) = planar_surface("landxml-target-path-limit");
+    let output = TemporaryOutput::new("target-path-limit");
+    let target = output.path("terrain.xml");
+    let target_bytes = u64::try_from(target.as_os_str().as_encoded_bytes().len())
+        .expect("fixture target length fits u64");
+    let limits = replace_byte_limits(
+        LandXmlLimits::default(),
+        None,
+        None,
+        None,
+        None,
+        Some(target_bytes - 1),
+    );
+
+    let error = surface
+        .export_landxml(&target, asserted_options("Ground"), limits)
+        .blocking_wait()
+        .expect_err("target path exceeds the export working ceiling");
+
+    assert!(matches!(
+        error,
+        TerrainError::ResourceLimit {
+            limit: "LandXML working bytes",
+            required,
+            allowed,
+        } if required == target_bytes && allowed == target_bytes - 1
+    ));
+    assert!(!target.exists());
+    output.assert_no_stages();
 }
 
 #[test]

@@ -1,4 +1,5 @@
 use std::{
+    ffi::OsString,
     fmt::{self, Write as _},
     fs::{self, File, OpenOptions},
     io::{self, Read, Write},
@@ -67,20 +68,20 @@ impl LandXmlOptions {
     /// XML-invalid Surface name, an impossible calendar date, or an invalid
     /// UTC time.
     pub fn metric_metres(
-        surface_name: impl Into<String>,
-        document_date: impl Into<String>,
-        document_time: impl Into<String>,
+        surface_name: impl AsRef<str>,
+        document_date: impl AsRef<str>,
+        document_time: impl AsRef<str>,
     ) -> Result<Self, TerrainError> {
-        let surface_name = surface_name.into();
-        validate_surface_name(&surface_name)?;
-        let document_date = document_date.into();
-        validate_date(&document_date)?;
-        let document_time = document_time.into();
-        validate_time(&document_time)?;
+        let surface_name = surface_name.as_ref();
+        let document_date = document_date.as_ref();
+        let document_time = document_time.as_ref();
+        validate_surface_name(surface_name)?;
+        validate_date(document_date)?;
+        validate_time(document_time)?;
         Ok(Self {
-            surface_name: surface_name.into_boxed_str(),
-            document_date: document_date.into_boxed_str(),
-            document_time: document_time.into_boxed_str(),
+            surface_name: surface_name.into(),
+            document_date: document_date.into(),
+            document_time: document_time.into(),
             coordinates_are_metric_metres: false,
         })
     }
@@ -128,24 +129,74 @@ pub(crate) fn start(
     limits: LandXmlLimits,
 ) -> LandXmlJob {
     let surface = surface.clone();
-    let target = target.as_ref().to_path_buf();
+    let target = copy_target_path(target.as_ref(), limits);
     Job::spawn(move |control| {
-        publish(
+        let target = target?;
+        publish_accounted(
             &surface,
-            &target,
+            &target.path,
             &options,
             limits,
+            target.allocated_bytes,
             &control,
             &ProductionPublicationHook,
         )
     })
 }
 
+struct OwnedTargetPath {
+    path: PathBuf,
+    allocated_bytes: u64,
+}
+
+fn copy_target_path(target: &Path, limits: LandXmlLimits) -> Result<OwnedTargetPath, TerrainError> {
+    let requested = target.as_os_str().as_encoded_bytes().len();
+    let requested_bytes = u64::try_from(requested).unwrap_or(u64::MAX);
+    require_limit(
+        "LandXML working bytes",
+        requested_bytes,
+        limits.max_working_bytes(),
+    )?;
+
+    let mut storage = OsString::new();
+    storage.try_reserve_exact(requested).map_err(|_| {
+        TerrainError::resource(
+            "LandXML target path allocation",
+            requested_bytes,
+            limits.max_working_bytes(),
+        )
+    })?;
+    storage.push(target.as_os_str());
+    let allocated_bytes = u64::try_from(storage.capacity()).unwrap_or(u64::MAX);
+    require_limit(
+        "LandXML working bytes",
+        allocated_bytes,
+        limits.max_working_bytes(),
+    )?;
+    Ok(OwnedTargetPath {
+        path: storage.into(),
+        allocated_bytes,
+    })
+}
+
+#[cfg(test)]
 fn publish<H: PublicationHook>(
     surface: &TerrainSurface,
     target: &Path,
     options: &LandXmlOptions,
     limits: LandXmlLimits,
+    control: &OperationControl,
+    hook: &H,
+) -> Result<LandXmlReceipt, TerrainError> {
+    publish_accounted(surface, target, options, limits, 0, control, hook)
+}
+
+fn publish_accounted<H: PublicationHook>(
+    surface: &TerrainSurface,
+    target: &Path,
+    options: &LandXmlOptions,
+    limits: LandXmlLimits,
+    retained_target_bytes: u64,
     control: &OperationControl,
     hook: &H,
 ) -> Result<LandXmlReceipt, TerrainError> {
@@ -168,7 +219,7 @@ fn publish<H: PublicationHook>(
         }
     }
 
-    let write_buffer = allocate_write_buffer(limits)?;
+    let write_buffer = allocate_write_buffer(limits, retained_target_bytes)?;
     let buffer_bytes = write_buffer.capacity();
     let (stage_path, stage_file) = create_stage(parent)?;
     let mut stage = StageGuard::new(stage_path);
@@ -203,7 +254,13 @@ fn publish<H: PublicationHook>(
     )?)?;
     // Verification reopens the synced, closed stage through read-only
     // `File::open`; no mutable encoder handle or timestamp is reused.
-    let verified = verify_file(stage.path(), buffer_bytes, limits, Some(control))?;
+    let verified = verify_file(
+        stage.path(),
+        buffer_bytes,
+        retained_target_bytes,
+        limits,
+        Some(control),
+    )?;
     if verified != expected {
         return Err(TerrainError::topology(
             "staged LandXML bytes changed during read-back verification",
@@ -234,6 +291,7 @@ fn publish<H: PublicationHook>(
             target,
             parent,
             buffer_bytes,
+            retained_target_bytes,
             limits,
             total_progress,
         },
@@ -245,6 +303,7 @@ struct PublicationCompletion<'a> {
     target: &'a Path,
     parent: &'a Path,
     buffer_bytes: usize,
+    retained_target_bytes: u64,
     limits: LandXmlLimits,
     total_progress: u64,
 }
@@ -266,6 +325,7 @@ fn finish_publication<H: PublicationHook>(
     let published = verify_file(
         completion.target,
         completion.buffer_bytes,
+        completion.retained_target_bytes,
         completion.limits,
         None,
     )
@@ -675,12 +735,19 @@ fn create_stage(parent: &Path) -> Result<(PathBuf, File), TerrainError> {
 fn verify_file(
     path: &Path,
     buffer_bytes: usize,
+    retained_target_bytes: u64,
     limits: LandXmlLimits,
     control: Option<&OperationControl>,
 ) -> Result<FileFacts, TerrainError> {
     let mut file = File::open(path).map_err(|error| {
         TerrainError::io("open LandXML for verification", path.display(), error)
     })?;
+    require_working_allocation(
+        "LandXML verification working bytes",
+        retained_target_bytes,
+        u64::try_from(buffer_bytes).unwrap_or(u64::MAX),
+        limits,
+    )?;
     let mut buffer = Vec::new();
     buffer.try_reserve_exact(buffer_bytes).map_err(|_| {
         TerrainError::resource(
@@ -690,10 +757,11 @@ fn verify_file(
         )
     })?;
     buffer.resize(buffer_bytes, 0);
-    require_limit(
+    require_working_allocation(
         "LandXML verification working bytes",
+        retained_target_bytes,
         u64::try_from(buffer.capacity()).unwrap_or(u64::MAX),
-        limits.max_working_bytes(),
+        limits,
     )?;
     let mut hasher = Hasher::new();
     let mut bytes = 0_u64;
@@ -724,7 +792,10 @@ fn sync_directory(path: &Path) -> io::Result<()> {
     File::open(path)?.sync_all()
 }
 
-fn allocate_write_buffer(limits: LandXmlLimits) -> Result<Vec<u8>, TerrainError> {
+fn allocate_write_buffer(
+    limits: LandXmlLimits,
+    retained_target_bytes: u64,
+) -> Result<Vec<u8>, TerrainError> {
     if limits.max_write_buffer_bytes() == 0 {
         return Err(TerrainError::resource(
             "LandXML write buffer bytes",
@@ -732,16 +803,17 @@ fn allocate_write_buffer(limits: LandXmlLimits) -> Result<Vec<u8>, TerrainError>
             limits.max_write_buffer_bytes(),
         ));
     }
-    if limits.max_working_bytes() == 0 {
+    let available_working = limits
+        .max_working_bytes()
+        .saturating_sub(retained_target_bytes);
+    if available_working == 0 {
         return Err(TerrainError::resource(
             "LandXML working bytes",
-            1,
+            retained_target_bytes.saturating_add(1),
             limits.max_working_bytes(),
         ));
     }
-    let allowed = limits
-        .max_write_buffer_bytes()
-        .min(limits.max_working_bytes());
+    let allowed = limits.max_write_buffer_bytes().min(available_working);
     let requested = usize::try_from(allowed.min(64 * 1024)).map_err(|_| {
         TerrainError::resource(
             "LandXML write buffer bytes",
@@ -763,8 +835,26 @@ fn allocate_write_buffer(limits: LandXmlLimits) -> Result<Vec<u8>, TerrainError>
         actual,
         limits.max_write_buffer_bytes(),
     )?;
-    require_limit("LandXML working bytes", actual, limits.max_working_bytes())?;
+    require_working_allocation(
+        "LandXML working bytes",
+        retained_target_bytes,
+        actual,
+        limits,
+    )?;
     Ok(buffer)
+}
+
+fn require_working_allocation(
+    name: &'static str,
+    retained_bytes: u64,
+    allocation_bytes: u64,
+    limits: LandXmlLimits,
+) -> Result<(), TerrainError> {
+    require_limit(
+        name,
+        retained_bytes.saturating_add(allocation_bytes),
+        limits.max_working_bytes(),
+    )
 }
 
 fn require_limit(name: &'static str, required: u64, allowed: u64) -> Result<(), TerrainError> {
