@@ -3,49 +3,60 @@
 All notable changes to Punctra are documented here. The project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased - 0.9.0-alpha.1
+## 0.9.0 - 2026-08-13
 
-- Started the accepted v0.9 Trust and v1 Candidate repository design from the
-  exact `926ba7f` v0.8 alpha base. v0.8 remains an incomplete alpha rather
-  than being relabeled Complete; its Run-bound qualification and canonical
-  evidence work is an explicit prerequisite within v0.9.
-- Fixed the initial trust scope around the existing narrow headless workflow:
-  extend the inherited owner-local Spatial Index v1 fixtures to the remaining
-  persisted-v1 compatibility surface, qualify recovery and disk-failure
-  behavior, publish a support matrix, review public interfaces, and reproduce
-  local resource and performance evidence. No new format, Edit, terrain, UI,
-  networking, or transformation family is authorized.
-- Mapped Spatial Index filesystem failures at the private Workflow seam to the
-  stable `PWF_IO` category with the existing restore-disk-and-resume action
-  instead of misclassifying them as internal failures. The current index API
-  exposes no publication-phase witness, so the Workflow reports conservative
-  `index-target` indeterminate certainty and requires reconciliation by
-  resuming. The
-  bounded diagnostic retains the rendered index operation, path, and operating-
-  system error, subject to its 1,024-byte cap. Safe recovery of a partially
-  written initial `.work` header remains an explicit v0.9 hardening gate; this
-  slice does not delete that path.
+- Completed the narrow Trust and v1 Candidate repository design from the exact
+  `9a8363a0d807990209f8252d93229c7f9464c923` v0.8 base. The completed v0.8
+  repository interoperability-qualification slice remains distinct from its
+  still-outstanding external product-MVP gates.
+- Froze owner-local version-1 Source Record, Spatial Index, Workspace, Workflow
+  Run, report, LandXML, and Round-Trip Evidence fixtures with exact manifests,
+  reopen/reconciliation coverage, and future-version, truncation, checksum,
+  lineage, binding, and semantic mutation cases appropriate to each artifact
+  class.
+- Hardened index, Workspace, journal, LandXML, report, and evidence persistence
+  around descriptor-bound no-replace publication, open target witnesses,
+  destination and parent-directory durability, late binding checks, retained
+  private stages, and conservative post-publication certainty without deleting
+  replaceable pathnames.
+- Preserved filesystem and publication failures through the private Workflow
+  taxonomy with bounded diagnostics and one safe recovery action. Recoverable
+  I/O remains distinct from invalid input, conflict, semantic failure, and
+  indeterminate publication.
+- Qualified the existing Complete-Run LandXML verifier with bounded streaming,
+  canonical pass/fail evidence, strict read-only Run/report/input binding, a
+  frozen generated corpus, exact-existing reconciliation, and adversarial
+  parser/resource/publication coverage.
+- Froze the version-1 support matrix and public-interface review, documented
+  upgrade/rebuild/recovery policy, and recorded the complete local formatting,
+  lint, test, rustdoc, fuzz, example, Criterion, and forced-GPU acceptance
+  sequence. No new format, Edit, terrain, UI, networking, transformation, or
+  product feature family was added.
 
-## Unreleased - 0.8.0-alpha.1
+## 0.8.0-alpha.1 - 2026-08-13
 
-- Accepted and activated the narrow v0.8 repository interoperability-
-  qualification design. The planned private `terrain-demo` path will compare a
-  caller-returned semantic LandXML 1.2 TIN with one Complete v0.7 Run and emit
-  a separate bounded canonical Round-Trip Evidence record.
+- Implemented the narrow v0.8 repository interoperability-qualification
+  design. The private `terrain-demo` path compares a caller-returned semantic
+  LandXML 1.2 TIN with one Complete v0.7 Run and emits a separate bounded
+  canonical Round-Trip Evidence record.
 - Fixed the caller declaration, bounded fail-closed parsing, explicit metric-
   metre unit checks, unique tolerance mapping, ambiguity rejection, exact face-
   topology comparison, no-overwrite evidence publication, and external-
-  evidence boundaries before the pending Run-bound publication slice.
-- Implemented the first two private delivery slices: bounded regular-file and
+  evidence boundaries.
+- Implemented the file-comparison delivery slices: bounded regular-file and
   DOM-backed LandXML subset parsing, unique tolerance matching, normalized TIN
   topology comparison, focused portability and semantic regressions, and an
   explicitly non-Run-bound `compare-landxml` CLI/process path. Its output
   states that canonical evidence was not published and external application
   execution was not verified.
-- Bumped workspace version metadata to `0.8.0-alpha.1`. This initial work does
-  not implement Run binding or evidence publication, alter the v0.7 eight-frame
-  journal or `audit.json`, complete the product MVP, or claim actual Civil 3D,
-  Bentley, partner, paid-pilot, conversion, or labor-savings evidence.
+- Added strict read-only Complete-Run binding, streaming LandXML coverage for
+  the full v0.7 export ceiling, stable semantic reason codes, canonical pass and
+  fail evidence, exact-existing reconciliation, no-replace publication, and
+  publication-fault/process regressions through `verify-round-trip`.
+- Bumped workspace version metadata to `0.8.0-alpha.1`. This repository slice
+  does not alter the v0.7 eight-frame journal or `audit.json`, complete the
+  product MVP, or claim actual Civil 3D, Bentley, partner, paid-pilot,
+  conversion, or labor-savings evidence.
 
 ## 0.7.0-alpha.1 - 2026-08-11
 

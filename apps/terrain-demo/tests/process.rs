@@ -3,6 +3,7 @@
 mod support;
 
 use std::{
+    collections::BTreeMap,
     fs,
     path::PathBuf,
     process::{Command, Output},
@@ -89,222 +90,247 @@ fn thin_process_starts_resumes_and_inspects_one_durable_run() {
 }
 
 #[test]
-fn verify_round_trip_publishes_deterministic_pass_and_semantic_failure_evidence() {
-    let fixture = ProcessFixture::new("qualification");
+fn verify_round_trip_binds_complete_run_and_reconciles_canonical_evidence() {
+    let fixture = ProcessFixture::new("round-trip-evidence");
     assert_success(&fixture.run("start"));
-    let run_before = snapshot_run(&fixture.run_root);
-    let original = fs::read(fixture.run_root.join("terrain.xml")).unwrap();
+    let journal_before = fs::read(fixture.run_root.join("run.pwf")).unwrap();
+    let landxml_before = fs::read(fixture.run_root.join("terrain.xml")).unwrap();
+    let audit_before = fs::read(fixture.run_root.join("audit.json")).unwrap();
     let returned = fixture.directory.path().join("returned.xml");
-    fs::write(&returned, &original).unwrap();
-    let passing = fixture.directory.path().join("passing-evidence.json");
+    let evidence = fixture.directory.path().join("round-trip.json");
+    fs::write(&returned, &landxml_before).expect("write returned LandXML fixture");
 
-    let passed = fixture.verify(&returned, &passing, ["format=LandXML;1.2", "units=meter"]);
-    assert_success(&passed);
-    let stdout = String::from_utf8_lossy(&passed.stdout);
-    assert!(stdout.contains("Round-Trip Evidence passed"), "{stdout}");
-    assert!(stdout.contains("evidence hash "), "{stdout}");
-    let passing_bytes = fs::read(&passing).unwrap();
-    let passing_json: serde_json::Value = serde_json::from_slice(&passing_bytes).unwrap();
+    let first = fixture.verify_round_trip(&returned, &evidence);
+    assert_success(&first);
+    let first_summary = String::from_utf8_lossy(&first.stdout);
+    for expected in [
+        "LandXML round-trip passed",
+        &format!("Run {}", hex(&RUN_ID)),
+        "canonical evidence published true",
+        "evidence hash ",
+        "evidence bytes ",
+        "external application execution verified false",
+    ] {
+        assert!(
+            first_summary.contains(expected),
+            "missing {expected:?}\n{first_summary}"
+        );
+    }
+    let evidence_bytes = fs::read(&evidence).expect("read canonical evidence");
+    let document: serde_json::Value =
+        serde_json::from_slice(&evidence_bytes).expect("parse canonical evidence");
     assert_eq!(
-        passing_json["schema"],
+        document["schema"],
         "punctra.terrain-demo.landxml-round-trip-evidence.v1"
     );
-    assert_eq!(passing_json["result"], "passed");
+    assert_eq!(document["result"], "passed");
+    assert_eq!(document["run"]["run_id"], hex(&RUN_ID));
+    assert_eq!(document["checks"]["provenance"]["status"], "passed");
+    assert_eq!(document["checks"]["topology"]["status"], "passed");
     assert_eq!(
-        passing_json["downstream_declaration"]["settings"][0]["key"],
-        "format"
+        document["nonclaims"]["punctra_observed_downstream_execution"],
+        false
+    );
+
+    let second = fixture.verify_round_trip(&returned, &evidence);
+    assert_success(&second);
+    assert_eq!(first.stdout, second.stdout);
+    assert_eq!(fs::read(&evidence).unwrap(), evidence_bytes);
+    assert_eq!(
+        fs::read(fixture.run_root.join("run.pwf")).unwrap(),
+        journal_before
     );
     assert_eq!(
-        passing_json["downstream_declaration"]["settings"][0]["value"],
-        "LandXML;1.2"
-    );
-    assert_eq!(snapshot_run(&fixture.run_root), run_before);
-
-    let reconciled = fixture.verify(&returned, &passing, ["units=meter", "format=LandXML;1.2"]);
-    assert_success(&reconciled);
-    assert!(
-        String::from_utf8_lossy(&reconciled.stdout).contains("disposition reconciled_existing")
-    );
-    assert_eq!(fs::read(&passing).unwrap(), passing_bytes);
-
-    let returned_text = String::from_utf8(original).unwrap();
-    let point_start = returned_text.find("<P id=\"").unwrap();
-    let coordinate_start = returned_text[point_start..].find('>').unwrap() + point_start + 1;
-    let coordinate_end = returned_text[coordinate_start..].find('<').unwrap() + coordinate_start;
-    let mut coordinates = returned_text[coordinate_start..coordinate_end]
-        .split_whitespace()
-        .map(str::to_owned)
-        .collect::<Vec<_>>();
-    coordinates[1] = format!("{:.17}", coordinates[1].parse::<f64>().unwrap() + 100.0);
-    let returned_text = format!(
-        "{}{}{}",
-        &returned_text[..coordinate_start],
-        coordinates.join(" "),
-        &returned_text[coordinate_end..]
-    );
-    fs::write(&returned, returned_text).unwrap();
-    let failed_target = fixture.directory.path().join("failed-evidence.json");
-    let failed = fixture.verify(
-        &returned,
-        &failed_target,
-        ["format=LandXML;1.2", "units=meter"],
-    );
-    assert!(!failed.status.success());
-    let diagnostic = String::from_utf8_lossy(&failed.stderr);
-    assert!(diagnostic.contains("PRT_SEMANTIC_MISMATCH"), "{diagnostic}");
-    assert!(diagnostic.contains("hash "), "{diagnostic}");
-    assert!(diagnostic.contains("bytes "), "{diagnostic}");
-    let failed_json: serde_json::Value =
-        serde_json::from_slice(&fs::read(&failed_target).unwrap()).unwrap();
-    assert_eq!(failed_json["result"], "failed");
-    assert_eq!(
-        failed_json["checks"]["unique_mapping"]["reason"],
-        "PRT_TOLERANCE_DRIFT"
-    );
-    assert_eq!(snapshot_run(&fixture.run_root), run_before);
-    write_qualification_corpus_if_requested(&fixture, &returned, &passing, &failed_target);
-}
-
-#[test]
-fn verify_round_trip_operational_failures_publish_no_evidence_and_preserve_inputs() {
-    let fixture = ProcessFixture::new("qualification-fail-closed");
-    assert_success(&fixture.run("start"));
-    let run_before = snapshot_run(&fixture.run_root);
-    let returned = fixture.directory.path().join("returned.xml");
-    fs::write(&returned, b"<not-complete").unwrap();
-    let evidence = fixture.directory.path().join("evidence.json");
-    let malformed = fixture.verify(&returned, &evidence, ["units=meter"]);
-    assert!(!malformed.status.success());
-    assert!(!evidence.exists());
-    assert_eq!(snapshot_run(&fixture.run_root), run_before);
-
-    let journal = fixture.run_root.join("run.pwf");
-    let mut torn = fs::read(&journal).unwrap();
-    torn.pop();
-    overwrite_and_sync(&journal, &torn).unwrap();
-    fs::write(
-        &returned,
         fs::read(fixture.run_root.join("terrain.xml")).unwrap(),
-    )
-    .unwrap();
-    let torn_before = fs::read(&journal).unwrap();
-    let rejected = fixture.verify(&returned, &evidence, ["units=meter"]);
-    assert!(!rejected.status.success());
+        landxml_before
+    );
     assert_eq!(
-        fs::read(&journal).unwrap(),
-        torn_before,
-        "qualification must not repair"
+        fs::read(fixture.run_root.join("audit.json")).unwrap(),
+        audit_before
     );
-    assert!(!evidence.exists());
+    write_qualification_corpus_if_requested(&fixture, &returned, &evidence);
 }
 
 #[test]
-fn verify_round_trip_rejects_same_file_and_preserves_conflicting_evidence() {
-    let fixture = ProcessFixture::new("qualification-targets");
-    assert_success(&fixture.run("start"));
-    let evidence = fixture.directory.path().join("evidence.json");
-    let same = fixture.verify(
-        &fixture.run_root.join("terrain.xml"),
-        &evidence,
-        ["units=meter"],
-    );
-    assert!(!same.status.success());
-    assert!(!evidence.exists());
-    assert!(
-        String::from_utf8_lossy(&same.stderr).contains("must be a distinct file"),
-        "{}",
-        String::from_utf8_lossy(&same.stderr)
-    );
-
-    let returned = fixture.directory.path().join("returned.xml");
-    fs::copy(fixture.run_root.join("terrain.xml"), &returned).unwrap();
-    let caller = b"caller-owned evidence conflict\n";
-    fs::write(&evidence, caller).unwrap();
-    let conflict = fixture.verify(&returned, &evidence, ["units=meter"]);
-    assert!(!conflict.status.success());
-    assert_eq!(fs::read(&evidence).unwrap(), caller);
-}
-
-#[test]
-fn verify_round_trip_publishes_unit_and_duplicate_face_failures() {
-    let fixture = ProcessFixture::new("qualification-semantic-families");
+fn verify_round_trip_publishes_failed_evidence_but_not_operational_failures() {
+    let fixture = ProcessFixture::new("round-trip-failed-evidence");
     assert_success(&fixture.run("start"));
     let original = fs::read_to_string(fixture.run_root.join("terrain.xml")).unwrap();
-    let units_start = original.find("  <Units>").unwrap();
-    let units_end = original.find("  </Units>\n").unwrap() + "  </Units>\n".len();
-    let units = &original[units_start..units_end];
-    for (name, replacement) in [
-        ("missing", String::new()),
-        ("duplicate", format!("{units}{units}")),
-        (
-            "imperial",
-            "  <Units><Imperial linearUnit=\"foot\"/></Units>\n".to_owned(),
-        ),
-        (
-            "non-meter",
-            "  <Units><Metric linearUnit=\"millimeter\"/></Units>\n".to_owned(),
-        ),
-    ] {
-        let returned = fixture.directory.path().join(format!("{name}.xml"));
-        fs::write(
-            &returned,
-            format!(
-                "{}{}{}",
-                &original[..units_start],
-                replacement,
-                &original[units_end..]
-            ),
-        )
-        .unwrap();
-        let evidence = fixture.directory.path().join(format!("{name}.json"));
-        let output = fixture.verify(&returned, &evidence, ["units=declared"]);
-        assert!(!output.status.success(), "{}", diagnostics(&output));
-        let value: serde_json::Value =
-            serde_json::from_slice(&fs::read(&evidence).unwrap()).unwrap();
-        assert_eq!(value["result"], "failed");
-        assert_eq!(value["checks"]["units"]["reason"], "PRT_UNIT_DRIFT");
-        for dependent in ["unique_mapping", "tolerance", "topology"] {
-            assert_eq!(value["checks"][dependent]["status"], "not_evaluated");
-            assert_eq!(value["checks"][dependent]["reason"], "none");
-        }
-    }
-
-    let first_face_start = original.find("          <F>").unwrap();
-    let first_face_end =
-        original[first_face_start..].find("</F>").unwrap() + first_face_start + "</F>".len();
-    let first_face = &original[first_face_start..first_face_end];
-    let duplicate = format!(
-        "{}{}\n{}{}",
-        &original[..first_face_start],
-        first_face,
-        first_face,
-        &original[first_face_end..]
+    let returned = fixture.directory.path().join("returned.xml");
+    let evidence = fixture.directory.path().join("round-trip.json");
+    let changed = original.replacen(">4600000 500000 120<", ">4600000.5 500000 120<", 1);
+    assert_ne!(
+        changed, original,
+        "generated fixture coordinate must be changed"
     );
-    let returned = fixture.directory.path().join("duplicate-face.xml");
-    fs::write(&returned, duplicate).unwrap();
-    let evidence = fixture.directory.path().join("duplicate-face.json");
-    let output = fixture.verify(&returned, &evidence, ["units=meter"]);
-    assert!(!output.status.success(), "{}", diagnostics(&output));
-    let value: serde_json::Value = serde_json::from_slice(&fs::read(&evidence).unwrap()).unwrap();
-    assert_eq!(value["checks"]["topology"]["status"], "failed");
-    assert_eq!(value["checks"]["topology"]["reason"], "PRT_TOPOLOGY_DRIFT");
-    assert_eq!(value["comparison"]["added_face_count"], 1);
+    fs::write(&returned, changed).unwrap();
+
+    let failed = fixture.verify_round_trip(&returned, &evidence);
+    assert!(!failed.status.success(), "semantic drift must fail");
+    let diagnostic = String::from_utf8_lossy(&failed.stderr);
+    assert!(diagnostic.contains("PRT_TOLERANCE_DRIFT"), "{diagnostic}");
+    let document: serde_json::Value =
+        serde_json::from_slice(&fs::read(&evidence).unwrap()).unwrap();
+    assert_eq!(document["result"], "failed");
+    assert_eq!(document["checks"]["tolerance"]["status"], "failed");
+    assert_eq!(document["returned_landxml"]["namespace"], LANDXML_NAMESPACE);
+    assert!(document["returned_landxml"]["point_count"].is_number());
+
+    let malformed_returned = fixture.directory.path().join("malformed-returned.xml");
+    let malformed_evidence = fixture.directory.path().join("malformed-round-trip.json");
+    fs::write(&malformed_returned, "<LandXML").unwrap();
+    let malformed = fixture.verify_round_trip(&malformed_returned, &malformed_evidence);
+    assert!(!malformed.status.success());
+    let diagnostic = String::from_utf8_lossy(&malformed.stderr);
+    assert!(diagnostic.contains("PRT_XML_INVALID"), "{diagnostic}");
+    let document: serde_json::Value =
+        serde_json::from_slice(&fs::read(&malformed_evidence).unwrap()).unwrap();
+    assert_eq!(document["checks"]["parse"]["status"], "failed");
+    assert!(document["returned_landxml"]["namespace"].is_null());
+
+    let topology_returned = fixture.directory.path().join("topology-returned.xml");
+    let topology_evidence = fixture.directory.path().join("topology-round-trip.json");
+    let topology_changed = original.replacen("<F>1 9 2</F>", "<F>1 9 10</F>", 1);
+    assert_ne!(topology_changed, original);
+    fs::write(&topology_returned, topology_changed).unwrap();
+    let topology_failed = fixture.verify_round_trip(&topology_returned, &topology_evidence);
+    assert!(!topology_failed.status.success());
+    let diagnostic = String::from_utf8_lossy(&topology_failed.stderr);
+    assert!(diagnostic.contains("PRT_TOPOLOGY_DRIFT"), "{diagnostic}");
+    let document: serde_json::Value =
+        serde_json::from_slice(&fs::read(&topology_evidence).unwrap()).unwrap();
+    assert_eq!(document["checks"]["topology"]["status"], "failed");
+    assert_eq!(document["comparison"]["added_face_count"], 1);
+    assert_eq!(document["comparison"]["removed_face_count"], 1);
+    assert_eq!(document["comparison"]["mapped_point_count"], 62);
+    assert_eq!(document["comparison"]["unmatched_point_count"], 0);
+    assert_eq!(document["comparison"]["ambiguous_point_count"], 0);
+    assert!(document["comparison"]["maximum_horizontal_delta_metres"].is_number());
+    assert!(document["comparison"]["maximum_vertical_delta_metres"].is_number());
+    assert!(document["comparison"]["added_face_hash"].is_string());
+    assert!(document["comparison"]["removed_face_hash"].is_string());
+
+    let incomplete = ProcessFixture::new("round-trip-incomplete-run");
+    assert_success(&incomplete.run("start"));
+    let journal_path = incomplete.run_root.join("run.pwf");
+    let complete = fs::read(&journal_path).unwrap();
+    let ends = journal_frame_ends(&complete).unwrap();
+    restore_journal_prefix(&journal_path, &complete, ends[6]).unwrap();
+    let returned = incomplete.directory.path().join("returned.xml");
+    fs::copy(incomplete.run_root.join("terrain.xml"), &returned).unwrap();
+    let evidence = incomplete.directory.path().join("round-trip.json");
+    let operational = incomplete.verify_round_trip(&returned, &evidence);
+    assert!(!operational.status.success());
+    assert!(
+        !evidence.exists(),
+        "non-Complete Run must publish no evidence"
+    );
+    assert_eq!(fs::read(&journal_path).unwrap(), &complete[..ends[6]]);
 }
 
 #[test]
-fn verify_round_trip_rejects_relocated_run_root_without_mutation() {
-    let fixture = ProcessFixture::new("qualification-relocated-run");
+fn verify_round_trip_never_overwrites_conflicting_or_run_root_targets() {
+    let fixture = ProcessFixture::new("round-trip-target-conflict");
+    assert_success(&fixture.run("start"));
+    let returned = fixture.directory.path().join("returned.xml");
+    fs::copy(fixture.run_root.join("terrain.xml"), &returned).unwrap();
+    let evidence = fixture.directory.path().join("round-trip.json");
+    let conflict = b"caller-owned evidence conflict";
+    fs::write(&evidence, conflict).unwrap();
+
+    let failed = fixture.verify_round_trip(&returned, &evidence);
+    assert!(!failed.status.success());
+    assert_eq!(fs::read(&evidence).unwrap(), conflict);
+
+    let inside_run = fixture.run_root.join("round-trip.json");
+    let failed = fixture.verify_round_trip(&returned, &inside_run);
+    assert!(!failed.status.success());
+    assert!(!inside_run.exists());
+}
+
+#[test]
+fn verify_round_trip_rejects_a_relocated_complete_run() {
+    let fixture = ProcessFixture::new("round-trip-relocated-run");
     assert_success(&fixture.run("start"));
     let relocated = fixture.directory.path().join("relocated-run");
     fs::rename(&fixture.run_root, &relocated).unwrap();
-    let before = snapshot_run(&relocated);
-    let returned = fixture.directory.path().join("returned.xml");
+    let returned = fixture.directory.path().join("relocated-returned.xml");
     fs::copy(relocated.join("terrain.xml"), &returned).unwrap();
     let evidence = fixture.directory.path().join("relocated-evidence.json");
-    let output = ProcessFixture::verify_at(&relocated, &returned, &evidence, ["units=meter"]);
-    assert!(!output.status.success(), "relocated Run must fail closed");
+    let output = ProcessFixture::verify_round_trip_at(&relocated, &returned, &evidence);
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("PRT_INVALID_INPUT"),
+        "{}",
+        diagnostics(&output)
+    );
     assert!(!evidence.exists());
-    assert_eq!(snapshot_run(&relocated), before);
+}
+
+#[test]
+fn checked_in_qualification_corpus_pins_canonical_wire_bytes() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/qualification-v1");
+    let before = corpus_snapshot(&root);
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&fs::read(root.join("manifest.json")).unwrap()).unwrap();
+    assert_eq!(
+        manifest["schema"],
+        "punctra.terrain-demo.qualification-corpus.v1"
+    );
+    assert_eq!(
+        manifest["evidence_schema"],
+        "punctra.terrain-demo.landxml-round-trip-evidence.v1"
+    );
+    assert_eq!(manifest["declaration"]["settings_profile"], "metric-tin-v1");
+    assert!(manifest["declaration"].get("settings").is_none());
+    let entries = manifest["entries"].as_object().unwrap();
+    assert_eq!(entries.len(), 15);
+    for (name, facts) in entries {
+        let bytes = fs::read(root.join(name)).unwrap();
+        assert_eq!(facts["byte_length"], bytes.len(), "{name}");
+        assert_eq!(
+            facts["blake3"],
+            blake3::hash(&bytes).to_hex().to_string(),
+            "{name}"
+        );
+    }
+    let complete = fs::read(root.join("run-complete.pwf")).unwrap();
+    let mut previous = 0;
+    for (index, name) in manifest["journal_checkpoint_prefixes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .enumerate()
+    {
+        let bytes = fs::read(root.join(name.as_str().unwrap())).unwrap();
+        assert!(complete.starts_with(&bytes));
+        assert!(bytes.len() > previous);
+        previous = bytes.len();
+        if index == 7 {
+            assert_eq!(bytes, complete);
+        }
+    }
+    let pass: serde_json::Value =
+        serde_json::from_slice(&fs::read(root.join("evidence-pass.json")).unwrap()).unwrap();
+    let fail: serde_json::Value =
+        serde_json::from_slice(&fs::read(root.join("evidence-fail.json")).unwrap()).unwrap();
+    assert_eq!(pass["result"], "passed");
+    assert_eq!(
+        pass["downstream_declaration"]["settings_profile"],
+        "metric-tin-v1"
+    );
+    assert!(pass["downstream_declaration"].get("settings").is_none());
+    assert_eq!(pass["checks"]["provenance"]["status"], "passed");
+    assert_eq!(fail["result"], "failed");
+    assert_eq!(
+        fail["checks"]["tolerance"]["reason_code"],
+        "PRT_TOLERANCE_DRIFT"
+    );
+    assert_eq!(
+        corpus_snapshot(&root),
+        before,
+        "corpus consumer is read-only"
+    );
 }
 
 #[test]
@@ -358,6 +384,7 @@ fn process_help_and_invalid_input_are_bounded_and_do_not_create_a_run() {
     assert!(help.contains("terrain-demo start|resume"));
     assert!(help.contains("terrain-demo inspect"));
     assert!(help.contains("terrain-demo compare-landxml"));
+    assert!(help.contains("terrain-demo verify-round-trip"));
     assert!(help.len() < 4 * 1024);
 
     let fixture = ProcessFixture::new("invalid");
@@ -389,6 +416,70 @@ fn process_help_and_invalid_input_are_bounded_and_do_not_create_a_run() {
         "{diagnostic}"
     );
     assert!(!diagnostic.contains("start a new Run"), "{diagnostic}");
+}
+
+#[test]
+fn round_trip_process_failures_preserve_public_mappings() {
+    let directory = TestDirectory::new("round-trip-failures").expect("create comparison fixture");
+    let reference = directory.path().join("reference.xml");
+    let returned = directory.path().join("returned.xml");
+    fs::write(&reference, comparison_landxml("0 0 0")).expect("write reference LandXML");
+    fs::write(&returned, comparison_landxml("0 0 1")).expect("write returned LandXML");
+
+    let resource_failure = comparison_process(&reference, &returned, &"x".repeat(129));
+    assert_round_trip_failure(
+        &resource_failure,
+        "PRT_RESOURCE_LIMIT",
+        "use inputs within the named round-trip limits",
+    );
+
+    let semantic_failure = comparison_process(&reference, &returned, "generated-fixture");
+    assert_round_trip_failure(
+        &semantic_failure,
+        "PRT_SEMANTIC_MISMATCH",
+        "review the downstream export settings or reject the returned deliverable",
+    );
+}
+
+fn comparison_process(reference: &PathBuf, returned: &PathBuf, application: &str) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_terrain-demo"))
+        .arg("compare-landxml")
+        .args(["--application", application])
+        .args(["--application-version", "test-only"])
+        .args(["--settings-profile", "metric-tin"])
+        .args(["--horizontal-tolerance-metres", "0"])
+        .args(["--vertical-tolerance-metres", "0"])
+        .arg(reference)
+        .arg(returned)
+        .output()
+        .expect("run LandXML comparison")
+}
+
+fn assert_round_trip_failure(output: &Output, code: &str, recovery: &str) {
+    assert!(!output.status.success(), "comparison must fail");
+    let diagnostic = String::from_utf8_lossy(&output.stderr);
+    for expected in [
+        &format!("{code} at landxml-round-trip-comparison"),
+        "certainty=pre-publication",
+        &format!("recovery: {recovery}"),
+    ] {
+        assert!(
+            diagnostic.contains(expected),
+            "missing {expected:?}\n{diagnostic}"
+        );
+    }
+}
+
+fn comparison_landxml(first_point: &str) -> String {
+    format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\
+<LandXML xmlns=\"{LANDXML_NAMESPACE}\" version=\"1.2\">\
+<Units><Metric linearUnit=\"meter\"/></Units>\
+<Surfaces><Surface name=\"Generated\"><Definition surfType=\"TIN\">\
+<Pnts><P id=\"1\">{first_point}</P><P id=\"2\">0 1 0</P><P id=\"3\">1 0 0</P></Pnts>\
+<Faces><F>1 2 3</F></Faces>\
+</Definition></Surface></Surfaces></LandXML>"
+    )
 }
 
 struct ProcessFixture {
@@ -456,67 +547,55 @@ impl ProcessFixture {
             .expect("run terrain-demo workflow process")
     }
 
-    fn verify<const N: usize>(
-        &self,
-        returned: &std::path::Path,
-        evidence: &std::path::Path,
-        settings: [&str; N],
-    ) -> Output {
-        Self::verify_at(&self.run_root, returned, evidence, settings)
+    fn verify_round_trip(&self, returned: &std::path::Path, evidence: &std::path::Path) -> Output {
+        Self::verify_round_trip_at(&self.run_root, returned, evidence)
     }
 
-    fn verify_at<const N: usize>(
+    fn verify_round_trip_at(
         run_root: &std::path::Path,
         returned: &std::path::Path,
         evidence: &std::path::Path,
-        settings: [&str; N],
     ) -> Output {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_terrain-demo"));
-        command
+        Command::new(env!("CARGO_BIN_EXE_terrain-demo"))
             .arg("verify-round-trip")
             .args(["--downstream-app", "generated-fixture"])
-            .args(["--downstream-version", "test-only"]);
-        for setting in settings {
-            command.args(["--downstream-setting", setting]);
-        }
-        command
-            .args(["--horizontal-tolerance-metres", "0.001"])
-            .args(["--vertical-tolerance-metres", "0.001"])
+            .args(["--downstream-version", "test-only"])
+            .args(["--downstream-setting", "metric-tin-v1"])
+            .args(["--horizontal-tolerance-metres", "0"])
+            .args(["--vertical-tolerance-metres", "0"])
             .arg(run_root)
             .arg(returned)
             .arg(evidence)
             .output()
-            .expect("run qualification process")
+            .expect("verify process LandXML round trip")
     }
 }
 
-fn snapshot_run(root: &std::path::Path) -> Vec<(String, Vec<u8>)> {
-    let mut entries = fs::read_dir(root)
-        .unwrap()
-        .map(|entry| {
-            let entry = entry.unwrap();
-            (
-                entry.file_name().to_string_lossy().into_owned(),
-                fs::read(entry.path()).unwrap(),
-            )
-        })
-        .collect::<Vec<_>>();
-    entries.sort_by(|left, right| left.0.cmp(&right.0));
-    entries
-}
-
+#[allow(clippy::too_many_lines)]
 fn write_qualification_corpus_if_requested(
     fixture: &ProcessFixture,
-    failed_returned: &std::path::Path,
-    passing_evidence: &std::path::Path,
-    failed_evidence: &std::path::Path,
+    passing_returned: &PathBuf,
+    passing_evidence: &PathBuf,
 ) {
     if std::env::var_os("PUNCTRA_WRITE_QUALIFICATION_CORPUS").is_none() {
         return;
     }
-    let destination =
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/qualification-v1");
-    fs::create_dir_all(&destination).unwrap();
+    let original = fs::read_to_string(fixture.run_root.join("terrain.xml")).unwrap();
+    let failed_returned = fixture.directory.path().join("corpus-returned-fail.xml");
+    let failed_evidence = fixture.directory.path().join("corpus-evidence-fail.json");
+    let changed = original.replacen(">4600000 500000 120<", ">4600000.5 500000 120<", 1);
+    assert_ne!(changed, original);
+    fs::write(&failed_returned, changed).unwrap();
+    let failed = fixture.verify_round_trip(&failed_returned, &failed_evidence);
+    assert!(!failed.status.success());
+    assert!(
+        String::from_utf8_lossy(&failed.stderr).contains("PRT_TOLERANCE_DRIFT"),
+        "{}",
+        diagnostics(&failed)
+    );
+
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/qualification-v1");
+    fs::create_dir_all(&root).unwrap();
     let complete = fs::read(fixture.run_root.join("run.pwf")).unwrap();
     let artifacts = [
         ("run-complete.pwf", complete.clone()),
@@ -528,21 +607,15 @@ fn write_qualification_corpus_if_requested(
             "audit.json",
             fs::read(fixture.run_root.join("audit.json")).unwrap(),
         ),
-        (
-            "returned-pass.xml",
-            fs::read(fixture.run_root.join("terrain.xml")).unwrap(),
-        ),
-        ("returned-fail.xml", fs::read(failed_returned).unwrap()),
+        ("returned-pass.xml", fs::read(passing_returned).unwrap()),
+        ("returned-fail.xml", fs::read(&failed_returned).unwrap()),
         ("evidence-pass.json", fs::read(passing_evidence).unwrap()),
-        ("evidence-fail.json", fs::read(failed_evidence).unwrap()),
+        ("evidence-fail.json", fs::read(&failed_evidence).unwrap()),
     ];
-    let mut entries = std::collections::BTreeMap::new();
+    let mut entries = BTreeMap::new();
     for (name, bytes) in artifacts {
-        fs::write(destination.join(name), &bytes).unwrap();
-        entries.insert(
-            name.to_owned(),
-            manifest_entry(&bytes, qualification_support_class(name)),
-        );
+        fs::write(root.join(name), &bytes).unwrap();
+        entries.insert(name.to_owned(), corpus_entry(name, &bytes));
     }
     let mut prefixes = Vec::new();
     for (index, end) in journal_frame_ends(&complete)
@@ -552,14 +625,17 @@ fn write_qualification_corpus_if_requested(
     {
         let name = format!("run-prefix-{:02}.pwf", index + 1);
         let bytes = &complete[..end];
-        fs::write(destination.join(&name), bytes).unwrap();
-        entries.insert(name.clone(), manifest_entry(bytes, "authoritative"));
+        fs::write(root.join(&name), bytes).unwrap();
+        entries.insert(name.clone(), corpus_entry(&name, bytes));
         prefixes.push(name);
     }
+    assert_eq!(entries.len(), 15);
     let audit: serde_json::Value =
-        serde_json::from_slice(&fs::read(destination.join("audit.json")).unwrap()).unwrap();
-    let evidence: serde_json::Value =
-        serde_json::from_slice(&fs::read(destination.join("evidence-pass.json")).unwrap()).unwrap();
+        serde_json::from_slice(&fs::read(root.join("audit.json")).unwrap()).unwrap();
+    let pass: serde_json::Value =
+        serde_json::from_slice(&fs::read(root.join("evidence-pass.json")).unwrap()).unwrap();
+    let fail: serde_json::Value =
+        serde_json::from_slice(&fs::read(root.join("evidence-fail.json")).unwrap()).unwrap();
     let manifest = serde_json::json!({
         "schema": "punctra.terrain-demo.qualification-corpus.v1",
         "owner": "terrain-demo",
@@ -567,16 +643,13 @@ fn write_qualification_corpus_if_requested(
         "run_versions": {"disk": 1, "semantic": 1, "frame": 1},
         "report_schema": "punctra.terrain-workflow.audit.v1",
         "evidence_schema": "punctra.terrain-demo.landxml-round-trip-evidence.v1",
-        "matcher_version": 1,
+        "matcher_version": "punctra-landxml-semantic-match-v1",
         "declaration": {
             "application": "generated-fixture",
             "version": "test-only",
-            "settings": [
-                {"key": "format", "value": "LandXML;1.2"},
-                {"key": "units", "value": "meter"}
-            ]
+            "settings_profile": "metric-tin-v1"
         },
-        "tolerances_metres": {"horizontal": 0.001, "vertical": 0.001},
+        "tolerances_metres": {"horizontal": 0, "vertical": 0},
         "entries": entries,
         "journal_checkpoint_prefixes": prefixes,
         "expected": {
@@ -587,28 +660,35 @@ fn write_qualification_corpus_if_requested(
             "operation_identity": audit["identities"]["operation"],
             "request_hash": audit["request"]["request_hash"],
             "revision": audit["identities"]["changed_revision"],
-            "complete_journal_hash": evidence["run"]["complete_journal_hash"],
-            "terrain_xml_hash": evidence["run"]["terrain_xml_hash"],
-            "terrain_xml_bytes": evidence["run"]["terrain_xml_bytes"],
-            "audit_json_hash": evidence["run"]["audit_json_hash"],
-            "audit_json_bytes": evidence["run"]["audit_json_bytes"],
-            "passing_result": evidence["result"],
-            "passing_point_count": evidence["returned_landxml"]["point_count"],
-            "passing_face_count": evidence["returned_landxml"]["face_count"],
-            "passing_mapped_point_count": evidence["comparison"]["mapped_point_count"],
-            "passing_added_face_count": evidence["comparison"]["added_face_count"],
-            "passing_removed_face_count": evidence["comparison"]["removed_face_count"],
-            "failed_result": "failed",
-            "failed_reason": "PRT_TOLERANCE_DRIFT",
-            "failed_unmatched_point_count": 1
+            "complete_journal_hash": pass["run"]["complete_journal_hash"],
+            "terrain_xml_hash": pass["run"]["original_landxml_hash"],
+            "terrain_xml_bytes": pass["run"]["original_landxml_bytes"],
+            "audit_json_hash": pass["run"]["audit_json_hash"],
+            "audit_json_bytes": pass["run"]["audit_json_bytes"],
+            "passing_result": pass["result"],
+            "passing_point_count": pass["returned_landxml"]["point_count"],
+            "passing_face_count": pass["returned_landxml"]["face_count"],
+            "passing_mapped_point_count": pass["comparison"]["mapped_point_count"],
+            "passing_added_face_count": pass["comparison"]["added_face_count"],
+            "passing_removed_face_count": pass["comparison"]["removed_face_count"],
+            "failed_result": fail["result"],
+            "failed_reason": fail["checks"]["tolerance"]["reason_code"],
+            "failed_mapped_point_count": fail["comparison"]["mapped_point_count"]
         }
     });
     let mut bytes = serde_json::to_vec_pretty(&manifest).unwrap();
     bytes.push(b'\n');
-    fs::write(destination.join("manifest.json"), bytes).unwrap();
+    fs::write(root.join("manifest.json"), bytes).unwrap();
 }
 
-fn manifest_entry(bytes: &[u8], support_class: &str) -> serde_json::Value {
+fn corpus_entry(name: &str, bytes: &[u8]) -> serde_json::Value {
+    let support_class = if name.starts_with("run-") {
+        "authoritative"
+    } else if matches!(name, "returned-pass.xml" | "returned-fail.xml") {
+        "test_only_input"
+    } else {
+        "caller_owned_published"
+    };
     serde_json::json!({
         "byte_length": bytes.len(),
         "blake3": blake3::hash(bytes).to_hex().to_string(),
@@ -616,15 +696,17 @@ fn manifest_entry(bytes: &[u8], support_class: &str) -> serde_json::Value {
     })
 }
 
-fn qualification_support_class(name: &str) -> &'static str {
-    match name {
-        "run-complete.pwf" => "authoritative",
-        "terrain.xml" | "audit.json" | "evidence-pass.json" | "evidence-fail.json" => {
-            "caller_owned_published"
-        }
-        "returned-pass.xml" | "returned-fail.xml" => "test_only_input",
-        _ => unreachable!("fixed qualification corpus artifact"),
-    }
+fn corpus_snapshot(root: &std::path::Path) -> BTreeMap<String, Vec<u8>> {
+    fs::read_dir(root)
+        .unwrap()
+        .map(|entry| {
+            let entry = entry.unwrap();
+            (
+                entry.file_name().to_string_lossy().into_owned(),
+                fs::read(entry.path()).unwrap(),
+            )
+        })
+        .collect()
 }
 
 fn assert_success(output: &Output) {

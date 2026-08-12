@@ -60,36 +60,33 @@ with one safe recovery action. It does not add Breaklines or establish the
 external design-partner, production-data, downstream-application, paid-use,
 or human-workflow evidence required by the product milestone.
 
-Version 0.8.0-alpha.1 started the accepted
+Version 0.8.0-alpha.1 completes the repository slice in the implemented
 [repository interoperability qualification
-design](docs/design/design-partner-mvp-v0.8.md). Its narrow planned repository
-slice is a private `terrain-demo` semantic LandXML 1.2 round-trip verifier and
-separate canonical evidence output. The bounded file-to-file comparison core
-and explicitly non-evidence `compare-landxml` CLI are now implemented. Durable
-Run binding and canonical evidence publication remain pending. This alpha is
-not relabeled Complete; its remaining accepted repository work is inherited as
-a prerequisite by v0.9. The v0.7 journal and `audit.json` are unchanged, and
-no actual Civil 3D, Bentley, partner, paid-pilot, conversion, or labor-savings
-test is claimed.
+design](docs/design/design-partner-mvp-v0.8.md). The narrow implementation adds
+a private `terrain-demo` semantic LandXML 1.2 comparator, read-only Complete-Run
+binding, a streaming verifier covering the v0.7 export ceiling, and separate
+canonical pass/fail evidence published without replacement. The v0.7 journal
+and `audit.json` remain unchanged. No actual Civil 3D, Bentley, partner,
+paid-pilot, conversion, or labor-savings test is claimed, so the product MVP
+gates remain outstanding.
 
-Version 0.9.0-alpha.1 starts the accepted, Active [Trust and v1 Candidate
-design](docs/design/trust-v1-candidate-v0.9.md). It narrows work to qualifying
-the existing headless workflow for a maintainable compatibility and support
-promise: close the inherited Run-bound qualification gap, freeze owner-local
-persisted-v1 fixtures beyond the inherited Spatial Index goldens, harden
-recovery and disk-failure behavior, publish the exact support matrix, and
-reproduce local resource and performance evidence. The first hardening slice
-preserves Spatial Index filesystem failures as recoverable `PWF_IO` diagnostics
-through `terrain-demo`, including bounded operation/path/error rendering. It
-deliberately does not delete a partially written initial `.work` header: an
-ownership-safe recovery protocol for that case remains a v0.9 readiness gate.
-This work adds no new product feature family.
+Version 0.9.0 completes the repository trust and version-1 compatibility
+candidate described by the implemented [Trust and v1 Candidate
+design](docs/design/trust-v1-candidate-v0.9.md). It freezes owner-local
+version-1 fixtures for Source Records, Spatial Indexes, Workspaces, Workflow
+Runs, reports, LandXML, and Round-Trip Evidence; hardens descriptor-bound
+no-replace publication and conservative recovery; and records the reviewed
+interface and support boundaries for the existing narrow workflow. The exact
+local release results are recorded in the [v0.9 verification
+record](docs/releases/v0.9.0.md). This repository candidate is not `1.0.0`, a
+product-readiness claim, or evidence of external downstream execution or
+customer acceptance.
 
-The candidate's exact format, coordinate, platform, device, upgrade, and
-recovery boundaries are collected in the
-[v0.9 support matrix](docs/architecture/v0.9-support-matrix.md); its public
-Rust and application surfaces are classified in the
-[v0.9 interface review](docs/architecture/v0.9-interface-review.md).
+The frozen format, coordinate, platform, device, upgrade, and recovery
+boundaries are collected in the [v0.9 support
+matrix](docs/architecture/v0.9-support-matrix.md). The reusable,
+adapter-author, test-support, and private application surfaces are classified
+in the [v0.9 interface review](docs/architecture/v0.9-interface-review.md).
 
 Later direction and the exact external product gates are described in the
 [living roadmap](ROADMAP.md). Its candidate themes do not expand accepted
@@ -260,11 +257,12 @@ caller-requested Revert restores the baseline after the correction, and Source
 bytes remain unchanged. A v0.7 Workflow does not automatically Revert a
 committed classification Revision when a later phase fails.
 
-The first v0.8 slice can compare that exact export with a returned LandXML at
-a separate resolved path while ignoring Point/face order, Point renumbering,
-and triangle winding. On Unix and Windows it also rejects a returned hard link
-to the reference file; other platforms fail closed when stable file identity
-is unavailable:
+The v0.8 comparison path can compare that exact export with a returned LandXML
+while ignoring Point/face order, Point renumbering, and triangle winding. The
+two operational paths may resolve to the same regular file or hard-linked
+content; semantic identity comes from the captured bytes rather than path
+identity. Symbolic links remain invalid, and platforms without stable file
+identity fail closed:
 
 ```bash
 cargo run --release -p terrain-demo -- compare-landxml \
@@ -280,6 +278,26 @@ This command rejects unit drift, out-of-tolerance coordinate drift, ambiguous
 vertex matches, and topology drift. Its summary is deliberately marked as not
 Run-bound and not canonical evidence; the application/version/settings labels
 are caller declarations, not proof that the named application ran.
+
+Use the completed Run-bound path to revalidate a Complete v0.7 Run and publish
+canonical pass or fail evidence outside its Run root:
+
+```bash
+cargo run --release -p terrain-demo -- verify-round-trip \
+  --downstream-app "CALLER-DECLARED APP" \
+  --downstream-version "CALLER-DECLARED VERSION" \
+  --downstream-setting "CALLER-DECLARED SETTINGS" \
+  --horizontal-tolerance-metres 0.001 \
+  --vertical-tolerance-metres 0.001 \
+  run-root returned.xml evidence/round-trip.json
+```
+
+The verifier rejects torn or non-Complete journals, revalidates the existing
+journal, `terrain.xml`, and `audit.json`, streams both XML inputs under the full
+v0.7 export ceilings, and never repairs or writes inside the Run root. Exact
+evidence bytes reconcile; a different existing target is never overwritten.
+Caller declarations and passing evidence still do not prove that the named
+application ran or satisfy any external product gate.
 
 The fixed Run-root children are `run.pwf`, `run.lock`, `terrain.xml`, and
 `audit.json`. Existing exact XML/report bytes reconcile; different caller-owned
@@ -345,13 +363,11 @@ design-partner runs remain explicitly outstanding.
 
 ## v0.5 benchmark evidence
 
-At v0.5, the `point-workspace` acceptance suite recorded 61 package tests: 19
-integration tests through the public interface and 42 unit, fault-injection,
-and allocation gates. The merged v0.7 suite now has 83 package tests—33
-integration and 50 unit/private—after adding exact row-stream and Revision
-Audit coverage. The retained tests include generated LAS and LAZ selection,
-commit, Revert, reopen, Source immutability, forced spill, hard limits,
-corruption, retry, and injected persistence-boundary cases.
+The retained `point-workspace` suites cover public lifecycle, selection,
+row-stream, Revision Audit, persistence, fault-injection, and allocation
+behavior. They include generated LAS and LAZ selection, commit, Revert, reopen,
+Source immutability, forced spill, hard limits, corruption, retry, frozen
+version-1 fixtures, and injected persistence-boundary cases.
 
 On the local Apple M5 Pro, 24 GiB, arm64, macOS 26.5.2 reference machine with
 Rust 1.90.0, the default generated one-million-Point benchmark completed its
@@ -363,8 +379,9 @@ benchmark does not claim worker heap: its public Point-ID iteration peaked at
 2,621,440 measured caller-thread bytes and retained zero, while selection
 memory is reported as sampled process RSS. Resident-selection RSS was
 62,668,800 bytes. Forced-spill RSS started at 62,685,184 bytes and sampled at
-62,832,640 bytes, a 147,456-byte delta; its sealed temporary file was 9,009,182
-bytes and was removed with the final Point Set handle.
+62,832,640 bytes, a 147,456-byte delta; its sealed temporary payload was
+9,009,182 bytes. The v0.9 ownership policy retains private spill names rather
+than unlinking a pathname that a concurrent actor could replace.
 
 A sparse 10,000-Point classification/Revert pair took approximately
 16.442/15.818 ms and added 20.100 logical bytes per changed Point. A dense
@@ -410,11 +427,11 @@ external gate remains outstanding.
 
 ## v0.7 benchmark evidence
 
-`terrain-demo` has 43 package tests: 25 unit/private fault and contract tests,
-15 public workflow-facade tests, and three process tests. The public suites
-cover every eight-frame resume prefix, 12 limit families, known-identity
-validation, and dropped-Workflow recovery; the private fault scope is
-documented precisely in the [verification strategy](docs/architecture/testing.md).
+The retained `terrain-demo` suites cover every eight-frame resume prefix, the
+documented limit families, known-identity validation, dropped-Workflow
+recovery, Complete-Run qualification, canonical pass/fail evidence, frozen
+version-1 fixtures, and representative persistence faults. The exact scope is
+documented in the [verification strategy](docs/architecture/testing.md).
 
 The checked-in `terrain-demo` Criterion benchmark exercises five restart modes
 through the public workflow facade with generated local LAS data. The local
@@ -436,6 +453,19 @@ here. These are generated local technical observations. Worker peak heap was
 not measured, and partner, production, downstream round-trip, and human-time
 acceptance remain unmeasured.
 
+## v0.8 repository verification evidence
+
+The v0.8 package suites cover the bounded DOM and full-export-ceiling streaming
+readers, UTF-8 and LandXML-subset failure evidence, unique tolerance mapping,
+topology-difference facts, Complete-Run and immutable-input witnesses,
+canonical pass/fail evidence, exact-existing reconciliation, conflicting
+targets, cancellation, and publication-boundary faults. The later v0.9
+qualification retains that behavior and adds frozen compatibility fixtures and
+failure/recovery coverage. Exact current command results and benchmark
+observations live in the [v0.9 verification record](docs/releases/v0.9.0.md),
+not in a test-count claim here. Generated repository checks satisfy no external
+product gate.
+
 ## Development
 
 Install the pinned Rust toolchain, then run the authoritative local verification
@@ -446,6 +476,9 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace --all-features
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps
+cargo fmt --manifest-path fuzz/Cargo.toml --all --check
+cargo check --manifest-path fuzz/Cargo.toml --bin index_persistence
+cargo test --manifest-path fuzz/Cargo.toml --lib
 cargo bench -p point-view --bench planner
 cargo bench -p source-memory --bench read
 cargo bench -p source-las --bench read
@@ -453,10 +486,11 @@ cargo bench -p point-index --bench index
 cargo bench -p point-workspace --bench document
 cargo bench -p point-terrain --bench terrain
 cargo bench -p terrain-demo --bench journal
+cargo run -p source-memory --example memory_source
 cargo run -p point-index --example direct_use
-cargo run --release -p point-workspace --example classify -- \
-  survey.laz survey.laz.pidx survey.pcw 6
+cargo test -p point-workspace --all-features
 cargo run -p point-terrain --example derive
+cargo test -p point-terrain --all-features
 cargo test -p terrain-demo --test workflow
 cargo test -p terrain-demo --test process
 cargo test -p renderer-demo --test headless_smoke
@@ -464,7 +498,7 @@ PUNCTRA_REQUIRE_GPU=1 cargo test -p render-wgpu --test offscreen
 PUNCTRA_REQUIRE_GPU=1 cargo test -p renderer-demo --test planner
 ```
 
-Punctra currently targets Rust 1.90 and wgpu 30. The renderer demo requires a graphics
+Punctra currently targets Rust 1.90 and wgpu 30. The demo requires a graphics
 adapter supported by wgpu; renderer-neutral protocol tests do not.
 
 GPU-backed tests are separated from renderer-neutral contract tests so the

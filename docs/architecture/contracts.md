@@ -1,7 +1,8 @@
 # Cross-Module Contracts and Invariants
 
-Status: existing contracts under Active v0.9 trust qualification; inherited
-Run-bound evidence and broader terrain/export contracts remain outstanding
+Status: frozen for the completed v0.9 repository trust and version-1
+compatibility candidate; broader terrain, export, and product contracts remain
+deferred
 
 The versioned designs in [`docs/design`](../design) control exact release
 scope. This document summarizes the invariants that cross current crate seams.
@@ -217,8 +218,10 @@ The Point Set retains bounded records in memory and automatically spills to a
 checksummed append-only file when its resident ceiling is crossed. Iteration
 through `PointSet::ids(PointIdReadLimits)` is repeatable and bounded. Missing,
 changed, truncated, or corrupt spill storage fails before false completion.
-The final handle removes the spill. A Point Set is not a durable named
-selection or recovery record.
+The spill is retained as bounded private debris rather than unlinked through a
+replaceable pathname. It is ignored by recovery and may be removed only as
+offline caller-owned maintenance while no related handle, job, or process is
+live. A Point Set is not a durable named selection or recovery record.
 
 ### Classification Revision and Revert
 
@@ -415,6 +418,32 @@ Change Envelope, QA, stable `ensured_exact` LandXML facts, all semantic limit
 facts, and explicit partner/downstream/human-acceptance nonclaims. Machine and
 elapsed-time observations do not enter canonical bytes.
 
+## Run-bound interoperability qualification contract
+
+`terrain-demo verify-round-trip` opens exactly one Complete eight-frame Run
+without repairing or mutating it. It retains and revalidates stable witnesses
+for the Run root, `run.pwf`, `terrain.xml`, `audit.json`, the caller-returned
+LandXML, and the evidence parent. The Complete checkpoint and canonical report
+must agree on Run, request, LandXML, and report facts before evaluation.
+
+The verifier streams both LandXML inputs under the full supported v0.7 export
+ceiling and builds only the bounded metric-metre single-TIN semantic model.
+Presentation order, identifiers, triangle winding, and supported bounded
+metadata do not change meaning. XML, subset, Coordinate-Reference, unit,
+Point-count, unique-vertex-mapping, tolerance, and topology outcomes use stable
+semantic reason codes. Once both
+files are completely witnessed, a supported semantic rejection is a canonical
+failed evaluation; inability to witness or completely evaluate an input,
+resource exhaustion, cancellation, or changed input is operational failure and
+does not become success.
+
+Canonical pass or fail evidence uses schema
+`punctra.terrain-demo.landxml-round-trip-evidence.v1` and is published outside
+the Run root by exact-existing reconciliation or descriptor-bound no-replace
+publication. Different existing bytes are never overwritten. Caller-provided
+application, version, and settings are opaque declarations, not proof that a
+downstream product ran or accepted the deliverable.
+
 ## View and renderer contracts
 
 `point-view` is synchronous and renderer-neutral. For one frozen camera,
@@ -465,7 +494,9 @@ publication. Separate ledgers cover:
   work; and
 - Workflow intent counts, journal/frame/path bytes, Revision Audit, Surface
   Change Envelope, canonical report output/staging/buffer bytes, and combined
-  live orchestrator working bytes.
+  live orchestrator working bytes; and
+- qualification XML input, node, text/attribute, semantic-model, comparison,
+  evidence output/staging/buffer, and retained-witness bytes.
 
 Temporary and durable storage are distinct. Overlapping old/new allocations
 are charged together. An indivisible block that cannot fit fails explicitly.

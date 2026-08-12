@@ -10,14 +10,13 @@ use point_workspace::{OperationId, RevisionId};
 use crate::{
     WorkflowFailure, WorkflowLimits, WorkflowPaths, WorkflowRunId, WorkflowRunIntent,
     diagnostic::{Certainty, FailureCode, FailureContext, RecoveryAction, WorkflowStage},
-    inspect_and_repair_run,
-    journal::JournalError,
-    qualification::{QualificationError, QualificationRequest, verify_round_trip},
-    report::ReportError,
-    resume_run,
+    inspect_and_repair_run, resume_run,
     roundtrip::{
         RoundTripDeclaration, RoundTripFailure, RoundTripLimits, RoundTripReport,
         RoundTripTolerances, verify_landxml_round_trip,
+    },
+    roundtrip_evidence::{
+        QualificationResult, RoundTripEvidenceError, RoundTripEvidenceReceipt, verify_round_trip,
     },
     start_run,
 };
@@ -30,8 +29,6 @@ const MAX_CLI_BYTES: u64 = 256 * 1024;
 const MAX_CLI_ARGUMENT_BYTES: u64 = 4 * 1024;
 const MAX_ORDINALS: usize = 1_000;
 const MAX_CHECK_POINTS: usize = 256;
-const MAX_DOWNSTREAM_SETTING_KEY_BYTES: usize = 128;
-const MAX_DOWNSTREAM_SETTING_VALUE_BYTES: usize = 1024;
 const USAGE: &str = "\
 terrain-demo start|resume [OPTIONS] SOURCE INDEX WORKSPACE RUN_ROOT
 terrain-demo inspect RUN_ROOT
@@ -63,9 +60,9 @@ Required compare-landxml options:
   --vertical-tolerance-metres N
 
 Required verify-round-trip options:
-  --downstream-app TEXT
-  --downstream-version TEXT
-  --downstream-setting KEY=VALUE (repeatable)
+  --downstream-app TEXT          caller-declared downstream application
+  --downstream-version TEXT      caller-declared downstream version
+  --downstream-setting TEXT      one opaque caller settings-profile label
   --horizontal-tolerance-metres N
   --vertical-tolerance-metres N
 ";
@@ -80,7 +77,11 @@ enum Command {
         tolerances: RoundTripTolerances,
     },
     VerifyRoundTrip {
-        request: QualificationRequest,
+        run_root: PathBuf,
+        returned: PathBuf,
+        evidence_target: PathBuf,
+        declaration: RoundTripDeclaration,
+        tolerances: RoundTripTolerances,
     },
     Start {
         resume: bool,
@@ -124,34 +125,39 @@ pub fn run_cli(arguments: impl IntoIterator<Item = OsString>) -> Result<String, 
             .map_err(|error| round_trip_failure(&error))?;
             Ok(round_trip_summary(&report))
         }
-        Command::VerifyRoundTrip { request } => {
-            let receipt = verify_round_trip(&request).map_err(qualification_failure)?;
-            let disposition = match receipt.disposition {
-                crate::report::ReportDisposition::Created => "created",
-                crate::report::ReportDisposition::ReconciledExisting => "reconciled_existing",
-            };
-            let result = if receipt.passed { "passed" } else { "failed" };
-            let output = format!(
-                "Round-Trip Evidence {result}\ndisposition {disposition}\nevidence hash {}\nevidence bytes {}\n",
-                Hex(&receipt.content_hash),
-                receipt.byte_length
-            );
-            if receipt.passed {
-                Ok(output)
-            } else {
-                Err(WorkflowFailure::new(
-                    FailureCode::RoundTripSemanticMismatch,
+        Command::VerifyRoundTrip {
+            run_root,
+            returned,
+            evidence_target,
+            declaration,
+            tolerances,
+        } => {
+            let receipt = verify_round_trip(
+                &run_root,
+                &returned,
+                &evidence_target,
+                declaration,
+                tolerances,
+            )
+            .map_err(round_trip_evidence_failure)?;
+            if let Some(reason) = receipt.failure_reason {
+                return Err(WorkflowFailure::new(
+                    reason.failure_code(),
                     WorkflowStage::RoundTrip,
                     Certainty::DurableFact,
-                    FailureContext::default(),
+                    FailureContext {
+                        run: Some(receipt.run),
+                        ..FailureContext::default()
+                    },
                     format_args!(
-                        "semantic qualification failed; canonical failed evidence {disposition}; hash {}; bytes {}",
-                        Hex(&receipt.content_hash),
-                        receipt.byte_length
+                        "canonical failed evidence published with hash {} and {} bytes",
+                        Hex(&receipt.evidence_hash),
+                        receipt.evidence_bytes
                     ),
                     RecoveryAction::ReviewReturnedLandXml,
-                ))
+                ));
             }
+            Ok(round_trip_evidence_summary(receipt))
         }
         Command::Start {
             resume,
@@ -356,12 +362,11 @@ where
 {
     let mut application = None;
     let mut version = None;
-    let mut settings = Vec::new();
+    let mut settings_profile = None;
     let mut horizontal_tolerance = None;
     let mut vertical_tolerance = None;
     let mut paths = Vec::new();
-    reserve(&mut settings, 64, "downstream setting storage")?;
-    reserve(&mut paths, 3, "qualification path storage")?;
+    reserve(&mut paths, 3, "round-trip evidence path storage")?;
     while let Some(argument) = arguments.next()? {
         match argument.to_str() {
             Some("--downstream-app") => set_once(
@@ -374,34 +379,11 @@ where
                 arguments.require_value("--downstream-version")?,
                 "--downstream-version",
             )?,
-            Some("--downstream-setting") => {
-                let value = arguments.require_value("--downstream-setting")?;
-                let value = unicode(&value, "--downstream-setting")?;
-                let Some((key, setting)) = value.split_once('=') else {
-                    return Err(invalid("--downstream-setting requires KEY=VALUE"));
-                };
-                if key.is_empty() || setting.is_empty() {
-                    return Err(invalid(
-                        "--downstream-setting requires nonempty KEY and VALUE",
-                    ));
-                }
-                validate_setting_component(
-                    key,
-                    "--downstream-setting key",
-                    MAX_DOWNSTREAM_SETTING_KEY_BYTES,
-                )?;
-                validate_setting_component(
-                    setting,
-                    "--downstream-setting value",
-                    MAX_DOWNSTREAM_SETTING_VALUE_BYTES,
-                )?;
-                push_bounded(
-                    &mut settings,
-                    (key.to_owned(), setting.to_owned()),
-                    64,
-                    "downstream setting count",
-                )?;
-            }
+            Some("--downstream-setting") => set_once(
+                &mut settings_profile,
+                arguments.require_value("--downstream-setting")?,
+                "--downstream-setting",
+            )?,
             Some("--horizontal-tolerance-metres") => set_once(
                 &mut horizontal_tolerance,
                 parse_f64(
@@ -427,20 +409,13 @@ where
                 &mut paths,
                 PathBuf::from(argument),
                 3,
-                "qualification positional path count",
+                "round-trip evidence positional path count",
             )?,
         }
     }
-    if settings.is_empty() {
-        return Err(invalid("at least one --downstream-setting is required"));
-    }
-    settings.sort_by(|left, right| left.0.cmp(&right.0));
-    if settings.windows(2).any(|values| values[0].0 == values[1].0) {
-        return Err(invalid("duplicate --downstream-setting key is not allowed"));
-    }
-    let [run_root, returned_landxml, evidence_target]: [PathBuf; 3] = paths
-        .try_into()
-        .map_err(|_| invalid("verify-round-trip requires RUN_ROOT RETURNED EVIDENCE_TARGET"))?;
+    let [run_root, returned, evidence_target]: [PathBuf; 3] = paths.try_into().map_err(|_| {
+        invalid("verify-round-trip requires RUN_ROOT, RETURNED, and EVIDENCE_TARGET paths")
+    })?;
     let declaration = RoundTripDeclaration::new(
         unicode(
             application
@@ -454,7 +429,12 @@ where
                 .ok_or_else(|| invalid("missing --downstream-version"))?,
             "--downstream-version",
         )?,
-        "qualification-uses-structured-settings-v1",
+        unicode(
+            settings_profile
+                .as_ref()
+                .ok_or_else(|| invalid("missing --downstream-setting"))?,
+            "--downstream-setting",
+        )?,
     )
     .map_err(|error| round_trip_failure(&error))?;
     let tolerances = RoundTripTolerances::new(
@@ -463,36 +443,12 @@ where
     )
     .map_err(|error| round_trip_failure(&error))?;
     Ok(Command::VerifyRoundTrip {
-        request: QualificationRequest {
-            run_root,
-            returned_landxml,
-            evidence_target,
-            declaration,
-            downstream_settings: settings,
-            tolerances,
-        },
+        run_root,
+        returned,
+        evidence_target,
+        declaration,
+        tolerances,
     })
-}
-
-fn validate_setting_component(
-    value: &str,
-    name: &'static str,
-    max_bytes: usize,
-) -> Result<(), WorkflowFailure> {
-    if value.trim() != value {
-        return Err(invalid(format_args!(
-            "{name} must not contain surrounding whitespace"
-        )));
-    }
-    if value.chars().any(char::is_control) {
-        return Err(invalid(format_args!(
-            "{name} must not contain control characters"
-        )));
-    }
-    if value.len() > max_bytes {
-        return Err(resource(name, value.len() as u64, max_bytes as u64));
-    }
-    Ok(())
 }
 
 fn parse_compare_landxml<I>(arguments: &mut BoundedArguments<I>) -> Result<Command, WorkflowFailure>
@@ -798,18 +754,120 @@ fn round_trip_failure(error: &RoundTripFailure) -> WorkflowFailure {
     )
 }
 
-fn qualification_failure(error: QualificationError) -> WorkflowFailure {
-    if error.is_publication_indeterminate() {
-        return WorkflowFailure::new(
-            FailureCode::PublicationIndeterminate,
+fn round_trip_evidence_failure(error: RoundTripEvidenceError) -> WorkflowFailure {
+    match error {
+        RoundTripEvidenceError::Comparison(error) => round_trip_failure(&error),
+        RoundTripEvidenceError::Publication(error) => {
+            use crate::report::ReportError;
+            match error {
+                error @ (ReportError::Conflict { .. } | ReportError::TargetConflict { .. }) => {
+                    WorkflowFailure::new(
+                        FailureCode::OutputConflict,
+                        WorkflowStage::RoundTrip,
+                        Certainty::DurableFact,
+                        FailureContext::default(),
+                        error,
+                        RecoveryAction::RemoveOrRenameConflictingTarget,
+                    )
+                }
+                error @ (ReportError::Indeterminate { .. } | ReportError::TargetChanged { .. }) => {
+                    WorkflowFailure::new(
+                        FailureCode::PublicationIndeterminate,
+                        WorkflowStage::RoundTrip,
+                        Certainty::Indeterminate(
+                            crate::diagnostic::PublicationPhase::RoundTripEvidenceTarget,
+                        ),
+                        FailureContext::default(),
+                        error,
+                        RecoveryAction::StopAndPreserve,
+                    )
+                }
+                error @ ReportError::Resource { .. } => WorkflowFailure::new(
+                    FailureCode::RoundTripResourceLimit,
+                    WorkflowStage::RoundTrip,
+                    Certainty::PrePublication,
+                    FailureContext::default(),
+                    error,
+                    RecoveryAction::UseSupportedRoundTripSize,
+                ),
+                error @ ReportError::Cancelled => WorkflowFailure::new(
+                    FailureCode::Cancelled,
+                    WorkflowStage::RoundTrip,
+                    Certainty::PrePublication,
+                    FailureContext::default(),
+                    error,
+                    RecoveryAction::ResumeSameRun,
+                ),
+                error @ ReportError::Io { .. } => WorkflowFailure::new(
+                    FailureCode::Io,
+                    WorkflowStage::RoundTrip,
+                    Certainty::PrePublication,
+                    FailureContext::default(),
+                    error,
+                    RecoveryAction::RetryAfterRestoringDisk,
+                ),
+                error @ ReportError::Invalid(_) => WorkflowFailure::new(
+                    FailureCode::RoundTripInvalidInput,
+                    WorkflowStage::RoundTrip,
+                    Certainty::PrePublication,
+                    FailureContext::default(),
+                    error,
+                    RecoveryAction::CorrectRoundTripInput,
+                ),
+            }
+        }
+        RoundTripEvidenceError::Invalid(error) => WorkflowFailure::new(
+            FailureCode::RoundTripInvalidInput,
             WorkflowStage::RoundTrip,
-            Certainty::Indeterminate(crate::diagnostic::PublicationPhase::RoundTripEvidence),
+            Certainty::PrePublication,
             FailureContext::default(),
             error,
-            RecoveryAction::StopAndPreserve,
-        );
+            RecoveryAction::CorrectRoundTripInput,
+        ),
+        RoundTripEvidenceError::Journal(error) => round_trip_journal_failure(error),
     }
-    let (code, certainty, action) = qualification_mapping(&error);
+}
+
+fn round_trip_journal_failure(error: crate::journal::JournalError) -> WorkflowFailure {
+    use crate::journal::JournalError;
+
+    let (code, certainty, action) = match &error {
+        JournalError::Resource { .. } => (
+            FailureCode::RoundTripResourceLimit,
+            Certainty::PrePublication,
+            RecoveryAction::UseSupportedRoundTripSize,
+        ),
+        JournalError::Corrupt(_) | JournalError::Incompatible(_) => (
+            FailureCode::JournalCorrupt,
+            Certainty::DurableFact,
+            RecoveryAction::StopAndPreserve,
+        ),
+        JournalError::Exists(_) | JournalError::Conflict(_) => (
+            FailureCode::JournalConflict,
+            Certainty::DurableFact,
+            RecoveryAction::StopAndPreserve,
+        ),
+        JournalError::Locked => (
+            FailureCode::Io,
+            Certainty::PrePublication,
+            RecoveryAction::ResumeSameRun,
+        ),
+        JournalError::Entropy | JournalError::Io { .. } => (
+            FailureCode::Io,
+            Certainty::PrePublication,
+            RecoveryAction::RetryAfterRestoringDisk,
+        ),
+        JournalError::Invalid(_) => (
+            FailureCode::RoundTripInvalidInput,
+            Certainty::PrePublication,
+            RecoveryAction::CorrectRoundTripInput,
+        ),
+        JournalError::Indeterminate { .. } | JournalError::CheckpointIndeterminate { .. } => (
+            FailureCode::PublicationIndeterminate,
+            Certainty::Indeterminate(crate::diagnostic::PublicationPhase::RoundTripEvidenceTarget),
+            RecoveryAction::StopAndPreserve,
+        ),
+    };
     WorkflowFailure::new(
         code,
         WorkflowStage::RoundTrip,
@@ -818,73 +876,6 @@ fn qualification_failure(error: QualificationError) -> WorkflowFailure {
         error,
         action,
     )
-}
-
-fn qualification_mapping(error: &QualificationError) -> (FailureCode, Certainty, RecoveryAction) {
-    match error {
-        QualificationError::Resource { .. }
-        | QualificationError::Publication(ReportError::Resource { .. }) => (
-            FailureCode::RoundTripResourceLimit,
-            Certainty::PrePublication,
-            RecoveryAction::UseSupportedRoundTripSize,
-        ),
-        QualificationError::Cancelled | QualificationError::Publication(ReportError::Cancelled) => {
-            (
-                FailureCode::Cancelled,
-                Certainty::PrePublication,
-                RecoveryAction::ResumeSameRun,
-            )
-        }
-        QualificationError::Io { .. }
-        | QualificationError::Journal(JournalError::Io { .. })
-        | QualificationError::Publication(ReportError::Io { .. }) => (
-            FailureCode::Io,
-            Certainty::PrePublication,
-            RecoveryAction::RetryAfterRestoringDisk,
-        ),
-        QualificationError::Journal(
-            JournalError::Corrupt(_) | JournalError::Incompatible(_) | JournalError::Invalid(_),
-        ) => (
-            FailureCode::JournalCorrupt,
-            Certainty::DurableFact,
-            RecoveryAction::StopAndPreserve,
-        ),
-        QualificationError::Journal(JournalError::Resource { .. }) => (
-            FailureCode::ResourceLimit,
-            Certainty::PrePublication,
-            RecoveryAction::RaiseLimitOrNarrow,
-        ),
-        QualificationError::Journal(_) => (
-            FailureCode::JournalConflict,
-            Certainty::DurableFact,
-            RecoveryAction::StopAndPreserve,
-        ),
-        QualificationError::Publication(
-            ReportError::Conflict { .. } | ReportError::TargetConflict { .. },
-        ) => (
-            FailureCode::OutputConflict,
-            Certainty::DurableFact,
-            RecoveryAction::RemoveOrRenameConflictingTarget,
-        ),
-        QualificationError::Publication(
-            ReportError::Indeterminate { .. } | ReportError::TargetChanged { .. },
-        ) => (
-            FailureCode::PublicationIndeterminate,
-            Certainty::Indeterminate(crate::diagnostic::PublicationPhase::RoundTripEvidence),
-            RecoveryAction::StopAndPreserve,
-        ),
-        QualificationError::Invalid(_)
-        | QualificationError::InputChanged(_)
-        | QualificationError::Xml(_)
-        | QualificationError::Subset(_)
-        | QualificationError::Report(_)
-        | QualificationError::Provenance(_)
-        | QualificationError::Publication(ReportError::Invalid(_)) => (
-            FailureCode::RoundTripInvalidInput,
-            Certainty::PrePublication,
-            RecoveryAction::CorrectRoundTripInput,
-        ),
-    }
 }
 
 fn round_trip_cli_failure(error: WorkflowFailure) -> WorkflowFailure {
@@ -959,6 +950,17 @@ external application execution verified false\n",
     )
 }
 
+fn round_trip_evidence_summary(receipt: RoundTripEvidenceReceipt) -> String {
+    debug_assert_eq!(receipt.result, QualificationResult::Passed);
+    format!(
+        "LandXML round-trip {}\nRun {}\ncanonical evidence published true\nevidence hash {}\nevidence bytes {}\nexternal application execution verified false\n",
+        receipt.result.as_str(),
+        receipt.run,
+        Hex(&receipt.evidence_hash),
+        receipt.evidence_bytes,
+    )
+}
+
 struct Hex<'a>(&'a [u8]);
 
 impl std::fmt::Display for Hex<'_> {
@@ -967,127 +969,5 @@ impl std::fmt::Display for Hex<'_> {
             write!(formatter, "{byte:02x}")?;
         }
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::{ffi::OsString, io, path::PathBuf};
-
-    use super::*;
-
-    #[test]
-    fn qualification_settings_are_sorted_structurally_without_delimiter_collisions() {
-        let Command::VerifyRoundTrip { request } = parse(arguments(&[
-            "--downstream-setting",
-            "z=a;b=c",
-            "--downstream-setting",
-            "a=b;c=d",
-        ]))
-        .unwrap() else {
-            panic!("expected qualification command")
-        };
-        assert_eq!(
-            request.downstream_settings,
-            vec![
-                ("a".to_owned(), "b;c=d".to_owned()),
-                ("z".to_owned(), "a;b=c".to_owned()),
-            ]
-        );
-    }
-
-    #[test]
-    fn qualification_rejects_duplicate_keys_and_invalid_components() {
-        for settings in [
-            [
-                "--downstream-setting",
-                "key=one",
-                "--downstream-setting",
-                "key=two",
-            ],
-            [
-                "--downstream-setting",
-                " key=value",
-                "--downstream-setting",
-                "ok=yes",
-            ],
-            [
-                "--downstream-setting",
-                "key=value\n",
-                "--downstream-setting",
-                "ok=yes",
-            ],
-        ] {
-            assert!(parse(arguments(&settings)).is_err());
-        }
-    }
-
-    #[test]
-    fn qualification_operational_failures_keep_owner_specific_taxonomy() {
-        let cases = [
-            (
-                QualificationError::Cancelled,
-                FailureCode::Cancelled,
-                RecoveryAction::ResumeSameRun,
-            ),
-            (
-                QualificationError::Io {
-                    operation: "read",
-                    path: PathBuf::from("input.xml"),
-                    source: io::Error::other("injected I/O"),
-                },
-                FailureCode::Io,
-                RecoveryAction::RetryAfterRestoringDisk,
-            ),
-            (
-                QualificationError::Journal(JournalError::Corrupt("injected corruption")),
-                FailureCode::JournalCorrupt,
-                RecoveryAction::StopAndPreserve,
-            ),
-            (
-                QualificationError::Publication(ReportError::Conflict {
-                    path: PathBuf::from("evidence.json"),
-                    expected_hash: [1; 32],
-                    actual_hash: [2; 32],
-                }),
-                FailureCode::OutputConflict,
-                RecoveryAction::RemoveOrRenameConflictingTarget,
-            ),
-            (
-                QualificationError::Publication(ReportError::Resource {
-                    limit: "evidence bytes",
-                    required: 2,
-                    allowed: 1,
-                }),
-                FailureCode::RoundTripResourceLimit,
-                RecoveryAction::UseSupportedRoundTripSize,
-            ),
-        ];
-        for (error, expected_code, expected_action) in cases {
-            let failure = qualification_failure(error);
-            assert_eq!(failure.code, expected_code);
-            assert_eq!(failure.action, expected_action);
-        }
-    }
-
-    fn arguments(settings: &[&str]) -> Vec<OsString> {
-        let mut arguments = vec![
-            "verify-round-trip",
-            "--downstream-app",
-            "app",
-            "--downstream-version",
-            "1",
-        ];
-        arguments.extend_from_slice(settings);
-        arguments.extend_from_slice(&[
-            "--horizontal-tolerance-metres",
-            "0",
-            "--vertical-tolerance-metres",
-            "0",
-            "run",
-            "returned.xml",
-            "evidence.json",
-        ]);
-        arguments.into_iter().map(OsString::from).collect()
     }
 }

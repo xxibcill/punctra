@@ -1095,19 +1095,6 @@ impl ValidatedRevision {
             self.verify_open_file_binding(&file)?;
             return Ok(());
         }
-        let actual_digest = hash_file_prefix(
-            &mut file,
-            self.file_bytes(),
-            limits.max_block_bytes,
-            &self.path,
-            Some(control),
-        )?;
-        if actual_digest != self.file_digest {
-            return corrupt(
-                &self.path,
-                "Revision overlay source differs from its validated whole-file digest",
-            );
-        }
         for block in self.blocks.iter().filter(|block| {
             block.first_ordinal <= last_ordinal && block.last_ordinal >= first_ordinal
         }) {
@@ -4807,6 +4794,100 @@ mod tests {
         ));
         assert_eq!(fs::read(&revision.path).unwrap(), bytes);
         assert_eq!(fs::read(displaced).unwrap(), bytes);
+    }
+
+    #[test]
+    fn overlay_reads_charge_and_validate_only_overlapping_blocks() {
+        let directory = TestDirectory::new();
+        let store = initialized_store(&directory);
+        let mut limits = write_limits();
+        limits.rows_per_block = 1;
+        let sealed = store
+            .seal_candidate(candidate(), rows(), limits, &OperationControl::new())
+            .expect("seal one-row blocks");
+        let ready = store
+            .publish_ready(&sealed, || Ok(()))
+            .expect("publish ready payload");
+        let revision = store
+            .publish_revision(&ready, || Ok(()), || {})
+            .expect("publish Revision");
+        assert_eq!(revision.blocks.len(), 2);
+
+        let second_payload = revision.blocks[1].payload_offset;
+        let mut permissions = fs::metadata(&revision.path).unwrap().permissions();
+        #[allow(clippy::permissions_set_readonly_false)]
+        permissions.set_readonly(false);
+        fs::set_permissions(&revision.path, permissions).unwrap();
+        let mut file = OpenOptions::new()
+            .write(true)
+            .open(&revision.path)
+            .expect("open later block for corruption");
+        file.seek(SeekFrom::Start(second_payload))
+            .expect("seek to later block");
+        file.write_all(&[0xff]).expect("corrupt later block");
+        file.sync_all().expect("sync later-block corruption");
+
+        let overlay_limits = OverlayLimits {
+            max_blocks: 1,
+            max_payload_bytes: ROW_BYTES as u64,
+            max_block_bytes: ROW_BYTES as u64,
+        };
+        let mut first = [1_u8];
+        let mut usage = OverlayUsage::default();
+        revision
+            .apply_rows(
+                3,
+                3,
+                &mut first,
+                overlay_limits,
+                &mut usage,
+                &OperationControl::new(),
+            )
+            .expect("an unrelated later block is outside this bounded overlay read");
+        assert_eq!(first, [9]);
+        assert_eq!(usage.blocks, 1);
+        assert_eq!(usage.payload_bytes, ROW_BYTES as u64);
+
+        let row_control = OperationControl::new();
+        let mut row_stream = revision
+            .rows(
+                RowReadLimits {
+                    max_frames: 2,
+                    max_payload_bytes: 2 * ROW_BYTES as u64,
+                    max_working_bytes: ROW_BYTES as u64,
+                },
+                &row_control,
+            )
+            .expect("open the bounded Revision row stream");
+        assert_eq!(
+            row_stream.next().expect("first row exists").unwrap(),
+            RevisionRow {
+                ordinal: 3,
+                before: 1,
+                after: 9,
+            }
+        );
+        assert!(matches!(
+            row_stream.next(),
+            Some(Err(PersistenceError::Corrupt { .. }))
+        ));
+        assert!(
+            row_stream.next().is_none(),
+            "a later corrupt block fuses the row stream without a false terminal success"
+        );
+
+        let mut later = [2_u8];
+        assert!(matches!(
+            revision.apply_rows(
+                8,
+                8,
+                &mut later,
+                overlay_limits,
+                &mut OverlayUsage::default(),
+                &OperationControl::new(),
+            ),
+            Err(PersistenceError::Corrupt { .. })
+        ));
     }
 
     #[test]

@@ -1,7 +1,7 @@
 # Runtime Workflows
 
-Status: v0.7 durable Run and v0.8 bounded comparison implemented; Active v0.9
-qualification inherits Run-bound evidence; broader workflows deferred
+Status: **v0.7 durable Run, v0.8 Run-bound qualification, and v0.9 trust/
+compatibility hardening Complete; broader workflows deferred**
 
 The host composes sibling modules explicitly. Lower crates never call back into
 an application, discover a Source for a Workspace, submit a GPU queue, or infer
@@ -78,7 +78,7 @@ sequenceDiagram
     WS->>DISK: acquire exclusive lock
     WS->>DISK: validate manifest, operations, contiguous Revisions
     WS->>IDX: revalidate Source/schema/index binding
-    WS->>DISK: clean recognized disposable scratch
+    WS->>DISK: ignore recognized retained scratch; preserve unknown children
     WS-->>HOST: Workspace at complete recovered head
 ~~~
 
@@ -270,7 +270,7 @@ Residual is observed Z minus Surface Z. Outside-hull positions are explicit
 gaps. LandXML coordinates are northing, easting, elevation and require caller-
 established metric-metre Source coordinates; no transformation or clock read
 occurs. Once target publication starts, any inability to prove final
-verification, durability, cleanup, or terminal acknowledgement is reported as
+verification, durability, target binding, or terminal acknowledgement is reported as
 indeterminate rather than success.
 
 An exact existing regular target reconciles without replacement. A different,
@@ -343,7 +343,35 @@ The fixed Run root contains `run.pwf`, `run.lock`, `terrain.xml`, and
 and unknown children are not deleted. `WorkflowFailure` names the stable code,
 stage, certainty, known identities, and exactly one safe recovery action.
 
-## 10. Prepare and render a View
+## 10. Qualify one Complete Run round trip
+
+~~~mermaid
+sequenceDiagram
+    participant CALLER as Caller
+    participant QUAL as terrain-demo qualifier
+    participant RUN as Complete Run root
+    participant RET as Returned LandXML
+    participant EVID as Evidence parent
+
+    CALLER->>QUAL: verify-round-trip(Run, returned, declaration, tolerances, target)
+    QUAL->>RUN: open and lock run.pwf strictly read-only
+    QUAL->>RUN: bind Complete journal, terrain.xml, and audit.json
+    QUAL->>RET: retain regular-file witness; stream complete bounded input
+    QUAL->>QUAL: evaluate XML/subset/CRS, units, Point count, mapping, tolerance, topology
+    QUAL->>RUN: revalidate all Run and input witnesses
+    QUAL->>EVID: create or exactly reconcile canonical pass/fail evidence
+    QUAL->>RUN: final unchanged revalidation
+    QUAL-->>CALLER: evidence receipt or conservative failure
+~~~
+
+Qualification never invokes journal repair and never writes inside the Run
+root. A torn or non-Complete Run, changed input, cancellation, or resource
+failure is operational failure. After complete stable reads, supported semantic
+non-conformance produces canonical failed evidence with a stable reason. Exact
+existing evidence reconciles; different bytes are never overwritten. The
+opaque downstream declaration is not evidence that the named application ran.
+
+## 11. Prepare and render a View
 
 View planning remains separate from exact Workspace selection. The current
 real-cloud host bridge reads `PreparedIndex` directly.
@@ -376,7 +404,7 @@ The host owns scheduling, staging, update ordering, queue submission, and device
 polling. A node becomes Resident only after a complete accepted Upsert. Parent
 Coverage remains until the planner emits its exact conditional retirement.
 
-## 11. Cancellation and crash matrix
+## 12. Cancellation and crash matrix
 
 | Operation | Safe cancellation boundary | Permitted residue | Published truth |
 |---|---|---|---|
@@ -390,10 +418,11 @@ Coverage remains until the planner emits its exact conditional retirement.
 | Detached QA | Between inputs and bounded face-location work | Private partial results | No report, or one complete report |
 | LandXML ensure | Before target publication; afterward certainty is conservative | Recognized sibling stage and possibly one complete target | No target, one exact target plus receipt, exact-existing reconciliation, conflict, or ExportIndeterminate |
 | Terrain Workflow Run | Cooperative phase boundaries and directly linked active child Jobs; after publication certainty remains conservative | Fixed `run.lock`/rebuildable index work before Intent; afterward a verified journal prefix, committed Revision, exact XML/report targets, or recognized sibling stages | No Run before Intent, or one resumable Run whose frames never overstate durable facts |
+| Run-bound qualification | Before evidence publication; afterward certainty is conservative | No Run mutation; retained private evidence stage and possibly one complete target | No evidence for unevaluated operational failure; otherwise one exact canonical pass/fail record, conflict, or publication-indeterminate result |
 | View planning | Before returning a plan | None | Old planner history or one complete new plan |
 | GPU frame | Host-controlled frame/device boundary | Disposable GPU allocations | Workspace unchanged |
 
-## 12. Staleness
+## 13. Staleness
 
 Snapshots and Revisions are immutable. A later commit creates a new head but
 does not mutate older Snapshots. Derived Surfaces remain immutable even when a
@@ -417,6 +446,9 @@ flowchart LR
     RUN["Durable Workflow journal"] -. "checkpoints; must revalidate" .-> R2
     RUN -. "checkpoints; must revalidate" .-> XML
     RUN -. "checkpoints; must revalidate" .-> REP
+    RUN --> QUAL["Read-only qualification"]
+    XML --> QUAL
+    QUAL --> EVID["Separate canonical Round-Trip Evidence"]
     VIEW["Disposable View/GPU state"] -. "never mutates" .-> R2
 ~~~
 

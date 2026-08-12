@@ -1,0 +1,954 @@
+//! Run-bound canonical evidence for one private `LandXML` qualification attempt.
+#![allow(clippy::too_many_lines)]
+
+use std::{
+    fmt::{self, Write as _},
+    io,
+    path::Path,
+};
+
+use foundation_runtime::OperationControl;
+
+use crate::{
+    journal::{Complete, CompleteRunSnapshot, JournalLimits, WorkflowRunId, read_complete_run},
+    publication::DirectoryWitness,
+    report::{
+        REPORT_HASH_DOMAIN, REPORT_SCHEMA, ReportError, ReportLimits, ReportReceipt,
+        ensure_evidence,
+    },
+    roundtrip::{
+        RoundTripDeclaration, RoundTripEvaluation, RoundTripFailure, RoundTripLimits,
+        RoundTripTolerances, capture_round_trip_file,
+    },
+    roundtrip_stream::evaluate_streaming_round_trip_with_control,
+};
+
+const EVIDENCE_SCHEMA: &str = "punctra.terrain-demo.landxml-round-trip-evidence.v1";
+const MATCHER_VERSION: &str = "punctra-landxml-semantic-match-v1";
+const DEFAULT_MAX_EVIDENCE_BYTES: u64 = 1024 * 1024;
+const DEFAULT_MAX_EVIDENCE_WRITE_BUFFER_BYTES: u64 = 8 * 1024;
+const DEFAULT_MAX_EVIDENCE_WORKING_BYTES: u64 =
+    DEFAULT_MAX_EVIDENCE_BYTES + DEFAULT_MAX_EVIDENCE_WRITE_BUFFER_BYTES;
+const PATH_BINDING_BYTES: u64 = 4 * 1024;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum QualificationResult {
+    Passed,
+    Failed,
+}
+
+impl QualificationResult {
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Passed => "passed",
+            Self::Failed => "failed",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct RoundTripEvidenceReceipt {
+    pub(crate) run: WorkflowRunId,
+    pub(crate) result: QualificationResult,
+    pub(crate) evidence_hash: [u8; 32],
+    pub(crate) evidence_bytes: u64,
+    pub(crate) failure_reason: Option<crate::roundtrip::RoundTripReason>,
+}
+
+#[derive(Debug)]
+pub(crate) enum RoundTripEvidenceError {
+    Invalid(String),
+    Journal(crate::journal::JournalError),
+    Comparison(RoundTripFailure),
+    Publication(ReportError),
+}
+
+impl fmt::Display for RoundTripEvidenceError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Invalid(message) => formatter.write_str(message),
+            Self::Journal(error) => write!(formatter, "{error}"),
+            Self::Comparison(error) => write!(formatter, "{error}"),
+            Self::Publication(error) => write!(formatter, "{error}"),
+        }
+    }
+}
+
+impl std::error::Error for RoundTripEvidenceError {}
+
+impl From<crate::journal::JournalError> for RoundTripEvidenceError {
+    fn from(error: crate::journal::JournalError) -> Self {
+        Self::Journal(error)
+    }
+}
+
+impl From<RoundTripFailure> for RoundTripEvidenceError {
+    fn from(error: RoundTripFailure) -> Self {
+        Self::Comparison(error)
+    }
+}
+
+impl From<ReportError> for RoundTripEvidenceError {
+    fn from(error: ReportError) -> Self {
+        Self::Publication(error)
+    }
+}
+
+pub(crate) fn verify_round_trip(
+    run_root: &Path,
+    returned_landxml: &Path,
+    evidence_target: &Path,
+    declaration: RoundTripDeclaration,
+    tolerances: RoundTripTolerances,
+) -> Result<RoundTripEvidenceReceipt, RoundTripEvidenceError> {
+    verify_round_trip_with_control(
+        run_root,
+        returned_landxml,
+        evidence_target,
+        declaration,
+        tolerances,
+        &OperationControl::new(),
+    )
+}
+
+fn verify_round_trip_with_control(
+    run_root: &Path,
+    returned_landxml: &Path,
+    evidence_target: &Path,
+    declaration: RoundTripDeclaration,
+    tolerances: RoundTripTolerances,
+    control: &OperationControl,
+) -> Result<RoundTripEvidenceReceipt, RoundTripEvidenceError> {
+    check_cancelled(control)?;
+    let run_witness = DirectoryWitness::capture(run_root).map_err(|error| {
+        RoundTripEvidenceError::Invalid(format!("Run root cannot be witnessed: {error}"))
+    })?;
+    let evidence_parent_witness = require_external_target(run_root, evidence_target)?;
+    let journal = read_complete_run(&run_root.join("run.pwf"), JournalLimits::default())?;
+    if crate::journal::bind_path(run_root, PATH_BINDING_BYTES)? != journal.intent.path_bindings[3] {
+        return Err(RoundTripEvidenceError::Invalid(
+            "Run root path differs from the Complete Run binding".to_owned(),
+        ));
+    }
+    check_cancelled(control)?;
+    let complete = journal.complete;
+    let audit = capture_round_trip_file(&run_root.join("audit.json"), DEFAULT_MAX_EVIDENCE_BYTES)?;
+    let audit_hash = domain_hash(REPORT_HASH_DOMAIN, &audit.bytes);
+    if audit_hash != complete.report_hash {
+        return Err(RoundTripEvidenceError::Invalid(
+            "audit.json does not match the Complete checkpoint".to_owned(),
+        ));
+    }
+    validate_audit_bindings(&journal, &audit.bytes)?;
+    let limits = RoundTripLimits::full_v07_export();
+    let streaming = evaluate_streaming_round_trip_with_control(
+        &run_root.join("terrain.xml"),
+        returned_landxml,
+        declaration,
+        tolerances,
+        limits,
+        control,
+    )?;
+    let evaluation = &streaming.evaluation;
+    if evaluation_reference_hash(evaluation) != complete.landxml_hash {
+        return Err(RoundTripEvidenceError::Invalid(
+            "terrain.xml does not match the Complete checkpoint".to_owned(),
+        ));
+    }
+    if evaluation_reference_bytes(evaluation) != journal.export.byte_length {
+        return Err(RoundTripEvidenceError::Invalid(
+            "terrain.xml byte length does not match the ExportEnsured checkpoint".to_owned(),
+        ));
+    }
+    run_witness.verify().map_err(|error| {
+        RoundTripEvidenceError::Invalid(format!("Run root changed during qualification: {error}"))
+    })?;
+    journal.verify_unchanged()?;
+    audit.verify()?;
+    streaming.verify_inputs()?;
+    evidence_parent_witness.verify().map_err(|error| {
+        RoundTripEvidenceError::Invalid(format!(
+            "evidence parent changed during qualification: {error}"
+        ))
+    })?;
+    check_cancelled(control)?;
+    let evidence = encode_evidence(&journal, complete, &audit, evaluation, limits)?;
+    let validate_inputs = || {
+        run_witness.verify()?;
+        journal.verify_unchanged().map_err(io::Error::other)?;
+        audit.verify().map_err(io::Error::other)?;
+        streaming.verify_inputs().map_err(io::Error::other)?;
+        evidence_parent_witness.verify()
+    };
+    let publication = ensure_evidence(
+        evidence_target,
+        ReportLimits {
+            max_output_bytes: DEFAULT_MAX_EVIDENCE_BYTES,
+            max_staging_bytes: DEFAULT_MAX_EVIDENCE_BYTES,
+            max_write_buffer_bytes: DEFAULT_MAX_EVIDENCE_WRITE_BUFFER_BYTES,
+            max_working_bytes: DEFAULT_MAX_EVIDENCE_WORKING_BYTES,
+        },
+        control,
+        |writer| writer.write_all(evidence.as_bytes()),
+        validate_inputs,
+    )?;
+    Ok(receipt(journal.run, evaluation, publication))
+}
+
+fn check_cancelled(control: &OperationControl) -> Result<(), RoundTripEvidenceError> {
+    control
+        .check_cancelled()
+        .map_err(|_| RoundTripEvidenceError::Comparison(RoundTripFailure::cancelled()))
+}
+
+fn validate_audit_bindings(
+    journal: &CompleteRunSnapshot,
+    bytes: &[u8],
+) -> Result<(), RoundTripEvidenceError> {
+    let report = journal.report;
+    if bytes.len() as u64 != report.byte_length {
+        return Err(RoundTripEvidenceError::Invalid(
+            "audit.json byte length does not match the ReportEnsured checkpoint".to_owned(),
+        ));
+    }
+    let document: serde_json::Value = serde_json::from_slice(bytes).map_err(|error| {
+        RoundTripEvidenceError::Invalid(format!("audit.json is not valid JSON: {error}"))
+    })?;
+    require_audit_string(&document, "/schema", REPORT_SCHEMA, "schema")?;
+    require_audit_string(
+        &document,
+        "/identities/run",
+        &hex_string(&journal.run.into_bytes()),
+        "Run Identity",
+    )?;
+    require_audit_string(
+        &document,
+        "/request/request_hash",
+        &hex_string(&journal.intent.request_hash),
+        "request hash",
+    )?;
+    require_audit_string(
+        &document,
+        "/identities/source",
+        &hex_string(&journal.intent.source),
+        "Source Identity",
+    )?;
+    require_audit_string(
+        &document,
+        "/identities/workspace",
+        &hex_string(&journal.intent.workspace),
+        "Workspace Identity",
+    )?;
+    require_audit_string(
+        &document,
+        "/identities/baseline_revision",
+        &hex_string(&journal.intent.baseline_revision),
+        "baseline Revision",
+    )?;
+    require_audit_string(
+        &document,
+        "/identities/operation",
+        &hex_string(&journal.intent.operation),
+        "Operation Identity",
+    )?;
+    require_audit_string(
+        &document,
+        "/identities/changed_revision",
+        &hex_string(&journal.complete.revision),
+        "changed Revision",
+    )?;
+    require_audit_string(
+        &document,
+        "/request/ordinal_hash",
+        &hex_string(&journal.intent.ordinal_hash),
+        "ordinal hash",
+    )?;
+    require_audit_string(
+        &document,
+        "/request/recipe_hash",
+        &hex_string(&journal.intent.recipe_hash),
+        "terrain recipe hash",
+    )?;
+    require_audit_string(
+        &document,
+        "/request/qa_input_hash",
+        &hex_string(&journal.intent.qa_input_hash),
+        "QA input hash",
+    )?;
+    require_audit_string(
+        &document,
+        "/request/landxml_options_hash",
+        &hex_string(&journal.intent.options_hash),
+        "LandXML options hash",
+    )?;
+    let path_bindings = document
+        .pointer("/request/path_bindings")
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(|| {
+            RoundTripEvidenceError::Invalid(
+                "audit.json path bindings are absent or invalid".to_owned(),
+            )
+        })?;
+    if path_bindings.len() != journal.intent.path_bindings.len()
+        || path_bindings
+            .iter()
+            .zip(journal.intent.path_bindings)
+            .any(|(actual, expected)| actual.as_str() != Some(&hex_string(&expected)))
+    {
+        return Err(RoundTripEvidenceError::Invalid(
+            "audit.json path bindings do not match the Complete Run".to_owned(),
+        ));
+    }
+    require_audit_string(
+        &document,
+        "/edit/audit_hash",
+        &hex_string(&journal.complete.audit_hash),
+        "Revision Audit hash",
+    )?;
+    require_audit_string(
+        &document,
+        "/terrain/changed/artifact_hash",
+        &hex_string(&journal.complete.surface_hash),
+        "changed terrain artifact hash",
+    )?;
+    require_audit_string(
+        &document,
+        "/qa/result_hash",
+        &hex_string(&journal.complete.qa_hash),
+        "QA result hash",
+    )?;
+    let export = journal.export;
+    require_audit_string(
+        &document,
+        "/landxml/content_hash",
+        &hex_string(&export.content_hash),
+        "LandXML content hash",
+    )?;
+    require_audit_u64(
+        &document,
+        "/landxml/byte_length",
+        export.byte_length,
+        "LandXML byte length",
+    )?;
+    require_audit_false(
+        &document,
+        "/external_evidence/downstream_round_trip_evaluated",
+        "downstream round-trip nonclaim",
+    )
+}
+
+fn require_audit_string(
+    document: &serde_json::Value,
+    pointer: &str,
+    expected: &str,
+    label: &str,
+) -> Result<(), RoundTripEvidenceError> {
+    if document
+        .pointer(pointer)
+        .and_then(serde_json::Value::as_str)
+        == Some(expected)
+    {
+        Ok(())
+    } else {
+        Err(RoundTripEvidenceError::Invalid(format!(
+            "audit.json {label} does not match the Complete Run"
+        )))
+    }
+}
+
+fn require_audit_u64(
+    document: &serde_json::Value,
+    pointer: &str,
+    expected: u64,
+    label: &str,
+) -> Result<(), RoundTripEvidenceError> {
+    if document
+        .pointer(pointer)
+        .and_then(serde_json::Value::as_u64)
+        == Some(expected)
+    {
+        Ok(())
+    } else {
+        Err(RoundTripEvidenceError::Invalid(format!(
+            "audit.json {label} does not match the Complete Run"
+        )))
+    }
+}
+
+fn require_audit_false(
+    document: &serde_json::Value,
+    pointer: &str,
+    label: &str,
+) -> Result<(), RoundTripEvidenceError> {
+    if document
+        .pointer(pointer)
+        .and_then(serde_json::Value::as_bool)
+        == Some(false)
+    {
+        Ok(())
+    } else {
+        Err(RoundTripEvidenceError::Invalid(format!(
+            "audit.json {label} is absent or changed"
+        )))
+    }
+}
+
+fn require_external_target(
+    run_root: &Path,
+    evidence_target: &Path,
+) -> Result<DirectoryWitness, RoundTripEvidenceError> {
+    if evidence_target.file_name().is_none() {
+        return Err(RoundTripEvidenceError::Invalid(
+            "evidence target must name a file".to_owned(),
+        ));
+    }
+    let run_root = run_root.canonicalize().map_err(|error| {
+        RoundTripEvidenceError::Invalid(format!("Run root cannot be resolved: {error}"))
+    })?;
+    let parent = evidence_target.parent().unwrap_or_else(|| Path::new("."));
+    let parent_witness = DirectoryWitness::capture(parent).map_err(|error| {
+        RoundTripEvidenceError::Invalid(format!("evidence parent cannot be witnessed: {error}"))
+    })?;
+    let resolved_parent = parent.canonicalize().map_err(|error| {
+        RoundTripEvidenceError::Invalid(format!("evidence parent cannot be resolved: {error}"))
+    })?;
+    if resolved_parent.starts_with(&run_root) {
+        return Err(RoundTripEvidenceError::Invalid(
+            "evidence target must be outside the Run root".to_owned(),
+        ));
+    }
+    Ok(parent_witness)
+}
+
+fn receipt(
+    run: WorkflowRunId,
+    evaluation: &RoundTripEvaluation,
+    publication: ReportReceipt,
+) -> RoundTripEvidenceReceipt {
+    RoundTripEvidenceReceipt {
+        run,
+        result: match evaluation {
+            RoundTripEvaluation::Passed(_) => QualificationResult::Passed,
+            RoundTripEvaluation::Failed(_) => QualificationResult::Failed,
+        },
+        evidence_hash: publication.content_hash,
+        evidence_bytes: publication.byte_length,
+        failure_reason: evaluation.reason(),
+    }
+}
+
+fn evaluation_reference_hash(evaluation: &RoundTripEvaluation) -> [u8; 32] {
+    match evaluation {
+        RoundTripEvaluation::Passed(report) => report.reference_content_hash(),
+        RoundTripEvaluation::Failed(mismatch) => mismatch.reference_content_hash(),
+    }
+}
+
+fn encode_evidence(
+    journal: &CompleteRunSnapshot,
+    complete: Complete,
+    audit: &crate::roundtrip::CapturedRoundTripFile,
+    evaluation: &RoundTripEvaluation,
+    limits: RoundTripLimits,
+) -> Result<String, RoundTripEvidenceError> {
+    let mut json = String::with_capacity(8 * 1024);
+    write!(json, "{{\"schema\":")?;
+    string(&mut json, EVIDENCE_SCHEMA)?;
+    write!(json, ",\"result\":")?;
+    string(
+        &mut json,
+        match evaluation {
+            RoundTripEvaluation::Passed(_) => "passed",
+            RoundTripEvaluation::Failed(_) => "failed",
+        },
+    )?;
+    write!(json, ",\"run\":{{\"run_id\":")?;
+    hex(&mut json, &journal.run.into_bytes())?;
+    write!(json, ",\"request_hash\":")?;
+    hex(&mut json, &journal.intent.request_hash)?;
+    write!(json, ",\"complete_journal_hash\":")?;
+    hex(&mut json, &journal.journal_hash)?;
+    write!(
+        json,
+        ",\"complete_journal_bytes\":{}",
+        journal.journal_bytes
+    )?;
+    write!(json, ",\"original_landxml_hash\":")?;
+    hex(&mut json, &complete.landxml_hash)?;
+    write!(
+        json,
+        ",\"original_landxml_bytes\":{}",
+        evaluation_reference_bytes(evaluation)
+    )?;
+    write!(json, ",\"audit_json_hash\":")?;
+    hex(&mut json, &complete.report_hash)?;
+    write!(json, ",\"audit_json_bytes\":{}}}", audit.bytes.len())?;
+    write!(json, ",\"downstream_declaration\":{{\"application\":")?;
+    let declaration = evaluation_declaration(evaluation);
+    string(&mut json, declaration.declared_application())?;
+    write!(json, ",\"version\":")?;
+    string(&mut json, declaration.declared_version())?;
+    write!(json, ",\"settings_profile\":")?;
+    string(&mut json, declaration.declared_settings_profile())?;
+    let tolerances = evaluation_tolerances(evaluation);
+    write!(
+        json,
+        "}},\"comparison_policy\":{{\"horizontal_tolerance_metres\":"
+    )?;
+    number(&mut json, tolerances.horizontal_metres())?;
+    write!(json, ",\"vertical_tolerance_metres\":")?;
+    number(&mut json, tolerances.vertical_metres())?;
+    write!(json, ",\"matcher_version\":")?;
+    string(&mut json, MATCHER_VERSION)?;
+    write!(json, "}},\"returned_landxml\":{{\"content_hash\":")?;
+    hex(&mut json, &evaluation_returned_hash(evaluation))?;
+    write!(
+        json,
+        ",\"bytes\":{},\"namespace\":",
+        evaluation_returned_bytes(evaluation)
+    )?;
+    if evaluation_returned_was_parsed(evaluation) {
+        string(&mut json, "http://www.landxml.org/schema/LandXML-1.2")?;
+    } else {
+        json.push_str("null");
+    }
+    write!(json, ",\"declared_units\":")?;
+    if evaluation_returned_was_parsed(evaluation) {
+        string(&mut json, "meter")?;
+    } else {
+        json.push_str("null");
+    }
+    write!(json, ",\"surface_name\":")?;
+    match evaluation_returned_surface_name(evaluation) {
+        Some(name) => string(&mut json, name)?,
+        None => json.push_str("null"),
+    }
+    write!(json, ",\"point_count\":")?;
+    optional_count(&mut json, evaluation, true)?;
+    write!(json, ",\"face_count\":")?;
+    optional_count(&mut json, evaluation, false)?;
+    write!(json, ",\"ignored_top_level_section_names\":[")?;
+    for (index, section) in evaluation_returned_ignored_sections(evaluation)
+        .iter()
+        .enumerate()
+    {
+        if index != 0 {
+            json.push(',');
+        }
+        string(&mut json, section)?;
+    }
+    write!(json, "]}}")?;
+    write_checks(&mut json, evaluation)?;
+    write_comparison(&mut json, evaluation)?;
+    write!(
+        json,
+        ",\"limits\":{{\"xml_input_bytes\":{},\"xml_nodes\":{},\"xml_text_attribute_bytes\":{},\"points\":{},\"faces\":{},\"candidate_vertex_comparisons\":{},\"application_label_bytes\":128,\"version_label_bytes\":128,\"settings_profile_bytes\":1024,\"evidence_output_bytes\":{DEFAULT_MAX_EVIDENCE_BYTES},\"evidence_staging_bytes\":{DEFAULT_MAX_EVIDENCE_BYTES},\"evidence_write_buffer_bytes\":{DEFAULT_MAX_EVIDENCE_WRITE_BUFFER_BYTES},\"evidence_working_bytes\":{DEFAULT_MAX_EVIDENCE_WORKING_BYTES}}}",
+        limits.file_bytes(),
+        limits.xml_nodes(),
+        limits.xml_text_bytes(),
+        limits.points(),
+        limits.faces(),
+        limits.comparisons()
+    )?;
+    writeln!(
+        json,
+        ",\"nonclaims\":{{\"punctra_observed_downstream_execution\":false,\"vendor_certification\":false,\"firm_acceptance\":false,\"paid_use\":false,\"conversion\":false,\"measured_labor_savings\":false}}}}"
+    )?;
+    if json.len() as u64 > DEFAULT_MAX_EVIDENCE_BYTES {
+        return Err(RoundTripEvidenceError::Invalid(
+            "canonical evidence exceeds its output limit".to_owned(),
+        ));
+    }
+    Ok(json)
+}
+
+fn write_checks(json: &mut String, evaluation: &RoundTripEvaluation) -> Result<(), fmt::Error> {
+    let [parse, units, unique_mapping, tolerance, topology] = check_statuses(evaluation.reason());
+    write!(
+        json,
+        ",\"checks\":{{\"provenance\":{{\"status\":\"passed\"}},\"parse\":{{\"status\":"
+    )?;
+    write_check_status(json, parse)?;
+    write!(json, "}},\"units\":{{\"status\":")?;
+    write_check_status(json, units)?;
+    write!(json, "}},\"unique_mapping\":{{\"status\":")?;
+    write_check_status(json, unique_mapping)?;
+    write!(json, "}},\"tolerance\":{{\"status\":")?;
+    write_check_status(json, tolerance)?;
+    write!(json, "}},\"topology\":{{\"status\":")?;
+    write_check_status(json, topology)?;
+    write!(json, "}}}}")
+}
+
+fn check_statuses(reason: Option<crate::roundtrip::RoundTripReason>) -> [CheckStatus; 5] {
+    use crate::roundtrip::RoundTripReason as Reason;
+
+    let parse = match reason {
+        Some(
+            value @ (Reason::XmlInvalid
+            | Reason::SubsetUnsupported
+            | Reason::CoordinateReferenceUnsupported),
+        ) => CheckStatus::Failed(value),
+        _ => CheckStatus::Passed,
+    };
+    let units = match reason {
+        Some(
+            Reason::XmlInvalid | Reason::SubsetUnsupported | Reason::CoordinateReferenceUnsupported,
+        ) => CheckStatus::NotEvaluated,
+        Some(value @ Reason::UnitDrift) => CheckStatus::Failed(value),
+        _ => CheckStatus::Passed,
+    };
+    let unique_mapping = match reason {
+        Some(
+            Reason::XmlInvalid
+            | Reason::SubsetUnsupported
+            | Reason::CoordinateReferenceUnsupported
+            | Reason::UnitDrift,
+        ) => CheckStatus::NotEvaluated,
+        Some(
+            value @ (Reason::PointCountDrift
+            | Reason::VertexUnmatched
+            | Reason::VertexAmbiguous
+            | Reason::ToleranceDrift),
+        ) => CheckStatus::Failed(value),
+        _ => CheckStatus::Passed,
+    };
+    let tolerance = match reason {
+        Some(
+            Reason::XmlInvalid
+            | Reason::SubsetUnsupported
+            | Reason::CoordinateReferenceUnsupported
+            | Reason::UnitDrift
+            | Reason::PointCountDrift
+            | Reason::VertexAmbiguous,
+        ) => CheckStatus::NotEvaluated,
+        Some(value @ (Reason::VertexUnmatched | Reason::ToleranceDrift)) => {
+            CheckStatus::Failed(value)
+        }
+        _ => CheckStatus::Passed,
+    };
+    let topology = match reason {
+        None => CheckStatus::Passed,
+        Some(value @ Reason::TopologyDrift) => CheckStatus::Failed(value),
+        Some(_) => CheckStatus::NotEvaluated,
+    };
+    [parse, units, unique_mapping, tolerance, topology]
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum CheckStatus {
+    Passed,
+    Failed(crate::roundtrip::RoundTripReason),
+    NotEvaluated,
+}
+
+fn write_check_status(json: &mut String, status: CheckStatus) -> Result<(), fmt::Error> {
+    match status {
+        CheckStatus::Passed => string(json, "passed"),
+        CheckStatus::Failed(reason) => {
+            write!(json, "\"failed\",\"reason_code\":")?;
+            string(json, reason.as_str())
+        }
+        CheckStatus::NotEvaluated => string(json, "not_evaluated"),
+    }
+}
+
+fn write_comparison(json: &mut String, evaluation: &RoundTripEvaluation) -> Result<(), fmt::Error> {
+    write!(json, ",\"comparison\":")?;
+    match evaluation {
+        RoundTripEvaluation::Passed(report) => {
+            write!(
+                json,
+                "{{\"mapped_point_count\":{},\"unmatched_point_count\":0,\"ambiguous_point_count\":0,\"maximum_horizontal_delta_metres\":",
+                report.vertex_count()
+            )?;
+            number(json, report.max_horizontal_drift_metres())?;
+            write!(json, ",\"maximum_vertical_delta_metres\":")?;
+            number(json, report.max_vertical_drift_metres())?;
+            write!(
+                json,
+                ",\"added_face_count\":0,\"removed_face_count\":0,\"added_face_hash\":null,\"removed_face_hash\":null,\"added_face_sample\":[],\"removed_face_sample\":[]}}"
+            )
+        }
+        RoundTripEvaluation::Failed(mismatch) => {
+            let completed_mapping = mismatch.completed_mapping_point_count();
+            write!(json, "{{\"mapped_point_count\":")?;
+            if let Some(count) = completed_mapping {
+                write!(json, "{count}")?;
+            } else {
+                json.push_str("null");
+            }
+            write!(
+                json,
+                ",\"unmatched_point_count\":{},\"ambiguous_point_count\":{},\"maximum_horizontal_delta_metres\":",
+                if completed_mapping.is_some() {
+                    "0"
+                } else {
+                    "null"
+                },
+                if completed_mapping.is_some() {
+                    "0"
+                } else {
+                    "null"
+                }
+            )?;
+            if let Some((horizontal, _)) = mismatch.completed_mapping_maximum_deltas() {
+                number(json, horizontal)?;
+            } else {
+                json.push_str("null");
+            }
+            write!(json, ",\"maximum_vertical_delta_metres\":")?;
+            if let Some((_, vertical)) = mismatch.completed_mapping_maximum_deltas() {
+                number(json, vertical)?;
+            } else {
+                json.push_str("null");
+            }
+            write!(json, ",\"added_face_count\":")?;
+            if let Some(topology) = mismatch.topology() {
+                write!(json, "{}", topology.added_count())?;
+            } else {
+                json.push_str("null");
+            }
+            write!(json, ",\"removed_face_count\":")?;
+            if let Some(topology) = mismatch.topology() {
+                write!(json, "{}", topology.removed_count())?;
+            } else {
+                json.push_str("null");
+            }
+            write!(json, ",\"added_face_hash\":")?;
+            if let Some(topology) = mismatch.topology() {
+                hex(json, &topology.added_hash())?;
+            } else {
+                json.push_str("null");
+            }
+            write!(json, ",\"removed_face_hash\":")?;
+            if let Some(topology) = mismatch.topology() {
+                hex(json, &topology.removed_hash())?;
+            } else {
+                json.push_str("null");
+            }
+            write!(json, ",\"added_face_sample\":")?;
+            write_face_sample(
+                json,
+                mismatch
+                    .topology()
+                    .map(crate::roundtrip::TopologyDrift::added_sample),
+            )?;
+            write!(json, ",\"removed_face_sample\":")?;
+            write_face_sample(
+                json,
+                mismatch
+                    .topology()
+                    .map(crate::roundtrip::TopologyDrift::removed_sample),
+            )?;
+            write!(json, ",\"diagnostic\":")?;
+            string(json, mismatch.diagnostic())?;
+            write!(json, "}}")
+        }
+    }
+}
+
+fn write_face_sample(json: &mut String, sample: Option<&[[usize; 3]]>) -> Result<(), fmt::Error> {
+    json.push('[');
+    for (index, face) in sample.unwrap_or_default().iter().enumerate() {
+        if index != 0 {
+            json.push(',');
+        }
+        write!(json, "[{},{},{}]", face[0], face[1], face[2])?;
+    }
+    json.push(']');
+    Ok(())
+}
+
+fn evaluation_declaration(evaluation: &RoundTripEvaluation) -> &RoundTripDeclaration {
+    match evaluation {
+        RoundTripEvaluation::Passed(report) => report.declaration(),
+        RoundTripEvaluation::Failed(mismatch) => mismatch.declaration(),
+    }
+}
+
+fn evaluation_tolerances(evaluation: &RoundTripEvaluation) -> RoundTripTolerances {
+    match evaluation {
+        RoundTripEvaluation::Passed(report) => report.tolerances(),
+        RoundTripEvaluation::Failed(mismatch) => mismatch.tolerances(),
+    }
+}
+
+fn evaluation_reference_bytes(evaluation: &RoundTripEvaluation) -> u64 {
+    match evaluation {
+        RoundTripEvaluation::Passed(report) => report.reference_bytes(),
+        RoundTripEvaluation::Failed(mismatch) => mismatch.reference_bytes(),
+    }
+}
+
+fn evaluation_returned_hash(evaluation: &RoundTripEvaluation) -> [u8; 32] {
+    match evaluation {
+        RoundTripEvaluation::Passed(report) => report.returned_content_hash(),
+        RoundTripEvaluation::Failed(mismatch) => mismatch.returned_content_hash(),
+    }
+}
+
+fn evaluation_returned_bytes(evaluation: &RoundTripEvaluation) -> u64 {
+    match evaluation {
+        RoundTripEvaluation::Passed(report) => report.returned_bytes(),
+        RoundTripEvaluation::Failed(mismatch) => mismatch.returned_bytes(),
+    }
+}
+
+fn optional_count(
+    json: &mut String,
+    evaluation: &RoundTripEvaluation,
+    points: bool,
+) -> Result<(), fmt::Error> {
+    let count = match evaluation {
+        RoundTripEvaluation::Passed(report) => Some(if points {
+            report.vertex_count()
+        } else {
+            report.face_count()
+        }),
+        RoundTripEvaluation::Failed(mismatch) => {
+            if points {
+                mismatch.returned_point_count()
+            } else {
+                mismatch.returned_face_count()
+            }
+        }
+    };
+    match count {
+        Some(count) => write!(json, "{count}"),
+        None => json.write_str("null"),
+    }
+}
+
+fn evaluation_returned_was_parsed(evaluation: &RoundTripEvaluation) -> bool {
+    match evaluation {
+        RoundTripEvaluation::Passed(_) => true,
+        RoundTripEvaluation::Failed(mismatch) => mismatch.returned_was_parsed(),
+    }
+}
+
+fn evaluation_returned_surface_name(evaluation: &RoundTripEvaluation) -> Option<&str> {
+    match evaluation {
+        RoundTripEvaluation::Passed(report) => report.returned_surface_name(),
+        RoundTripEvaluation::Failed(mismatch) => mismatch.returned_surface_name(),
+    }
+}
+
+fn evaluation_returned_ignored_sections(evaluation: &RoundTripEvaluation) -> &[Box<str>] {
+    match evaluation {
+        RoundTripEvaluation::Passed(report) => report.returned_ignored_sections(),
+        RoundTripEvaluation::Failed(mismatch) => mismatch.returned_ignored_sections(),
+    }
+}
+
+fn domain_hash(domain: &[u8], bytes: &[u8]) -> [u8; 32] {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(domain);
+    hasher.update(bytes);
+    *hasher.finalize().as_bytes()
+}
+
+fn number(output: &mut String, value: f64) -> Result<(), fmt::Error> {
+    write!(output, "{value:.17}")
+}
+
+fn hex(output: &mut String, bytes: &[u8]) -> Result<(), fmt::Error> {
+    output.push('"');
+    for byte in bytes {
+        write!(output, "{byte:02x}")?;
+    }
+    output.push('"');
+    Ok(())
+}
+
+fn hex_string(bytes: &[u8]) -> String {
+    let mut output = String::with_capacity(bytes.len().saturating_mul(2));
+    for byte in bytes {
+        write!(output, "{byte:02x}").expect("writing to String cannot fail");
+    }
+    output
+}
+
+fn string(output: &mut String, value: &str) -> Result<(), fmt::Error> {
+    output.push('"');
+    for character in value.chars() {
+        match character {
+            '"' => output.push_str("\\\""),
+            '\\' => output.push_str("\\\\"),
+            '\n' => output.push_str("\\n"),
+            '\r' => output.push_str("\\r"),
+            '\t' => output.push_str("\\t"),
+            value if value < '\u{20}' => write!(output, "\\u{:04x}", value as u32)?,
+            value => output.push(value),
+        }
+    }
+    output.push('"');
+    Ok(())
+}
+
+impl From<fmt::Error> for RoundTripEvidenceError {
+    fn from(_error: fmt::Error) -> Self {
+        Self::Invalid("canonical evidence encoding failed".to_owned())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        path::Path,
+        sync::atomic::{AtomicU64, Ordering},
+    };
+
+    use foundation_runtime::OperationControl;
+
+    use crate::roundtrip::{
+        RoundTripDeclaration, RoundTripFailureKind, RoundTripReason, RoundTripTolerances,
+    };
+
+    use super::{
+        CheckStatus, RoundTripEvidenceError, check_statuses, verify_round_trip_with_control,
+    };
+
+    static NEXT_TARGET: AtomicU64 = AtomicU64::new(0);
+
+    #[test]
+    fn ambiguous_mapping_leaves_dependent_checks_not_evaluated() {
+        let [parse, units, mapping, tolerance, topology] =
+            check_statuses(Some(RoundTripReason::VertexAmbiguous));
+
+        assert_eq!(parse, CheckStatus::Passed);
+        assert_eq!(units, CheckStatus::Passed);
+        assert_eq!(
+            mapping,
+            CheckStatus::Failed(RoundTripReason::VertexAmbiguous)
+        );
+        assert_eq!(tolerance, CheckStatus::NotEvaluated);
+        assert_eq!(topology, CheckStatus::NotEvaluated);
+    }
+
+    #[test]
+    fn cancelled_preflight_publishes_no_evidence() {
+        let control = OperationControl::new();
+        control.cancel();
+        let target = std::env::temp_dir().join(format!(
+            "punctra-cancelled-round-trip-{}-{}.json",
+            std::process::id(),
+            NEXT_TARGET.fetch_add(1, Ordering::Relaxed)
+        ));
+        let error = verify_round_trip_with_control(
+            Path::new("cancelled-round-trip-run-must-not-exist"),
+            Path::new("cancelled-returned-must-not-exist.xml"),
+            &target,
+            RoundTripDeclaration::new("generated", "test", "metric").unwrap(),
+            RoundTripTolerances::new(0.0, 0.0).unwrap(),
+            &control,
+        )
+        .expect_err("pre-cancelled qualification must stop before input access");
+
+        let RoundTripEvidenceError::Comparison(error) = error else {
+            panic!("cancellation must retain its operational failure class");
+        };
+        assert_eq!(error.kind(), RoundTripFailureKind::Cancelled);
+        assert!(!target.exists());
+    }
+}

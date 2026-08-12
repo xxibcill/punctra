@@ -428,6 +428,13 @@ pub(crate) struct CompleteRunSnapshot {
 
 impl CompleteRunSnapshot {
     pub(crate) fn verify_unchanged(&self) -> Result<(), JournalError> {
+        self.verify_unchanged_with_hook(|| Ok(()))
+    }
+
+    fn verify_unchanged_with_hook(
+        &self,
+        after_hash: impl FnOnce() -> io::Result<()>,
+    ) -> Result<(), JournalError> {
         let opened = self
             .file
             .metadata()
@@ -468,9 +475,45 @@ impl CompleteRunSnapshot {
             hasher.update(&buffer[..read]);
             remaining = remaining.saturating_sub(read as u64);
         }
+        after_hash().map_err(|source| {
+            JournalError::io(
+                "run Complete journal terminal-verification boundary",
+                &self.path,
+                source,
+            )
+        })?;
+        let mut sentinel = [0_u8; 1];
+        if reader.read(&mut sentinel).map_err(|source| {
+            JournalError::io("check Complete journal for growth", &self.path, source)
+        })? != 0
+        {
+            return Err(JournalError::Corrupt(
+                "Complete journal grew after qualification read",
+            ));
+        }
         if hasher.finalize().as_bytes() != &self.journal_hash {
             return Err(JournalError::Corrupt(
                 "Complete journal bytes changed after qualification read",
+            ));
+        }
+        let opened_after = self.file.metadata().map_err(|source| {
+            JournalError::io("terminally reinspect Complete journal", &self.path, source)
+        })?;
+        let target_after = fs::symlink_metadata(&self.path).map_err(|source| {
+            JournalError::io(
+                "terminally reinspect Complete journal path",
+                &self.path,
+                source,
+            )
+        })?;
+        if !target_after.file_type().is_file()
+            || !same_file_identity(&self.identity, &opened_after)
+            || !same_file_identity(&opened_after, &target_after)
+            || !journal_file_state(&self.identity, &opened_after)
+            || !journal_file_state(&opened_after, &target_after)
+        {
+            return Err(JournalError::Corrupt(
+                "Complete journal changed during terminal verification",
             ));
         }
         Ok(())
@@ -2974,6 +3017,29 @@ mod tests {
             Err(JournalError::Incompatible(_))
         ));
         assert_eq!(fs::read(&path).unwrap(), unknown);
+    }
+
+    #[test]
+    fn complete_snapshot_rejects_growth_at_terminal_verification() {
+        let directory = Directory::new("complete-terminal-growth");
+        let path = directory.path.join("run.pwf");
+        let expected_intent = intent();
+        let checkpoints = checkpoints(&expected_intent);
+        let mut journal =
+            Journal::create(&path, expected_intent, JournalLimits::default()).unwrap();
+        for checkpoint in checkpoints {
+            journal.record(checkpoint).unwrap();
+        }
+        drop(journal);
+        let snapshot = read_complete_run(&path, JournalLimits::default()).unwrap();
+        let failure = snapshot
+            .verify_unchanged_with_hook(|| {
+                let mut file = OpenOptions::new().append(true).open(&path)?;
+                file.write_all(b"growth after terminal hash")?;
+                file.sync_all()
+            })
+            .expect_err("growth after the terminal hash must not be acknowledged");
+        assert!(matches!(failure, JournalError::Corrupt(_)));
     }
 
     #[test]

@@ -1,41 +1,42 @@
 # Repository Trust and v1 Candidate Design (v0.9)
 
-Status: **Accepted and Active — first failure-taxonomy slice implemented; inherited
-Run-bound qualification closure and v1-candidate gates remain outstanding**
+Status: **Implemented and Complete — repository-verified version-1
+compatibility candidate; external product evidence remains outstanding**
 
 This design is authoritative for the narrow Punctra v0.9 repository slice. Its
-base is commit `926ba7f`, the `0.8.0-alpha.1` state. That v0.8 state is an
-**incomplete alpha**, not a Complete release: it implements bounded LandXML
-file parsing and comparison, but not Complete-Run binding, canonical evidence
-publication, full-ceiling streaming coverage, or the final local release gates.
-v0.9 folds that unfinished scope forward rather than declaring v0.8 Complete.
+base is commit `9a8363a0d807990209f8252d93229c7f9464c923`, the completed
+`0.8.0-alpha.1` repository interoperability-qualification slice. That base
+already includes strict Complete-Run binding, canonical pass/fail evidence,
+full-ceiling streaming coverage, and the v0.8 local repository gates. It does
+not complete the external design-partner product MVP.
 
-The inherited v0.8 Run-bound qualification closure is a prerequisite to v0.9
-readiness. No failure-hardening fix, compatibility fixture, interface review,
-version bump, or local green test run can substitute for that closure. Until it
-is implemented and verified, v0.9 is Active work and must not be described as a
-v1 candidate ready for release.
+v0.9 freezes and hardens that existing repository surface rather than adding a
+feature family. Its version-1 fixtures, artifact policies, interface review,
+support matrix, and local qualification together establish a repository v1
+candidate. They do not substitute for external product evidence or constitute
+`1.0.0`.
 
 ## Outcome
 
-v0.9 makes the already accepted repository slice easier to trust before a v1
-candidate is named. It does not add another workflow or format family. It:
+v0.9 makes the already implemented repository slice easier to trust. It does
+not add another workflow or format family. It:
 
-1. closes the inherited private Run-bound LandXML qualification path;
+1. retains and further qualifies the private Run-bound LandXML path completed
+   in v0.8;
 2. classifies every supported persisted artifact as authoritative,
    rebuildable, temporary, or caller-owned published output;
 3. retains the inherited Spatial Index v1 goldens, completes the remaining
    version-1 fixture corpus, and tests the compatibility promise for each class;
-4. hardens failure and recovery at existing persistence seams, beginning with
-   faithful Workflow classification of Spatial Index filesystem failures;
+4. hardens failure and recovery at existing persistence seams, including
+   faithful Workflow classification of filesystem and publication failures;
 5. reviews existing public interfaces and publishes an exact support matrix;
    and
-6. runs and records the complete applicable local verification sequence before
-   the repository may be called a v1 candidate.
+6. runs and records the complete applicable local verification sequence for
+   the repository candidate.
 
 The deletion test for this slice is trust-shaped: deleting the v0.9 work would
 reintroduce ambiguous artifact ownership, incomplete old-byte compatibility,
-misclassified recoverable I/O, and an unclosed v0.8 qualification claim. It
+misclassified recoverable I/O, and weaker qualification evidence. It
 would not remove a new end-user capability, because none is accepted here.
 
 ## Scope discipline
@@ -70,7 +71,7 @@ recovery policy; a filename suffix alone never does.
 |---|---|---|---|
 | **Authoritative** | Workspace manifest, immutable Operation records and Revisions; Workflow `run.pwf`; serialized `SourceRecord` | Supported version-1 bytes remain readable and retain identical identity and semantic facts. They are never silently rebuilt, replaced, downgraded, or deleted. | Fail closed on unknown version, corruption, lineage mismatch, or indeterminate durability. Preserve the bytes and report the one safe reconciliation action. |
 | **Rebuildable** | Complete Spatial Index `.pidx` and its valid resumable `.work` prefix | An accepted version may be opened or resumed exactly. A successful build retains its bounded valid `.work`; the complete artifact wins on later opens. When a version or recipe is no longer supported, the caller may explicitly delete the index family and rebuild it from the verified immutable Source. | Never expose a partial index. Preserve valid durable work frames and fail closed on a truncated header. Never delete a pre-existing or racing work path implicitly, and never rewrite an incompatible complete target. |
-| **Temporary** | Point Set spills, Workspace scratch candidates, index `.samples` files and platform-specific publication stages, and recognized journal/report/LandXML/evidence stages | No cross-release readability promise. Their meaning is process- or attempt-scoped and no authoritative fact depends on their survival before publication. | Production code never unlinks a replaceable temporary pathname. Linux index publication stages are unnamed and disappear when their descriptor closes; named stages and spools remain per-attempt bounded debris. An operator may remove only the owning family's private names while no related handle, job, or process is live. A missing or changed live spill fails the operation. Unknown siblings and replacements are never deleted. |
+| **Temporary** | Point Set spills, Workspace scratch candidates, index `.samples` files and platform-specific publication stages, and recognized journal/report/LandXML/evidence stages | No cross-release readability promise. Their meaning is process- or attempt-scoped and no authoritative fact depends on their survival before publication. | Production code never unlinks a replaceable temporary pathname. Linux index, journal, report, and evidence publication stages are unnamed; LandXML uses a retained named encoding stage plus a separate unnamed Linux publication copy. Named stages and spools remain per-attempt bounded debris. An operator may remove only the owning family's private names while no related handle, job, or process is live. A missing or changed live spill fails the operation. Unknown siblings and replacements are never deleted. |
 | **Caller-owned published output** | `terrain.xml`, `audit.json`, and the separate v0.8 Round-Trip Evidence target | Exact existing bytes may be reconciled; different existing bytes are a conflict. These outputs are not Workspace state and are not silently migrated. | Use synced staging, no-replace publication, read-back, directory sync, and conservative post-publication certainty. Never overwrite the caller's target. |
 
 `SourceRecord` is authoritative persisted evidence of which immutable Source was
@@ -86,7 +87,7 @@ Complete Run without repairing it and never writes another checkpoint.
 
 ## Version-1 support matrix
 
-The initial v0.9 matrix keeps the base formats unchanged:
+The frozen v0.9 matrix keeps the base formats unchanged:
 
 | Interface or format | Candidate support | Explicit boundary |
 |---|---|---|
@@ -98,7 +99,7 @@ The initial v0.9 matrix keeps the base formats unchanged:
 | Workflow Run disk 1 / semantic 1 / frame 1 | Exactly the existing eight-frame headless classification-to-terrain Run, including resume and inspect | The v0.8 qualifier accepts only a strictly revalidated Complete Run and does not mutate or repair it. |
 | `audit.json` schema `punctra.terrain-workflow.audit.v1` | Exact create/reconcile for the existing Run | Repository evidence only; not partner or product acceptance. |
 | LandXML | Existing metric-metre LandXML 1.2 single-TIN points/faces export plus the v0.8 narrow returned-file comparison | No general import, unit conversion, CRS interpretation, Breaklines, boundaries, or multiple Surfaces. |
-| Round-Trip Evidence schema `punctra.terrain-demo.landxml-round-trip-evidence.v1` | Supported only after inherited Run binding and exact publication are implemented | Caller application/version/settings are declarations, not observed execution. |
+| Round-Trip Evidence schema `punctra.terrain-demo.landxml-round-trip-evidence.v1` | Exact create/reconcile for canonical pass and supported semantic-failure results after strict Complete-Run binding | Caller application/version/settings are declarations, not observed execution. |
 | Renderer-neutral and wgpu interfaces | Existing bounded generation, planning, update, rendering, and picking behavior | GPU values remain disposable display data; caller owns device, submission, and host application policy. |
 
 The repository's reference verification environment remains the documented
@@ -110,16 +111,15 @@ required. Cross-platform intent is not cross-platform evidence.
 
 ## Golden fixture compatibility plan
 
-The v0.8 base already pins one complete Spatial Index disk-1 artifact and one
-resumable disk-1 work file under the owning crate, and tests open or resume
-those checked-in bytes. v0.9 extends that owner-local pattern to every claimed
-authoritative format before any version-2 persisted format or v1 compatibility
-claim is accepted. Golden bytes are captured once from fixed, generated,
+The v0.8 base pins one complete Spatial Index disk-1 artifact and one resumable
+disk-1 work file under the owning crate, and tests open or resume those
+checked-in bytes. v0.9 extends that owner-local pattern to every claimed
+authoritative format. Golden bytes are captured once from fixed, generated,
 non-secret inputs and committed with their exact byte lengths, BLAKE3 hashes,
 format/recipe versions, and expected semantic facts. Tests read the committed
 bytes; they do not regenerate the expected side during the test.
 
-The minimum corpus contains:
+The completed corpus contains:
 
 - a serialized SourceRecord version 1 with fixed Source identity, metadata,
   adapter facts, content hash, and bounded Fast evidence;
@@ -130,8 +130,7 @@ The minimum corpus contains:
   Operation, and a recorded rejection, with fixed lineage and identities;
 - Run disk-1/semantic-1/frame-1 prefixes at every checkpoint boundary plus one
   Complete eight-frame Run and its exact `terrain.xml` and `audit.json`; and
-- after inherited v0.8 closure, canonical passing and semantic-failure
-  Round-Trip Evidence version-1 files.
+- canonical passing and semantic-failure Round-Trip Evidence version-1 files.
 
 For authoritative fixtures, every later supporting release must open the old
 bytes without mutation and reproduce the recorded identities, ordering,
@@ -148,10 +147,11 @@ continuing to fail it explicitly, and documenting deletion-and-rebuild from the
 verified Source. It may not reinterpret old bytes.
 
 Temporary spills and stages deliberately have no cross-release golden-open
-promise. Instead, fault fixtures prove recognition, ownership-safe cleanup,
-replacement protection, and that temporary bytes never count as a published
-authoritative fact. Golden fixtures are generated technical evidence; they are
-not licensed production data or downstream-application evidence.
+promise. Instead, fault fixtures prove recognition, ownership-safe retention
+and offline cleanup policy, replacement protection, and that temporary bytes
+never count as a published authoritative fact. Golden fixtures are generated
+technical evidence; they are not licensed production data or downstream-
+application evidence.
 
 ## Failure and recovery hardening
 
@@ -180,13 +180,11 @@ No recovery code scans and cleans a broad directory, follows a symlink, removes
 an unknown child, overwrites a target, or retries an uncertain Workspace
 mutation with a new Operation Identity.
 
-### First implementation slice: Workflow index I/O taxonomy
+### Workflow persistence I/O taxonomy
 
-The first v0.9 implementation slice is deliberately small:
-
-1. `terrain-demo` maps `IndexError::Io` at the `index` stage to `PWF_IO` with
-   conservative `indeterminate(index-target)` certainty and the recovery action
-   “restore disk capacity or permissions, then resume the same Run.”
+`terrain-demo` maps `IndexError::Io` at the `index` stage to `PWF_IO` with
+conservative `indeterminate(index-target)` certainty and the recovery action
+“restore disk capacity or permissions, then resume the same Run.”
 
 The mapping keeps the operation, path, and operating-system error in the
 bounded diagnostic instead of collapsing the failure into `PWF_INTERNAL`; its
@@ -196,8 +194,10 @@ stage, certainty, and recovery action. `IndexError::Io` does not expose whether
 the failure happened before or after complete-target publication, so the
 Workflow does not claim `pre_publication` or a durable fact; resuming reconciles
 an absent target, a valid resumable work prefix, or a complete rebuildable
-target. This slice does not alter `point-index` persistence, close the inherited
-v0.8 qualification prerequisite, or make v0.9 ready.
+target. The broader v0.9 hardening applies the same principle at journal,
+Workspace, terrain, report, evidence, and qualification seams: preserve the
+typed cause, distinguish prepublication from indeterminate publication when
+known, and give exactly one safe recovery action.
 
 The index-owner recovery slice closes the initial work-header gap. It writes
 and syncs the complete fixed-size header to a private file, then publishes that
@@ -241,15 +241,14 @@ inspecting, mutating, or deleting the work path. A metadata check followed by
 pathname deletion is never used because a racing replacement can arrive
 between those operations.
 
-Later fault coverage uses narrow private seams or owned filesystem fixtures to
+Fault coverage uses narrow private seams or owned filesystem fixtures to
 exercise representative pre-publication, post-link, sync, replacement, and
 cleanup failures for each artifact class. It does not claim to simulate every
 kernel, filesystem, power-loss, or hardware failure.
 
-## Inherited Run-bound qualification closure
+## Run-bound qualification retained from v0.8
 
-Before v0.9 can reach readiness, the two pending v0.8 delivery slices are
-implemented without changing the v0.7 Run:
+The completed v0.8 delivery is retained without changing the v0.7 Run:
 
 1. `verify-round-trip` strictly opens a non-mutating Complete Run, revalidates
    the journal, request, Source/Workspace/Revision identities, `terrain.xml`,
@@ -258,7 +257,7 @@ implemented without changing the v0.7 Run:
    evidence outside the Run root; and
 2. the end-to-end generated matrix, streaming input coverage through the full
    accepted v0.7 LandXML export ceiling, canonical fixture coverage,
-   documentation, independent review, and complete local release gates pass.
+   documentation, independent review, and local release gates remain covered.
 
 A torn or non-Complete Run is rejected and is never repaired by qualification.
 Operational failure publishes no final pass or fail evidence. Semantic failure
@@ -289,8 +288,8 @@ racing replacement is preserved even in the terminal acknowledgement window.
 
 ## Interface review
 
-v0.9 reviews existing interfaces; it does not assume that every public Rust
-item is a v1 promise. Each module owner records:
+v0.9 reviewed existing interfaces; it did not assume that every public Rust
+item is a v1 promise. Each module owner recorded:
 
 - its one-job sentence and the exact caller-visible interface;
 - invariants, ordering, determinism, limits, performance class, side effects,
@@ -305,21 +304,20 @@ item is a v1 promise. Each module owner records:
 adapters. Feature-gated fault controls remain test support. Demo package
 facades, CLI syntax, private journal/round-trip modules, and examples do not
 become stable product interfaces merely because they are callable in repository
-tests. Any pre-v1 breaking cleanup found by the review must be explicit,
+tests. Any later pre-v1 breaking cleanup must be explicit,
 minimal, locally migrated in one slice, and reflected in documentation and
 interface tests. No speculative wrapper is added to preserve a shallow seam.
 
-The review is complete only when the support matrix and rustdoc agree and no
-supported caller must learn a private stage, filesystem layout, decoder,
-triangulator, or renderer implementation detail.
+The frozen review and support matrix agree, and no supported caller must learn
+a private stage, filesystem layout, decoder, triangulator, or renderer
+implementation detail.
 
-## Local verification and readiness gate
+## Local verification and completed readiness gate
 
 All verification runs locally. No GitHub Actions or other hosted CI is added.
-The first hardening slice runs its focused `terrain-demo` test, then the
-relevant formatting, Clippy, workspace-test, and rustdoc gates. Final
-v0.9 readiness requires the complete command sequence in `CONTRIBUTING.md`,
-including every documented example, process test, and Criterion benchmark.
+The completed qualification uses the complete command sequence in
+`CONTRIBUTING.md`, including every documented example, process test, and
+Criterion benchmark.
 When a local GPU adapter is expected, both GPU acceptance commands run with
 `PUNCTRA_REQUIRE_GPU=1` so a missing adapter is a failure rather than a skip.
 
@@ -327,11 +325,13 @@ The release record names the commit, pinned toolchain, machine/OS, filesystem,
 GPU adapter/backend, commands, outcomes, benchmark scales, and any explicitly
 unsupported platform. A generated benchmark establishes only the stated local
 resource and performance observation. Documentation activation or a partial
-test pass is not repository readiness.
+test pass is not repository readiness. The exact completed outcomes are owned
+by the [v0.9 repository verification record](../releases/v0.9.0.md).
 
-v0.9 may be labeled a v1 candidate only when all of these are true:
+The v0.9 repository candidate is Complete because all of these gates are bound
+to the release record:
 
-- inherited Run-bound qualification and full-ceiling streaming closure pass;
+- Run-bound qualification and full-ceiling streaming coverage pass;
 - every artifact has one support class and every supported version appears in
   the matrix;
 - authoritative version-1 and published-evidence golden fixtures pass without
@@ -363,25 +363,25 @@ injection, benchmarks, and a v1-candidate label satisfy none of those gates.
 
 ## Delivery slices
 
-Implementation is divided into independently reviewable slices:
+Implementation was divided into independently reviewable slices:
 
 1. **Implemented:** preserve `IndexError::Io` as recoverable `PWF_IO` at the
    Workflow index stage, including bounded operation, path, and source-error
    rendering.
-2. **Inherited qualification closure:** implement strict Complete-Run binding,
-   canonical pass/fail evidence, exact no-replace publication/reconciliation,
-   and stable operational versus semantic diagnostics.
-3. **Full-ceiling and golden coverage:** replace the bounded DOM ceiling gap
-   with the accepted streaming path, complete generated end-to-end comparison,
-   and complete the remaining version-1 fixture corpus and mutation cases.
-4. **Artifact recovery hardening:** make the initial index-header failure
-   safely retryable without pathname-race deletion, then complete the
+2. **Implemented:** retain strict Complete-Run binding, canonical pass/fail
+   evidence, exact no-replace publication/reconciliation, and stable
+   operational versus semantic diagnostics.
+3. **Implemented:** retain the full-ceiling streaming path and generated
+   end-to-end comparison, and complete the remaining version-1 fixture corpus
+   and mutation cases.
+4. **Implemented:** make the initial index-header failure safely retryable
+   without pathname-race deletion, and complete the
    class-based representative fault matrix across authoritative
    Workspace/Run/SourceRecord state, rebuildable index state, temporary
    spills/stages, and caller-owned outputs.
-5. **Candidate review:** freeze the exact support matrix, resolve the public
+5. **Implemented:** freeze the exact support matrix, resolve the public
    interface review, align architecture/user documentation, perform independent
    review, and run the complete local release gates.
 
-No slice may be described as v0.8 Complete, v0.9 ready, a v1 candidate, or
-external product evidence before its corresponding gate is actually satisfied.
+Completion describes only this repository surface. No slice, fixture, generated
+benchmark, local fault test, or candidate label is external product evidence.

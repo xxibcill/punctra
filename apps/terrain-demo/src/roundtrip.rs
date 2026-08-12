@@ -1,7 +1,7 @@
 //! Private, bounded semantic verification for returned `LandXML` terrain files.
 
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::BTreeMap,
     error::Error,
     fmt,
     fs::{self, File, Metadata},
@@ -9,7 +9,9 @@ use std::{
     path::Path,
 };
 
+use foundation_runtime::OperationControl;
 use num_bigint::BigInt;
+use quick_xml::events::{BytesDecl, Event};
 use robust::{Coord, orient2d};
 use roxmltree::{Document, Node, ParsingOptions};
 
@@ -125,18 +127,30 @@ impl RoundTripTolerances {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct RoundTripLimits {
-    pub(crate) file_bytes: u64,
-    pub(crate) xml_nodes: u64,
-    pub(crate) xml_text_bytes: u64,
-    pub(crate) points: u64,
-    pub(crate) faces: u64,
-    pub(crate) comparisons: u64,
-    pub(crate) retained_model_bytes: u64,
+    file_bytes: u64,
+    xml_nodes: u64,
+    xml_text_bytes: u64,
+    points: u64,
+    faces: u64,
+    comparisons: u64,
+    retained_model_bytes: u64,
 }
 
 impl RoundTripLimits {
+    pub(crate) const fn full_v07_export() -> Self {
+        Self {
+            file_bytes: 4 * 1024 * 1024 * 1024,
+            xml_nodes: 60_000_000,
+            xml_text_bytes: 4 * 1024 * 1024 * 1024,
+            points: 10_000_000,
+            faces: 20_000_000,
+            comparisons: 160_000_000,
+            retained_model_bytes: 4 * 1024 * 1024 * 1024,
+        }
+    }
+
     #[cfg(test)]
-    const fn new(
+    pub(crate) const fn new(
         max_file_bytes: u64,
         max_xml_nodes: u64,
         max_xml_text_bytes: u64,
@@ -151,20 +165,42 @@ impl RoundTripLimits {
             points: max_points,
             faces: max_faces,
             comparisons: max_comparisons,
-            retained_model_bytes: 512 * 1024 * 1024,
+            retained_model_bytes: 4 * 1024 * 1024 * 1024,
         }
     }
 
-    pub(crate) const fn qualification() -> Self {
-        Self {
-            file_bytes: 4 * 1024 * 1024 * 1024,
-            xml_nodes: 60_000_000,
-            xml_text_bytes: 4 * 1024 * 1024 * 1024,
-            points: 10_000_000,
-            faces: 20_000_000,
-            comparisons: 160_000_000,
-            retained_model_bytes: 4 * 1024 * 1024 * 1024,
-        }
+    #[cfg(test)]
+    pub(crate) const fn with_retained_model_bytes(mut self, bytes: u64) -> Self {
+        self.retained_model_bytes = bytes;
+        self
+    }
+
+    pub(crate) const fn file_bytes(self) -> u64 {
+        self.file_bytes
+    }
+
+    pub(crate) const fn xml_nodes(self) -> u64 {
+        self.xml_nodes
+    }
+
+    pub(crate) const fn xml_text_bytes(self) -> u64 {
+        self.xml_text_bytes
+    }
+
+    pub(crate) const fn points(self) -> u64 {
+        self.points
+    }
+
+    pub(crate) const fn faces(self) -> u64 {
+        self.faces
+    }
+
+    pub(crate) const fn comparisons(self) -> u64 {
+        self.comparisons
+    }
+
+    pub(crate) const fn retained_model_bytes(self) -> u64 {
+        self.retained_model_bytes
     }
 }
 
@@ -177,7 +213,7 @@ impl Default for RoundTripLimits {
             points: DEFAULT_MAX_POINTS,
             faces: DEFAULT_MAX_FACES,
             comparisons: DEFAULT_MAX_COMPARISONS,
-            retained_model_bytes: 512 * 1024 * 1024,
+            retained_model_bytes: 64 * 1024 * 1024,
         }
     }
 }
@@ -187,6 +223,52 @@ pub(crate) enum RoundTripFailureKind {
     InvalidInput,
     ResourceLimit,
     SemanticMismatch,
+    Cancelled,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum RoundTripReason {
+    XmlInvalid,
+    SubsetUnsupported,
+    CoordinateReferenceUnsupported,
+    UnitDrift,
+    PointCountDrift,
+    VertexUnmatched,
+    VertexAmbiguous,
+    ToleranceDrift,
+    TopologyDrift,
+}
+
+impl RoundTripReason {
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::XmlInvalid => "PRT_XML_INVALID",
+            Self::SubsetUnsupported => "PRT_SUBSET_UNSUPPORTED",
+            Self::CoordinateReferenceUnsupported => "PRT_COORDINATE_REFERENCE_UNSUPPORTED",
+            Self::UnitDrift => "PRT_UNIT_DRIFT",
+            Self::PointCountDrift => "PRT_POINT_COUNT_DRIFT",
+            Self::VertexUnmatched => "PRT_VERTEX_UNMATCHED",
+            Self::VertexAmbiguous => "PRT_VERTEX_AMBIGUOUS",
+            Self::ToleranceDrift => "PRT_TOLERANCE_DRIFT",
+            Self::TopologyDrift => "PRT_TOPOLOGY_DRIFT",
+        }
+    }
+
+    pub(crate) const fn failure_code(self) -> FailureCode {
+        match self {
+            Self::XmlInvalid => FailureCode::RoundTripXmlInvalid,
+            Self::SubsetUnsupported => FailureCode::RoundTripSubsetUnsupported,
+            Self::CoordinateReferenceUnsupported => {
+                FailureCode::RoundTripCoordinateReferenceUnsupported
+            }
+            Self::UnitDrift => FailureCode::RoundTripUnitDrift,
+            Self::PointCountDrift => FailureCode::RoundTripPointCountDrift,
+            Self::VertexUnmatched => FailureCode::RoundTripVertexUnmatched,
+            Self::VertexAmbiguous => FailureCode::RoundTripVertexAmbiguous,
+            Self::ToleranceDrift => FailureCode::RoundTripToleranceDrift,
+            Self::TopologyDrift => FailureCode::RoundTripTopologyDrift,
+        }
+    }
 }
 
 impl RoundTripFailureKind {
@@ -208,38 +290,72 @@ impl RoundTripFailureKind {
                 FailureCode::RoundTripSemanticMismatch,
                 RecoveryAction::ReviewReturnedLandXml,
             ),
+            Self::Cancelled => (FailureCode::Cancelled, RecoveryAction::ResumeSameRun),
         }
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RoundTripFailure {
     kind: RoundTripFailureKind,
+    reason: Option<RoundTripReason>,
+    topology: Option<Box<TopologyDrift>>,
+    comparison: Option<ComparisonFacts>,
     diagnostic: BoundedDiagnostic,
 }
 
 impl RoundTripFailure {
-    fn invalid(error: impl fmt::Display) -> Self {
+    pub(crate) fn invalid(error: impl fmt::Display) -> Self {
         Self::new(RoundTripFailureKind::InvalidInput, error)
     }
 
-    fn resource(error: impl fmt::Display) -> Self {
+    pub(crate) fn resource(error: impl fmt::Display) -> Self {
         Self::new(RoundTripFailureKind::ResourceLimit, error)
-    }
-
-    fn mismatch(error: impl fmt::Display) -> Self {
-        Self::new(RoundTripFailureKind::SemanticMismatch, error)
     }
 
     fn new(kind: RoundTripFailureKind, error: impl fmt::Display) -> Self {
         Self {
             kind,
+            reason: None,
+            topology: None,
+            comparison: None,
+            diagnostic: BoundedDiagnostic::new(error),
+        }
+    }
+
+    pub(crate) fn semantic(reason: RoundTripReason, error: impl fmt::Display) -> Self {
+        Self {
+            kind: RoundTripFailureKind::SemanticMismatch,
+            reason: Some(reason),
+            topology: None,
+            comparison: None,
+            diagnostic: BoundedDiagnostic::new(error),
+        }
+    }
+
+    pub(crate) fn cancelled() -> Self {
+        Self::new(
+            RoundTripFailureKind::Cancelled,
+            "round-trip cancellation was requested",
+        )
+    }
+
+    fn topology(topology: TopologyDrift, error: impl fmt::Display) -> Self {
+        Self {
+            kind: RoundTripFailureKind::SemanticMismatch,
+            reason: Some(RoundTripReason::TopologyDrift),
+            topology: Some(Box::new(topology)),
+            comparison: None,
             diagnostic: BoundedDiagnostic::new(error),
         }
     }
 
     pub(crate) const fn kind(&self) -> RoundTripFailureKind {
         self.kind
+    }
+
+    pub(crate) const fn reason(&self) -> Option<RoundTripReason> {
+        self.reason
     }
 
     pub(crate) fn diagnostic(&self) -> &str {
@@ -272,9 +388,56 @@ pub(crate) struct RoundTripReport {
     max_vertical_drift_metres: f64,
     exact_bytes: bool,
     topology_matches: bool,
+    returned_surface_name: Option<Box<str>>,
+    returned_ignored_sections: Box<[Box<str>]>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RoundTripMismatch {
+    declaration: RoundTripDeclaration,
+    tolerances: RoundTripTolerances,
+    reason: RoundTripReason,
+    diagnostic: BoundedDiagnostic,
+    reference_content_hash: [u8; 32],
+    returned_content_hash: [u8; 32],
+    reference_bytes: u64,
+    returned_bytes: u64,
+    topology: Option<Box<TopologyDrift>>,
+    returned_surface_name: Option<Box<str>>,
+    returned_ignored_sections: Box<[Box<str>]>,
+    returned_point_count: Option<u64>,
+    returned_face_count: Option<u64>,
+    comparison: Option<ComparisonFacts>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum RoundTripEvaluation {
+    Passed(RoundTripReport),
+    Failed(RoundTripMismatch),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct RoundTripFileFacts {
+    pub(crate) content_hash: [u8; 32],
+    pub(crate) byte_length: u64,
+}
+
+pub(crate) struct ParsedRoundTrip {
+    pub(crate) declaration: RoundTripDeclaration,
+    pub(crate) tolerances: RoundTripTolerances,
+    pub(crate) limits: RoundTripLimits,
+    pub(crate) reference_facts: RoundTripFileFacts,
+    pub(crate) returned_facts: RoundTripFileFacts,
+    pub(crate) exact_bytes: bool,
+    pub(crate) reference_surface: ParsedSurface,
+    pub(crate) returned_surface: ParsedSurface,
 }
 
 impl RoundTripReport {
+    pub(crate) fn declaration(&self) -> &RoundTripDeclaration {
+        &self.declaration
+    }
+
     pub(crate) fn declared_application(&self) -> &str {
         self.declaration.declared_application()
     }
@@ -342,6 +505,98 @@ impl RoundTripReport {
     pub(crate) const fn topology_matches(&self) -> bool {
         self.topology_matches
     }
+
+    pub(crate) fn returned_surface_name(&self) -> Option<&str> {
+        self.returned_surface_name.as_deref()
+    }
+
+    pub(crate) fn returned_ignored_sections(&self) -> &[Box<str>] {
+        &self.returned_ignored_sections
+    }
+}
+
+impl RoundTripMismatch {
+    pub(crate) fn declaration(&self) -> &RoundTripDeclaration {
+        &self.declaration
+    }
+
+    pub(crate) const fn tolerances(&self) -> RoundTripTolerances {
+        self.tolerances
+    }
+
+    pub(crate) const fn reason(&self) -> RoundTripReason {
+        self.reason
+    }
+
+    pub(crate) fn diagnostic(&self) -> &str {
+        self.diagnostic.as_str()
+    }
+
+    pub(crate) const fn reference_content_hash(&self) -> [u8; 32] {
+        self.reference_content_hash
+    }
+
+    pub(crate) const fn returned_content_hash(&self) -> [u8; 32] {
+        self.returned_content_hash
+    }
+
+    pub(crate) const fn reference_bytes(&self) -> u64 {
+        self.reference_bytes
+    }
+
+    pub(crate) const fn returned_bytes(&self) -> u64 {
+        self.returned_bytes
+    }
+
+    pub(crate) fn topology(&self) -> Option<&TopologyDrift> {
+        self.topology.as_deref()
+    }
+
+    pub(crate) const fn returned_was_parsed(&self) -> bool {
+        self.returned_point_count.is_some()
+    }
+
+    pub(crate) fn returned_surface_name(&self) -> Option<&str> {
+        self.returned_surface_name.as_deref()
+    }
+
+    pub(crate) fn returned_ignored_sections(&self) -> &[Box<str>] {
+        &self.returned_ignored_sections
+    }
+
+    pub(crate) const fn returned_point_count(&self) -> Option<u64> {
+        self.returned_point_count
+    }
+
+    pub(crate) const fn returned_face_count(&self) -> Option<u64> {
+        self.returned_face_count
+    }
+
+    pub(crate) const fn completed_mapping_point_count(&self) -> Option<u64> {
+        if self.comparison.is_some() {
+            self.returned_point_count
+        } else {
+            None
+        }
+    }
+
+    pub(crate) fn completed_mapping_maximum_deltas(&self) -> Option<(f64, f64)> {
+        self.comparison.map(|comparison| {
+            (
+                comparison.max_horizontal_drift_metres,
+                comparison.max_vertical_drift_metres,
+            )
+        })
+    }
+}
+
+impl RoundTripEvaluation {
+    pub(crate) fn reason(&self) -> Option<RoundTripReason> {
+        match self {
+            Self::Passed(_) => None,
+            Self::Failed(mismatch) => Some(mismatch.reason()),
+        }
+    }
 }
 
 pub(crate) fn verify_landxml_round_trip(
@@ -351,54 +606,196 @@ pub(crate) fn verify_landxml_round_trip(
     tolerances: RoundTripTolerances,
     limits: RoundTripLimits,
 ) -> Result<RoundTripReport, RoundTripFailure> {
-    validate_limits(limits)?;
-    reject_same_path(reference_path, returned_path)?;
-    let reference_file =
-        read_regular_file(InputSide::Reference, reference_path, limits.file_bytes)?;
-    let returned_file = read_regular_file(InputSide::Returned, returned_path, limits.file_bytes)?;
-    reject_same_file(&reference_file, &returned_file)?;
+    match evaluate_landxml_round_trip(
+        reference_path,
+        returned_path,
+        declaration,
+        tolerances,
+        limits,
+    )? {
+        RoundTripEvaluation::Passed(report) => Ok(report),
+        RoundTripEvaluation::Failed(mismatch) => Err(RoundTripFailure::semantic(
+            mismatch.reason(),
+            mismatch.diagnostic(),
+        )),
+    }
+}
 
-    let reference_surface = parse_surface(InputSide::Reference, &reference_file.bytes, limits)?;
-    let returned_surface = parse_surface(InputSide::Returned, &returned_file.bytes, limits)?;
-    let comparison = compare_surfaces(
+pub(crate) fn evaluate_landxml_round_trip(
+    reference_path: &Path,
+    returned_path: &Path,
+    declaration: RoundTripDeclaration,
+    tolerances: RoundTripTolerances,
+    limits: RoundTripLimits,
+) -> Result<RoundTripEvaluation, RoundTripFailure> {
+    validate_limits(limits)?;
+    let (reference_witness, returned_witness) =
+        capture_file_pair(reference_path, returned_path, limits.file_bytes)?;
+    let reference = read_regular_file(InputSide::Reference, reference_witness, limits.file_bytes)?;
+    let returned = read_regular_file(InputSide::Returned, returned_witness, limits.file_bytes)?;
+    let reference_hash = *blake3::hash(&reference.bytes).as_bytes();
+    let returned_hash = *blake3::hash(&returned.bytes).as_bytes();
+    let evaluated = (|| {
+        let reference_surface = parse_surface(InputSide::Reference, &reference.bytes, limits)?;
+        let returned_surface = parse_surface(InputSide::Returned, &returned.bytes, limits)?;
+        let comparison = compare_surfaces(
+            &reference_surface,
+            &returned_surface,
+            tolerances,
+            limits.comparisons,
+            None,
+        )?;
+        Ok::<_, RoundTripFailure>((reference_surface, returned_surface, comparison))
+    })();
+    match evaluated {
+        Ok((reference_surface, returned_surface, comparison)) => {
+            Ok(RoundTripEvaluation::Passed(RoundTripReport {
+                declaration,
+                tolerances,
+                reference_content_hash: reference_hash,
+                returned_content_hash: returned_hash,
+                reference_bytes: reference.bytes.len() as u64,
+                returned_bytes: returned.bytes.len() as u64,
+                vertex_count: reference_surface.points.len() as u64,
+                face_count: reference_surface.faces.len() as u64,
+                comparison_count: comparison.comparison_count,
+                max_easting_drift_metres: comparison.max_easting_drift_metres,
+                max_northing_drift_metres: comparison.max_northing_drift_metres,
+                max_horizontal_drift_metres: comparison.max_horizontal_drift_metres,
+                max_vertical_drift_metres: comparison.max_vertical_drift_metres,
+                exact_bytes: reference.bytes == returned.bytes,
+                topology_matches: true,
+                returned_surface_name: returned_surface.surface_name,
+                returned_ignored_sections: returned_surface.ignored_top_level_sections,
+            }))
+        }
+        Err(error)
+            if error.kind() == RoundTripFailureKind::SemanticMismatch
+                && error.reason().is_some() =>
+        {
+            Ok(RoundTripEvaluation::Failed(RoundTripMismatch {
+                declaration,
+                tolerances,
+                reason: error.reason().expect("guarded semantic reason"),
+                diagnostic: BoundedDiagnostic::new(error.diagnostic()),
+                reference_content_hash: reference_hash,
+                returned_content_hash: returned_hash,
+                reference_bytes: reference.bytes.len() as u64,
+                returned_bytes: returned.bytes.len() as u64,
+                topology: error.topology,
+                returned_point_count: None,
+                returned_face_count: None,
+                comparison: error.comparison,
+                returned_surface_name: None,
+                returned_ignored_sections: Box::default(),
+            }))
+        }
+        Err(error) => Err(error),
+    }
+}
+
+pub(crate) fn evaluate_parsed_round_trip(
+    input: ParsedRoundTrip,
+    control: Option<&OperationControl>,
+) -> Result<RoundTripEvaluation, RoundTripFailure> {
+    let ParsedRoundTrip {
+        declaration,
+        tolerances,
+        limits,
+        reference_facts,
+        returned_facts,
+        exact_bytes,
+        reference_surface,
+        returned_surface,
+    } = input;
+    match compare_surfaces(
         &reference_surface,
         &returned_surface,
         tolerances,
         limits.comparisons,
-    )?;
-
-    Ok(RoundTripReport {
-        declaration,
-        tolerances,
-        reference_content_hash: *blake3::hash(&reference_file.bytes).as_bytes(),
-        returned_content_hash: *blake3::hash(&returned_file.bytes).as_bytes(),
-        reference_bytes: reference_file.bytes.len() as u64,
-        returned_bytes: returned_file.bytes.len() as u64,
-        vertex_count: reference_surface.points.len() as u64,
-        face_count: reference_surface.faces.len() as u64,
-        comparison_count: comparison.comparison_count,
-        max_easting_drift_metres: comparison.max_easting_drift_metres,
-        max_northing_drift_metres: comparison.max_northing_drift_metres,
-        max_horizontal_drift_metres: comparison.max_horizontal_drift_metres,
-        max_vertical_drift_metres: comparison.max_vertical_drift_metres,
-        exact_bytes: reference_file.bytes == returned_file.bytes,
-        topology_matches: true,
-    })
+        control,
+    ) {
+        Ok(comparison) => Ok(RoundTripEvaluation::Passed(RoundTripReport {
+            declaration,
+            tolerances,
+            reference_content_hash: reference_facts.content_hash,
+            returned_content_hash: returned_facts.content_hash,
+            reference_bytes: reference_facts.byte_length,
+            returned_bytes: returned_facts.byte_length,
+            vertex_count: reference_surface.points.len() as u64,
+            face_count: reference_surface.faces.len() as u64,
+            comparison_count: comparison.comparison_count,
+            max_easting_drift_metres: comparison.max_easting_drift_metres,
+            max_northing_drift_metres: comparison.max_northing_drift_metres,
+            max_horizontal_drift_metres: comparison.max_horizontal_drift_metres,
+            max_vertical_drift_metres: comparison.max_vertical_drift_metres,
+            exact_bytes,
+            topology_matches: true,
+            returned_surface_name: returned_surface.surface_name,
+            returned_ignored_sections: returned_surface.ignored_top_level_sections,
+        })),
+        Err(error)
+            if error.kind() == RoundTripFailureKind::SemanticMismatch
+                && error.reason().is_some() =>
+        {
+            Ok(RoundTripEvaluation::Failed(RoundTripMismatch {
+                declaration,
+                tolerances,
+                reason: error.reason().expect("guarded semantic reason"),
+                diagnostic: BoundedDiagnostic::new(error.diagnostic()),
+                reference_content_hash: reference_facts.content_hash,
+                returned_content_hash: returned_facts.content_hash,
+                reference_bytes: reference_facts.byte_length,
+                returned_bytes: returned_facts.byte_length,
+                topology: error.topology,
+                returned_point_count: Some(returned_surface.points.len() as u64),
+                returned_face_count: Some(returned_surface.faces.len() as u64),
+                comparison: error.comparison,
+                returned_surface_name: returned_surface.surface_name,
+                returned_ignored_sections: returned_surface.ignored_top_level_sections,
+            }))
+        }
+        Err(error) => Err(error),
+    }
 }
 
-fn reject_same_path(reference_path: &Path, returned_path: &Path) -> Result<(), RoundTripFailure> {
-    let reference = fs::canonicalize(reference_path).map_err(|error| {
-        RoundTripFailure::invalid(format_args!("REFERENCE path cannot be resolved: {error}"))
-    })?;
-    let returned = fs::canonicalize(returned_path).map_err(|error| {
-        RoundTripFailure::invalid(format_args!("RETURNED path cannot be resolved: {error}"))
-    })?;
-    if reference == returned {
-        return Err(RoundTripFailure::invalid(
-            "REFERENCE and RETURNED must use separate resolved paths",
-        ));
+pub(crate) fn semantic_evaluation_failure(
+    declaration: RoundTripDeclaration,
+    tolerances: RoundTripTolerances,
+    reference_facts: RoundTripFileFacts,
+    returned_facts: RoundTripFileFacts,
+    error: RoundTripFailure,
+    returned_surface: Option<ParsedSurface>,
+) -> Result<RoundTripEvaluation, RoundTripFailure> {
+    if error.kind() != RoundTripFailureKind::SemanticMismatch || error.reason().is_none() {
+        return Err(error);
     }
-    Ok(())
+    let returned_point_count = returned_surface
+        .as_ref()
+        .map(|surface| surface.points.len() as u64);
+    let returned_face_count = returned_surface
+        .as_ref()
+        .map(|surface| surface.faces.len() as u64);
+    let (returned_surface_name, returned_ignored_sections) = returned_surface.map_or_else(
+        || (None, Box::default()),
+        |surface| (surface.surface_name, surface.ignored_top_level_sections),
+    );
+    Ok(RoundTripEvaluation::Failed(RoundTripMismatch {
+        declaration,
+        tolerances,
+        reason: error.reason().expect("guarded semantic reason"),
+        diagnostic: BoundedDiagnostic::new(error.diagnostic()),
+        reference_content_hash: reference_facts.content_hash,
+        returned_content_hash: returned_facts.content_hash,
+        reference_bytes: reference_facts.byte_length,
+        returned_bytes: returned_facts.byte_length,
+        topology: error.topology,
+        returned_surface_name,
+        returned_ignored_sections,
+        returned_point_count,
+        returned_face_count,
+        comparison: error.comparison,
+    }))
 }
 
 fn validate_declaration_field(
@@ -450,41 +847,268 @@ fn validate_limits(limits: RoundTripLimits) -> Result<(), RoundTripFailure> {
 
 struct FileSnapshot {
     bytes: Vec<u8>,
-    identity: FileIdentity,
 }
 
-fn read_regular_file(
+pub(crate) struct CapturedRoundTripFile {
+    pub(crate) bytes: Vec<u8>,
+    witness: RetainedFileWitness,
+}
+
+impl CapturedRoundTripFile {
+    pub(crate) fn verify(&self) -> Result<(), RoundTripFailure> {
+        self.witness.verify()
+    }
+}
+
+pub(crate) fn capture_round_trip_file(
+    path: &Path,
+    max_file_bytes: u64,
+) -> Result<CapturedRoundTripFile, RoundTripFailure> {
+    let witness = capture_regular_file(InputSide::Returned, path, max_file_bytes)?;
+    let (snapshot, witness) =
+        read_regular_file_retained(InputSide::Returned, witness, max_file_bytes)?;
+    Ok(CapturedRoundTripFile {
+        bytes: snapshot.bytes,
+        witness,
+    })
+}
+
+struct RetainedFileWitness {
+    side: InputSide,
+    path: std::path::PathBuf,
+    file: File,
+    identity: Metadata,
+    content_hash: [u8; 32],
+    byte_length: u64,
+}
+
+impl RetainedFileWitness {
+    fn verify(&self) -> Result<(), RoundTripFailure> {
+        let opened = self.file.metadata().map_err(|error| {
+            RoundTripFailure::invalid(format_args!(
+                "{} metadata cannot be rechecked: {error}",
+                self.side
+            ))
+        })?;
+        let current = fs::symlink_metadata(&self.path).map_err(|error| {
+            RoundTripFailure::invalid(format_args!(
+                "{} path cannot be rechecked: {error}",
+                self.side
+            ))
+        })?;
+        if require_file_identity(self.side, &self.identity)?
+            != require_file_identity(self.side, &opened)?
+            || !same_file_state(&self.identity, &opened)
+            || current.file_type().is_symlink()
+            || !current.is_file()
+            || require_file_identity(self.side, &opened)?
+                != require_file_identity(self.side, &current)?
+            || !same_file_state(&self.identity, &current)
+        {
+            return Err(RoundTripFailure::invalid(format_args!(
+                "{} changed after it was captured",
+                self.side
+            )));
+        }
+        let mut reader = self.file.try_clone().map_err(|error| {
+            RoundTripFailure::invalid(format_args!(
+                "{} descriptor cannot be cloned for terminal verification: {error}",
+                self.side
+            ))
+        })?;
+        reader.seek(SeekFrom::Start(0)).map_err(|error| {
+            RoundTripFailure::invalid(format_args!(
+                "{} descriptor cannot be rewound for terminal verification: {error}",
+                self.side
+            ))
+        })?;
+        let mut remaining = self.byte_length;
+        let mut hasher = blake3::Hasher::new();
+        let mut buffer = [0_u8; 8 * 1024];
+        while remaining != 0 {
+            let requested = usize::try_from(remaining.min(buffer.len() as u64))
+                .expect("bounded retained-file read fits usize");
+            let read = reader.read(&mut buffer[..requested]).map_err(|error| {
+                RoundTripFailure::invalid(format_args!(
+                    "{} descriptor cannot be terminally rehashed: {error}",
+                    self.side
+                ))
+            })?;
+            if read == 0 {
+                return Err(RoundTripFailure::invalid(format_args!(
+                    "{} was truncated after capture",
+                    self.side
+                )));
+            }
+            hasher.update(&buffer[..read]);
+            remaining -= read as u64;
+        }
+        let mut sentinel = [0_u8; 1];
+        if reader.read(&mut sentinel).map_err(|error| {
+            RoundTripFailure::invalid(format_args!(
+                "{} descriptor cannot be checked for growth: {error}",
+                self.side
+            ))
+        })? != 0
+            || hasher.finalize().as_bytes() != &self.content_hash
+        {
+            return Err(RoundTripFailure::invalid(format_args!(
+                "{} content changed after capture",
+                self.side
+            )));
+        }
+        let opened_after = self.file.metadata().map_err(|error| {
+            RoundTripFailure::invalid(format_args!(
+                "{} metadata cannot be terminally rechecked: {error}",
+                self.side
+            ))
+        })?;
+        let current_after = fs::symlink_metadata(&self.path).map_err(|error| {
+            RoundTripFailure::invalid(format_args!(
+                "{} path cannot be terminally rechecked: {error}",
+                self.side
+            ))
+        })?;
+        if require_file_identity(self.side, &self.identity)?
+            != require_file_identity(self.side, &opened_after)?
+            || require_file_identity(self.side, &opened_after)?
+                != require_file_identity(self.side, &current_after)?
+            || !same_file_state(&self.identity, &opened_after)
+            || !same_file_state(&opened_after, &current_after)
+        {
+            return Err(RoundTripFailure::invalid(format_args!(
+                "{} changed during terminal verification",
+                self.side
+            )));
+        }
+        Ok(())
+    }
+}
+
+struct FileWitness<'a> {
+    path: &'a Path,
+    file: File,
+    metadata: Metadata,
+}
+
+fn capture_file_pair<'a>(
+    reference_path: &'a Path,
+    returned_path: &'a Path,
+    max_file_bytes: u64,
+) -> Result<(FileWitness<'a>, FileWitness<'a>), RoundTripFailure> {
+    let reference = capture_regular_file(InputSide::Reference, reference_path, max_file_bytes)?;
+    let returned = capture_regular_file(InputSide::Returned, returned_path, max_file_bytes)?;
+    Ok((reference, returned))
+}
+
+fn capture_regular_file(
     side: InputSide,
     path: &Path,
     max_file_bytes: u64,
-) -> Result<FileSnapshot, RoundTripFailure> {
+) -> Result<FileWitness<'_>, RoundTripFailure> {
     let path_metadata = fs::symlink_metadata(path).map_err(|error| {
         RoundTripFailure::invalid(format_args!("{side} cannot be inspected: {error}"))
     })?;
+    capture_inspected_regular_file(side, path, &path_metadata, max_file_bytes)
+}
+
+fn capture_inspected_regular_file<'a>(
+    side: InputSide,
+    path: &'a Path,
+    path_metadata: &Metadata,
+    max_file_bytes: u64,
+) -> Result<FileWitness<'a>, RoundTripFailure> {
     if path_metadata.file_type().is_symlink() || !path_metadata.is_file() {
         return Err(RoundTripFailure::invalid(format_args!(
             "{side} must be a regular file and not a symbolic link"
         )));
     }
-    let path_identity = require_file_identity(side, &path_metadata)?;
+    let path_identity = require_file_identity(side, path_metadata)?;
     check_file_bytes(side, path_metadata.len(), max_file_bytes)?;
 
-    let mut file = File::open(path).map_err(|error| {
+    let file = open_input_file(path).map_err(|error| {
         RoundTripFailure::invalid(format_args!("{side} cannot be opened: {error}"))
     })?;
+    #[cfg(windows)]
+    require_disk_file(side, &file)?;
     let open_metadata = file.metadata().map_err(|error| {
         RoundTripFailure::invalid(format_args!("{side} metadata cannot be read: {error}"))
     })?;
     let open_identity = require_file_identity(side, &open_metadata)?;
     if !open_metadata.is_file()
         || path_identity != open_identity
-        || !same_file_state(&path_metadata, &open_metadata)
+        || !same_file_state(path_metadata, &open_metadata)
     {
         return Err(RoundTripFailure::invalid(format_args!(
             "{side} changed while it was being opened"
         )));
     }
+    Ok(FileWitness {
+        path,
+        file,
+        metadata: open_metadata,
+    })
+}
 
+#[cfg(unix)]
+fn open_input_file(path: &Path) -> std::io::Result<File> {
+    use std::os::unix::fs::OpenOptionsExt as _;
+
+    fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(path)
+}
+
+#[cfg(windows)]
+fn open_input_file(path: &Path) -> std::io::Result<File> {
+    use std::os::windows::fs::OpenOptionsExt as _;
+
+    fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT)
+        .open(path)
+}
+
+#[cfg(not(any(unix, windows)))]
+fn open_input_file(_path: &Path) -> std::io::Result<File> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "stable no-follow input capture is unavailable on this platform",
+    ))
+}
+
+#[cfg(windows)]
+fn require_disk_file(side: InputSide, file: &File) -> Result<(), RoundTripFailure> {
+    let file_type = winapi_util::file::typ(file).map_err(|error| {
+        RoundTripFailure::invalid(format_args!("{side} handle type cannot be read: {error}"))
+    })?;
+    if !file_type.is_disk() {
+        return Err(RoundTripFailure::invalid(format_args!(
+            "{side} must use a disk-backed regular file"
+        )));
+    }
+    Ok(())
+}
+
+fn read_regular_file(
+    side: InputSide,
+    witness: FileWitness<'_>,
+    max_file_bytes: u64,
+) -> Result<FileSnapshot, RoundTripFailure> {
+    read_regular_file_retained(side, witness, max_file_bytes).map(|(snapshot, _)| snapshot)
+}
+
+fn read_regular_file_retained(
+    side: InputSide,
+    witness: FileWitness<'_>,
+    max_file_bytes: u64,
+) -> Result<(FileSnapshot, RetainedFileWitness), RoundTripFailure> {
+    let FileWitness {
+        path,
+        mut file,
+        metadata: open_metadata,
+    } = witness;
     let bytes = read_bounded_bytes(side, &mut file, open_metadata.len(), max_file_bytes)?;
     let final_metadata = file.metadata().map_err(|error| {
         RoundTripFailure::invalid(format_args!("{side} metadata cannot be rechecked: {error}"))
@@ -503,10 +1127,18 @@ fn read_regular_file(
             "{side} changed while it was being read"
         )));
     }
-    Ok(FileSnapshot {
-        bytes,
-        identity: open_identity,
-    })
+    let content_hash = *blake3::hash(&bytes).as_bytes();
+    Ok((
+        FileSnapshot { bytes },
+        RetainedFileWitness {
+            side,
+            path: path.to_path_buf(),
+            file,
+            identity: final_metadata,
+            content_hash,
+            byte_length: expected_bytes,
+        },
+    ))
 }
 
 #[cfg(unix)]
@@ -660,27 +1292,68 @@ fn same_file_state(_left: &Metadata, _right: &Metadata) -> bool {
     false
 }
 
-fn reject_same_file(
-    reference: &FileSnapshot,
-    returned: &FileSnapshot,
-) -> Result<(), RoundTripFailure> {
-    if reference.identity == returned.identity {
-        return Err(RoundTripFailure::invalid(
-            "REFERENCE and RETURNED must be distinct regular files",
-        ));
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Position {
+    pub(crate) easting: f64,
+    pub(crate) northing: f64,
+    pub(crate) elevation: f64,
+}
+
+impl Position {
+    fn key(self) -> [u64; 3] {
+        [
+            self.easting.to_bits(),
+            self.northing.to_bits(),
+            self.elevation.to_bits(),
+        ]
     }
-    Ok(())
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct Point {
-    pub(crate) position: [f64; 3],
+pub(crate) struct Triangle {
+    first: usize,
+    second: usize,
+    third: usize,
+}
+
+impl Triangle {
+    pub(crate) const fn new(first: usize, second: usize, third: usize) -> Self {
+        Self {
+            first,
+            second,
+            third,
+        }
+    }
+
+    const fn has_repeated_point(self) -> bool {
+        self.first == self.second || self.second == self.third || self.first == self.third
+    }
+
+    fn positions(self, points: &[Position]) -> [Position; 3] {
+        [points[self.first], points[self.second], points[self.third]]
+    }
+
+    fn canonical_point_indices(self) -> [usize; 3] {
+        let mut indices = [self.first, self.second, self.third];
+        indices.sort_unstable();
+        indices
+    }
+
+    fn remap(self, point_mapping: &[usize]) -> Self {
+        Self::new(
+            point_mapping[self.first],
+            point_mapping[self.second],
+            point_mapping[self.third],
+        )
+    }
 }
 
 #[derive(Debug)]
 pub(crate) struct ParsedSurface {
-    pub(crate) points: Vec<Point>,
-    pub(crate) faces: Vec<[usize; 3]>,
+    pub(crate) points: Vec<Position>,
+    pub(crate) faces: Vec<Triangle>,
+    pub(crate) surface_name: Option<Box<str>>,
+    pub(crate) ignored_top_level_sections: Box<[Box<str>]>,
 }
 
 fn parse_surface(
@@ -689,12 +1362,14 @@ fn parse_surface(
     limits: RoundTripLimits,
 ) -> Result<ParsedSurface, RoundTripFailure> {
     let text = std::str::from_utf8(bytes).map_err(|error| {
-        RoundTripFailure::invalid(format_args!("{side} is not UTF-8 XML: {error}"))
+        RoundTripFailure::semantic(
+            RoundTripReason::XmlInvalid,
+            format_args!("{side} is not UTF-8 XML: {error}"),
+        )
     })?;
-    if text.contains("<!DOCTYPE") || text.contains("<!ENTITY") {
-        return Err(RoundTripFailure::invalid(format_args!(
-            "{side} must not contain a DTD or entity declaration"
-        )));
+    let mut declaration_reader = quick_xml::Reader::from_str(text);
+    if let Ok(Event::Decl(declaration)) = declaration_reader.read_event() {
+        validate_utf8_declaration(side, &declaration)?;
     }
     let nodes_limit = u32::try_from(limits.xml_nodes)
         .map_err(|_| RoundTripFailure::invalid("XML node limit exceeds parser capacity"))?;
@@ -710,12 +1385,38 @@ fn parse_surface(
                 limits.xml_nodes
             ))
         } else {
-            RoundTripFailure::invalid(format_args!("{side} XML is malformed: {error}"))
+            RoundTripFailure::semantic(
+                RoundTripReason::XmlInvalid,
+                format_args!("{side} XML is malformed: {error}"),
+            )
         }
     })?;
     reject_xinclude(side, &document)?;
-    check_xml_text_bytes(side, &document, limits.xml_text_bytes)?;
+    check_xml_text_bytes(side, text, &document, limits.xml_text_bytes)?;
     parse_landxml_document(side, &document, limits)
+}
+
+pub(crate) fn validate_utf8_declaration(
+    side: InputSide,
+    declaration: &BytesDecl<'_>,
+) -> Result<(), RoundTripFailure> {
+    let Some(encoding) = declaration.encoding() else {
+        return Ok(());
+    };
+    let encoding = encoding.map_err(|error| {
+        RoundTripFailure::semantic(
+            RoundTripReason::XmlInvalid,
+            format_args!("{side} XML declaration is invalid: {error}"),
+        )
+    })?;
+    if encoding.eq_ignore_ascii_case(b"UTF-8") {
+        Ok(())
+    } else {
+        Err(RoundTripFailure::semantic(
+            RoundTripReason::XmlInvalid,
+            format_args!("{side} XML declaration does not specify UTF-8"),
+        ))
+    }
 }
 
 fn reject_xinclude(side: InputSide, document: &Document<'_>) -> Result<(), RoundTripFailure> {
@@ -723,15 +1424,17 @@ fn reject_xinclude(side: InputSide, document: &Document<'_>) -> Result<(), Round
         .descendants()
         .any(|node| node.is_element() && node.tag_name().namespace() == Some(XINCLUDE_NAMESPACE))
     {
-        return Err(RoundTripFailure::invalid(format_args!(
-            "{side} must not contain XInclude elements"
-        )));
+        return Err(RoundTripFailure::semantic(
+            RoundTripReason::SubsetUnsupported,
+            format_args!("{side} must not contain XInclude elements"),
+        ));
     }
     Ok(())
 }
 
 fn check_xml_text_bytes(
     side: InputSide,
+    source: &str,
     document: &Document<'_>,
     allowed: u64,
 ) -> Result<(), RoundTripFailure> {
@@ -741,12 +1444,59 @@ fn check_xml_text_bytes(
             total = add_text_bytes(side, total, text.len(), allowed)?;
         }
         if node.is_element() {
-            for attribute in node.attributes() {
-                total = add_text_bytes(side, total, attribute.value().len(), allowed)?;
-            }
+            total = add_text_bytes(
+                side,
+                total,
+                element_attribute_bytes(side, source, node)?,
+                allowed,
+            )?;
         }
     }
     Ok(())
+}
+
+fn element_attribute_bytes(
+    side: InputSide,
+    source: &str,
+    node: Node<'_, '_>,
+) -> Result<usize, RoundTripFailure> {
+    let range = node.range();
+    let bytes = source.as_bytes();
+    let mut cursor = range.start.saturating_add(1);
+    while cursor < range.end
+        && !bytes[cursor].is_ascii_whitespace()
+        && bytes[cursor] != b'/'
+        && bytes[cursor] != b'>'
+    {
+        cursor += 1;
+    }
+    let attributes_start = cursor;
+    let mut quote = None;
+    while cursor < range.end {
+        match (quote, bytes[cursor]) {
+            (Some(expected), actual) if actual == expected => quote = None,
+            (None, actual @ (b'\'' | b'"')) => quote = Some(actual),
+            (None, b'>') => break,
+            (Some(_) | None, _) => {}
+        }
+        cursor += 1;
+    }
+    if cursor == range.end {
+        return Err(RoundTripFailure::invalid(format_args!(
+            "{side} XML element has no complete start tag"
+        )));
+    }
+    let mut attributes_end = cursor;
+    while attributes_end > attributes_start && bytes[attributes_end - 1].is_ascii_whitespace() {
+        attributes_end -= 1;
+    }
+    if attributes_end > attributes_start && bytes[attributes_end - 1] == b'/' {
+        attributes_end -= 1;
+        while attributes_end > attributes_start && bytes[attributes_end - 1].is_ascii_whitespace() {
+            attributes_end -= 1;
+        }
+    }
+    Ok(attributes_end.saturating_sub(attributes_start))
 }
 
 fn add_text_bytes(
@@ -771,23 +1521,40 @@ fn parse_landxml_document(
 ) -> Result<ParsedSurface, RoundTripFailure> {
     let root = document.root_element();
     require_tag(side, root, "LandXML")?;
-    if root.attribute("version") != Some("1.2") {
+    if unqualified_attribute(root, "version") != Some("1.2") {
         return Err(schema_error(side, "LandXML version must be 1.2"));
     }
     validate_root_children(side, root)?;
     let units = unique_child(side, root, "Units").map_err(|_| {
-        RoundTripFailure::mismatch(format_args!(
-            "{side} must contain exactly one explicit metric-metre unit declaration"
-        ))
+        RoundTripFailure::semantic(
+            RoundTripReason::UnitDrift,
+            format_args!("{side} must contain exactly one explicit metric-metre unit declaration"),
+        )
     })?;
     validate_metric_units(side, units)?;
     let surfaces = unique_child(side, root, "Surfaces")?;
     validate_allowed_children(side, surfaces, &["Surface"])?;
     let surface = unique_child(side, surfaces, "Surface")?;
-    validate_surface(side, surface, limits)
+    let mut parsed = validate_surface(side, surface, limits)?;
+    parsed.ignored_top_level_sections = element_children(root)
+        .filter(|node| {
+            node.has_tag_name((LANDXML_NAMESPACE, "Project"))
+                || node.has_tag_name((LANDXML_NAMESPACE, "Application"))
+        })
+        .map(|node| node.tag_name().name().to_owned().into_boxed_str())
+        .collect::<Vec<_>>()
+        .into_boxed_slice();
+    Ok(parsed)
 }
 
 fn validate_root_children(side: InputSide, root: Node<'_, '_>) -> Result<(), RoundTripFailure> {
+    if element_children(root).any(|node| node.has_tag_name((LANDXML_NAMESPACE, "CoordinateSystem")))
+    {
+        return Err(RoundTripFailure::semantic(
+            RoundTripReason::CoordinateReferenceUnsupported,
+            format_args!("{side} CoordinateSystem semantics are unsupported"),
+        ));
+    }
     validate_allowed_children(side, root, &["Units", "Project", "Application", "Surfaces"])?;
     unique_child(side, root, "Surfaces")?;
     at_most_one_child(side, root, "Project")?;
@@ -799,16 +1566,17 @@ fn validate_metric_units(side: InputSide, units: Node<'_, '_>) -> Result<(), Rou
     validate_allowed_children(side, units, &["Metric"]).map_err(|_| unit_drift(side))?;
     let metric = unique_child(side, units, "Metric").map_err(|_| unit_drift(side))?;
     validate_allowed_children(side, metric, &[]).map_err(|_| unit_drift(side))?;
-    if metric.attribute("linearUnit") != Some("meter") {
+    if unqualified_attribute(metric, "linearUnit") != Some("meter") {
         return Err(unit_drift(side));
     }
     Ok(())
 }
 
 fn unit_drift(side: InputSide) -> RoundTripFailure {
-    RoundTripFailure::mismatch(format_args!(
-        "{side} units do not declare exactly one Metric linearUnit=\"meter\""
-    ))
+    RoundTripFailure::semantic(
+        RoundTripReason::UnitDrift,
+        format_args!("{side} units do not declare exactly one Metric linearUnit=\"meter\""),
+    )
 }
 
 fn validate_surface(
@@ -816,12 +1584,12 @@ fn validate_surface(
     surface: Node<'_, '_>,
     limits: RoundTripLimits,
 ) -> Result<ParsedSurface, RoundTripFailure> {
-    if surface.attribute("name").is_none() {
+    let Some(surface_name) = unqualified_attribute(surface, "name") else {
         return Err(schema_error(side, "Surface requires a name attribute"));
-    }
+    };
     validate_allowed_children(side, surface, &["Definition"])?;
     let definition = unique_child(side, surface, "Definition")?;
-    if definition.attribute("surfType") != Some("TIN") {
+    if unqualified_attribute(definition, "surfType") != Some("TIN") {
         return Err(schema_error(side, "Surface Definition must be a TIN"));
     }
     validate_allowed_children(side, definition, &["Pnts", "Faces"])?;
@@ -835,14 +1603,19 @@ fn validate_surface(
             "TIN requires at least three points and one face",
         ));
     }
-    Ok(ParsedSurface { points, faces })
+    Ok(ParsedSurface {
+        points,
+        faces,
+        surface_name: (!surface_name.is_empty()).then(|| surface_name.to_owned().into_boxed_str()),
+        ignored_top_level_sections: Box::new([]),
+    })
 }
 
 fn parse_points(
     side: InputSide,
     pnts: Node<'_, '_>,
     max_points: u64,
-) -> Result<(Vec<Point>, BTreeMap<u64, usize>), RoundTripFailure> {
+) -> Result<(Vec<Position>, BTreeMap<u64, usize>), RoundTripFailure> {
     validate_allowed_children(side, pnts, &["P"])?;
     let point_count = element_children(pnts).count();
     check_item_limit(side, "points", point_count, max_points)?;
@@ -857,33 +1630,35 @@ fn parse_points(
         let id = parse_point_id(side, node)?;
         let index = points.len();
         if point_ids.insert(id, index).is_some() {
-            return Err(RoundTripFailure::invalid(format_args!(
-                "{side} contains duplicate point ID {id}"
-            )));
+            return Err(RoundTripFailure::semantic(
+                RoundTripReason::XmlInvalid,
+                format_args!("{side} contains duplicate point ID {id}"),
+            ));
         }
-        points.push(Point {
-            position: parse_position(side, node)?,
-        });
+        points.push(parse_position(side, node)?);
     }
     Ok((points, point_ids))
 }
 
 fn parse_point_id(side: InputSide, node: Node<'_, '_>) -> Result<u64, RoundTripFailure> {
-    let value = node
-        .attribute("id")
+    let value = unqualified_attribute(node, "id")
         .ok_or_else(|| schema_error(side, "every P requires an id"))?;
     let id = value.parse::<u64>().map_err(|_| {
-        RoundTripFailure::invalid(format_args!("{side} point ID must be a positive integer"))
+        RoundTripFailure::semantic(
+            RoundTripReason::XmlInvalid,
+            format_args!("{side} point ID must be a positive integer"),
+        )
     })?;
     if id == 0 {
-        return Err(RoundTripFailure::invalid(format_args!(
-            "{side} point ID must be positive"
-        )));
+        return Err(RoundTripFailure::semantic(
+            RoundTripReason::XmlInvalid,
+            format_args!("{side} point ID must be positive"),
+        ));
     }
     Ok(id)
 }
 
-fn parse_position(side: InputSide, node: Node<'_, '_>) -> Result<[f64; 3], RoundTripFailure> {
+fn parse_position(side: InputSide, node: Node<'_, '_>) -> Result<Position, RoundTripFailure> {
     let text = simple_text(side, node, "P")?;
     let mut values = text.split_whitespace();
     let northing = parse_coordinate(side, values.next())?;
@@ -899,36 +1674,41 @@ fn parse_position(side: InputSide, node: Node<'_, '_>) -> Result<[f64; 3], Round
         .iter()
         .any(|value| !value.is_finite())
     {
-        return Err(RoundTripFailure::invalid(format_args!(
-            "{side} P coordinates must be finite"
-        )));
+        return Err(RoundTripFailure::semantic(
+            RoundTripReason::XmlInvalid,
+            format_args!("{side} P coordinates must be finite"),
+        ));
     }
-    Ok([
-        canonical_zero(easting),
-        canonical_zero(northing),
-        canonical_zero(elevation),
-    ])
+    Ok(Position {
+        easting: canonical_zero(easting),
+        northing: canonical_zero(northing),
+        elevation: canonical_zero(elevation),
+    })
 }
 
 fn parse_coordinate(side: InputSide, value: Option<&str>) -> Result<f64, RoundTripFailure> {
     value
         .ok_or_else(|| schema_error(side, "P must contain exactly northing easting elevation"))?
         .parse()
-        .map_err(|_| RoundTripFailure::invalid(format_args!("{side} P coordinates are invalid")))
+        .map_err(|_| {
+            RoundTripFailure::semantic(
+                RoundTripReason::XmlInvalid,
+                format_args!("{side} P coordinates are invalid"),
+            )
+        })
 }
 
 fn parse_faces(
     side: InputSide,
     faces: Node<'_, '_>,
-    points: &[Point],
+    points: &[Position],
     point_ids: &BTreeMap<u64, usize>,
     max_faces: u64,
-) -> Result<Vec<[usize; 3]>, RoundTripFailure> {
+) -> Result<Vec<Triangle>, RoundTripFailure> {
     validate_allowed_children(side, faces, &["F"])?;
     let face_count = element_children(faces).count();
     check_item_limit(side, "faces", face_count, max_faces)?;
     let mut parsed_faces = Vec::new();
-    let mut unique_faces = BTreeSet::new();
     parsed_faces.try_reserve_exact(face_count).map_err(|_| {
         RoundTripFailure::resource(format_args!(
             "{side} face storage cannot reserve {face_count} entries"
@@ -937,12 +1717,6 @@ fn parse_faces(
     for node in element_children(faces) {
         let face = parse_face(side, node, point_ids)?;
         validate_face(side, face, points)?;
-        let canonical = canonical_face(face);
-        if !unique_faces.insert(canonical) {
-            return Err(RoundTripFailure::mismatch(format_args!(
-                "{side} contains a duplicate face"
-            )));
-        }
         parsed_faces.push(face);
     }
     Ok(parsed_faces)
@@ -952,7 +1726,7 @@ fn parse_face(
     side: InputSide,
     node: Node<'_, '_>,
     point_ids: &BTreeMap<u64, usize>,
-) -> Result<[usize; 3], RoundTripFailure> {
+) -> Result<Triangle, RoundTripFailure> {
     let text = simple_text(side, node, "F")?;
     let mut ids = text.split_whitespace();
     let a = parse_face_id(side, ids.next())?;
@@ -963,42 +1737,56 @@ fn parse_face(
     }
     let resolve = |id| {
         point_ids.get(&id).copied().ok_or_else(|| {
-            RoundTripFailure::invalid(format_args!(
-                "{side} face has dangling point reference {id}"
-            ))
+            RoundTripFailure::semantic(
+                RoundTripReason::XmlInvalid,
+                format_args!("{side} face has dangling point reference {id}"),
+            )
         })
     };
-    Ok([resolve(a)?, resolve(b)?, resolve(c)?])
+    Ok(Triangle::new(resolve(a)?, resolve(b)?, resolve(c)?))
 }
 
 fn parse_face_id(side: InputSide, value: Option<&str>) -> Result<u64, RoundTripFailure> {
     value
         .ok_or_else(|| schema_error(side, "F must contain exactly three point IDs"))?
         .parse()
-        .map_err(|_| RoundTripFailure::invalid(format_args!("{side} F references are invalid")))
+        .map_err(|_| {
+            RoundTripFailure::semantic(
+                RoundTripReason::XmlInvalid,
+                format_args!("{side} F references are invalid"),
+            )
+        })
 }
 
-fn validate_face(
+pub(crate) fn validate_face(
     side: InputSide,
-    face: [usize; 3],
-    points: &[Point],
+    face: Triangle,
+    points: &[Position],
 ) -> Result<(), RoundTripFailure> {
-    if face[0] == face[1] || face[1] == face[2] || face[0] == face[2] {
-        return Err(RoundTripFailure::invalid(format_args!(
-            "{side} contains a face with repeated point references"
-        )));
+    if face.has_repeated_point() {
+        return Err(RoundTripFailure::semantic(
+            RoundTripReason::XmlInvalid,
+            format_args!("{side} contains a face with repeated point references"),
+        ));
     }
-    if face_is_degenerate(face.map(|index| points[index])) {
-        return Err(RoundTripFailure::invalid(format_args!(
-            "{side} contains a geometrically degenerate face"
-        )));
+    let [a, b, c] = face.positions(points);
+    let robust_orientation = normalized_orientation_xy(a, b, c);
+    let is_collinear = match robust_orientation {
+        Some(orientation) if orientation != 0.0 => false,
+        Some(_) | None => exact_orientation_is_zero(a, b, c),
+    };
+    if is_collinear {
+        return Err(RoundTripFailure::semantic(
+            RoundTripReason::XmlInvalid,
+            format_args!("{side} contains a geometrically degenerate face"),
+        ));
     }
     Ok(())
 }
 
-fn normalized_orientation_xy(a: [f64; 3], b: [f64; 3], c: [f64; 3]) -> Option<f64> {
-    let [ax, bx, cx] = scale_axis_exact([a[0], b[0], c[0]])?;
-    let [ay, by, cy] = scale_axis_exact([a[1], b[1], c[1]])?;
+fn normalized_orientation_xy(a: Position, b: Position, c: Position) -> Option<f64> {
+    let [ax, bx, cx] = scale_axis_exact([a.easting, b.easting, c.easting])?;
+    let [ay, by, cy] = scale_axis_exact([a.northing, b.northing, c.northing])?;
     let orientation = orient2d(
         Coord { x: ax, y: ay },
         Coord { x: bx, y: by },
@@ -1053,11 +1841,11 @@ fn normal_power_of_two(exponent: i32) -> f64 {
     f64::from_bits(encoded << 52)
 }
 
-fn exact_orientation_is_zero(a: [f64; 3], b: [f64; 3], c: [f64; 3]) -> bool {
-    let (a_easting_delta, a_easting_exponent) = exact_difference(a[0], c[0]);
-    let (a_northing_delta, a_northing_exponent) = exact_difference(a[1], c[1]);
-    let (b_easting_delta, b_easting_exponent) = exact_difference(b[0], c[0]);
-    let (b_northing_delta, b_northing_exponent) = exact_difference(b[1], c[1]);
+fn exact_orientation_is_zero(a: Position, b: Position, c: Position) -> bool {
+    let (a_easting_delta, a_easting_exponent) = exact_difference(a.easting, c.easting);
+    let (a_northing_delta, a_northing_exponent) = exact_difference(a.northing, c.northing);
+    let (b_easting_delta, b_easting_exponent) = exact_difference(b.easting, c.easting);
+    let (b_northing_delta, b_northing_exponent) = exact_difference(b.northing, c.northing);
     let left = a_easting_delta * b_northing_delta;
     let right = a_northing_delta * b_easting_delta;
     exact_scaled_integers_equal(
@@ -1232,98 +2020,105 @@ fn element_children<'a, 'input>(node: Node<'a, 'input>) -> impl Iterator<Item = 
     node.children().filter(Node::is_element)
 }
 
+fn unqualified_attribute<'a>(node: Node<'a, '_>, name: &str) -> Option<&'a str> {
+    node.attributes()
+        .find(|attribute| attribute.namespace().is_none() && attribute.name() == name)
+        .map(|attribute| attribute.value())
+}
+
 fn schema_error(side: InputSide, message: &'static str) -> RoundTripFailure {
-    RoundTripFailure::invalid(format_args!("{side} schema is unsupported: {message}"))
+    RoundTripFailure::semantic(
+        RoundTripReason::SubsetUnsupported,
+        format_args!("{side} schema is unsupported: {message}"),
+    )
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub(crate) struct ComparisonFacts {
-    pub(crate) comparison_count: u64,
-    pub(crate) max_easting_drift_metres: f64,
-    pub(crate) max_northing_drift_metres: f64,
-    pub(crate) max_horizontal_drift_metres: f64,
-    pub(crate) max_vertical_drift_metres: f64,
+struct ComparisonFacts {
+    comparison_count: u64,
+    max_easting_drift_metres: f64,
+    max_northing_drift_metres: f64,
+    max_horizontal_drift_metres: f64,
+    max_vertical_drift_metres: f64,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum PointMatchError {
-    Resource {
-        required: u64,
-        allowed: u64,
-    },
-    Allocation {
-        buffer: &'static str,
-        required_bytes: u64,
-    },
-    Unmatched,
-    Ambiguous,
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct TopologyDrift {
+    added_count: u64,
+    removed_count: u64,
+    added_hash: [u8; 32],
+    removed_hash: [u8; 32],
+    added_sample: Box<[[usize; 3]]>,
+    removed_sample: Box<[[usize; 3]]>,
 }
 
-pub(crate) fn compare_surfaces(
+impl TopologyDrift {
+    pub(crate) const fn added_count(&self) -> u64 {
+        self.added_count
+    }
+
+    pub(crate) const fn removed_count(&self) -> u64 {
+        self.removed_count
+    }
+
+    pub(crate) const fn added_hash(&self) -> [u8; 32] {
+        self.added_hash
+    }
+
+    pub(crate) const fn removed_hash(&self) -> [u8; 32] {
+        self.removed_hash
+    }
+
+    pub(crate) fn added_sample(&self) -> &[[usize; 3]] {
+        &self.added_sample
+    }
+
+    pub(crate) fn removed_sample(&self) -> &[[usize; 3]] {
+        &self.removed_sample
+    }
+}
+
+fn compare_surfaces(
     reference: &ParsedSurface,
     returned: &ParsedSurface,
     tolerances: RoundTripTolerances,
     max_comparisons: u64,
+    control: Option<&OperationControl>,
 ) -> Result<ComparisonFacts, RoundTripFailure> {
+    check_round_trip_cancelled(control)?;
     if reference.points.len() != returned.points.len() {
-        return Err(RoundTripFailure::mismatch(format_args!(
-            "vertex counts differ: REFERENCE has {}, RETURNED has {}",
-            reference.points.len(),
-            returned.points.len()
-        )));
-    }
-    if reference.faces.len() != returned.faces.len() {
-        return Err(RoundTripFailure::mismatch(format_args!(
-            "face counts differ: REFERENCE has {}, RETURNED has {}",
-            reference.faces.len(),
-            returned.faces.len()
-        )));
+        return Err(RoundTripFailure::semantic(
+            RoundTripReason::PointCountDrift,
+            format_args!(
+                "vertex counts differ: REFERENCE has {}, RETURNED has {}",
+                reference.points.len(),
+                returned.points.len()
+            ),
+        ));
     }
     let (returned_to_reference, facts) = match_points(
         &reference.points,
         &returned.points,
         tolerances,
         max_comparisons,
+        control,
     )?;
-    compare_topology(reference, returned, &returned_to_reference)?;
+    if let Err(mut error) = compare_topology(reference, returned, &returned_to_reference, control) {
+        error.comparison = Some(facts);
+        return Err(error);
+    }
     Ok(facts)
 }
 
-pub(crate) fn match_points(
-    reference: &[Point],
-    returned: &[Point],
+fn match_points(
+    reference: &[Position],
+    returned: &[Position],
     tolerances: RoundTripTolerances,
     max_comparisons: u64,
+    control: Option<&OperationControl>,
 ) -> Result<(Vec<usize>, ComparisonFacts), RoundTripFailure> {
-    match_points_evidence(reference, returned, tolerances, max_comparisons).map_err(|error| {
-        match error {
-            PointMatchError::Resource { required, allowed } => RoundTripFailure::resource(
-                format_args!("vertex comparisons require {required}; limit is {allowed}"),
-            ),
-            PointMatchError::Allocation {
-                buffer,
-                required_bytes,
-            } => RoundTripFailure::resource(format_args!(
-                "{buffer} allocation for {required_bytes} bytes failed"
-            )),
-            PointMatchError::Unmatched => RoundTripFailure::mismatch(
-                "a REFERENCE vertex has no RETURNED match within the declared tolerances",
-            ),
-            PointMatchError::Ambiguous => RoundTripFailure::mismatch(
-                "vertex matching is ambiguous under the declared tolerances",
-            ),
-        }
-    })
-}
-
-pub(crate) fn match_points_evidence(
-    reference: &[Point],
-    returned: &[Point],
-    tolerances: RoundTripTolerances,
-    max_comparisons: u64,
-) -> Result<(Vec<usize>, ComparisonFacts), PointMatchError> {
     if tolerances.horizontal_metres() == 0.0 && tolerances.vertical_metres() == 0.0 {
-        return match_exact_points(reference, returned, max_comparisons);
+        return match_exact_points(reference, returned, max_comparisons, control);
     }
     let mut returned_by_easting = Vec::new();
     reserve_matcher_items(
@@ -1333,7 +2128,7 @@ pub(crate) fn match_points_evidence(
     )?;
     returned_by_easting.extend(0..returned.len());
     returned_by_easting.sort_unstable_by(|left, right| {
-        returned[*left].position[0].total_cmp(&returned[*right].position[0])
+        returned[*left].easting.total_cmp(&returned[*right].easting)
     });
     let mut returned_to_reference = Vec::new();
     reserve_matcher_items(
@@ -1344,38 +2139,39 @@ pub(crate) fn match_points_evidence(
     returned_to_reference.resize(returned.len(), usize::MAX);
     let mut facts = ComparisonFacts::default();
     for (reference_index, reference_point) in reference.iter().enumerate() {
-        let returned_index = unique_point_match(
-            reference_point,
+        check_round_trip_cancelled(control)?;
+        let (returned_index, drift) = unique_point_match(
+            *reference_point,
             returned,
             &returned_by_easting,
             tolerances,
             max_comparisons,
             &mut facts,
+            control,
         )?;
         if returned_to_reference[returned_index] != usize::MAX {
-            return Err(PointMatchError::Ambiguous);
+            return Err(RoundTripFailure::semantic(
+                RoundTripReason::VertexAmbiguous,
+                "vertex matching is ambiguous under the declared tolerances",
+            ));
         }
         returned_to_reference[returned_index] = reference_index;
-        update_drift_facts(
-            &mut facts,
-            reference_point.position,
-            returned[returned_index].position,
-        );
+        update_drift_facts(&mut facts, drift);
     }
     Ok((returned_to_reference, facts))
 }
 
 fn match_exact_points(
-    reference: &[Point],
-    returned: &[Point],
+    reference: &[Position],
+    returned: &[Position],
     max_comparisons: u64,
-) -> Result<(Vec<usize>, ComparisonFacts), PointMatchError> {
+    control: Option<&OperationControl>,
+) -> Result<(Vec<usize>, ComparisonFacts), RoundTripFailure> {
     let comparison_count = u64::try_from(reference.len()).unwrap_or(u64::MAX);
     if comparison_count > max_comparisons {
-        return Err(PointMatchError::Resource {
-            required: comparison_count,
-            allowed: max_comparisons,
-        });
+        return Err(RoundTripFailure::resource(format_args!(
+            "vertex comparisons require {comparison_count}; limit is {max_comparisons}"
+        )));
     }
     let mut returned_positions = Vec::new();
     reserve_matcher_items(
@@ -1384,14 +2180,20 @@ fn match_exact_points(
         "exact returned position index",
     )?;
     for (index, point) in returned.iter().enumerate() {
-        returned_positions.push((position_key(point.position), index));
+        if index.is_multiple_of(4096) {
+            check_round_trip_cancelled(control)?;
+        }
+        returned_positions.push((point.key(), index));
     }
     returned_positions.sort_unstable_by_key(|entry| entry.0);
     if returned_positions
         .windows(2)
-        .any(|pair| pair[0].0 == pair[1].0)
+        .any(|entries| entries[0].0 == entries[1].0)
     {
-        return Err(PointMatchError::Ambiguous);
+        return Err(RoundTripFailure::semantic(
+            RoundTripReason::VertexAmbiguous,
+            "RETURNED contains duplicate coordinates, so vertex matching is ambiguous",
+        ));
     }
     let mut returned_to_reference = Vec::new();
     reserve_matcher_items(
@@ -1401,14 +2203,25 @@ fn match_exact_points(
     )?;
     returned_to_reference.resize(returned.len(), usize::MAX);
     for (reference_index, point) in reference.iter().enumerate() {
-        let key = position_key(point.position);
+        if reference_index.is_multiple_of(4096) {
+            check_round_trip_cancelled(control)?;
+        }
+        let key = point.key();
         let returned_index = returned_positions
             .binary_search_by_key(&key, |entry| entry.0)
             .ok()
             .map(|index| returned_positions[index].1)
-            .ok_or(PointMatchError::Unmatched)?;
+            .ok_or_else(|| {
+                RoundTripFailure::semantic(
+                    RoundTripReason::ToleranceDrift,
+                    "a REFERENCE vertex has no exact RETURNED coordinate match",
+                )
+            })?;
         if returned_to_reference[returned_index] != usize::MAX {
-            return Err(PointMatchError::Ambiguous);
+            return Err(RoundTripFailure::semantic(
+                RoundTripReason::VertexAmbiguous,
+                "REFERENCE contains duplicate coordinates, so vertex matching is ambiguous",
+            ));
         }
         returned_to_reference[returned_index] = reference_index;
     }
@@ -1424,86 +2237,74 @@ fn match_exact_points(
 fn reserve_matcher_items<T>(
     values: &mut Vec<T>,
     items: usize,
-    buffer: &'static str,
-) -> Result<(), PointMatchError> {
-    let requested_bytes = matcher_capacity_bytes::<T>(items);
-    values
-        .try_reserve_exact(items)
-        .map_err(|_| PointMatchError::Allocation {
-            buffer,
-            required_bytes: requested_bytes,
-        })?;
-    let retained_bytes = matcher_capacity_bytes::<T>(values.capacity());
-    if retained_bytes > requested_bytes {
-        return Err(PointMatchError::Allocation {
-            buffer,
-            required_bytes: retained_bytes,
-        });
+    label: &'static str,
+) -> Result<(), RoundTripFailure> {
+    let requested = (items as u64).saturating_mul(std::mem::size_of::<T>() as u64);
+    values.try_reserve_exact(items).map_err(|_| {
+        RoundTripFailure::resource(format_args!(
+            "{label} allocation for {requested} bytes failed"
+        ))
+    })?;
+    let retained = (values.capacity() as u64).saturating_mul(std::mem::size_of::<T>() as u64);
+    if retained > requested {
+        Err(RoundTripFailure::resource(format_args!(
+            "{label} allocator retained {retained} bytes for a {requested} byte request"
+        )))
+    } else {
+        Ok(())
     }
-    Ok(())
-}
-
-fn matcher_capacity_bytes<T>(items: usize) -> u64 {
-    u64::try_from(items)
-        .unwrap_or(u64::MAX)
-        .saturating_mul(std::mem::size_of::<T>() as u64)
-}
-
-fn position_key(position: [f64; 3]) -> [u64; 3] {
-    position.map(f64::to_bits)
 }
 
 fn unique_point_match(
-    reference: &Point,
-    returned: &[Point],
+    reference: Position,
+    returned: &[Position],
     returned_by_easting: &[usize],
     tolerances: RoundTripTolerances,
     max_comparisons: u64,
     facts: &mut ComparisonFacts,
-) -> Result<usize, PointMatchError> {
-    let reference_easting = reference.position[0];
+    control: Option<&OperationControl>,
+) -> Result<(usize, CoordinateDrift), RoundTripFailure> {
+    let reference_easting = reference.easting;
     let horizontal_tolerance = tolerances.horizontal_metres();
     let start = returned_by_easting.partition_point(|index| {
         easting_is_below_window(
-            returned[*index].position[0],
+            returned[*index].easting,
             reference_easting,
             horizontal_tolerance,
         )
     });
     let end = returned_by_easting.partition_point(|index| {
         !easting_is_above_window(
-            returned[*index].position[0],
+            returned[*index].easting,
             reference_easting,
             horizontal_tolerance,
         )
     });
     let mut matched = None;
     for returned_index in &returned_by_easting[start..end] {
+        if facts.comparison_count.is_multiple_of(4096) {
+            check_round_trip_cancelled(control)?;
+        }
         facts.comparison_count = facts.comparison_count.saturating_add(1);
         if facts.comparison_count > max_comparisons {
-            return Err(PointMatchError::Resource {
-                required: facts.comparison_count,
-                allowed: max_comparisons,
-            });
+            return Err(RoundTripFailure::resource(format_args!(
+                "vertex comparisons exceed the {max_comparisons} comparison limit"
+            )));
         }
-        if points_within_tolerance(
-            reference.position,
-            returned[*returned_index].position,
-            tolerances,
-        ) && matched.replace(*returned_index).is_some()
-        {
-            return Err(PointMatchError::Ambiguous);
+        let drift = CoordinateDrift::between(reference, returned[*returned_index]);
+        if drift.is_within(tolerances) && matched.replace((*returned_index, drift)).is_some() {
+            return Err(RoundTripFailure::semantic(
+                RoundTripReason::VertexAmbiguous,
+                "vertex matching is ambiguous under the declared tolerances",
+            ));
         }
     }
-    matched.ok_or(PointMatchError::Unmatched)
-}
-
-pub(crate) fn face_is_degenerate(points: [Point; 3]) -> bool {
-    let [a, b, c] = points.map(|point| point.position);
-    match normalized_orientation_xy(a, b, c) {
-        Some(orientation) if orientation != 0.0 => false,
-        Some(_) | None => exact_orientation_is_zero(a, b, c),
-    }
+    matched.ok_or_else(|| {
+        RoundTripFailure::semantic(
+            RoundTripReason::VertexUnmatched,
+            "a REFERENCE vertex has no RETURNED match within the declared tolerances",
+        )
+    })
 }
 
 fn easting_is_below_window(candidate: f64, reference: f64, tolerance: f64) -> bool {
@@ -1514,60 +2315,181 @@ fn easting_is_above_window(candidate: f64, reference: f64, tolerance: f64) -> bo
     candidate > reference && candidate - reference > tolerance
 }
 
-fn points_within_tolerance(
-    reference: [f64; 3],
-    returned: [f64; 3],
-    tolerances: RoundTripTolerances,
-) -> bool {
-    let easting = (returned[0] - reference[0]).abs();
-    let northing = (returned[1] - reference[1]).abs();
-    let vertical = (returned[2] - reference[2]).abs();
-    easting.hypot(northing) <= tolerances.horizontal_metres()
-        && vertical <= tolerances.vertical_metres()
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct CoordinateDrift {
+    easting: f64,
+    northing: f64,
+    horizontal: f64,
+    vertical: f64,
 }
 
-fn update_drift_facts(facts: &mut ComparisonFacts, reference: [f64; 3], returned: [f64; 3]) {
-    let easting = (returned[0] - reference[0]).abs();
-    let northing = (returned[1] - reference[1]).abs();
-    let vertical = (returned[2] - reference[2]).abs();
-    facts.max_easting_drift_metres = facts.max_easting_drift_metres.max(easting);
-    facts.max_northing_drift_metres = facts.max_northing_drift_metres.max(northing);
-    facts.max_horizontal_drift_metres = facts
-        .max_horizontal_drift_metres
-        .max(easting.hypot(northing));
-    facts.max_vertical_drift_metres = facts.max_vertical_drift_metres.max(vertical);
+impl CoordinateDrift {
+    fn between(reference: Position, returned: Position) -> Self {
+        let easting = (returned.easting - reference.easting).abs();
+        let northing = (returned.northing - reference.northing).abs();
+        let vertical = (returned.elevation - reference.elevation).abs();
+        Self {
+            easting,
+            northing,
+            horizontal: easting.hypot(northing),
+            vertical,
+        }
+    }
+
+    fn is_within(self, tolerances: RoundTripTolerances) -> bool {
+        self.horizontal <= tolerances.horizontal_metres()
+            && self.vertical <= tolerances.vertical_metres()
+    }
+}
+
+fn update_drift_facts(facts: &mut ComparisonFacts, drift: CoordinateDrift) {
+    facts.max_easting_drift_metres = facts.max_easting_drift_metres.max(drift.easting);
+    facts.max_northing_drift_metres = facts.max_northing_drift_metres.max(drift.northing);
+    facts.max_horizontal_drift_metres = facts.max_horizontal_drift_metres.max(drift.horizontal);
+    facts.max_vertical_drift_metres = facts.max_vertical_drift_metres.max(drift.vertical);
 }
 
 fn compare_topology(
     reference: &ParsedSurface,
     returned: &ParsedSurface,
     returned_to_reference: &[usize],
+    control: Option<&OperationControl>,
 ) -> Result<(), RoundTripFailure> {
-    let mut reference_faces = reference
-        .faces
-        .iter()
-        .copied()
-        .map(canonical_face)
-        .collect::<Vec<_>>();
-    let mut returned_faces = returned
-        .faces
-        .iter()
-        .map(|face| face.map(|index| returned_to_reference[index]))
-        .map(canonical_face)
-        .collect::<Vec<_>>();
+    check_round_trip_cancelled(control)?;
+    let mut reference_faces = Vec::new();
+    reserve_matcher_items(
+        &mut reference_faces,
+        reference.faces.len(),
+        "reference topology projection",
+    )?;
+    reference_faces.extend(
+        reference
+            .faces
+            .iter()
+            .copied()
+            .map(Triangle::canonical_point_indices),
+    );
+    let mut returned_faces = Vec::new();
+    reserve_matcher_items(
+        &mut returned_faces,
+        returned.faces.len(),
+        "returned topology projection",
+    )?;
+    returned_faces.extend(
+        returned
+            .faces
+            .iter()
+            .copied()
+            .map(|face| face.remap(returned_to_reference).canonical_point_indices()),
+    );
     reference_faces.sort_unstable();
     returned_faces.sort_unstable();
+    check_round_trip_cancelled(control)?;
     if reference_faces != returned_faces {
-        return Err(RoundTripFailure::mismatch(
+        return Err(RoundTripFailure::topology(
+            topology_drift(&reference_faces, &returned_faces, control)?,
             "TIN topology differs after point-ID, face-order, and winding normalization",
         ));
     }
     Ok(())
 }
 
-fn canonical_face(mut face: [usize; 3]) -> [usize; 3] {
-    face.sort_unstable();
-    face
+fn check_round_trip_cancelled(control: Option<&OperationControl>) -> Result<(), RoundTripFailure> {
+    if control.is_some_and(|control| control.check_cancelled().is_err()) {
+        Err(RoundTripFailure::cancelled())
+    } else {
+        Ok(())
+    }
+}
+
+fn topology_drift(
+    reference: &[[usize; 3]],
+    returned: &[[usize; 3]],
+    control: Option<&OperationControl>,
+) -> Result<TopologyDrift, RoundTripFailure> {
+    let mut added = FaceDifference::new(b"punctra-round-trip-added-faces-v1");
+    let mut removed = FaceDifference::new(b"punctra-round-trip-removed-faces-v1");
+    let (mut reference_index, mut returned_index) = (0, 0);
+    while reference_index < reference.len() && returned_index < returned.len() {
+        if (reference_index + returned_index).is_multiple_of(4096) {
+            check_round_trip_cancelled(control)?;
+        }
+        match reference[reference_index].cmp(&returned[returned_index]) {
+            std::cmp::Ordering::Less => {
+                removed.push(reference[reference_index]);
+                reference_index += 1;
+            }
+            std::cmp::Ordering::Greater => {
+                added.push(returned[returned_index]);
+                returned_index += 1;
+            }
+            std::cmp::Ordering::Equal => {
+                reference_index += 1;
+                returned_index += 1;
+            }
+        }
+    }
+    for (index, face) in reference[reference_index..].iter().copied().enumerate() {
+        if index.is_multiple_of(4096) {
+            check_round_trip_cancelled(control)?;
+        }
+        removed.push(face);
+    }
+    for (index, face) in returned[returned_index..].iter().copied().enumerate() {
+        if index.is_multiple_of(4096) {
+            check_round_trip_cancelled(control)?;
+        }
+        added.push(face);
+    }
+    let (added_count, added_hash, added_sample) = added.finish();
+    let (removed_count, removed_hash, removed_sample) = removed.finish();
+    Ok(TopologyDrift {
+        added_count,
+        removed_count,
+        added_hash,
+        removed_hash,
+        added_sample,
+        removed_sample,
+    })
+}
+
+struct FaceDifference {
+    count: u64,
+    hasher: blake3::Hasher,
+    sample: Vec<[usize; 3]>,
+}
+
+impl FaceDifference {
+    const SAMPLE_LIMIT: usize = 16;
+
+    fn new(domain: &[u8]) -> Self {
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(domain);
+        Self {
+            count: 0,
+            hasher,
+            sample: Vec::with_capacity(Self::SAMPLE_LIMIT),
+        }
+    }
+
+    fn push(&mut self, face: [usize; 3]) {
+        self.count = self.count.saturating_add(1);
+        for vertex in face {
+            self.hasher.update(&(vertex as u64).to_le_bytes());
+        }
+        if self.sample.len() < Self::SAMPLE_LIMIT {
+            self.sample.push(face);
+        }
+    }
+
+    fn finish(mut self) -> (u64, [u8; 32], Box<[[usize; 3]]>) {
+        self.hasher.update(&self.count.to_le_bytes());
+        (
+            self.count,
+            *self.hasher.finalize().as_bytes(),
+            self.sample.into_boxed_slice(),
+        )
+    }
 }
 
 const fn canonical_zero(value: f64) -> f64 {
@@ -1673,6 +2595,29 @@ mod tests {
             default_limits(),
         )
         .expect("an empty surface name does not change terrain semantics");
+
+        assert!(!report.exact_bytes());
+        assert!(report.topology_matches());
+    }
+
+    #[test]
+    fn comments_containing_declaration_tokens_are_ignored() {
+        let fixture = Fixture::new("declaration-token-comments");
+        let reference_xml = landxml(REFERENCE_POINTS, REFERENCE_FACES, false);
+        let returned_xml = reference_xml.replacen(
+            "<Units>",
+            "<!-- generated without <!DOCTYPE or <!ENTITY declarations -->\n<Units>",
+            1,
+        );
+        let (reference, returned) = fixture.write_pair(&reference_xml, &returned_xml);
+
+        let report = verify(
+            &reference,
+            &returned,
+            tolerances(0.0, 0.0),
+            default_limits(),
+        )
+        .expect("declaration tokens in comment text are non-semantic");
 
         assert!(!report.exact_bytes());
         assert!(report.topology_matches());
@@ -1818,7 +2763,13 @@ mod tests {
         let reference_xml = landxml(REFERENCE_POINTS, REFERENCE_FACES, false);
         let invalid_documents = [
             "<LandXML",
+            &reference_xml.replace("UTF-8", "UTF-16"),
             &reference_xml.replacen("<LandXML", "<!DOCTYPE LandXML []>\n<LandXML", 1),
+            &reference_xml.replacen(
+                "<LandXML",
+                "<!DOCTYPE LandXML [<!ENTITY generated \"value\">]>\n<LandXML",
+                1,
+            ),
             &reference_xml.replace(super::LANDXML_NAMESPACE, "urn:wrong-landxml"),
             &reference_xml.replace(
                 "<Application name=\"Declared elsewhere\" version=\"ignored\"/>",
@@ -1877,9 +2828,90 @@ mod tests {
                     tolerances(0.0, 0.0),
                     default_limits(),
                 ),
-                RoundTripFailureKind::InvalidInput,
+                RoundTripFailureKind::SemanticMismatch,
             );
         }
+    }
+
+    #[test]
+    fn foreign_namespaced_attributes_cannot_supply_landxml_semantics() {
+        let fixture = Fixture::new("foreign-attribute-lookalikes");
+        let reference_xml = landxml(REFERENCE_POINTS, REFERENCE_FACES, false);
+        let variants = [
+            (
+                reference_xml.replacen(
+                    "version=\"1.2\"",
+                    "xmlns:meta=\"urn:generated:metadata\" meta:version=\"1.2\"",
+                    1,
+                ),
+                RoundTripFailureKind::SemanticMismatch,
+            ),
+            (
+                reference_xml.replacen(
+                    "linearUnit=\"meter\"",
+                    "xmlns:meta=\"urn:generated:metadata\" meta:linearUnit=\"meter\"",
+                    1,
+                ),
+                RoundTripFailureKind::SemanticMismatch,
+            ),
+            (
+                reference_xml.replacen(
+                    "name=\"Ground\"",
+                    "xmlns:meta=\"urn:generated:metadata\" meta:name=\"Ground\"",
+                    1,
+                ),
+                RoundTripFailureKind::SemanticMismatch,
+            ),
+            (
+                reference_xml.replacen(
+                    "surfType=\"TIN\"",
+                    "xmlns:meta=\"urn:generated:metadata\" meta:surfType=\"TIN\"",
+                    1,
+                ),
+                RoundTripFailureKind::SemanticMismatch,
+            ),
+            (
+                reference_xml.replacen(
+                    "<P id=\"1\">",
+                    "<P xmlns:meta=\"urn:generated:metadata\" meta:id=\"1\">",
+                    1,
+                ),
+                RoundTripFailureKind::SemanticMismatch,
+            ),
+        ];
+        for (index, (returned_xml, expected)) in variants.iter().enumerate() {
+            let reference = fixture.write(&format!("reference-{index}.xml"), &reference_xml);
+            let returned = fixture.write(&format!("returned-{index}.xml"), returned_xml);
+            assert_kind(
+                verify(
+                    &reference,
+                    &returned,
+                    tolerances(0.0, 0.0),
+                    default_limits(),
+                ),
+                *expected,
+            );
+        }
+
+        let returned_xml = reference_xml
+            .replacen(
+                "<LandXML ",
+                "<LandXML xmlns:meta=\"urn:generated:metadata\" meta:version=\"9.9\" ",
+                1,
+            )
+            .replacen("<Metric ", "<Metric meta:linearUnit=\"foot\" ", 1)
+            .replacen("<Surface ", "<Surface meta:name=\"Ignored\" ", 1)
+            .replacen("<Definition ", "<Definition meta:surfType=\"GRID\" ", 1)
+            .replacen("<P id=\"1\">", "<P meta:id=\"99\" id=\"1\">", 1);
+        let reference = fixture.write("reference-with-metadata.xml", &reference_xml);
+        let returned = fixture.write("returned-with-metadata.xml", &returned_xml);
+        verify(
+            &reference,
+            &returned,
+            tolerances(0.0, 0.0),
+            default_limits(),
+        )
+        .expect("foreign namespaced attributes remain ignored metadata");
     }
 
     #[test]
@@ -1992,9 +3024,93 @@ mod tests {
         }
     }
 
+    #[test]
+    fn attribute_names_and_namespace_declarations_are_text_bounded() {
+        let fixture = Fixture::new("attribute-text-limits");
+        let xml = landxml(REFERENCE_POINTS, REFERENCE_FACES, false);
+        let long_name = "a".repeat(1_500);
+        let long_namespace = format!("urn:generated:{}", "n".repeat(1_500));
+        let variants = [
+            xml.replace(
+                "<Surface name=\"Ground\">",
+                &format!("<Surface name=\"Ground\" {long_name}=\"\">"),
+            ),
+            xml.replace(
+                "<Surface name=\"Ground\">",
+                &format!("<Surface name=\"Ground\" xmlns:ignored=\"{long_namespace}\">"),
+            ),
+        ];
+        for (index, returned_xml) in variants.iter().enumerate() {
+            let reference = fixture.write(&format!("reference-attribute-{index}.xml"), &xml);
+            let returned = fixture.write(&format!("returned-attribute-{index}.xml"), returned_xml);
+            assert_kind(
+                verify(
+                    &reference,
+                    &returned,
+                    tolerances(0.0, 0.0),
+                    RoundTripLimits::new(10_000, 1_000, 1_000, 10, 10, 100),
+                ),
+                RoundTripFailureKind::ResourceLimit,
+            );
+        }
+    }
+
     #[cfg(unix)]
     #[test]
-    fn symbolic_links_and_same_file_identity_are_rejected() {
+    fn raced_symlink_and_fifo_replacements_fail_without_blocking() {
+        use std::os::unix::fs::symlink;
+
+        let fixture = Fixture::new("raced-non-regular-inputs");
+        let xml = landxml(REFERENCE_POINTS, REFERENCE_FACES, false);
+
+        let fifo = fixture.write("raced-fifo.xml", &xml);
+        let fifo_metadata = fs::symlink_metadata(&fifo).expect("inspect initial FIFO path");
+        fs::remove_file(&fifo).expect("remove initial FIFO-path file");
+        create_fifo(&fifo);
+        assert_capture_rejects_promptly(fifo, fifo_metadata);
+
+        let link = fixture.write("raced-link.xml", &xml);
+        let link_metadata = fs::symlink_metadata(&link).expect("inspect initial link path");
+        fs::remove_file(&link).expect("remove initial link-path file");
+        let link_target = fixture.path("raced-link-target.fifo");
+        create_fifo(&link_target);
+        symlink(link_target, &link).expect("replace regular file with FIFO link");
+        assert_capture_rejects_promptly(link, link_metadata);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn captured_input_pair_rejects_replacement_before_consumption() {
+        let fixture = Fixture::new("captured-pair-replacement");
+        let xml = landxml(REFERENCE_POINTS, REFERENCE_FACES, false);
+        let (reference, returned) = fixture.write_pair(&xml, &xml);
+        let limits = default_limits();
+        let (reference_witness, returned_witness) =
+            super::capture_file_pair(&reference, &returned, limits.file_bytes)
+                .expect("capture both input witnesses");
+
+        let replacement = fixture.write("replacement.xml", &xml.replace("Ground", "Return"));
+        fs::rename(replacement, &returned).expect("replace returned path after capture");
+
+        super::read_regular_file(
+            super::InputSide::Reference,
+            reference_witness,
+            limits.file_bytes,
+        )
+        .expect("read unchanged reference witness");
+        let Err(error) = super::read_regular_file(
+            super::InputSide::Returned,
+            returned_witness,
+            limits.file_bytes,
+        ) else {
+            panic!("replacement after pair capture must fail");
+        };
+        assert_eq!(error.kind(), RoundTripFailureKind::InvalidInput, "{error}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symbolic_links_are_rejected_and_hard_links_compare_by_content() {
         use std::os::unix::fs::symlink;
 
         let fixture = Fixture::new("file-identity");
@@ -2010,22 +3126,20 @@ mod tests {
 
         let hard_link = fixture.path("hard-link.xml");
         fs::hard_link(&actual, &hard_link).expect("create fixture hard link");
-        assert_kind(
-            verify(&actual, &hard_link, tolerances(0.0, 0.0), default_limits()),
-            RoundTripFailureKind::InvalidInput,
-        );
+        let report = verify(&actual, &hard_link, tolerances(0.0, 0.0), default_limits())
+            .expect("hard-linked inputs compare by captured content");
+        assert!(report.exact_bytes());
     }
 
     #[test]
-    fn the_same_resolved_path_is_rejected() {
+    fn the_same_resolved_path_compares_captured_content() {
         let fixture = Fixture::new("same-path");
         let xml = landxml(REFERENCE_POINTS, REFERENCE_FACES, false);
         let actual = fixture.write("actual.xml", &xml);
         let aliased = fixture.path(".").join("actual.xml");
-        assert_kind(
-            verify(&actual, &aliased, tolerances(0.0, 0.0), default_limits()),
-            RoundTripFailureKind::InvalidInput,
-        );
+        let report = verify(&actual, &aliased, tolerances(0.0, 0.0), default_limits())
+            .expect("resolved path aliases compare by captured content");
+        assert!(report.exact_bytes());
     }
 
     #[test]
@@ -2080,6 +3194,40 @@ mod tests {
     ) {
         let error = result.expect_err("operation must fail");
         assert_eq!(error.kind(), expected, "{error}");
+    }
+
+    #[cfg(unix)]
+    fn create_fifo(path: &Path) {
+        let status = std::process::Command::new("mkfifo")
+            .arg(path)
+            .status()
+            .expect("invoke POSIX mkfifo");
+        assert!(
+            status.success(),
+            "create FIFO fixture at {}",
+            path.display()
+        );
+    }
+
+    #[cfg(unix)]
+    fn assert_capture_rejects_promptly(path: PathBuf, metadata: fs::Metadata) {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            let kind = super::capture_inspected_regular_file(
+                super::InputSide::Returned,
+                &path,
+                &metadata,
+                default_limits().file_bytes,
+            )
+            .err()
+            .map(|error| error.kind());
+            let _ = sender.send(kind);
+        });
+        let kind = receiver
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .expect("input capture must not block on a raced non-regular path");
+        assert_eq!(kind, Some(RoundTripFailureKind::InvalidInput));
+        worker.join().expect("input-capture worker must finish");
     }
 
     fn landxml(points: &[(&str, &str)], faces: &[&str], faces_first: bool) -> String {

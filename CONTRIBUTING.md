@@ -17,20 +17,21 @@ headless `terrain-demo` composition. The completed [v0.7 technical-readiness
 scope](docs/design/technical-alpha-readiness-v0.7.md) permits linked child
 cancellation, exact Revision Audit and Edit Footprint facts, exact LandXML
 ensure/reconciliation, and the private durable `terrain-demo` Workflow Run,
-canonical report, and structured recovery diagnostics. The accepted
+canonical report, and structured recovery diagnostics. The completed
 [v0.8 repository interoperability qualification
-scope](docs/design/design-partner-mvp-v0.8.md) implements the private, bounded
-`terrain-demo` LandXML comparison reader but remains an incomplete alpha; its
-Run-bound evidence closure is inherited by the Active
-[v0.9 Trust and v1 Candidate
-scope](docs/design/trust-v1-candidate-v0.9.md). That v0.9 scope permits
-compatibility fixtures, recovery and failure hardening, support-matrix
-documentation, interface review, and reproducible local qualification for the
-existing narrow workflow. Apart from the explicit v0.8 reader exception,
-external format decoding belongs only in accepted Source adapter crates.
-Networking, screen selection, general editing, constrained or persistent
-terrain, general export, Source rewriting, and general host UI remain in
-callers or future projects unless the scope is explicitly revised.
+scope](docs/design/design-partner-mvp-v0.8.md) additionally permits the private,
+bounded `terrain-demo` LandXML comparison reader, read-only Complete-Run
+binding, and separate canonical Round-Trip Evidence. Apart from that explicit
+exception, the completed [v0.9 Trust and v1 Candidate
+scope](docs/design/trust-v1-candidate-v0.9.md) permits version-1 compatibility
+fixtures, ownership-safe persistence hardening, the frozen support matrix,
+interface review, and reproducible local qualification for the same narrow
+workflow. External format decoding otherwise belongs only in accepted Source
+adapter crates. Networking, screen selection, general editing, constrained or
+persistent terrain, general export, Source rewriting, and general host UI
+remain in callers or future projects unless the scope is explicitly revised.
+The exact v0.9 command outcomes and benchmark observations are recorded in the
+[repository verification record](docs/releases/v0.9.0.md).
 
 ## Local verification
 
@@ -104,6 +105,13 @@ cargo run --release -p terrain-demo -- start \
   --assert-unknown-crs-metric \
   path/to/source.laz path/to/source.pidx path/to/workspace.pcw path/to/run-root
 cargo run --release -p terrain-demo -- inspect path/to/run-root
+cargo run --release -p terrain-demo -- verify-round-trip \
+  --downstream-app "CALLER-DECLARED APP" \
+  --downstream-version "CALLER-DECLARED VERSION" \
+  --downstream-setting "CALLER-DECLARED SETTINGS" \
+  --horizontal-tolerance-metres 0.001 \
+  --vertical-tolerance-metres 0.001 \
+  path/to/run-root path/to/returned.xml path/to/evidence/round-trip.json
 ```
 
 `RUN_ID_HEX` and `OPERATION_ID_HEX` are caller-owned nonzero 32-character hex
@@ -121,6 +129,11 @@ command and request with `resume` in place of `start`. At least one repeated
 `--exclude-ground-ordinal ORDINAL` is required, and every listed ordinal must
 be in the baseline class-2 Ground Input. Optional detached observations use
 repeated `--check-point ID,X,Y,Z` arguments.
+
+The Round-Trip Evidence target must be outside the Run root and its parent must
+already exist. `verify-round-trip` opens a Complete Run read-only, never invokes
+`inspect` repair, and never treats its caller-declared downstream labels as
+proof that the named application ran.
 
 `terrain-demo` requires metric-metre coordinates and performs no
 transformation. The caller must pass `--assert-unknown-crs-metric` only when

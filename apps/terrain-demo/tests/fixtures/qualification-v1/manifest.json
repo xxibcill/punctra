@@ -1,37 +1,28 @@
 {
   "declaration": {
     "application": "generated-fixture",
-    "settings": [
-      {
-        "key": "format",
-        "value": "LandXML;1.2"
-      },
-      {
-        "key": "units",
-        "value": "meter"
-      }
-    ],
+    "settings_profile": "metric-tin-v1",
     "version": "test-only"
   },
   "entries": {
     "audit.json": {
-      "blake3": "61dc50b20b3f64dd992109b534015e970e8cb58d53c06506b9aa81193a95b7c1",
+      "blake3": "9f089f433367e7fd4d68419d558c0a5da9381152a5e75158699e51023e014ac3",
       "byte_length": 11452,
       "support_class": "caller_owned_published"
     },
     "evidence-fail.json": {
-      "blake3": "04822165c5cb488c92b9077df9069e96788a539878df98dbcd0a3cf4863d1f80",
-      "byte_length": 2540,
+      "blake3": "eab5bd793ce9fb572526bfd0ee5541e59081df7e64203bc399f29c5f958ad058",
+      "byte_length": 2415,
       "support_class": "caller_owned_published"
     },
     "evidence-pass.json": {
-      "blake3": "7f689cd741f20d399f569d39cda80806cfbcb96c5803c0cdf4c9cb704a5a09c9",
-      "byte_length": 2506,
+      "blake3": "5c0cae519eef18fae1008b198e8c39968d0c91230f587dfd0516a56881619ab7",
+      "byte_length": 2279,
       "support_class": "caller_owned_published"
     },
     "returned-fail.xml": {
-      "blake3": "75d20ddc2b3434c06f71394cc0703735f5ef31c90374ecf0a32906aedf340d46",
-      "byte_length": 6021,
+      "blake3": "0b36cc5a663dcffd8fc2e1e83a91a756395f0b8acabccd33c1295cb3c58b300f",
+      "byte_length": 6005,
       "support_class": "test_only_input"
     },
     "returned-pass.xml": {
@@ -40,47 +31,47 @@
       "support_class": "test_only_input"
     },
     "run-complete.pwf": {
-      "blake3": "ad76891a097c36a0d0f44cff4822138bcfa7b02d504eddf9742243944cc283f7",
+      "blake3": "5b9f6e450e1d0e2fc87b2e4e1e1a0fe231016462832ec9667b36c7e898afbd40",
       "byte_length": 2799,
       "support_class": "authoritative"
     },
     "run-prefix-01.pwf": {
-      "blake3": "03daf8d3e6938066e985d5faea19cf983dcd4925684932b4389d6328a517f97a",
+      "blake3": "c615913c4e1c2af9911bb9de806ef9e24c106461886c56b513f3d125a548286c",
       "byte_length": 741,
       "support_class": "authoritative"
     },
     "run-prefix-02.pwf": {
-      "blake3": "4556a4e884db3e1635e3ee18ccf2c42f1aff2a1b012071a4d79feb9394dbe0f5",
+      "blake3": "c3e63b6b89004706a2f2efea0d484d51146d4a4b56a3e852fc0f10e0093b7e29",
       "byte_length": 925,
       "support_class": "authoritative"
     },
     "run-prefix-03.pwf": {
-      "blake3": "c88586eb5ec3cd62fc7b46543587ebe07fee77f7dad73c6d13b6ba81d88340e9",
+      "blake3": "340608ea6be1e30cfc350008f45ed61e2d5021b0dd6cda1e8015bfc6015793e7",
       "byte_length": 1206,
       "support_class": "authoritative"
     },
     "run-prefix-04.pwf": {
-      "blake3": "14273de353f2bf645806ca264398c7ba821977635dad1fd122ae4389ed246b50",
+      "blake3": "9d4598084055d47d79731a7771f82c325469ef953881fca8aa057b500f815415",
       "byte_length": 1718,
       "support_class": "authoritative"
     },
     "run-prefix-05.pwf": {
-      "blake3": "cbdf27c30d17ed2a101da58174b1fece6d4c93e4bde3defd6505cbeed8cbda08",
+      "blake3": "b96a540687014eb3cf692ca2c93eada042ba014ce9b977a4d5a4db0eb19acedd",
       "byte_length": 1942,
       "support_class": "authoritative"
     },
     "run-prefix-06.pwf": {
-      "blake3": "47accc0086977bd8046705abdbddef4c60ea4f21f9405d4eb4d37322ca6fa405",
+      "blake3": "e9ebbc50b78a1bca74dc1e9c742244d23bc4189835e4d3b1073000272dae9571",
       "byte_length": 2199,
       "support_class": "authoritative"
     },
     "run-prefix-07.pwf": {
-      "blake3": "55266486257ae9500a54b639cb65d0fe573d7ae2ff0164a6d832d3e00056f5e7",
+      "blake3": "182753bd641bcd7a4e3330d69b353a3128e144fc44518035a6a94d65a0a71b7c",
       "byte_length": 2487,
       "support_class": "authoritative"
     },
     "run-prefix-08.pwf": {
-      "blake3": "ad76891a097c36a0d0f44cff4822138bcfa7b02d504eddf9742243944cc283f7",
+      "blake3": "5b9f6e450e1d0e2fc87b2e4e1e1a0fe231016462832ec9667b36c7e898afbd40",
       "byte_length": 2799,
       "support_class": "authoritative"
     },
@@ -93,12 +84,12 @@
   "evidence_schema": "punctra.terrain-demo.landxml-round-trip-evidence.v1",
   "expected": {
     "audit_json_bytes": 11452,
-    "audit_json_hash": "85a8168e0c995ffb5c9a58b5d80d91f032814f61f3661728a476bb56e2735368",
-    "baseline_revision": "c7754034346b273b85700970b206ab4c4d991e53882a39ec2c14c41e6ec49c8b",
-    "complete_journal_hash": "ad76891a097c36a0d0f44cff4822138bcfa7b02d504eddf9742243944cc283f7",
+    "audit_json_hash": "45c372a9e5f5382386f90a47a333707152531bd332496037fc223adfe5a074c9",
+    "baseline_revision": "0be889af7769b28a8a40ed04c14231f3bd6ab24ecbe64bbe325ce923dad9cf39",
+    "complete_journal_hash": "5b9f6e450e1d0e2fc87b2e4e1e1a0fe231016462832ec9667b36c7e898afbd40",
+    "failed_mapped_point_count": null,
     "failed_reason": "PRT_TOLERANCE_DRIFT",
     "failed_result": "failed",
-    "failed_unmatched_point_count": 1,
     "operation_identity": "32323232323232323232323232323232",
     "passing_added_face_count": 0,
     "passing_face_count": 94,
@@ -106,13 +97,13 @@
     "passing_point_count": 62,
     "passing_removed_face_count": 0,
     "passing_result": "passed",
-    "request_hash": "805691b563f5a4e1016ae34386e65d1a13cf5f4a00d81bd6debcfb082aaf6abb",
-    "revision": "11cd95c2f8557152ee50fe2cc687c1d9fc286cf507e60689ae9db2d67bc0233f",
+    "request_hash": "64912712d60c6b6fce10608399d6817feaea67acaa5f1464a3b4e26d019926e7",
+    "revision": "48c9f22fd4b209f9bc8597a9b4e34063432559af77a012464c90ff7b75d62994",
     "run_identity": "31313131313131313131313131313131",
     "source_identity": "12c80f40777e13053c56a9f1e9457a666fde644b8a89d6dfbfdb100b4a6924c4",
     "terrain_xml_bytes": 6003,
     "terrain_xml_hash": "0699e09e6d440e49aa6478b89985d393726d689e46778d325a93de0d60c16f4b",
-    "workspace_identity": "a37d2c1da45a6e6e35282c8dda0efa17"
+    "workspace_identity": "4de3f8d952e5a489f67c59cd8ecb8920"
   },
   "journal_checkpoint_prefixes": [
     "run-prefix-01.pwf",
@@ -124,7 +115,7 @@
     "run-prefix-07.pwf",
     "run-prefix-08.pwf"
   ],
-  "matcher_version": 1,
+  "matcher_version": "punctra-landxml-semantic-match-v1",
   "owner": "terrain-demo",
   "path_base": "manifest_directory",
   "report_schema": "punctra.terrain-workflow.audit.v1",
@@ -135,7 +126,7 @@
   },
   "schema": "punctra.terrain-demo.qualification-corpus.v1",
   "tolerances_metres": {
-    "horizontal": 0.001,
-    "vertical": 0.001
+    "horizontal": 0,
+    "vertical": 0
   }
 }

@@ -1,12 +1,8 @@
 # Domain Context: Point-Cloud Foundation
 
-Status: renderer, adaptive View planning, Real Sources, Spatial Index/out-of-
-core View, the narrow Workspace, v0.6 Terrain and Check Point QA, and the v0.7
-technical-readiness Workflow Run are implemented; v0.8 remains an incomplete
-interoperability-qualification alpha with bounded file comparison implemented;
-the narrow v0.9 Trust and v1 Candidate design is Active and inherits its
-Run-bound evidence closure before compatibility-readiness claims; broader
-terrain and product terms remain deferred
+Status: the narrow v0.1 through v0.8 repository slices and the v0.9 repository
+trust/version-1 compatibility candidate are Complete; broader terrain,
+external interoperability, product, and `1.0.0` terms remain deferred
 
 Punctra v0.9 builds on the reusable render engine, renderer-neutral View
 planner, and verified Source path described in the accepted [v0.1 renderer
@@ -28,18 +24,19 @@ design](docs/design/technical-alpha-readiness-v0.7.md) additionally fixes the
 narrow meanings of Workflow Run, Run Checkpoint, Revision Audit, Edit
 Footprint, Surface Change Envelope, and Recovery Action. Those terms describe
 one headless technical path and do not imply a partner-facing product.
-The accepted [v0.8 repository interoperability qualification
+The implemented [v0.8 repository interoperability qualification
 design](docs/design/design-partner-mvp-v0.8.md) fixes the meanings of
 Downstream Declaration, Interoperability Qualification, Round-Trip Evidence,
-and Tolerance Profile for the post-Run verifier. The initial comparator exists,
-but those terms do not imply that Run-bound evidence was published or that a
-downstream product was exercised.
-The accepted [v0.9 Trust and v1 Candidate
-design](docs/design/trust-v1-candidate-v0.9.md) fixes compatibility and support
-claims to the formats, persisted versions, platforms, limits, and failure
-behavior actually covered by frozen fixtures and reproducible local evidence.
-It does not create a broader product or silently promote the incomplete v0.8
-alpha.
+and Tolerance Profile for the post-Run verifier. Those terms and a published
+repository evidence record do not imply that a downstream product was actually
+exercised or that any external product gate was satisfied.
+The implemented [v0.9 Trust and v1 Candidate
+design](docs/design/trust-v1-candidate-v0.9.md) fixes the repository meanings of
+artifact support class, version-1 compatibility, rebuild policy, recovery
+certainty, platform evidence, and v1 candidate. Here, v1 candidate means only
+that the frozen repository surface passed its recorded local qualification; it
+does not mean `1.0.0`, production support, product readiness, or external
+acceptance.
 
 ## Artifact
 
