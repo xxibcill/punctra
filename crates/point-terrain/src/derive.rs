@@ -158,11 +158,7 @@ fn run(
             .zip(batch.effective_classifications())
         {
             work.charge(1, limits.max_work_units(), control)?;
-            if classification != recipe.ground_classification() {
-                return Err(TerrainError::topology(
-                    "Snapshot Point stream returned a row outside the Ground Input predicate",
-                ));
-            }
+            validate_ground_row(recipe, transform, ticks, classification)?;
             reserve_input(&mut input, limits, &mut memory)?;
             input.push(InputVertex {
                 ticks,
@@ -377,6 +373,32 @@ fn terminal_summary(
     summary.ok_or_else(|| {
         TerrainError::topology("Snapshot Point stream ended without a terminal summary")
     })
+}
+
+fn validate_ground_row(
+    recipe: TerrainRecipe,
+    transform: PositionTransform,
+    ticks: [i64; 3],
+    classification: u8,
+) -> Result<(), TerrainError> {
+    if classification != recipe.ground_classification() {
+        return Err(TerrainError::topology(
+            "Snapshot Point stream returned a row outside the Ground Input classification",
+        ));
+    }
+    let Some(bounds) = recipe.bounds() else {
+        return Ok(());
+    };
+    let world = transform.world_f64(ticks);
+    let minimum = bounds.min();
+    let maximum = bounds.max();
+    if (0..3).all(|axis| world[axis] >= minimum[axis] && world[axis] <= maximum[axis]) {
+        Ok(())
+    } else {
+        Err(TerrainError::topology(
+            "Snapshot Point stream returned a row outside the Ground Input bounds",
+        ))
+    }
 }
 
 fn reserve_input(
