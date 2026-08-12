@@ -4,11 +4,13 @@
 #![allow(clippy::struct_field_names, clippy::too_many_lines)]
 
 use std::{
-    fmt,
-    fs::{self, File, OpenOptions},
+    fs::{self, File},
     io::{self, Read, Write},
     path::{Path, PathBuf},
 };
+
+#[cfg(test)]
+use std::{fmt, fs::OpenOptions};
 
 use blake3::Hasher;
 use foundation_runtime::OperationControl;
@@ -19,7 +21,10 @@ use thiserror::Error;
 
 use crate::{
     journal::{Digest, WorkflowRunId},
-    publication::{DirectoryWitness, StageGuard, same_file_identity, sync_directory},
+    publication::{
+        DirectoryWitness, StageCreationError, StageGuard, create_stage as create_publication_stage,
+        same_file_identity, sync_directory,
+    },
 };
 
 const REPORT_SCHEMA: &str = "punctra.terrain-workflow.audit.v1";
@@ -1014,35 +1019,31 @@ fn create_stage(
     parent: &Path,
     control: &OperationControl,
 ) -> Result<(StageGuard, File), ReportError> {
-    for _ in 0..64 {
-        check_cancelled(control)?;
-        let mut random = [0; 16];
-        getrandom::fill(&mut random)
-            .map_err(|_| ReportError::Invalid("system randomness is unavailable"))?;
-        let stage = parent.join(format!(".punctra-report-{}.tmp", Hex(&random)));
-        match OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create_new(true)
-            .open(&stage)
-        {
-            Ok(file) => {
-                let metadata = file
-                    .metadata()
-                    .map_err(|source| ReportError::io("inspect report stage", &stage, source))?;
-                return Ok((StageGuard::new(stage, parent.to_path_buf(), metadata), file));
+    create_publication_stage(
+        parent,
+        "report",
+        || check_cancelled(control),
+        |error| match error {
+            StageCreationError::RandomnessUnavailable => {
+                ReportError::Invalid("system randomness is unavailable")
             }
-            Err(source) if source.kind() == io::ErrorKind::AlreadyExists => {}
-            Err(source) => return Err(ReportError::io("create report stage", &stage, source)),
-        }
-    }
-    Err(ReportError::Invalid(
-        "report staging name space is exhausted",
-    ))
+            StageCreationError::NamespaceExhausted => {
+                ReportError::Invalid("report staging name space is exhausted")
+            }
+            StageCreationError::Inspect { path, source } => {
+                ReportError::io("inspect report stage", &path, source)
+            }
+            StageCreationError::Create { path, source } => {
+                ReportError::io("create report stage", &path, source)
+            }
+        },
+    )
 }
 
+#[cfg(test)]
 struct Hex<'a>(&'a [u8]);
 
+#[cfg(test)]
 impl fmt::Display for Hex<'_> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         for byte in self.0 {

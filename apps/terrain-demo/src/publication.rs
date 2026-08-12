@@ -1,8 +1,66 @@
 use std::{
-    fs::{self, File},
+    fmt,
+    fs::{self, File, OpenOptions},
     io,
     path::{Path, PathBuf},
 };
+
+pub(crate) enum StageCreationError {
+    RandomnessUnavailable,
+    NamespaceExhausted,
+    Inspect { path: PathBuf, source: io::Error },
+    Create { path: PathBuf, source: io::Error },
+}
+
+pub(crate) fn create_stage<E>(
+    parent: &Path,
+    namespace: &'static str,
+    mut before_attempt: impl FnMut() -> Result<(), E>,
+    mut map_error: impl FnMut(StageCreationError) -> E,
+) -> Result<(StageGuard, File), E> {
+    for _ in 0..64 {
+        before_attempt()?;
+        let mut random = [0; 16];
+        getrandom::fill(&mut random)
+            .map_err(|_| map_error(StageCreationError::RandomnessUnavailable))?;
+        let stage = parent.join(format!(".punctra-{namespace}-{}.tmp", Hex(&random)));
+        match OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create_new(true)
+            .open(&stage)
+        {
+            Ok(file) => {
+                let metadata = file.metadata().map_err(|source| {
+                    map_error(StageCreationError::Inspect {
+                        path: stage.clone(),
+                        source,
+                    })
+                })?;
+                return Ok((StageGuard::new(stage, parent.to_path_buf(), metadata), file));
+            }
+            Err(source) if source.kind() == io::ErrorKind::AlreadyExists => {}
+            Err(source) => {
+                return Err(map_error(StageCreationError::Create {
+                    path: stage,
+                    source,
+                }));
+            }
+        }
+    }
+    Err(map_error(StageCreationError::NamespaceExhausted))
+}
+
+struct Hex<'a>(&'a [u8]);
+
+impl fmt::Display for Hex<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for byte in self.0 {
+            write!(formatter, "{byte:02x}")?;
+        }
+        Ok(())
+    }
+}
 
 pub(crate) struct StageGuard {
     path: Option<PathBuf>,

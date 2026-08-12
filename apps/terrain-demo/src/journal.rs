@@ -18,7 +18,10 @@ use std::{
 use blake3::Hasher;
 use thiserror::Error;
 
-use crate::publication::{DirectoryWitness, StageGuard, same_file_identity, sync_directory};
+use crate::publication::{
+    DirectoryWitness, StageCreationError, StageGuard, create_stage as create_publication_stage,
+    same_file_identity, sync_directory,
+};
 
 const HEADER_MAGIC: &[u8; 8] = b"PTWFJ001";
 const FRAME_MAGIC: &[u8; 4] = b"PWF1";
@@ -2210,27 +2213,22 @@ fn verify_recognized_journal(file: &File, path: &Path, identity: &fs::Metadata) 
 }
 
 fn create_stage(parent: &Path) -> Result<(StageGuard, File), JournalError> {
-    for _ in 0..64 {
-        let mut random = [0; 16];
-        getrandom::fill(&mut random).map_err(|_| JournalError::Entropy)?;
-        let path = parent.join(format!(".punctra-workflow-{}.tmp", hex(&random)));
-        match OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create_new(true)
-            .open(&path)
-        {
-            Ok(file) => {
-                let metadata = file
-                    .metadata()
-                    .map_err(|source| JournalError::io("inspect journal stage", &path, source))?;
-                return Ok((StageGuard::new(path, parent.to_path_buf(), metadata), file));
+    create_publication_stage(
+        parent,
+        "workflow",
+        || Ok(()),
+        |error| match error {
+            StageCreationError::RandomnessUnavailable | StageCreationError::NamespaceExhausted => {
+                JournalError::Entropy
             }
-            Err(source) if source.kind() == io::ErrorKind::AlreadyExists => {}
-            Err(source) => return Err(JournalError::io("create journal stage", &path, source)),
-        }
-    }
-    Err(JournalError::Entropy)
+            StageCreationError::Inspect { path, source } => {
+                JournalError::io("inspect journal stage", &path, source)
+            }
+            StageCreationError::Create { path, source } => {
+                JournalError::io("create journal stage", &path, source)
+            }
+        },
+    )
 }
 
 fn map_lock_error(error: std::fs::TryLockError) -> JournalError {
@@ -2331,6 +2329,7 @@ fn copy_array<const N: usize>(bytes: &[u8]) -> [u8; N] {
     bytes.try_into().expect("validated fixed-width slice")
 }
 
+#[cfg(test)]
 fn hex(bytes: &[u8]) -> String {
     use std::fmt::Write as _;
     let mut output = String::with_capacity(bytes.len() * 2);
