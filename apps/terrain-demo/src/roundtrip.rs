@@ -13,7 +13,10 @@ use num_bigint::BigInt;
 use robust::{Coord, orient2d};
 use roxmltree::{Document, Node, ParsingOptions};
 
-use crate::bounded_diagnostic::BoundedDiagnostic;
+use crate::{
+    bounded_diagnostic::BoundedDiagnostic,
+    diagnostic::{FailureCode, RecoveryAction},
+};
 
 const LANDXML_NAMESPACE: &str = "http://www.landxml.org/schema/LandXML-1.2";
 const XINCLUDE_NAMESPACE: &str = "http://www.w3.org/2001/XInclude";
@@ -173,10 +176,23 @@ pub(crate) enum RoundTripFailureKind {
 
 impl RoundTripFailureKind {
     pub(crate) const fn as_str(self) -> &'static str {
+        self.workflow_mapping().0.as_str()
+    }
+
+    pub(crate) const fn workflow_mapping(self) -> (FailureCode, RecoveryAction) {
         match self {
-            Self::InvalidInput => "PRT_INVALID_INPUT",
-            Self::ResourceLimit => "PRT_RESOURCE_LIMIT",
-            Self::SemanticMismatch => "PRT_SEMANTIC_MISMATCH",
+            Self::InvalidInput => (
+                FailureCode::RoundTripInvalidInput,
+                RecoveryAction::CorrectRoundTripInput,
+            ),
+            Self::ResourceLimit => (
+                FailureCode::RoundTripResourceLimit,
+                RecoveryAction::UseSupportedRoundTripSize,
+            ),
+            Self::SemanticMismatch => (
+                FailureCode::RoundTripSemanticMismatch,
+                RecoveryAction::ReviewReturnedLandXml,
+            ),
         }
     }
 }

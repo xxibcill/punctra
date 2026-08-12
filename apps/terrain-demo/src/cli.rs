@@ -12,8 +12,8 @@ use crate::{
     diagnostic::{Certainty, FailureCode, FailureContext, RecoveryAction, WorkflowStage},
     inspect_and_repair_run, resume_run,
     roundtrip::{
-        RoundTripDeclaration, RoundTripFailure, RoundTripFailureKind, RoundTripLimits,
-        RoundTripReport, RoundTripTolerances, verify_landxml_round_trip,
+        RoundTripDeclaration, RoundTripFailure, RoundTripLimits, RoundTripReport,
+        RoundTripTolerances, verify_landxml_round_trip,
     },
     start_run,
 };
@@ -591,20 +591,7 @@ fn resource(limit: &'static str, required: u64, allowed: u64) -> WorkflowFailure
 }
 
 fn round_trip_failure(error: &RoundTripFailure) -> WorkflowFailure {
-    let (code, action) = match error.kind() {
-        RoundTripFailureKind::InvalidInput => (
-            FailureCode::RoundTripInvalidInput,
-            RecoveryAction::CorrectRoundTripInput,
-        ),
-        RoundTripFailureKind::ResourceLimit => (
-            FailureCode::RoundTripResourceLimit,
-            RecoveryAction::UseSupportedRoundTripSize,
-        ),
-        RoundTripFailureKind::SemanticMismatch => (
-            FailureCode::RoundTripSemanticMismatch,
-            RecoveryAction::ReviewReturnedLandXml,
-        ),
-    };
+    let (code, action) = error.kind().workflow_mapping();
     WorkflowFailure::new(
         code,
         WorkflowStage::RoundTrip,
