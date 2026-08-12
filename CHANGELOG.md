@@ -8,7 +8,7 @@ All notable changes to Punctra are documented here. The project follows
 - Added the exact classification-aware `Snapshot::point_rows` pull stream with
   exact ticks, effective classification, stable Point Identity, deterministic
   ordering and hashes, cumulative hard limits, fused cancellation, and a
-  complete-only terminal summary. The `point-workspace` package now has 67
+  complete-only terminal summary. The `point-workspace` package now has 72
   tests, including six public Point-row integration tests.
 - Added one deep `point-terrain` crate. Its single-worker robust triangulation
   derives a deterministic unconstrained in-memory 2.5D `TerrainSurface` with
@@ -24,9 +24,10 @@ All notable changes to Punctra are documented here. The project follows
   `roxmltree` semantic verification.
 - Added a public Source-to-Terrain example, a generated 10k/100k/1M-capable
   terrain benchmark, and the GPU-free `terrain-demo` LAS/LAZ process caller.
-  `point-terrain` has 41 package tests—15 unit/private and 26 integration—plus
+  `point-terrain` has 46 package tests—17 unit/private and 29 integration—plus
   one documentation test;
-  `terrain-demo` has one generated LAS/LAZ process test.
+  `terrain-demo` has two process tests covering generated LAS/LAZ and failed
+  changed-Surface Derivation recovery.
 - Recorded the local 10,000-Point baseline: Derivation 11.983–12.049 ms,
   detached QA 94.907–95.164 us for three Check Points and 19,604 face tests,
   and durable 1,030,118-byte LandXML creation 18.020–18.311 ms. Descriptor

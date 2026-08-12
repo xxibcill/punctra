@@ -207,7 +207,7 @@ It does not own Source/index discovery, Workspace edits, Breaklines,
 constrained topology, terrain persistence, coordinate transformation, general
 LandXML, rendering, or host recovery policy.
 
-**Independent proof:** 41 package tests—15 unit/private and 26 integration—plus
+**Independent proof:** 46 package tests—17 unit/private and 29 integration—plus
 one documentation test cover the public interface, robust topology/oracle
 agreement, degeneracy and every resource family, detached QA, injected durable
 LandXML certainty boundaries, and independent XML semantics. A public example
@@ -279,10 +279,11 @@ Reference requires the caller's explicit metric-metre assertion. Its optional
 correction, re-Derivation, immediate-head Revert, and exact Surface-restoration
 check.
 
-**Independent proof:** one process integration test runs generated LAS and LAZ
-through the complete composition without a GPU and checks deterministic output
+**Independent proof:** two process integration tests run generated LAS and LAZ
+through the complete composition without a GPU, check deterministic output
 semantics, changed Ground Input, exact post-Revert geometry/topology/vertices/
-faces, and byte-identical Source data.
+faces, and byte-identical Source data, and prove a failed changed-Surface
+Derivation still Reverts the Workspace.
 
 ## Deferred modules
 

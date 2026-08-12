@@ -95,8 +95,8 @@ LAS, and LAZ benchmarks enforce adapter-specific memory ceilings.
 
 ### point-workspace
 
-The v0.6 package has 67 tests: 25 integration tests through the public
-interface and 42 unit, fault-injection, and allocation gates. The public suites
+The v0.6 package has 72 tests: 26 integration tests through the public
+interface and 46 unit, fault-injection, and allocation gates. The public suites
 prove:
 
 - create, root identity, exclusive lock, complete-handle lifetime, and reopen;
@@ -139,10 +139,10 @@ under a 64 MiB ceiling, with zero retained measured allocations.
 
 ### point-terrain and terrain-demo
 
-`point-terrain` has 41 package tests—15 unit/private and 26 integration—plus
+`point-terrain` has 46 package tests—17 unit/private and 29 integration—plus
 one documentation test:
 
-- 15 unit/private tests cover canonical input keys, deterministic robust
+- 17 unit/private tests cover canonical input keys, deterministic robust
   predicates, cocircular tie-breaking, the pinned `delaunator` oracle, bounded
   topology work, cancellation, diagnostics, allocation preflight, and injected
   post-publication LandXML certainty boundaries;
@@ -153,7 +153,7 @@ one documentation test:
 - seven resource tests cover insufficient, duplicate/conflicting, collinear,
   unsupported numeric, input/output/face/work/working/retained limits, and
   cancellation without publication;
-- seven QA tests cover closed boundaries, stable face selection, ordered
+- ten QA tests cover closed boundaries, stable face selection, ordered
   positive/negative/zero residuals, explicit gaps, compensated statistics,
   duplicate identities, every QA resource family, bounded input consumption,
   cancellation, and result-sealing overlap; and
@@ -162,11 +162,12 @@ one documentation test:
   cancellation, and durable publication certainty.
 
 The `point-terrain` doctest and direct example compose the public Source/index/
-Workspace/Terrain/QA/LandXML APIs. `terrain-demo` has one process test that runs
+Workspace/Terrain/QA/LandXML APIs. `terrain-demo` has two process tests: one runs
 generated LAS and LAZ through the complete GPU-free caller, including explicit
 document date/time, unknown-CRS metric assertion, exact-ordinal classification
 correction, changed Ground Input, immediate-head Revert, exact restoration of
-geometry/topology/vertices/faces, and byte-identical Source data.
+geometry/topology/vertices/faces, and byte-identical Source data; the other
+proves a failed changed-Surface Derivation still Reverts the Workspace.
 
 ### render-protocol and point-view
 

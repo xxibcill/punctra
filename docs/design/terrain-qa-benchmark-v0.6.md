@@ -558,15 +558,15 @@ not claim an observed worker-heap value.
 
 ### Implemented repository evidence
 
-- `point-workspace` has 67 tests: 42 unit/fault/allocation tests and 25 public
+- `point-workspace` has 72 tests: 46 unit/fault/allocation tests and 26 public
   integration tests, including six exact Point-row stream tests.
-- `point-terrain` has 41 package tests—15 unit/private and 26 integration—plus
+- `point-terrain` has 46 package tests—17 unit/private and 29 integration—plus
   one documentation test across interface, topology, resource, detached-QA,
   LandXML, robust-algorithm, and publication-fault suites.
-- `terrain-demo` has one process test that runs generated LAS and LAZ through
-  the complete GPU-free caller. LAS/LAZ correction, re-Derivation, immediate-
-  head Revert, and restored geometry meaning are covered while Source bytes
-  remain unchanged.
+- `terrain-demo` has two process tests covering the complete generated LAS/LAZ
+  GPU-free caller and failed changed-Surface Derivation. LAS/LAZ correction,
+  re-Derivation, immediate-head Revert, and restored geometry meaning are
+  covered while Source bytes remain unchanged.
 - Formatting, strict workspace lint, workspace tests, warning-free
   documentation, every declared example/benchmark/process smoke, and required
   local GPU gates complete through the commands in `CONTRIBUTING.md`.
