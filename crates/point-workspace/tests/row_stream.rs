@@ -298,6 +298,26 @@ fn output_failure_and_cancellation_are_fused_without_a_summary() {
     assert!(matches!(cancelled.next(), Err(WorkspaceError::Cancelled)));
     assert!(cancelled.summary().is_none());
     assert!(cancelled.next().expect("cancellation is fused").is_none());
+
+    let plan_blocked = PointRowLimits::new(
+        CandidateLimits::new(0, 0, 0, 0),
+        defaults.source_read_budget(),
+        defaults.max_overlay_segments(),
+        defaults.max_overlay_bytes(),
+        defaults.max_output_points(),
+        defaults.max_batch_points(),
+        defaults.max_batch_payload_bytes(),
+        defaults.max_working_bytes(),
+    );
+    let mut cancelled_before_planning = snapshot
+        .point_rows(PointQuery::all(), plan_blocked)
+        .expect("stream exposes cancellation before candidate planning");
+    cancelled_before_planning.handle().cancel();
+    assert!(matches!(
+        cancelled_before_planning.next(),
+        Err(WorkspaceError::Cancelled)
+    ));
+    assert!(cancelled_before_planning.summary().is_none());
 }
 
 #[test]

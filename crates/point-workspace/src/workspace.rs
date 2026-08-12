@@ -477,8 +477,9 @@ impl Snapshot {
     ///
     /// # Errors
     ///
-    /// Returns a candidate-planning, Source, or resource failure before the
-    /// stream can be started.
+    /// Returns when the bounded stream state cannot be created. Candidate-
+    /// planning, Source, and resource failures encountered by the lazy read are
+    /// returned from [`crate::SnapshotPointBatches::next`].
     pub fn point_rows(
         &self,
         query: crate::PointQuery,

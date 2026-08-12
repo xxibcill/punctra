@@ -179,9 +179,10 @@ pub struct SnapshotPointBatches {
     limits: PointRowLimits,
     classification: point_contracts::AttributeId,
     source_budget: ReadBudget,
-    expected_spans: SpanFacts,
+    expected_spans: Option<SpanFacts>,
     retained_span_bytes: u64,
     source: Option<PointBatches>,
+    initialized: bool,
     pending: Option<PendingBatch>,
     overlay_usage: OverlayUsage,
     control: OperationControl,
@@ -233,6 +234,9 @@ impl SnapshotPointBatches {
         if let Err(error) = self.control.check_cancelled() {
             return self.fail(error.into());
         }
+        if let Err(error) = self.initialize_source() {
+            return self.fail(error);
+        }
 
         loop {
             if let Some(mut pending) = self.pending.take() {
@@ -272,6 +276,45 @@ impl SnapshotPointBatches {
                 Err(error) => return self.fail(error.into()),
             }
         }
+    }
+
+    fn initialize_source(&mut self) -> Result<(), WorkspaceError> {
+        if self.initialized {
+            return Ok(());
+        }
+        self.control.check_cancelled()?;
+        let spans = plan_query(
+            &self.session,
+            self.query,
+            self.limits.candidate_limits(),
+            self.limits.max_working_bytes(),
+            &self.control,
+        )?;
+        let expected_spans = SpanFacts::new(&spans)?;
+        let span_handoff_bytes = allocation_bytes::<SourceSpan>(spans.capacity()).saturating_mul(2);
+        require_working(
+            span_handoff_bytes,
+            self.limits,
+            "Source span handoff working bytes",
+        )?;
+
+        let retained_span_bytes = allocation_bytes::<SourceSpan>(expected_spans.span_count);
+        require_working(
+            retained_span_bytes.saturating_add(self.source_budget.max_adapter_working_bytes()),
+            self.limits,
+            "Snapshot Point Source read working bytes",
+        )?;
+        let request = ReadRequest::all()
+            .spans(spans)
+            .attributes(AttributeSelection::only([self.classification]))
+            .budget(self.source_budget);
+        let source = self.session.source().read(request)?;
+        self.control.check_cancelled()?;
+        self.expected_spans = Some(expected_spans);
+        self.retained_span_bytes = retained_span_bytes;
+        self.source = Some(source);
+        self.initialized = true;
+        Ok(())
     }
 
     fn prepare_batch(&mut self, batch: PointBatch) -> Result<PendingBatch, WorkspaceError> {
@@ -498,15 +541,16 @@ impl SnapshotPointBatches {
     }
 
     fn publish_examined(&mut self, added: u64) -> Result<(), WorkspaceError> {
+        let expected_points = self.expected_points()?;
         self.examined_points =
             self.examined_points
                 .checked_add(added)
                 .ok_or(WorkspaceError::ResourceLimit {
                     limit: "examined candidate Points",
                     required: u64::MAX,
-                    allowed: self.expected_spans.point_count,
+                    allowed: expected_points,
                 })?;
-        if self.examined_points > self.expected_spans.point_count {
+        if self.examined_points > expected_points {
             return Err(WorkspaceError::incompatible(
                 "Snapshot Point stream examined too many candidate Points",
             ));
@@ -514,7 +558,7 @@ impl SnapshotPointBatches {
         self.control.report_progress(ProgressSnapshot::new(
             ProgressPhase::RUNNING,
             self.examined_points,
-            Some(self.expected_spans.point_count),
+            Some(expected_points),
         )?)?;
         Ok(())
     }
@@ -530,16 +574,21 @@ impl SnapshotPointBatches {
                 "Snapshot Point Source ended without stream state",
             ));
         };
+        let Some(expected_spans) = self.expected_spans else {
+            return self.fail(WorkspaceError::incompatible(
+                "Snapshot Point Source ended without candidate facts",
+            ));
+        };
         if let Err(error) = validate_source_summary(
             source.summary(),
             self.session.source().provenance(),
             self.classification,
             self.source_budget,
-            self.expected_spans,
+            expected_spans,
         ) {
             return self.fail(error);
         }
-        if self.examined_points != self.expected_spans.point_count {
+        if self.examined_points != expected_spans.point_count {
             return self.fail(WorkspaceError::incompatible(
                 "Snapshot Point stream ended before every candidate was examined",
             ));
@@ -547,23 +596,28 @@ impl SnapshotPointBatches {
         if let Err(error) = self.control.check_cancelled() {
             return self.fail(error.into());
         }
-        if let Err(error) = self
-            .control
-            .complete_progress(self.expected_spans.point_count)
-        {
+        if let Err(error) = self.control.complete_progress(expected_spans.point_count) {
             return self.fail(error.into());
         }
         self.source = None;
         self.summary = Some(SnapshotPointSummary {
             provenance: self.provenance,
             query: self.query,
-            candidate_point_count: self.expected_spans.point_count,
+            candidate_point_count: expected_spans.point_count,
             exact_count: self.emitted_points,
             point_id_hash: self.point_id_hasher.finalize(),
             content_hash: ContentHash::new(*self.content_hasher.finalize().as_bytes()),
         });
         self.terminal = true;
         Ok(None)
+    }
+
+    fn expected_points(&self) -> Result<u64, WorkspaceError> {
+        self.expected_spans
+            .map(|spans| spans.point_count)
+            .ok_or_else(|| {
+                WorkspaceError::incompatible("Snapshot Point candidate facts are unavailable")
+            })
     }
 
     fn fail<T>(&mut self, error: WorkspaceError) -> Result<T, WorkspaceError> {
@@ -621,6 +675,9 @@ impl std::fmt::Debug for SnapshotPointBatches {
     }
 }
 
+// The accepted public interface reserves synchronous setup errors even though
+// v0.6 defers every fallible Source-scale step until the first pull.
+#[allow(clippy::unnecessary_wraps)]
 pub(crate) fn start(
     snapshot: &Snapshot,
     query: PointQuery,
@@ -629,34 +686,7 @@ pub(crate) fn start(
     let control = OperationControl::new();
     let provenance = *snapshot.provenance();
     let session = snapshot.session();
-    let spans = plan_query(
-        &session,
-        query,
-        limits.candidate_limits(),
-        limits.max_working_bytes(),
-        &control,
-    )?;
-    let expected_spans = SpanFacts::new(&spans)?;
-    let span_handoff_bytes = allocation_bytes::<SourceSpan>(spans.capacity()).saturating_mul(2);
-    require_working(
-        span_handoff_bytes,
-        limits,
-        "Source span handoff working bytes",
-    )?;
-
-    let retained_span_bytes = allocation_bytes::<SourceSpan>(expected_spans.span_count);
-    let source_budget = limits.source_read_budget();
-    require_working(
-        retained_span_bytes.saturating_add(source_budget.max_adapter_working_bytes()),
-        limits,
-        "Snapshot Point Source read working bytes",
-    )?;
     let classification = session.classification_attribute();
-    let request = ReadRequest::all()
-        .spans(spans)
-        .attributes(AttributeSelection::only([classification]))
-        .budget(source_budget);
-    let source = session.source().read(request)?;
 
     let point_id_hasher = CanonicalPointIdHasher::new(provenance.source());
     let mut content_hasher = domain_hasher(CONTENT_HASH_DOMAIN);
@@ -670,10 +700,11 @@ pub(crate) fn start(
         query,
         limits,
         classification,
-        source_budget,
-        expected_spans,
-        retained_span_bytes,
-        source: Some(source),
+        source_budget: limits.source_read_budget(),
+        expected_spans: None,
+        retained_span_bytes: 0,
+        source: None,
+        initialized: false,
         pending: None,
         overlay_usage: OverlayUsage::default(),
         control,
