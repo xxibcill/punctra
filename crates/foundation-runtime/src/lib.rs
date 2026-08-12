@@ -112,11 +112,50 @@ struct CancellationState {
 
 impl CancellationState {
     fn is_cancelled(&self) -> bool {
-        self.cancelled.load(Ordering::Acquire)
-            || self
-                .parent
-                .get()
-                .is_some_and(LinkedParentCancellation::is_cancelled)
+        if self.cancelled.load(Ordering::Acquire) {
+            return true;
+        }
+
+        let mut current = self.linked_parent();
+        let mut tortoise = current.clone();
+        let mut hare = current.clone();
+        while let Some(state) = current {
+            if state.cancelled.load(Ordering::Acquire) {
+                return true;
+            }
+            current = state.linked_parent();
+            tortoise = tortoise.and_then(|state| state.linked_parent());
+            hare = hare
+                .and_then(|state| state.linked_parent())
+                .and_then(|state| state.linked_parent());
+            if let (Some(tortoise), Some(hare)) = (&tortoise, &hare)
+                && Arc::ptr_eq(tortoise, hare)
+            {
+                return Self::linked_cycle_is_cancelled(tortoise);
+            }
+        }
+        false
+    }
+
+    fn linked_parent(&self) -> Option<Arc<Self>> {
+        self.parent.get().and_then(LinkedParentCancellation::state)
+    }
+
+    fn linked_cycle_is_cancelled(start: &Arc<Self>) -> bool {
+        let mut current = Some(Arc::clone(start));
+        while let Some(state) = current {
+            if state.cancelled.load(Ordering::Acquire) {
+                return true;
+            }
+            current = state.linked_parent();
+            if current
+                .as_ref()
+                .is_some_and(|state| Arc::ptr_eq(state, start))
+            {
+                return false;
+            }
+        }
+        false
     }
 }
 
@@ -126,12 +165,11 @@ struct LinkedParentCancellation {
 }
 
 impl LinkedParentCancellation {
-    fn is_cancelled(&self) -> bool {
-        self.active.load(Ordering::Acquire)
-            && self
-                .state
-                .upgrade()
-                .is_some_and(|parent| parent.cancelled.load(Ordering::Acquire))
+    fn state(&self) -> Option<Arc<CancellationState>> {
+        self.active
+            .load(Ordering::Acquire)
+            .then(|| self.state.upgrade())
+            .flatten()
     }
 }
 
@@ -853,4 +891,21 @@ fn wait_recovering<'a, T>(condvar: &Condvar, guard: MutexGuard<'a, T>) -> MutexG
     condvar
         .wait(guard)
         .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CancellationToken;
+
+    #[test]
+    fn linked_cancellation_cycles_remain_finite_and_observe_members() {
+        let first = CancellationToken::new();
+        let second = CancellationToken::new();
+        let _first_link = first.link_parent(&second);
+        let _second_link = second.link_parent(&first);
+
+        assert!(!first.is_cancelled());
+        second.cancel();
+        assert!(first.is_cancelled());
+    }
 }
