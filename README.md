@@ -254,11 +254,12 @@ caller-requested Revert restores the baseline after the correction, and Source
 bytes remain unchanged. A v0.7 Workflow does not automatically Revert a
 committed classification Revision when a later phase fails.
 
-The first v0.8 slice can compare that exact export with a returned LandXML at
-a separate resolved path while ignoring Point/face order, Point renumbering,
-and triangle winding. On Unix and Windows it also rejects a returned hard link
-to the reference file; other platforms fail closed when stable file identity
-is unavailable:
+The first v0.8 slice can compare that exact export with a returned LandXML while
+ignoring Point/face order, Point renumbering, and triangle winding. The two
+operational paths may resolve to the same regular file or hard-linked content;
+semantic identity comes from the captured bytes rather than path identity.
+Symbolic links remain invalid, and platforms without stable file identity fail
+closed:
 
 ```bash
 cargo run --release -p terrain-demo -- compare-landxml \

@@ -337,14 +337,12 @@ pub(crate) fn verify_landxml_round_trip(
     limits: RoundTripLimits,
 ) -> Result<RoundTripReport, RoundTripFailure> {
     validate_limits(limits)?;
-    reject_same_path(reference_path, returned_path)?;
     let (reference_witness, returned_witness) =
         capture_file_pair(reference_path, returned_path, limits.file_bytes)?;
     let reference_file =
         read_regular_file(InputSide::Reference, reference_witness, limits.file_bytes)?;
     let returned_file =
         read_regular_file(InputSide::Returned, returned_witness, limits.file_bytes)?;
-    reject_same_file(&reference_file, &returned_file)?;
 
     let reference_surface = parse_surface(InputSide::Reference, &reference_file.bytes, limits)?;
     let returned_surface = parse_surface(InputSide::Returned, &returned_file.bytes, limits)?;
@@ -372,21 +370,6 @@ pub(crate) fn verify_landxml_round_trip(
         exact_bytes: reference_file.bytes == returned_file.bytes,
         topology_matches: true,
     })
-}
-
-fn reject_same_path(reference_path: &Path, returned_path: &Path) -> Result<(), RoundTripFailure> {
-    let reference = fs::canonicalize(reference_path).map_err(|error| {
-        RoundTripFailure::invalid(format_args!("REFERENCE path cannot be resolved: {error}"))
-    })?;
-    let returned = fs::canonicalize(returned_path).map_err(|error| {
-        RoundTripFailure::invalid(format_args!("RETURNED path cannot be resolved: {error}"))
-    })?;
-    if reference == returned {
-        return Err(RoundTripFailure::invalid(
-            "REFERENCE and RETURNED must use separate resolved paths",
-        ));
-    }
-    Ok(())
 }
 
 fn validate_declaration_field(
@@ -438,14 +421,12 @@ fn validate_limits(limits: RoundTripLimits) -> Result<(), RoundTripFailure> {
 
 struct FileSnapshot {
     bytes: Vec<u8>,
-    identity: FileIdentity,
 }
 
 struct FileWitness<'a> {
     path: &'a Path,
     file: File,
     metadata: Metadata,
-    identity: FileIdentity,
 }
 
 fn capture_file_pair<'a>(
@@ -493,7 +474,6 @@ fn capture_regular_file(
         path,
         file,
         metadata: open_metadata,
-        identity: open_identity,
     })
 }
 
@@ -506,7 +486,6 @@ fn read_regular_file(
         path,
         mut file,
         metadata: open_metadata,
-        identity,
     } = witness;
     let bytes = read_bounded_bytes(side, &mut file, open_metadata.len(), max_file_bytes)?;
     let final_metadata = file.metadata().map_err(|error| {
@@ -526,7 +505,7 @@ fn read_regular_file(
             "{side} changed while it was being read"
         )));
     }
-    Ok(FileSnapshot { bytes, identity })
+    Ok(FileSnapshot { bytes })
 }
 
 #[cfg(unix)]
@@ -678,18 +657,6 @@ fn same_file_state(left: &Metadata, right: &Metadata) -> bool {
 #[cfg(not(any(unix, windows)))]
 fn same_file_state(_left: &Metadata, _right: &Metadata) -> bool {
     false
-}
-
-fn reject_same_file(
-    reference: &FileSnapshot,
-    returned: &FileSnapshot,
-) -> Result<(), RoundTripFailure> {
-    if reference.identity == returned.identity {
-        return Err(RoundTripFailure::invalid(
-            "REFERENCE and RETURNED must be distinct regular files",
-        ));
-    }
-    Ok(())
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -1999,7 +1966,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn symbolic_links_and_same_file_identity_are_rejected() {
+    fn symbolic_links_are_rejected_and_hard_links_compare_by_content() {
         use std::os::unix::fs::symlink;
 
         let fixture = Fixture::new("file-identity");
@@ -2015,22 +1982,20 @@ mod tests {
 
         let hard_link = fixture.path("hard-link.xml");
         fs::hard_link(&actual, &hard_link).expect("create fixture hard link");
-        assert_kind(
-            verify(&actual, &hard_link, tolerances(0.0, 0.0), default_limits()),
-            RoundTripFailureKind::InvalidInput,
-        );
+        let report = verify(&actual, &hard_link, tolerances(0.0, 0.0), default_limits())
+            .expect("hard-linked inputs compare by captured content");
+        assert!(report.exact_bytes());
     }
 
     #[test]
-    fn the_same_resolved_path_is_rejected() {
+    fn the_same_resolved_path_compares_captured_content() {
         let fixture = Fixture::new("same-path");
         let xml = landxml(REFERENCE_POINTS, REFERENCE_FACES, false);
         let actual = fixture.write("actual.xml", &xml);
         let aliased = fixture.path(".").join("actual.xml");
-        assert_kind(
-            verify(&actual, &aliased, tolerances(0.0, 0.0), default_limits()),
-            RoundTripFailureKind::InvalidInput,
-        );
+        let report = verify(&actual, &aliased, tolerances(0.0, 0.0), default_limits())
+            .expect("resolved path aliases compare by captured content");
+        assert!(report.exact_bytes());
     }
 
     #[test]
