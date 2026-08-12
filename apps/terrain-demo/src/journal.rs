@@ -175,7 +175,7 @@ pub(crate) struct WorkflowIntent {
     pub(crate) surface_name: Box<str>,
     pub(crate) document_date: Box<str>,
     pub(crate) document_time: Box<str>,
-    pub(crate) allow_unknown_metric: bool,
+    pub(crate) coordinates_are_metric_metres_asserted: bool,
     pub(crate) options_hash: Digest,
     pub(crate) path_bindings: [Digest; 4],
 }
@@ -196,7 +196,7 @@ impl WorkflowIntent {
         surface_name: Box<str>,
         document_date: Box<str>,
         document_time: Box<str>,
-        allow_unknown_metric: bool,
+        coordinates_are_metric_metres_asserted: bool,
         path_bindings: [Digest; 4],
         limits: JournalLimits,
     ) -> Result<Self, JournalError> {
@@ -207,7 +207,7 @@ impl WorkflowIntent {
             &surface_name,
             &document_date,
             &document_time,
-            allow_unknown_metric,
+            coordinates_are_metric_metres_asserted,
         );
         let mut intent = Self {
             run,
@@ -227,7 +227,7 @@ impl WorkflowIntent {
             surface_name,
             document_date,
             document_time,
-            allow_unknown_metric,
+            coordinates_are_metric_metres_asserted,
             options_hash,
             path_bindings,
         };
@@ -314,7 +314,7 @@ impl WorkflowIntent {
                     &self.surface_name,
                     &self.document_date,
                     &self.document_time,
-                    self.allow_unknown_metric,
+                    self.coordinates_are_metric_metres_asserted,
                 )
         {
             return Err(JournalError::Corrupt("Intent canonical input hash differs"));
@@ -1383,7 +1383,7 @@ fn encode_intent(value: &WorkflowIntent, bytes: &mut Vec<u8>) -> Result<(), Jour
     bytes.push(value.ground_classification);
     bytes.push(value.non_ground_classification);
     bytes.push(u8::from(value.recipe_bounds_bits.is_some()));
-    bytes.push(u8::from(value.allow_unknown_metric));
+    bytes.push(u8::from(value.coordinates_are_metric_metres_asserted));
     encode_optional_bounds(value.recipe_bounds_bits, bytes);
     push_u32(bytes, as_u32(value.correction_ordinals.len())?);
     push_u32(bytes, as_u32(value.check_points.len())?);
@@ -1506,7 +1506,7 @@ fn decode_intent(
         ground_classification: bytes[384],
         non_ground_classification: bytes[385],
         recipe_bounds_bits: bounds,
-        allow_unknown_metric: decode_bool(bytes[387])?,
+        coordinates_are_metric_metres_asserted: decode_bool(bytes[387])?,
         correction_ordinals: ordinals.into_boxed_slice(),
         check_points: check_points.into_boxed_slice(),
         surface_name,
@@ -1945,7 +1945,7 @@ fn request_hash(intent: &WorkflowIntent) -> Digest {
     hasher.update(&[
         intent.ground_classification,
         intent.non_ground_classification,
-        u8::from(intent.allow_unknown_metric),
+        u8::from(intent.coordinates_are_metric_metres_asserted),
     ]);
     for binding in intent.path_bindings {
         hasher.update(&binding);
@@ -2006,14 +2006,19 @@ fn hash_recipe(ground: u8, bounds: Option<[[u64; 2]; 3]>) -> Digest {
     *hasher.finalize().as_bytes()
 }
 
-fn hash_options(name: &str, date: &str, time: &str, allow_unknown: bool) -> Digest {
+fn hash_options(
+    name: &str,
+    date: &str,
+    time: &str,
+    coordinates_are_metric_metres_asserted: bool,
+) -> Digest {
     let mut hasher = Hasher::new();
     hasher.update(OPTIONS_HASH_DOMAIN);
     for value in [name.as_bytes(), date.as_bytes(), time.as_bytes()] {
         hasher.update(&as_u64(value.len()).to_le_bytes());
         hasher.update(value);
     }
-    hasher.update(&[u8::from(allow_unknown)]);
+    hasher.update(&[u8::from(coordinates_are_metric_metres_asserted)]);
     *hasher.finalize().as_bytes()
 }
 

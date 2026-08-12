@@ -1499,7 +1499,8 @@ fn validate_supplied_intent(
         || durable.surface_name.as_ref() != supplied.landxml.surface_name()
         || durable.document_date.as_ref() != supplied.landxml.document_date()
         || durable.document_time.as_ref() != supplied.landxml.document_time()
-        || durable.allow_unknown_metric != supplied.landxml.coordinates_are_metric_metres_asserted()
+        || durable.coordinates_are_metric_metres_asserted
+            != supplied.landxml.coordinates_are_metric_metres_asserted()
         || durable.path_bindings != path_bindings
     {
         return Err(WorkflowFailure::new(
