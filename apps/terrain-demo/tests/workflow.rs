@@ -181,6 +181,15 @@ fn journal_corruption_limits_locking_and_path_binding_fail_closed() {
     drop(lock);
     assert!(inspect_run(&fixture.run_root, WorkflowLimits::default()).is_ok());
 
+    overwrite_and_sync(&fixture.lock(), b"unexpected lock payload")
+        .expect("install nonempty workflow lock file");
+    let error = inspect_run(&fixture.run_root, WorkflowLimits::default())
+        .expect_err("nonempty run.lock must fail its fixed schema");
+    assert_eq!(error.code(), "PWF_IO");
+    assert_eq!(error.stage(), "lock");
+    overwrite_and_sync(&fixture.lock(), b"").expect("restore empty workflow lock file");
+    assert!(inspect_run(&fixture.run_root, WorkflowLimits::default()).is_ok());
+
     let aggregate_limit = WorkflowLimits::default().with_max_aggregate_working_bytes(1);
     let error = inspect_run(&fixture.run_root, aggregate_limit)
         .expect_err("aggregate ceiling must bind before journal inspection");

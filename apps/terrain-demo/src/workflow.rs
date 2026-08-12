@@ -2627,10 +2627,10 @@ impl RunLock {
     fn acquire(path: &Path) -> io::Result<Self> {
         let initial = match fs::symlink_metadata(path) {
             Ok(metadata) => {
-                if !metadata.file_type().is_file() {
+                if !is_empty_regular_lock(&metadata) {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidInput,
-                        "run.lock is not a regular non-symlink file",
+                        "run.lock must be an empty regular non-symlink file",
                     ));
                 }
                 Some(metadata)
@@ -2646,8 +2646,8 @@ impl RunLock {
             .open(path)?;
         let opened = file.metadata()?;
         let current = fs::symlink_metadata(path)?;
-        if !opened.file_type().is_file()
-            || !current.file_type().is_file()
+        if !is_empty_regular_lock(&opened)
+            || !is_empty_regular_lock(&current)
             || !same_file_identity(&opened, &current)
             || initial
                 .as_ref()
@@ -2660,10 +2660,10 @@ impl RunLock {
         }
         file.try_lock().map_err(io::Error::from)?;
         let locked_path = fs::symlink_metadata(path)?;
-        if !locked_path.file_type().is_file() || !same_file_identity(&opened, &locked_path) {
+        if !is_empty_regular_lock(&locked_path) || !same_file_identity(&opened, &locked_path) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                "run.lock changed identity while it was locked",
+                "run.lock changed identity or contents while it was locked",
             ));
         }
         Ok(Self {
@@ -2676,8 +2676,8 @@ impl RunLock {
     fn verify(&self) -> io::Result<()> {
         let opened = self.file.metadata()?;
         let current = fs::symlink_metadata(&self.path)?;
-        if opened.file_type().is_file()
-            && current.file_type().is_file()
+        if is_empty_regular_lock(&opened)
+            && is_empty_regular_lock(&current)
             && same_file_identity(&self.identity, &opened)
             && same_file_identity(&opened, &current)
         {
@@ -2689,6 +2689,10 @@ impl RunLock {
             ))
         }
     }
+}
+
+fn is_empty_regular_lock(metadata: &fs::Metadata) -> bool {
+    metadata.file_type().is_file() && metadata.len() == 0
 }
 
 fn verify_run_binding(lock: &RunLock, witness: &DirectoryWitness) -> io::Result<()> {
