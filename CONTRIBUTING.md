@@ -17,11 +17,14 @@ headless `terrain-demo` composition. The completed [v0.7 technical-readiness
 scope](docs/design/technical-alpha-readiness-v0.7.md) permits linked child
 cancellation, exact Revision Audit and Edit Footprint facts, exact LandXML
 ensure/reconciliation, and the private durable `terrain-demo` Workflow Run,
-canonical report, and structured recovery diagnostics. Format decoding belongs
-only in accepted Source adapter crates. Networking, screen selection, general
-editing, constrained or persistent terrain, general export, Source rewriting,
-and general host UI remain in callers or future projects unless the scope is
-explicitly revised.
+canonical report, and structured recovery diagnostics. The accepted
+[v0.8 repository interoperability qualification
+scope](docs/design/design-partner-mvp-v0.8.md) additionally permits the private,
+bounded `terrain-demo` LandXML comparison reader. Apart from that explicit
+exception, external format decoding belongs only in accepted Source adapter
+crates. Networking, screen selection, general editing, constrained or
+persistent terrain, general export, Source rewriting, and general host UI
+remain in callers or future projects unless the scope is explicitly revised.
 
 ## Local verification
 
