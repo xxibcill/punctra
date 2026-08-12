@@ -7,6 +7,10 @@ This is the ownership map for implemented crates. Each crate has one public
 job. Several private files may cooperate behind one deep interface; private
 file boundaries are not public module promises.
 
+The v0.9 compatibility classification, caller obligations, side effects,
+limits, and recovery modes are frozen in the
+[v0.9 public interface review](v0.9-interface-review.md).
+
 ## Catalog
 
 | Module | Its only job | Canonical input | Canonical output |

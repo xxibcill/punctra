@@ -12,3 +12,5 @@ encoder from the one-point `clustered_ticks(1)` test Source:
 The persistence integration test opens and resumes these checked-in bytes. Do
 not regenerate them unless disk version 1 is intentionally replaced or a new
 reader migration is added; keep these v1 files when adding later versions.
+`manifest.json` is the machine-readable authority for exact lengths, BLAKE3
+hashes, format versions, support class, Source identity, and semantic facts.

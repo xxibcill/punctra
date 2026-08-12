@@ -6,6 +6,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+autoexamples = false
 
 [dependencies]
 blake3.workspace = true
@@ -25,6 +26,14 @@ source-memory.workspace = true
 [[bench]]
 name = "read"
 harness = false
+
+[[example]]
+name = "inspect"
+path = "examples/inspect.rs"
+
+[[example]]
+name = "generate_las_v1_fixtures"
+path = "examples/generate_v1_fixtures.rs"
 
 [lints]
 workspace = true

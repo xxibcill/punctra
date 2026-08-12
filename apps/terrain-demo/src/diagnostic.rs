@@ -111,6 +111,7 @@ pub(crate) enum PublicationPhase {
     LandXmlTarget,
     ReportTarget,
     CompleteCheckpoint,
+    RoundTripEvidence,
 }
 
 impl PublicationPhase {
@@ -125,6 +126,7 @@ impl PublicationPhase {
             Self::LandXmlTarget => "landxml-target",
             Self::ReportTarget => "report-target",
             Self::CompleteCheckpoint => "complete-checkpoint",
+            Self::RoundTripEvidence => "round-trip-evidence-target",
         }
     }
 }

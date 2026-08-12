@@ -289,15 +289,19 @@ workspace.pcw/
 ~~~
 
 Manifest, ready, rejection, and Revision values are immutable, versioned, and
-checksummed. Complete values are staged and synced, closed, made read-only,
-reopened and revalidated, then hard-linked without replacement. Directory sync
-establishes the durable commit point. Recovery validates contiguous linear
-history and every published operation record under `OpenLimits`; it fails
-closed on gaps, forks, lineage/Source mismatch, duplicate identities, or
-corruption.
+checksummed. Complete scratch values are staged and synced, made read-only,
+reopened and revalidated, then published as independent descriptor-bound
+no-replace copies. The ready Operation to Revision path alone intentionally
+hard-links one authoritative identity. Directory sync establishes the durable
+commit point. Recovery validates contiguous linear history and every published
+operation record under `OpenLimits`; it fails closed on gaps, forks,
+lineage/Source mismatch, duplicate identities, or corruption.
 
-Recognized incomplete scratch files are disposable. Recovery never opens a
-published immutable value for mutation.
+Recognized incomplete scratch files are per-attempt bounded and ignored by
+recovery. They are retained because automatic pathname deletion cannot exclude
+a racing replacement; offline cleanup is permitted only with no live
+Workspace, Snapshot, Point Set, or job. Recovery never opens a published
+immutable value for mutation.
 
 ## Terrain Surface contract
 
@@ -341,12 +345,23 @@ as northing, easting, elevation. The caller must explicitly assert that Source
 units are metres because the declared-or-unknown Coordinate Reference remains
 opaque to the exporter. No unit or CRS transformation occurs.
 
-Export stages and syncs a bounded sibling file, reopens and verifies it, then
-publishes by no-replace hard link and syncs the parent. Before publication,
-failure leaves no target. Once publication starts, verification, sync, cleanup,
-or terminal-progress failure is conservatively `ExportIndeterminate`; a
-`LandXmlReceipt` is returned only after durable completion. The independent
-`roxmltree` acceptance parser is test-only and shares no encoder helpers.
+Export stages and syncs a per-attempt bounded sibling file, reopens and
+verifies it, then publishes an independent descriptor-bound copy with atomic
+no-replace semantics and syncs the parent. The verified macOS path uses
+`fclonefileat`; the unverified Linux path copies into an unnamed `O_TMPFILE`
+and links that descriptor exactly once. Unsupported filesystems or platforms
+fail closed. The separately encoded named stage is retained as recognized
+debris because pathname cleanup cannot conditionally unlink the owned open
+file. Before publication, failure
+leaves no target. Once publication starts, verification, sync, or terminal-
+progress failure is conservatively `ExportIndeterminate`; a `LandXmlReceipt`
+is returned only after durable completion. Publication retains an open witness
+for the published leaf, syncs that destination file before the parent
+directory, and revalidates both the open file and target name after directory
+sync and terminal progress. Reconciliation retains and revalidates the same
+kind of leaf witness through its final acknowledgement boundary. The
+independent `roxmltree`
+acceptance parser is test-only and shares no encoder helpers.
 
 `TerrainSurface::ensure_landxml` applies the same deterministic encoding and
 publication limits but also reconciles a pre-existing regular target. An exact

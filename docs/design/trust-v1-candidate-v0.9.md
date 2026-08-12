@@ -69,8 +69,8 @@ recovery policy; a filename suffix alone never does.
 | Class | Included persisted state | v0.9 promise | Failure and recovery rule |
 |---|---|---|---|
 | **Authoritative** | Workspace manifest, immutable Operation records and Revisions; Workflow `run.pwf`; serialized `SourceRecord` | Supported version-1 bytes remain readable and retain identical identity and semantic facts. They are never silently rebuilt, replaced, downgraded, or deleted. | Fail closed on unknown version, corruption, lineage mismatch, or indeterminate durability. Preserve the bytes and report the one safe reconciliation action. |
-| **Rebuildable** | Complete Spatial Index `.pidx` and its valid resumable `.work` prefix | An accepted version may be opened or resumed exactly. When a version or recipe is no longer supported, the caller may explicitly delete the index family and rebuild it from the verified immutable Source. | Never expose a partial index. Preserve valid durable work frames and fail closed on a truncated header. Never delete a pre-existing or racing work path implicitly, and never rewrite an incompatible complete target. |
-| **Temporary** | Point Set spills, Workspace scratch candidates, index `.samples`/`.tmp`, and recognized journal/report/LandXML/evidence stages | No cross-release readability promise. Their meaning is process- or attempt-scoped and no authoritative fact depends on their survival before publication. | Remove only names and file identities provably created or recognized by the owning module. A missing or changed live spill fails the operation. Unknown siblings and replacement files are never deleted. |
+| **Rebuildable** | Complete Spatial Index `.pidx` and its valid resumable `.work` prefix | An accepted version may be opened or resumed exactly. A successful build retains its bounded valid `.work`; the complete artifact wins on later opens. When a version or recipe is no longer supported, the caller may explicitly delete the index family and rebuild it from the verified immutable Source. | Never expose a partial index. Preserve valid durable work frames and fail closed on a truncated header. Never delete a pre-existing or racing work path implicitly, and never rewrite an incompatible complete target. |
+| **Temporary** | Point Set spills, Workspace scratch candidates, index `.samples` files and platform-specific publication stages, and recognized journal/report/LandXML/evidence stages | No cross-release readability promise. Their meaning is process- or attempt-scoped and no authoritative fact depends on their survival before publication. | Production code never unlinks a replaceable temporary pathname. Linux index publication stages are unnamed and disappear when their descriptor closes; named stages and spools remain per-attempt bounded debris. An operator may remove only the owning family's private names while no related handle, job, or process is live. A missing or changed live spill fails the operation. Unknown siblings and replacements are never deleted. |
 | **Caller-owned published output** | `terrain.xml`, `audit.json`, and the separate v0.8 Round-Trip Evidence target | Exact existing bytes may be reconciled; different existing bytes are a conflict. These outputs are not Workspace state and are not silently migrated. | Use synced staging, no-replace publication, read-back, directory sync, and conservative post-publication certainty. Never overwrite the caller's target. |
 
 `SourceRecord` is authoritative persisted evidence of which immutable Source was
@@ -165,8 +165,16 @@ The class rules are asymmetric by design:
 
 - authoritative state is preserved and reconciled, never guessed away;
 - rebuildable state may retain a verified prefix or be explicitly rebuilt;
-- temporary state may be removed only when ownership is proven; and
+- temporary state is retained when pathname cleanup cannot prove ownership at
+  the unlink instant, and is removed only by explicit offline maintenance; and
 - caller-owned targets are reconciled exactly or reported as conflicts.
+
+For LandXML, the no-replace copy is not acknowledged from a pathname-only
+read-back. The owner retains an open target witness, syncs that destination
+before syncing its parent directory, and revalidates the open file against the
+leaf name after parent sync and terminal progress. Exact reconciliation retains
+the same witness through its final acknowledgement boundary. A missing,
+replaced, or changed leaf yields no receipt.
 
 No recovery code scans and cleans a broad directory, follows a symlink, removes
 an unknown child, overwrites a target, or retries an uncertain Workspace
@@ -191,16 +199,47 @@ an absent target, a valid resumable work prefix, or a complete rebuildable
 target. This slice does not alter `point-index` persistence, close the inherited
 v0.8 qualification prerequisite, or make v0.9 ready.
 
-An initial work-header write or sync failure remains a known recovery gap. It
-can leave a truncated `.pidx.work` path that the next prepare correctly rejects
-as `CorruptWork`; current code preserves that path rather than guessing that it
-still names the file created by the failed attempt. Before v0.9 readiness, the
-index owner must make this case safely retryable using a protocol whose
-publication or cleanup is bound atomically to the owned file identity. A
-metadata-check followed by pathname deletion is not sufficient because a
-racing replacement can arrive between those operations. Unsupported platforms
-must fail closed when stable identity cannot be proven. A parent-directory-sync
-failure after a valid header never authorizes deletion.
+The index-owner recovery slice closes the initial work-header gap. It writes
+and syncs the complete fixed-size header to a private file, then publishes that
+open file descriptor to `.pidx.work` with one atomic no-replace operation. A
+write or file-sync failure therefore leaves the canonical work path absent. A
+pre-existing or racing canonical path wins unchanged. A
+parent-directory-sync failure after publication reports the original I/O error
+and retains the valid header; it never authorizes deletion.
+
+On the verified local macOS filesystem, descriptor publication uses atomic
+`fclonefileat`: the already immutable, synced header or complete artifact is
+cloned into a destination name that must not exist. The destination has
+independent copy-on-write bytes, so all artifact writes and file syncs finish
+before cloning. The owner then opens the canonical destination without
+following symlinks, proves that it has the platform-expected identity relation
+to the stage, flushes that destination inode, syncs the parent directory, and
+revalidates the same canonical leaf and exact header or artifact checksum
+before acknowledging publication. Complete-artifact opening likewise retains
+one descriptor witness through decoding and final hashing, so even a same-size
+leaf replacement is an indeterminate I/O failure rather than a returned index.
+Linux creates the stage as an unnamed `O_TMPFILE` in the target directory and
+uses `linkat` through its `/proc/self/fd` descriptor path with
+`AT_SYMLINK_FOLLOW` to assign exactly one no-replace canonical name. If the
+filesystem lacks `O_TMPFILE`, procfs descriptor linking is unavailable, or the
+kernel rejects either operation, preparation fails closed with no canonical
+publication. Other platforms fail closed. In both implementations the target
+leaf is resolved relative to a directory opened from the caller-provided
+parent at publication time. The verified scope assumes that caller-controlled
+parent namespace remains stable for the operation; concurrent parent-directory
+replacement is not claimed as a supported workflow.
+
+Linux initial-header and artifact stages have no pathname before publication,
+so a failed stage disappears when its descriptor closes and a successful stage
+has exactly the canonical name. Named stages on other platforms and named
+sample spools remain per-attempt bounded recognized temporary debris because no
+portable conditional-unlink primitive can prove that a pathname still names
+the owned open file; retry ignores those private names. Publication is bound to
+the owned open file rather than its replaceable pathname. Completed valid
+`.work` files likewise remain beside `.pidx`, which wins on later opens without
+inspecting, mutating, or deleting the work path. A metadata check followed by
+pathname deletion is never used because a racing replacement can arrive
+between those operations.
 
 Later fault coverage uses narrow private seams or owned filesystem fixtures to
 exercise representative pre-publication, post-link, sync, replacement, and
@@ -226,6 +265,27 @@ Operational failure publishes no final pass or fail evidence. Semantic failure
 may publish canonical failed evidence only after every prerequisite fact was
 successfully evaluated. The v0.7 journal remains disk/semantic/frame version 1
 with exactly eight frames, and `audit.json` remains byte-compatible schema v1.
+
+The checked-in qualification corpus pins every journal checkpoint prefix and
+the Complete journal, report, LandXML, and passing/failing evidence bytes. Its
+Run-root path binding intentionally prevents relocating those bytes and then
+calling the public verifier as though the copy were the original Run. The
+corpus consumer therefore uses the owning strict journal, report, parser, and
+evidence interfaces to verify the committed bytes without regenerating the
+expected side; generated process tests exercise the complete public command at
+the Run path captured in its request.
+
+v0.9 also tightens the inherited caller-output publication protocol. On macOS,
+the synced open stage descriptor is published as an independent no-replace
+clone; on the unverified Linux path, an unnamed `O_TMPFILE` publication copy
+is linked exactly once via `/proc/self/fd`. The target never aliases the
+separately encoded named stage. That named stage is intentionally retained as
+bounded private debris because portable identity-conditional unlink is
+unavailable; the Linux publication copy remains unnamed until its one link.
+Linux fails closed if the filesystem, procfs path, privileges, or kernel reject
+the required operation.
+This supersedes v0.7's cleanup-step wording for new v0.9 publications: a
+racing replacement is preserved even in the terminal acknowledgement window.
 
 ## Interface review
 

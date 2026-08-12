@@ -1849,7 +1849,11 @@ fn create_workspace(
     );
     let mut store = Store::create(root).map_err(map_persistence)?;
     control.check_cancelled()?;
-    store.publish_manifest(&manifest).map_err(map_persistence)?;
+    if let Err(error) = store.publish_manifest(&manifest) {
+        return Err(classify_manifest_publication_failure(
+            &store, &manifest, error,
+        ));
+    }
     let catalog = Catalog::empty(manifest.root_revision);
     Ok(Workspace {
         session: Arc::new(Session {
@@ -1866,6 +1870,33 @@ fn create_workspace(
             writer_waiters: std::sync::atomic::AtomicUsize::new(0),
         }),
     })
+}
+
+fn classify_manifest_publication_failure(
+    store: &Store,
+    manifest: &ManifestFacts,
+    error: PersistenceError,
+) -> WorkspaceError {
+    let publication_error = map_persistence(error);
+    let diagnostic = publication_error.to_string();
+    match store.manifest_is_published_as(manifest) {
+        Ok(true) => WorkspaceError::RecoveryIndeterminate {
+            operation: None,
+            reason: WorkspaceDiagnostic::new(format!(
+                "Workspace creation may already be complete; reopen this exact root: {diagnostic}"
+            )),
+        },
+        // No durable manifest exists, so the original structured failure and
+        // its filesystem operation, path, and OS error remain definitive.
+        Ok(false) => publication_error,
+        Err(reconcile) => WorkspaceError::RecoveryIndeterminate {
+            operation: None,
+            reason: WorkspaceDiagnostic::new(format!(
+                "Workspace creation could not be reconciled; reopen this exact root: {diagnostic}; {}",
+                map_persistence(reconcile)
+            )),
+        },
+    }
 }
 
 fn open_workspace(
@@ -2183,6 +2214,49 @@ mod tests {
             .with_max_single_file_bytes(MANIFEST_BYTES as u64)
             .with_max_total_persisted_bytes(MANIFEST_BYTES as u64);
         validate_root_limits(exact).expect("exact manifest single-file boundary");
+    }
+
+    #[test]
+    fn absent_manifest_preserves_the_original_publication_io_failure() {
+        let directory = TestDirectory::new();
+        let store = Store::create(&directory.0).expect("create premanifest Store");
+        let manifest = ManifestFacts {
+            workspace: [1; 16],
+            source: [2; 32],
+            source_point_count: 0,
+            position_transform_bits: [0; 6],
+            classification: PersistedAttributeDefinition {
+                id: 7,
+                name_len: 0,
+                name: [0; MAX_ATTRIBUTE_NAME_BYTES],
+                data_type: ATTRIBUTE_DATA_TYPE_U8,
+            },
+            root_revision: [3; 32],
+            source_contract: [4; 32],
+        };
+        let original_path = directory.0.join("scratch/manifest-stage");
+        let error = PersistenceError::Io {
+            action: "flush Workspace manifest stage",
+            path: original_path.clone(),
+            source: std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "injected permission failure",
+            ),
+        };
+
+        let result = classify_manifest_publication_failure(&store, &manifest, error);
+
+        let WorkspaceError::Io {
+            operation,
+            path,
+            source,
+        } = result
+        else {
+            panic!("an absent manifest must retain its definitive I/O failure");
+        };
+        assert_eq!(operation, "flush Workspace manifest stage");
+        assert_eq!(path.as_str(), original_path.display().to_string());
+        assert_eq!(source.kind(), std::io::ErrorKind::PermissionDenied);
     }
 
     #[test]

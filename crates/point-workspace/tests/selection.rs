@@ -249,7 +249,7 @@ fn forced_spill_point_sets_fail_closed_when_temporary_storage_is_missing_or_chan
     let mut file = fs::OpenOptions::new()
         .read(true)
         .write(true)
-        .open(changed_path)
+        .open(&changed_path)
         .expect("fault fixture opens its own spill");
     file.seek(SeekFrom::End(-1)).unwrap();
     let mut byte = [0_u8; 1];
@@ -270,12 +270,37 @@ fn forced_spill_point_sets_fail_closed_when_temporary_storage_is_missing_or_chan
         },
     };
     assert!(matches!(error, WorkspaceError::InvalidPointSet { .. }));
+    drop(changed);
+    fs::remove_file(&changed_path).unwrap();
+
+    let replaced = root
+        .select(PointQuery::all(), forced_spill_limits(17))
+        .blocking_wait()
+        .expect("replacement-spill fixture materializes");
+    let replaced_path = only_scratch_file(temporary.workspace_path().join("scratch"));
+    let displaced_path = replaced_path.with_extension("displaced");
+    fs::rename(&replaced_path, &displaced_path).unwrap();
+    fs::write(&replaced_path, b"racing sealed-spill replacement").unwrap();
+    let Err(error) = replaced.ids(PointIdReadLimits::default()) else {
+        panic!("replacement spill must fail before publishing an identity stream");
+    };
+    assert!(matches!(error, WorkspaceError::InvalidPointSet { .. }));
+    drop(replaced);
+    assert_eq!(
+        fs::read(&replaced_path).unwrap(),
+        b"racing sealed-spill replacement",
+        "Point Set drop must not remove a racing replacement"
+    );
 }
 
 fn only_scratch_file(scratch: impl AsRef<std::path::Path>) -> std::path::PathBuf {
     let mut paths = fs::read_dir(scratch)
         .expect("read fixture scratch")
         .map(|entry| entry.expect("read fixture scratch entry").path())
+        .filter(|path| {
+            path.extension()
+                .is_some_and(|extension| extension == "pset")
+        })
         .collect::<Vec<_>>();
     assert_eq!(paths.len(), 1, "fixture owns exactly one temporary spill");
     paths.pop().expect("one spill path exists")
@@ -362,7 +387,7 @@ fn selection_and_identity_read_limits_fail_instead_of_publishing_prefixes() {
 }
 
 #[test]
-fn cancelling_an_in_flight_forced_spill_selection_publishes_no_point_set_or_spill() {
+fn cancelling_an_in_flight_forced_spill_selection_publishes_no_point_set_and_retains_its_spill() {
     let (temporary, _index, workspace, _ticks, _classifications) =
         create_fixture_workspace("selection-cancellation", 100_003);
     let job = workspace
@@ -380,8 +405,14 @@ fn cancelling_an_in_flight_forced_spill_selection_publishes_no_point_set_or_spil
     assert!(
         fs::read_dir(temporary.workspace_path().join("scratch"))
             .expect("read Workspace scratch")
-            .next()
-            .is_some(),
+            .any(|entry| {
+                entry.as_ref().ok().is_some_and(|entry| {
+                    entry
+                        .path()
+                        .extension()
+                        .is_some_and(|extension| extension == "pset")
+                })
+            }),
         "forced spill exists while the in-flight selection owns it"
     );
     handle.cancel();
@@ -390,9 +421,17 @@ fn cancelling_an_in_flight_forced_spill_selection_publishes_no_point_set_or_spil
     assert_eq!(
         fs::read_dir(temporary.workspace_path().join("scratch"))
             .expect("read Workspace scratch after cancellation")
+            .filter(|entry| {
+                entry.as_ref().ok().is_some_and(|entry| {
+                    entry
+                        .path()
+                        .extension()
+                        .is_some_and(|extension| extension == "pset")
+                })
+            })
             .count(),
-        0,
-        "cancelled selection removed its unpublished spill"
+        1,
+        "cancelled selection retains one bounded spill instead of unlinking a replacement"
     );
 }
 

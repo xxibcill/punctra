@@ -1593,8 +1593,11 @@ dependencies = [
  "blake3",
  "criterion",
  "foundation-runtime",
+ "getrandom 0.3.4",
  "point-contracts",
  "point-source",
+ "rustix 1.1.4",
+ "serde_json",
  "source-memory",
  "thiserror 2.0.20",
 ]
@@ -1625,6 +1628,7 @@ dependencies = [
  "point-workspace",
  "robust",
  "roxmltree",
+ "rustix 1.1.4",
  "source-memory",
  "thiserror 2.0.20",
 ]
@@ -1653,7 +1657,9 @@ dependencies = [
  "point-contracts",
  "point-index",
  "point-source",
+ "rustix 1.1.4",
  "serde",
+ "serde_json",
  "source-las",
  "source-memory",
  "thiserror 2.0.20",
@@ -2146,6 +2152,7 @@ dependencies = [
  "foundation-runtime",
  "point-contracts",
  "point-source",
+ "serde_json",
  "thiserror 2.0.20",
 ]
 
@@ -2229,8 +2236,10 @@ dependencies = [
  "point-source",
  "point-terrain",
  "point-workspace",
+ "quick-xml",
  "robust",
  "roxmltree",
+ "rustix 1.1.4",
  "serde_json",
  "source-las",
  "thiserror 2.0.20",

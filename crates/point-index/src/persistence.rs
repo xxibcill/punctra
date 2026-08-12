@@ -1,7 +1,7 @@
 use std::{
     collections::BinaryHeap,
     fs::{self, File, OpenOptions},
-    io::{Read, Seek, SeekFrom, Write},
+    io::{self, Read, Seek, SeekFrom, Write},
     mem,
     path::{Path, PathBuf},
     sync::{
@@ -9,6 +9,9 @@ use std::{
         atomic::{AtomicU64, Ordering},
     },
 };
+
+#[cfg(test)]
+use std::cell::Cell;
 
 use blake3::Hasher;
 use foundation_runtime::OperationControl;
@@ -40,6 +43,159 @@ const ORDINAL_HASH_DOMAIN: u64 = 0x706e_6374_7261_0401;
 const TEMPORARY_CREATE_ATTEMPTS: usize = 128;
 
 static NEXT_TEMPORARY_FILE: AtomicU64 = AtomicU64::new(1);
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct FileIdentity {
+    first: u64,
+    second: u64,
+}
+
+impl FileIdentity {
+    fn read(metadata: &fs::Metadata) -> io::Result<Self> {
+        platform_file_identity(metadata).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::Unsupported,
+                "stable file identity is unavailable on this platform",
+            )
+        })
+    }
+}
+
+struct StablePathFile {
+    file: File,
+    path: PathBuf,
+    identity: FileIdentity,
+}
+
+impl StablePathFile {
+    fn open(path: &Path, writable: bool) -> io::Result<Self> {
+        let initial = regular_path_metadata(path)?;
+        let identity = FileIdentity::read(&initial)?;
+        let file = platform_open_nofollow(path, writable)?;
+        let opened = file.metadata()?;
+        if !opened.file_type().is_file() || FileIdentity::read(&opened)? != identity {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "path changed while its regular file was being opened",
+            ));
+        }
+        let witness = Self {
+            file,
+            path: path.to_path_buf(),
+            identity,
+        };
+        witness.verify_path()?;
+        Ok(witness)
+    }
+
+    fn verify_path(&self) -> io::Result<()> {
+        let path_metadata = regular_path_metadata(&self.path)?;
+        let file_metadata = self.file.metadata()?;
+        if FileIdentity::read(&path_metadata)? != self.identity
+            || FileIdentity::read(&file_metadata)? != self.identity
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "path no longer names the opened regular file",
+            ));
+        }
+        Ok(())
+    }
+
+    fn verify_exact_bytes(&self, expected: &[u8]) -> io::Result<()> {
+        self.verify_path()?;
+        let mut file = self.file.try_clone()?;
+        file.seek(SeekFrom::Start(0))?;
+        let mut offset = 0;
+        let mut actual = [0_u8; 4_096];
+        while offset != expected.len() {
+            let count = actual.len().min(expected.len() - offset);
+            file.read_exact(&mut actual[..count])?;
+            if actual[..count] != expected[offset..offset + count] {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "opened file differs from the expected complete bytes",
+                ));
+            }
+            offset += count;
+        }
+        let mut trailing = [0_u8; 1];
+        if file.read(&mut trailing)? != 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "opened file differs from the expected complete bytes",
+            ));
+        }
+        self.verify_path()
+    }
+
+    fn sync_all(&self) -> io::Result<()> {
+        self.verify_path()?;
+        self.file.sync_all()?;
+        self.verify_path()
+    }
+}
+
+fn regular_path_metadata(path: &Path) -> io::Result<fs::Metadata> {
+    let metadata = fs::symlink_metadata(path)?;
+    if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "path is not a regular non-symlink file",
+        ));
+    }
+    Ok(metadata)
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn platform_open_nofollow(path: &Path, writable: bool) -> io::Result<File> {
+    use rustix::fs::{CWD, Mode, OFlags, openat};
+
+    let access = if writable {
+        OFlags::RDWR
+    } else {
+        OFlags::RDONLY
+    };
+    openat(
+        CWD,
+        path,
+        access | OFlags::CLOEXEC | OFlags::NOFOLLOW,
+        Mode::empty(),
+    )
+    .map(File::from)
+    .map_err(Into::into)
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn platform_open_nofollow(path: &Path, writable: bool) -> io::Result<File> {
+    OpenOptions::new().read(true).write(writable).open(path)
+}
+
+#[cfg(unix)]
+#[allow(clippy::unnecessary_wraps)]
+fn platform_file_identity(metadata: &fs::Metadata) -> Option<FileIdentity> {
+    use std::os::unix::fs::MetadataExt;
+
+    Some(FileIdentity {
+        first: metadata.dev(),
+        second: metadata.ino(),
+    })
+}
+
+#[cfg(windows)]
+fn platform_file_identity(metadata: &fs::Metadata) -> Option<FileIdentity> {
+    use std::os::windows::fs::MetadataExt;
+
+    Some(FileIdentity {
+        first: u64::from(metadata.volume_serial_number()?),
+        second: metadata.file_index()?,
+    })
+}
+
+#[cfg(not(any(unix, windows)))]
+fn platform_file_identity(_metadata: &fs::Metadata) -> Option<FileIdentity> {
+    None
+}
 
 #[derive(Clone)]
 pub(crate) struct ArtifactReader {
@@ -209,11 +365,13 @@ pub(crate) struct OpenArtifact {
 pub(crate) struct WorkFile {
     file: File,
     path: PathBuf,
+    identity: FileIdentity,
     leaves: Vec<LeafRecord>,
     durable_points: u64,
 }
 
 impl WorkFile {
+    #[cfg(test)]
     pub(crate) fn durable_points(&self) -> u64 {
         self.durable_points
     }
@@ -228,6 +386,15 @@ impl WorkFile {
             .saturating_mul(u64::try_from(mem::size_of::<LeafRecord>()).unwrap_or(u64::MAX))
     }
 
+    pub(crate) fn verified_durable_points(&self) -> Result<u64, IndexError> {
+        self.verify_path()?;
+        Ok(self.durable_points)
+    }
+
+    fn verify_path(&self) -> Result<(), IndexError> {
+        verify_work_path_identity(&self.file, &self.path, self.identity)
+    }
+
     pub(crate) fn append_block(
         &mut self,
         span: SourceSpan,
@@ -235,6 +402,7 @@ impl WorkFile {
         samples: &[IndexSample],
         limits: PrepareLimits,
     ) -> Result<(), IndexError> {
+        self.verify_path()?;
         let retained = span.point_count().min(MAX_NODE_SAMPLES);
         let validation_bytes = retained
             .saturating_mul(u64::try_from(mem::size_of::<(u64, u64)>()).unwrap_or(u64::MAX))
@@ -312,6 +480,9 @@ impl WorkFile {
             .and_then(|()| self.file.write_all(&payload))
             .and_then(|()| self.file.sync_data())
             .map_err(|error| IndexError::io("append and flush", &self.path, error))?;
+        #[cfg(test)]
+        inject_live_work_replacement(self)?;
+        self.verify_path()?;
 
         let sample_offset = frame_offset + FRAME_PREFIX_BYTES + FRAME_FIXED_PAYLOAD_BYTES;
         let sample_bytes = &payload[usize::try_from(FRAME_FIXED_PAYLOAD_BYTES).unwrap_or(72)..];
@@ -342,38 +513,441 @@ pub(crate) fn open_or_create_work(
     preflight_work_initialization(source, limits, control)?;
     let path = sibling_path(target, ".work")?;
     reject_symlink(&path, "work path is a symbolic link")?;
-    let file = match OpenOptions::new().read(true).write(true).open(&path) {
-        Ok(file) => file,
+    match open_work_path(&path) {
+        Ok(file) => open_existing_work(source, target, path, file, limits, control),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            match OpenOptions::new()
-                .read(true)
-                .write(true)
-                .create_new(true)
-                .open(&path)
-            {
-                Ok(file) => file,
-                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-                    OpenOptions::new()
-                        .read(true)
-                        .write(true)
-                        .open(&path)
-                        .map_err(|error| IndexError::io("open raced", &path, error))?
+            match initialize_new_work(source, target, &path, limits)? {
+                InitialWork::Published { file, leaves } => {
+                    open_published_work(source, target, path, file, leaves, limits, control)
                 }
-                Err(error) => return Err(IndexError::io("create", path, error)),
+                InitialWork::Occupied => {
+                    reject_symlink(&path, "work path is a symbolic link")?;
+                    let file = open_work_path(&path)
+                        .map_err(|error| IndexError::io("open raced", &path, error))?;
+                    open_existing_work(source, target, path, file, limits, control)
+                }
             }
         }
-        Err(error) => return Err(IndexError::io("open", path, error)),
-    };
+        Err(error) => Err(IndexError::io("open", path, error)),
+    }
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn open_work_path(path: &Path) -> std::io::Result<File> {
+    use rustix::fs::{CWD, Mode, OFlags, openat};
+
+    openat(
+        CWD,
+        path,
+        OFlags::RDWR | OFlags::CLOEXEC | OFlags::NOFOLLOW,
+        Mode::empty(),
+    )
+    .map(File::from)
+    .map_err(Into::into)
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn open_work_path(_path: &Path) -> std::io::Result<File> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "non-symlink work-file opening is unavailable on this platform",
+    ))
+}
+
+fn open_existing_work(
+    source: &Source,
+    target: &Path,
+    path: PathBuf,
+    file: File,
+    limits: PrepareLimits,
+    control: &OperationControl,
+) -> Result<WorkFile, IndexError> {
     acquire_work_ownership(&file, target)?;
+    let identity = bind_work_path(&file, &path)?;
+    scan_work(source, path, file, identity, limits, control)
+}
+
+fn open_published_work(
+    source: &Source,
+    target: &Path,
+    path: PathBuf,
+    mut file: File,
+    leaves: Vec<LeafRecord>,
+    limits: PrepareLimits,
+    control: &OperationControl,
+) -> Result<WorkFile, IndexError> {
+    if target_exists(target)? {
+        return Err(IndexError::IncompatibleArtifact {
+            reason: "target appeared while its index was being built",
+        });
+    }
+    control.check_cancelled()?;
+    let identity = bind_work_path(&file, &path)?;
     let file_bytes = file
         .metadata()
         .map_err(|error| IndexError::io("inspect", &path, error))?
         .len();
-    if file_bytes == 0 {
-        initialize_work(source, path, file, limits)
-    } else {
-        scan_work(source, path, file, limits, control)
+    if file_bytes != WORK_HEADER_BYTES {
+        drop(leaves);
+        return scan_work(source, path, file, identity, limits, control);
     }
+
+    let mut header = [0_u8; 200];
+    file.seek(SeekFrom::Start(0))
+        .and_then(|_| file.read_exact(&mut header))
+        .map_err(|error| IndexError::io("read", &path, error))?;
+    validate_work_header(source, &header)?;
+    verify_work_path_identity(&file, &path, identity)?;
+    Ok(WorkFile {
+        file,
+        path,
+        identity,
+        leaves,
+        durable_points: 0,
+    })
+}
+
+fn bind_work_path(file: &File, path: &Path) -> Result<FileIdentity, IndexError> {
+    let metadata = file
+        .metadata()
+        .map_err(|error| IndexError::io("inspect live work file at", path, error))?;
+    if !metadata.file_type().is_file() {
+        return Err(IndexError::io(
+            "identify live work file at",
+            path,
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "work descriptor is not a regular file",
+            ),
+        ));
+    }
+    let identity = FileIdentity::read(&metadata)
+        .map_err(|error| IndexError::io("identify live work file at", path, error))?;
+    verify_work_path_identity(file, path, identity)?;
+    Ok(identity)
+}
+
+fn verify_work_path_identity(
+    file: &File,
+    path: &Path,
+    identity: FileIdentity,
+) -> Result<(), IndexError> {
+    let path_metadata = regular_path_metadata(path)
+        .map_err(|error| IndexError::io("verify live work path at", path, error))?;
+    let file_metadata = file
+        .metadata()
+        .map_err(|error| IndexError::io("verify live work descriptor at", path, error))?;
+    let path_identity = FileIdentity::read(&path_metadata)
+        .map_err(|error| IndexError::io("identify live work path at", path, error))?;
+    let file_identity = FileIdentity::read(&file_metadata)
+        .map_err(|error| IndexError::io("identify live work descriptor at", path, error))?;
+    if path_identity != identity || file_identity != identity {
+        return Err(IndexError::io(
+            "verify live work identity at",
+            path,
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "work path no longer names the owned durable file",
+            ),
+        ));
+    }
+    Ok(())
+}
+
+enum InitialWork {
+    Published { file: File, leaves: Vec<LeafRecord> },
+    Occupied,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[allow(dead_code)]
+enum PublicationSemantics {
+    IndependentCopy,
+    AuthoritativeAlias,
+}
+
+#[cfg(target_os = "macos")]
+const PLATFORM_PUBLICATION_SEMANTICS: PublicationSemantics = PublicationSemantics::IndependentCopy;
+
+#[cfg(target_os = "linux")]
+const PLATFORM_PUBLICATION_SEMANTICS: PublicationSemantics =
+    PublicationSemantics::AuthoritativeAlias;
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+const PLATFORM_PUBLICATION_SEMANTICS: PublicationSemantics = PublicationSemantics::IndependentCopy;
+
+struct InitialWorkStage {
+    file: File,
+    path: PathBuf,
+}
+
+impl InitialWorkStage {
+    fn create(work_path: &Path) -> Result<Self, IndexError> {
+        #[cfg(target_os = "linux")]
+        {
+            let (file, path) = create_unnamed_publication_file(work_path, "init")?;
+            Ok(Self { file, path })
+        }
+
+        // Failed named stages are intentionally retained. No portable
+        // filesystem primitive can unlink a pathname conditionally on its
+        // still naming this open file, so cleanup would reintroduce a
+        // replacement race. Each stage is uniquely named, ignored by prepare,
+        // and bounded by WORK_HEADER_BYTES.
+        #[cfg(not(target_os = "linux"))]
+        {
+            let mut last_path = None;
+            for _ in 0..TEMPORARY_CREATE_ATTEMPTS {
+                let mut nonce = [0_u8; 16];
+                getrandom::fill(&mut nonce).map_err(|error| {
+                    IndexError::io(
+                        "choose private initial-work stage for",
+                        work_path,
+                        std::io::Error::other(error.to_string()),
+                    )
+                })?;
+                let suffix = format!(".init-{:032x}", u128::from_le_bytes(nonce));
+                let path = sibling_path(work_path, &suffix)?;
+                match OpenOptions::new()
+                    .read(true)
+                    .write(true)
+                    .create_new(true)
+                    .open(&path)
+                {
+                    Ok(file) => return Ok(Self { file, path }),
+                    Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                        last_path = Some(path);
+                    }
+                    Err(error) => return Err(IndexError::io("create", &path, error)),
+                }
+            }
+            let path = last_path.expect("initial-work stage attempts are nonzero");
+            Err(IndexError::io(
+                "create",
+                &path,
+                std::io::Error::new(
+                    std::io::ErrorKind::AlreadyExists,
+                    "could not reserve a private initial-work stage name",
+                ),
+            ))
+        }
+    }
+}
+
+fn initialize_new_work(
+    source: &Source,
+    target: &Path,
+    work_path: &Path,
+    limits: PrepareLimits,
+) -> Result<InitialWork, IndexError> {
+    let leaves = reserve_leaf_metadata(source.metadata().point_count(), limits)?;
+    let mut stage = InitialWorkStage::create(work_path)?;
+    acquire_work_ownership(&stage.file, target)?;
+    let header = encode_work_header(source);
+    write_and_sync_initial_header(&mut stage.file, &header)
+        .map_err(|error| IndexError::io("write and flush", &stage.path, error))?;
+    #[cfg(all(test, not(target_os = "linux")))]
+    inject_initial_stage_replacement(&stage)?;
+    if !publish_initial_work_no_replace(&stage, work_path)? {
+        return Ok(InitialWork::Occupied);
+    }
+    let published = StablePathFile::open(work_path, true)
+        .map_err(|error| IndexError::io("open published initial work at", work_path, error))?;
+    verify_publication_identity(
+        &stage.file,
+        &published,
+        PLATFORM_PUBLICATION_SEMANTICS,
+        work_path,
+    )?;
+    published
+        .verify_exact_bytes(&header)
+        .map_err(|error| IndexError::io("verify published initial work at", work_path, error))?;
+    #[cfg(target_os = "macos")]
+    acquire_work_ownership(&published.file, target)?;
+    sync_initial_work_target(&published)?;
+    sync_initial_work_parent(work_path)?;
+    #[cfg(test)]
+    inject_initial_target_replacement(work_path)?;
+    published.verify_exact_bytes(&header).map_err(|error| {
+        IndexError::io("revalidate published initial work at", work_path, error)
+    })?;
+    verify_publication_identity(
+        &stage.file,
+        &published,
+        PLATFORM_PUBLICATION_SEMANTICS,
+        work_path,
+    )?;
+
+    #[cfg(target_os = "linux")]
+    let file = stage.file;
+    #[cfg(not(target_os = "linux"))]
+    let file = published.file;
+    Ok(InitialWork::Published { file, leaves })
+}
+
+fn verify_publication_identity(
+    source: &File,
+    target: &StablePathFile,
+    semantics: PublicationSemantics,
+    target_path: &Path,
+) -> Result<(), IndexError> {
+    target
+        .verify_path()
+        .map_err(|error| IndexError::io("verify published file identity at", target_path, error))?;
+    let source_identity =
+        FileIdentity::read(&source.metadata().map_err(|error| {
+            IndexError::io("inspect publication source for", target_path, error)
+        })?)
+        .map_err(|error| IndexError::io("identify publication source for", target_path, error))?;
+    let identity_is_valid = match semantics {
+        PublicationSemantics::IndependentCopy => target.identity != source_identity,
+        PublicationSemantics::AuthoritativeAlias => target.identity == source_identity,
+    };
+    if !identity_is_valid {
+        return Err(IndexError::io(
+            "verify publication identity at",
+            target_path,
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                match semantics {
+                    PublicationSemantics::IndependentCopy => {
+                        "published file unexpectedly aliases its private stage"
+                    }
+                    PublicationSemantics::AuthoritativeAlias => {
+                        "published file does not alias its authoritative stage"
+                    }
+                },
+            ),
+        ));
+    }
+    Ok(())
+}
+
+fn sync_initial_work_target(target: &StablePathFile) -> Result<(), IndexError> {
+    #[cfg(test)]
+    if matches!(initial_work_fault(), Some(InitialWorkFault::TargetSync)) {
+        return Err(IndexError::io(
+            "flush published initial work at",
+            &target.path,
+            io::Error::other("injected initial-work target-sync failure"),
+        ));
+    }
+    target
+        .sync_all()
+        .map_err(|error| IndexError::io("flush published initial work at", &target.path, error))
+}
+
+fn publish_initial_work_no_replace(
+    stage: &InitialWorkStage,
+    work_path: &Path,
+) -> Result<bool, IndexError> {
+    #[cfg(test)]
+    if matches!(initial_work_fault(), Some(InitialWorkFault::PublishRace)) {
+        fs::write(work_path, b"racing replacement").map_err(|error| {
+            IndexError::io("create injected racing work path", work_path, error)
+        })?;
+    }
+    publish_initial_work_no_replace_with(&stage.file, work_path, platform_publish_initial_work)
+}
+
+fn publish_initial_work_no_replace_with<T: ?Sized>(
+    source: &T,
+    work_path: &Path,
+    publish: impl FnOnce(&T, &Path) -> std::io::Result<()>,
+) -> Result<bool, IndexError> {
+    match publish(source, work_path) {
+        Ok(()) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Ok(false),
+        Err(error) => Err(IndexError::io(
+            "atomically publish initial work header at",
+            work_path,
+            error,
+        )),
+    }
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn initial_work_parent(work_path: &Path) -> (&Path, &std::ffi::OsStr) {
+    let parent = work_path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let name = work_path
+        .file_name()
+        .expect("validated index targets have a file name");
+    (parent, name)
+}
+
+#[cfg(target_os = "macos")]
+fn platform_publish_initial_work(stage: &File, work_path: &Path) -> std::io::Result<()> {
+    use rustix::fs::{CloneFlags, fclonefileat};
+
+    let (parent, name) = initial_work_parent(work_path);
+    let directory = File::open(parent)?;
+    fclonefileat(stage, &directory, name, CloneFlags::empty()).map_err(Into::into)
+}
+
+#[cfg(target_os = "linux")]
+fn platform_publish_initial_work(stage: &File, work_path: &Path) -> std::io::Result<()> {
+    use rustix::fs::{AtFlags, linkat};
+    use std::os::fd::AsRawFd;
+
+    let (parent, name) = initial_work_parent(work_path);
+    let directory = File::open(parent)?;
+    let descriptor_path = format!("/proc/self/fd/{}", stage.as_raw_fd());
+    linkat(
+        rustix::fs::CWD,
+        descriptor_path,
+        &directory,
+        name,
+        AtFlags::SYMLINK_FOLLOW,
+    )
+    .map_err(Into::into)
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn platform_publish_initial_work(_stage: &File, _work_path: &Path) -> std::io::Result<()> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "atomic no-replace initial-work publication is unavailable on this platform",
+    ))
+}
+
+fn sync_initial_work_parent(work_path: &Path) -> Result<(), IndexError> {
+    #[cfg(test)]
+    if matches!(initial_work_fault(), Some(InitialWorkFault::ParentSync)) {
+        return Err(IndexError::io(
+            "flush parent directory of",
+            work_path,
+            std::io::Error::other("injected initial-work parent-sync failure"),
+        ));
+    }
+    sync_parent(work_path)
+}
+
+#[cfg(target_os = "linux")]
+fn create_unnamed_publication_file(
+    target: &Path,
+    role: &str,
+) -> Result<(File, PathBuf), IndexError> {
+    use rustix::fs::{Mode, OFlags, openat};
+
+    let (parent, _) = initial_work_parent(target);
+    let diagnostic_path = sibling_path(target, &format!(".{role}.unnamed"))?;
+    let directory = File::open(parent)
+        .map_err(|error| IndexError::io("open parent directory of", target, error))?;
+    let mode = Mode::RUSR | Mode::WUSR | Mode::RGRP | Mode::WGRP | Mode::ROTH | Mode::WOTH;
+    let file = openat(
+        &directory,
+        ".",
+        OFlags::RDWR | OFlags::CLOEXEC | OFlags::TMPFILE,
+        mode,
+    )
+    .map(File::from)
+    .map_err(|error| {
+        IndexError::io("create unnamed publication stage for", target, error.into())
+    })?;
+    Ok((file, diagnostic_path))
 }
 
 fn acquire_work_ownership(file: &File, target: &Path) -> Result<(), IndexError> {
@@ -396,24 +970,183 @@ fn acquire_work_ownership(file: &File, target: &Path) -> Result<(), IndexError> 
     Ok(())
 }
 
-fn initialize_work(
-    source: &Source,
-    path: PathBuf,
-    mut file: File,
-    limits: PrepareLimits,
-) -> Result<WorkFile, IndexError> {
-    let header = encode_work_header(source);
-    file.write_all(&header)
-        .and_then(|()| file.sync_data())
-        .map_err(|error| IndexError::io("write and flush", &path, error))?;
-    sync_parent(&path)?;
-    let leaves = reserve_leaf_metadata(source.metadata().point_count(), limits)?;
-    Ok(WorkFile {
-        file,
-        path,
-        leaves,
-        durable_points: 0,
-    })
+#[cfg(test)]
+thread_local! {
+    static INITIAL_WORK_FAULT: Cell<Option<InitialWorkFault>> = const { Cell::new(None) };
+}
+
+fn write_and_sync_initial_header(file: &mut File, header: &[u8]) -> std::io::Result<()> {
+    #[cfg(test)]
+    match initial_work_fault() {
+        Some(InitialWorkFault::WriteAfter(limit)) => {
+            file.write_all(&header[..limit.min(header.len())])?;
+            return Err(std::io::Error::other(
+                "injected initial-header write failure",
+            ));
+        }
+        Some(InitialWorkFault::HeaderSync) => {
+            file.write_all(header)?;
+            return Err(std::io::Error::other(
+                "injected initial-header sync failure",
+            ));
+        }
+        _ => {}
+    }
+    file.write_all(header).and_then(|()| file.sync_data())
+}
+
+#[cfg(test)]
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum InitialWorkFault {
+    WriteAfter(usize),
+    HeaderSync,
+    #[cfg(not(target_os = "linux"))]
+    StageReplacement,
+    PublishRace,
+    TargetSync,
+    ParentSync,
+    InitialTargetReplacement,
+    LiveWorkReplacement,
+    CompletedWorkReplacement,
+    #[cfg(not(target_os = "linux"))]
+    ArtifactStageReplacement,
+    ArtifactTargetSync,
+    ArtifactParentSync,
+    ArtifactTargetReplacement,
+    OpenCompleteTargetReplacement,
+    SampleSpoolReplacement,
+}
+
+#[cfg(test)]
+fn initial_work_fault() -> Option<InitialWorkFault> {
+    INITIAL_WORK_FAULT.get()
+}
+
+#[cfg(all(test, not(target_os = "linux")))]
+fn inject_initial_stage_replacement(stage: &InitialWorkStage) -> Result<(), IndexError> {
+    if !matches!(
+        initial_work_fault(),
+        Some(InitialWorkFault::StageReplacement)
+    ) {
+        return Ok(());
+    }
+    let displaced = sibling_path(&stage.path, ".displaced")?;
+    fs::rename(&stage.path, &displaced)
+        .map_err(|error| IndexError::io("inject replacement for", &stage.path, error))?;
+    fs::write(&stage.path, b"racing private-stage replacement")
+        .map_err(|error| IndexError::io("inject replacement for", &stage.path, error))
+}
+
+#[cfg(test)]
+fn inject_completed_work_replacement(work: &WorkFile) -> Result<(), IndexError> {
+    if !matches!(
+        initial_work_fault(),
+        Some(InitialWorkFault::CompletedWorkReplacement)
+    ) {
+        return Ok(());
+    }
+    let displaced = sibling_path(&work.path, ".completed-displaced")?;
+    fs::rename(&work.path, &displaced)
+        .map_err(|error| IndexError::io("inject replacement for", &work.path, error))?;
+    fs::write(&work.path, b"racing completed-work replacement")
+        .map_err(|error| IndexError::io("inject replacement for", &work.path, error))
+}
+
+#[cfg(test)]
+fn inject_live_work_replacement(work: &WorkFile) -> Result<(), IndexError> {
+    if !matches!(
+        initial_work_fault(),
+        Some(InitialWorkFault::LiveWorkReplacement)
+    ) {
+        return Ok(());
+    }
+    let displaced = sibling_path(&work.path, ".live-displaced")?;
+    fs::rename(&work.path, &displaced)
+        .map_err(|error| IndexError::io("inject replacement for", &work.path, error))?;
+    fs::write(&work.path, b"racing live-work replacement")
+        .map_err(|error| IndexError::io("inject replacement for", &work.path, error))
+}
+
+#[cfg(test)]
+fn inject_initial_target_replacement(work_path: &Path) -> Result<(), IndexError> {
+    if !matches!(
+        initial_work_fault(),
+        Some(InitialWorkFault::InitialTargetReplacement)
+    ) {
+        return Ok(());
+    }
+    inject_target_replacement(work_path, "initial-target-displaced")
+}
+
+#[cfg(test)]
+fn inject_artifact_target_replacement(target: &Path) -> Result<(), IndexError> {
+    if !matches!(
+        initial_work_fault(),
+        Some(InitialWorkFault::ArtifactTargetReplacement)
+    ) {
+        return Ok(());
+    }
+    inject_target_replacement(target, "artifact-target-displaced")
+}
+
+#[cfg(test)]
+fn inject_open_complete_target_replacement(target: &Path) -> Result<(), IndexError> {
+    if !matches!(
+        initial_work_fault(),
+        Some(InitialWorkFault::OpenCompleteTargetReplacement)
+    ) {
+        return Ok(());
+    }
+    inject_target_replacement(target, "open-target-displaced")
+}
+
+#[cfg(test)]
+fn inject_target_replacement(target: &Path, role: &str) -> Result<(), IndexError> {
+    let target_bytes = fs::metadata(target)
+        .map_err(|error| IndexError::io("inspect injected replacement target", target, error))?
+        .len();
+    let displaced = sibling_path(target, &format!(".{role}"))?;
+    fs::rename(target, &displaced)
+        .map_err(|error| IndexError::io("inject replacement for", target, error))?;
+    let mut replacement = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(target)
+        .map_err(|error| IndexError::io("inject replacement for", target, error))?;
+    replacement
+        .write_all(b"racing published-target replacement")
+        .and_then(|()| replacement.set_len(target_bytes))
+        .map_err(|error| IndexError::io("inject replacement for", target, error))
+}
+
+#[cfg(test)]
+fn inject_temporary_replacement(
+    temporary: &OwnedTemporaryFile,
+    fault: InitialWorkFault,
+) -> Result<(), IndexError> {
+    if initial_work_fault() != Some(fault) {
+        return Ok(());
+    }
+    let displaced = sibling_path(&temporary.path, ".displaced")?;
+    fs::rename(&temporary.path, &displaced)
+        .map_err(|error| IndexError::io("inject replacement for", &temporary.path, error))?;
+    fs::write(&temporary.path, b"racing temporary replacement")
+        .map_err(|error| IndexError::io("inject replacement for", &temporary.path, error))
+}
+
+#[cfg(all(test, not(target_os = "linux")))]
+fn inject_publication_replacement(
+    temporary: &OwnedPublicationFile,
+    fault: InitialWorkFault,
+) -> Result<(), IndexError> {
+    if initial_work_fault() != Some(fault) {
+        return Ok(());
+    }
+    let displaced = sibling_path(&temporary.path, ".displaced")?;
+    fs::rename(&temporary.path, &displaced)
+        .map_err(|error| IndexError::io("inject replacement for", &temporary.path, error))?;
+    fs::write(&temporary.path, b"racing temporary replacement")
+        .map_err(|error| IndexError::io("inject replacement for", &temporary.path, error))
 }
 
 fn preflight_work_initialization(
@@ -441,10 +1174,12 @@ fn scan_work(
     source: &Source,
     path: PathBuf,
     mut file: File,
+    identity: FileIdentity,
     limits: PrepareLimits,
     control: &OperationControl,
 ) -> Result<WorkFile, IndexError> {
     control.check_cancelled()?;
+    verify_work_path_identity(&file, &path, identity)?;
     let file_bytes = file
         .metadata()
         .map_err(|error| IndexError::io("inspect", &path, error))?
@@ -521,9 +1256,11 @@ fn scan_work(
             .and_then(|()| file.sync_data())
             .map_err(|error| IndexError::io("truncate invalid suffix of", &path, error))?;
     }
+    verify_work_path_identity(&file, &path, identity)?;
     Ok(WorkFile {
         file,
         path,
+        identity,
         leaves,
         durable_points,
     })
@@ -1241,9 +1978,8 @@ struct SampleLocation {
 }
 
 struct OwnedTemporaryFile {
-    file: Option<File>,
+    file: File,
     path: PathBuf,
-    owned: bool,
 }
 
 impl OwnedTemporaryFile {
@@ -1259,13 +1995,7 @@ impl OwnedTemporaryFile {
                 .create_new(true)
                 .open(&path)
             {
-                Ok(file) => {
-                    return Ok(Self {
-                        file: Some(file),
-                        path,
-                        owned: true,
-                    });
-                }
+                Ok(file) => return Ok(Self { file, path }),
                 Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
                     last_path = Some(path);
                 }
@@ -1284,24 +2014,39 @@ impl OwnedTemporaryFile {
     }
 
     fn file_mut(&mut self) -> &mut File {
-        self.file.as_mut().expect("owned temporary file is open")
-    }
-
-    fn close_and_remove(mut self, operation: &'static str) -> Result<(), IndexError> {
-        self.file.take();
-        fs::remove_file(&self.path)
-            .map_err(|error| IndexError::io(operation, &self.path, error))?;
-        self.owned = false;
-        Ok(())
+        &mut self.file
     }
 }
 
-impl Drop for OwnedTemporaryFile {
-    fn drop(&mut self) {
-        self.file.take();
-        if self.owned {
-            let _ = fs::remove_file(&self.path);
+struct OwnedPublicationFile {
+    file: File,
+    path: PathBuf,
+}
+
+impl OwnedPublicationFile {
+    fn create(target: &Path, role: &str) -> Result<Self, IndexError> {
+        #[cfg(target_os = "linux")]
+        {
+            let (file, path) = create_unnamed_publication_file(target, role)?;
+            Ok(Self { file, path })
         }
+
+        #[cfg(not(target_os = "linux"))]
+        {
+            let temporary = OwnedTemporaryFile::create(target, role, true)?;
+            Ok(Self {
+                file: temporary.file,
+                path: temporary.path,
+            })
+        }
+    }
+
+    fn file(&self) -> &File {
+        &self.file
+    }
+
+    fn file_mut(&mut self) -> &mut File {
+        &mut self.file
     }
 }
 
@@ -1315,6 +2060,7 @@ pub(crate) fn finalize(
     control: &OperationControl,
 ) -> Result<(), IndexError> {
     control.check_cancelled()?;
+    work.verify_path()?;
     preflight_finalization(work, plan, limits)?;
     if target_exists(target)? {
         return Err(IndexError::IncompatibleArtifact {
@@ -1373,6 +2119,8 @@ pub(crate) fn finalize(
         .file_mut()
         .sync_data()
         .map_err(|error| IndexError::io("flush", &spool_path, error))?;
+    #[cfg(test)]
+    inject_temporary_replacement(&spool, InitialWorkFault::SampleSpoolReplacement)?;
 
     let internal_sample_count = plan
         .nodes
@@ -1433,7 +2181,7 @@ pub(crate) fn finalize(
         sample_offset,
         sample_bytes,
     );
-    let mut temporary = OwnedTemporaryFile::create(target, "tmp", false)?;
+    let mut temporary = OwnedPublicationFile::create(target, "tmp")?;
     let temporary_path = temporary.path.clone();
     let mut artifact_hasher = Hasher::new();
     write_hashed(
@@ -1485,6 +2233,7 @@ pub(crate) fn finalize(
         )?;
     }
     let checksum = artifact_hasher.finalize();
+    let expected_checksum = *checksum.as_bytes();
     temporary
         .file_mut()
         .write_all(checksum.as_bytes())
@@ -1506,28 +2255,146 @@ pub(crate) fn finalize(
             reason: "target appeared before atomic publication",
         });
     }
-    publish_no_replace(&temporary_path, target)?;
-    sync_parent(target)?;
-    temporary.close_and_remove("remove published temporary")?;
-    fs::remove_file(&work.path)
-        .map_err(|error| IndexError::io("remove completed work file", &work.path, error))?;
-    spool.close_and_remove("remove sample spool")?;
-    sync_parent(target)?;
+    #[cfg(all(test, not(target_os = "linux")))]
+    inject_publication_replacement(&temporary, InitialWorkFault::ArtifactStageReplacement)?;
+    publish_no_replace(temporary.file(), target)?;
+    let published = StablePathFile::open(target, false)
+        .map_err(|error| IndexError::io("open published artifact at", target, error))?;
+    verify_publication_identity(
+        temporary.file(),
+        &published,
+        PLATFORM_PUBLICATION_SEMANTICS,
+        target,
+    )?;
+    sync_artifact_target(&published)?;
+    sync_artifact_parent(target)?;
+    #[cfg(test)]
+    inject_artifact_target_replacement(target)?;
+    verify_publication_identity(
+        temporary.file(),
+        &published,
+        PLATFORM_PUBLICATION_SEMANTICS,
+        target,
+    )?;
+    verify_published_artifact(&published, artifact_bytes, expected_checksum, limits)?;
+    #[cfg(test)]
+    inject_completed_work_replacement(work)?;
+    // The complete artifact wins on future opens, but the valid work prefix is
+    // retained. There is no portable unlink operation conditional on this path
+    // still naming `work.file`; removing by pathname could delete a racing
+    // replacement. Explicit caller-owned index-family cleanup may remove both.
     Ok(())
 }
 
-fn publish_no_replace(temporary: &Path, target: &Path) -> Result<(), IndexError> {
-    publish_no_replace_with(temporary, target, |source, destination| {
-        fs::hard_link(source, destination)
-    })
+fn sync_artifact_target(target: &StablePathFile) -> Result<(), IndexError> {
+    #[cfg(test)]
+    if matches!(
+        initial_work_fault(),
+        Some(InitialWorkFault::ArtifactTargetSync)
+    ) {
+        return Err(IndexError::io(
+            "flush published artifact at",
+            &target.path,
+            io::Error::other("injected artifact target-sync failure"),
+        ));
+    }
+    target
+        .sync_all()
+        .map_err(|error| IndexError::io("flush published artifact at", &target.path, error))
 }
 
-fn publish_no_replace_with(
-    temporary: &Path,
-    target: &Path,
-    hard_link: impl FnOnce(&Path, &Path) -> std::io::Result<()>,
+fn sync_artifact_parent(target: &Path) -> Result<(), IndexError> {
+    #[cfg(test)]
+    if matches!(
+        initial_work_fault(),
+        Some(InitialWorkFault::ArtifactParentSync)
+    ) {
+        return Err(IndexError::io(
+            "flush parent directory of",
+            target,
+            io::Error::other("injected artifact parent-sync failure"),
+        ));
+    }
+    sync_parent(target)
+}
+
+fn verify_published_artifact(
+    target: &StablePathFile,
+    expected_bytes: u64,
+    expected_checksum: [u8; 32],
+    limits: PrepareLimits,
 ) -> Result<(), IndexError> {
-    match hard_link(temporary, target) {
+    target
+        .verify_path()
+        .map_err(|error| IndexError::io("revalidate published artifact at", &target.path, error))?;
+    let actual_bytes = target
+        .file
+        .metadata()
+        .map_err(|error| IndexError::io("reinspect published artifact at", &target.path, error))?
+        .len();
+    if actual_bytes != expected_bytes {
+        return Err(IndexError::io(
+            "revalidate published artifact at",
+            &target.path,
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "published artifact length differs from its completed stage",
+            ),
+        ));
+    }
+    let mut file = target.file.try_clone().map_err(|error| {
+        IndexError::io(
+            "duplicate published artifact descriptor at",
+            &target.path,
+            error,
+        )
+    })?;
+    let actual_checksum = verify_artifact_checksum(
+        &mut file,
+        &target.path,
+        expected_bytes,
+        limits,
+        &OperationControl::new(),
+    )
+    .map_err(|error| published_artifact_uncertainty(&target.path, error))?;
+    if actual_checksum != expected_checksum {
+        return Err(IndexError::io(
+            "revalidate published artifact at",
+            &target.path,
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "published artifact checksum differs from its completed stage",
+            ),
+        ));
+    }
+    target
+        .verify_path()
+        .map_err(|error| IndexError::io("revalidate published artifact at", &target.path, error))
+}
+
+fn published_artifact_uncertainty(path: &Path, error: IndexError) -> IndexError {
+    match error {
+        IndexError::Io { source, .. } => {
+            IndexError::io("revalidate published artifact at", path, source)
+        }
+        error => IndexError::io(
+            "revalidate published artifact at",
+            path,
+            io::Error::other(error.to_string()),
+        ),
+    }
+}
+
+fn publish_no_replace(temporary: &File, target: &Path) -> Result<(), IndexError> {
+    publish_no_replace_with(temporary, target, platform_publish_initial_work)
+}
+
+fn publish_no_replace_with<T: ?Sized>(
+    temporary: &T,
+    target: &Path,
+    publish: impl FnOnce(&T, &Path) -> std::io::Result<()>,
+) -> Result<(), IndexError> {
+    match publish(temporary, target) {
         Ok(()) => {}
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
             return Err(IndexError::IncompatibleArtifact {
@@ -1828,7 +2695,11 @@ pub(crate) fn open_complete(
 ) -> Result<OpenArtifact, IndexError> {
     control.check_cancelled()?;
     reject_complete_symlink(target)?;
-    let mut file = File::open(target).map_err(|error| IndexError::io("open", target, error))?;
+    let witness = StablePathFile::open(target, false)
+        .map_err(|error| IndexError::io("open stable complete artifact at", target, error))?;
+    let mut file = witness.file.try_clone().map_err(|error| {
+        IndexError::io("duplicate complete artifact descriptor at", target, error)
+    })?;
     let artifact_bytes = file
         .metadata()
         .map_err(|error| IndexError::io("inspect", target, error))?
@@ -1948,15 +2819,36 @@ pub(crate) fn open_complete(
         limits,
         control,
     )?;
-    if final_checksum != artifact_checksum
-        || fs::metadata(target)
-            .map_err(|error| IndexError::io("reinspect", target, error))?
-            .len()
-            != artifact_bytes
+    if final_checksum != artifact_checksum {
+        return Err(IndexError::io(
+            "revalidate complete artifact at",
+            target,
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "artifact checksum changed while it was being opened",
+            ),
+        ));
+    }
+    #[cfg(test)]
+    inject_open_complete_target_replacement(target)?;
+    witness
+        .verify_path()
+        .map_err(|error| IndexError::io("revalidate complete artifact path at", target, error))?;
+    if witness
+        .file
+        .metadata()
+        .map_err(|error| IndexError::io("reinspect complete artifact at", target, error))?
+        .len()
+        != artifact_bytes
     {
-        return Err(IndexError::CorruptArtifact {
-            reason: "artifact changed while it was being opened",
-        });
+        return Err(IndexError::io(
+            "revalidate complete artifact at",
+            target,
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "artifact length changed while it was being opened",
+            ),
+        ));
     }
     let descriptor = IndexDescriptor {
         source: header.source,
@@ -2597,7 +3489,492 @@ fn reject_complete_symlink(path: &Path) -> Result<(), IndexError> {
 
 #[cfg(test)]
 mod publication_tests {
+    use point_contracts::{AttributeColumns, CoordinateReference, PositionTransform};
+    use source_memory::MemorySource;
+
     use super::*;
+
+    #[cfg(not(target_os = "linux"))]
+    #[test]
+    fn partial_initial_header_stays_private_and_retry_ignores_it() {
+        let source = fixture_source();
+        let fixture = InitialWorkFixture::new("partial-write");
+        let result = with_initial_work_fault(InitialWorkFault::WriteAfter(17), || {
+            open_or_create_work(
+                &source,
+                &fixture.target,
+                PrepareLimits::default(),
+                &OperationControl::new(),
+            )
+        });
+
+        assert!(matches!(result, Err(IndexError::Io { .. })));
+        assert!(
+            !fixture.work.exists(),
+            "a partial initial header must remain private, never canonical"
+        );
+        let stages = fixture.stage_paths();
+        assert_eq!(stages.len(), 1);
+        assert_eq!(fs::metadata(&stages[0]).unwrap().len(), 17);
+        let retained = fs::read(&stages[0]).unwrap();
+
+        let retry = open_or_create_work(
+            &source,
+            &fixture.target,
+            PrepareLimits::default(),
+            &OperationControl::new(),
+        )
+        .unwrap();
+        assert_eq!(retry.durable_points(), 0);
+        assert_eq!(
+            fs::metadata(&fixture.work).unwrap().len(),
+            WORK_HEADER_BYTES
+        );
+        assert_eq!(fs::read(&stages[0]).unwrap(), retained);
+        assert!(fixture.stage_paths().contains(&stages[0]));
+        assert_eq!(fixture.stage_lengths(), vec![17, WORK_HEADER_BYTES]);
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    #[test]
+    fn initial_header_sync_failure_keeps_the_complete_header_private() {
+        let source = fixture_source();
+        let fixture = InitialWorkFixture::new("header-sync");
+        let result = with_initial_work_fault(InitialWorkFault::HeaderSync, || {
+            open_or_create_work(
+                &source,
+                &fixture.target,
+                PrepareLimits::default(),
+                &OperationControl::new(),
+            )
+        });
+
+        assert!(matches!(result, Err(IndexError::Io { .. })));
+        assert!(!fixture.work.exists());
+        let stages = fixture.stage_paths();
+        assert_eq!(stages.len(), 1);
+        assert_eq!(fs::metadata(&stages[0]).unwrap().len(), WORK_HEADER_BYTES);
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    #[test]
+    fn racing_private_stage_replacement_cannot_change_published_header() {
+        let source = fixture_source();
+        let fixture = InitialWorkFixture::new("private-stage-race");
+        let result = with_initial_work_fault(InitialWorkFault::StageReplacement, || {
+            open_or_create_work(
+                &source,
+                &fixture.target,
+                PrepareLimits::default(),
+                &OperationControl::new(),
+            )
+        });
+
+        let work = result.unwrap();
+        assert_eq!(work.durable_points(), 0);
+        assert_eq!(
+            fs::metadata(&fixture.work).unwrap().len(),
+            WORK_HEADER_BYTES
+        );
+        let stages = fixture.stage_paths();
+        assert_eq!(stages.len(), 2);
+        let replacement = stages
+            .into_iter()
+            .find(|path| !path.to_string_lossy().ends_with(".displaced"))
+            .expect("the racing stage replacement is preserved");
+        assert_eq!(
+            fs::read(replacement).unwrap(),
+            b"racing private-stage replacement"
+        );
+    }
+
+    #[test]
+    fn racing_work_replacement_is_preserved_and_never_replaced() {
+        let source = fixture_source();
+        let fixture = InitialWorkFixture::new("publish-race");
+        let result = with_initial_work_fault(InitialWorkFault::PublishRace, || {
+            open_or_create_work(
+                &source,
+                &fixture.target,
+                PrepareLimits::default(),
+                &OperationControl::new(),
+            )
+        });
+
+        assert!(matches!(result, Err(IndexError::CorruptWork { .. })));
+        assert_eq!(fs::read(&fixture.work).unwrap(), b"racing replacement");
+        #[cfg(not(target_os = "linux"))]
+        {
+            let stages = fixture.stage_paths();
+            assert_eq!(stages.len(), 1);
+            assert_eq!(fs::metadata(&stages[0]).unwrap().len(), WORK_HEADER_BYTES);
+        }
+        #[cfg(target_os = "linux")]
+        assert!(fixture.stage_paths().is_empty());
+    }
+
+    #[test]
+    fn parent_sync_uncertainty_retains_a_valid_resumable_header() {
+        let source = fixture_source();
+        let fixture = InitialWorkFixture::new("parent-sync");
+        let result = with_initial_work_fault(InitialWorkFault::ParentSync, || {
+            open_or_create_work(
+                &source,
+                &fixture.target,
+                PrepareLimits::default(),
+                &OperationControl::new(),
+            )
+        });
+
+        let Err(IndexError::Io {
+            operation, path, ..
+        }) = result
+        else {
+            panic!("parent-sync uncertainty must retain its filesystem category");
+        };
+        assert_eq!(operation, "flush parent directory of");
+        assert_eq!(path, fixture.work);
+        assert_eq!(
+            fs::metadata(&fixture.work).unwrap().len(),
+            WORK_HEADER_BYTES
+        );
+        #[cfg(not(target_os = "linux"))]
+        assert_eq!(fixture.stage_lengths(), vec![WORK_HEADER_BYTES]);
+        #[cfg(target_os = "linux")]
+        assert!(fixture.stage_paths().is_empty());
+
+        let reopened = open_or_create_work(
+            &source,
+            &fixture.target,
+            PrepareLimits::default(),
+            &OperationControl::new(),
+        )
+        .unwrap();
+        assert_eq!(reopened.durable_points(), 0);
+    }
+
+    #[test]
+    fn target_sync_uncertainty_retains_a_valid_resumable_header() {
+        let source = fixture_source();
+        let fixture = InitialWorkFixture::new("target-sync");
+        let result = with_initial_work_fault(InitialWorkFault::TargetSync, || {
+            open_or_create_work(
+                &source,
+                &fixture.target,
+                PrepareLimits::default(),
+                &OperationControl::new(),
+            )
+        });
+
+        let Err(IndexError::Io {
+            operation, path, ..
+        }) = result
+        else {
+            panic!("target-sync uncertainty must retain its filesystem category");
+        };
+        assert_eq!(operation, "flush published initial work at");
+        assert_eq!(path, fixture.work);
+        assert_eq!(
+            fs::metadata(&fixture.work).unwrap().len(),
+            WORK_HEADER_BYTES
+        );
+
+        let reopened = open_or_create_work(
+            &source,
+            &fixture.target,
+            PrepareLimits::default(),
+            &OperationControl::new(),
+        )
+        .unwrap();
+        assert_eq!(reopened.durable_points(), 0);
+    }
+
+    #[test]
+    fn final_initial_work_replacement_is_preserved_and_not_acknowledged() {
+        let source = fixture_source();
+        let fixture = InitialWorkFixture::new("initial-final-window");
+        let result = with_initial_work_fault(InitialWorkFault::InitialTargetReplacement, || {
+            open_or_create_work(
+                &source,
+                &fixture.target,
+                PrepareLimits::default(),
+                &OperationControl::new(),
+            )
+        });
+
+        assert!(matches!(result, Err(IndexError::Io { .. })));
+        let replacement = fs::read(&fixture.work).unwrap();
+        assert_eq!(u64::try_from(replacement.len()).unwrap(), WORK_HEADER_BYTES);
+        assert!(replacement.starts_with(b"racing published-target replacement"));
+        let displaced = sibling_path(&fixture.work, ".initial-target-displaced").unwrap();
+        assert_eq!(fs::metadata(displaced).unwrap().len(), WORK_HEADER_BYTES);
+    }
+
+    #[test]
+    fn live_work_replacement_after_sync_is_not_acknowledged_as_durable() {
+        let source = fixture_source();
+        let fixture = InitialWorkFixture::new("live-work-final-window");
+        let mut work = open_or_create_work(
+            &source,
+            &fixture.target,
+            PrepareLimits::default(),
+            &OperationControl::new(),
+        )
+        .unwrap();
+        let span = SourceSpan::new(0, 1).unwrap();
+        let bounds = WorldBounds::new([0.001, 0.002, 0.003], [0.001, 0.002, 0.003]).unwrap();
+        let samples = [IndexSample::new(0, [1, 2, 3])];
+
+        let result = with_initial_work_fault(InitialWorkFault::LiveWorkReplacement, || {
+            work.append_block(span, bounds, &samples, PrepareLimits::default())
+        });
+
+        let Err(IndexError::Io {
+            operation, path, ..
+        }) = result
+        else {
+            panic!("a replaced live work path must fail with its filesystem context");
+        };
+        assert_eq!(operation, "verify live work identity at");
+        assert_eq!(path, fixture.work);
+        assert_eq!(work.durable_points(), 0);
+        assert_eq!(
+            fs::read(&fixture.work).unwrap(),
+            b"racing live-work replacement"
+        );
+        let displaced = sibling_path(&fixture.work, ".live-displaced").unwrap();
+        assert!(fs::metadata(displaced).unwrap().len() > WORK_HEADER_BYTES);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_failed_initial_headers_leave_no_namespace_entry() {
+        let source = fixture_source();
+        let fixture = InitialWorkFixture::new("linux-failed-header");
+
+        for fault in [
+            InitialWorkFault::WriteAfter(17),
+            InitialWorkFault::HeaderSync,
+        ] {
+            let result = with_initial_work_fault(fault, || {
+                open_or_create_work(
+                    &source,
+                    &fixture.target,
+                    PrepareLimits::default(),
+                    &OperationControl::new(),
+                )
+            });
+            assert!(matches!(result, Err(IndexError::Io { .. })));
+            assert!(!fixture.work.exists());
+            assert!(fixture.stage_paths().is_empty());
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_publication_retains_no_named_aliases() {
+        use std::os::unix::fs::MetadataExt;
+
+        let fixture = InitialWorkFixture::new("linux-unnamed-publication");
+        crate::prepare(
+            fixture_source_with_points(Vec::new()),
+            &fixture.target,
+            PrepareLimits::default(),
+        )
+        .blocking_wait()
+        .unwrap();
+
+        assert_eq!(fs::metadata(&fixture.work).unwrap().nlink(), 1);
+        assert_eq!(fs::metadata(&fixture.target).unwrap().nlink(), 1);
+        assert!(fixture.stage_paths().is_empty());
+        assert!(fixture.temporary_paths("tmp").is_empty());
+    }
+
+    #[test]
+    fn completed_work_path_replacement_survives_finalization() {
+        let source = fixture_source_with_points(Vec::new());
+        let fixture = InitialWorkFixture::new("completed-work-race");
+        let work = open_or_create_work(
+            &source,
+            &fixture.target,
+            PrepareLimits::default(),
+            &OperationControl::new(),
+        )
+        .unwrap();
+        let mut work = work;
+        let plan = crate::tree::plan(
+            work.leaves(),
+            PrepareLimits::default(),
+            &OperationControl::new(),
+        )
+        .unwrap();
+        with_initial_work_fault(InitialWorkFault::CompletedWorkReplacement, || {
+            finalize(
+                &source,
+                &fixture.target,
+                &mut work,
+                &plan,
+                PrepareLimits::default(),
+                &OperationControl::new(),
+            )
+        })
+        .unwrap();
+
+        assert!(fixture.target.exists());
+        assert_eq!(
+            fs::read(&fixture.work).unwrap(),
+            b"racing completed-work replacement"
+        );
+        assert_eq!(fixture.completed_displaced_paths().len(), 1);
+        let opened = open_complete(
+            &source,
+            &fixture.target,
+            PrepareLimits::default(),
+            &OperationControl::new(),
+        )
+        .unwrap();
+        assert_eq!(opened.descriptor.source_point_count(), 0);
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    #[test]
+    fn racing_artifact_stage_replacement_cannot_change_complete_target() {
+        let (fixture, source) = finalize_empty_with_fault(
+            "artifact-stage-race",
+            InitialWorkFault::ArtifactStageReplacement,
+        );
+
+        assert_complete_empty(&fixture, &source);
+        assert_racing_temporary_preserved(&fixture, "tmp");
+    }
+
+    #[test]
+    fn racing_sample_spool_replacement_is_preserved() {
+        let (fixture, source) = finalize_empty_with_fault(
+            "sample-spool-race",
+            InitialWorkFault::SampleSpoolReplacement,
+        );
+
+        assert_complete_empty(&fixture, &source);
+        assert_racing_temporary_preserved(&fixture, "samples");
+    }
+
+    #[test]
+    fn artifact_target_sync_uncertainty_retains_the_published_artifact() {
+        let (fixture, source, result) = finalize_empty_result_with_fault(
+            "artifact-target-sync",
+            InitialWorkFault::ArtifactTargetSync,
+        );
+
+        let Err(IndexError::Io {
+            operation, path, ..
+        }) = result
+        else {
+            panic!("artifact target-sync uncertainty must remain an I/O failure");
+        };
+        assert_eq!(operation, "flush published artifact at");
+        assert_eq!(path, fixture.target);
+        assert_complete_empty(&fixture, &source);
+    }
+
+    #[test]
+    fn artifact_parent_sync_uncertainty_retains_the_published_artifact() {
+        let (fixture, source, result) = finalize_empty_result_with_fault(
+            "artifact-parent-sync",
+            InitialWorkFault::ArtifactParentSync,
+        );
+
+        let Err(IndexError::Io {
+            operation, path, ..
+        }) = result
+        else {
+            panic!("artifact parent-sync uncertainty must remain an I/O failure");
+        };
+        assert_eq!(operation, "flush parent directory of");
+        assert_eq!(path, fixture.target);
+        assert_complete_empty(&fixture, &source);
+    }
+
+    #[test]
+    fn final_artifact_replacement_is_preserved_and_not_acknowledged() {
+        let (fixture, source, result) = finalize_empty_result_with_fault(
+            "artifact-final-window",
+            InitialWorkFault::ArtifactTargetReplacement,
+        );
+
+        assert!(matches!(result, Err(IndexError::Io { .. })));
+        let replacement = fs::read(&fixture.target).unwrap();
+        assert!(replacement.starts_with(b"racing published-target replacement"));
+        let displaced = sibling_path(&fixture.target, ".artifact-target-displaced").unwrap();
+        assert_eq!(
+            replacement.len() as u64,
+            fs::metadata(&displaced).unwrap().len()
+        );
+        let opened = open_complete(
+            &source,
+            &displaced,
+            PrepareLimits::default(),
+            &OperationControl::new(),
+        )
+        .unwrap();
+        assert_eq!(opened.descriptor.source_point_count(), 0);
+    }
+
+    #[test]
+    fn final_open_replacement_is_preserved_and_not_returned() {
+        let (fixture, source) = finalize_empty_with_fault(
+            "open-final-window",
+            InitialWorkFault::SampleSpoolReplacement,
+        );
+        let result =
+            with_initial_work_fault(InitialWorkFault::OpenCompleteTargetReplacement, || {
+                open_complete(
+                    &source,
+                    &fixture.target,
+                    PrepareLimits::default(),
+                    &OperationControl::new(),
+                )
+            });
+
+        assert!(matches!(result, Err(IndexError::Io { .. })));
+        let replacement = fs::read(&fixture.target).unwrap();
+        assert!(replacement.starts_with(b"racing published-target replacement"));
+        let displaced = sibling_path(&fixture.target, ".open-target-displaced").unwrap();
+        assert_eq!(
+            replacement.len() as u64,
+            fs::metadata(&displaced).unwrap().len()
+        );
+        let opened = open_complete(
+            &source,
+            &displaced,
+            PrepareLimits::default(),
+            &OperationControl::new(),
+        )
+        .unwrap();
+        assert_eq!(opened.descriptor.source_point_count(), 0);
+    }
+
+    #[test]
+    fn initial_work_publication_error_retains_target_and_os_error() {
+        let stage = Path::new("fixture.pidx.work.init-fixture");
+        let work = Path::new("fixture.pidx.work");
+        let error = publish_initial_work_no_replace_with(stage, work, |_, _| {
+            Err(std::io::Error::from_raw_os_error(13))
+        })
+        .unwrap_err();
+
+        let IndexError::Io {
+            operation,
+            path,
+            source,
+        } = error
+        else {
+            panic!("initial-work publication lost its filesystem category");
+        };
+        assert_eq!(operation, "atomically publish initial work header at");
+        assert_eq!(path, work);
+        assert_eq!(source.raw_os_error(), Some(13));
+    }
 
     #[test]
     fn publication_error_retains_operation_target_and_os_error() {
@@ -2619,5 +3996,182 @@ mod publication_tests {
         assert_eq!(operation, "atomically publish");
         assert_eq!(path, target);
         assert_eq!(source.raw_os_error(), Some(13));
+    }
+
+    fn fixture_source() -> Source {
+        fixture_source_with_points(vec![[1, 2, 3]])
+    }
+
+    fn fixture_source_with_points(ticks: Vec<[i64; 3]>) -> Source {
+        let point_count = ticks.len();
+        let input = MemorySource::from_columns(
+            PositionTransform::new([0.0; 3], [0.001; 3]).unwrap(),
+            CoordinateReference::Unknown,
+            ticks,
+            AttributeColumns::empty(point_count),
+        )
+        .unwrap();
+        source_memory::open(input).blocking_wait().unwrap()
+    }
+
+    fn with_initial_work_fault<T>(fault: InitialWorkFault, run: impl FnOnce() -> T) -> T {
+        struct ResetFault(Option<InitialWorkFault>);
+
+        impl Drop for ResetFault {
+            fn drop(&mut self) {
+                INITIAL_WORK_FAULT.with(|current| current.set(self.0));
+            }
+        }
+
+        let previous = INITIAL_WORK_FAULT.with(|current| current.replace(Some(fault)));
+        let _reset = ResetFault(previous);
+        run()
+    }
+
+    fn finalize_empty_with_fault(
+        label: &str,
+        fault: InitialWorkFault,
+    ) -> (InitialWorkFixture, Source) {
+        let (fixture, source, result) = finalize_empty_result_with_fault(label, fault);
+        result.unwrap();
+        (fixture, source)
+    }
+
+    fn finalize_empty_result_with_fault(
+        label: &str,
+        fault: InitialWorkFault,
+    ) -> (InitialWorkFixture, Source, Result<(), IndexError>) {
+        let source = fixture_source_with_points(Vec::new());
+        let fixture = InitialWorkFixture::new(label);
+        let mut work = open_or_create_work(
+            &source,
+            &fixture.target,
+            PrepareLimits::default(),
+            &OperationControl::new(),
+        )
+        .unwrap();
+        let plan = crate::tree::plan(
+            work.leaves(),
+            PrepareLimits::default(),
+            &OperationControl::new(),
+        )
+        .unwrap();
+        let result = with_initial_work_fault(fault, || {
+            finalize(
+                &source,
+                &fixture.target,
+                &mut work,
+                &plan,
+                PrepareLimits::default(),
+                &OperationControl::new(),
+            )
+        });
+        (fixture, source, result)
+    }
+
+    fn assert_complete_empty(fixture: &InitialWorkFixture, source: &Source) {
+        let opened = open_complete(
+            source,
+            &fixture.target,
+            PrepareLimits::default(),
+            &OperationControl::new(),
+        )
+        .unwrap();
+        assert_eq!(opened.descriptor.source_point_count(), 0);
+    }
+
+    fn assert_racing_temporary_preserved(fixture: &InitialWorkFixture, role: &str) {
+        let paths = fixture.temporary_paths(role);
+        assert_eq!(paths.len(), 2);
+        let replacement = paths
+            .into_iter()
+            .find(|path| !path.to_string_lossy().ends_with(".displaced"))
+            .unwrap();
+        assert_eq!(
+            fs::read(replacement).unwrap(),
+            b"racing temporary replacement"
+        );
+    }
+
+    struct InitialWorkFixture {
+        directory: PathBuf,
+        target: PathBuf,
+        work: PathBuf,
+    }
+
+    impl InitialWorkFixture {
+        fn new(label: &str) -> Self {
+            let directory = std::env::temp_dir().join(format!(
+                "punctra-point-index-initial-work-{label}-{}-{}",
+                std::process::id(),
+                NEXT_TEMPORARY_FILE.fetch_add(1, Ordering::Relaxed)
+            ));
+            fs::create_dir(&directory).unwrap();
+            Self {
+                target: directory.join("fixture.pidx"),
+                work: directory.join("fixture.pidx.work"),
+                directory,
+            }
+        }
+
+        fn stage_paths(&self) -> Vec<PathBuf> {
+            let mut paths = fs::read_dir(&self.directory)
+                .unwrap()
+                .map(|entry| entry.unwrap())
+                .filter(|entry| {
+                    entry
+                        .file_name()
+                        .to_string_lossy()
+                        .starts_with("fixture.pidx.work.init-")
+                })
+                .map(|entry| entry.path())
+                .collect::<Vec<_>>();
+            paths.sort_unstable();
+            paths
+        }
+
+        #[cfg(not(target_os = "linux"))]
+        fn stage_lengths(&self) -> Vec<u64> {
+            let mut lengths = self
+                .stage_paths()
+                .iter()
+                .map(|path| fs::metadata(path).unwrap().len())
+                .collect::<Vec<_>>();
+            lengths.sort_unstable();
+            lengths
+        }
+
+        fn temporary_paths(&self, role: &str) -> Vec<PathBuf> {
+            let marker = format!(".{role}.");
+            fs::read_dir(&self.directory)
+                .unwrap()
+                .map(|entry| entry.unwrap().path())
+                .filter(|path| {
+                    path.file_name()
+                        .unwrap()
+                        .to_string_lossy()
+                        .contains(&marker)
+                })
+                .collect()
+        }
+
+        fn completed_displaced_paths(&self) -> Vec<PathBuf> {
+            fs::read_dir(&self.directory)
+                .unwrap()
+                .map(|entry| entry.unwrap().path())
+                .filter(|path| {
+                    path.file_name()
+                        .unwrap()
+                        .to_string_lossy()
+                        .ends_with(".completed-displaced")
+                })
+                .collect()
+        }
+    }
+
+    impl Drop for InitialWorkFixture {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.directory);
+        }
     }
 }

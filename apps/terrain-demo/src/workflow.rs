@@ -2353,11 +2353,10 @@ fn index_failure(
     control: &OperationControl,
     context: FailureContext,
 ) -> WorkflowFailure {
-    if control.check_cancelled().is_err()
-        || matches!(
-            &error,
-            IndexError::Runtime(foundation_runtime::RuntimeError::Cancelled)
-        )
+    if matches!(
+        &error,
+        IndexError::Runtime(foundation_runtime::RuntimeError::Cancelled)
+    ) || (control.check_cancelled().is_err() && !matches!(&error, IndexError::Io { .. }))
     {
         return cancelled_failure(stage, context);
     }
@@ -2536,11 +2535,7 @@ fn terrain_output_failure(
 ) -> WorkflowFailure {
     match error {
         point_terrain::TerrainError::ExportConflict { .. }
-        | point_terrain::TerrainError::TargetExists { .. }
-        | point_terrain::TerrainError::InvalidArgument {
-            argument: "LandXML target",
-            ..
-        } => WorkflowFailure::new(
+        | point_terrain::TerrainError::TargetExists { .. } => WorkflowFailure::new(
             FailureCode::OutputConflict,
             stage,
             Certainty::DurableFact,
@@ -2550,6 +2545,22 @@ fn terrain_output_failure(
         ),
         point_terrain::TerrainError::ExportIndeterminate { .. } => WorkflowFailure::new(
             FailureCode::PublicationIndeterminate,
+            stage,
+            Certainty::Indeterminate(PublicationPhase::LandXmlTarget),
+            context,
+            error,
+            RecoveryAction::ResumeSameRun,
+        ),
+        error @ point_terrain::TerrainError::TargetChanged { .. } => WorkflowFailure::new(
+            FailureCode::Io,
+            stage,
+            Certainty::PrePublication,
+            context,
+            error,
+            RecoveryAction::ResumeSameRun,
+        ),
+        error @ point_terrain::TerrainError::Io { .. } => WorkflowFailure::new(
+            FailureCode::Io,
             stage,
             Certainty::Indeterminate(PublicationPhase::LandXmlTarget),
             context,
@@ -2599,7 +2610,22 @@ fn report_failure(
             RecoveryAction::RaiseLimitOrNarrow,
         ),
         ReportError::Cancelled => cancelled_failure(stage, context),
-        error => phase_failure(stage, error, context),
+        error @ ReportError::Invalid(_) => WorkflowFailure::new(
+            FailureCode::InvalidRequest,
+            stage,
+            Certainty::PrePublication,
+            context,
+            error,
+            RecoveryAction::CorrectInvalidRequest,
+        ),
+        error @ ReportError::Io { .. } => WorkflowFailure::new(
+            FailureCode::Io,
+            stage,
+            Certainty::PrePublication,
+            context,
+            error,
+            RecoveryAction::RetryAfterRestoringDisk,
+        ),
     }
 }
 
@@ -2645,13 +2671,37 @@ fn journal_failure(
             error,
             RecoveryAction::StopAndPreserve,
         ),
-        error => WorkflowFailure::new(
+        error @ (JournalError::Exists(_) | JournalError::Conflict(_)) => WorkflowFailure::new(
             FailureCode::JournalConflict,
             stage,
             Certainty::DurableFact,
             context,
             error,
             RecoveryAction::StopAndPreserve,
+        ),
+        error @ JournalError::Invalid(_) => WorkflowFailure::new(
+            FailureCode::InvalidRequest,
+            stage,
+            Certainty::PrePublication,
+            context,
+            error,
+            RecoveryAction::CorrectInvalidRequest,
+        ),
+        error @ JournalError::Locked => WorkflowFailure::new(
+            FailureCode::Io,
+            stage,
+            Certainty::PrePublication,
+            context,
+            error,
+            RecoveryAction::ResumeSameRun,
+        ),
+        error @ (JournalError::Entropy | JournalError::Io { .. }) => WorkflowFailure::new(
+            FailureCode::Io,
+            stage,
+            Certainty::PrePublication,
+            context,
+            error,
+            RecoveryAction::RetryAfterRestoringDisk,
         ),
     }
 }
@@ -3086,6 +3136,25 @@ mod tests {
     }
 
     #[test]
+    fn index_io_uncertainty_wins_over_concurrent_ambient_cancellation() {
+        let control = OperationControl::new();
+        control.cancel();
+        let failure = index_failure(
+            WorkflowStage::Index,
+            IndexError::Io {
+                operation: "sync published target",
+                path: PathBuf::from("fixture.pidx"),
+                source: io::Error::other("injected terminal I/O"),
+            },
+            &control,
+            FailureContext::default(),
+        );
+        assert_eq!(failure.code(), "PWF_IO");
+        assert_eq!(failure.certainty(), "indeterminate");
+        assert_eq!(failure.publication_phase(), Some("index-target"));
+    }
+
+    #[test]
     fn run_root_witness_detects_same_path_replacement() {
         let directory = TestDirectory::new("run-root-witness").expect("create test directory");
         let run_root = directory.path().join("run-root");
@@ -3275,6 +3344,7 @@ mod tests {
             WorkflowStage::LandXml,
             point_terrain::TerrainError::ExportIndeterminate {
                 expected_hash: point_contracts::ContentHash::new([1; 32]),
+                source: Box::new(point_terrain::TerrainError::Cancelled),
             },
             &control,
             FailureContext::default(),
@@ -3283,6 +3353,122 @@ mod tests {
         assert_eq!(failure.code(), "PWF_PUBLICATION_INDETERMINATE");
         assert_eq!(failure.certainty(), "indeterminate");
         assert_eq!(failure.publication_phase(), Some("landxml-target"));
+    }
+
+    #[test]
+    fn undifferentiated_landxml_io_requires_target_reconciliation() {
+        let failure = terrain_output_failure(
+            WorkflowStage::LandXml,
+            point_terrain::TerrainError::Io {
+                operation: "publish LandXML target",
+                path: point_terrain::TerrainDiagnostic::new("terrain.xml"),
+                source: io::Error::other("publication outcome is not phase-witnessed"),
+            },
+            &OperationControl::new(),
+            FailureContext::default(),
+        );
+
+        assert_eq!(failure.code(), "PWF_IO");
+        assert_eq!(failure.certainty(), "indeterminate");
+        assert_eq!(failure.publication_phase(), Some("landxml-target"));
+        assert_eq!(
+            failure.recovery_action(),
+            "resume the same Run with the same identities and paths"
+        );
+    }
+
+    #[test]
+    fn landxml_target_replacement_is_retryable_io_not_output_conflict() {
+        let failure = terrain_output_failure(
+            WorkflowStage::LandXml,
+            point_terrain::TerrainError::TargetChanged {
+                path: point_terrain::TerrainDiagnostic::new("terrain.xml"),
+            },
+            &OperationControl::new(),
+            FailureContext::default(),
+        );
+
+        assert_eq!(failure.code(), "PWF_IO");
+        assert_eq!(failure.certainty(), "pre_publication");
+        assert_eq!(
+            failure.recovery_action(),
+            "resume the same Run with the same identities and paths"
+        );
+    }
+
+    #[test]
+    fn report_operational_failures_keep_their_stable_taxonomy() {
+        let context = FailureContext::default();
+        let invalid = report_failure(
+            WorkflowStage::Report,
+            ReportError::Invalid("invalid request"),
+            context,
+        );
+        assert_eq!(invalid.code(), "PWF_INVALID_REQUEST");
+        assert_eq!(invalid.certainty(), "pre_publication");
+
+        let io = report_failure(
+            WorkflowStage::Report,
+            ReportError::Io {
+                operation: "sync report",
+                path: PathBuf::from("audit.json"),
+                source: io::Error::other("disk unavailable"),
+            },
+            context,
+        );
+        assert_eq!(io.code(), "PWF_IO");
+        assert_eq!(io.certainty(), "pre_publication");
+        assert_eq!(
+            io.recovery_action(),
+            "restore disk capacity or permissions, then resume the same Run"
+        );
+    }
+
+    #[test]
+    fn journal_operational_failures_keep_their_stable_taxonomy() {
+        let context = FailureContext::default();
+        for (error, code, action) in [
+            (
+                JournalError::Invalid("bad request"),
+                "PWF_INVALID_REQUEST",
+                "correct the invalid request and start a new Run",
+            ),
+            (
+                JournalError::Locked,
+                "PWF_IO",
+                "resume the same Run with the same identities and paths",
+            ),
+            (
+                JournalError::Entropy,
+                "PWF_IO",
+                "restore disk capacity or permissions, then resume the same Run",
+            ),
+            (
+                JournalError::Exists(PathBuf::from("run.pwf")),
+                "PWF_JOURNAL_CONFLICT",
+                "stop and preserve all Run and Workspace files",
+            ),
+            (
+                JournalError::Corrupt("bad frame"),
+                "PWF_JOURNAL_CORRUPT",
+                "stop and preserve all Run and Workspace files",
+            ),
+        ] {
+            let failure = journal_failure(WorkflowStage::Intent, error, context);
+            assert_eq!(failure.code(), code);
+            assert_eq!(failure.recovery_action(), action);
+        }
+        let io = journal_failure(
+            WorkflowStage::Intent,
+            JournalError::Io {
+                operation: "sync intent",
+                path: PathBuf::from("run.pwf"),
+                source: io::Error::other("disk unavailable"),
+            },
+            context,
+        );
+        assert_eq!(io.code(), "PWF_IO");
+        assert_eq!(io.certainty(), "pre_publication");
     }
 
     #[test]

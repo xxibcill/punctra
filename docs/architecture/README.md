@@ -28,6 +28,13 @@ audited Workflow Run without turning orchestration policy into another
 foundation crate. A crate exists only when its behavior, direct tests, and a
 caller exist.
 
+The [v0.9 public interface review](v0.9-interface-review.md) classifies the
+reusable, adapter-author, test-support, and private application surfaces and
+records the caller obligations that are not visible in Rust type signatures.
+The companion [v0.9 support, upgrade, and recovery
+matrix](v0.9-support-matrix.md) defines the exact supported workflow profile,
+artifact policies, platform evidence, and operator actions.
+
 ## Current module shape
 
 An arrow means “may depend on.” Cycles are forbidden.

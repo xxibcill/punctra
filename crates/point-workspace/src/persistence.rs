@@ -3,7 +3,6 @@ use std::fs::{self, File, OpenOptions, Permissions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use blake3::Hasher;
 use foundation_runtime::OperationControl;
@@ -37,6 +36,7 @@ pub(crate) const REJECTION_BYTES: usize = 184;
 const REVISION_HEADER_BYTES_U32: u32 = 384;
 const ROW_BYTES_U32: u32 = 10;
 const CHECKSUM_READ_BUFFER_BYTES: usize = 64 * 1024;
+const WITNESS_READ_BUFFER_BYTES: usize = 8 * 1024;
 const REVISION_ID_DOMAIN: &[u8] = b"punctra-workspace-revision-v1";
 const DELTA_DOMAIN: &[u8] = b"punctra-workspace-delta-v1";
 const BLOCK_DOMAIN: &[u8] = b"punctra-workspace-revision-block-v1";
@@ -50,6 +50,7 @@ const REVERT_REQUEST_DOMAIN: &[u8] = b"punctra-workspace-revert-request-v1";
 pub(crate) enum FaultPoint {
     ManifestStage,
     ManifestLink,
+    ManifestTargetSync,
     ManifestDirectorySync,
     ManifestParentDirectorySync,
     ManifestLostAcknowledgement,
@@ -59,6 +60,7 @@ pub(crate) enum FaultPoint {
     CandidateReadOnly,
     CandidateRevalidate,
     ReadyLink,
+    ReadyTargetSync,
     OperationsDirectorySync,
     ReadyCleanup,
     OperationLostAcknowledgement,
@@ -67,10 +69,12 @@ pub(crate) enum FaultPoint {
     RejectionReadOnly,
     RejectionRevalidate,
     RejectionLink,
+    RejectionTargetSync,
     RejectionDirectorySync,
     RejectionCleanup,
     RejectionLostAcknowledgement,
     RevisionLink,
+    RevisionTargetSync,
     RevisionDirectorySync,
     RevisionLostAcknowledgement,
     RecoveryOperationsSync,
@@ -425,39 +429,252 @@ pub(crate) enum PersistenceError {
     Input(#[source] Box<WorkspaceError>),
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct FileIdentity {
+    first: u64,
+    second: u64,
+}
+
+impl FileIdentity {
+    fn read(metadata: &fs::Metadata, path: &Path) -> Result<Self, PersistenceError> {
+        platform_file_identity(metadata).ok_or_else(|| {
+            io_error(
+                "establish stable file identity for",
+                path,
+                io::Error::new(
+                    io::ErrorKind::Unsupported,
+                    "stable file identity is unavailable on this platform",
+                ),
+            )
+        })
+    }
+}
+
+#[derive(Debug)]
+struct ScratchStage {
+    path: PathBuf,
+    file: File,
+    identity: FileIdentity,
+}
+
+impl ScratchStage {
+    fn path(&self) -> &Path {
+        &self.path
+    }
+
+    fn file_mut(&mut self) -> &mut File {
+        &mut self.file
+    }
+
+    fn seal(self) -> Result<OpenFileWitness, PersistenceError> {
+        let Self {
+            path,
+            file,
+            identity,
+        } = self;
+        make_open_file_read_only(&file, &path)?;
+        drop(file);
+        OpenFileWitness::open_expected(path, identity)
+    }
+}
+
+#[derive(Debug)]
+struct OpenFileWitness {
+    path: PathBuf,
+    file: File,
+    identity: FileIdentity,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PublicationSemantics {
+    IndependentCopy,
+    AuthoritativeAlias,
+}
+
+impl OpenFileWitness {
+    fn open(path: PathBuf) -> Result<Self, PersistenceError> {
+        let initial = regular_file_metadata(&path)?;
+        let identity = FileIdentity::read(&initial, &path)?;
+        Self::open_expected(path, identity)
+    }
+
+    fn open_expected(
+        path: PathBuf,
+        expected_identity: FileIdentity,
+    ) -> Result<Self, PersistenceError> {
+        let initial = regular_file_metadata(&path)?;
+        if FileIdentity::read(&initial, &path)? != expected_identity {
+            return corrupt(&path, "private file identity changed before it was opened");
+        }
+        let file =
+            File::open(&path).map_err(|source| io_error("open private file", &path, source))?;
+        let opened = file
+            .metadata()
+            .map_err(|source| io_error("inspect open private file", &path, source))?;
+        if FileIdentity::read(&opened, &path)? != expected_identity {
+            return corrupt(&path, "private file changed while it was being opened");
+        }
+        let witness = Self {
+            path,
+            file,
+            identity: expected_identity,
+        };
+        witness.verify()?;
+        Ok(witness)
+    }
+
+    fn path(&self) -> &Path {
+        &self.path
+    }
+
+    fn verify(&self) -> Result<(), PersistenceError> {
+        let path_metadata = regular_file_metadata(&self.path)?;
+        let file_metadata = self
+            .file
+            .metadata()
+            .map_err(|source| io_error("inspect owned private file", &self.path, source))?;
+        if FileIdentity::read(&path_metadata, &self.path)? != self.identity
+            || FileIdentity::read(&file_metadata, &self.path)? != self.identity
+        {
+            return corrupt(&self.path, "private file identity changed");
+        }
+        Ok(())
+    }
+
+    fn publish_independent_no_replace(
+        &self,
+        target: &Path,
+    ) -> Result<OpenFileWitness, PersistenceError> {
+        self.publish_no_replace_with(
+            target,
+            platform_publish_independent_copy,
+            PublicationSemantics::IndependentCopy,
+        )
+    }
+
+    fn publish_authoritative_alias_no_replace(
+        &self,
+        target: &Path,
+    ) -> Result<OpenFileWitness, PersistenceError> {
+        self.publish_no_replace_with(
+            target,
+            platform_publish_authoritative_alias,
+            PublicationSemantics::AuthoritativeAlias,
+        )
+    }
+
+    fn publish_no_replace_with(
+        &self,
+        target: &Path,
+        publish: impl FnOnce(&File, &Path) -> io::Result<()>,
+        semantics: PublicationSemantics,
+    ) -> Result<OpenFileWitness, PersistenceError> {
+        self.verify()?;
+        match publish(&self.file, target) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                return Err(PersistenceError::PublicationConflict);
+            }
+            Err(source) => return Err(io_error("publish immutable file", target, source)),
+        }
+        let target = OpenFileWitness::open(target.to_path_buf())?;
+        target.verify_copy_of(self, semantics)?;
+        Ok(target)
+    }
+
+    fn verify_copy_of(
+        &self,
+        source: &OpenFileWitness,
+        semantics: PublicationSemantics,
+    ) -> Result<(), PersistenceError> {
+        source.verify()?;
+        self.verify()?;
+        match semantics {
+            PublicationSemantics::IndependentCopy if self.identity == source.identity => {
+                return corrupt(&self.path, "published file aliases a temporary source");
+            }
+            PublicationSemantics::AuthoritativeAlias if self.identity != source.identity => {
+                return corrupt(
+                    &self.path,
+                    "published file does not share its authoritative source identity",
+                );
+            }
+            _ => {}
+        }
+        let source_facts = open_file_facts(&source.file, &source.path)?;
+        let target_facts = open_file_facts(&self.file, &self.path)?;
+        source.verify()?;
+        self.verify()?;
+        if source_facts != target_facts {
+            return corrupt(&self.path, "published file differs from its owned source");
+        }
+        Ok(())
+    }
+
+    fn verify_exact_bytes(&self, expected: &[u8]) -> Result<(), PersistenceError> {
+        self.verify()?;
+        let (length, digest) = open_file_facts(&self.file, &self.path)?;
+        self.verify()?;
+        if length != u64::try_from(expected.len()).unwrap_or(u64::MAX)
+            || digest != domain_hash(FILE_DOMAIN, expected)
+        {
+            return corrupt(&self.path, "private file differs from its expected bytes");
+        }
+        Ok(())
+    }
+
+    fn verify_revision(&self, expected: &ValidatedRevision) -> Result<(), PersistenceError> {
+        self.verify()?;
+        let (length, digest) = open_file_facts(&self.file, &self.path)?;
+        self.verify()?;
+        if self.identity != expected.file_identity
+            || length != expected.file_bytes()
+            || digest != expected.file_digest
+        {
+            return corrupt(
+                &self.path,
+                "private Revision differs from its fully validated facts",
+            );
+        }
+        Ok(())
+    }
+
+    fn sync(&self) -> Result<(), PersistenceError> {
+        self.verify()?;
+        self.file
+            .sync_all()
+            .map_err(|source| io_error("sync published file", &self.path, source))?;
+        self.verify()
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct SealedRevision {
     file: ValidatedRevision,
+    stage: OpenFileWitness,
 }
 
 pub(crate) struct PreparedRejection {
     facts: RejectionFacts,
-    scratch_path: PathBuf,
     target_path: PathBuf,
-    file: Option<File>,
+    stage: Option<ScratchStage>,
     bytes: [u8; REJECTION_BYTES],
-    cleanup_scratch: bool,
 }
 
 impl PreparedRejection {
     pub(crate) fn working_bytes(&self) -> u64 {
         (REJECTION_BYTES as u64)
-            .saturating_add(u64::try_from(self.scratch_path.capacity()).unwrap_or(u64::MAX))
+            .saturating_add(self.stage.as_ref().map_or(0, |stage| {
+                u64::try_from(stage.path.capacity()).unwrap_or(u64::MAX)
+            }))
             .saturating_add(u64::try_from(self.target_path.capacity()).unwrap_or(u64::MAX))
     }
 }
 
-impl Drop for PreparedRejection {
-    fn drop(&mut self) {
-        if self.cleanup_scratch {
-            let _ = fs::remove_file(&self.scratch_path);
-        }
-    }
-}
-
 impl SealedRevision {
-    pub(crate) fn path(&self) -> &Path {
-        &self.file.path
+    #[cfg(test)]
+    fn path(&self) -> &Path {
+        self.stage.path()
     }
 
     pub(crate) const fn file_bytes(&self) -> u64 {
@@ -473,16 +690,12 @@ impl SealedRevision {
     }
 }
 
-impl Drop for SealedRevision {
-    fn drop(&mut self) {
-        let _ = fs::remove_file(&self.file.path);
-    }
-}
-
 #[derive(Clone, Debug)]
 pub(crate) struct ValidatedRevision {
     path: PathBuf,
     facts: RevisionFacts,
+    file_identity: FileIdentity,
+    file_digest: DigestBytes,
     blocks: Arc<Vec<BlockMetadata>>,
 }
 
@@ -683,6 +896,27 @@ impl Catalog {
 }
 
 impl ValidatedRevision {
+    fn open_bound_file(&self) -> Result<File, PersistenceError> {
+        let witness = OpenFileWitness::open_expected(self.path.clone(), self.file_identity)?;
+        Ok(witness.file)
+    }
+
+    fn verify_open_file_binding(&self, file: &File) -> Result<(), PersistenceError> {
+        let path_metadata = regular_file_metadata(&self.path)?;
+        let file_metadata = file
+            .metadata()
+            .map_err(|source| io_error("inspect open Revision file", &self.path, source))?;
+        if FileIdentity::read(&path_metadata, &self.path)? != self.file_identity
+            || FileIdentity::read(&file_metadata, &self.path)? != self.file_identity
+        {
+            return corrupt(
+                &self.path,
+                "Revision path no longer names its fully validated file",
+            );
+        }
+        Ok(())
+    }
+
     pub(crate) const fn operation(&self) -> OperationBytes {
         self.facts.candidate.operation
     }
@@ -747,6 +981,18 @@ impl ValidatedRevision {
         Self {
             path,
             facts: self.facts,
+            file_identity: self.file_identity,
+            file_digest: self.file_digest,
+            blocks: Arc::clone(&self.blocks),
+        }
+    }
+
+    fn with_file_identity(&self, file_identity: FileIdentity) -> Self {
+        Self {
+            path: self.path.clone(),
+            facts: self.facts,
+            file_identity,
+            file_digest: self.file_digest,
             blocks: Arc::clone(&self.blocks),
         }
     }
@@ -764,7 +1010,7 @@ impl ValidatedRevision {
         limits: RowReadLimits,
         control: &'a OperationControl,
     ) -> Result<RevisionRows<'a>, PersistenceError> {
-        let mut file = open_read(&self.path)?;
+        let mut file = self.open_bound_file()?;
         let actual_file_bytes = file
             .metadata()
             .map_err(|source| io_error("read metadata", &self.path, source))?
@@ -784,6 +1030,7 @@ impl ValidatedRevision {
                 "Revision row source header differs from its validated facts",
             );
         }
+        self.verify_open_file_binding(&file)?;
         let mut file_hasher = Hasher::new();
         file_hasher.update(FILE_DOMAIN);
         file_hasher.update(&header);
@@ -840,7 +1087,27 @@ impl ValidatedRevision {
         usage: &mut OverlayUsage,
         control: &OperationControl,
     ) -> Result<(), PersistenceError> {
-        let mut file = open_read(&self.path)?;
+        let overlaps = self.blocks.iter().any(|block| {
+            block.first_ordinal <= last_ordinal && block.last_ordinal >= first_ordinal
+        });
+        let mut file = self.open_bound_file()?;
+        if !overlaps {
+            self.verify_open_file_binding(&file)?;
+            return Ok(());
+        }
+        let actual_digest = hash_file_prefix(
+            &mut file,
+            self.file_bytes(),
+            limits.max_block_bytes,
+            &self.path,
+            Some(control),
+        )?;
+        if actual_digest != self.file_digest {
+            return corrupt(
+                &self.path,
+                "Revision overlay source differs from its validated whole-file digest",
+            );
+        }
         for block in self.blocks.iter().filter(|block| {
             block.first_ordinal <= last_ordinal && block.last_ordinal >= first_ordinal
         }) {
@@ -877,6 +1144,7 @@ impl ValidatedRevision {
                 &self.path,
             )?;
         }
+        self.verify_open_file_binding(&file)?;
         Ok(())
     }
 }
@@ -1021,6 +1289,7 @@ impl RevisionRows<'_> {
                 "Revision row source delta digest differs from validated facts",
             );
         }
+        self.revision.verify_open_file_binding(&self.file)?;
         Ok(())
     }
 }
@@ -1031,14 +1300,13 @@ pub(crate) struct Store {
     operations: PathBuf,
     revisions: PathBuf,
     scratch: PathBuf,
-    lock: Option<File>,
-    remove_on_drop: bool,
+    _lock: File,
 }
 
 impl Store {
     pub(crate) fn create(root: &Path) -> Result<Self, PersistenceError> {
         let resumed = create_or_recognize_incomplete_root(root)?;
-        let mut lock = Some(acquire_lock(root)?);
+        let lock = acquire_lock(root)?;
         if resumed {
             validate_incomplete_root(root)?;
         }
@@ -1052,24 +1320,14 @@ impl Store {
             sync_directory(root)?;
             Ok(())
         })();
-        if let Err(error) = setup {
-            let detached = detach_incomplete_root(root);
-            drop(lock.take());
-            if let Some(detached) = detached {
-                let _ = fs::remove_dir_all(detached);
-            }
-            return Err(error);
-        }
-        let store = Self {
+        setup?;
+        Ok(Self {
             root: root.to_path_buf(),
             operations,
             revisions,
             scratch,
-            lock,
-            remove_on_drop: true,
-        };
-        store.clean_recognized_scratch()?;
-        Ok(store)
+            _lock: lock,
+        })
     }
 
     pub(crate) fn open(root: &Path) -> Result<Self, PersistenceError> {
@@ -1083,8 +1341,7 @@ impl Store {
             operations,
             revisions,
             scratch,
-            lock: Some(lock),
-            remove_on_drop: false,
+            _lock: lock,
         })
     }
 
@@ -1111,35 +1368,47 @@ impl Store {
         &mut self,
         facts: &ManifestFacts,
     ) -> Result<(), PersistenceError> {
-        let (scratch_path, mut scratch_file) = create_temporary(&self.scratch, "manifest", "tmp")?;
-        let result = (|| {
+        let mut stage = create_temporary(&self.scratch, "manifest", "tmp")?;
+        (|| {
             inject_fault(&self.root, FaultPoint::ManifestStage)?;
             let bytes = encode_manifest(facts);
-            write_all(&mut scratch_file, &bytes, &scratch_path)?;
-            sync_file(&scratch_file, &scratch_path)?;
-            drop(scratch_file);
-            make_read_only(&scratch_path)?;
+            let stage_path = stage.path().to_path_buf();
+            write_all(stage.file_mut(), &bytes, &stage_path)?;
+            sync_file(stage.file_mut(), &stage_path)?;
+            let stage = stage.seal()?;
+            stage.verify_exact_bytes(&bytes)?;
             let manifest_path = self.root.join("manifest.pwm");
             inject_fault(&self.root, FaultPoint::ManifestLink)?;
-            publish_link(&scratch_path, &manifest_path)?;
+            let published = stage.publish_independent_no_replace(&manifest_path)?;
+            inject_fault(&self.root, FaultPoint::ManifestTargetSync)?;
+            published.sync()?;
             inject_fault(&self.root, FaultPoint::ManifestDirectorySync)?;
             sync_directory(&self.root)?;
             inject_fault(&self.root, FaultPoint::ManifestParentDirectorySync)?;
             sync_directory(workspace_parent(&self.root))?;
-            self.remove_on_drop = false;
             // Creation has no uncertainty result. Once the manifest directory
             // entry is synced, completion must win over a lost acknowledgement.
             let _ = inject_fault(&self.root, FaultPoint::ManifestLostAcknowledgement);
-            // The parent sync is the create commit point. Scratch cleanup cannot
-            // revoke a successfully created Workspace.
-            let _ = remove_file(&scratch_path);
-            let _ = sync_directory(&self.scratch);
+            published.verify_copy_of(&stage, PublicationSemantics::IndependentCopy)?;
+            published.verify_exact_bytes(&bytes)?;
+            if self.read_manifest()? != *facts {
+                return corrupt(&manifest_path, "published manifest facts changed");
+            }
+            published.verify_exact_bytes(&bytes)?;
             Ok(())
-        })();
-        if result.is_err() {
-            let _ = fs::remove_file(&scratch_path);
+        })()
+    }
+
+    pub(crate) fn manifest_is_published_as(
+        &self,
+        facts: &ManifestFacts,
+    ) -> Result<bool, PersistenceError> {
+        let path = self.root.join("manifest.pwm");
+        match fs::symlink_metadata(&path) {
+            Ok(_) => self.read_manifest().map(|actual| actual == *facts),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+            Err(source) => Err(io_error("inspect Workspace manifest", &path, source)),
         }
-        result
     }
 
     pub(crate) fn read_manifest(&self) -> Result<ManifestFacts, PersistenceError> {
@@ -1161,12 +1430,8 @@ impl Store {
     where
         I: IntoIterator<Item = Result<RevisionRow, PersistenceError>>,
     {
-        let (path, file) = create_temporary(&self.scratch, "revision", "tmp")?;
-        let result = write_candidate_file(&path, file, facts, rows, limits, control);
-        if result.is_err() {
-            let _ = fs::remove_file(&path);
-        }
-        result
+        let stage = create_temporary(&self.scratch, "revision", "tmp")?;
+        write_candidate_file(stage, facts, rows, limits, control)
     }
 
     pub(crate) fn prepare_ready(
@@ -1228,13 +1493,21 @@ impl Store {
     {
         mark_publication_attempted()?;
         inject_fault(&self.root, FaultPoint::ReadyLink)?;
-        publish_link(sealed.path(), &prepared.path)?;
+        sealed.stage.verify_revision(&sealed.file)?;
+        let published = sealed
+            .stage
+            .publish_independent_no_replace(&prepared.path)?;
+        inject_fault(&self.root, FaultPoint::ReadyTargetSync)?;
+        published.sync()?;
         inject_fault(&self.root, FaultPoint::OperationsDirectorySync)?;
         sync_directory(&self.operations)?;
         inject_fault(&self.root, FaultPoint::OperationLostAcknowledgement)?;
         inject_fault(&self.root, FaultPoint::ReadyCleanup)?;
-        remove_file(sealed.path())?;
-        sync_directory(&self.scratch)?;
+        let prepared =
+            Arc::new(Arc::unwrap_or_clone(prepared).with_file_identity(published.identity));
+        published.verify_copy_of(&sealed.stage, PublicationSemantics::IndependentCopy)?;
+        published.verify_revision(&prepared)?;
+        sealed.stage.verify_revision(&sealed.file)?;
         Ok(prepared)
     }
 
@@ -1305,11 +1578,18 @@ impl Store {
     {
         mark_publication_attempted()?;
         inject_fault(&self.root, FaultPoint::RevisionLink)?;
-        publish_link(&ready.path, &prepared.path)?;
+        let source = OpenFileWitness::open(ready.path.clone())?;
+        source.verify_revision(ready)?;
+        let published = source.publish_authoritative_alias_no_replace(&prepared.path)?;
         mark_directory_sync_attempted();
+        inject_fault(&self.root, FaultPoint::RevisionTargetSync)?;
+        published.sync()?;
         inject_fault(&self.root, FaultPoint::RevisionDirectorySync)?;
         sync_directory(&self.revisions)?;
         inject_fault(&self.root, FaultPoint::RevisionLostAcknowledgement)?;
+        published.verify_copy_of(&source, PublicationSemantics::AuthoritativeAlias)?;
+        source.verify_revision(ready)?;
+        published.verify_revision(&prepared)?;
         Ok(prepared)
     }
 
@@ -1352,14 +1632,12 @@ impl Store {
             max_working_bytes,
             "rejection publication working bytes",
         )?;
-        let (scratch_path, file) = create_temporary(&self.scratch, "reject", "tmp")?;
+        let stage = create_temporary(&self.scratch, "reject", "tmp")?;
         let prepared = PreparedRejection {
             facts,
-            scratch_path,
             target_path: self.rejection_path(facts.operation),
-            file: Some(file),
+            stage: Some(stage),
             bytes: encode_rejection(&facts),
-            cleanup_scratch: true,
         };
         ensure_at_most(
             prepared.working_bytes(),
@@ -1390,30 +1668,39 @@ impl Store {
     where
         F: FnOnce() -> Result<(), PersistenceError>,
     {
-        let mut scratch_file = prepared
-            .file
+        let mut stage = prepared
+            .stage
             .take()
             .expect("prepared rejection retains its writable stage");
         (|| {
+            let stage_path = stage.path().to_path_buf();
             inject_fault(&self.root, FaultPoint::RejectionStage)?;
-            write_all(&mut scratch_file, &prepared.bytes, &prepared.scratch_path)?;
+            write_all(stage.file_mut(), &prepared.bytes, &stage_path)?;
             inject_fault(&self.root, FaultPoint::RejectionFileSync)?;
-            sync_file(&scratch_file, &prepared.scratch_path)?;
-            drop(scratch_file);
+            sync_file(stage.file_mut(), &stage_path)?;
             inject_fault(&self.root, FaultPoint::RejectionReadOnly)?;
-            make_read_only(&prepared.scratch_path)?;
+            let stage = stage.seal()?;
             inject_fault(&self.root, FaultPoint::RejectionRevalidate)?;
-            validate_rejection_file(&prepared.scratch_path, Some(prepared.facts.operation))?;
+            validate_rejection_file(stage.path(), Some(prepared.facts.operation))?;
+            stage.verify_exact_bytes(&prepared.bytes)?;
             mark_publication_attempted()?;
             inject_fault(&self.root, FaultPoint::RejectionLink)?;
-            publish_link(&prepared.scratch_path, &prepared.target_path)?;
+            let published = stage.publish_independent_no_replace(&prepared.target_path)?;
+            inject_fault(&self.root, FaultPoint::RejectionTargetSync)?;
+            published.sync()?;
             inject_fault(&self.root, FaultPoint::RejectionDirectorySync)?;
             sync_directory(&self.operations)?;
             inject_fault(&self.root, FaultPoint::RejectionLostAcknowledgement)?;
             inject_fault(&self.root, FaultPoint::RejectionCleanup)?;
-            remove_file(&prepared.scratch_path)?;
-            prepared.cleanup_scratch = false;
-            sync_directory(&self.scratch)
+            published.verify_copy_of(&stage, PublicationSemantics::IndependentCopy)?;
+            published.verify_exact_bytes(&prepared.bytes)?;
+            if validate_rejection_file(&prepared.target_path, Some(prepared.facts.operation))?
+                != prepared.facts
+            {
+                return corrupt(&prepared.target_path, "published rejection facts changed");
+            }
+            published.verify_exact_bytes(&prepared.bytes)?;
+            Ok(())
         })()
     }
 
@@ -1423,7 +1710,6 @@ impl Store {
         limits: CatalogLimits,
         control: &OperationControl,
     ) -> Result<Catalog, PersistenceError> {
-        self.clean_recognized_scratch()?;
         let mut ledger = RecoveryLedger::default();
         let revisions = self.read_revisions(manifest, limits, &mut ledger, control)?;
         let operations =
@@ -1456,33 +1742,6 @@ impl Store {
     fn revision_path(&self, sequence: u64, revision: RevisionBytes) -> PathBuf {
         self.revisions
             .join(format!("{sequence:020}-{}.pwr", encode_hex(&revision)))
-    }
-
-    fn clean_recognized_scratch(&self) -> Result<(), PersistenceError> {
-        let mut removed_any = false;
-        for entry in read_directory(&self.scratch)? {
-            let entry =
-                entry.map_err(|source| io_error("read scratch entry", &self.scratch, source))?;
-            let name = entry.file_name();
-            let name = name.to_string_lossy();
-            if is_recognized_scratch(&name) {
-                let file_type = entry
-                    .file_type()
-                    .map_err(|source| io_error("inspect scratch entry", &self.scratch, source))?;
-                if !file_type.is_file() || file_type.is_symlink() {
-                    return corrupt(
-                        &entry.path(),
-                        "recognized scratch entry is not a private real file",
-                    );
-                }
-                remove_file(&entry.path())?;
-                removed_any = true;
-            }
-        }
-        if removed_any {
-            sync_directory(&self.scratch)?;
-        }
-        Ok(())
     }
 
     fn revision_entries(
@@ -1894,41 +2153,6 @@ fn validate_candidate_request(
     Ok(())
 }
 
-impl Drop for Store {
-    fn drop(&mut self) {
-        if !self.remove_on_drop {
-            return;
-        }
-        // Detach the exact create-new tree while its advisory lock is still
-        // held. A concurrent create can then use the original pathname and
-        // cannot be deleted by cleanup of this detached inode tree.
-        let detached = detach_incomplete_root(&self.root);
-        drop(self.lock.take());
-        if let Some(detached) = detached {
-            let _ = fs::remove_dir_all(detached);
-        }
-    }
-}
-
-fn detach_incomplete_root(root: &Path) -> Option<PathBuf> {
-    static NEXT_ABORT: AtomicU64 = AtomicU64::new(0);
-    let parent = root.parent()?;
-    let name = root.file_name()?.to_string_lossy();
-    for _ in 0..64 {
-        let sequence = NEXT_ABORT.fetch_add(1, Ordering::Relaxed);
-        let target = parent.join(format!(
-            ".{name}.punctra-aborted-{}-{sequence:016x}",
-            std::process::id()
-        ));
-        match fs::rename(root, &target) {
-            Ok(()) => return Some(target),
-            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
-            Err(_) => return None,
-        }
-    }
-    None
-}
-
 #[derive(Clone, Copy)]
 enum OperationFileKind {
     Ready,
@@ -1937,8 +2161,7 @@ enum OperationFileKind {
 
 #[allow(clippy::too_many_lines)]
 fn write_candidate_file<I>(
-    path: &Path,
-    mut file: File,
+    stage: ScratchStage,
     facts: CandidateFacts,
     rows: I,
     limits: WriteLimits,
@@ -1947,6 +2170,11 @@ fn write_candidate_file<I>(
 where
     I: IntoIterator<Item = Result<RevisionRow, PersistenceError>>,
 {
+    let ScratchStage {
+        path,
+        mut file,
+        identity,
+    } = stage;
     let mut rows = rows.into_iter();
     let Some(first_row) = rows.next() else {
         return Err(PersistenceError::NoRows);
@@ -1963,7 +2191,7 @@ where
         limits.max_temporary_bytes,
         "commit temporary bytes",
     )?;
-    write_all(&mut file, &[0_u8; REVISION_HEADER_BYTES], path)?;
+    write_all(&mut file, &[0_u8; REVISION_HEADER_BYTES], &path)?;
 
     let rows_per_block = usize::try_from(limits.rows_per_block).map_err(|_| {
         limit(
@@ -2012,7 +2240,7 @@ where
     for row in std::iter::once(Ok(first_row)).chain(rows) {
         check_cancelled(control)?;
         let row = row?;
-        validate_next_row(row, last_ordinal, path)?;
+        validate_next_row(row, last_ordinal, &path)?;
         last_ordinal = Some(row.ordinal);
         row_count = row_count
             .checked_add(1)
@@ -2022,7 +2250,7 @@ where
         if block_payload.len() == rows_per_block.saturating_mul(ROW_BYTES) {
             flush_block(
                 &mut file,
-                path,
+                &path,
                 &mut block_payload,
                 &mut block_count,
                 &mut delta_hasher,
@@ -2033,7 +2261,7 @@ where
     if !block_payload.is_empty() {
         flush_block(
             &mut file,
-            path,
+            &path,
             &mut block_payload,
             &mut block_count,
             &mut delta_hasher,
@@ -2041,7 +2269,7 @@ where
         )?;
     }
     drop(block_payload);
-    let body_bytes = stream_position(&mut file, path)?;
+    let body_bytes = stream_position(&mut file, &path)?;
     ensure_at_most(
         body_bytes.saturating_add(FOOTER_BYTES as u64),
         limits.max_file_bytes,
@@ -2058,24 +2286,24 @@ where
         body_bytes,
     };
     let header = encode_revision_header(&revision_facts);
-    seek(&mut file, 0, path)?;
-    write_all(&mut file, &header, path)?;
+    seek(&mut file, 0, &path)?;
+    write_all(&mut file, &header, &path)?;
     let file_digest = hash_file_prefix(
         &mut file,
         body_bytes,
         limits.max_working_bytes,
-        path,
+        &path,
         Some(control),
     )?;
-    seek(&mut file, body_bytes, path)?;
-    write_all(&mut file, &encode_footer(body_bytes, file_digest), path)?;
-    inject_fault(path, FaultPoint::CandidateStage)?;
-    inject_fault(path, FaultPoint::CandidateFileSync)?;
-    sync_file(&file, path)?;
-    inject_fault(path, FaultPoint::CandidateClose)?;
+    seek(&mut file, body_bytes, &path)?;
+    write_all(&mut file, &encode_footer(body_bytes, file_digest), &path)?;
+    inject_fault(&path, FaultPoint::CandidateStage)?;
+    inject_fault(&path, FaultPoint::CandidateFileSync)?;
+    sync_file(&file, &path)?;
+    inject_fault(&path, FaultPoint::CandidateClose)?;
+    inject_fault(&path, FaultPoint::CandidateReadOnly)?;
+    make_open_file_read_only(&file, &path)?;
     drop(file);
-    inject_fault(path, FaultPoint::CandidateReadOnly)?;
-    make_read_only(path)?;
 
     let read_limits = ReadLimits {
         max_file_bytes: limits.max_file_bytes,
@@ -2084,9 +2312,14 @@ where
         max_block_bytes: limits.max_block_bytes,
         max_working_bytes: limits.max_working_bytes,
     };
-    inject_fault(path, FaultPoint::CandidateRevalidate)?;
-    let validated = validate_revision_file(path, read_limits, Some(control))?;
-    Ok(SealedRevision { file: validated })
+    inject_fault(&path, FaultPoint::CandidateRevalidate)?;
+    let stage = OpenFileWitness::open_expected(path.clone(), identity)?;
+    let validated = validate_revision_file(&path, read_limits, Some(control))?;
+    stage.verify()?;
+    Ok(SealedRevision {
+        file: validated,
+        stage,
+    })
 }
 
 fn revision_base_metadata_bytes(path: &PathBuf) -> u64 {
@@ -2253,7 +2486,24 @@ fn validate_revision_file(
     limits: ReadLimits,
     control: Option<&OperationControl>,
 ) -> Result<ValidatedRevision, PersistenceError> {
-    let mut file = open_read(path)?;
+    let witness = OpenFileWitness::open(path.to_path_buf())?;
+    let file = witness
+        .file
+        .try_clone()
+        .map_err(|source| io_error("clone open Revision file", path, source))?;
+    let validated = validate_revision_open_file(file, witness.identity, path, limits, control)?;
+    witness.verify()?;
+    Ok(validated)
+}
+
+#[allow(clippy::too_many_lines)]
+fn validate_revision_open_file(
+    mut file: File,
+    file_identity: FileIdentity,
+    path: &Path,
+    limits: ReadLimits,
+    control: Option<&OperationControl>,
+) -> Result<ValidatedRevision, PersistenceError> {
     let file_bytes = file
         .metadata()
         .map_err(|source| io_error("read metadata", path, source))?
@@ -2409,9 +2659,18 @@ fn validate_revision_file(
     if footer_body_bytes != facts.body_bytes {
         return corrupt(path, "Revision footer and header lengths differ");
     }
+    let file_digest = hash_file_prefix(
+        &mut file,
+        file_bytes,
+        limits.max_working_bytes,
+        path,
+        control,
+    )?;
     Ok(ValidatedRevision {
         path: path.to_path_buf(),
         facts,
+        file_identity,
+        file_digest,
         blocks: Arc::new(blocks),
     })
 }
@@ -3221,7 +3480,7 @@ fn create_temporary(
     directory: &Path,
     prefix: &str,
     suffix: &str,
-) -> Result<(PathBuf, File), PersistenceError> {
+) -> Result<ScratchStage, PersistenceError> {
     for _ in 0..64 {
         let mut random = [0_u8; 16];
         getrandom::fill(&mut random).map_err(|_| PersistenceError::Entropy)?;
@@ -3232,7 +3491,17 @@ fn create_temporary(
             .create_new(true)
             .open(&path)
         {
-            Ok(file) => return Ok((path, file)),
+            Ok(file) => {
+                let metadata = file
+                    .metadata()
+                    .map_err(|source| io_error("inspect created scratch file", &path, source))?;
+                let identity = FileIdentity::read(&metadata, &path)?;
+                return Ok(ScratchStage {
+                    path,
+                    file,
+                    identity,
+                });
+            }
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
             Err(source) => return Err(io_error("create scratch file", &path, source)),
         }
@@ -3240,7 +3509,8 @@ fn create_temporary(
     Err(PersistenceError::Entropy)
 }
 
-// Cleanup deliberately recognizes only canonical lowercase private filenames.
+// Incomplete-root recovery recognizes only canonical lowercase private names;
+// it ignores their bytes and never removes them.
 #[allow(clippy::case_sensitive_file_extension_comparisons)]
 fn is_recognized_scratch(name: &str) -> bool {
     const RANDOM_HEX_BYTES: usize = 16 * 2;
@@ -3290,22 +3560,144 @@ fn acquire_lock(root: &Path) -> Result<File, PersistenceError> {
     }
 }
 
-fn publish_link(source: &Path, target: &Path) -> Result<(), PersistenceError> {
-    fs::hard_link(source, target).map_err(|error| {
-        if error.kind() == io::ErrorKind::AlreadyExists {
-            PersistenceError::PublicationConflict
-        } else {
-            io_error("publish immutable link", target, error)
-        }
+#[cfg(target_os = "macos")]
+fn platform_publish_authoritative_alias(source: &File, target: &Path) -> io::Result<()> {
+    use std::os::unix::fs::MetadataExt;
+
+    let metadata = source.metadata()?;
+    let descriptor_path = PathBuf::from(format!("/.vol/{}/{}", metadata.dev(), metadata.ino()));
+    fs::hard_link(descriptor_path, target)
+}
+
+#[cfg(target_os = "macos")]
+fn platform_publish_independent_copy(source: &File, target: &Path) -> io::Result<()> {
+    use rustix::fs::{CloneFlags, fclonefileat};
+
+    let (parent, name) = publication_parent(target)?;
+    let directory = File::open(parent)?;
+    fclonefileat(source, &directory, name, CloneFlags::empty()).map_err(Into::into)
+}
+
+#[cfg(target_os = "linux")]
+fn platform_publish_authoritative_alias(source: &File, target: &Path) -> io::Result<()> {
+    use rustix::fs::{AtFlags, linkat};
+
+    let (parent, name) = publication_parent(target)?;
+    let directory = File::open(parent)?;
+    linkat(source, "", &directory, name, AtFlags::EMPTY_PATH).map_err(Into::into)
+}
+
+#[cfg(target_os = "linux")]
+fn platform_publish_independent_copy(_source: &File, _target: &Path) -> io::Result<()> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "independent descriptor-bound publication is unavailable for named Linux stages",
+    ))
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn platform_publish_authoritative_alias(_source: &File, _target: &Path) -> io::Result<()> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "descriptor-bound authoritative publication is unavailable on this platform",
+    ))
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn platform_publish_independent_copy(_source: &File, _target: &Path) -> io::Result<()> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "descriptor-bound independent publication is unavailable on this platform",
+    ))
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn publication_parent(target: &Path) -> io::Result<(&Path, &std::ffi::OsStr)> {
+    let parent = target
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let name = target.file_name().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "publication target has no filename",
+        )
+    })?;
+    Ok((parent, name))
+}
+
+fn open_file_facts(file: &File, path: &Path) -> Result<(u64, DigestBytes), PersistenceError> {
+    let mut file = file
+        .try_clone()
+        .map_err(|source| io_error("clone open file for verification", path, source))?;
+    let length = file
+        .metadata()
+        .map_err(|source| io_error("inspect open file for verification", path, source))?
+        .len();
+    seek(&mut file, 0, path)?;
+    let mut hasher = Hasher::new();
+    hasher.update(FILE_DOMAIN);
+    let mut remaining = length;
+    let mut buffer = [0_u8; WITNESS_READ_BUFFER_BYTES];
+    while remaining > 0 {
+        let requested = usize::try_from(remaining.min(WITNESS_READ_BUFFER_BYTES as u64))
+            .expect("bounded witness read fits usize");
+        read_exact(&mut file, &mut buffer[..requested], path)?;
+        hasher.update(&buffer[..requested]);
+        remaining -= requested as u64;
+    }
+    let final_length = file
+        .metadata()
+        .map_err(|source| io_error("reinspect open file after verification", path, source))?
+        .len();
+    if final_length != length {
+        return corrupt(path, "private file length changed during verification");
+    }
+    Ok((length, *hasher.finalize().as_bytes()))
+}
+
+fn regular_file_metadata(path: &Path) -> Result<fs::Metadata, PersistenceError> {
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|source| io_error("inspect private file", path, source))?;
+    if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
+        return corrupt(path, "private file is not a regular non-symlink file");
+    }
+    Ok(metadata)
+}
+
+#[cfg(unix)]
+#[allow(clippy::unnecessary_wraps)]
+fn platform_file_identity(metadata: &fs::Metadata) -> Option<FileIdentity> {
+    use std::os::unix::fs::MetadataExt;
+
+    Some(FileIdentity {
+        first: metadata.dev(),
+        second: metadata.ino(),
     })
 }
 
-fn make_read_only(path: &Path) -> Result<(), PersistenceError> {
-    let metadata =
-        fs::metadata(path).map_err(|source| io_error("read permissions", path, source))?;
+#[cfg(windows)]
+fn platform_file_identity(metadata: &fs::Metadata) -> Option<FileIdentity> {
+    use std::os::windows::fs::MetadataExt;
+
+    Some(FileIdentity {
+        first: u64::from(metadata.volume_serial_number()?),
+        second: metadata.file_index()?,
+    })
+}
+
+#[cfg(not(any(unix, windows)))]
+fn platform_file_identity(_metadata: &fs::Metadata) -> Option<FileIdentity> {
+    None
+}
+
+fn make_open_file_read_only(file: &File, path: &Path) -> Result<(), PersistenceError> {
+    let metadata = file
+        .metadata()
+        .map_err(|source| io_error("read permissions", path, source))?;
     let mut permissions: Permissions = metadata.permissions();
     permissions.set_readonly(true);
-    fs::set_permissions(path, permissions)
+    file.set_permissions(permissions)
         .map_err(|source| io_error("seal file read-only", path, source))
 }
 
@@ -3468,10 +3860,6 @@ fn stream_position(file: &mut File, path: &Path) -> Result<u64, PersistenceError
 fn sync_file(file: &File, path: &Path) -> Result<(), PersistenceError> {
     file.sync_all()
         .map_err(|source| io_error("sync file", path, source))
-}
-
-fn remove_file(path: &Path) -> Result<(), PersistenceError> {
-    fs::remove_file(path).map_err(|source| io_error("remove scratch file", path, source))
 }
 
 fn file_length(path: &Path) -> Result<u64, PersistenceError> {
@@ -4142,7 +4530,287 @@ mod tests {
     }
 
     #[test]
-    fn empty_candidate_needs_no_block_capacity_and_sealed_drop_cleans_stage() {
+    fn temporary_publication_rejects_a_hard_link_alias() {
+        let directory = TestDirectory::new();
+        fs::create_dir(directory.path()).unwrap();
+        let mut stage = create_temporary(directory.path(), "revision", "tmp").unwrap();
+        let source_path = stage.path().to_path_buf();
+        write_all(stage.file_mut(), b"owned stage", &source_path).unwrap();
+        sync_file(stage.file_mut(), &source_path).unwrap();
+        let witness = stage.seal().unwrap();
+        let target = directory.path().join("target");
+
+        let result = witness.publish_no_replace_with(
+            &target,
+            |_, target| fs::hard_link(&source_path, target),
+            PublicationSemantics::IndependentCopy,
+        );
+
+        assert!(matches!(result, Err(PersistenceError::Corrupt { .. })));
+        assert_eq!(
+            FileIdentity::read(&fs::metadata(&source_path).unwrap(), &source_path).unwrap(),
+            FileIdentity::read(&fs::metadata(&target).unwrap(), &target).unwrap(),
+        );
+    }
+
+    #[test]
+    fn temporary_publication_preserves_a_racing_stage_replacement() {
+        let directory = TestDirectory::new();
+        fs::create_dir(directory.path()).unwrap();
+        let mut stage = create_temporary(directory.path(), "reject", "tmp").unwrap();
+        let stage_path = stage.path().to_path_buf();
+        write_all(stage.file_mut(), b"owned stage", &stage_path).unwrap();
+        sync_file(stage.file_mut(), &stage_path).unwrap();
+        let witness = stage.seal().unwrap();
+        let displaced = directory.path().join("owned-stage-displaced");
+        let target = directory.path().join("published");
+
+        let result = witness.publish_no_replace_with(
+            &target,
+            |source, target| {
+                fs::rename(&stage_path, &displaced)?;
+                fs::write(&stage_path, b"racing stage replacement")?;
+                platform_publish_independent_copy(source, target)
+            },
+            PublicationSemantics::IndependentCopy,
+        );
+
+        assert!(result.is_err());
+        assert_eq!(fs::read(&stage_path).unwrap(), b"racing stage replacement");
+        assert_eq!(fs::read(&displaced).unwrap(), b"owned stage");
+    }
+
+    #[test]
+    fn temporary_publication_preserves_a_post_publication_target_replacement() {
+        let directory = TestDirectory::new();
+        fs::create_dir(directory.path()).unwrap();
+        let mut stage = create_temporary(directory.path(), "manifest", "tmp").unwrap();
+        let stage_path = stage.path().to_path_buf();
+        write_all(stage.file_mut(), b"owned stage", &stage_path).unwrap();
+        sync_file(stage.file_mut(), &stage_path).unwrap();
+        let witness = stage.seal().unwrap();
+        let target = directory.path().join("published");
+        let displaced = directory.path().join("published-displaced");
+
+        let result = witness.publish_no_replace_with(
+            &target,
+            |source, target| {
+                platform_publish_independent_copy(source, target)?;
+                fs::rename(target, &displaced)?;
+                fs::write(target, b"racing target replacement")
+            },
+            PublicationSemantics::IndependentCopy,
+        );
+
+        assert!(result.is_err());
+        assert_eq!(fs::read(&target).unwrap(), b"racing target replacement");
+        assert_eq!(fs::read(&displaced).unwrap(), b"owned stage");
+    }
+
+    #[test]
+    fn manifest_final_window_replacement_is_detected_and_preserved() {
+        let directory = TestDirectory::new();
+        let mut store = Store::create(directory.path()).expect("create premanifest Store");
+        let expected = manifest();
+        let target = directory.path().join("manifest.pwm");
+        let displaced = directory.path().join("manifest-published-displaced");
+        let fault = test_fault::Guard::install(
+            directory.path(),
+            FaultPoint::ManifestLostAcknowledgement,
+            test_fault::Action::PauseThenContinue,
+        );
+
+        let result = std::thread::scope(|scope| {
+            let worker = scope.spawn(|| store.publish_manifest(&expected));
+            fault.wait_until_hit();
+            fs::rename(&target, &displaced).unwrap();
+            fs::write(&target, b"racing manifest replacement").unwrap();
+            fault.release();
+            worker.join().unwrap()
+        });
+
+        assert!(matches!(result, Err(PersistenceError::Corrupt { .. })));
+        assert_eq!(fs::read(&target).unwrap(), b"racing manifest replacement");
+        assert_eq!(fs::read(&displaced).unwrap(), encode_manifest(&expected));
+    }
+
+    #[test]
+    fn ready_final_window_replacement_is_detected_and_preserved() {
+        let directory = TestDirectory::new();
+        let store = initialized_store(&directory);
+        let sealed = sealed(&store);
+        let target = store.ready_path(candidate().operation);
+        let displaced = directory.path().join("ready-published-displaced");
+        let fault = test_fault::Guard::install(
+            directory.path(),
+            FaultPoint::OperationLostAcknowledgement,
+            test_fault::Action::PauseThenContinue,
+        );
+
+        let result = std::thread::scope(|scope| {
+            let worker = scope.spawn(|| store.publish_ready(&sealed, || Ok(())));
+            fault.wait_until_hit();
+            fs::rename(&target, &displaced).unwrap();
+            fs::write(&target, b"racing ready replacement").unwrap();
+            fault.release();
+            worker.join().unwrap()
+        });
+
+        assert!(matches!(result, Err(PersistenceError::Corrupt { .. })));
+        assert_eq!(fs::read(&target).unwrap(), b"racing ready replacement");
+        assert_eq!(
+            fs::read(&displaced).unwrap(),
+            fs::read(sealed.path()).unwrap()
+        );
+    }
+
+    #[test]
+    fn rejection_final_window_replacement_is_detected_and_preserved() {
+        let directory = TestDirectory::new();
+        let store = initialized_store(&directory);
+        let facts = RejectionFacts {
+            workspace: manifest().workspace,
+            operation: candidate().operation,
+            request_digest: candidate().request_digest,
+            reason_code: 3,
+            expected_head: [0; REVISION_ID_BYTES],
+            actual_head: [0; REVISION_ID_BYTES],
+        };
+        let target = store.rejection_path(facts.operation);
+        let displaced = directory.path().join("rejection-published-displaced");
+        let fault = test_fault::Guard::install(
+            directory.path(),
+            FaultPoint::RejectionLostAcknowledgement,
+            test_fault::Action::PauseThenContinue,
+        );
+
+        let result = std::thread::scope(|scope| {
+            let worker = scope.spawn(|| store.publish_rejection(facts, || Ok(())));
+            fault.wait_until_hit();
+            fs::rename(&target, &displaced).unwrap();
+            fs::write(&target, b"racing rejection replacement").unwrap();
+            fault.release();
+            worker.join().unwrap()
+        });
+
+        assert!(matches!(result, Err(PersistenceError::Corrupt { .. })));
+        assert_eq!(fs::read(&target).unwrap(), b"racing rejection replacement");
+        assert_eq!(fs::read(&displaced).unwrap(), encode_rejection(&facts));
+    }
+
+    #[test]
+    fn revision_final_window_replacement_is_detected_and_preserved() {
+        let directory = TestDirectory::new();
+        let store = initialized_store(&directory);
+        let sealed = sealed(&store);
+        let ready = store
+            .publish_ready(&sealed, || Ok(()))
+            .expect("publish ready payload");
+        let target = store.revision_path(ready.sequence(), ready.revision());
+        let displaced = directory.path().join("revision-published-displaced");
+        let fault = test_fault::Guard::install(
+            directory.path(),
+            FaultPoint::RevisionLostAcknowledgement,
+            test_fault::Action::PauseThenContinue,
+        );
+
+        let result = std::thread::scope(|scope| {
+            let worker = scope.spawn(|| store.publish_revision(&ready, || Ok(()), || {}));
+            fault.wait_until_hit();
+            fs::rename(&target, &displaced).unwrap();
+            fs::write(&target, b"racing Revision replacement").unwrap();
+            fault.release();
+            worker.join().unwrap()
+        });
+
+        assert!(matches!(result, Err(PersistenceError::Corrupt { .. })));
+        assert_eq!(fs::read(&target).unwrap(), b"racing Revision replacement");
+        assert_eq!(
+            fs::read(&displaced).unwrap(),
+            fs::read(&ready.path).unwrap()
+        );
+    }
+
+    #[test]
+    fn ready_to_revision_rejects_an_exact_byte_ready_replacement() {
+        let directory = TestDirectory::new();
+        let store = initialized_store(&directory);
+        let sealed = sealed(&store);
+        let ready = store
+            .publish_ready(&sealed, || Ok(()))
+            .expect("publish ready payload");
+        let ready_path = ready.path.clone();
+        let displaced = directory.path().join("ready-identity-displaced");
+        let bytes = fs::read(&ready_path).unwrap();
+        fs::rename(&ready_path, &displaced).unwrap();
+        fs::write(&ready_path, &bytes).unwrap();
+        let target = store.revision_path(ready.sequence(), ready.revision());
+
+        let result = store.publish_revision(&ready, || Ok(()), || {});
+
+        assert!(matches!(result, Err(PersistenceError::Corrupt { .. })));
+        assert!(
+            !target.exists(),
+            "a replaced ready path must publish no Revision"
+        );
+        assert_eq!(fs::read(&ready_path).unwrap(), bytes);
+        assert_eq!(fs::read(&displaced).unwrap(), bytes);
+        assert_ne!(
+            FileIdentity::read(&fs::metadata(&ready_path).unwrap(), &ready_path).unwrap(),
+            FileIdentity::read(&fs::metadata(&displaced).unwrap(), &displaced).unwrap(),
+        );
+    }
+
+    #[test]
+    fn live_revision_reads_reject_an_exact_byte_path_replacement() {
+        let directory = TestDirectory::new();
+        let store = initialized_store(&directory);
+        let sealed = sealed(&store);
+        let ready = store
+            .publish_ready(&sealed, || Ok(()))
+            .expect("publish ready payload");
+        let revision = store
+            .publish_revision(&ready, || Ok(()), || {})
+            .expect("publish Revision");
+        let displaced = directory.path().join("live-revision-displaced");
+        let bytes = fs::read(&revision.path).unwrap();
+        fs::rename(&revision.path, &displaced).unwrap();
+        fs::write(&revision.path, &bytes).unwrap();
+
+        assert!(matches!(
+            revision.rows(
+                RowReadLimits {
+                    max_frames: 16,
+                    max_payload_bytes: 1 << 20,
+                    max_working_bytes: 1 << 20,
+                },
+                &OperationControl::new(),
+            ),
+            Err(PersistenceError::Corrupt { .. })
+        ));
+
+        let mut values = [0_u8; 2];
+        assert!(matches!(
+            revision.apply_rows(
+                40,
+                41,
+                &mut values,
+                OverlayLimits {
+                    max_blocks: 16,
+                    max_payload_bytes: 1 << 20,
+                    max_block_bytes: 1 << 20,
+                },
+                &mut OverlayUsage::default(),
+                &OperationControl::new(),
+            ),
+            Err(PersistenceError::Corrupt { .. })
+        ));
+        assert_eq!(fs::read(&revision.path).unwrap(), bytes);
+        assert_eq!(fs::read(displaced).unwrap(), bytes);
+    }
+
+    #[test]
+    fn empty_candidate_needs_no_block_capacity_and_sealed_drop_retains_stage() {
         let directory = TestDirectory::new();
         let store = initialized_store(&directory);
         let no_block_limits = WriteLimits {
@@ -4169,7 +4837,7 @@ mod tests {
         let path = stage.path().to_path_buf();
         assert!(path.exists());
         drop(stage);
-        assert!(!path.exists());
+        assert!(path.exists());
     }
 
     #[test]
@@ -4179,21 +4847,14 @@ mod tests {
         File::create(directory.path().join("workspace.lock")).expect("partial lock");
         fs::create_dir(directory.path().join("operations")).expect("partial operations");
         fs::create_dir(directory.path().join("scratch")).expect("partial scratch");
-        File::create(
-            directory
-                .path()
-                .join("scratch/revision-deadbeefdeadbeefdeadbeefdeadbeef.tmp"),
-        )
-        .expect("recognized partial stage");
+        let retained = directory
+            .path()
+            .join("scratch/revision-deadbeefdeadbeefdeadbeefdeadbeef.tmp");
+        File::create(&retained).expect("recognized partial stage");
 
         let mut store = Store::create(directory.path()).expect("resume recognized partial create");
         assert!(directory.path().join("revisions").is_dir());
-        assert_eq!(
-            fs::read_dir(directory.path().join("scratch"))
-                .expect("cleaned scratch")
-                .count(),
-            0
-        );
+        assert!(retained.is_file());
         store
             .publish_manifest(&manifest())
             .expect("complete resumed create");
@@ -4216,18 +4877,45 @@ mod tests {
     }
 
     #[test]
-    fn create_parent_sync_failure_remains_precommit_and_cleans_owned_root() {
+    fn create_post_link_sync_failures_retain_the_indeterminate_owned_root() {
+        for point in [
+            FaultPoint::ManifestTargetSync,
+            FaultPoint::ManifestDirectorySync,
+            FaultPoint::ManifestParentDirectorySync,
+        ] {
+            let directory = TestDirectory::new();
+            let mut store = Store::create(directory.path()).expect("create premanifest Store");
+            let fault =
+                test_fault::Guard::install(directory.path(), point, test_fault::Action::Error);
+            assert!(store.publish_manifest(&manifest()).is_err());
+            drop(fault);
+            drop(store);
+            let store = Store::open(directory.path()).expect("retained Workspace remains openable");
+            assert_eq!(store.read_manifest().unwrap(), manifest());
+        }
+    }
+
+    #[test]
+    fn manifest_reconciliation_distinguishes_absent_exact_and_conflicting_targets() {
         let directory = TestDirectory::new();
         let mut store = Store::create(directory.path()).expect("create premanifest Store");
-        let fault = test_fault::Guard::install(
-            directory.path(),
-            FaultPoint::ManifestParentDirectorySync,
-            test_fault::Action::Error,
-        );
-        assert!(store.publish_manifest(&manifest()).is_err());
-        drop(fault);
-        drop(store);
-        assert!(!directory.path().exists());
+        let expected = manifest();
+        assert!(!store.manifest_is_published_as(&expected).unwrap());
+        store.publish_manifest(&expected).unwrap();
+        assert!(store.manifest_is_published_as(&expected).unwrap());
+
+        let target = directory.path().join("manifest.pwm");
+        let mut bytes = fs::read(&target).unwrap();
+        bytes[32] ^= 0x80;
+        let mut permissions = fs::metadata(&target).unwrap().permissions();
+        #[allow(clippy::permissions_set_readonly_false)]
+        permissions.set_readonly(false);
+        fs::set_permissions(&target, permissions).unwrap();
+        fs::write(&target, bytes).unwrap();
+        assert!(matches!(
+            store.manifest_is_published_as(&expected),
+            Err(PersistenceError::Corrupt { .. })
+        ));
     }
 
     #[test]
@@ -4322,7 +5010,7 @@ mod tests {
     }
 
     #[test]
-    fn candidate_stage_faults_publish_nothing_and_recovery_cleans_scratch() {
+    fn candidate_stage_faults_publish_nothing_and_recovery_ignores_scratch() {
         let points = [
             FaultPoint::CandidateStage,
             FaultPoint::CandidateFileSync,
@@ -4354,7 +5042,8 @@ mod tests {
                 fs::read_dir(directory.path().join("scratch"))
                     .expect("read scratch")
                     .count(),
-                0
+                2,
+                "manifest and failed candidate stages remain bounded private debris"
             );
         }
     }
@@ -4363,6 +5052,7 @@ mod tests {
     fn ready_faults_recover_only_absent_or_complete_intent() {
         let points = [
             (FaultPoint::ReadyLink, false),
+            (FaultPoint::ReadyTargetSync, true),
             (FaultPoint::OperationsDirectorySync, true),
             (FaultPoint::OperationLostAcknowledgement, true),
             (FaultPoint::ReadyCleanup, true),
@@ -4392,6 +5082,7 @@ mod tests {
     fn revision_faults_recover_only_old_or_complete_new_head() {
         let points = [
             (FaultPoint::RevisionLink, false),
+            (FaultPoint::RevisionTargetSync, true),
             (FaultPoint::RevisionDirectorySync, true),
             (FaultPoint::RevisionLostAcknowledgement, true),
         ];
@@ -4421,6 +5112,7 @@ mod tests {
             (FaultPoint::RejectionReadOnly, false),
             (FaultPoint::RejectionRevalidate, false),
             (FaultPoint::RejectionLink, false),
+            (FaultPoint::RejectionTargetSync, true),
             (FaultPoint::RejectionDirectorySync, true),
             (FaultPoint::RejectionLostAcknowledgement, true),
             (FaultPoint::RejectionCleanup, true),

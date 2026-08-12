@@ -234,12 +234,14 @@ BVH, merges child samples with fixed working buffers, and writes a new complete
 artifact. The artifact header records Source Identity, Source count, exact
 transform bits, recipe and disk versions, counts, offsets, and lengths. A final
 BLAKE3 checksum covers every prior byte. The temporary artifact is written and
-`sync_all` completes before publication. Publication is an atomic, no-replace
-hard link from the temporary sibling to the requested target: an existing or
-racing target is rejected and is never overwritten. The parent directory is
-synced after publication; only then are the temporary artifact, work file, and
-sample spool removed, followed by a second parent-directory sync. This is
-deliberately not rename-and-replace behavior.
+`sync_all` completes before publication. Publication is atomic and no-replace:
+an existing or racing target is rejected and is never overwritten. The v0.9
+hardening publishes from the owned open descriptor (`fclonefileat` on the
+verified macOS filesystem; an unnamed `O_TMPFILE` linked once on Linux), then
+syncs the parent directory. It retains the valid work prefix and any named
+sample spool or platform-specific stage instead of deleting a pathname that a
+racer could have replaced. This is deliberately not rename-and-replace
+behavior.
 
 Opening validates lengths, counts, versions, Source binding, checksum, node
 topology, nested bounds, Source-span coverage, exact bottom-k sample ordinals

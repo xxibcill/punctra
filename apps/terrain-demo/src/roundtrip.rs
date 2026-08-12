@@ -32,7 +32,7 @@ const DEFAULT_MAX_FACES: u64 = 4_000_000;
 const DEFAULT_MAX_COMPARISONS: u64 = 32_000_000;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum InputSide {
+pub(crate) enum InputSide {
     Reference,
     Returned,
 }
@@ -125,12 +125,13 @@ impl RoundTripTolerances {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct RoundTripLimits {
-    file_bytes: u64,
-    xml_nodes: u64,
-    xml_text_bytes: u64,
-    points: u64,
-    faces: u64,
-    comparisons: u64,
+    pub(crate) file_bytes: u64,
+    pub(crate) xml_nodes: u64,
+    pub(crate) xml_text_bytes: u64,
+    pub(crate) points: u64,
+    pub(crate) faces: u64,
+    pub(crate) comparisons: u64,
+    pub(crate) retained_model_bytes: u64,
 }
 
 impl RoundTripLimits {
@@ -150,6 +151,19 @@ impl RoundTripLimits {
             points: max_points,
             faces: max_faces,
             comparisons: max_comparisons,
+            retained_model_bytes: 512 * 1024 * 1024,
+        }
+    }
+
+    pub(crate) const fn qualification() -> Self {
+        Self {
+            file_bytes: 4 * 1024 * 1024 * 1024,
+            xml_nodes: 60_000_000,
+            xml_text_bytes: 4 * 1024 * 1024 * 1024,
+            points: 10_000_000,
+            faces: 20_000_000,
+            comparisons: 160_000_000,
+            retained_model_bytes: 4 * 1024 * 1024 * 1024,
         }
     }
 }
@@ -163,6 +177,7 @@ impl Default for RoundTripLimits {
             points: DEFAULT_MAX_POINTS,
             faces: DEFAULT_MAX_FACES,
             comparisons: DEFAULT_MAX_COMPARISONS,
+            retained_model_bytes: 512 * 1024 * 1024,
         }
     }
 }
@@ -658,14 +673,14 @@ fn reject_same_file(
 }
 
 #[derive(Clone, Copy, Debug)]
-struct Point {
-    position: [f64; 3],
+pub(crate) struct Point {
+    pub(crate) position: [f64; 3],
 }
 
 #[derive(Debug)]
-struct ParsedSurface {
-    points: Vec<Point>,
-    faces: Vec<[usize; 3]>,
+pub(crate) struct ParsedSurface {
+    pub(crate) points: Vec<Point>,
+    pub(crate) faces: Vec<[usize; 3]>,
 }
 
 fn parse_surface(
@@ -973,13 +988,7 @@ fn validate_face(
             "{side} contains a face with repeated point references"
         )));
     }
-    let [a, b, c] = face.map(|index| points[index].position);
-    let robust_orientation = normalized_orientation_xy(a, b, c);
-    let is_collinear = match robust_orientation {
-        Some(orientation) if orientation != 0.0 => false,
-        Some(_) | None => exact_orientation_is_zero(a, b, c),
-    };
-    if is_collinear {
+    if face_is_degenerate(face.map(|index| points[index])) {
         return Err(RoundTripFailure::invalid(format_args!(
             "{side} contains a geometrically degenerate face"
         )));
@@ -1228,15 +1237,29 @@ fn schema_error(side: InputSide, message: &'static str) -> RoundTripFailure {
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-struct ComparisonFacts {
-    comparison_count: u64,
-    max_easting_drift_metres: f64,
-    max_northing_drift_metres: f64,
-    max_horizontal_drift_metres: f64,
-    max_vertical_drift_metres: f64,
+pub(crate) struct ComparisonFacts {
+    pub(crate) comparison_count: u64,
+    pub(crate) max_easting_drift_metres: f64,
+    pub(crate) max_northing_drift_metres: f64,
+    pub(crate) max_horizontal_drift_metres: f64,
+    pub(crate) max_vertical_drift_metres: f64,
 }
 
-fn compare_surfaces(
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum PointMatchError {
+    Resource {
+        required: u64,
+        allowed: u64,
+    },
+    Allocation {
+        buffer: &'static str,
+        required_bytes: u64,
+    },
+    Unmatched,
+    Ambiguous,
+}
+
+pub(crate) fn compare_surfaces(
     reference: &ParsedSurface,
     returned: &ParsedSurface,
     tolerances: RoundTripTolerances,
@@ -1266,20 +1289,59 @@ fn compare_surfaces(
     Ok(facts)
 }
 
-fn match_points(
+pub(crate) fn match_points(
     reference: &[Point],
     returned: &[Point],
     tolerances: RoundTripTolerances,
     max_comparisons: u64,
 ) -> Result<(Vec<usize>, ComparisonFacts), RoundTripFailure> {
+    match_points_evidence(reference, returned, tolerances, max_comparisons).map_err(|error| {
+        match error {
+            PointMatchError::Resource { required, allowed } => RoundTripFailure::resource(
+                format_args!("vertex comparisons require {required}; limit is {allowed}"),
+            ),
+            PointMatchError::Allocation {
+                buffer,
+                required_bytes,
+            } => RoundTripFailure::resource(format_args!(
+                "{buffer} allocation for {required_bytes} bytes failed"
+            )),
+            PointMatchError::Unmatched => RoundTripFailure::mismatch(
+                "a REFERENCE vertex has no RETURNED match within the declared tolerances",
+            ),
+            PointMatchError::Ambiguous => RoundTripFailure::mismatch(
+                "vertex matching is ambiguous under the declared tolerances",
+            ),
+        }
+    })
+}
+
+pub(crate) fn match_points_evidence(
+    reference: &[Point],
+    returned: &[Point],
+    tolerances: RoundTripTolerances,
+    max_comparisons: u64,
+) -> Result<(Vec<usize>, ComparisonFacts), PointMatchError> {
     if tolerances.horizontal_metres() == 0.0 && tolerances.vertical_metres() == 0.0 {
         return match_exact_points(reference, returned, max_comparisons);
     }
-    let mut returned_by_easting = (0..returned.len()).collect::<Vec<_>>();
+    let mut returned_by_easting = Vec::new();
+    reserve_matcher_items(
+        &mut returned_by_easting,
+        returned.len(),
+        "returned easting index",
+    )?;
+    returned_by_easting.extend(0..returned.len());
     returned_by_easting.sort_unstable_by(|left, right| {
         returned[*left].position[0].total_cmp(&returned[*right].position[0])
     });
-    let mut returned_to_reference = vec![usize::MAX; returned.len()];
+    let mut returned_to_reference = Vec::new();
+    reserve_matcher_items(
+        &mut returned_to_reference,
+        returned.len(),
+        "returned-to-reference mapping",
+    )?;
+    returned_to_reference.resize(returned.len(), usize::MAX);
     let mut facts = ComparisonFacts::default();
     for (reference_index, reference_point) in reference.iter().enumerate() {
         let returned_index = unique_point_match(
@@ -1291,9 +1353,7 @@ fn match_points(
             &mut facts,
         )?;
         if returned_to_reference[returned_index] != usize::MAX {
-            return Err(RoundTripFailure::mismatch(
-                "vertex matching is ambiguous under the declared tolerances",
-            ));
+            return Err(PointMatchError::Ambiguous);
         }
         returned_to_reference[returned_index] = reference_index;
         update_drift_facts(
@@ -1309,38 +1369,46 @@ fn match_exact_points(
     reference: &[Point],
     returned: &[Point],
     max_comparisons: u64,
-) -> Result<(Vec<usize>, ComparisonFacts), RoundTripFailure> {
+) -> Result<(Vec<usize>, ComparisonFacts), PointMatchError> {
     let comparison_count = u64::try_from(reference.len()).unwrap_or(u64::MAX);
     if comparison_count > max_comparisons {
-        return Err(RoundTripFailure::resource(format_args!(
-            "vertex comparisons require {comparison_count}; limit is {max_comparisons}"
-        )));
+        return Err(PointMatchError::Resource {
+            required: comparison_count,
+            allowed: max_comparisons,
+        });
     }
-    let mut returned_positions = BTreeMap::new();
+    let mut returned_positions = Vec::new();
+    reserve_matcher_items(
+        &mut returned_positions,
+        returned.len(),
+        "exact returned position index",
+    )?;
     for (index, point) in returned.iter().enumerate() {
-        if returned_positions
-            .insert(position_key(point.position), index)
-            .is_some()
-        {
-            return Err(RoundTripFailure::mismatch(
-                "RETURNED contains duplicate coordinates, so vertex matching is ambiguous",
-            ));
-        }
+        returned_positions.push((position_key(point.position), index));
     }
-    let mut returned_to_reference = vec![usize::MAX; returned.len()];
+    returned_positions.sort_unstable_by_key(|entry| entry.0);
+    if returned_positions
+        .windows(2)
+        .any(|pair| pair[0].0 == pair[1].0)
+    {
+        return Err(PointMatchError::Ambiguous);
+    }
+    let mut returned_to_reference = Vec::new();
+    reserve_matcher_items(
+        &mut returned_to_reference,
+        returned.len(),
+        "exact returned-to-reference mapping",
+    )?;
+    returned_to_reference.resize(returned.len(), usize::MAX);
     for (reference_index, point) in reference.iter().enumerate() {
+        let key = position_key(point.position);
         let returned_index = returned_positions
-            .get(&position_key(point.position))
-            .copied()
-            .ok_or_else(|| {
-                RoundTripFailure::mismatch(
-                    "a REFERENCE vertex has no exact RETURNED coordinate match",
-                )
-            })?;
+            .binary_search_by_key(&key, |entry| entry.0)
+            .ok()
+            .map(|index| returned_positions[index].1)
+            .ok_or(PointMatchError::Unmatched)?;
         if returned_to_reference[returned_index] != usize::MAX {
-            return Err(RoundTripFailure::mismatch(
-                "REFERENCE contains duplicate coordinates, so vertex matching is ambiguous",
-            ));
+            return Err(PointMatchError::Ambiguous);
         }
         returned_to_reference[returned_index] = reference_index;
     }
@@ -1351,6 +1419,34 @@ fn match_exact_points(
             ..ComparisonFacts::default()
         },
     ))
+}
+
+fn reserve_matcher_items<T>(
+    values: &mut Vec<T>,
+    items: usize,
+    buffer: &'static str,
+) -> Result<(), PointMatchError> {
+    let requested_bytes = matcher_capacity_bytes::<T>(items);
+    values
+        .try_reserve_exact(items)
+        .map_err(|_| PointMatchError::Allocation {
+            buffer,
+            required_bytes: requested_bytes,
+        })?;
+    let retained_bytes = matcher_capacity_bytes::<T>(values.capacity());
+    if retained_bytes > requested_bytes {
+        return Err(PointMatchError::Allocation {
+            buffer,
+            required_bytes: retained_bytes,
+        });
+    }
+    Ok(())
+}
+
+fn matcher_capacity_bytes<T>(items: usize) -> u64 {
+    u64::try_from(items)
+        .unwrap_or(u64::MAX)
+        .saturating_mul(std::mem::size_of::<T>() as u64)
 }
 
 fn position_key(position: [f64; 3]) -> [u64; 3] {
@@ -1364,7 +1460,7 @@ fn unique_point_match(
     tolerances: RoundTripTolerances,
     max_comparisons: u64,
     facts: &mut ComparisonFacts,
-) -> Result<usize, RoundTripFailure> {
+) -> Result<usize, PointMatchError> {
     let reference_easting = reference.position[0];
     let horizontal_tolerance = tolerances.horizontal_metres();
     let start = returned_by_easting.partition_point(|index| {
@@ -1385,9 +1481,10 @@ fn unique_point_match(
     for returned_index in &returned_by_easting[start..end] {
         facts.comparison_count = facts.comparison_count.saturating_add(1);
         if facts.comparison_count > max_comparisons {
-            return Err(RoundTripFailure::resource(format_args!(
-                "vertex comparisons exceed the {max_comparisons} comparison limit"
-            )));
+            return Err(PointMatchError::Resource {
+                required: facts.comparison_count,
+                allowed: max_comparisons,
+            });
         }
         if points_within_tolerance(
             reference.position,
@@ -1395,16 +1492,18 @@ fn unique_point_match(
             tolerances,
         ) && matched.replace(*returned_index).is_some()
         {
-            return Err(RoundTripFailure::mismatch(
-                "vertex matching is ambiguous under the declared tolerances",
-            ));
+            return Err(PointMatchError::Ambiguous);
         }
     }
-    matched.ok_or_else(|| {
-        RoundTripFailure::mismatch(
-            "a REFERENCE vertex has no RETURNED match within the declared tolerances",
-        )
-    })
+    matched.ok_or(PointMatchError::Unmatched)
+}
+
+pub(crate) fn face_is_degenerate(points: [Point; 3]) -> bool {
+    let [a, b, c] = points.map(|point| point.position);
+    match normalized_orientation_xy(a, b, c) {
+        Some(orientation) if orientation != 0.0 => false,
+        Some(_) | None => exact_orientation_is_zero(a, b, c),
+    }
 }
 
 fn easting_is_below_window(candidate: f64, reference: f64, tolerance: f64) -> bool {

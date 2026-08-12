@@ -8,6 +8,7 @@ mod cli;
 mod diagnostic;
 mod journal;
 mod publication;
+mod qualification;
 mod report;
 mod roundtrip;
 mod workflow;

@@ -1,0 +1,33 @@
+{
+  "expected": {
+    "adapter_name": "source-memory",
+    "adapter_version": "1",
+    "classification_values_in_logical_order": [
+      2,
+      7,
+      2
+    ],
+    "content_hash": "17a8438d6b9124fd6cdee150c13baaecc8a8e937a65f7328650bb30b61e8c90e",
+    "fast_token_hex": "0000000000000000",
+    "logical_order": "immutable input row order v1",
+    "point_count": 3,
+    "source_id": "4fb837767b5fd89001059cf40291e17e52136d5e77466bb63804288111868487"
+  },
+  "files": [
+    {
+      "blake3": "0f8ef7c5c3edcbfb08f8309bf5e21ec8389f0e6c96f83381fa4e14ffd4bf517f",
+      "byte_length": 85,
+      "path": "memory-source.json"
+    },
+    {
+      "blake3": "b2049e1e5b9d93e812757e9c7d477a5e9eae0d741869364691072d0fd89e7216",
+      "byte_length": 1433,
+      "path": "../../../../point-source/tests/fixtures/v1/source-memory-record.json"
+    }
+  ],
+  "owner": "source-memory",
+  "path_base": "manifest_directory",
+  "source_contract_version": 1,
+  "source_record_version": 1,
+  "support_class": "authoritative"
+}

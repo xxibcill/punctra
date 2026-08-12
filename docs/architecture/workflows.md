@@ -257,8 +257,8 @@ sequenceDiagram
     HOST->>TER: ensure_landxml(target, explicit options, limits)
     TER->>DISK: create/sync/reopen/verify bounded sibling stage
     alt target absent
-        TER->>DISK: no-replace publish target + sync parent
-        TER->>DISK: remove stage + sync cleanup
+        TER->>DISK: independent descriptor-bound no-replace publish + sync parent
+        Note over DISK: retain the per-attempt bounded private stage
         TER-->>HOST: Created receipt after durable completion
     else regular target exists
         TER->>DISK: bounded exact length/hash verification

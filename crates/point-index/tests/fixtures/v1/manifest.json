@@ -1,0 +1,49 @@
+{
+  "schema": "punctra.point-index.fixture-manifest.v1",
+  "owner": "point-index",
+  "support_class": "rebuildable",
+  "disk_version": 1,
+  "recipe_version": 1,
+  "source": {
+    "generator": "clustered_ticks(1)",
+    "identity": "e8be2701bc5022b9a345b20884a80ca2936c3a9dd2ac4e26a930721e8031bf90",
+    "point_count": 1,
+    "position_transform": {
+      "offset": [1000000.25, -2000000.5, 17.0],
+      "scale": [0.25, 0.5, 2.0]
+    },
+    "coordinate_reference": "unknown",
+    "point_ticks": [-128, -125, -14],
+    "world_bounds": {
+      "minimum": [999968.25, -2000063.0, -11.0],
+      "maximum": [999968.25, -2000063.0, -11.0]
+    }
+  },
+  "artifacts": [
+    {
+      "path": "one-point.pidx",
+      "role": "complete",
+      "byte_length": 408,
+      "blake3": "d9e0769b00bfe5f35845f94fab5b67107b85d94feb54175e7b56ee3e6bf48954",
+      "semantic_facts": {
+        "prepare_disposition": "opened",
+        "node_count": 1,
+        "leaf_count": 1,
+        "root_covered_point_count": 1,
+        "root_display_point_count": 1
+      }
+    },
+    {
+      "path": "one-point.pidx.work",
+      "role": "resumable-work",
+      "byte_length": 344,
+      "blake3": "e81496a3e1f42526599394d12fd9234a13d1da9c88233c0b7fee83536c010810",
+      "semantic_facts": {
+        "durable_points": 1,
+        "resume_disposition": "resumed",
+        "source_points_read": 0,
+        "rebuild_equals_complete": true
+      }
+    }
+  ]
+}

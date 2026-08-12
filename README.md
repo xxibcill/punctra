@@ -85,6 +85,12 @@ deliberately does not delete a partially written initial `.work` header: an
 ownership-safe recovery protocol for that case remains a v0.9 readiness gate.
 This work adds no new product feature family.
 
+The candidate's exact format, coordinate, platform, device, upgrade, and
+recovery boundaries are collected in the
+[v0.9 support matrix](docs/architecture/v0.9-support-matrix.md); its public
+Rust and application surfaces are classified in the
+[v0.9 interface review](docs/architecture/v0.9-interface-review.md).
+
 Later direction and the exact external product gates are described in the
 [living roadmap](ROADMAP.md). Its candidate themes do not expand accepted
 implementation scope by themselves.

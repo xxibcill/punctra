@@ -103,7 +103,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         qa.accounted_peak_working_bytes()
     );
     println!(
-        "LandXML bytes={} content_hash={} (temporary state is removed on exit)",
+        "LandXML bytes={} content_hash={} (the example-owned temporary directory is removed on exit)",
         receipt.byte_length(),
         receipt.content_hash()
     );
