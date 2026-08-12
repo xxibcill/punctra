@@ -264,6 +264,34 @@ fn finite_extreme_world_coordinates_remain_sampleable() {
 }
 
 #[test]
+fn large_world_offsets_do_not_collapse_a_valid_surface_face() {
+    let transform = PositionTransform::new([1.0e12, 1.0e15, 0.0], [0.000_122_070_312_5, 0.25, 1.0])
+        .expect("finite offset transform is valid");
+    let fixture = TerrainFixture::with_transform(
+        "qa-large-offset",
+        transform,
+        vec![[0, 0, 0], [1, 0, 0], [0, 1, 0]],
+        vec![2; 3],
+    );
+    let surface = derive_surface(fixture.snapshot(), 2);
+    let vertex = transform.world_f64([0, 0, 0]);
+
+    let report = surface
+        .check_points([check_point(1, vertex)], CheckPointLimits::default())
+        .blocking_wait()
+        .expect("a Surface vertex remains sampleable after normalization");
+
+    assert!(matches!(
+        report.results()[0].outcome(),
+        CheckPointOutcome::Sampled {
+            surface_z: 0.0,
+            residual: 0.0,
+            ..
+        }
+    ));
+}
+
+#[test]
 fn duplicate_identities_and_every_qa_resource_family_fail_without_a_report() {
     let (_fixture, surface) = planar_surface("qa-limits");
     let surface = &surface;

@@ -353,6 +353,18 @@ fn normalize_xy(
         return None;
     }
 
+    let origin = Coord {
+        x: triangle[0][0],
+        y: triangle[0][1],
+    };
+    for position in &mut triangle {
+        position[0] -= origin.x;
+        position[1] -= origin.y;
+    }
+    let mut point = Coord {
+        x: point.x - origin.x,
+        y: point.y - origin.y,
+    };
     let scale = triangle
         .iter()
         .flat_map(|position| [position[0].abs(), position[1].abs()])
@@ -360,18 +372,12 @@ fn normalize_xy(
     if scale == 0.0 {
         return None;
     }
-    let origin = Coord {
-        x: triangle[0][0] / scale,
-        y: triangle[0][1] / scale,
-    };
     for position in &mut triangle {
-        position[0] = position[0] / scale - origin.x;
-        position[1] = position[1] / scale - origin.y;
+        position[0] /= scale;
+        position[1] /= scale;
     }
-    let point = Coord {
-        x: point.x / scale - origin.x,
-        y: point.y / scale - origin.y,
-    };
+    point.x /= scale;
+    point.y /= scale;
     Some((triangle, point))
 }
 
