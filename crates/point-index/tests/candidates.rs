@@ -2,6 +2,7 @@
 
 mod support;
 
+use foundation_runtime::CancellationToken;
 use point_contracts::WorldBounds;
 use point_index::{CandidateLimits, IndexError, PrepareLimits, prepare};
 
@@ -9,6 +10,25 @@ use support::{
     BLOCK_POINTS, TemporaryTarget, bounds_around, clustered_ticks, open_source, ordinal_is_covered,
     point_is_inside, transform,
 };
+
+#[test]
+fn candidate_traversal_observes_cancellation() {
+    let source = open_source(clustered_ticks(BLOCK_POINTS * 2 + 37));
+    let target = TemporaryTarget::new("candidate-cancellation");
+    let index = prepare(source.clone(), target.path(), PrepareLimits::default())
+        .blocking_wait()
+        .unwrap();
+    let bounds = source.metadata().world_bounds().unwrap();
+    let cancellation = CancellationToken::new();
+    cancellation.cancel();
+
+    assert!(matches!(
+        index.candidates_with_cancellation(bounds, CandidateLimits::default(), &cancellation),
+        Err(IndexError::Runtime(
+            foundation_runtime::RuntimeError::Cancelled
+        ))
+    ));
+}
 
 #[test]
 fn candidate_spans_are_sorted_disjoint_and_have_no_false_negatives() {
@@ -157,6 +177,10 @@ fn candidate_planning_fails_instead_of_returning_over_budget_partial_output() {
     assert_resource_error(
         &index.candidates(all, CandidateLimits::new(u64::MAX, u64::MAX, u64::MAX, 0)),
     );
+    let one_merged_span = index
+        .candidates(all, CandidateLimits::new(u64::MAX, 1, u64::MAX, u64::MAX))
+        .unwrap();
+    assert_eq!(one_merged_span.spans().len(), 1);
     assert_resource_error(&index.candidates(
         nonadjacent,
         CandidateLimits::new(u64::MAX, 1, u64::MAX, u64::MAX),

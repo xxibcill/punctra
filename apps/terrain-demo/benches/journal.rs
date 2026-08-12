@@ -195,7 +195,7 @@ impl BenchFixture {
             ],
             LandXmlOptions::metric_metres("Punctra Generated Benchmark", "2026-08-10", "00:00:00Z")
                 .expect("valid benchmark LandXML options")
-                .allow_unknown_coordinate_reference_as_metric_metres(),
+                .assert_coordinates_are_metric_metres(),
         )
         .expect("construct benchmark workflow Intent");
         Self {

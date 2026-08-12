@@ -804,7 +804,7 @@ impl WorkflowFixture {
                 "00:00:00Z",
             )
             .expect("valid deterministic LandXML options")
-            .allow_unknown_coordinate_reference_as_metric_metres(),
+            .assert_coordinates_are_metric_metres(),
         )
         .expect("construct bounded workflow intent");
         Self {
@@ -945,19 +945,7 @@ fn one_byte_index_artifact_limits() -> PrepareLimits {
 }
 
 fn one_byte_workspace_manifest_limits() -> OpenLimits {
-    let defaults = OpenLimits::default();
-    OpenLimits::new(
-        1,
-        defaults.max_operation_records(),
-        defaults.max_revision_files(),
-        defaults.max_revision_blocks(),
-        defaults.max_revision_rows(),
-        defaults.max_revision_block_bytes(),
-        defaults.max_single_file_bytes(),
-        defaults.max_total_persisted_bytes(),
-        defaults.max_working_bytes(),
-        defaults.max_resident_metadata_bytes(),
-    )
+    OpenLimits::default().with_max_manifest_bytes(1)
 }
 
 fn one_output_point_row_limits() -> PointRowLimits {
@@ -975,18 +963,7 @@ fn one_output_point_row_limits() -> PointRowLimits {
 }
 
 fn one_selected_point_commit_limits() -> CommitLimits {
-    let defaults = CommitLimits::default();
-    CommitLimits::new(
-        1,
-        defaults.max_changed_points(),
-        defaults.max_input_frames(),
-        defaults.max_block_points(),
-        defaults.max_block_bytes(),
-        defaults.max_working_bytes(),
-        defaults.max_temporary_bytes(),
-        defaults.max_revision_bytes(),
-        defaults.max_total_durable_bytes(),
-    )
+    CommitLimits::default().with_max_selected_points(1)
 }
 
 fn one_changed_point_audit_limits() -> RevisionAuditLimits {

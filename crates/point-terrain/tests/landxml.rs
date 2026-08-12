@@ -23,6 +23,14 @@ const GROUND: u8 = 2;
 
 static NEXT_OUTPUT: AtomicU64 = AtomicU64::new(1);
 
+struct BorrowedText<'a>(&'a str);
+
+impl AsRef<str> for BorrowedText<'_> {
+    fn as_ref(&self) -> &str {
+        self.0
+    }
+}
+
 fn planar_surface(label: &str) -> (TerrainFixture, TerrainSurface) {
     let fixture = TerrainFixture::new(
         label,
@@ -36,21 +44,25 @@ fn planar_surface(label: &str) -> (TerrainFixture, TerrainSurface) {
 fn asserted_options(name: &str) -> LandXmlOptions {
     LandXmlOptions::metric_metres(name, "2026-08-10", "12:34:56Z")
         .expect("fixture LandXML options are valid")
-        .allow_unknown_coordinate_reference_as_metric_metres()
+        .assert_coordinates_are_metric_metres()
 }
 
 #[test]
 fn options_require_bounded_xml_text_and_explicit_valid_root_date_time() {
-    let options = LandXmlOptions::metric_metres("Existing Ground", "2024-02-29", "00:00:00Z")
-        .expect("leap-day options are valid");
+    let options = LandXmlOptions::metric_metres(
+        BorrowedText("Existing Ground"),
+        BorrowedText("2024-02-29"),
+        BorrowedText("00:00:00Z"),
+    )
+    .expect("leap-day options are valid");
     assert_eq!(options.surface_name(), "Existing Ground");
     assert_eq!(options.document_date(), "2024-02-29");
     assert_eq!(options.document_time(), "00:00:00Z");
-    assert!(!options.allows_unknown_coordinate_reference());
+    assert!(!options.coordinates_are_metric_metres_asserted());
     assert!(
         options
-            .allow_unknown_coordinate_reference_as_metric_metres()
-            .allows_unknown_coordinate_reference()
+            .assert_coordinates_are_metric_metres()
+            .coordinates_are_metric_metres_asserted()
     );
 
     for (name, date, time) in [
@@ -69,7 +81,56 @@ fn options_require_bounded_xml_text_and_explicit_valid_root_date_time() {
 }
 
 #[test]
-fn unknown_coordinate_reference_requires_the_explicit_metric_metre_assertion() {
+fn target_path_is_checked_before_export_or_ensure_copies_it() {
+    let (_fixture, surface) = planar_surface("landxml-target-path-limit");
+    let output = TemporaryOutput::new("target-path-limit");
+    let target = output.path("terrain.xml");
+    let target_bytes = u64::try_from(target.as_os_str().as_encoded_bytes().len())
+        .expect("fixture target length fits u64");
+    let limits = replace_byte_limits(
+        LandXmlLimits::default(),
+        None,
+        None,
+        None,
+        None,
+        Some(target_bytes - 1),
+    );
+
+    let export_error = surface
+        .export_landxml(&target, asserted_options("Ground"), limits)
+        .blocking_wait()
+        .expect_err("target path exceeds the export working ceiling");
+
+    assert!(matches!(
+        export_error,
+        TerrainError::ResourceLimit {
+            limit: "LandXML working bytes",
+            required,
+            allowed,
+        } if required == target_bytes && allowed == target_bytes - 1
+    ));
+    assert!(!target.exists());
+    output.assert_no_stages();
+
+    let ensure_error = surface
+        .ensure_landxml(&target, asserted_options("Ground"), limits)
+        .blocking_wait()
+        .expect_err("target path exceeds the ensure working ceiling");
+
+    assert!(matches!(
+        ensure_error,
+        TerrainError::ResourceLimit {
+            limit: "LandXML working bytes",
+            required,
+            allowed,
+        } if required == target_bytes && allowed == target_bytes - 1
+    ));
+    assert!(!target.exists());
+    output.assert_no_stages();
+}
+
+#[test]
+fn source_coordinates_require_the_explicit_metric_metre_assertion() {
     let (_fixture, surface) = planar_surface("landxml-reference");
     assert!(surface.descriptor().coordinate_reference().is_unknown());
     let output = TemporaryOutput::new("reference");
@@ -81,7 +142,12 @@ fn unknown_coordinate_reference_requires_the_explicit_metric_metre_assertion() {
         .blocking_wait()
         .expect_err("unknown reference is not guessed");
 
-    assert!(matches!(error, TerrainError::InvalidArgument { .. }));
+    assert!(matches!(
+        error,
+        TerrainError::UnsupportedMetricExport { reason }
+            if reason.as_str()
+                == "Source coordinates require an explicit metric-metre assertion"
+    ));
     assert!(!target.exists());
     output.assert_no_stages();
 }
@@ -92,6 +158,7 @@ fn deterministic_bytes_round_trip_through_an_independent_semantic_parser() {
     let output = TemporaryOutput::new("semantic");
     let first = output.path("first.xml");
     let second = output.path("second.xml");
+    let single_byte_buffer = output.path("single-byte-buffer.xml");
     let expected_name = "Existing & <Ground> \"A\"\nB\tC\rD";
     let options = asserted_options(expected_name);
 
@@ -100,15 +167,26 @@ fn deterministic_bytes_round_trip_through_an_independent_semantic_parser() {
         .blocking_wait()
         .expect("first LandXML export succeeds");
     let second_receipt = surface
-        .export_landxml(&second, options, LandXmlLimits::default())
+        .export_landxml(&second, options.clone(), LandXmlLimits::default())
         .blocking_wait()
         .expect("repeated LandXML export succeeds at another create-new target");
+    let single_byte_receipt = surface
+        .export_landxml(
+            &single_byte_buffer,
+            options,
+            replace_byte_limits(LandXmlLimits::default(), None, None, Some(1), None, None),
+        )
+        .blocking_wait()
+        .expect("LandXML export succeeds with a one-byte write buffer");
     let first_bytes = fs::read(&first).expect("read first published XML");
     let second_bytes = fs::read(&second).expect("read second published XML");
+    let single_byte_bytes = fs::read(&single_byte_buffer).expect("read single-byte-buffer XML");
 
     assert_eq!(first_bytes, second_bytes);
+    assert_eq!(first_bytes, single_byte_bytes);
     assert_eq!(first_receipt, second_receipt);
     assert_eq!(first_receipt.disposition(), LandXmlDisposition::Created);
+    assert_eq!(first_receipt, single_byte_receipt);
     assert_eq!(
         first_receipt.content_hash(),
         ContentHash::new(*blake3::hash(&first_bytes).as_bytes())
@@ -122,6 +200,14 @@ fn deterministic_bytes_round_trip_through_an_independent_semantic_parser() {
     assert_eq!(
         first_receipt.surface_artifact_hash(),
         surface.descriptor().artifact_hash()
+    );
+    assert_eq!(
+        first_receipt.recipe_hash(),
+        surface.descriptor().recipe_hash()
+    );
+    assert_eq!(
+        first_receipt.input_hash(),
+        surface.descriptor().input_hash()
     );
     assert_eq!(
         first_receipt.geometry_hash(),

@@ -77,7 +77,8 @@ let mut renderer = WgpuRenderer::new(&device, config)?;
 renderer.apply(&RenderUpdate::Reset { view_generation })?;
 renderer.apply(&RenderUpdate::Upsert { batch })?;
 
-let frame = Frame::new(view_generation, camera, [width, height])?;
+let viewport = Viewport::new(width, height)?;
+let frame = Frame::new(view_generation, camera, viewport)?;
 let recorded_frame = renderer.render(&mut encoder, &target, &frame)?;
 let report = recorded_frame.report();
 queue.submit([encoder.finish()]);
@@ -219,6 +220,15 @@ Operation Identity. Journal-only status inspection requires only the Run root:
 cargo run --release -p terrain-demo -- inspect run-root
 ```
 
+The durable v0.7 command replaces the v0.6 one-shot
+`--exercise-correction-revert` grammar; it commits the requested correction
+rather than automatically reverting it. The v0.6 terrain guarantees remain
+covered by regressions: the correction changes the exact Ground Input, an
+immediate-head Revert restores geometry, topology, vertices, and faces, a
+caller-requested Revert restores the baseline after the correction, and Source
+bytes remain unchanged. A v0.7 Workflow does not automatically Revert a
+committed classification Revision when a later phase fails.
+
 The fixed Run-root children are `run.pwf`, `run.lock`, `terrain.xml`, and
 `audit.json`. Existing exact XML/report bytes reconcile; different caller-owned
 targets fail without replacement. Inspect may durably truncate a torn final
@@ -283,11 +293,13 @@ design-partner runs remain explicitly outstanding.
 
 ## v0.5 benchmark evidence
 
-The `point-workspace` acceptance suite has 61 package tests: 19 integration
-tests through the public interface and 42 unit, fault-injection, and allocation
-gates. They include generated LAS and LAZ selection, commit, Revert, reopen,
-Source-immutability, forced-spill, hard-limit, corruption, retry, and injected
-persistence-boundary cases.
+At v0.5, the `point-workspace` acceptance suite recorded 61 package tests: 19
+integration tests through the public interface and 42 unit, fault-injection,
+and allocation gates. The merged v0.7 suite now has 83 package tests—33
+integration and 50 unit/private—after adding exact row-stream and Revision
+Audit coverage. The retained tests include generated LAS and LAZ selection,
+commit, Revert, reopen, Source immutability, forced spill, hard limits,
+corruption, retry, and injected persistence-boundary cases.
 
 On the local Apple M5 Pro, 24 GiB, arm64, macOS 26.5.2 reference machine with
 Rust 1.90.0, the default generated one-million-Point benchmark completed its
@@ -346,8 +358,8 @@ external gate remains outstanding.
 
 ## v0.7 benchmark evidence
 
-`terrain-demo` has 35 package tests: 18 unit/private fault and contract tests,
-14 public workflow-facade tests, and three process tests. The public suites
+`terrain-demo` has 43 package tests: 25 unit/private fault and contract tests,
+15 public workflow-facade tests, and three process tests. The public suites
 cover every eight-frame resume prefix, 12 limit families, known-identity
 validation, and dropped-Workflow recovery; the private fault scope is
 documented precisely in the [verification strategy](docs/architecture/testing.md).

@@ -235,7 +235,7 @@ fn parse(arguments: impl IntoIterator<Item = OsString>) -> Result<Command, Workf
     )
     .map_err(|error| invalid(error.to_string()))?;
     if assert_unknown.is_some() {
-        landxml = landxml.allow_unknown_coordinate_reference_as_metric_metres();
+        landxml = landxml.assert_coordinates_are_metric_metres();
     }
     let run = WorkflowRunId::new(run.ok_or_else(|| invalid("missing --run-id"))?)
         .ok_or_else(|| invalid("Run ID must be nonzero"))?;

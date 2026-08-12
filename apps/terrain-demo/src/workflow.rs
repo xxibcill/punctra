@@ -923,16 +923,15 @@ fn advance(
         context,
     )?;
 
-    require_workflow_bytes(
-        retained_observations_bytes(journal, request, limits, &audit, &baseline, &changed)
-            .saturating_add(limits.qa.max_working_bytes()),
-        limits.max_aggregate_working_bytes,
-        WorkflowStage::CheckPointQa,
+    let qa_input = copy_check_points_for_job(
+        &request.check_points,
+        retained_observations_bytes(journal, request, limits, &audit, &baseline, &changed),
+        limits,
         context,
     )?;
 
     let qa = changed
-        .check_points(request.check_points.iter().copied(), limits.qa)
+        .check_points(qa_input, limits.qa)
         .blocking_wait_cancelled_by(&control.token())
         .map_err(|error| terrain_failure(WorkflowStage::CheckPointQa, error, control, context))?;
     let qa_hash = qa_hash(&qa, control)
@@ -1398,7 +1397,7 @@ fn durable_intent(
         request.landxml.surface_name().into(),
         request.landxml.document_date().into(),
         request.landxml.document_time().into(),
-        request.landxml.allows_unknown_coordinate_reference(),
+        request.landxml.coordinates_are_metric_metres_asserted(),
         bindings,
         limits,
     )
@@ -1429,7 +1428,7 @@ fn validate_supplied_intent(
         || durable.surface_name.as_ref() != supplied.landxml.surface_name()
         || durable.document_date.as_ref() != supplied.landxml.document_date()
         || durable.document_time.as_ref() != supplied.landxml.document_time()
-        || durable.allow_unknown_metric != supplied.landxml.allows_unknown_coordinate_reference()
+        || durable.allow_unknown_metric != supplied.landxml.coordinates_are_metric_metres_asserted()
         || durable.path_bindings != path_bindings
     {
         return Err(WorkflowFailure::new(
@@ -2239,9 +2238,7 @@ fn source_failure(
             FailureCode::ResourceLimit,
             RecoveryAction::RaiseLimitOrNarrow,
         ),
-        SourceError::InvalidBudget { .. }
-        | SourceError::InvalidSourceSpan { .. }
-        | SourceError::UnknownAttribute { .. } => (
+        SourceError::InvalidBudget { .. } | SourceError::InvalidSourceSpan { .. } => (
             FailureCode::InvalidRequest,
             RecoveryAction::CorrectInvalidRequest,
         ),
@@ -2830,6 +2827,60 @@ fn retained_observations_bytes(
 fn qa_retained_bytes(qa: &point_terrain::CheckPointReport) -> u64 {
     usize_u64(std::mem::size_of::<point_terrain::CheckPointReport>())
         .saturating_add(usize_u64(std::mem::size_of_val(qa.results())))
+}
+
+fn copy_check_points_for_job(
+    check_points: &[CheckPoint],
+    retained_bytes: u64,
+    limits: &WorkflowLimits,
+    context: FailureContext,
+) -> Result<Vec<CheckPoint>, WorkflowFailure> {
+    let count = usize_u64(check_points.len());
+    if count > limits.qa.max_check_points() {
+        return Err(WorkflowFailure::new(
+            FailureCode::ResourceLimit,
+            WorkflowStage::CheckPointQa,
+            Certainty::PrePublication,
+            context,
+            format_args!(
+                "detached Check Point count requires {count}, limit {}",
+                limits.qa.max_check_points()
+            ),
+            RecoveryAction::RaiseLimitOrNarrow,
+        ));
+    }
+    let requested_bytes = usize_u64(std::mem::size_of_val(check_points));
+    require_workflow_bytes(
+        retained_bytes
+            .saturating_add(requested_bytes)
+            .saturating_add(limits.qa.max_working_bytes()),
+        limits.max_aggregate_working_bytes,
+        WorkflowStage::CheckPointQa,
+        context,
+    )?;
+    let mut owned = Vec::new();
+    owned.try_reserve_exact(check_points.len()).map_err(|_| {
+        WorkflowFailure::new(
+            FailureCode::ResourceLimit,
+            WorkflowStage::CheckPointQa,
+            Certainty::PrePublication,
+            context,
+            "failed to allocate bounded detached Check Point job input",
+            RecoveryAction::RaiseLimitOrNarrow,
+        )
+    })?;
+    let allocated_bytes =
+        usize_u64(owned.capacity()).saturating_mul(usize_u64(std::mem::size_of::<CheckPoint>()));
+    require_workflow_bytes(
+        retained_bytes
+            .saturating_add(allocated_bytes)
+            .saturating_add(limits.qa.max_working_bytes()),
+        limits.max_aggregate_working_bytes,
+        WorkflowStage::CheckPointQa,
+        context,
+    )?;
+    owned.extend_from_slice(check_points);
+    Ok(owned)
 }
 
 fn require_workflow_bytes(

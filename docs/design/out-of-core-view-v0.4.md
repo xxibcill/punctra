@@ -215,6 +215,9 @@ union.
 The target is one immutable complete artifact. A deterministic sibling work
 file is an append-only sequence of Source-block frames. Each complete frame
 contains its Source Span, exact bounds, bounded leaf sample, and BLAKE3 checksum.
+Disk version 1 stores all multibyte integer fields and the raw bit patterns of
+all `f64` fields in little-endian order. Fixed magic bytes, Source identities,
+and BLAKE3 checksum bytes retain their declared byte order.
 
 After interruption, `prepare`:
 
@@ -239,9 +242,16 @@ sample spool removed, followed by a second parent-directory sync. This is
 deliberately not rename-and-replace behavior.
 
 Opening validates lengths, counts, versions, Source binding, checksum, node
-topology, nested bounds, Source-span coverage, and the caller's hierarchy and
-resident-byte limits before returning `PreparedIndex`. No incomplete artifact
-can answer candidates or View reads.
+topology, nested bounds, Source-span coverage, exact bottom-k sample ordinals
+from descendant spans, and the caller's hierarchy and resident-byte limits
+before returning `PreparedIndex`. No incomplete artifact can answer candidates
+or View reads.
+
+Complete artifacts are trusted local rebuildable caches. Their unkeyed BLAKE3
+checksums detect accidental corruption and concurrent mutation; they do not
+authenticate bytes deliberately rewritten by an adversary. Warm opening does
+not reread Source Points, so an artifact obtained from untrusted storage must be
+discarded and rebuilt from the verified Source rather than opened in place.
 
 ## Progressive View bridge
 

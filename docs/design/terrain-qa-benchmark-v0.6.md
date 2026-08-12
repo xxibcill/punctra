@@ -182,7 +182,7 @@ impl TerrainSurface {
         limits: CheckPointLimits,
     ) -> CheckPointJob
     where
-        I: IntoIterator<Item = CheckPoint>;
+        I: IntoIterator<Item = CheckPoint> + Send + 'static;
 
     pub fn export_landxml(
         &self,
@@ -371,8 +371,9 @@ then written with a deterministic finite round-tripping decimal encoding. The
 profile assumes Source X is easting, Y is northing, and Z is elevation; the
 LandXML coordinate tuple is encoded in its required northing, easting,
 elevation order. The caller must use this export only when the Source
-coordinates are already metric metres. The exporter performs no unit or CRS
-transformation and never guesses an unknown Coordinate Reference.
+coordinates are already metric metres and must make that assertion explicitly.
+The exporter performs no unit or CRS transformation and never interprets the
+opaque declared-or-unknown Coordinate Reference.
 
 Document date and time are explicit `LandXmlOptions` facts. The encoder never
 reads the system clock, infers them from filesystem metadata, or injects another
@@ -504,7 +505,7 @@ let receipt = terrain.export_landxml(
         "Existing Ground",
         "2026-08-10",
         "00:00:00Z",
-    )?,
+    )?.assert_coordinates_are_metric_metres(),
     LandXmlLimits::default(),
 ).blocking_wait()?;
 println!("exported {} bytes", receipt.byte_length());
@@ -557,15 +558,15 @@ not claim an observed worker-heap value.
 
 ### Implemented repository evidence
 
-- `point-workspace` has 67 tests: 42 unit/fault/allocation tests and 25 public
+- `point-workspace` has 72 tests: 46 unit/fault/allocation tests and 26 public
   integration tests, including six exact Point-row stream tests.
-- `point-terrain` has 41 package tests—15 unit/private and 26 integration—plus
+- `point-terrain` has 46 package tests—17 unit/private and 29 integration—plus
   one documentation test across interface, topology, resource, detached-QA,
   LandXML, robust-algorithm, and publication-fault suites.
-- `terrain-demo` has one process test that runs generated LAS and LAZ through
-  the complete GPU-free caller. LAS/LAZ correction, re-Derivation, immediate-
-  head Revert, and restored geometry meaning are covered while Source bytes
-  remain unchanged.
+- `terrain-demo` has two process tests covering the complete generated LAS/LAZ
+  GPU-free caller and failed changed-Surface Derivation. LAS/LAZ correction,
+  re-Derivation, immediate-head Revert, and restored geometry meaning are
+  covered while Source bytes remain unchanged.
 - Formatting, strict workspace lint, workspace tests, warning-free
   documentation, every declared example/benchmark/process smoke, and required
   local GPU gates complete through the commands in `CONTRIBUTING.md`.

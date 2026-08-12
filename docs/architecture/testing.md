@@ -87,8 +87,8 @@ LAS, and LAZ benchmarks enforce adapter-specific memory ceilings.
 - candidate spans are sorted, disjoint, and bounded;
 - build/resume produces deterministic descriptor and artifact bytes;
 - valid-prefix recovery resumes at the exact durable boundary;
-- incompatible, corrupt, truncated, over-limit, and racing targets fail
-  without replacement;
+- incompatible, corrupt, truncated, over-limit, racing, and checksum-valid
+  non-recipe-sample targets fail without replacement;
 - display samples and exact leaves preserve Source-aware identities/ticks;
 - LAZ fixed-chunk seeks cross chunk boundaries exactly; and
 - process smoke covers Full verification, Built then Opened index paths, and
@@ -96,7 +96,10 @@ LAS, and LAZ benchmarks enforce adapter-specific memory ceilings.
 
 ### point-workspace
 
-The public suites prove:
+The merged v0.7 package has 83 tests: 33 integration tests through the public
+interface and 50 unit, fault-injection, and allocation gates. It retains the
+v0.6 lifecycle, selection, row-stream, persistence, fault-injection, and
+allocation coverage and adds the Revision Audit suite. The public suites prove:
 
 - create, root identity, exclusive lock, complete-handle lifetime, and reopen;
 - schema rejection when the chosen classification Attribute is absent or not
@@ -116,14 +119,14 @@ The public suites prove:
 - prepublication failure for selection, ID-read, open, and commit hard limits;
 - committed, rejected, retryable, not-recorded, conflict, and indeterminate
   Operation reconciliation;
-- idempotent retry with at most one Revision; and
-- fail-closed corruption plus recoverable recognized scratch.
+- idempotent retry with at most one Revision;
+- fail-closed corruption plus recoverable recognized scratch;
 - exact ordered `Snapshot::point_rows` values at root, edited, historical, and
   Revert Snapshots;
 - partition-independent row membership/content hashes matching Point Set
-  membership and identical generated LAS/LAZ row values; and
+  membership and identical generated LAS/LAZ row values;
 - cumulative row limits, complete no-match behavior, fused error/cancellation,
-  and absence of a terminal summary after failure.
+  and absence of a terminal summary after failure; and
 - exact root/classification/Revert Revision Audit transitions, membership and
   content hashes, Edit Footprints, historical immutability, Source partition
   independence, every audit resource family, cancellation, and corruption
@@ -142,27 +145,29 @@ under a 64 MiB ceiling, with zero retained measured allocations.
 
 ### point-terrain and terrain-demo
 
-`point-terrain` has 41 package tests—15 unit/private and 26 integration—plus
-one documentation test:
+The `point-terrain` package and documentation suites cover:
 
-- 15 unit/private tests cover canonical input keys, deterministic robust
+- unit/private tests for canonical input keys, deterministic robust
   predicates, cocircular tie-breaking, the pinned `delaunator` oracle, bounded
-  topology work, cancellation, diagnostics, allocation preflight, and injected
-  post-publication LandXML certainty boundaries;
-- four public interface tests cover canonical facts, inclusive Ground Input,
+  topology work, large-world and extreme finite numeric behavior, cancellation,
+  diagnostics, allocation preflight, and injected post-publication LandXML
+  certainty boundaries;
+- public interface tests for canonical facts, inclusive Ground Input,
   partition-independent hashes, and historical/Edit/Revert Snapshots;
-- two topology tests prove counter-clockwise canonical manifold Delaunay disks
+- topology tests proving counter-clockwise canonical manifold Delaunay disks
   and the canonical cocircular diagonal;
-- seven resource tests cover insufficient, duplicate/conflicting, collinear,
+- resource tests for insufficient, duplicate/conflicting, collinear,
   unsupported numeric, input/output/face/work/working/retained limits, and
   cancellation without publication;
-- seven QA tests cover closed boundaries, stable face selection, ordered
+- QA tests for closed boundaries, stable face selection, rounded and
+  large-world sampling, ordered
   positive/negative/zero residuals, explicit gaps, compensated statistics,
-  duplicate identities, every QA resource family, bounded input consumption,
-  cancellation, and result-sealing overlap; and
-- six LandXML tests cover deterministic independent semantic parsing, explicit
-  coordinate/date/time assumptions, every XML resource family, target conflict,
-  cancellation, and durable publication certainty.
+  overflow-safe large finite statistics, duplicate identities, every QA
+  resource family, bounded input consumption, cancellation, and result-sealing
+  overlap; and
+- LandXML tests for deterministic independent semantic parsing, explicit
+  coordinate/date/time and metric-unit assumptions, every XML resource family,
+  target conflict, cancellation, and durable publication certainty.
 
 The `point-terrain` doctest and direct example compose the public Source/index/
 Workspace/Terrain/QA/LandXML APIs. v0.7 adds exact-existing LandXML ensure tests
@@ -170,9 +175,8 @@ for create, reconcile, conflict, races, symlink/non-regular rejection,
 publication faults, post-link cancellation certainty, and lost
 acknowledgement.
 
-`terrain-demo` has 35 package tests: 18 unit/private tests, 14 through the
-public workflow facade, and three through the process boundary. The 17 public/
-process tests cover:
+`terrain-demo` has 43 package tests: 25 unit/private tests, 15 through the
+public workflow facade, and three through the process boundary. They cover:
 
 - every prefix of the eight-frame journal resuming to the same receipt and one
   Operation Revision;
@@ -192,6 +196,14 @@ process tests cover:
 - Run-root validation failures retaining the already-known Run, Operation, and
   baseline Revision identities; and
 - bounded `start`, `resume`, and `inspect` CLI output and structured failures.
+
+The retained v0.6 process/regression coverage also proves deterministic
+generated LAS and LAZ Terrain semantics, exact changed Ground Input,
+byte-identical Source data, exact immediate-head Revert restoration of
+geometry/topology/vertices/faces, and explicit Revert behavior independently
+of the durable workflow facade. The superseded one-shot CLI grammar is not
+retained, and the v0.7 Workflow leaves a committed classification Revision in
+place when a later phase fails.
 
 This is representative public recovery evidence, not an exhaustive injected
 hook at every OS fault or active-child cancellation boundary. Private journal

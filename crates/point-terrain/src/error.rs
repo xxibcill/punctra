@@ -96,6 +96,13 @@ pub enum TerrainError {
         reason: TerrainDiagnostic,
     },
 
+    /// The Surface coordinate contract does not support metric-metre export.
+    #[error("unsupported metric-metre LandXML export: {reason}")]
+    UnsupportedMetricExport {
+        /// Bounded coordinate-assumption failure explanation.
+        reason: TerrainDiagnostic,
+    },
+
     /// Completed topology failed an internal deterministic invariant.
     #[error("invalid terrain topology: {reason}")]
     TopologyInvariant {
@@ -195,6 +202,12 @@ impl TerrainError {
 
     pub(crate) fn numeric(reason: impl AsRef<str>) -> Self {
         Self::UnsupportedNumericRange {
+            reason: TerrainDiagnostic::new(reason),
+        }
+    }
+
+    pub(crate) fn unsupported_metric_export(reason: impl AsRef<str>) -> Self {
+        Self::UnsupportedMetricExport {
             reason: TerrainDiagnostic::new(reason),
         }
     }

@@ -11,12 +11,12 @@ use las::raw::point::ScanAngle;
 use las::{Builder, Color, Point, Transform, Vector, Vlr, Writer};
 use point_contracts::{
     AttributeColumn, AttributeColumns, AttributeDataType, AttributeDefinition, AttributeId,
-    AttributeSchema, AttributeValues, CoordinateReference, MetadataRecord, PointBatch,
-    PositionTransform, SourceMetadata, WorldBounds,
+    AttributeSchema, AttributeValues, CoordinateReference, MAX_METADATA_RECORDS, MetadataRecord,
+    PointBatch, PositionTransform, SourceMetadata, WorldBounds,
 };
 use point_source::{
-    AttributeSelection, OpenOptions, ReadBudget, ReadRequest, Source, SourceError, SourceRecord,
-    SourceSpan, VerificationPolicy,
+    AttributeSelection, OpenOptions, ReadBudget, ReadLimit, ReadRequest, Source, SourceError,
+    SourceRecord, SourceSpan, VerificationPolicy,
 };
 use source_las::{open as open_file, open_with as open_file_with};
 use source_memory::{MemorySource, open as open_memory, open_with as open_memory_with};
@@ -262,7 +262,7 @@ fn projection_and_every_hard_read_budget_are_enforced_through_the_public_source(
         assert!(matches!(
             payload_error,
             SourceError::ResourceLimit {
-                limit: "batch payload bytes",
+                limit: ReadLimit::BatchPayloadBytes,
                 required,
                 allowed,
             } if required == bytes_per_point && allowed == bytes_per_point - 1
@@ -275,7 +275,7 @@ fn projection_and_every_hard_read_budget_are_enforced_through_the_public_source(
         assert!(matches!(
             source.read(ReadRequest::all().budget(max_points)),
             Err(SourceError::ResourceLimit {
-                limit: "requested Point count",
+                limit: ReadLimit::RequestedPoints,
                 required,
                 allowed,
             }) if required == POINT_COUNT as u64 && allowed == (POINT_COUNT - 1) as u64
@@ -477,6 +477,78 @@ fn missing_truncated_corrupt_and_changed_files_have_stable_public_failures() {
         .blocking_wait(),
         Err(SourceError::SourceChanged { .. })
     ));
+}
+
+#[test]
+fn malformed_metadata_reports_its_section_and_byte_offset() {
+    let fixtures = FixtureSet::new();
+    let path = fixtures.directory.join("bad-vlr-length.las");
+    let mut bytes = fs::read(&fixtures.uncompressed).unwrap();
+    let header_start = usize::from(u16::from_le_bytes(bytes[94..96].try_into().unwrap()));
+    bytes[header_start + 20..header_start + 22].copy_from_slice(&u16::MAX.to_le_bytes());
+    fs::write(&path, bytes).unwrap();
+
+    let Err(SourceError::CorruptSource { reason }) = open_file(&path).blocking_wait() else {
+        panic!("the malformed VLR must be rejected as corrupt");
+    };
+    assert!(
+        reason
+            .as_str()
+            .contains(&format!("VLR payload at byte {header_start}")),
+        "diagnostic did not retain the known context: {reason}"
+    );
+}
+
+#[test]
+fn invalid_metadata_header_text_is_rejected_without_lossy_replacement() {
+    let fixtures = FixtureSet::new();
+    let original = fs::read(&fixtures.uncompressed).unwrap();
+    let header_start = usize::from(u16::from_le_bytes(original[94..96].try_into().unwrap()));
+
+    for (file_name, field_offset, field_name) in [
+        ("bad-vlr-user-id.las", 2, "user ID"),
+        ("bad-vlr-description.las", 22, "description"),
+    ] {
+        let path = fixtures.directory.join(file_name);
+        let mut bytes = original.clone();
+        bytes[header_start + field_offset] = 0xff;
+        fs::write(&path, bytes).unwrap();
+
+        let Err(SourceError::CorruptSource { reason }) = open_file(&path).blocking_wait() else {
+            panic!("invalid {field_name} text must be rejected as corrupt");
+        };
+        assert!(
+            reason
+                .as_str()
+                .contains(&format!("VLR header at byte {header_start}")),
+            "diagnostic did not retain the known context: {reason}"
+        );
+        assert!(
+            reason.as_str().contains(field_name) && reason.as_str().contains("invalid UTF-8"),
+            "diagnostic did not identify the invalid field: {reason}"
+        );
+    }
+}
+
+#[test]
+fn combined_vlr_and_evlr_count_is_bounded_through_public_open() {
+    let directory = unique_temp_directory();
+    fs::create_dir(&directory).unwrap();
+    let path = directory.join("too-many-metadata-records.las");
+    let regular_count = MAX_METADATA_RECORDS / 2;
+    let extended_count = MAX_METADATA_RECORDS - regular_count + 1;
+    write_las_fixture_with_metadata(
+        &path,
+        &fixture_rows(),
+        empty_vlrs(regular_count),
+        empty_vlrs(extended_count),
+    );
+
+    assert!(matches!(
+        open_file(&path).blocking_wait(),
+        Err(SourceError::CorruptSource { .. })
+    ));
+    fs::remove_dir_all(directory).unwrap();
 }
 
 fn overwrite_first_layer_size(bytes: &mut [u8], layer_size: u32) {
@@ -1031,6 +1103,12 @@ fn vlr(user_id: &str, record_id: u16, description: &str, data: Vec<u8>) -> Vlr {
         description: description.to_owned(),
         data,
     }
+}
+
+fn empty_vlrs(count: usize) -> Vec<Vlr> {
+    std::iter::repeat_with(|| vlr("limit", 1, "limit", Vec::new()))
+        .take(count)
+        .collect()
 }
 
 fn wkt_payload() -> Vec<u8> {

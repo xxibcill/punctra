@@ -226,9 +226,10 @@ LandXML, rendering, or host recovery policy.
 
 **Independent proof:** package and documentation tests cover the public
 interface, robust topology/oracle agreement, degeneracy and every resource
-family, detached QA, exact-existing reconciliation, injected durable LandXML
-certainty boundaries, and independent XML semantics. A public example and
-generated 10k/100k/1M-capable benchmark compose only public seams;
+family, large-world and extreme finite numeric behavior, detached QA,
+overflow-safe residual statistics, exact-existing reconciliation, injected
+durable LandXML certainty boundaries, and independent XML semantics. A public
+example and generated 10k/100k/1M-capable benchmark compose only public seams;
 `terrain-demo` is the real LAS/LAZ process caller.
 
 ## 7. render-protocol
@@ -296,6 +297,13 @@ identities, expected baseline Revision, nonempty exact Ground-ordinal set,
 normalized Terrain Recipe, detached Check Points, LandXML options, four paths,
 and limits.
 
+The application Full-verifies the supported LAS/LAZ Source, prepares or opens
+its Spatial Index, opens the caller-created Workspace, resolves or commits the
+recorded classification correction, audits the resulting Revision, derives
+the baseline and changed class-2 Surfaces, evaluates detached QA, and ensures
+the supported LandXML and canonical report. The opaque Coordinate Reference
+requires the caller's explicit metric-metre assertion.
+
 The Workflow never creates a Workspace. The caller creates one through the
 public `point-workspace` lifecycle, supplies the current head as the baseline,
 uses Source Attribute 6 (`source-las` classification) as the selected `U8`
@@ -309,13 +317,13 @@ Change Envelope, QA, LandXML/report reconciliation, and one-action structured
 failures. The fixed Run root contains `run.pwf`, `run.lock`, `terrain.xml`, and
 `audit.json`. No Terrain Surface or audit cache is persisted.
 
-**Independent proof:** 35 package tests—18 unit/private, 14 workflow-facade,
-and three process—cover every eight-frame restart prefix, one-Revision
-idempotence, exact report/XML conflict and recovery, 12 public limit families,
-LAS/LAZ semantic projection, Source immutability, stale/mismatched state,
-Retryable intent, cancellation, identity-bearing Run-root validation,
-dropped-Workflow recovery, and CLI diagnostics. The generated
-10k/100k/1M-capable Criterion benchmark has five
+**Independent proof:** 43 package tests—25 unit/private, 15 through the public
+workflow facade, and three through the process boundary—cover every
+eight-frame restart prefix, one-Revision idempotence, exact report/XML conflict
+and recovery, 12 public limit families, LAS/LAZ semantic projection, Source
+immutability, stale/mismatched state, Retryable intent, cancellation,
+identity-bearing Run-root validation, dropped-Workflow recovery, and CLI
+diagnostics. The generated 10k/100k/1M-capable Criterion benchmark has five
 cold/restart/reconciliation modes. Its evidence is generated-only and does not
 claim worker heap or external acceptance.
 
@@ -329,7 +337,12 @@ not a claim about every possible operating-system fault.
 
 The private workflow regression additionally rederives the immediate-head
 Revert and proves that its baseline-to-restored Surface Change Envelope is
-empty.
+empty. Retained v0.6 regressions also cover exact changed Ground Input,
+post-Revert geometry/topology/vertex/face restoration, byte-identical Source
+data, and explicit immediate-head Revert behavior. These regressions preserve
+the lower-level terrain and Workspace guarantees without retaining the
+superseded one-shot CLI grammar. The v0.7 Workflow leaves a committed
+classification Revision in place when a later phase fails.
 
 ## Deferred modules
 
@@ -354,7 +367,7 @@ The allowlist is stricter than what Cargo can compile:
 | `point-view` | `render-protocol` and narrow math/value dependencies |
 | `render-wgpu` | `render-protocol`, `point-contracts` |
 | `renderer-demo` | only the Source/index/View/render crates it composes |
-| `terrain-demo` | `source-las`, `point-source`, `point-index`, `point-workspace`, `point-terrain`, `point-contracts`, `foundation-runtime` |
+| `terrain-demo` | `source-las`, `point-source`, `point-index`, `point-workspace`, `point-terrain`, `point-contracts`, `foundation-runtime`, and narrow checksum, identity-generation, and error dependencies |
 
 Additional rules:
 

@@ -10,7 +10,7 @@ use point_index::{
     CandidateLimits, DisplayCoverage, IndexError, IndexNode, IndexNodeId, NodeReadBudget,
     PrepareDisposition, PrepareLimits, PreparedIndex, prepare,
 };
-use point_source::Source;
+use point_source::{ReadLimit, Source};
 
 use support::{
     BLOCK_POINTS, ObservedNodeRead, TemporaryTarget, clustered_ticks, open_budgeted_source,
@@ -308,7 +308,7 @@ fn adapter_working_memory_is_forwarded_to_prepare_and_leaf_reads() {
     assert!(matches!(
         prepare(source.clone(), target.path(), tight_prepare).blocking_wait(),
         Err(IndexError::Source(point_source::SourceError::ResourceLimit {
-            limit: "adapter working bytes",
+            limit: ReadLimit::AdapterWorkingBytes,
             required: REQUIRED_ADAPTER_BYTES,
             allowed,
         })) if allowed == REQUIRED_ADAPTER_BYTES - 1
@@ -330,7 +330,7 @@ fn adapter_working_memory_is_forwarded_to_prepare_and_leaf_reads() {
     assert!(matches!(
         index.read_node(root.id(), tight_read),
         Err(IndexError::Source(point_source::SourceError::ResourceLimit {
-            limit: "adapter working bytes",
+            limit: ReadLimit::AdapterWorkingBytes,
             required: REQUIRED_ADAPTER_BYTES,
             allowed,
         })) if allowed == REQUIRED_ADAPTER_BYTES - 1

@@ -10,8 +10,12 @@ use std::sync::Arc;
 
 use foundation_runtime::OperationReporter;
 use point_contracts::{ContentHash, PointBatch, SourceId, SourceMetadata};
+use serde::Serialize;
 
-use crate::{AttributeSelection, ReadBudget, SourceError, SourcePreview, SourceSpan};
+use crate::{
+    AttributeSelection, MAX_ADAPTER_NAME_BYTES, MAX_ADAPTER_VERSION_BYTES, MAX_LOGICAL_ORDER_BYTES,
+    ReadBudget, SourceError, SourcePreview, SourceSpan,
+};
 
 /// Caller intent supplied to complete Source verification.
 ///
@@ -41,14 +45,84 @@ impl FullVerification {
     }
 }
 
+/// Validated identity contract for one concrete Source adapter.
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize)]
+pub struct AdapterContract {
+    #[serde(rename = "adapter_name")]
+    name: String,
+    #[serde(rename = "adapter_version")]
+    version: String,
+    logical_order: String,
+}
+
+impl AdapterContract {
+    /// Creates a bounded, non-empty adapter identity contract.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SourceError::SourceContractMismatch`] when any field is empty
+    /// or exceeds its persisted byte limit.
+    pub fn new(
+        name: impl Into<String>,
+        version: impl Into<String>,
+        logical_order: impl Into<String>,
+    ) -> Result<Self, SourceError> {
+        let name = validated_contract_text("adapter name", name.into(), MAX_ADAPTER_NAME_BYTES)?;
+        let version =
+            validated_contract_text("adapter version", version.into(), MAX_ADAPTER_VERSION_BYTES)?;
+        let logical_order = validated_contract_text(
+            "logical order",
+            logical_order.into(),
+            MAX_LOGICAL_ORDER_BYTES,
+        )?;
+        Ok(Self {
+            name,
+            version,
+            logical_order,
+        })
+    }
+
+    /// Returns the concrete adapter name.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Returns the concrete adapter contract version.
+    #[must_use]
+    pub fn version(&self) -> &str {
+        &self.version
+    }
+
+    /// Returns the adapter's canonical Point ordering rule.
+    #[must_use]
+    pub fn logical_order(&self) -> &str {
+        &self.logical_order
+    }
+}
+
+fn validated_contract_text(
+    field: &str,
+    value: String,
+    max_bytes: usize,
+) -> Result<String, SourceError> {
+    if value.trim().is_empty() {
+        return Err(SourceError::contract(format!("{field} is empty")));
+    }
+    if value.len() > max_bytes {
+        return Err(SourceError::contract(format!(
+            "{field} exceeds its {max_bytes}-byte limit"
+        )));
+    }
+    Ok(value)
+}
+
 /// Untrusted verification result supplied by a concrete adapter.
 ///
 /// `point-source` validates this value and is the only module that can publish
 /// an always-verified [`crate::Source`].
 pub struct AdapterVerified {
-    adapter_name: String,
-    adapter_version: String,
-    logical_order: String,
+    contract: AdapterContract,
     metadata: Arc<SourceMetadata>,
     content_hash: ContentHash,
     fast_token: Vec<u8>,
@@ -57,21 +131,16 @@ pub struct AdapterVerified {
 
 impl AdapterVerified {
     /// Creates an adapter verification result.
-    #[allow(clippy::too_many_arguments)]
     #[must_use]
     pub fn new(
-        adapter_name: impl Into<String>,
-        adapter_version: impl Into<String>,
-        logical_order: impl Into<String>,
+        contract: AdapterContract,
         metadata: Arc<SourceMetadata>,
         content_hash: ContentHash,
         fast_token: Vec<u8>,
         reader: Arc<dyn ReadAdapter>,
     ) -> Self {
         Self {
-            adapter_name: adapter_name.into(),
-            adapter_version: adapter_version.into(),
-            logical_order: logical_order.into(),
+            contract,
             metadata,
             content_hash,
             fast_token,
@@ -79,16 +148,8 @@ impl AdapterVerified {
         }
     }
 
-    pub(crate) fn adapter_name(&self) -> &str {
-        &self.adapter_name
-    }
-
-    pub(crate) fn adapter_version(&self) -> &str {
-        &self.adapter_version
-    }
-
-    pub(crate) fn logical_order(&self) -> &str {
-        &self.logical_order
+    pub(crate) const fn contract(&self) -> &AdapterContract {
+        &self.contract
     }
 
     pub(crate) fn metadata(&self) -> &SourceMetadata {
@@ -105,9 +166,7 @@ impl AdapterVerified {
 
     pub(crate) fn into_parts(self) -> AdapterVerifiedParts {
         AdapterVerifiedParts {
-            adapter_name: self.adapter_name,
-            adapter_version: self.adapter_version,
-            logical_order: self.logical_order,
+            contract: self.contract,
             metadata: self.metadata,
             content_hash: self.content_hash,
             fast_token: self.fast_token,
@@ -120,9 +179,7 @@ impl fmt::Debug for AdapterVerified {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("AdapterVerified")
-            .field("adapter_name", &self.adapter_name)
-            .field("adapter_version", &self.adapter_version)
-            .field("logical_order", &self.logical_order)
+            .field("contract", &self.contract)
             .field("metadata", &self.metadata)
             .field("content_hash", &self.content_hash)
             .field("fast_token_bytes", &self.fast_token.len())
@@ -131,9 +188,7 @@ impl fmt::Debug for AdapterVerified {
 }
 
 pub(crate) struct AdapterVerifiedParts {
-    pub(crate) adapter_name: String,
-    pub(crate) adapter_version: String,
-    pub(crate) logical_order: String,
+    pub(crate) contract: AdapterContract,
     pub(crate) metadata: Arc<SourceMetadata>,
     pub(crate) content_hash: ContentHash,
     pub(crate) fast_token: Vec<u8>,
@@ -195,6 +250,7 @@ pub struct AdapterReadRequest {
     spans: Arc<[SourceSpan]>,
     attributes: AttributeSelection,
     budget: ReadBudget,
+    max_output_batch_points: u64,
 }
 
 impl AdapterReadRequest {
@@ -202,11 +258,13 @@ impl AdapterReadRequest {
         spans: Arc<[SourceSpan]>,
         attributes: AttributeSelection,
         budget: ReadBudget,
+        max_output_batch_points: u64,
     ) -> Self {
         Self {
             spans,
             attributes,
             budget,
+            max_output_batch_points,
         }
     }
 
@@ -229,6 +287,16 @@ impl AdapterReadRequest {
     #[must_use]
     pub const fn budget(&self) -> ReadBudget {
         self.budget
+    }
+
+    /// Returns the effective Point limit for one canonical output batch.
+    ///
+    /// This combines the caller's Point and payload budgets with the Source
+    /// module's cancellation quantum. Adapters may apply additional working-
+    /// memory limits but do not need to repeat canonical payload accounting.
+    #[must_use]
+    pub const fn max_output_batch_points(&self) -> u64 {
+        self.max_output_batch_points
     }
 }
 

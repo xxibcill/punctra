@@ -223,12 +223,29 @@ fn assert_landxml(bytes: &[u8]) {
     assert_eq!(root.attribute("version"), Some("1.2"));
     assert_eq!(root.attribute("date"), Some("2026-08-10"));
     assert_eq!(root.attribute("time"), Some("00:00:00Z"));
+
+    let metric = document
+        .descendants()
+        .find(|node| node.has_tag_name((LANDXML_NAMESPACE, "Metric")))
+        .expect("metric Units declaration exists");
+    assert_eq!(metric.attribute("linearUnit"), Some("meter"));
+    let surface = document
+        .descendants()
+        .find(|node| node.has_tag_name((LANDXML_NAMESPACE, "Surface")))
+        .expect("Surface exists");
+    assert_eq!(surface.attribute("name"), Some("Punctra Ground Surface"));
     assert_eq!(
         document
             .descendants()
             .filter(|node| node.has_tag_name((LANDXML_NAMESPACE, "P")))
             .count(),
         62,
+    );
+    assert!(
+        document
+            .descendants()
+            .any(|node| node.has_tag_name((LANDXML_NAMESPACE, "F"))),
+        "LandXML must contain at least one face",
     );
 }
 

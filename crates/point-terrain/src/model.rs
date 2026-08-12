@@ -590,6 +590,8 @@ pub enum LandXmlDisposition {
 pub struct LandXmlReceipt {
     disposition: LandXmlDisposition,
     surface_artifact_hash: ContentHash,
+    recipe_hash: ContentHash,
+    input_hash: ContentHash,
     geometry_hash: ContentHash,
     topology_hash: ContentHash,
     content_hash: ContentHash,
@@ -603,6 +605,8 @@ impl LandXmlReceipt {
     pub(crate) const fn new(
         disposition: LandXmlDisposition,
         surface_artifact_hash: ContentHash,
+        recipe_hash: ContentHash,
+        input_hash: ContentHash,
         geometry_hash: ContentHash,
         topology_hash: ContentHash,
         content_hash: ContentHash,
@@ -613,6 +617,8 @@ impl LandXmlReceipt {
         Self {
             disposition,
             surface_artifact_hash,
+            recipe_hash,
+            input_hash,
             geometry_hash,
             topology_hash,
             content_hash,
@@ -632,6 +638,18 @@ impl LandXmlReceipt {
     #[must_use]
     pub const fn surface_artifact_hash(self) -> ContentHash {
         self.surface_artifact_hash
+    }
+
+    /// Returns the exported surface's normalized Recipe hash.
+    #[must_use]
+    pub const fn recipe_hash(self) -> ContentHash {
+        self.recipe_hash
+    }
+
+    /// Returns the exported surface's canonical input Point-row hash.
+    #[must_use]
+    pub const fn input_hash(self) -> ContentHash {
+        self.input_hash
     }
 
     /// Returns the exported geometry hash.

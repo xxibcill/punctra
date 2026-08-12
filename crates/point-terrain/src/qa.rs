@@ -6,6 +6,7 @@ use robust::{Coord, orient2d};
 use crate::{
     CheckPoint, CheckPointJob, CheckPointLimits, CheckPointOutcome, CheckPointReport,
     CheckPointResult, ResidualStatistics, SurfaceFace, TerrainError, TerrainSurface,
+    numeric::canonical_zero,
 };
 
 const CANCELLATION_STRIDE: usize = 1_024;
@@ -16,12 +17,12 @@ pub(crate) fn start<I>(
     limits: CheckPointLimits,
 ) -> CheckPointJob
 where
-    I: IntoIterator<Item = CheckPoint>,
+    I: IntoIterator<Item = CheckPoint> + Send + 'static,
 {
-    let collected = collect_check_points(check_points, limits);
     let surface = surface.clone();
     Job::spawn(move |control| {
-        let (check_points, collection_bytes) = collected?;
+        let (check_points, collection_bytes) =
+            collect_check_points(check_points, limits, &control)?;
         evaluate(&surface, check_points, collection_bytes, limits, &control)
     })
 }
@@ -29,16 +30,23 @@ where
 fn collect_check_points<I>(
     check_points: I,
     limits: CheckPointLimits,
+    control: &OperationControl,
 ) -> Result<(Vec<CheckPoint>, u64), TerrainError>
 where
     I: IntoIterator<Item = CheckPoint>,
 {
+    control.check_cancelled()?;
     let mut input = check_points.into_iter();
     let lower_bound = u64::try_from(input.size_hint().0).unwrap_or(u64::MAX);
     require_count(lower_bound, limits)?;
 
     let mut collected = Vec::new();
-    for check_point in input.by_ref() {
+    loop {
+        let next = input.next();
+        control.check_cancelled()?;
+        let Some(check_point) = next else {
+            break;
+        };
         let next_count = u64::try_from(collected.len())
             .unwrap_or(u64::MAX)
             .saturating_add(1);
@@ -264,7 +272,7 @@ fn locate(
     control: &OperationControl,
 ) -> Result<CheckPointOutcome, TerrainError> {
     let position = check_point.position();
-    let query = Coord {
+    let world_query = Coord {
         x: position[0],
         y: position[1],
     };
@@ -282,9 +290,31 @@ fn locate(
                 limits.max_face_tests(),
             ));
         }
-        let triangle = face_world(surface, face)?;
+        let world_triangle = face_world(surface, face)?;
+        let (triangle, query, elevation_origin) = match normalize_xy(world_triangle, world_query) {
+            NormalizedFace::Outside => continue,
+            NormalizedFace::Candidate { triangle, query } => (triangle, query, 0.0),
+            NormalizedFace::Degenerate => {
+                let frame = face_local(surface, face)?;
+                let local_query = Coord {
+                    x: position[0] - frame.world_origin[0],
+                    y: position[1] - frame.world_origin[1],
+                };
+                let NormalizedFace::Candidate { triangle, query } =
+                    normalize_xy(frame.triangle, local_query)
+                else {
+                    continue;
+                };
+                (triangle, query, frame.world_origin[2])
+            }
+        };
         if contains_closed(triangle, query) {
-            let surface_z = interpolate_z(triangle, query)?;
+            let surface_z = canonical_zero(elevation_origin + interpolate_z(triangle, query)?);
+            if !surface_z.is_finite() {
+                return Err(TerrainError::numeric(
+                    "interpolated Surface elevation is not finite",
+                ));
+            }
             let residual = canonical_zero(position[2] - surface_z);
             if !residual.is_finite() {
                 return Err(TerrainError::numeric("Check Point residual is not finite"));
@@ -297,6 +327,11 @@ fn locate(
         }
     }
     Ok(CheckPointOutcome::Gap)
+}
+
+struct LocalFaceFrame {
+    triangle: [[f64; 3]; 3],
+    world_origin: [f64; 3],
 }
 
 fn face_world(surface: &TerrainSurface, face: SurfaceFace) -> Result<[[f64; 3]; 3], TerrainError> {
@@ -318,6 +353,129 @@ fn face_world(surface: &TerrainSurface, face: SurfaceFace) -> Result<[[f64; 3]; 
     Ok(world)
 }
 
+fn face_local(surface: &TerrainSurface, face: SurfaceFace) -> Result<LocalFaceFrame, TerrainError> {
+    let transform = surface.descriptor().position_transform();
+    let mut ticks = [[0; 3]; 3];
+    for (slot, vertex) in face.vertices().into_iter().enumerate() {
+        let Some(vertex) = surface.vertices().get(vertex.zero_based()) else {
+            return Err(TerrainError::topology(
+                "a Surface face references a missing vertex",
+            ));
+        };
+        ticks[slot] = vertex.ticks();
+    }
+
+    let world_origin = transform.world_f64(ticks[0]);
+    if world_origin
+        .iter()
+        .any(|coordinate| !coordinate.is_finite())
+    {
+        return Err(TerrainError::numeric(
+            "a Surface vertex world position is not finite",
+        ));
+    }
+
+    let scale = transform.scale();
+    let mut triangle = [[0.0; 3]; 3];
+    for (slot, position) in ticks.into_iter().enumerate() {
+        for axis in 0..3 {
+            triangle[slot][axis] = scaled_tick_delta(position[axis], ticks[0][axis], scale[axis]);
+        }
+        if triangle[slot]
+            .iter()
+            .any(|coordinate| !coordinate.is_finite())
+        {
+            return Err(TerrainError::numeric(
+                "a Surface vertex local position is not finite",
+            ));
+        }
+    }
+    Ok(LocalFaceFrame {
+        triangle,
+        world_origin,
+    })
+}
+
+#[allow(
+    clippy::cast_precision_loss,
+    reason = "Surface calculations intentionally use the nearest representable f64 tick delta"
+)]
+fn scaled_tick_delta(tick: i64, origin: i64, scale: f64) -> f64 {
+    let delta = tick
+        .checked_sub(origin)
+        .map_or_else(|| i128::from(tick) - i128::from(origin), i128::from);
+    delta as f64 * scale
+}
+
+enum NormalizedFace {
+    Outside,
+    Degenerate,
+    Candidate {
+        triangle: [[f64; 3]; 3],
+        query: Coord<f64>,
+    },
+}
+
+fn normalize_xy(mut triangle: [[f64; 3]; 3], point: Coord<f64>) -> NormalizedFace {
+    let minimum_x = triangle
+        .iter()
+        .map(|position| position[0])
+        .reduce(f64::min)
+        .expect("a face always has three positions");
+    let maximum_x = triangle
+        .iter()
+        .map(|position| position[0])
+        .reduce(f64::max)
+        .expect("a face always has three positions");
+    let minimum_y = triangle
+        .iter()
+        .map(|position| position[1])
+        .reduce(f64::min)
+        .expect("a face always has three positions");
+    let maximum_y = triangle
+        .iter()
+        .map(|position| position[1])
+        .reduce(f64::max)
+        .expect("a face always has three positions");
+    if point.x < minimum_x || point.x > maximum_x || point.y < minimum_y || point.y > maximum_y {
+        return NormalizedFace::Outside;
+    }
+
+    let origin = Coord {
+        x: triangle[0][0],
+        y: triangle[0][1],
+    };
+    for position in &mut triangle {
+        position[0] -= origin.x;
+        position[1] -= origin.y;
+    }
+    let mut point = Coord {
+        x: point.x - origin.x,
+        y: point.y - origin.y,
+    };
+    let scale = triangle
+        .iter()
+        .flat_map(|position| [position[0].abs(), position[1].abs()])
+        .reduce(f64::max)
+        .expect("a face always has planar coordinates");
+    if scale == 0.0 {
+        return NormalizedFace::Degenerate;
+    }
+    for position in &mut triangle {
+        position[0] /= scale;
+        position[1] /= scale;
+    }
+    point.x /= scale;
+    point.y /= scale;
+    if orient2d(xy(triangle[0]), xy(triangle[1]), xy(triangle[2])) == 0.0 {
+        return NormalizedFace::Degenerate;
+    }
+    NormalizedFace::Candidate {
+        triangle,
+        query: point,
+    }
+}
+
 fn contains_closed(triangle: [[f64; 3]; 3], point: Coord<f64>) -> bool {
     let a = xy(triangle[0]);
     let b = xy(triangle[1]);
@@ -330,7 +488,7 @@ fn interpolate_z(triangle: [[f64; 3]; 3], point: Coord<f64>) -> Result<f64, Terr
     let denominator = (b[1] - c[1]) * (a[0] - c[0]) + (c[0] - b[0]) * (a[1] - c[1]);
     if !denominator.is_finite() || denominator == 0.0 {
         return Err(TerrainError::numeric(
-            "a Surface face cannot be interpolated in world coordinates",
+            "a Surface face cannot be interpolated in normalized coordinates",
         ));
     }
     let a_weight =
@@ -354,18 +512,14 @@ fn xy(position: [f64; 3]) -> Coord<f64> {
     }
 }
 
-fn canonical_zero(value: f64) -> f64 {
-    if value == 0.0 { 0.0 } else { value }
-}
-
 #[derive(Default)]
 struct ResidualAccumulator {
     covered_count: u64,
     gap_count: u64,
     minimum: Option<f64>,
     maximum: Option<f64>,
-    sum: CompensatedSum,
-    squared_sum: CompensatedSum,
+    sum: ScaledSum,
+    squared_sum: ScaledSquareSum,
 }
 
 impl ResidualAccumulator {
@@ -385,7 +539,7 @@ impl ResidualAccumulator {
                 self.minimum = Some(self.minimum.map_or(residual, |value| value.min(residual)));
                 self.maximum = Some(self.maximum.map_or(residual, |value| value.max(residual)));
                 self.sum.add(residual)?;
-                self.squared_sum.add(residual * residual)?;
+                self.squared_sum.add(residual)?;
             }
         }
         Ok(())
@@ -397,16 +551,81 @@ impl ResidualAccumulator {
             return ResidualStatistics::new(0, self.gap_count, None, None, None, None);
         }
         let count = self.covered_count as f64;
-        let sum = self.sum.total();
-        let squared_sum = self.squared_sum.total();
         ResidualStatistics::new(
             self.covered_count,
             self.gap_count,
             self.minimum,
             self.maximum,
-            Some(canonical_zero(sum / count)),
-            Some(canonical_zero((squared_sum / count).sqrt())),
+            Some(self.sum.mean(count)),
+            Some(self.squared_sum.root_mean_square(count)),
         )
+    }
+}
+
+#[derive(Default)]
+struct ScaledSum {
+    scale: f64,
+    normalized_sum: CompensatedSum,
+}
+
+impl ScaledSum {
+    fn add(&mut self, value: f64) -> Result<(), TerrainError> {
+        let magnitude = value.abs();
+        if magnitude == 0.0 {
+            return Ok(());
+        }
+        if magnitude > self.scale {
+            let prior_sum = self.normalized_sum.total() * (self.scale / magnitude);
+            self.scale = magnitude;
+            self.normalized_sum = CompensatedSum::default();
+            self.normalized_sum.add(value.signum())?;
+            self.normalized_sum.add(prior_sum)?;
+        } else {
+            self.normalized_sum.add(value / self.scale)?;
+        }
+        Ok(())
+    }
+
+    fn mean(&self, count: f64) -> f64 {
+        let normalized = self.normalized_sum.total();
+        let sum = self.scale * normalized;
+        let mean = if sum.is_finite() {
+            sum / count
+        } else {
+            self.scale * (normalized / count)
+        };
+        canonical_zero(mean)
+    }
+}
+
+#[derive(Default)]
+struct ScaledSquareSum {
+    scale: f64,
+    normalized_sum: CompensatedSum,
+}
+
+impl ScaledSquareSum {
+    fn add(&mut self, value: f64) -> Result<(), TerrainError> {
+        let magnitude = value.abs();
+        if magnitude == 0.0 {
+            return Ok(());
+        }
+        if magnitude > self.scale {
+            let ratio = self.scale / magnitude;
+            let prior_sum = self.normalized_sum.total() * ratio * ratio;
+            self.scale = magnitude;
+            self.normalized_sum = CompensatedSum::default();
+            self.normalized_sum.add(1.0)?;
+            self.normalized_sum.add(prior_sum)?;
+        } else {
+            let ratio = magnitude / self.scale;
+            self.normalized_sum.add(ratio * ratio)?;
+        }
+        Ok(())
+    }
+
+    fn root_mean_square(&self, count: f64) -> f64 {
+        canonical_zero(self.scale * (self.normalized_sum.total() / count).sqrt())
     }
 }
 

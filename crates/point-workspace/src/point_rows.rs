@@ -1,4 +1,4 @@
-use std::{mem, sync::Arc};
+use std::sync::Arc;
 
 use blake3::Hasher;
 use foundation_runtime::{
@@ -13,8 +13,11 @@ use point_source::{
 
 use crate::{
     PointQuery, PointRowLimits, Snapshot, SnapshotProvenance, WorkspaceError,
+    point_id_hash::CanonicalPointIdHasher,
+    query::{SpanFacts, matches_query},
     selection::plan_query,
-    workspace::{OverlayLimits, OverlayUsage, Session},
+    util::allocation_bytes,
+    workspace::{EffectiveClassificationBudget, OverlayUsage, Session},
 };
 
 const CANCELLATION_STRIDE: usize = 4_096;
@@ -24,7 +27,6 @@ const CLASSIFICATION_PAYLOAD_BYTES: u64 = 1;
 const ROW_PAYLOAD_BYTES: u64 =
     ORDINAL_PAYLOAD_BYTES + POSITION_PAYLOAD_BYTES + CLASSIFICATION_PAYLOAD_BYTES;
 const CONTENT_HASH_DOMAIN: &[u8] = b"punctra-snapshot-point-rows-v1";
-const SPAN_HASH_DOMAIN: &[u8] = b"punctra-selection-spans-v1";
 
 /// One nonempty bounded batch of exact rows from an immutable Snapshot.
 ///
@@ -84,14 +86,6 @@ impl SnapshotPointBatch {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.ordinals.is_empty()
-    }
-
-    /// Returns the exact logical payload bytes in all three row columns.
-    #[must_use]
-    pub fn estimated_payload_bytes(&self) -> u64 {
-        u64::try_from(self.len())
-            .unwrap_or(u64::MAX)
-            .saturating_mul(ROW_PAYLOAD_BYTES)
     }
 }
 
@@ -185,16 +179,17 @@ pub struct SnapshotPointBatches {
     limits: PointRowLimits,
     classification: point_contracts::AttributeId,
     source_budget: ReadBudget,
-    expected_spans: SpanFacts,
+    expected_spans: Option<SpanFacts>,
     retained_span_bytes: u64,
     source: Option<PointBatches>,
+    initialized: bool,
     pending: Option<PendingBatch>,
     overlay_usage: OverlayUsage,
     control: OperationControl,
     examined_points: u64,
     emitted_points: u64,
     previous_ordinal: Option<u64>,
-    point_id_hasher: Hasher,
+    point_id_hasher: CanonicalPointIdHasher,
     content_hasher: Hasher,
     summary: Option<SnapshotPointSummary>,
     terminal: bool,
@@ -239,6 +234,9 @@ impl SnapshotPointBatches {
         if let Err(error) = self.control.check_cancelled() {
             return self.fail(error.into());
         }
+        if let Err(error) = self.initialize_source() {
+            return self.fail(error);
+        }
 
         loop {
             if let Some(mut pending) = self.pending.take() {
@@ -280,60 +278,64 @@ impl SnapshotPointBatches {
         }
     }
 
+    fn initialize_source(&mut self) -> Result<(), WorkspaceError> {
+        if self.initialized {
+            return Ok(());
+        }
+        self.control.check_cancelled()?;
+        let spans = plan_query(
+            &self.session,
+            self.query,
+            self.limits.candidate_limits(),
+            self.limits.max_working_bytes(),
+            &self.control,
+        )?;
+        let expected_spans = SpanFacts::new(&spans)?;
+        let span_handoff_bytes = allocation_bytes::<SourceSpan>(spans.capacity()).saturating_mul(2);
+        require_working(
+            span_handoff_bytes,
+            self.limits,
+            "Source span handoff working bytes",
+        )?;
+
+        let retained_span_bytes = allocation_bytes::<SourceSpan>(expected_spans.span_count());
+        require_working(
+            retained_span_bytes.saturating_add(self.source_budget.max_adapter_working_bytes()),
+            self.limits,
+            "Snapshot Point Source read working bytes",
+        )?;
+        let request = ReadRequest::all()
+            .spans(spans)
+            .attributes(AttributeSelection::only([self.classification]))
+            .budget(self.source_budget);
+        let source = self.session.source().read(request)?;
+        self.control.check_cancelled()?;
+        self.expected_spans = Some(expected_spans);
+        self.retained_span_bytes = retained_span_bytes;
+        self.source = Some(source);
+        self.initialized = true;
+        Ok(())
+    }
+
     fn prepare_batch(&mut self, batch: PointBatch) -> Result<PendingBatch, WorkspaceError> {
-        let source_values = batch
-            .attributes()
-            .get(self.classification)
-            .and_then(|column| column.values().as_u8())
-            .ok_or_else(|| {
-                WorkspaceError::incompatible(
-                    "classification Source column is absent or no longer U8",
-                )
-            })?;
         let base_without_effective = self
             .retained_span_bytes
             .saturating_add(batch.estimated_payload_bytes())
             .saturating_add(self.source_budget.max_adapter_working_bytes());
-        require_working(
-            base_without_effective
-                .saturating_add(u64::try_from(source_values.len()).unwrap_or(u64::MAX)),
-            self.limits,
-            "effective classification working bytes",
-        )?;
-        let mut effective = Vec::new();
-        effective
-            .try_reserve_exact(source_values.len())
-            .map_err(|_| WorkspaceError::ResourceLimit {
-                limit: "effective classification allocation",
-                required: u64::try_from(source_values.len()).unwrap_or(u64::MAX),
-                allowed: self.limits.max_working_bytes(),
-            })?;
-        let effective_bytes = allocation_bytes::<u8>(effective.capacity());
-        let base_working_bytes = base_without_effective.saturating_add(effective_bytes);
-        require_working(
-            base_working_bytes,
-            self.limits,
-            "Snapshot Point Source batch working bytes",
-        )?;
-        effective.extend_from_slice(source_values);
-
-        let overlay_working_bytes = self
-            .limits
-            .max_working_bytes()
-            .saturating_sub(base_working_bytes);
-        self.session.apply_overlays(
+        let effective = self.session.effective_classifications(
             self.provenance.revision(),
-            batch.first_ordinal(),
-            &mut effective,
-            OverlayLimits {
-                max_blocks: self.limits.max_overlay_segments(),
-                max_payload_bytes: self.limits.max_overlay_bytes(),
-                max_block_bytes: overlay_working_bytes.min(self.limits.max_overlay_bytes()),
-            },
+            &batch,
+            base_without_effective,
+            EffectiveClassificationBudget::new(
+                self.limits.max_working_bytes(),
+                self.limits.max_overlay_segments(),
+                self.limits.max_overlay_bytes(),
+            ),
             &mut self.overlay_usage,
             &self.control,
         )?;
-        self.control.check_cancelled()?;
+        let effective_bytes = allocation_bytes::<u8>(effective.capacity());
+        let base_working_bytes = base_without_effective.saturating_add(effective_bytes);
 
         Ok(PendingBatch {
             batch,
@@ -398,7 +400,7 @@ impl SnapshotPointBatches {
             if (end - start).is_multiple_of(CANCELLATION_STRIDE) {
                 self.control.check_cancelled()?;
             }
-            if matches_query(self.query, &pending.batch, &pending.effective, end) {
+            if matches_query(self.query, &pending.batch, &pending.effective, end)? {
                 if batch_capacity == 0 {
                     return Err(self.zero_output_capacity_error());
                 }
@@ -426,7 +428,7 @@ impl SnapshotPointBatches {
             if (row - scan.start).is_multiple_of(CANCELLATION_STRIDE) {
                 self.control.check_cancelled()?;
             }
-            if !matches_query(self.query, &pending.batch, &pending.effective, row) {
+            if !matches_query(self.query, &pending.batch, &pending.effective, row)? {
                 continue;
             }
             let row_offset = u64::try_from(row).map_err(|_| {
@@ -527,7 +529,7 @@ impl SnapshotPointBatches {
                 ));
             }
             let ordinal_bytes = ordinal.to_le_bytes();
-            self.point_id_hasher.update(&ordinal_bytes);
+            self.point_id_hasher.update(ordinal);
             self.content_hasher.update(&ordinal_bytes);
             for coordinate in ticks {
                 self.content_hasher.update(&coordinate.to_le_bytes());
@@ -539,15 +541,16 @@ impl SnapshotPointBatches {
     }
 
     fn publish_examined(&mut self, added: u64) -> Result<(), WorkspaceError> {
+        let expected_points = self.expected_points()?;
         self.examined_points =
             self.examined_points
                 .checked_add(added)
                 .ok_or(WorkspaceError::ResourceLimit {
                     limit: "examined candidate Points",
                     required: u64::MAX,
-                    allowed: self.expected_spans.point_count,
+                    allowed: expected_points,
                 })?;
-        if self.examined_points > self.expected_spans.point_count {
+        if self.examined_points > expected_points {
             return Err(WorkspaceError::incompatible(
                 "Snapshot Point stream examined too many candidate Points",
             ));
@@ -555,7 +558,7 @@ impl SnapshotPointBatches {
         self.control.report_progress(ProgressSnapshot::new(
             ProgressPhase::RUNNING,
             self.examined_points,
-            Some(self.expected_spans.point_count),
+            Some(expected_points),
         )?)?;
         Ok(())
     }
@@ -571,16 +574,21 @@ impl SnapshotPointBatches {
                 "Snapshot Point Source ended without stream state",
             ));
         };
+        let Some(expected_spans) = self.expected_spans else {
+            return self.fail(WorkspaceError::incompatible(
+                "Snapshot Point Source ended without candidate facts",
+            ));
+        };
         if let Err(error) = validate_source_summary(
             source.summary(),
             self.session.source().provenance(),
             self.classification,
             self.source_budget,
-            self.expected_spans,
+            expected_spans,
         ) {
             return self.fail(error);
         }
-        if self.examined_points != self.expected_spans.point_count {
+        if self.examined_points != expected_spans.point_count() {
             return self.fail(WorkspaceError::incompatible(
                 "Snapshot Point stream ended before every candidate was examined",
             ));
@@ -588,23 +596,28 @@ impl SnapshotPointBatches {
         if let Err(error) = self.control.check_cancelled() {
             return self.fail(error.into());
         }
-        if let Err(error) = self
-            .control
-            .complete_progress(self.expected_spans.point_count)
-        {
+        if let Err(error) = self.control.complete_progress(expected_spans.point_count()) {
             return self.fail(error.into());
         }
         self.source = None;
         self.summary = Some(SnapshotPointSummary {
             provenance: self.provenance,
             query: self.query,
-            candidate_point_count: self.expected_spans.point_count,
+            candidate_point_count: expected_spans.point_count(),
             exact_count: self.emitted_points,
-            point_id_hash: ContentHash::new(*self.point_id_hasher.finalize().as_bytes()),
+            point_id_hash: self.point_id_hasher.finalize(),
             content_hash: ContentHash::new(*self.content_hasher.finalize().as_bytes()),
         });
         self.terminal = true;
         Ok(None)
+    }
+
+    fn expected_points(&self) -> Result<u64, WorkspaceError> {
+        self.expected_spans
+            .map(SpanFacts::point_count)
+            .ok_or_else(|| {
+                WorkspaceError::incompatible("Snapshot Point candidate facts are unavailable")
+            })
     }
 
     fn fail<T>(&mut self, error: WorkspaceError) -> Result<T, WorkspaceError> {
@@ -662,6 +675,9 @@ impl std::fmt::Debug for SnapshotPointBatches {
     }
 }
 
+// The accepted public interface reserves synchronous setup errors even though
+// v0.6 defers every fallible Source-scale step until the first pull.
+#[allow(clippy::unnecessary_wraps)]
 pub(crate) fn start(
     snapshot: &Snapshot,
     query: PointQuery,
@@ -670,36 +686,9 @@ pub(crate) fn start(
     let control = OperationControl::new();
     let provenance = *snapshot.provenance();
     let session = snapshot.session();
-    let spans = plan_query(
-        &session,
-        query,
-        limits.candidate_limits(),
-        limits.max_working_bytes(),
-        &control,
-    )?;
-    let expected_spans = SpanFacts::new(&spans)?;
-    let span_handoff_bytes = allocation_bytes::<SourceSpan>(spans.capacity()).saturating_mul(2);
-    require_working(
-        span_handoff_bytes,
-        limits,
-        "Source span handoff working bytes",
-    )?;
-
-    let retained_span_bytes = allocation_bytes::<SourceSpan>(expected_spans.span_count);
-    let source_budget = limits.source_read_budget();
-    require_working(
-        retained_span_bytes.saturating_add(source_budget.max_adapter_working_bytes()),
-        limits,
-        "Snapshot Point Source read working bytes",
-    )?;
     let classification = session.classification_attribute();
-    let request = ReadRequest::all()
-        .spans(spans)
-        .attributes(AttributeSelection::only([classification]))
-        .budget(source_budget);
-    let source = session.source().read(request)?;
 
-    let point_id_hasher = crate::hashes::point_id_hasher(provenance.source());
+    let point_id_hasher = CanonicalPointIdHasher::new(provenance.source());
     let mut content_hasher = domain_hasher(CONTENT_HASH_DOMAIN);
     content_hasher.update(provenance.workspace().as_bytes());
     content_hasher.update(provenance.source().as_bytes());
@@ -711,10 +700,11 @@ pub(crate) fn start(
         query,
         limits,
         classification,
-        source_budget,
-        expected_spans,
-        retained_span_bytes,
-        source: Some(source),
+        source_budget: limits.source_read_budget(),
+        expected_spans: None,
+        retained_span_bytes: 0,
+        source: None,
+        initialized: false,
         pending: None,
         overlay_usage: OverlayUsage::default(),
         control,
@@ -802,22 +792,6 @@ fn output_allocation_error(rows: usize, limits: PointRowLimits) -> WorkspaceErro
     }
 }
 
-fn matches_query(query: PointQuery, batch: &PointBatch, effective: &[u8], row: usize) -> bool {
-    let matches_bounds = query.bounds().is_none_or(|bounds| {
-        let world = batch
-            .positions()
-            .transform()
-            .world_f64(batch.positions().ticks()[row]);
-        let min = bounds.min();
-        let max = bounds.max();
-        (0..3).all(|axis| world[axis] >= min[axis] && world[axis] <= max[axis])
-    });
-    matches_bounds
-        && query
-            .classification_eq()
-            .is_none_or(|value| effective[row] == value)
-}
-
 fn validate_source_summary(
     summary: Option<&SourceReadSummary>,
     provenance: &point_contracts::SourceProvenance,
@@ -830,7 +804,7 @@ fn validate_source_summary(
     })?;
     let actual = SpanFacts::new(summary.spans())?;
     if summary.provenance() != provenance
-        || summary.exact_count() != expected.point_count
+        || summary.exact_count() != expected.point_count()
         || summary.attributes() != [classification]
         || summary.budget() != budget
         || actual != expected
@@ -840,36 +814,6 @@ fn validate_source_summary(
         ));
     }
     Ok(())
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct SpanFacts {
-    span_count: usize,
-    point_count: u64,
-    hash: [u8; 32],
-}
-
-impl SpanFacts {
-    fn new(spans: &[SourceSpan]) -> Result<Self, WorkspaceError> {
-        let mut point_count = 0_u64;
-        let mut hasher = domain_hasher(SPAN_HASH_DOMAIN);
-        for span in spans {
-            point_count = point_count.checked_add(span.point_count()).ok_or(
-                WorkspaceError::ResourceLimit {
-                    limit: "candidate Points",
-                    required: u64::MAX,
-                    allowed: u64::MAX - 1,
-                },
-            )?;
-            hasher.update(&span.first_ordinal().to_le_bytes());
-            hasher.update(&span.point_count().to_le_bytes());
-        }
-        Ok(Self {
-            span_count: spans.len(),
-            point_count,
-            hash: *hasher.finalize().as_bytes(),
-        })
-    }
 }
 
 fn require_working(
@@ -885,12 +829,6 @@ fn require_working(
         });
     }
     Ok(())
-}
-
-fn allocation_bytes<T>(values: usize) -> u64 {
-    u64::try_from(values)
-        .unwrap_or(u64::MAX)
-        .saturating_mul(u64::try_from(mem::size_of::<T>()).unwrap_or(u64::MAX))
 }
 
 fn domain_hasher(domain: &[u8]) -> Hasher {

@@ -346,17 +346,7 @@ fn hard_commit_limits_leave_the_head_and_operation_catalog_unchanged() {
         .blocking_wait()
         .expect("limit target materializes");
     let defaults = CommitLimits::default();
-    let limits = CommitLimits::new(
-        2,
-        defaults.max_changed_points(),
-        defaults.max_input_frames(),
-        defaults.max_block_points(),
-        defaults.max_block_bytes(),
-        defaults.max_working_bytes(),
-        defaults.max_temporary_bytes(),
-        defaults.max_revision_bytes(),
-        defaults.max_total_durable_bytes(),
-    );
+    let limits = defaults.with_max_selected_points(2);
     let operation = operation(5);
     let error = workspace
         .commit(
@@ -475,18 +465,7 @@ fn open_limits_fail_without_changing_a_valid_workspace() {
         create_fixture_workspace("open-limits", 17);
     drop(workspace);
     let defaults = OpenLimits::default();
-    let limits = OpenLimits::new(
-        defaults.max_manifest_bytes(),
-        defaults.max_operation_records(),
-        0,
-        defaults.max_revision_blocks(),
-        defaults.max_revision_rows(),
-        defaults.max_revision_block_bytes(),
-        defaults.max_single_file_bytes(),
-        defaults.max_total_persisted_bytes(),
-        defaults.max_working_bytes(),
-        defaults.max_resident_metadata_bytes(),
-    );
+    let limits = defaults.with_max_revision_files(0);
     let error = open(temporary.workspace_path(), index.clone(), limits)
         .blocking_wait()
         .unwrap_err();

@@ -75,7 +75,7 @@ impl OrbitCamera {
 #[cfg(test)]
 mod tests {
     use point_view::{AvailableNodes, PlanningBudget, ViewPlanner};
-    use render_protocol::{ViewGenerationKey, ViewId};
+    use render_protocol::{ViewGenerationKey, ViewId, Viewport};
 
     use crate::synthetic::{SCENE_RADIUS, SCENE_TARGET, SyntheticScene};
 
@@ -118,7 +118,7 @@ mod tests {
         let plan = ViewPlanner::default()
             .plan(
                 &orbit.as_render_camera().unwrap(),
-                [1_280, 800],
+                Viewport::new(1_280, 800).unwrap(),
                 AvailableNodes::new(view_generation, &planning_nodes),
                 PlanningBudget::new(u64::MAX, u64::MAX, u64::MAX),
             )
