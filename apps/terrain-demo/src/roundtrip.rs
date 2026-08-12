@@ -658,14 +658,65 @@ fn reject_same_file(
 }
 
 #[derive(Clone, Copy, Debug)]
-struct Point {
-    position: [f64; 3],
+struct Position {
+    easting: f64,
+    northing: f64,
+    elevation: f64,
+}
+
+impl Position {
+    fn key(self) -> [u64; 3] {
+        [
+            self.easting.to_bits(),
+            self.northing.to_bits(),
+            self.elevation.to_bits(),
+        ]
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct Triangle {
+    first: usize,
+    second: usize,
+    third: usize,
+}
+
+impl Triangle {
+    const fn new(first: usize, second: usize, third: usize) -> Self {
+        Self {
+            first,
+            second,
+            third,
+        }
+    }
+
+    const fn has_repeated_point(self) -> bool {
+        self.first == self.second || self.second == self.third || self.first == self.third
+    }
+
+    fn positions(self, points: &[Position]) -> [Position; 3] {
+        [points[self.first], points[self.second], points[self.third]]
+    }
+
+    fn canonical_point_indices(self) -> [usize; 3] {
+        let mut indices = [self.first, self.second, self.third];
+        indices.sort_unstable();
+        indices
+    }
+
+    fn remap(self, point_mapping: &[usize]) -> Self {
+        Self::new(
+            point_mapping[self.first],
+            point_mapping[self.second],
+            point_mapping[self.third],
+        )
+    }
 }
 
 #[derive(Debug)]
 struct ParsedSurface {
-    points: Vec<Point>,
-    faces: Vec<[usize; 3]>,
+    points: Vec<Position>,
+    faces: Vec<Triangle>,
 }
 
 fn parse_surface(
@@ -827,7 +878,7 @@ fn parse_points(
     side: InputSide,
     pnts: Node<'_, '_>,
     max_points: u64,
-) -> Result<(Vec<Point>, BTreeMap<u64, usize>), RoundTripFailure> {
+) -> Result<(Vec<Position>, BTreeMap<u64, usize>), RoundTripFailure> {
     validate_allowed_children(side, pnts, &["P"])?;
     let point_count = element_children(pnts).count();
     check_item_limit(side, "points", point_count, max_points)?;
@@ -846,9 +897,7 @@ fn parse_points(
                 "{side} contains duplicate point ID {id}"
             )));
         }
-        points.push(Point {
-            position: parse_position(side, node)?,
-        });
+        points.push(parse_position(side, node)?);
     }
     Ok((points, point_ids))
 }
@@ -868,7 +917,7 @@ fn parse_point_id(side: InputSide, node: Node<'_, '_>) -> Result<u64, RoundTripF
     Ok(id)
 }
 
-fn parse_position(side: InputSide, node: Node<'_, '_>) -> Result<[f64; 3], RoundTripFailure> {
+fn parse_position(side: InputSide, node: Node<'_, '_>) -> Result<Position, RoundTripFailure> {
     let text = simple_text(side, node, "P")?;
     let mut values = text.split_whitespace();
     let northing = parse_coordinate(side, values.next())?;
@@ -888,11 +937,11 @@ fn parse_position(side: InputSide, node: Node<'_, '_>) -> Result<[f64; 3], Round
             "{side} P coordinates must be finite"
         )));
     }
-    Ok([
-        canonical_zero(easting),
-        canonical_zero(northing),
-        canonical_zero(elevation),
-    ])
+    Ok(Position {
+        easting: canonical_zero(easting),
+        northing: canonical_zero(northing),
+        elevation: canonical_zero(elevation),
+    })
 }
 
 fn parse_coordinate(side: InputSide, value: Option<&str>) -> Result<f64, RoundTripFailure> {
@@ -905,10 +954,10 @@ fn parse_coordinate(side: InputSide, value: Option<&str>) -> Result<f64, RoundTr
 fn parse_faces(
     side: InputSide,
     faces: Node<'_, '_>,
-    points: &[Point],
+    points: &[Position],
     point_ids: &BTreeMap<u64, usize>,
     max_faces: u64,
-) -> Result<Vec<[usize; 3]>, RoundTripFailure> {
+) -> Result<Vec<Triangle>, RoundTripFailure> {
     validate_allowed_children(side, faces, &["F"])?;
     let face_count = element_children(faces).count();
     check_item_limit(side, "faces", face_count, max_faces)?;
@@ -922,7 +971,7 @@ fn parse_faces(
     for node in element_children(faces) {
         let face = parse_face(side, node, point_ids)?;
         validate_face(side, face, points)?;
-        let canonical = canonical_face(face);
+        let canonical = face.canonical_point_indices();
         if !unique_faces.insert(canonical) {
             return Err(RoundTripFailure::mismatch(format_args!(
                 "{side} contains a duplicate face"
@@ -937,7 +986,7 @@ fn parse_face(
     side: InputSide,
     node: Node<'_, '_>,
     point_ids: &BTreeMap<u64, usize>,
-) -> Result<[usize; 3], RoundTripFailure> {
+) -> Result<Triangle, RoundTripFailure> {
     let text = simple_text(side, node, "F")?;
     let mut ids = text.split_whitespace();
     let a = parse_face_id(side, ids.next())?;
@@ -953,7 +1002,7 @@ fn parse_face(
             ))
         })
     };
-    Ok([resolve(a)?, resolve(b)?, resolve(c)?])
+    Ok(Triangle::new(resolve(a)?, resolve(b)?, resolve(c)?))
 }
 
 fn parse_face_id(side: InputSide, value: Option<&str>) -> Result<u64, RoundTripFailure> {
@@ -965,15 +1014,15 @@ fn parse_face_id(side: InputSide, value: Option<&str>) -> Result<u64, RoundTripF
 
 fn validate_face(
     side: InputSide,
-    face: [usize; 3],
-    points: &[Point],
+    face: Triangle,
+    points: &[Position],
 ) -> Result<(), RoundTripFailure> {
-    if face[0] == face[1] || face[1] == face[2] || face[0] == face[2] {
+    if face.has_repeated_point() {
         return Err(RoundTripFailure::invalid(format_args!(
             "{side} contains a face with repeated point references"
         )));
     }
-    let [a, b, c] = face.map(|index| points[index].position);
+    let [a, b, c] = face.positions(points);
     let robust_orientation = normalized_orientation_xy(a, b, c);
     let is_collinear = match robust_orientation {
         Some(orientation) if orientation != 0.0 => false,
@@ -987,9 +1036,9 @@ fn validate_face(
     Ok(())
 }
 
-fn normalized_orientation_xy(a: [f64; 3], b: [f64; 3], c: [f64; 3]) -> Option<f64> {
-    let [ax, bx, cx] = scale_axis_exact([a[0], b[0], c[0]])?;
-    let [ay, by, cy] = scale_axis_exact([a[1], b[1], c[1]])?;
+fn normalized_orientation_xy(a: Position, b: Position, c: Position) -> Option<f64> {
+    let [ax, bx, cx] = scale_axis_exact([a.easting, b.easting, c.easting])?;
+    let [ay, by, cy] = scale_axis_exact([a.northing, b.northing, c.northing])?;
     let orientation = orient2d(
         Coord { x: ax, y: ay },
         Coord { x: bx, y: by },
@@ -1044,11 +1093,11 @@ fn normal_power_of_two(exponent: i32) -> f64 {
     f64::from_bits(encoded << 52)
 }
 
-fn exact_orientation_is_zero(a: [f64; 3], b: [f64; 3], c: [f64; 3]) -> bool {
-    let (a_easting_delta, a_easting_exponent) = exact_difference(a[0], c[0]);
-    let (a_northing_delta, a_northing_exponent) = exact_difference(a[1], c[1]);
-    let (b_easting_delta, b_easting_exponent) = exact_difference(b[0], c[0]);
-    let (b_northing_delta, b_northing_exponent) = exact_difference(b[1], c[1]);
+fn exact_orientation_is_zero(a: Position, b: Position, c: Position) -> bool {
+    let (a_easting_delta, a_easting_exponent) = exact_difference(a.easting, c.easting);
+    let (a_northing_delta, a_northing_exponent) = exact_difference(a.northing, c.northing);
+    let (b_easting_delta, b_easting_exponent) = exact_difference(b.easting, c.easting);
+    let (b_northing_delta, b_northing_exponent) = exact_difference(b.northing, c.northing);
     let left = a_easting_delta * b_northing_delta;
     let right = a_northing_delta * b_easting_delta;
     exact_scaled_integers_equal(
@@ -1267,8 +1316,8 @@ fn compare_surfaces(
 }
 
 fn match_points(
-    reference: &[Point],
-    returned: &[Point],
+    reference: &[Position],
+    returned: &[Position],
     tolerances: RoundTripTolerances,
     max_comparisons: u64,
 ) -> Result<(Vec<usize>, ComparisonFacts), RoundTripFailure> {
@@ -1277,13 +1326,13 @@ fn match_points(
     }
     let mut returned_by_easting = (0..returned.len()).collect::<Vec<_>>();
     returned_by_easting.sort_unstable_by(|left, right| {
-        returned[*left].position[0].total_cmp(&returned[*right].position[0])
+        returned[*left].easting.total_cmp(&returned[*right].easting)
     });
     let mut returned_to_reference = vec![usize::MAX; returned.len()];
     let mut facts = ComparisonFacts::default();
     for (reference_index, reference_point) in reference.iter().enumerate() {
         let (returned_index, drift) = unique_point_match(
-            reference_point,
+            *reference_point,
             returned,
             &returned_by_easting,
             tolerances,
@@ -1302,8 +1351,8 @@ fn match_points(
 }
 
 fn match_exact_points(
-    reference: &[Point],
-    returned: &[Point],
+    reference: &[Position],
+    returned: &[Position],
     max_comparisons: u64,
 ) -> Result<(Vec<usize>, ComparisonFacts), RoundTripFailure> {
     let comparison_count = u64::try_from(reference.len()).unwrap_or(u64::MAX);
@@ -1314,10 +1363,7 @@ fn match_exact_points(
     }
     let mut returned_positions = BTreeMap::new();
     for (index, point) in returned.iter().enumerate() {
-        if returned_positions
-            .insert(position_key(point.position), index)
-            .is_some()
-        {
+        if returned_positions.insert(point.key(), index).is_some() {
             return Err(RoundTripFailure::mismatch(
                 "RETURNED contains duplicate coordinates, so vertex matching is ambiguous",
             ));
@@ -1326,7 +1372,7 @@ fn match_exact_points(
     let mut returned_to_reference = vec![usize::MAX; returned.len()];
     for (reference_index, point) in reference.iter().enumerate() {
         let returned_index = returned_positions
-            .get(&position_key(point.position))
+            .get(&point.key())
             .copied()
             .ok_or_else(|| {
                 RoundTripFailure::mismatch(
@@ -1349,30 +1395,26 @@ fn match_exact_points(
     ))
 }
 
-fn position_key(position: [f64; 3]) -> [u64; 3] {
-    position.map(f64::to_bits)
-}
-
 fn unique_point_match(
-    reference: &Point,
-    returned: &[Point],
+    reference: Position,
+    returned: &[Position],
     returned_by_easting: &[usize],
     tolerances: RoundTripTolerances,
     max_comparisons: u64,
     facts: &mut ComparisonFacts,
 ) -> Result<(usize, CoordinateDrift), RoundTripFailure> {
-    let reference_easting = reference.position[0];
+    let reference_easting = reference.easting;
     let horizontal_tolerance = tolerances.horizontal_metres();
     let start = returned_by_easting.partition_point(|index| {
         easting_is_below_window(
-            returned[*index].position[0],
+            returned[*index].easting,
             reference_easting,
             horizontal_tolerance,
         )
     });
     let end = returned_by_easting.partition_point(|index| {
         !easting_is_above_window(
-            returned[*index].position[0],
+            returned[*index].easting,
             reference_easting,
             horizontal_tolerance,
         )
@@ -1385,8 +1427,7 @@ fn unique_point_match(
                 "vertex comparisons exceed the {max_comparisons} comparison limit"
             )));
         }
-        let drift =
-            CoordinateDrift::between(reference.position, returned[*returned_index].position);
+        let drift = CoordinateDrift::between(reference, returned[*returned_index]);
         if drift.is_within(tolerances) && matched.replace((*returned_index, drift)).is_some() {
             return Err(RoundTripFailure::mismatch(
                 "vertex matching is ambiguous under the declared tolerances",
@@ -1417,10 +1458,10 @@ struct CoordinateDrift {
 }
 
 impl CoordinateDrift {
-    fn between(reference: [f64; 3], returned: [f64; 3]) -> Self {
-        let easting = (returned[0] - reference[0]).abs();
-        let northing = (returned[1] - reference[1]).abs();
-        let vertical = (returned[2] - reference[2]).abs();
+    fn between(reference: Position, returned: Position) -> Self {
+        let easting = (returned.easting - reference.easting).abs();
+        let northing = (returned.northing - reference.northing).abs();
+        let vertical = (returned.elevation - reference.elevation).abs();
         Self {
             easting,
             northing,
@@ -1451,13 +1492,13 @@ fn compare_topology(
         .faces
         .iter()
         .copied()
-        .map(canonical_face)
+        .map(Triangle::canonical_point_indices)
         .collect::<Vec<_>>();
     let mut returned_faces = returned
         .faces
         .iter()
-        .map(|face| face.map(|index| returned_to_reference[index]))
-        .map(canonical_face)
+        .copied()
+        .map(|face| face.remap(returned_to_reference).canonical_point_indices())
         .collect::<Vec<_>>();
     reference_faces.sort_unstable();
     returned_faces.sort_unstable();
@@ -1467,11 +1508,6 @@ fn compare_topology(
         ));
     }
     Ok(())
-}
-
-fn canonical_face(mut face: [usize; 3]) -> [usize; 3] {
-    face.sort_unstable();
-    face
 }
 
 const fn canonical_zero(value: f64) -> f64 {
