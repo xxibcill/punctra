@@ -1,14 +1,16 @@
 use std::sync::Arc;
 
 use foundation_runtime::{Job, OperationControl, ProgressPhase, ProgressSnapshot};
-use point_contracts::{AttributeId, PointBatch, PointId, SourceId, WorldBounds};
+use point_contracts::{AttributeId, PointBatch, PointId, SourceId};
+use point_index::CandidateLimits;
 use point_source::{AttributeSelection, ReadBudget, ReadRequest, SourceSpan};
 
 use crate::{
     PointQuery, PointSet, PointSetLimits, Snapshot, SnapshotProvenance, WorkspaceError,
     point_set::{PointSetBuilder, PointSetRecord},
+    query::{SpanFacts, matches_query},
     util::allocation_bytes,
-    workspace::{OverlayUsage, Session},
+    workspace::{EffectiveClassificationBudget, OverlayUsage, Session},
 };
 
 const CANCELLATION_STRIDE: usize = 4_096;
@@ -34,16 +36,14 @@ fn run_select(
 ) -> Result<PointSet, WorkspaceError> {
     let provenance = *snapshot.provenance();
     let session = snapshot.session();
-    let spans = plan_query(&session, query, limits, control)?;
-    materialize(
+    let spans = plan_query(
         &session,
-        provenance,
-        spans,
-        query.bounds(),
-        query.classification_eq(),
-        limits,
+        query,
+        limits.candidate_limits(),
+        limits.max_working_bytes(),
         control,
-    )
+    )?;
+    materialize(&session, provenance, spans, query, limits, control)
 }
 
 pub(crate) fn select_point_ids<I>(
@@ -69,20 +69,28 @@ where
             limits,
             &control,
         )?;
-        materialize(&session, provenance, spans, None, None, limits, &control)
+        materialize(
+            &session,
+            provenance,
+            spans,
+            PointQuery::all(),
+            limits,
+            &control,
+        )
     })
 }
 
-fn plan_query(
+pub(crate) fn plan_query(
     session: &Session,
     query: PointQuery,
-    limits: PointSetLimits,
+    candidate_limits: CandidateLimits,
+    max_working_bytes: u64,
     control: &OperationControl,
 ) -> Result<Vec<SourceSpan>, WorkspaceError> {
     control.check_cancelled()?;
     require_peak(
-        limits.candidate_limits().max_working_bytes(),
-        limits.max_working_bytes(),
+        candidate_limits.max_working_bytes(),
+        max_working_bytes,
         "candidate planning working bytes",
     )?;
 
@@ -100,9 +108,12 @@ fn plan_query(
             "nonempty Spatial Index has no world bounds",
         ));
     };
-    let plan = session
-        .index()
-        .candidates(index_bounds, limits.candidate_limits())?;
+    let cancellation = control.token();
+    let plan = session.index().candidates_with_cancellation(
+        index_bounds,
+        candidate_limits,
+        &cancellation,
+    )?;
     control.check_cancelled()?;
     validate_candidate_plan(
         plan.spans(),
@@ -110,7 +121,11 @@ fn plan_query(
         descriptor.source_point_count(),
         query.bounds().is_none(),
     )?;
-    copy_candidate_spans(plan.spans(), limits)
+    copy_candidate_spans(
+        plan.spans(),
+        candidate_limits.max_working_bytes(),
+        max_working_bytes,
+    )
 }
 
 fn validate_candidate_plan(
@@ -149,11 +164,11 @@ fn validate_candidate_plan(
 
 fn copy_candidate_spans(
     source: &[SourceSpan],
-    limits: PointSetLimits,
+    candidate_working_bytes: u64,
+    max_working_bytes: u64,
 ) -> Result<Vec<SourceSpan>, WorkspaceError> {
     let mut spans = Vec::new();
-    let candidate_bytes = limits.candidate_limits().max_working_bytes();
-    let available_copy_bytes = limits.max_working_bytes().saturating_sub(candidate_bytes);
+    let available_copy_bytes = max_working_bytes.saturating_sub(candidate_working_bytes);
     if !source.is_empty() {
         grow_working_vec(
             &mut spans,
@@ -285,8 +300,7 @@ fn materialize(
     session: &Arc<Session>,
     provenance: SnapshotProvenance,
     spans: Vec<SourceSpan>,
-    bounds: Option<WorldBounds>,
-    classification_eq: Option<u8>,
+    query: PointQuery,
     limits: PointSetLimits,
     control: &OperationControl,
 ) -> Result<PointSet, WorkspaceError> {
@@ -301,7 +315,7 @@ fn materialize(
 
     let classification = session.classification_attribute();
     let budget = limits.source_read_budget();
-    let retained_span_bytes = allocation_bytes::<SourceSpan>(span_facts.span_count);
+    let retained_span_bytes = allocation_bytes::<SourceSpan>(span_facts.span_count());
     let declared_read_base = retained_span_bytes
         .saturating_add(budget.max_batch_payload_bytes())
         .saturating_add(budget.max_adapter_working_bytes())
@@ -339,8 +353,7 @@ fn materialize(
             provenance,
             &batch,
             classification,
-            bounds,
-            classification_eq,
+            query,
             retained_span_bytes,
             budget,
             limits,
@@ -352,7 +365,7 @@ fn materialize(
         control.report_progress(ProgressSnapshot::new(
             ProgressPhase::RUNNING,
             processed,
-            Some(span_facts.point_count),
+            Some(span_facts.point_count()),
         )?)?;
     }
     validate_summary(
@@ -369,7 +382,7 @@ fn materialize(
         drop(point_set);
         return Err(error.into());
     }
-    control.complete_progress(span_facts.point_count)?;
+    control.complete_progress(span_facts.point_count())?;
     Ok(point_set)
 }
 
@@ -379,8 +392,7 @@ fn process_batch(
     provenance: SnapshotProvenance,
     batch: &PointBatch,
     classification: AttributeId,
-    bounds: Option<WorldBounds>,
-    classification_eq: Option<u8>,
+    query: PointQuery,
     retained_span_bytes: u64,
     budget: ReadBudget,
     limits: PointSetLimits,
@@ -388,57 +400,33 @@ fn process_batch(
     builder: &mut PointSetBuilder,
     overlay_usage: &mut OverlayUsage,
 ) -> Result<(), WorkspaceError> {
-    let source_values = batch
-        .attributes()
-        .get(classification)
-        .and_then(|column| column.values().as_u8())
-        .ok_or_else(|| {
-            WorkspaceError::incompatible("classification Source column is absent or no longer U8")
-        })?;
     let before_effective = retained_span_bytes
         .saturating_add(batch.estimated_payload_bytes())
         .saturating_add(budget.max_adapter_working_bytes())
         .saturating_add(builder.resident_bytes());
-    let mut effective = copy_classification(source_values, before_effective, limits)?;
+    debug_assert_eq!(classification, session.classification_attribute());
+    let effective = session.effective_classifications(
+        provenance.revision(),
+        batch,
+        before_effective,
+        EffectiveClassificationBudget::new(
+            limits.max_working_bytes(),
+            limits.max_overlay_segments(),
+            limits.max_overlay_bytes(),
+        ),
+        overlay_usage,
+        control,
+    )?;
     let batch_base = retained_span_bytes
         .saturating_add(batch.estimated_payload_bytes())
         .saturating_add(budget.max_adapter_working_bytes())
         .saturating_add(allocation_bytes::<u8>(effective.capacity()));
-    let before_overlay = batch_base.saturating_add(builder.resident_bytes());
-    require_peak(
-        before_overlay,
-        limits.max_working_bytes(),
-        "selection batch working bytes",
-    )?;
-    let overlay_working = limits.max_working_bytes().saturating_sub(before_overlay);
-    session.apply_overlays(
-        provenance.revision(),
-        batch.first_ordinal(),
-        &mut effective,
-        overlay_limits(limits, overlay_working),
-        overlay_usage,
-        control,
-    )?;
-    control.check_cancelled()?;
 
     for (row, &effective_classification) in effective.iter().enumerate() {
         if row % CANCELLATION_STRIDE == 0 {
             control.check_cancelled()?;
         }
-        let matches_bounds = match bounds {
-            None => true,
-            Some(bounds) => {
-                let world = batch.positions().world_f64(row).ok_or_else(|| {
-                    WorkspaceError::incompatible(
-                        "Source batch position row disappeared during selection",
-                    )
-                })?;
-                contains(bounds, world)
-            }
-        };
-        if !matches_bounds
-            || classification_eq.is_some_and(|value| value != effective_classification)
-        {
+        if !matches_query(query, batch, &effective, row)? {
             continue;
         }
         let row = u64::try_from(row).map_err(|_| {
@@ -459,47 +447,6 @@ fn process_batch(
     Ok(())
 }
 
-fn copy_classification(
-    values: &[u8],
-    existing_working_bytes: u64,
-    limits: PointSetLimits,
-) -> Result<Vec<u8>, WorkspaceError> {
-    require_peak(
-        existing_working_bytes.saturating_add(u64::try_from(values.len()).unwrap_or(u64::MAX)),
-        limits.max_working_bytes(),
-        "effective classification working bytes",
-    )?;
-    let mut copied = Vec::new();
-    copied
-        .try_reserve_exact(values.len())
-        .map_err(|_| WorkspaceError::ResourceLimit {
-            limit: "effective classification working bytes",
-            required: u64::try_from(values.len()).unwrap_or(u64::MAX),
-            allowed: limits.max_working_bytes(),
-        })?;
-    require_peak(
-        existing_working_bytes.saturating_add(allocation_bytes::<u8>(copied.capacity())),
-        limits.max_working_bytes(),
-        "effective classification working bytes",
-    )?;
-    copied.extend_from_slice(values);
-    Ok(copied)
-}
-
-fn overlay_limits(limits: PointSetLimits, working_bytes: u64) -> PointSetLimits {
-    PointSetLimits::new(
-        limits.candidate_limits(),
-        limits.source_read_budget(),
-        limits.max_input_point_ids(),
-        limits.max_output_points(),
-        limits.max_overlay_segments(),
-        limits.max_overlay_bytes(),
-        working_bytes,
-        limits.max_resident_bytes(),
-        limits.max_temporary_bytes(),
-    )
-}
-
 fn validate_summary(
     summary: Option<&point_source::SourceReadSummary>,
     source: SourceId,
@@ -512,7 +459,7 @@ fn validate_summary(
     })?;
     let actual = SpanFacts::new(summary.spans())?;
     if summary.source() != source
-        || summary.exact_count() != expected.point_count
+        || summary.exact_count() != expected.point_count()
         || summary.attributes() != [classification]
         || summary.budget() != budget
         || actual != expected
@@ -522,43 +469,6 @@ fn validate_summary(
         ));
     }
     Ok(())
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct SpanFacts {
-    span_count: usize,
-    point_count: u64,
-    hash: [u8; 32],
-}
-
-impl SpanFacts {
-    fn new(spans: &[SourceSpan]) -> Result<Self, WorkspaceError> {
-        let mut point_count = 0_u64;
-        let mut hasher = blake3::Hasher::new();
-        hasher.update(b"punctra-selection-spans-v1");
-        for span in spans {
-            point_count = point_count.checked_add(span.point_count()).ok_or(
-                WorkspaceError::ResourceLimit {
-                    limit: "candidate Points",
-                    required: u64::MAX,
-                    allowed: u64::MAX - 1,
-                },
-            )?;
-            hasher.update(&span.first_ordinal().to_le_bytes());
-            hasher.update(&span.point_count().to_le_bytes());
-        }
-        Ok(Self {
-            span_count: spans.len(),
-            point_count,
-            hash: *hasher.finalize().as_bytes(),
-        })
-    }
-}
-
-fn contains(bounds: WorldBounds, point: [f64; 3]) -> bool {
-    let min = bounds.min();
-    let max = bounds.max();
-    (0..3).all(|axis| point[axis] >= min[axis] && point[axis] <= max[axis])
 }
 
 fn require_peak(required: u64, allowed: u64, limit: &'static str) -> Result<(), WorkspaceError> {
@@ -608,20 +518,10 @@ fn grow_working_vec<T>(
 
 #[cfg(test)]
 mod tests {
-    use point_contracts::{PointId, SourceId, WorldBounds};
+    use point_contracts::{PointId, SourceId};
 
-    use super::{collect_point_ids, contains};
+    use super::collect_point_ids;
     use crate::PointSetLimits;
-
-    #[test]
-    fn inclusive_bounds_keep_faces_edges_and_corners() {
-        let bounds = WorldBounds::new([-1.0, 2.0, 3.0], [4.0, 5.0, 6.0]).unwrap();
-
-        assert!(contains(bounds, [-1.0, 5.0, 6.0]));
-        assert!(contains(bounds, [4.0, 2.0, 3.0]));
-        assert!(!contains(bounds, [-1.000_001, 5.0, 6.0]));
-        assert!(!contains(bounds, [4.0, 5.000_001, 6.0]));
-    }
 
     #[test]
     fn explicit_input_stops_after_the_first_over_limit_identity() {

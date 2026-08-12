@@ -314,6 +314,120 @@ impl Default for PointSetLimits {
     }
 }
 
+/// Cumulative hard ceilings for one exact Snapshot Point-row stream.
+///
+/// These limits deliberately do not include Point Set resident or spill
+/// storage: a row stream retains only its current Source and output batches.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[allow(clippy::struct_field_names)]
+pub struct PointRowLimits {
+    candidate_limits: CandidateLimits,
+    source_read_budget: ReadBudget,
+    max_overlay_segments: u64,
+    max_overlay_bytes: u64,
+    max_output_points: u64,
+    max_batch_points: u64,
+    max_batch_payload_bytes: u64,
+    max_working_bytes: u64,
+}
+
+impl PointRowLimits {
+    /// Creates one Point-row budget without hidden per-batch resets.
+    ///
+    /// Candidate and Source limits cover the complete normalized Query.
+    /// Overlay segment and byte ceilings accumulate across every Source batch,
+    /// while output batch ceilings apply to each returned nonempty batch.
+    /// `max_working_bytes` is the combined peak of retained candidate spans,
+    /// the current Source batch, adapter allowance, effective-classification
+    /// copy, overlay block, and unpublished output columns.
+    #[must_use]
+    #[allow(clippy::too_many_arguments)]
+    pub const fn new(
+        candidate_limits: CandidateLimits,
+        source_read_budget: ReadBudget,
+        max_overlay_segments: u64,
+        max_overlay_bytes: u64,
+        max_output_points: u64,
+        max_batch_points: u64,
+        max_batch_payload_bytes: u64,
+        max_working_bytes: u64,
+    ) -> Self {
+        Self {
+            candidate_limits,
+            source_read_budget,
+            max_overlay_segments,
+            max_overlay_bytes,
+            max_output_points,
+            max_batch_points,
+            max_batch_payload_bytes,
+            max_working_bytes,
+        }
+    }
+
+    /// Returns conservative Spatial Index planning limits.
+    #[must_use]
+    pub const fn candidate_limits(self) -> CandidateLimits {
+        self.candidate_limits
+    }
+
+    /// Returns bounded Source span, Point, batch, payload, and decoder limits.
+    #[must_use]
+    pub const fn source_read_budget(self) -> ReadBudget {
+        self.source_read_budget
+    }
+
+    /// Returns the cumulative Revision-overlay segment ceiling.
+    #[must_use]
+    pub const fn max_overlay_segments(self) -> u64 {
+        self.max_overlay_segments
+    }
+
+    /// Returns the cumulative Revision-overlay payload-byte ceiling.
+    #[must_use]
+    pub const fn max_overlay_bytes(self) -> u64 {
+        self.max_overlay_bytes
+    }
+
+    /// Returns the exact complete emitted-row ceiling.
+    #[must_use]
+    pub const fn max_output_points(self) -> u64 {
+        self.max_output_points
+    }
+
+    /// Returns the maximum rows in one emitted batch.
+    #[must_use]
+    pub const fn max_batch_points(self) -> u64 {
+        self.max_batch_points
+    }
+
+    /// Returns the maximum exact column payload bytes in one emitted batch.
+    #[must_use]
+    pub const fn max_batch_payload_bytes(self) -> u64 {
+        self.max_batch_payload_bytes
+    }
+
+    /// Returns the combined peak incremental working-memory ceiling.
+    #[must_use]
+    pub const fn max_working_bytes(self) -> u64 {
+        self.max_working_bytes
+    }
+}
+
+impl Default for PointRowLimits {
+    fn default() -> Self {
+        Self::new(
+            CandidateLimits::default(),
+            ReadBudget::default().with_max_points(50_000_000),
+            100_000,
+            4 * GIB,
+            10_000_000,
+            65_536,
+            4 * MIB,
+            128 * MIB,
+        )
+    }
+}
+
 /// Hard ceilings for streaming exact Point Identities from a completed Point Set.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[allow(clippy::struct_field_names)]

@@ -9,7 +9,7 @@ use blake3::Hasher;
 use foundation_runtime::{Job, OperationControl, OperationHandle};
 use point_contracts::{
     AttributeDataType, AttributeDefinition, AttributeId, ContentHash, MAX_ATTRIBUTE_NAME_BYTES,
-    PointId, SourceId,
+    PointBatch, PointId, SourceId,
 };
 use point_index::PreparedIndex;
 use point_source::Source;
@@ -22,17 +22,18 @@ use crate::model::{
     RecordedRejection, RevisionId, RevisionInfo, RevisionKind, SnapshotProvenance, WorkspaceId,
     WorkspaceSchema,
 };
-pub(crate) use crate::persistence::OverlayUsage;
 use crate::persistence::{
     ATTRIBUTE_DATA_TYPE_U8, CandidateFacts, Catalog, CatalogLimits, ClassificationRequestFacts,
-    MANIFEST_BYTES, ManifestFacts, OverlayLimits, PersistedAttributeDefinition,
-    PersistedPointSetFacts, PersistenceError, REJECTION_BYTES, ReadLimits, RejectionFacts,
+    MANIFEST_BYTES, ManifestFacts, PersistedAttributeDefinition, PersistedPointSetFacts,
+    PersistenceError, REJECTION_BYTES, ReadLimits, RejectionFacts,
     RevisionKind as PersistedRevisionKind, RevisionRow, RowReadLimits, SealedRevision, Store,
     ValidatedRevision, WriteLimits,
     classification_request_digest as persisted_classification_request_digest,
     revert_request_digest as persisted_revert_request_digest,
 };
+pub(crate) use crate::persistence::{OverlayLimits, OverlayUsage};
 use crate::point_set::{PointSetRecord, PointSetRecordBatches};
+use crate::util::allocation_bytes;
 
 const SOURCE_CONTRACT_DOMAIN: &[u8] = b"punctra-workspace-source-contract-v1";
 const ROOT_REVISION_DOMAIN: &[u8] = b"punctra-workspace-root-revision-v1";
@@ -469,6 +470,24 @@ impl Snapshot {
         crate::selection::select_point_ids(self, ids, limits)
     }
 
+    /// Starts a bounded pull stream of exact Query rows at this Revision.
+    ///
+    /// Returned batches remain provisional until the stream reaches terminal
+    /// `None` and publishes its exact success summary.
+    ///
+    /// # Errors
+    ///
+    /// Returns when the bounded stream state cannot be created. Candidate-
+    /// planning, Source, and resource failures encountered by the lazy read are
+    /// returned from [`crate::SnapshotPointBatches::next`].
+    pub fn point_rows(
+        &self,
+        query: crate::PointQuery,
+        limits: crate::PointRowLimits,
+    ) -> Result<crate::SnapshotPointBatches, WorkspaceError> {
+        crate::point_rows::start(self, query, limits)
+    }
+
     pub(crate) fn session(&self) -> Arc<Session> {
         Arc::clone(&self.session)
     }
@@ -497,6 +516,27 @@ pub(crate) struct Session {
     writer_waiters: std::sync::atomic::AtomicUsize,
 }
 
+#[derive(Clone, Copy)]
+pub(crate) struct EffectiveClassificationBudget {
+    working_bytes: u64,
+    overlay_blocks: u64,
+    overlay_bytes: u64,
+}
+
+impl EffectiveClassificationBudget {
+    pub(crate) const fn new(
+        max_working_bytes: u64,
+        max_overlay_blocks: u64,
+        max_overlay_bytes: u64,
+    ) -> Self {
+        Self {
+            working_bytes: max_working_bytes,
+            overlay_blocks: max_overlay_blocks,
+            overlay_bytes: max_overlay_bytes,
+        }
+    }
+}
+
 impl Session {
     fn ensure_mutable(&self) -> Result<(), WorkspaceError> {
         if self.poisoned.load(Ordering::SeqCst) {
@@ -521,21 +561,54 @@ impl Session {
         self.store.scratch()
     }
 
+    pub(crate) fn effective_classifications(
+        &self,
+        revision: RevisionId,
+        batch: &PointBatch,
+        existing_working_bytes: u64,
+        budget: EffectiveClassificationBudget,
+        usage: &mut OverlayUsage,
+        control: &OperationControl,
+    ) -> Result<Vec<u8>, WorkspaceError> {
+        let source_values = batch
+            .attributes()
+            .get(self.classification_attribute())
+            .and_then(|column| column.values().as_u8())
+            .ok_or_else(|| {
+                WorkspaceError::incompatible(
+                    "classification Source column is absent or no longer U8",
+                )
+            })?;
+        let mut effective =
+            copy_classifications(source_values, existing_working_bytes, budget.working_bytes)?;
+        let overlay_working_bytes = budget.working_bytes.saturating_sub(
+            existing_working_bytes.saturating_add(allocation_bytes::<u8>(effective.capacity())),
+        );
+        self.apply_overlays(
+            revision,
+            batch.first_ordinal(),
+            &mut effective,
+            OverlayLimits {
+                max_blocks: budget.overlay_blocks,
+                max_payload_bytes: budget.overlay_bytes,
+                max_block_bytes: overlay_working_bytes.min(budget.overlay_bytes),
+            },
+            usage,
+            control,
+        )?;
+        Ok(effective)
+    }
+
     pub(crate) fn apply_overlays(
         &self,
         revision: RevisionId,
         first_ordinal: u64,
         values: &mut [u8],
-        limits: PointSetLimits,
+        limits: OverlayLimits,
         usage: &mut OverlayUsage,
         control: &OperationControl,
     ) -> Result<(), WorkspaceError> {
         control.check_cancelled()?;
-        let overlay_limits = OverlayLimits {
-            max_blocks: limits.max_overlay_segments(),
-            max_payload_bytes: limits.max_overlay_bytes(),
-            max_block_bytes: limits.max_working_bytes().min(limits.max_overlay_bytes()),
-        };
         self.catalog
             .read()
             .map_err(|_| WorkspaceError::Poisoned)?
@@ -543,7 +616,7 @@ impl Session {
                 revision.into_bytes(),
                 first_ordinal,
                 values,
-                overlay_limits,
+                limits,
                 usage,
                 control,
             )
@@ -590,6 +663,43 @@ impl Session {
             .ok_or(WorkspaceError::UnknownRevision { revision })?;
         revision_info_from_persisted(persisted)
     }
+}
+
+fn copy_classifications(
+    source_values: &[u8],
+    existing_working_bytes: u64,
+    max_working_bytes: u64,
+) -> Result<Vec<u8>, WorkspaceError> {
+    let source_bytes = u64::try_from(source_values.len()).unwrap_or(u64::MAX);
+    require_effective_working(
+        existing_working_bytes.saturating_add(source_bytes),
+        max_working_bytes,
+    )?;
+    let mut effective = Vec::new();
+    effective
+        .try_reserve_exact(source_values.len())
+        .map_err(|_| WorkspaceError::ResourceLimit {
+            limit: "effective classification working bytes",
+            required: source_bytes,
+            allowed: max_working_bytes,
+        })?;
+    require_effective_working(
+        existing_working_bytes.saturating_add(allocation_bytes::<u8>(effective.capacity())),
+        max_working_bytes,
+    )?;
+    effective.extend_from_slice(source_values);
+    Ok(effective)
+}
+
+fn require_effective_working(required: u64, allowed: u64) -> Result<(), WorkspaceError> {
+    if required > allowed {
+        return Err(WorkspaceError::ResourceLimit {
+            limit: "effective classification working bytes",
+            required,
+            allowed,
+        });
+    }
+    Ok(())
 }
 
 fn run_commit(

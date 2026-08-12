@@ -12,11 +12,11 @@ use point_contracts::{ContentHash, PointId, SourceId};
 
 use crate::{
     PointIdReadLimits, PointSetLimits, PointSetMetadata, SnapshotProvenance, WorkspaceError,
+    point_id_hash::CanonicalPointIdHasher,
     util::{allocation_bytes, encode_hex},
     workspace::Session,
 };
 
-const POINT_ID_HASH_DOMAIN: &[u8] = b"punctra-point-set-ids-v1";
 const CONTENT_HASH_DOMAIN: &[u8] = b"punctra-point-set-content-v1";
 const FILE_HASH_DOMAIN: &[u8] = b"punctra-point-set-file-v1";
 const FRAME_HASH_DOMAIN: &[u8] = b"punctra-point-set-frame-v1";
@@ -341,7 +341,7 @@ pub(crate) struct PointSetBuilder {
     storage: BuilderStorage,
     exact_count: u64,
     previous_ordinal: Option<u64>,
-    point_id_hasher: Hasher,
+    point_id_hasher: CanonicalPointIdHasher,
     content_hasher: Hasher,
 }
 
@@ -351,7 +351,7 @@ impl PointSetBuilder {
         provenance: SnapshotProvenance,
         limits: PointSetLimits,
     ) -> Self {
-        let point_id_hasher = point_id_hasher(&provenance);
+        let point_id_hasher = CanonicalPointIdHasher::new(provenance.source());
         let content_hasher = content_hasher(&provenance);
         Self {
             session,
@@ -392,7 +392,7 @@ impl PointSetBuilder {
     }
 
     pub(crate) fn finish(self) -> Result<PointSet, WorkspaceError> {
-        let point_id_hash = ContentHash::new(*self.point_id_hasher.finalize().as_bytes());
+        let point_id_hash = self.point_id_hasher.finalize();
         let content_hash = ContentHash::new(*self.content_hasher.finalize().as_bytes());
         let metadata = PointSetMetadata::new(
             self.provenance,
@@ -748,7 +748,7 @@ struct SpillReader {
     expected_content_hash: ContentHash,
     emitted_count: u64,
     previous_ordinal: Option<u64>,
-    point_id_hasher: Hasher,
+    point_id_hasher: CanonicalPointIdHasher,
     content_hasher: Hasher,
     terminal: bool,
 }
@@ -807,7 +807,7 @@ impl SpillReader {
             expected_content_hash: metadata.content_hash(),
             emitted_count: 0,
             previous_ordinal: None,
-            point_id_hasher: point_id_hasher(&metadata.provenance()),
+            point_id_hasher: CanonicalPointIdHasher::new(metadata.provenance().source()),
             content_hasher: content_hasher(&metadata.provenance()),
             terminal: false,
         };
@@ -938,8 +938,7 @@ impl SpillReader {
         let content_hash = ContentHash::new(self.read_hashed_array::<32>()?);
         let expected_file_hash = *self.file_hasher.finalize().as_bytes();
         let actual_file_hash = self.read_raw_array::<32>()?;
-        let calculated_point_id_hash =
-            ContentHash::new(*self.point_id_hasher.finalize().as_bytes());
+        let calculated_point_id_hash = self.point_id_hasher.finalize();
         let calculated_content_hash = ContentHash::new(*self.content_hasher.finalize().as_bytes());
         if exact_count != self.expected_count
             || exact_count != self.emitted_count
@@ -1203,12 +1202,6 @@ fn create_spill_file(scratch: &Path) -> Result<(PathBuf, File), WorkspaceError> 
     ))
 }
 
-fn point_id_hasher(provenance: &SnapshotProvenance) -> Hasher {
-    let mut hasher = domain_hasher(POINT_ID_HASH_DOMAIN);
-    hasher.update(provenance.source().as_bytes());
-    hasher
-}
-
 fn content_hasher(provenance: &SnapshotProvenance) -> Hasher {
     let mut hasher = domain_hasher(CONTENT_HASH_DOMAIN);
     hasher.update(provenance.workspace().as_bytes());
@@ -1223,9 +1216,13 @@ fn domain_hasher(domain: &[u8]) -> Hasher {
     hasher
 }
 
-fn update_hashes(point_ids: &mut Hasher, content: &mut Hasher, record: PointSetRecord) {
+fn update_hashes(
+    point_ids: &mut CanonicalPointIdHasher,
+    content: &mut Hasher,
+    record: PointSetRecord,
+) {
     let ordinal = record.ordinal.to_le_bytes();
-    point_ids.update(&ordinal);
+    point_ids.update(record.ordinal);
     content.update(&ordinal);
     content.update(&[record.effective_classification]);
 }
@@ -1282,11 +1279,11 @@ mod tests {
 
     use super::{
         PointSetRecord, SpillReader, SpillWriter, content_hasher, decode_record, encode_record,
-        grow_resident_records, point_id_hasher, resident_record_bytes, update_hashes,
+        grow_resident_records, resident_record_bytes, update_hashes,
     };
     use crate::{
         PointIdReadLimits, PointSetMetadata, RevisionId, SnapshotProvenance, WorkspaceId,
-        util::encode_hex,
+        point_id_hash::CanonicalPointIdHasher, util::encode_hex,
     };
 
     #[test]
@@ -1343,13 +1340,13 @@ mod tests {
             ordinal: 8,
             effective_classification: 4,
         };
-        let mut point_ids = point_id_hasher(&provenance);
+        let mut point_ids = CanonicalPointIdHasher::new(provenance.source());
         let mut content = content_hasher(&provenance);
         update_hashes(&mut point_ids, &mut content, record);
         let metadata = PointSetMetadata::new(
             provenance,
             1,
-            ContentHash::new(*point_ids.finalize().as_bytes()),
+            point_ids.finalize(),
             ContentHash::new(*content.finalize().as_bytes()),
         );
         let mut writer = SpillWriter::create(&std::env::temp_dir(), 4_096, 4_096).unwrap();
@@ -1389,13 +1386,13 @@ mod tests {
             ordinal: 1,
             effective_classification: 2,
         };
-        let mut point_ids = point_id_hasher(&provenance);
+        let mut point_ids = CanonicalPointIdHasher::new(provenance.source());
         let mut content = content_hasher(&provenance);
         update_hashes(&mut point_ids, &mut content, record);
         let sealed_metadata = PointSetMetadata::new(
             provenance,
             1,
-            ContentHash::new(*point_ids.finalize().as_bytes()),
+            point_ids.finalize(),
             ContentHash::new(*content.finalize().as_bytes()),
         );
         let mut writer = SpillWriter::create(&std::env::temp_dir(), 4_096, 4_096).unwrap();

@@ -511,6 +511,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f27ae1dd37df86211c42e150270f82743308803d90a6f6e6651cd730d5e1732f"
 
 [[package]]
+name = "delaunator"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3e1ee323c1275374f7e612d3724d12707079fb6a2117349fe144def656f5a880"
+dependencies = [
+ "robust",
+]
+
+[[package]]
 name = "dispatch"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -625,7 +634,7 @@ checksum = "aa9a19cbb55df58761df49b23516a86d432839add4af60fc256da840f66ed35b"
 
 [[package]]
 name = "foundation-runtime"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "pollster",
  "thiserror 2.0.20",
@@ -1550,7 +1559,7 @@ dependencies = [
 
 [[package]]
 name = "point-contracts"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -1559,7 +1568,7 @@ dependencies = [
 
 [[package]]
 name = "point-index"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "allocation-counter",
  "blake3",
@@ -1573,7 +1582,7 @@ dependencies = [
 
 [[package]]
 name = "point-source"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "blake3",
  "foundation-runtime",
@@ -1584,8 +1593,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "point-terrain"
+version = "0.6.0"
+dependencies = [
+ "allocation-counter",
+ "blake3",
+ "criterion",
+ "delaunator",
+ "foundation-runtime",
+ "point-contracts",
+ "point-index",
+ "point-workspace",
+ "robust",
+ "roxmltree",
+ "source-memory",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "point-view"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "criterion",
  "glam",
@@ -1596,7 +1623,7 @@ dependencies = [
 
 [[package]]
 name = "point-workspace"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "allocation-counter",
  "blake3",
@@ -1810,7 +1837,7 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
 name = "render-protocol"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "glam",
  "point-contracts",
@@ -1819,7 +1846,7 @@ dependencies = [
 
 [[package]]
 name = "render-wgpu"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "bytemuck",
  "glam",
@@ -1837,7 +1864,7 @@ checksum = "19b30a45b0cd0bcca8037f3d0dc3421eaf95327a17cad11964fb8179b4fc4832"
 
 [[package]]
 name = "renderer-demo"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "las",
  "point-contracts",
@@ -1850,6 +1877,21 @@ dependencies = [
  "source-memory",
  "wgpu",
  "winit",
+]
+
+[[package]]
+name = "robust"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4e27ee8bb91ca0adcf0ecb116293afa12d393f9c2b9b9cd54d33e8078fe19839"
+
+[[package]]
+name = "roxmltree"
+version = "0.21.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f1964b10c76125c36f8afe190065a4bf9a87bf324842c05701330bba9f1cacbb"
+dependencies = [
+ "memchr",
 ]
 
 [[package]]
@@ -2061,7 +2103,7 @@ dependencies = [
 
 [[package]]
 name = "source-las"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "allocation-counter",
  "blake3",
@@ -2078,7 +2120,7 @@ dependencies = [
 
 [[package]]
 name = "source-memory"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "blake3",
  "criterion",
@@ -2151,6 +2193,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "06794f8f6c5c898b3275aebefa6b8a1cb24cd2c6c79397ab15774837a0bc5755"
 dependencies = [
  "winapi-util",
+]
+
+[[package]]
+name = "terrain-demo"
+version = "0.6.0"
+dependencies = [
+ "blake3",
+ "las",
+ "point-contracts",
+ "point-index",
+ "point-terrain",
+ "point-workspace",
+ "roxmltree",
+ "source-las",
 ]
 
 [[package]]

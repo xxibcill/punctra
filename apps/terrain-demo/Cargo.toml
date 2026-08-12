@@ -1,0 +1,24 @@
+[package]
+name = "terrain-demo"
+description = "Headless LAS/LAZ-to-terrain and LandXML demonstration for Punctra."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+blake3.workspace = true
+point-contracts.workspace = true
+point-index.workspace = true
+point-terrain.workspace = true
+point-workspace.workspace = true
+source-las.workspace = true
+
+[dev-dependencies]
+las.workspace = true
+roxmltree.workspace = true
+
+[lints]
+workspace = true

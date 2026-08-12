@@ -3,7 +3,43 @@
 All notable changes to Punctra are documented here. The project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## 0.6.0 - 2026-08-10
+
+- Added the exact classification-aware `Snapshot::point_rows` pull stream with
+  exact ticks, effective classification, stable Point Identity, deterministic
+  ordering and hashes, cumulative hard limits, fused cancellation, and a
+  complete-only terminal summary. The `point-workspace` package now has 72
+  tests, including six public Point-row integration tests.
+- Added one deep `point-terrain` crate. Its single-worker robust triangulation
+  derives a deterministic unconstrained in-memory 2.5D `TerrainSurface` with
+  canonical `SurfaceVertex` and `SurfaceFace` values, complete descriptor
+  provenance and hashes, explicit degeneracy failures, and hard resource and
+  cancellation gates.
+- Added bounded detached Check Point QA with closed-boundary coverage,
+  explicit gaps, observed-Z-minus-surface-Z residuals, stable caller ordering,
+  compensated statistics, and complete-only publication.
+- Added the private durable create-new metric-metre LandXML 1.2 points/faces
+  encoder with explicit date/time, deterministic bytes, no-replace
+  publication, conservative post-publication certainty, and independent
+  `roxmltree` semantic verification.
+- Added a public Source-to-Terrain example, a generated 10k/100k/1M-capable
+  terrain benchmark, and the GPU-free `terrain-demo` LAS/LAZ process caller.
+  `point-terrain` has 46 package tests—17 unit/private and 29 integration—plus
+  one documentation test;
+  `terrain-demo` has two process tests covering generated LAS/LAZ and failed
+  changed-Surface Derivation recovery.
+- Recorded the local 10,000-Point baseline: Derivation 11.983–12.049 ms,
+  detached QA 94.907–95.164 us for three Check Points and 19,604 face tests,
+  and durable 1,030,118-byte LandXML creation 18.020–18.311 ms. Descriptor
+  accounting reported 135,790,592 peak working bytes, 1,034,176 retained bytes,
+  and 521,494 topology steps; QA reported 336 peak working bytes. The benchmark
+  names `jjaes-MacBook-Pro.local` and separately reports one-shot Derivation/
+  QA/LandXML times of 13,371/125/14,656 us. It explicitly reports
+  `worker_heap_measurement: null`, so no worker-heap measurement is claimed.
+- Terrain persistence, Breaklines, Profiles, classifiers, CRS transformation,
+  general LandXML, downstream-application round trips, licensed production or
+  above-500-million-Point evidence, partner validation, paid use, and human-
+  workflow claims remain outstanding.
 
 ## 0.5.0 - 2026-08-10
 

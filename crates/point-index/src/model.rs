@@ -1,5 +1,6 @@
 use std::{mem, sync::Arc};
 
+use foundation_runtime::CancellationToken;
 use point_contracts::{PositionTransform, SourceId, WorldBounds};
 use point_source::{Source, SourceSpan};
 
@@ -14,6 +15,8 @@ pub const RECIPE_VERSION: u32 = 1;
 
 /// Persisted complete/work-file schema version implemented by this crate.
 pub const DISK_VERSION: u32 = 1;
+
+const CANDIDATE_CANCELLATION_CADENCE: u64 = 1_024;
 
 /// Stable nonzero identity of one hierarchy node.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -352,7 +355,24 @@ impl PreparedIndex {
         bounds: WorldBounds,
         limits: CandidateLimits,
     ) -> Result<CandidatePlan, IndexError> {
-        candidates(&self.hierarchy, bounds, limits)
+        candidates(&self.hierarchy, bounds, limits, None)
+    }
+
+    /// Returns conservative Source spans while observing cooperative cancellation.
+    ///
+    /// Cancellation is checked before traversal, after every bounded group of
+    /// visited hierarchy nodes, and after traversal completes.
+    ///
+    /// # Errors
+    ///
+    /// Returns a cancellation or resource error instead of a partial plan.
+    pub fn candidates_with_cancellation(
+        &self,
+        bounds: WorldBounds,
+        limits: CandidateLimits,
+        cancellation: &CancellationToken,
+    ) -> Result<CandidatePlan, IndexError> {
+        candidates(&self.hierarchy, bounds, limits, Some(cancellation))
     }
 
     /// Starts a bounded stream of display-only exact position samples.
@@ -387,7 +407,9 @@ fn candidates(
     hierarchy: &IndexHierarchy,
     request: WorldBounds,
     limits: CandidateLimits,
+    cancellation: Option<&CancellationToken>,
 ) -> Result<CandidatePlan, IndexError> {
+    check_candidate_cancellation(cancellation)?;
     let Some(root) = hierarchy.root() else {
         return Ok(CandidatePlan {
             spans: Box::new([]),
@@ -412,6 +434,9 @@ fn candidates(
             IndexLimit::VisitedHierarchyNodes,
             limits.max_visited_nodes(),
         )?;
+        if visited.is_multiple_of(CANDIDATE_CANCELLATION_CADENCE) {
+            check_candidate_cancellation(cancellation)?;
+        }
         check_working_bytes(
             stack.capacity(),
             spans.capacity(),
@@ -451,6 +476,7 @@ fn candidates(
             )?;
         }
     }
+    check_candidate_cancellation(cancellation)?;
     spans.sort_unstable_by_key(|span| span.first_ordinal());
     merge_adjacent(&mut spans)?;
     let output_count = u64::try_from(spans.len()).unwrap_or(u64::MAX);
@@ -461,11 +487,21 @@ fn candidates(
             allowed: limits.max_output_spans(),
         });
     }
+    check_candidate_cancellation(cancellation)?;
     Ok(CandidatePlan {
         spans: spans.into_boxed_slice(),
         candidate_point_count: candidate_points,
         visited_node_count: visited,
     })
+}
+
+fn check_candidate_cancellation(
+    cancellation: Option<&CancellationToken>,
+) -> Result<(), IndexError> {
+    if let Some(cancellation) = cancellation {
+        cancellation.check()?;
+    }
+    Ok(())
 }
 
 fn checked_limit(

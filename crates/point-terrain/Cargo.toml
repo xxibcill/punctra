@@ -1,0 +1,31 @@
+[package]
+name = "point-terrain"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Deterministic terrain derivation and QA for Punctra"
+
+[dependencies]
+blake3.workspace = true
+foundation-runtime.workspace = true
+point-contracts.workspace = true
+point-workspace.workspace = true
+robust.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+allocation-counter.workspace = true
+criterion.workspace = true
+delaunator.workspace = true
+point-index.workspace = true
+roxmltree.workspace = true
+source-memory = { workspace = true, features = ["test-support"] }
+
+[lints]
+workspace = true
+
+[[bench]]
+name = "terrain"
+harness = false
