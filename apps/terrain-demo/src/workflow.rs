@@ -453,12 +453,13 @@ pub fn inspect_run(
     let journal = Journal::open(&run_root.join("run.pwf"), limits.journal).map_err(|error| {
         journal_failure(WorkflowStage::Inspect, error, FailureContext::default())
     })?;
+    let context = durable_context(journal.run(), journal.intent());
     witness.verify().map_err(|error| {
         WorkflowFailure::new(
             FailureCode::PublicationIndeterminate,
             WorkflowStage::Inspect,
             Certainty::Indeterminate(PublicationPhase::JournalCheckpoint),
-            FailureContext::default(),
+            context,
             error,
             RecoveryAction::ResumeSameRun,
         )
@@ -468,7 +469,7 @@ pub fn inspect_run(
         journal_failure(
             WorkflowStage::Inspect,
             JournalError::Invalid("Workspace Operation Identity is all zero"),
-            FailureContext::default(),
+            context,
         )
     })?;
     Ok(WorkflowStatus {
@@ -2084,6 +2085,16 @@ fn base_context(request: &WorkflowRunIntent) -> FailureContext {
     }
 }
 
+fn durable_context(run: WorkflowRunId, intent: &DurableIntent) -> FailureContext {
+    FailureContext {
+        run: Some(run),
+        source: Some(point_contracts::SourceId::new(intent.source)),
+        workspace: point_workspace::WorkspaceId::from_bytes(intent.workspace).ok(),
+        operation: OperationId::from_bytes(intent.operation).ok(),
+        revision: RevisionId::from_bytes(intent.baseline_revision).ok(),
+    }
+}
+
 fn rejected_failure(reason: CommitRejection, context: FailureContext) -> WorkflowFailure {
     WorkflowFailure::new(
         FailureCode::OperationRejected,
@@ -2870,6 +2881,48 @@ mod tests {
 
         fs::remove_dir(&run_root).expect("remove replacement Run root");
         fs::rename(&moved_root, &run_root).expect("restore witnessed Run root");
+    }
+
+    #[test]
+    fn durable_context_preserves_valid_identities_when_operation_is_invalid() {
+        let run = WorkflowRunId::new([1; 16]).expect("nonzero Run identity");
+        let mut intent = DurableIntent::new(
+            run,
+            [2; 32],
+            [3; 16],
+            [4; 32],
+            [5; 16],
+            vec![7].into_boxed_slice(),
+            2,
+            1,
+            None,
+            Vec::new().into_boxed_slice(),
+            "Ground".into(),
+            "2026-08-12".into(),
+            "00:00:00Z".into(),
+            true,
+            [[6; 32], [7; 32], [8; 32], [9; 32]],
+            JournalLimits::default(),
+        )
+        .expect("create valid durable Intent");
+        intent.operation = [0; 16];
+
+        let context = durable_context(run, &intent);
+
+        assert_eq!(context.run, Some(run));
+        assert_eq!(
+            context.source,
+            Some(point_contracts::SourceId::new([2; 32]))
+        );
+        assert_eq!(
+            context.workspace,
+            Some(point_workspace::WorkspaceId::from_bytes([3; 16]).unwrap())
+        );
+        assert_eq!(context.operation, None);
+        assert_eq!(
+            context.revision,
+            Some(RevisionId::from_bytes([4; 32]).unwrap())
+        );
     }
 
     #[test]
