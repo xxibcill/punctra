@@ -669,6 +669,7 @@ impl FrameKind {
 pub(crate) struct Journal {
     path: PathBuf,
     file: File,
+    identity: fs::Metadata,
     limits: JournalLimits,
     run: WorkflowRunId,
     checkpoints: Vec<Checkpoint>,
@@ -750,17 +751,19 @@ impl Journal {
 
     pub(crate) fn open(path: &Path, limits: JournalLimits) -> Result<Self, JournalError> {
         validate_limits(limits)?;
-        require_regular_file(path)?;
+        let target_identity = require_regular_file(path)?;
         let mut file = OpenOptions::new()
             .read(true)
             .write(true)
             .open(path)
             .map_err(|source| JournalError::io("open journal", path, source))?;
         file.try_lock().map_err(map_lock_error)?;
-        let file_bytes = file
+        let identity = file
             .metadata()
-            .map_err(|source| JournalError::io("inspect journal", path, source))?
-            .len();
+            .map_err(|source| JournalError::io("inspect journal", path, source))?;
+        verify_recognized_journal(&file, path, &target_identity)
+            .map_err(|source| JournalError::io("verify opened journal target", path, source))?;
+        let file_bytes = identity.len();
         require(file_bytes, limits.max_journal_bytes, "journal bytes")?;
         let (run, header_hash) = read_header(&mut file, path)?;
         let mut scan = scan_frames(&mut file, path, limits, file_bytes, header_hash, run)?;
@@ -779,9 +782,12 @@ impl Journal {
             file.sync_data()
                 .map_err(|source| JournalError::io("sync repaired journal", path, source))?;
         }
+        verify_recognized_journal(&file, path, &identity)
+            .map_err(|source| JournalError::io("revalidate opened journal target", path, source))?;
         Ok(Self {
             path: path.to_path_buf(),
             file,
+            identity,
             limits,
             run,
             checkpoints: scan.checkpoints,
@@ -872,6 +878,9 @@ impl Journal {
                 allowed: self.limits.max_journal_bytes,
             })?;
         require(required, self.limits.max_journal_bytes, "journal bytes")?;
+        self.verify_recognized_path().map_err(|source| {
+            JournalError::io("verify journal append target", &self.path, source)
+        })?;
         self.file
             .seek(SeekFrom::Start(self.end))
             .map_err(|source| JournalError::io("seek journal append", &self.path, source))?;
@@ -880,6 +889,9 @@ impl Journal {
             .map_err(|source| {
                 JournalError::io("run journal pre-append boundary", &self.path, source)
             })?;
+        self.verify_recognized_path().map_err(|source| {
+            JournalError::io("revalidate journal append target", &self.path, source)
+        })?;
         self.poisoned = true;
         self.file
             .write_all(&frame)
@@ -915,11 +927,23 @@ impl Journal {
                 expected_hash,
                 source,
             })?;
+        self.verify_recognized_path()
+            .map_err(|source| JournalError::CheckpointIndeterminate {
+                path: self.path.clone(),
+                kind: checkpoint.kind() as u16,
+                sequence,
+                expected_hash,
+                source,
+            })?;
         self.poisoned = false;
         self.previous_hash = copy_digest(&frame[frame.len() - FRAME_HASH_BYTES..]);
         self.end = required;
         self.checkpoints.push(checkpoint);
         Ok(true)
+    }
+
+    fn verify_recognized_path(&self) -> io::Result<()> {
+        verify_recognized_journal(&self.file, &self.path, &self.identity)
     }
 }
 
@@ -2151,13 +2175,30 @@ fn require_absent(path: &Path) -> Result<(), JournalError> {
     }
 }
 
-fn require_regular_file(path: &Path) -> Result<(), JournalError> {
+fn require_regular_file(path: &Path) -> Result<fs::Metadata, JournalError> {
     let metadata = fs::symlink_metadata(path)
         .map_err(|source| JournalError::io("inspect journal", path, source))?;
     if metadata.file_type().is_file() {
-        Ok(())
+        Ok(metadata)
     } else {
         Err(JournalError::Invalid("journal is not a regular file"))
+    }
+}
+
+fn verify_recognized_journal(file: &File, path: &Path, identity: &fs::Metadata) -> io::Result<()> {
+    let opened = file.metadata()?;
+    let target = fs::symlink_metadata(path)?;
+    if opened.file_type().is_file()
+        && target.file_type().is_file()
+        && same_file_identity(identity, &opened)
+        && same_file_identity(&opened, &target)
+    {
+        Ok(())
+    } else {
+        Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "recognized journal target identity changed",
+        ))
     }
 }
 
@@ -2569,6 +2610,59 @@ mod tests {
                 expected_frames == 8
             );
         }
+    }
+
+    #[test]
+    fn checkpoint_append_rejects_a_replaced_recognized_path() {
+        let directory = Directory::new("checkpoint-path-replacement");
+        let path = directory.path.join("run.pwf");
+        let moved = directory.path.join("moved.pwf");
+        let expected_intent = intent();
+        let checkpoint = checkpoints(&expected_intent)[0].clone();
+        let mut journal =
+            Journal::create(&path, expected_intent, JournalLimits::default()).unwrap();
+        let recognized_bytes = fs::read(&path).unwrap();
+
+        fs::rename(&path, &moved).unwrap();
+        fs::copy(&moved, &path).unwrap();
+
+        let failure = journal
+            .record(checkpoint)
+            .expect_err("a byte-identical replacement is not the recognized journal");
+        assert!(matches!(failure, JournalError::Io { .. }));
+        assert!(!journal.poisoned);
+        assert_eq!(fs::read(&path).unwrap(), recognized_bytes);
+        assert_eq!(fs::read(&moved).unwrap(), recognized_bytes);
+    }
+
+    #[test]
+    fn post_write_path_replacement_is_indeterminate_and_preserved() {
+        let directory = Directory::new("checkpoint-post-write-replacement");
+        let path = directory.path.join("run.pwf");
+        let expected_intent = intent();
+        let checkpoint = checkpoints(&expected_intent)[0].clone();
+        let replacement = b"caller replacement after checkpoint sync";
+        let mut journal =
+            Journal::create(&path, expected_intent, JournalLimits::default()).unwrap();
+
+        let failure = journal
+            .record_with_hook(
+                checkpoint,
+                &TestHook(TestAction::InstallAt {
+                    boundary: PublicationBoundary::CheckpointAfterSync,
+                    target: &path,
+                    bytes: replacement,
+                    replace: true,
+                }),
+            )
+            .expect_err("a replaced target cannot acknowledge the checkpoint");
+
+        assert!(matches!(
+            failure,
+            JournalError::CheckpointIndeterminate { sequence: 1, .. }
+        ));
+        assert!(journal.poisoned);
+        assert_eq!(fs::read(path).unwrap(), replacement);
     }
 
     #[test]
