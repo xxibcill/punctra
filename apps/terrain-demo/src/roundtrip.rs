@@ -781,11 +781,6 @@ fn parse_surface(
     let text = std::str::from_utf8(bytes).map_err(|error| {
         RoundTripFailure::invalid(format_args!("{side} is not UTF-8 XML: {error}"))
     })?;
-    if text.contains("<!DOCTYPE") || text.contains("<!ENTITY") {
-        return Err(RoundTripFailure::invalid(format_args!(
-            "{side} must not contain a DTD or entity declaration"
-        )));
-    }
     let nodes_limit = u32::try_from(limits.xml_nodes)
         .map_err(|_| RoundTripFailure::invalid("XML node limit exceeds parser capacity"))?;
     let options = ParsingOptions {
@@ -1726,6 +1721,29 @@ mod tests {
     }
 
     #[test]
+    fn comments_containing_declaration_tokens_are_ignored() {
+        let fixture = Fixture::new("declaration-token-comments");
+        let reference_xml = landxml(REFERENCE_POINTS, REFERENCE_FACES, false);
+        let returned_xml = reference_xml.replacen(
+            "<Units>",
+            "<!-- generated without <!DOCTYPE or <!ENTITY declarations -->\n<Units>",
+            1,
+        );
+        let (reference, returned) = fixture.write_pair(&reference_xml, &returned_xml);
+
+        let report = verify(
+            &reference,
+            &returned,
+            tolerances(0.0, 0.0),
+            default_limits(),
+        )
+        .expect("declaration tokens in comment text are non-semantic");
+
+        assert!(!report.exact_bytes());
+        assert!(report.topology_matches());
+    }
+
+    #[test]
     fn finite_coordinate_drift_within_both_tolerances_is_reported() {
         let fixture = Fixture::new("within-tolerance");
         let returned_points = &[
@@ -1866,6 +1884,11 @@ mod tests {
         let invalid_documents = [
             "<LandXML",
             &reference_xml.replacen("<LandXML", "<!DOCTYPE LandXML []>\n<LandXML", 1),
+            &reference_xml.replacen(
+                "<LandXML",
+                "<!DOCTYPE LandXML [<!ENTITY generated \"value\">]>\n<LandXML",
+                1,
+            ),
             &reference_xml.replace(super::LANDXML_NAMESPACE, "urn:wrong-landxml"),
             &reference_xml.replace(
                 "<Application name=\"Declared elsewhere\" version=\"ignored\"/>",
