@@ -288,13 +288,15 @@ Points, sorts them canonically, requires a nonempty unique ordinal set and
 unique Check Point identities, and rejects zero/invalid identities or equal
 Ground/replacement classes.
 
-`WorkflowReceipt` exposes Run, Operation, changed Revision, report hash/bytes,
-and frame count. `WorkflowStatus` exposes Run, Operation, verified frame count,
-and Complete status. `WorkflowLimits` composes the public index, Workspace row/
-selection/commit/audit, Terrain, QA, and LandXML limits with intent, envelope,
-journal, report, and aggregate working ceilings. Builders replace each public
-child-limit family and expose intent-count, envelope, journal-byte, report-byte,
-and aggregate-working controls for constrained runs and evidence.
+`WorkflowReceipt` exposes Run, Operation, changed Revision, and report
+hash/bytes. `WorkflowStatus` exposes Run, Operation, the last semantically
+validated durable `WorkflowPhase`, and Complete status. Private journal frame
+counts do not cross the application facade. `WorkflowLimits` composes the
+public index, Workspace row/selection/commit/audit, Terrain, QA, and LandXML
+limits with intent, envelope, journal, report, and aggregate working ceilings.
+Builders replace each public child-limit family and expose intent-count,
+envelope, journal-byte, report-byte, and aggregate-working controls for
+constrained runs and evidence.
 
 `WorkflowPaths` supplies Source, index, Workspace, and Run-root paths on every
 start or resume. Paths are not reconstructed from journal bytes. The journal
@@ -341,9 +343,9 @@ Start/resume require `--run-id HEX32`, `--operation-id HEX32`,
 observations use repeated `--check-point ID,X,Y,Z`; the replacement
 classification and Surface name are bounded options. Resume repeats the
 identical request. Inspect opens only the Run root and reports Run, Operation,
-verified frame count, and Complete status. It may repair a torn final journal
-suffix to the last verified frame, but it never opens Source, index, Workspace,
-LandXML, or report state.
+the last semantically validated durable phase, and Complete status. It may
+repair a torn final journal suffix to the last verified frame, but it never
+opens Source, index, Workspace, LandXML, or report state.
 
 ## Journal format
 

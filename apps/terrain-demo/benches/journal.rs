@@ -95,17 +95,19 @@ fn benchmark_workflow(criterion: &mut Criterion) {
 fn report_resource_evidence(point_count: usize) {
     let fixture = BenchFixture::new(point_count);
     let receipt = fixture.start();
-    let journal_bytes = fs::metadata(fixture.run_root.join("run.pwf"))
-        .expect("measure benchmark journal")
+    let journal = fs::read(fixture.run_root.join("run.pwf")).expect("read benchmark journal");
+    let frame_count = journal_frame_ends(&journal)
+        .expect("parse benchmark journal")
         .len();
     let report =
         fs::read(fixture.run_root.join("audit.json")).expect("read benchmark resource report");
     let report_json: serde_json::Value =
         serde_json::from_slice(&report).expect("parse benchmark resource report");
     eprintln!(
-        "terrain-workflow generated evidence: points={point_count} journal_bytes={journal_bytes} report_bytes={} frames={} semantic_limits={}",
+        "terrain-workflow generated evidence: points={point_count} journal_bytes={} report_bytes={} frames={} semantic_limits={}",
+        journal.len(),
         receipt.report_bytes(),
-        receipt.frame_count(),
+        frame_count,
         report_json["limits"],
     );
     eprintln!(

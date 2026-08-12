@@ -64,10 +64,10 @@ pub fn run_cli(arguments: impl IntoIterator<Item = OsString>) -> Result<String, 
         Command::Inspect(root) => {
             let status = inspect_run(root, WorkflowLimits::default())?;
             Ok(format!(
-                "Run {}\nOperation {}\nframes {}\ncomplete {}\n",
+                "Run {}\nOperation {}\nphase {}\ncomplete {}\n",
                 status.run(),
                 status.operation(),
-                status.frame_count(),
+                status.phase().as_str(),
                 status.is_complete(),
             ))
         }
@@ -82,13 +82,12 @@ pub fn run_cli(arguments: impl IntoIterator<Item = OsString>) -> Result<String, 
                 start_run(paths, *intent, WorkflowLimits::default()).blocking_wait()?
             };
             Ok(format!(
-                "Run complete\nRun {}\nOperation {}\nRevision {}\nreport hash {}\nreport bytes {}\nframes {}\n",
+                "Run complete\nRun {}\nOperation {}\nRevision {}\nreport hash {}\nreport bytes {}\n",
                 receipt.run(),
                 receipt.operation(),
                 receipt.revision(),
                 receipt.report_hash(),
                 receipt.report_bytes(),
-                receipt.frame_count(),
             ))
         }
     }

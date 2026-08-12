@@ -41,7 +41,7 @@ fn thin_process_starts_resumes_and_inspects_one_durable_run() {
         .expect("inspect workflow process");
     assert_success(&inspected);
     let inspection = String::from_utf8_lossy(&inspected.stdout);
-    assert!(inspection.contains("frames 8"), "{inspection}");
+    assert!(inspection.contains("phase complete"), "{inspection}");
     assert!(inspection.contains("complete true"), "{inspection}");
 
     let resumed = fixture.run("resume");
@@ -203,7 +203,6 @@ fn assert_complete_summary(output: &Output) {
         "Revision ",
         "report hash ",
         "report bytes ",
-        "frames 8",
     ] {
         assert!(stdout.contains(expected), "missing {expected:?}\n{stdout}");
     }

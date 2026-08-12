@@ -289,13 +289,13 @@ materialization seam.
 turning application policy into another foundation crate.
 
 The package exposes a small application facade: `WorkflowPaths`,
-`WorkflowRunIntent`, `WorkflowLimits`, `WorkflowReceipt`, `WorkflowStatus`,
-`WorkflowFailure`, `start_run`, `resume_run`, and `inspect_run`. The binary is a
-thin bounded grammar and presentation layer with `start`, `resume`, and
-`inspect` commands. Start/resume require the same caller-owned Run/Operation
-identities, expected baseline Revision, nonempty exact Ground-ordinal set,
-normalized Terrain Recipe, detached Check Points, LandXML options, four paths,
-and limits.
+`WorkflowRunIntent`, `WorkflowLimits`, `WorkflowPhase`, `WorkflowReceipt`,
+`WorkflowStatus`, `WorkflowFailure`, `start_run`, `resume_run`, and
+`inspect_run`. The binary is a thin bounded grammar and presentation layer with
+`start`, `resume`, and `inspect` commands. Start/resume require the same
+caller-owned Run/Operation identities, expected baseline Revision, nonempty
+exact Ground-ordinal set, normalized Terrain Recipe, detached Check Points,
+LandXML options, four paths, and limits.
 
 The application Full-verifies the supported LAS/LAZ Source, prepares or opens
 its Spatial Index, opens the caller-created Workspace, resolves or commits the

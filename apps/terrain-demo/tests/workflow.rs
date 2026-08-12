@@ -25,8 +25,8 @@ use support::{
     restore_journal_prefix, semantic_report_projection, write_las_family_fixture,
 };
 use terrain_demo::{
-    WorkflowLimits, WorkflowPaths, WorkflowReceipt, WorkflowRunId, WorkflowRunIntent, inspect_run,
-    resume_run, start_run,
+    WorkflowLimits, WorkflowPaths, WorkflowPhase, WorkflowReceipt, WorkflowRunId,
+    WorkflowRunIntent, inspect_run, resume_run, start_run,
 };
 
 const GROUND: u8 = 2;
@@ -34,6 +34,16 @@ const NON_GROUND: u8 = 1;
 const CLASSIFICATION_ATTRIBUTE: u32 = 6;
 const RETURN_NUMBER_ATTRIBUTE: u32 = 2;
 const EXPECTED_FRAME_COUNT: usize = 8;
+const EXPECTED_PHASES: [WorkflowPhase; EXPECTED_FRAME_COUNT] = [
+    WorkflowPhase::IntentRecorded,
+    WorkflowPhase::RevisionResolved,
+    WorkflowPhase::AuditObserved,
+    WorkflowPhase::SurfacesObserved,
+    WorkflowPhase::QaObserved,
+    WorkflowPhase::ExportEnsured,
+    WorkflowPhase::ReportEnsured,
+    WorkflowPhase::Complete,
+];
 
 #[test]
 fn every_checkpoint_prefix_resumes_to_one_revision_and_the_same_report() {
@@ -41,7 +51,6 @@ fn every_checkpoint_prefix_resumes_to_one_revision_and_the_same_report() {
     let immutable_source = fs::read(&fixture.source).expect("read immutable Source fixture");
 
     let expected = fixture.start();
-    assert_eq!(expected.frame_count(), EXPECTED_FRAME_COUNT as u64);
     let expected_report = fixture.report_bytes();
     let expected_landxml = fixture.landxml_bytes();
     let complete_journal = fixture.journal_bytes();
@@ -55,7 +64,7 @@ fn every_checkpoint_prefix_resumes_to_one_revision_and_the_same_report() {
             .expect("durably restore completed-run journal prefix");
         let before = inspect_run(&fixture.run_root, WorkflowLimits::default())
             .expect("inspect verified journal prefix");
-        assert_eq!(before.frame_count(), (prefix + 1) as u64);
+        assert_eq!(before.phase(), EXPECTED_PHASES[prefix]);
         assert_eq!(before.is_complete(), prefix + 1 == EXPECTED_FRAME_COUNT);
 
         let resumed = fixture.resume();
@@ -312,7 +321,6 @@ fn cancelling_the_parent_run_never_publishes_a_false_complete_checkpoint() {
             "a cancelled workflow must not claim Complete",
         );
         let receipt = fixture.resume();
-        assert_eq!(receipt.frame_count(), EXPECTED_FRAME_COUNT as u64);
         fixture.assert_single_operation_revision(receipt);
     } else {
         assert!(
@@ -367,7 +375,6 @@ fn dropping_an_active_workflow_never_publishes_complete_and_can_resume() {
         "dropping an active workflow must not publish Complete",
     );
     let receipt = fixture.resume();
-    assert_eq!(receipt.frame_count(), EXPECTED_FRAME_COUNT as u64);
     fixture.assert_single_operation_revision(receipt);
     assert_eq!(
         fs::read(&fixture.source).expect("reread drop-test Source fixture"),
@@ -390,7 +397,7 @@ fn report_limits_and_landxml_conflicts_resume_without_a_second_revision() {
     assert!(limited.run_root.join("terrain.xml").is_file());
     let status = inspect_run(&limited.run_root, WorkflowLimits::default())
         .expect("inspect Run stopped at the report limit");
-    assert_eq!(status.frame_count(), 6);
+    assert_eq!(status.phase(), WorkflowPhase::ExportEnsured);
     assert!(!status.is_complete());
     let recovered = limited.resume();
     limited.assert_single_operation_revision(recovered);
@@ -413,7 +420,7 @@ fn report_limits_and_landxml_conflicts_resume_without_a_second_revision() {
     );
     let status = inspect_run(&conflicting.run_root, WorkflowLimits::default())
         .expect("inspect Run stopped before LandXML checkpoint");
-    assert_eq!(status.frame_count(), 5);
+    assert_eq!(status.phase(), WorkflowPhase::QaObserved);
     assert!(!status.is_complete());
     fs::remove_file(conflicting.run_root.join("terrain.xml"))
         .expect("caller removes its conflicting target");
@@ -561,14 +568,14 @@ fn stale_head_and_a_differently_bound_rejection_do_not_mutate_the_run() {
     assert_eq!(error.code(), "PWF_JOURNAL_CONFLICT");
     let status = inspect_run(&rejected.run_root, WorkflowLimits::default())
         .expect("inspect rejected Run Intent");
-    assert_eq!(status.frame_count(), 1);
+    assert_eq!(status.phase(), WorkflowPhase::IntentRecorded);
     assert!(!status.is_complete());
 }
 
 #[test]
 fn changed_source_and_workspace_identities_are_named_before_run_mutation() {
     let fixture = WorkflowFixture::new("identity-mismatch", "las", 64, 111);
-    let expected = fixture.start();
+    fixture.start();
     let source_bytes = fs::read(&fixture.source).expect("read expected Source bytes");
     let journal = fixture.journal_bytes();
 
@@ -617,7 +624,6 @@ fn changed_source_and_workspace_identities_are_named_before_run_mutation() {
     .expect_err("changed Workspace lineage must fail before Run mutation");
     assert_eq!(error.code(), "PWF_WORKSPACE_MISMATCH", "{error}");
     assert_eq!(fixture.journal_bytes(), journal);
-    assert_eq!(expected.frame_count(), EXPECTED_FRAME_COUNT as u64);
 }
 
 #[test]
@@ -673,7 +679,7 @@ fn retryable_workspace_intent_resumes_with_the_recorded_operation() {
     assert_eq!(error.code(), "PWF_RESOURCE_LIMIT", "{error}");
     let status = inspect_run(&fixture.run_root, WorkflowLimits::default())
         .expect("inspect Intent-only workflow Run");
-    assert_eq!(status.frame_count(), 1);
+    assert_eq!(status.phase(), WorkflowPhase::IntentRecorded);
     assert!(!status.is_complete());
 
     let workspace = fixture.open_workspace();
@@ -716,7 +722,6 @@ fn retryable_workspace_intent_resumes_with_the_recorded_operation() {
 
     let receipt = fixture.resume();
     assert_eq!(receipt.operation(), fixture.intent.operation());
-    assert_eq!(receipt.frame_count(), EXPECTED_FRAME_COUNT as u64);
     fixture.assert_single_operation_revision(receipt);
     assert_eq!(fs::read(&fixture.source).unwrap(), source_bytes);
 }
@@ -1034,8 +1039,8 @@ fn resource_limit_problem(label: &str, identity: u8, limits: &WorkflowLimits) ->
         assert!(!status.is_complete(), "{label}: false Complete checkpoint");
         if label == "audit-limit" {
             assert_eq!(
-                status.frame_count(),
-                2,
+                status.phase(),
+                WorkflowPhase::RevisionResolved,
                 "the resolved Revision must be durable before its audit starts",
             );
         }

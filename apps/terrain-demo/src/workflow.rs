@@ -104,6 +104,44 @@ pub struct WorkflowRunIntent {
     landxml: LandXmlOptions,
 }
 
+/// Last semantically validated durable phase of one Workflow Run.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum WorkflowPhase {
+    /// The immutable Run intent and bindings are durable.
+    IntentRecorded,
+    /// The Workspace Operation has one resolved Revision.
+    RevisionResolved,
+    /// The exact Revision Audit has been observed.
+    AuditObserved,
+    /// Both Terrain Surfaces and their change envelope have been observed.
+    SurfacesObserved,
+    /// Detached Check Point QA has been observed.
+    QaObserved,
+    /// The exact `LandXML` output has been ensured.
+    ExportEnsured,
+    /// The canonical audit report has been ensured.
+    ReportEnsured,
+    /// Every final fact has been revalidated and the Run is complete.
+    Complete,
+}
+
+impl WorkflowPhase {
+    /// Returns the stable presentation name for this semantic phase.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::IntentRecorded => "intent-recorded",
+            Self::RevisionResolved => "revision-resolved",
+            Self::AuditObserved => "audit-observed",
+            Self::SurfacesObserved => "surfaces-observed",
+            Self::QaObserved => "qa-observed",
+            Self::ExportEnsured => "export-ensured",
+            Self::ReportEnsured => "report-ensured",
+            Self::Complete => "complete",
+        }
+    }
+}
+
 impl WorkflowRunIntent {
     /// Creates one bounded explicit Ground-exclusion intent.
     ///
@@ -343,7 +381,6 @@ pub struct WorkflowReceipt {
     revision: RevisionId,
     report_hash: ContentHash,
     report_bytes: u64,
-    frame_count: u64,
 }
 
 impl WorkflowReceipt {
@@ -372,11 +409,6 @@ impl WorkflowReceipt {
     pub const fn report_bytes(self) -> u64 {
         self.report_bytes
     }
-    /// Returns the exact durable journal frame count.
-    #[must_use]
-    pub const fn frame_count(self) -> u64 {
-        self.frame_count
-    }
 }
 
 /// Verified journal status for one Run.
@@ -384,8 +416,7 @@ impl WorkflowReceipt {
 pub struct WorkflowStatus {
     run: WorkflowRunId,
     operation: OperationId,
-    frame_count: u64,
-    complete: bool,
+    phase: WorkflowPhase,
 }
 
 impl WorkflowStatus {
@@ -399,15 +430,15 @@ impl WorkflowStatus {
     pub const fn operation(self) -> OperationId {
         self.operation
     }
-    /// Returns the exact verified frame count.
+    /// Returns the last semantically validated durable phase.
     #[must_use]
-    pub const fn frame_count(self) -> u64 {
-        self.frame_count
+    pub const fn phase(self) -> WorkflowPhase {
+        self.phase
     }
     /// Reports whether the Complete checkpoint is durable.
     #[must_use]
     pub const fn is_complete(self) -> bool {
-        self.complete
+        matches!(self.phase, WorkflowPhase::Complete)
     }
 }
 
@@ -479,11 +510,21 @@ pub fn inspect_run(
             context,
         )
     })?;
+    let phase = journal
+        .checkpoints()
+        .last()
+        .map(checkpoint_phase)
+        .ok_or_else(|| {
+            journal_failure(
+                WorkflowStage::Inspect,
+                JournalError::Corrupt("journal has no validated durable phase"),
+                context,
+            )
+        })?;
     let status = WorkflowStatus {
         run: journal.run(),
         operation,
-        frame_count: usize_u64(journal.checkpoints().len()),
-        complete: matches!(journal.checkpoints().last(), Some(Checkpoint::Complete(_))),
+        phase,
     };
     verify_run_binding(&lock, &witness).map_err(|error| {
         WorkflowFailure::new(
@@ -1152,8 +1193,20 @@ fn advance(
         revision: revision.id(),
         report_hash: ContentHash::new(report.content_hash),
         report_bytes: report.byte_length,
-        frame_count: usize_u64(journal.checkpoints().len()),
     })
+}
+
+fn checkpoint_phase(checkpoint: &Checkpoint) -> WorkflowPhase {
+    match checkpoint {
+        Checkpoint::Intent(_) => WorkflowPhase::IntentRecorded,
+        Checkpoint::RevisionResolved(_) => WorkflowPhase::RevisionResolved,
+        Checkpoint::AuditObserved(_) => WorkflowPhase::AuditObserved,
+        Checkpoint::SurfaceObserved(_) => WorkflowPhase::SurfacesObserved,
+        Checkpoint::QaObserved(_) => WorkflowPhase::QaObserved,
+        Checkpoint::ExportEnsured(_) => WorkflowPhase::ExportEnsured,
+        Checkpoint::ReportEnsured(_) => WorkflowPhase::ReportEnsured,
+        Checkpoint::Complete(_) => WorkflowPhase::Complete,
+    }
 }
 
 fn open_workspace(
