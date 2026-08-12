@@ -857,7 +857,7 @@ fn parse_landxml_document(
 ) -> Result<ParsedSurface, RoundTripFailure> {
     let root = document.root_element();
     require_tag(side, root, "LandXML")?;
-    if root.attribute("version") != Some("1.2") {
+    if unqualified_attribute(root, "version") != Some("1.2") {
         return Err(schema_error(side, "LandXML version must be 1.2"));
     }
     validate_root_children(side, root)?;
@@ -885,7 +885,7 @@ fn validate_metric_units(side: InputSide, units: Node<'_, '_>) -> Result<(), Rou
     validate_allowed_children(side, units, &["Metric"]).map_err(|_| unit_drift(side))?;
     let metric = unique_child(side, units, "Metric").map_err(|_| unit_drift(side))?;
     validate_allowed_children(side, metric, &[]).map_err(|_| unit_drift(side))?;
-    if metric.attribute("linearUnit") != Some("meter") {
+    if unqualified_attribute(metric, "linearUnit") != Some("meter") {
         return Err(unit_drift(side));
     }
     Ok(())
@@ -902,12 +902,12 @@ fn validate_surface(
     surface: Node<'_, '_>,
     limits: RoundTripLimits,
 ) -> Result<ParsedSurface, RoundTripFailure> {
-    if surface.attribute("name").is_none() {
+    if unqualified_attribute(surface, "name").is_none() {
         return Err(schema_error(side, "Surface requires a name attribute"));
     }
     validate_allowed_children(side, surface, &["Definition"])?;
     let definition = unique_child(side, surface, "Definition")?;
-    if definition.attribute("surfType") != Some("TIN") {
+    if unqualified_attribute(definition, "surfType") != Some("TIN") {
         return Err(schema_error(side, "Surface Definition must be a TIN"));
     }
     validate_allowed_children(side, definition, &["Pnts", "Faces"])?;
@@ -953,8 +953,7 @@ fn parse_points(
 }
 
 fn parse_point_id(side: InputSide, node: Node<'_, '_>) -> Result<u64, RoundTripFailure> {
-    let value = node
-        .attribute("id")
+    let value = unqualified_attribute(node, "id")
         .ok_or_else(|| schema_error(side, "every P requires an id"))?;
     let id = value.parse::<u64>().map_err(|_| {
         RoundTripFailure::invalid(format_args!("{side} point ID must be a positive integer"))
@@ -1320,6 +1319,12 @@ fn at_most_one_child(
 
 fn element_children<'a, 'input>(node: Node<'a, 'input>) -> impl Iterator<Item = Node<'a, 'input>> {
     node.children().filter(Node::is_element)
+}
+
+fn unqualified_attribute<'a>(node: Node<'a, '_>, name: &str) -> Option<&'a str> {
+    node.attributes()
+        .find(|attribute| attribute.namespace().is_none() && attribute.name() == name)
+        .map(|attribute| attribute.value())
 }
 
 fn schema_error(side: InputSide, message: &'static str) -> RoundTripFailure {
@@ -1870,6 +1875,87 @@ mod tests {
                 RoundTripFailureKind::InvalidInput,
             );
         }
+    }
+
+    #[test]
+    fn foreign_namespaced_attributes_cannot_supply_landxml_semantics() {
+        let fixture = Fixture::new("foreign-attribute-lookalikes");
+        let reference_xml = landxml(REFERENCE_POINTS, REFERENCE_FACES, false);
+        let variants = [
+            (
+                reference_xml.replacen(
+                    "version=\"1.2\"",
+                    "xmlns:meta=\"urn:generated:metadata\" meta:version=\"1.2\"",
+                    1,
+                ),
+                RoundTripFailureKind::InvalidInput,
+            ),
+            (
+                reference_xml.replacen(
+                    "linearUnit=\"meter\"",
+                    "xmlns:meta=\"urn:generated:metadata\" meta:linearUnit=\"meter\"",
+                    1,
+                ),
+                RoundTripFailureKind::SemanticMismatch,
+            ),
+            (
+                reference_xml.replacen(
+                    "name=\"Ground\"",
+                    "xmlns:meta=\"urn:generated:metadata\" meta:name=\"Ground\"",
+                    1,
+                ),
+                RoundTripFailureKind::InvalidInput,
+            ),
+            (
+                reference_xml.replacen(
+                    "surfType=\"TIN\"",
+                    "xmlns:meta=\"urn:generated:metadata\" meta:surfType=\"TIN\"",
+                    1,
+                ),
+                RoundTripFailureKind::InvalidInput,
+            ),
+            (
+                reference_xml.replacen(
+                    "<P id=\"1\">",
+                    "<P xmlns:meta=\"urn:generated:metadata\" meta:id=\"1\">",
+                    1,
+                ),
+                RoundTripFailureKind::InvalidInput,
+            ),
+        ];
+        for (index, (returned_xml, expected)) in variants.iter().enumerate() {
+            let reference = fixture.write(&format!("reference-{index}.xml"), &reference_xml);
+            let returned = fixture.write(&format!("returned-{index}.xml"), returned_xml);
+            assert_kind(
+                verify(
+                    &reference,
+                    &returned,
+                    tolerances(0.0, 0.0),
+                    default_limits(),
+                ),
+                *expected,
+            );
+        }
+
+        let returned_xml = reference_xml
+            .replacen(
+                "<LandXML ",
+                "<LandXML xmlns:meta=\"urn:generated:metadata\" meta:version=\"9.9\" ",
+                1,
+            )
+            .replacen("<Metric ", "<Metric meta:linearUnit=\"foot\" ", 1)
+            .replacen("<Surface ", "<Surface meta:name=\"Ignored\" ", 1)
+            .replacen("<Definition ", "<Definition meta:surfType=\"GRID\" ", 1)
+            .replacen("<P id=\"1\">", "<P meta:id=\"99\" id=\"1\">", 1);
+        let reference = fixture.write("reference-with-metadata.xml", &reference_xml);
+        let returned = fixture.write("returned-with-metadata.xml", &returned_xml);
+        verify(
+            &reference,
+            &returned,
+            tolerances(0.0, 0.0),
+            default_limits(),
+        )
+        .expect("foreign namespaced attributes remain ignored metadata");
     }
 
     #[test]
