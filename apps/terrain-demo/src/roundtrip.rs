@@ -338,9 +338,12 @@ pub(crate) fn verify_landxml_round_trip(
 ) -> Result<RoundTripReport, RoundTripFailure> {
     validate_limits(limits)?;
     reject_same_path(reference_path, returned_path)?;
+    let (reference_witness, returned_witness) =
+        capture_file_pair(reference_path, returned_path, limits.file_bytes)?;
     let reference_file =
-        read_regular_file(InputSide::Reference, reference_path, limits.file_bytes)?;
-    let returned_file = read_regular_file(InputSide::Returned, returned_path, limits.file_bytes)?;
+        read_regular_file(InputSide::Reference, reference_witness, limits.file_bytes)?;
+    let returned_file =
+        read_regular_file(InputSide::Returned, returned_witness, limits.file_bytes)?;
     reject_same_file(&reference_file, &returned_file)?;
 
     let reference_surface = parse_surface(InputSide::Reference, &reference_file.bytes, limits)?;
@@ -438,11 +441,28 @@ struct FileSnapshot {
     identity: FileIdentity,
 }
 
-fn read_regular_file(
+struct FileWitness<'a> {
+    path: &'a Path,
+    file: File,
+    metadata: Metadata,
+    identity: FileIdentity,
+}
+
+fn capture_file_pair<'a>(
+    reference_path: &'a Path,
+    returned_path: &'a Path,
+    max_file_bytes: u64,
+) -> Result<(FileWitness<'a>, FileWitness<'a>), RoundTripFailure> {
+    let reference = capture_regular_file(InputSide::Reference, reference_path, max_file_bytes)?;
+    let returned = capture_regular_file(InputSide::Returned, returned_path, max_file_bytes)?;
+    Ok((reference, returned))
+}
+
+fn capture_regular_file(
     side: InputSide,
     path: &Path,
     max_file_bytes: u64,
-) -> Result<FileSnapshot, RoundTripFailure> {
+) -> Result<FileWitness<'_>, RoundTripFailure> {
     let path_metadata = fs::symlink_metadata(path).map_err(|error| {
         RoundTripFailure::invalid(format_args!("{side} cannot be inspected: {error}"))
     })?;
@@ -454,7 +474,7 @@ fn read_regular_file(
     let path_identity = require_file_identity(side, &path_metadata)?;
     check_file_bytes(side, path_metadata.len(), max_file_bytes)?;
 
-    let mut file = File::open(path).map_err(|error| {
+    let file = File::open(path).map_err(|error| {
         RoundTripFailure::invalid(format_args!("{side} cannot be opened: {error}"))
     })?;
     let open_metadata = file.metadata().map_err(|error| {
@@ -469,7 +489,25 @@ fn read_regular_file(
             "{side} changed while it was being opened"
         )));
     }
+    Ok(FileWitness {
+        path,
+        file,
+        metadata: open_metadata,
+        identity: open_identity,
+    })
+}
 
+fn read_regular_file(
+    side: InputSide,
+    witness: FileWitness<'_>,
+    max_file_bytes: u64,
+) -> Result<FileSnapshot, RoundTripFailure> {
+    let FileWitness {
+        path,
+        mut file,
+        metadata: open_metadata,
+        identity,
+    } = witness;
     let bytes = read_bounded_bytes(side, &mut file, open_metadata.len(), max_file_bytes)?;
     let final_metadata = file.metadata().map_err(|error| {
         RoundTripFailure::invalid(format_args!("{side} metadata cannot be rechecked: {error}"))
@@ -488,10 +526,7 @@ fn read_regular_file(
             "{side} changed while it was being read"
         )));
     }
-    Ok(FileSnapshot {
-        bytes,
-        identity: open_identity,
-    })
+    Ok(FileSnapshot { bytes, identity })
 }
 
 #[cfg(unix)]
@@ -1930,6 +1965,36 @@ mod tests {
                 RoundTripFailureKind::ResourceLimit,
             );
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn captured_input_pair_rejects_replacement_before_consumption() {
+        let fixture = Fixture::new("captured-pair-replacement");
+        let xml = landxml(REFERENCE_POINTS, REFERENCE_FACES, false);
+        let (reference, returned) = fixture.write_pair(&xml, &xml);
+        let limits = default_limits();
+        let (reference_witness, returned_witness) =
+            super::capture_file_pair(&reference, &returned, limits.file_bytes)
+                .expect("capture both input witnesses");
+
+        let replacement = fixture.write("replacement.xml", &xml.replace("Ground", "Return"));
+        fs::rename(replacement, &returned).expect("replace returned path after capture");
+
+        super::read_regular_file(
+            super::InputSide::Reference,
+            reference_witness,
+            limits.file_bytes,
+        )
+        .expect("read unchanged reference witness");
+        let Err(error) = super::read_regular_file(
+            super::InputSide::Returned,
+            returned_witness,
+            limits.file_bytes,
+        ) else {
+            panic!("replacement after pair capture must fail");
+        };
+        assert_eq!(error.kind(), RoundTripFailureKind::InvalidInput, "{error}");
     }
 
     #[cfg(unix)]
