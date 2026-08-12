@@ -35,6 +35,7 @@ use crate::{
         JournalError, JournalLimits, QaObserved, ReportEnsured, RevisionResolved, SurfaceObserved,
         WorkflowIntent as DurableIntent, WorkflowRunId,
     },
+    publication::same_file_identity,
     report::{self, LimitFact, ReportError, ReportFacts, ReportLimits, SurfaceChangeEnvelope},
 };
 
@@ -445,16 +446,15 @@ pub fn inspect_run(
     )?;
     let witness = DirectoryWitness::capture(run_root)
         .map_err(|error| io_failure(WorkflowStage::Inspect, error, FailureContext::default()))?;
-    let _lock = RunLock::acquire(&run_root.join("run.lock"))
+    let lock = RunLock::acquire(&run_root.join("run.lock"))
         .map_err(|error| lock_failure(error, FailureContext::default()))?;
-    witness
-        .verify()
+    verify_run_binding(&lock, &witness)
         .map_err(|error| io_failure(WorkflowStage::Inspect, error, FailureContext::default()))?;
     let journal = Journal::open(&run_root.join("run.pwf"), limits.journal).map_err(|error| {
         journal_failure(WorkflowStage::Inspect, error, FailureContext::default())
     })?;
     let context = durable_context(journal.run(), journal.intent());
-    witness.verify().map_err(|error| {
+    verify_run_binding(&lock, &witness).map_err(|error| {
         WorkflowFailure::new(
             FailureCode::PublicationIndeterminate,
             WorkflowStage::Inspect,
@@ -472,12 +472,23 @@ pub fn inspect_run(
             context,
         )
     })?;
-    Ok(WorkflowStatus {
+    let status = WorkflowStatus {
         run: journal.run(),
         operation,
         frame_count: usize_u64(journal.checkpoints().len()),
         complete: matches!(journal.checkpoints().last(), Some(Checkpoint::Complete(_))),
-    })
+    };
+    verify_run_binding(&lock, &witness).map_err(|error| {
+        WorkflowFailure::new(
+            FailureCode::PublicationIndeterminate,
+            WorkflowStage::Inspect,
+            Certainty::Indeterminate(PublicationPhase::JournalCheckpoint),
+            context,
+            error,
+            RecoveryAction::ResumeSameRun,
+        )
+    })?;
+    Ok(status)
 }
 
 fn run(
@@ -490,10 +501,9 @@ fn run(
     validate_run_root(&paths.run_root, base_context(request))?;
     let witness = DirectoryWitness::capture(&paths.run_root)
         .map_err(|error| io_failure(WorkflowStage::Validate, error, base_context(request)))?;
-    let _lock = RunLock::acquire(&paths.lock())
+    let lock = RunLock::acquire(&paths.lock())
         .map_err(|error| lock_failure(error, base_context(request)))?;
-    witness
-        .verify()
+    verify_run_binding(&lock, &witness)
         .map_err(|error| io_failure(WorkflowStage::Lock, error, base_context(request)))?;
 
     require_workflow_bytes(
@@ -516,7 +526,7 @@ fn run(
         let journal = Journal::open(&paths.journal(), limits.journal).map_err(|error| {
             journal_failure(WorkflowStage::Intent, error, base_context(request))
         })?;
-        witness.verify().map_err(|error| {
+        verify_run_binding(&lock, &witness).map_err(|error| {
             WorkflowFailure::new(
                 FailureCode::PublicationIndeterminate,
                 WorkflowStage::Intent,
@@ -535,6 +545,8 @@ fn run(
         .map_err(|error| {
             source_failure(WorkflowStage::Source, error, control, base_context(request))
         })?;
+    verify_run_binding(&lock, &witness)
+        .map_err(|error| io_failure(WorkflowStage::Source, error, base_context(request)))?;
     let source_id = source.identity();
     if let Some(journal) = resumed_journal.as_ref()
         && journal.intent().source != source_id.into_bytes()
@@ -565,6 +577,8 @@ fn run(
         .map_err(|error| {
             index_failure(WorkflowStage::Index, error, control, base_context(request))
         })?;
+    verify_run_binding(&lock, &witness)
+        .map_err(|error| io_failure(WorkflowStage::Index, error, base_context(request)))?;
     let mut context = base_context(request);
     context.source = Some(source_id);
     require_workflow_bytes(
@@ -577,6 +591,8 @@ fn run(
         context,
     )?;
     let workspace = open_workspace(index, &paths.workspace, limits.open, control, context)?;
+    verify_run_binding(&lock, &witness)
+        .map_err(|error| io_failure(WorkflowStage::Workspace, error, context))?;
     context.workspace = Some(workspace.identity());
     if let Some(journal) = resumed_journal.as_ref()
         && journal.intent().workspace != workspace.identity().into_bytes()
@@ -642,6 +658,8 @@ fn run(
         control,
         context,
     )?;
+    verify_run_binding(&lock, &witness)
+        .map_err(|error| io_failure(WorkflowStage::Selection, error, context))?;
     require_workflow_bytes(
         request_retained_bytes(request)
             .saturating_add(limits.prepare.max_resident_metadata_bytes())
@@ -659,8 +677,7 @@ fn run(
         limits.journal,
     )
     .map_err(|error| journal_failure(WorkflowStage::Validate, error, context))?;
-    witness
-        .verify()
+    verify_run_binding(&lock, &witness)
         .map_err(|error| io_failure(WorkflowStage::Intent, error, context))?;
     let mut journal = if start {
         Journal::create(&paths.journal(), durable, limits.journal)
@@ -679,7 +696,7 @@ fn run(
         }
         journal
     };
-    witness.verify().map_err(|error| {
+    verify_run_binding(&lock, &witness).map_err(|error| {
         if start {
             WorkflowFailure::new(
                 FailureCode::PublicationIndeterminate,
@@ -700,6 +717,7 @@ fn run(
         &workspace,
         &mut journal,
         &witness,
+        &lock,
         control,
         context,
     )
@@ -712,6 +730,7 @@ fn advance(
     workspace: &Workspace,
     journal: &mut Journal,
     witness: &DirectoryWitness,
+    lock: &RunLock,
     control: &OperationControl,
     mut context: FailureContext,
 ) -> Result<WorkflowReceipt, WorkflowFailure> {
@@ -758,6 +777,8 @@ fn advance(
         ));
     }
     let expected_metadata = *expected_points.metadata();
+    verify_run_binding(lock, witness)
+        .map_err(|error| io_failure(WorkflowStage::Selection, error, context))?;
     require_workflow_bytes(
         workflow_retained_bytes(journal, request, limits)
             .saturating_add(limits.selection.max_resident_bytes())
@@ -788,6 +809,7 @@ fn advance(
     record(
         journal,
         witness,
+        lock,
         control,
         Checkpoint::RevisionResolved(revision_fact),
         WorkflowStage::ResolveOperation,
@@ -818,6 +840,7 @@ fn advance(
     record(
         journal,
         witness,
+        lock,
         control,
         Checkpoint::AuditObserved(audit_fact),
         WorkflowStage::RevisionAudit,
@@ -842,6 +865,8 @@ fn advance(
     )
     .blocking_wait_cancelled_by(&control.token())
     .map_err(|error| terrain_failure(WorkflowStage::Terrain, error, control, context))?;
+    verify_run_binding(lock, witness)
+        .map_err(|error| io_failure(WorkflowStage::Terrain, error, context))?;
     require_workflow_bytes(
         workflow_retained_bytes(journal, request, limits)
             .saturating_add(audit.retained_result_bytes())
@@ -860,6 +885,8 @@ fn advance(
     )
     .blocking_wait_cancelled_by(&control.token())
     .map_err(|error| terrain_failure(WorkflowStage::Terrain, error, control, context))?;
+    verify_run_binding(lock, witness)
+        .map_err(|error| io_failure(WorkflowStage::Terrain, error, context))?;
     require_workflow_bytes(
         workflow_retained_bytes(journal, request, limits)
             .saturating_add(audit.retained_result_bytes())
@@ -888,6 +915,7 @@ fn advance(
     record(
         journal,
         witness,
+        lock,
         control,
         Checkpoint::SurfaceObserved(surface_fact),
         WorkflowStage::Terrain,
@@ -916,6 +944,7 @@ fn advance(
     record(
         journal,
         witness,
+        lock,
         control,
         Checkpoint::QaObserved(qa_fact),
         WorkflowStage::CheckPointQa,
@@ -930,8 +959,7 @@ fn advance(
         WorkflowStage::LandXml,
         context,
     )?;
-    witness
-        .verify()
+    verify_run_binding(lock, witness)
         .map_err(|error| io_failure(WorkflowStage::LandXml, error, context))?;
     let landxml = changed
         .ensure_landxml(paths.landxml(), request.landxml.clone(), limits.landxml)
@@ -949,6 +977,7 @@ fn advance(
     record(
         journal,
         witness,
+        lock,
         control,
         Checkpoint::ExportEnsured(export_fact),
         WorkflowStage::LandXml,
@@ -1008,8 +1037,7 @@ fn advance(
         landxml,
         limits: &limit_facts,
     };
-    witness
-        .verify()
+    verify_run_binding(lock, witness)
         .map_err(|error| io_failure(WorkflowStage::Report, error, context))?;
     let report = report::ensure_report(&paths.report(), &report_facts, limits.report, control)
         .map_err(|error| report_failure(WorkflowStage::Report, error, context))?;
@@ -1025,6 +1053,7 @@ fn advance(
     record(
         journal,
         witness,
+        lock,
         control,
         Checkpoint::ReportEnsured(report_fact),
         WorkflowStage::Report,
@@ -1033,8 +1062,7 @@ fn advance(
     control
         .check_cancelled()
         .map_err(|_| cancelled_failure(WorkflowStage::Complete, context))?;
-    witness
-        .verify()
+    verify_run_binding(lock, witness)
         .map_err(|error| io_failure(WorkflowStage::Complete, error, context))?;
     let final_landxml = changed
         .ensure_landxml(paths.landxml(), request.landxml.clone(), limits.landxml)
@@ -1086,6 +1114,7 @@ fn advance(
     record(
         journal,
         witness,
+        lock,
         control,
         Checkpoint::Complete(complete),
         WorkflowStage::Complete,
@@ -1101,6 +1130,8 @@ fn advance(
             RecoveryAction::ResumeSameRun,
         )
     })?;
+    verify_run_binding(lock, witness)
+        .map_err(|error| io_failure(WorkflowStage::Complete, error, context))?;
     Ok(WorkflowReceipt {
         run: request.run,
         operation: request.operation,
@@ -2033,6 +2064,7 @@ fn limit_facts(
 fn record(
     journal: &mut Journal,
     witness: &DirectoryWitness,
+    lock: &RunLock,
     control: &OperationControl,
     checkpoint: Checkpoint,
     stage: WorkflowStage,
@@ -2041,14 +2073,12 @@ fn record(
     control
         .check_cancelled()
         .map_err(|_| cancelled_failure(stage, context))?;
-    witness
-        .verify()
-        .map_err(|error| io_failure(stage, error, context))?;
+    verify_run_binding(lock, witness).map_err(|error| io_failure(stage, error, context))?;
     journal
         .record(checkpoint)
         .map(|_| ())
         .map_err(|error| journal_failure(stage, error, context))?;
-    witness.verify().map_err(|error| {
+    verify_run_binding(lock, witness).map_err(|error| {
         WorkflowFailure::new(
             FailureCode::PublicationIndeterminate,
             stage,
@@ -2588,7 +2618,9 @@ fn validate_run_root(path: &Path, context: FailureContext) -> Result<(), Workflo
 }
 
 struct RunLock {
-    _file: File,
+    file: File,
+    path: PathBuf,
+    identity: fs::Metadata,
 }
 
 impl RunLock {
@@ -2616,10 +2648,10 @@ impl RunLock {
         let current = fs::symlink_metadata(path)?;
         if !opened.file_type().is_file()
             || !current.file_type().is_file()
-            || !lock_same_file_identity(&opened, &current)
+            || !same_file_identity(&opened, &current)
             || initial
                 .as_ref()
-                .is_some_and(|value| !lock_same_file_identity(value, &opened))
+                .is_some_and(|value| !same_file_identity(value, &opened))
         {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -2628,36 +2660,40 @@ impl RunLock {
         }
         file.try_lock().map_err(io::Error::from)?;
         let locked_path = fs::symlink_metadata(path)?;
-        if !locked_path.file_type().is_file() || !lock_same_file_identity(&opened, &locked_path) {
+        if !locked_path.file_type().is_file() || !same_file_identity(&opened, &locked_path) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "run.lock changed identity while it was locked",
             ));
         }
-        Ok(Self { _file: file })
+        Ok(Self {
+            file,
+            path: path.to_path_buf(),
+            identity: opened,
+        })
+    }
+
+    fn verify(&self) -> io::Result<()> {
+        let opened = self.file.metadata()?;
+        let current = fs::symlink_metadata(&self.path)?;
+        if opened.file_type().is_file()
+            && current.file_type().is_file()
+            && same_file_identity(&self.identity, &opened)
+            && same_file_identity(&opened, &current)
+        {
+            Ok(())
+        } else {
+            Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "run.lock path no longer names the locked file",
+            ))
+        }
     }
 }
 
-#[cfg(unix)]
-fn lock_same_file_identity(left: &fs::Metadata, right: &fs::Metadata) -> bool {
-    use std::os::unix::fs::MetadataExt;
-
-    left.dev() == right.dev() && left.ino() == right.ino()
-}
-
-#[cfg(windows)]
-fn lock_same_file_identity(left: &fs::Metadata, right: &fs::Metadata) -> bool {
-    use std::os::windows::fs::MetadataExt;
-
-    left.file_attributes() == right.file_attributes()
-        && left.creation_time() == right.creation_time()
-        && left.last_write_time() == right.last_write_time()
-        && left.file_size() == right.file_size()
-}
-
-#[cfg(not(any(unix, windows)))]
-fn lock_same_file_identity(_left: &fs::Metadata, _right: &fs::Metadata) -> bool {
-    false
+fn verify_run_binding(lock: &RunLock, witness: &DirectoryWitness) -> io::Result<()> {
+    witness.verify()?;
+    lock.verify()
 }
 
 struct DirectoryWitness {
@@ -2881,6 +2917,26 @@ mod tests {
 
         fs::remove_dir(&run_root).expect("remove replacement Run root");
         fs::rename(&moved_root, &run_root).expect("restore witnessed Run root");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn run_lock_detects_same_path_replacement_while_held() {
+        let directory = TestDirectory::new("run-lock-witness").expect("create test directory");
+        let path = directory.path().join("run.lock");
+        let moved = directory.path().join("moved.lock");
+        let lock = RunLock::acquire(&path).expect("acquire original Run lock");
+
+        fs::rename(&path, &moved).expect("move locked path");
+        File::create(&path).expect("install replacement lock file");
+        let replacement = RunLock::acquire(&path).expect("replacement path has a distinct lock");
+
+        assert!(lock.verify().is_err());
+
+        drop(replacement);
+        fs::remove_file(&path).expect("remove replacement lock");
+        fs::rename(&moved, &path).expect("restore original lock path");
+        assert!(lock.verify().is_ok());
     }
 
     #[test]
