@@ -1,7 +1,7 @@
 use std::{
     fmt::{self, Write as _},
     fs::{self, File, OpenOptions},
-    io::{self, BufWriter, Read, Write},
+    io::{self, Read, Write},
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
 };
@@ -168,7 +168,8 @@ fn publish<H: PublicationHook>(
         }
     }
 
-    let buffer_bytes = choose_buffer_bytes(limits)?;
+    let write_buffer = allocate_write_buffer(limits)?;
+    let buffer_bytes = write_buffer.capacity();
     let (stage_path, stage_file) = create_stage(parent)?;
     let mut stage = StageGuard::new(stage_path);
     let total_elements = surface
@@ -188,7 +189,7 @@ fn publish<H: PublicationHook>(
         StageEncoding {
             file: stage_file,
             path: stage.path(),
-            buffer_bytes,
+            write_buffer,
         },
         EncodingProgress {
             elements: total_elements,
@@ -349,7 +350,7 @@ fn encode_stage(
     progress: EncodingProgress,
 ) -> Result<FileFacts, TerrainError> {
     let bounded = BoundedHashWriter::new(stage.file, limits);
-    let mut writer = BufWriter::with_capacity(stage.buffer_bytes, bounded);
+    let mut writer = PreallocatedBufWriter::new(bounded, stage.write_buffer);
     write_document(
         &mut writer,
         surface,
@@ -359,10 +360,7 @@ fn encode_stage(
         progress.elements,
         progress.total,
     )?;
-    writer.flush().map_err(map_write_error)?;
-    let bounded = writer
-        .into_inner()
-        .map_err(|error| map_write_error(error.into_error()))?;
+    let bounded = writer.finish().map_err(map_write_error)?;
     let (file, hash, bytes) = bounded.finish();
     file.sync_all()
         .map_err(|error| TerrainError::io("sync LandXML stage", stage.path.display(), error))?;
@@ -373,7 +371,7 @@ fn encode_stage(
 struct StageEncoding<'a> {
     file: File,
     path: &'a Path,
-    buffer_bytes: usize,
+    write_buffer: Vec<u8>,
 }
 
 #[derive(Clone, Copy)]
@@ -724,7 +722,7 @@ fn sync_directory(path: &Path) -> io::Result<()> {
     File::open(path)?.sync_all()
 }
 
-fn choose_buffer_bytes(limits: LandXmlLimits) -> Result<usize, TerrainError> {
+fn allocate_write_buffer(limits: LandXmlLimits) -> Result<Vec<u8>, TerrainError> {
     if limits.max_write_buffer_bytes() == 0 {
         return Err(TerrainError::resource(
             "LandXML write buffer bytes",
@@ -742,13 +740,29 @@ fn choose_buffer_bytes(limits: LandXmlLimits) -> Result<usize, TerrainError> {
     let allowed = limits
         .max_write_buffer_bytes()
         .min(limits.max_working_bytes());
-    usize::try_from(allowed.min(64 * 1024)).map_err(|_| {
+    let requested = usize::try_from(allowed.min(64 * 1024)).map_err(|_| {
         TerrainError::resource(
             "LandXML write buffer bytes",
             allowed,
             u64::try_from(usize::MAX).unwrap_or(u64::MAX),
         )
-    })
+    })?;
+    let mut buffer = Vec::new();
+    buffer.try_reserve_exact(requested).map_err(|_| {
+        TerrainError::resource(
+            "LandXML write buffer allocation",
+            u64::try_from(requested).unwrap_or(u64::MAX),
+            allowed,
+        )
+    })?;
+    let actual = u64::try_from(buffer.capacity()).unwrap_or(u64::MAX);
+    require_limit(
+        "LandXML write buffer bytes",
+        actual,
+        limits.max_write_buffer_bytes(),
+    )?;
+    require_limit("LandXML working bytes", actual, limits.max_working_bytes())?;
+    Ok(buffer)
 }
 
 fn require_limit(name: &'static str, required: u64, allowed: u64) -> Result<(), TerrainError> {
@@ -884,6 +898,57 @@ fn escaped_len(value: &str) -> Result<usize, TerrainError> {
             .checked_add(added)
             .ok_or_else(|| TerrainError::numeric("escaped LandXML text length overflowed"))
     })
+}
+
+struct PreallocatedBufWriter<W> {
+    inner: W,
+    buffer: Vec<u8>,
+}
+
+impl<W: Write> PreallocatedBufWriter<W> {
+    fn new(inner: W, buffer: Vec<u8>) -> Self {
+        debug_assert!(buffer.is_empty());
+        debug_assert!(buffer.capacity() > 0);
+        Self { inner, buffer }
+    }
+
+    fn flush_buffer(&mut self) -> io::Result<()> {
+        self.inner.write_all(&self.buffer)?;
+        self.buffer.clear();
+        Ok(())
+    }
+
+    fn finish(mut self) -> io::Result<W> {
+        self.flush()?;
+        Ok(self.inner)
+    }
+}
+
+impl<W: Write> Write for PreallocatedBufWriter<W> {
+    fn write(&mut self, input: &[u8]) -> io::Result<usize> {
+        if input.is_empty() {
+            return Ok(0);
+        }
+        if self.buffer.len() == self.buffer.capacity() {
+            self.flush_buffer()?;
+        }
+        if input.len() >= self.buffer.capacity() {
+            if !self.buffer.is_empty() {
+                self.flush_buffer()?;
+            }
+            return self.inner.write(input);
+        }
+        let written = input
+            .len()
+            .min(self.buffer.capacity().saturating_sub(self.buffer.len()));
+        self.buffer.extend_from_slice(&input[..written]);
+        Ok(written)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.flush_buffer()?;
+        self.inner.flush()
+    }
 }
 
 struct BoundedHashWriter {

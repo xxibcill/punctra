@@ -95,6 +95,7 @@ fn deterministic_bytes_round_trip_through_an_independent_semantic_parser() {
     let output = TemporaryOutput::new("semantic");
     let first = output.path("first.xml");
     let second = output.path("second.xml");
+    let single_byte_buffer = output.path("single-byte-buffer.xml");
     let expected_name = "Existing & <Ground> \"A\"\nB\tC\rD";
     let options = asserted_options(expected_name);
 
@@ -103,14 +104,25 @@ fn deterministic_bytes_round_trip_through_an_independent_semantic_parser() {
         .blocking_wait()
         .expect("first LandXML export succeeds");
     let second_receipt = surface
-        .export_landxml(&second, options, LandXmlLimits::default())
+        .export_landxml(&second, options.clone(), LandXmlLimits::default())
         .blocking_wait()
         .expect("repeated LandXML export succeeds at another create-new target");
+    let single_byte_receipt = surface
+        .export_landxml(
+            &single_byte_buffer,
+            options,
+            replace_byte_limits(LandXmlLimits::default(), None, None, Some(1), None, None),
+        )
+        .blocking_wait()
+        .expect("LandXML export succeeds with a one-byte write buffer");
     let first_bytes = fs::read(&first).expect("read first published XML");
     let second_bytes = fs::read(&second).expect("read second published XML");
+    let single_byte_bytes = fs::read(&single_byte_buffer).expect("read single-byte-buffer XML");
 
     assert_eq!(first_bytes, second_bytes);
+    assert_eq!(first_bytes, single_byte_bytes);
     assert_eq!(first_receipt, second_receipt);
+    assert_eq!(first_receipt, single_byte_receipt);
     assert_eq!(
         first_receipt.content_hash(),
         ContentHash::new(*blake3::hash(&first_bytes).as_bytes())
