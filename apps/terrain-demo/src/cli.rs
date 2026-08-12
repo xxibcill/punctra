@@ -15,6 +15,9 @@ use crate::{
         RoundTripDeclaration, RoundTripFailure, RoundTripLimits, RoundTripReport,
         RoundTripTolerances, verify_landxml_round_trip,
     },
+    roundtrip_evidence::{
+        QualificationResult, RoundTripEvidenceError, RoundTripEvidenceReceipt, verify_round_trip,
+    },
     start_run,
 };
 
@@ -30,6 +33,7 @@ const USAGE: &str = "\
 terrain-demo start|resume [OPTIONS] SOURCE INDEX WORKSPACE RUN_ROOT
 terrain-demo inspect RUN_ROOT
 terrain-demo compare-landxml [OPTIONS] REFERENCE RETURNED
+terrain-demo verify-round-trip [OPTIONS] RUN_ROOT RETURNED EVIDENCE_TARGET
 
 WORKSPACE must already exist; pass its current head Revision as --baseline.
 
@@ -54,6 +58,13 @@ Required compare-landxml options:
   --settings-profile TEXT        caller-declared export settings profile
   --horizontal-tolerance-metres N
   --vertical-tolerance-metres N
+
+Required verify-round-trip options:
+  --downstream-app TEXT          caller-declared downstream application
+  --downstream-version TEXT      caller-declared downstream version
+  --downstream-setting TEXT      one opaque caller settings-profile label
+  --horizontal-tolerance-metres N
+  --vertical-tolerance-metres N
 ";
 
 enum Command {
@@ -62,6 +73,13 @@ enum Command {
     CompareLandXml {
         reference: PathBuf,
         returned: PathBuf,
+        declaration: RoundTripDeclaration,
+        tolerances: RoundTripTolerances,
+    },
+    VerifyRoundTrip {
+        run_root: PathBuf,
+        returned: PathBuf,
+        evidence_target: PathBuf,
         declaration: RoundTripDeclaration,
         tolerances: RoundTripTolerances,
     },
@@ -107,6 +125,40 @@ pub fn run_cli(arguments: impl IntoIterator<Item = OsString>) -> Result<String, 
             .map_err(|error| round_trip_failure(&error))?;
             Ok(round_trip_summary(&report))
         }
+        Command::VerifyRoundTrip {
+            run_root,
+            returned,
+            evidence_target,
+            declaration,
+            tolerances,
+        } => {
+            let receipt = verify_round_trip(
+                &run_root,
+                &returned,
+                &evidence_target,
+                declaration,
+                tolerances,
+            )
+            .map_err(round_trip_evidence_failure)?;
+            if let Some(reason) = receipt.failure_reason {
+                return Err(WorkflowFailure::new(
+                    reason.failure_code(),
+                    WorkflowStage::RoundTrip,
+                    Certainty::DurableFact,
+                    FailureContext {
+                        run: Some(receipt.run),
+                        ..FailureContext::default()
+                    },
+                    format_args!(
+                        "canonical failed evidence published with hash {} and {} bytes",
+                        Hex(&receipt.evidence_hash),
+                        receipt.evidence_bytes
+                    ),
+                    RecoveryAction::ReviewReturnedLandXml,
+                ));
+            }
+            Ok(round_trip_evidence_summary(receipt))
+        }
         Command::Start {
             resume,
             paths,
@@ -149,12 +201,15 @@ fn parse(arguments: impl IntoIterator<Item = OsString>) -> Result<Command, Workf
     if first == "compare-landxml" {
         return parse_compare_landxml(&mut arguments).map_err(round_trip_cli_failure);
     }
+    if first == "verify-round-trip" {
+        return parse_verify_round_trip(&mut arguments).map_err(round_trip_cli_failure);
+    }
     let resume = match first.to_str() {
         Some("start") => false,
         Some("resume") => true,
         _ => {
             return Err(invalid(
-                "unknown command; expected start, resume, inspect, or compare-landxml",
+                "unknown command; expected start, resume, inspect, compare-landxml, or verify-round-trip",
             ));
         }
     };
@@ -296,6 +351,103 @@ fn parse(arguments: impl IntoIterator<Item = OsString>) -> Result<Command, Workf
         resume,
         paths: WorkflowPaths::new(source, spatial_index, workspace, run_root),
         intent: Box::new(intent),
+    })
+}
+
+fn parse_verify_round_trip<I>(
+    arguments: &mut BoundedArguments<I>,
+) -> Result<Command, WorkflowFailure>
+where
+    I: Iterator<Item = OsString>,
+{
+    let mut application = None;
+    let mut version = None;
+    let mut settings_profile = None;
+    let mut horizontal_tolerance = None;
+    let mut vertical_tolerance = None;
+    let mut paths = Vec::new();
+    reserve(&mut paths, 3, "round-trip evidence path storage")?;
+    while let Some(argument) = arguments.next()? {
+        match argument.to_str() {
+            Some("--downstream-app") => set_once(
+                &mut application,
+                arguments.require_value("--downstream-app")?,
+                "--downstream-app",
+            )?,
+            Some("--downstream-version") => set_once(
+                &mut version,
+                arguments.require_value("--downstream-version")?,
+                "--downstream-version",
+            )?,
+            Some("--downstream-setting") => set_once(
+                &mut settings_profile,
+                arguments.require_value("--downstream-setting")?,
+                "--downstream-setting",
+            )?,
+            Some("--horizontal-tolerance-metres") => set_once(
+                &mut horizontal_tolerance,
+                parse_f64(
+                    &arguments.require_value("--horizontal-tolerance-metres")?,
+                    "horizontal tolerance",
+                )?,
+                "--horizontal-tolerance-metres",
+            )?,
+            Some("--vertical-tolerance-metres") => set_once(
+                &mut vertical_tolerance,
+                parse_f64(
+                    &arguments.require_value("--vertical-tolerance-metres")?,
+                    "vertical tolerance",
+                )?,
+                "--vertical-tolerance-metres",
+            )?,
+            Some(value) if value.starts_with('-') => {
+                return Err(invalid(
+                    "unknown verify-round-trip option; use --help for usage",
+                ));
+            }
+            _ => push_bounded(
+                &mut paths,
+                PathBuf::from(argument),
+                3,
+                "round-trip evidence positional path count",
+            )?,
+        }
+    }
+    let [run_root, returned, evidence_target]: [PathBuf; 3] = paths.try_into().map_err(|_| {
+        invalid("verify-round-trip requires RUN_ROOT, RETURNED, and EVIDENCE_TARGET paths")
+    })?;
+    let declaration = RoundTripDeclaration::new(
+        unicode(
+            application
+                .as_ref()
+                .ok_or_else(|| invalid("missing --downstream-app"))?,
+            "--downstream-app",
+        )?,
+        unicode(
+            version
+                .as_ref()
+                .ok_or_else(|| invalid("missing --downstream-version"))?,
+            "--downstream-version",
+        )?,
+        unicode(
+            settings_profile
+                .as_ref()
+                .ok_or_else(|| invalid("missing --downstream-setting"))?,
+            "--downstream-setting",
+        )?,
+    )
+    .map_err(|error| round_trip_failure(&error))?;
+    let tolerances = RoundTripTolerances::new(
+        horizontal_tolerance.ok_or_else(|| invalid("missing --horizontal-tolerance-metres"))?,
+        vertical_tolerance.ok_or_else(|| invalid("missing --vertical-tolerance-metres"))?,
+    )
+    .map_err(|error| round_trip_failure(&error))?;
+    Ok(Command::VerifyRoundTrip {
+        run_root,
+        returned,
+        evidence_target,
+        declaration,
+        tolerances,
     })
 }
 
@@ -602,6 +754,76 @@ fn round_trip_failure(error: &RoundTripFailure) -> WorkflowFailure {
     )
 }
 
+fn round_trip_evidence_failure(error: RoundTripEvidenceError) -> WorkflowFailure {
+    match error {
+        RoundTripEvidenceError::Comparison(error) => round_trip_failure(&error),
+        RoundTripEvidenceError::Publication(error) => {
+            use crate::publication::CanonicalFileError;
+            match error {
+                error @ (CanonicalFileError::Conflict { .. }
+                | CanonicalFileError::TargetConflict { .. }) => WorkflowFailure::new(
+                    FailureCode::OutputConflict,
+                    WorkflowStage::RoundTrip,
+                    Certainty::DurableFact,
+                    FailureContext::default(),
+                    error,
+                    RecoveryAction::RemoveOrRenameConflictingTarget,
+                ),
+                error @ CanonicalFileError::Indeterminate { .. } => WorkflowFailure::new(
+                    FailureCode::PublicationIndeterminate,
+                    WorkflowStage::RoundTrip,
+                    Certainty::Indeterminate(
+                        crate::diagnostic::PublicationPhase::RoundTripEvidenceTarget,
+                    ),
+                    FailureContext::default(),
+                    error,
+                    RecoveryAction::StopAndPreserve,
+                ),
+                error @ CanonicalFileError::Resource { .. } => WorkflowFailure::new(
+                    FailureCode::RoundTripResourceLimit,
+                    WorkflowStage::RoundTrip,
+                    Certainty::PrePublication,
+                    FailureContext::default(),
+                    error,
+                    RecoveryAction::UseSupportedRoundTripSize,
+                ),
+                error if error.is_cancelled() => WorkflowFailure::new(
+                    FailureCode::Cancelled,
+                    WorkflowStage::RoundTrip,
+                    Certainty::PrePublication,
+                    FailureContext::default(),
+                    error,
+                    RecoveryAction::ResumeSameRun,
+                ),
+                error => WorkflowFailure::new(
+                    FailureCode::RoundTripInvalidInput,
+                    WorkflowStage::RoundTrip,
+                    Certainty::PrePublication,
+                    FailureContext::default(),
+                    error,
+                    RecoveryAction::CorrectRoundTripInput,
+                ),
+            }
+        }
+        RoundTripEvidenceError::Invalid(error) => WorkflowFailure::new(
+            FailureCode::RoundTripInvalidInput,
+            WorkflowStage::RoundTrip,
+            Certainty::PrePublication,
+            FailureContext::default(),
+            error,
+            RecoveryAction::CorrectRoundTripInput,
+        ),
+        RoundTripEvidenceError::Journal(error) => WorkflowFailure::new(
+            FailureCode::RoundTripInvalidInput,
+            WorkflowStage::RoundTrip,
+            Certainty::DurableFact,
+            FailureContext::default(),
+            error,
+            RecoveryAction::StopAndPreserve,
+        ),
+    }
+}
+
 fn round_trip_cli_failure(error: WorkflowFailure) -> WorkflowFailure {
     match error.code {
         FailureCode::RoundTripInvalidInput
@@ -671,6 +893,17 @@ external application execution verified false\n",
         report.max_vertical_drift_metres(),
         report.exact_bytes(),
         report.topology_matches(),
+    )
+}
+
+fn round_trip_evidence_summary(receipt: RoundTripEvidenceReceipt) -> String {
+    debug_assert_eq!(receipt.result, QualificationResult::Passed);
+    format!(
+        "LandXML round-trip {}\nRun {}\ncanonical evidence published true\nevidence hash {}\nevidence bytes {}\nexternal application execution verified false\n",
+        receipt.result.as_str(),
+        receipt.run,
+        Hex(&receipt.evidence_hash),
+        receipt.evidence_bytes,
     )
 }
 

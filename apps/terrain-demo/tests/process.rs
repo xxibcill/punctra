@@ -89,6 +89,164 @@ fn thin_process_starts_resumes_and_inspects_one_durable_run() {
 }
 
 #[test]
+fn verify_round_trip_binds_complete_run_and_reconciles_canonical_evidence() {
+    let fixture = ProcessFixture::new("round-trip-evidence");
+    assert_success(&fixture.run("start"));
+    let journal_before = fs::read(fixture.run_root.join("run.pwf")).unwrap();
+    let landxml_before = fs::read(fixture.run_root.join("terrain.xml")).unwrap();
+    let audit_before = fs::read(fixture.run_root.join("audit.json")).unwrap();
+    let returned = fixture.directory.path().join("returned.xml");
+    let evidence = fixture.directory.path().join("round-trip.json");
+    fs::write(&returned, &landxml_before).expect("write returned LandXML fixture");
+
+    let first = fixture.verify_round_trip(&returned, &evidence);
+    assert_success(&first);
+    let first_summary = String::from_utf8_lossy(&first.stdout);
+    for expected in [
+        "LandXML round-trip passed",
+        &format!("Run {}", hex(&RUN_ID)),
+        "canonical evidence published true",
+        "evidence hash ",
+        "evidence bytes ",
+        "external application execution verified false",
+    ] {
+        assert!(
+            first_summary.contains(expected),
+            "missing {expected:?}\n{first_summary}"
+        );
+    }
+    let evidence_bytes = fs::read(&evidence).expect("read canonical evidence");
+    let document: serde_json::Value =
+        serde_json::from_slice(&evidence_bytes).expect("parse canonical evidence");
+    assert_eq!(
+        document["schema"],
+        "punctra.terrain-demo.landxml-round-trip-evidence.v1"
+    );
+    assert_eq!(document["result"], "passed");
+    assert_eq!(document["run"]["run_id"], hex(&RUN_ID));
+    assert_eq!(document["checks"]["provenance"]["status"], "passed");
+    assert_eq!(document["checks"]["topology"]["status"], "passed");
+    assert_eq!(
+        document["nonclaims"]["punctra_observed_downstream_execution"],
+        false
+    );
+
+    let second = fixture.verify_round_trip(&returned, &evidence);
+    assert_success(&second);
+    assert_eq!(first.stdout, second.stdout);
+    assert_eq!(fs::read(&evidence).unwrap(), evidence_bytes);
+    assert_eq!(
+        fs::read(fixture.run_root.join("run.pwf")).unwrap(),
+        journal_before
+    );
+    assert_eq!(
+        fs::read(fixture.run_root.join("terrain.xml")).unwrap(),
+        landxml_before
+    );
+    assert_eq!(
+        fs::read(fixture.run_root.join("audit.json")).unwrap(),
+        audit_before
+    );
+}
+
+#[test]
+fn verify_round_trip_publishes_failed_evidence_but_not_operational_failures() {
+    let fixture = ProcessFixture::new("round-trip-failed-evidence");
+    assert_success(&fixture.run("start"));
+    let original = fs::read_to_string(fixture.run_root.join("terrain.xml")).unwrap();
+    let returned = fixture.directory.path().join("returned.xml");
+    let evidence = fixture.directory.path().join("round-trip.json");
+    let changed = original.replacen(">4600000 500000 120<", ">4600000.5 500000 120<", 1);
+    assert_ne!(
+        changed, original,
+        "generated fixture coordinate must be changed"
+    );
+    fs::write(&returned, changed).unwrap();
+
+    let failed = fixture.verify_round_trip(&returned, &evidence);
+    assert!(!failed.status.success(), "semantic drift must fail");
+    let diagnostic = String::from_utf8_lossy(&failed.stderr);
+    assert!(diagnostic.contains("PRT_TOLERANCE_DRIFT"), "{diagnostic}");
+    let document: serde_json::Value =
+        serde_json::from_slice(&fs::read(&evidence).unwrap()).unwrap();
+    assert_eq!(document["result"], "failed");
+    assert_eq!(document["checks"]["tolerance"]["status"], "failed");
+    assert_eq!(document["returned_landxml"]["namespace"], LANDXML_NAMESPACE);
+    assert!(document["returned_landxml"]["point_count"].is_number());
+
+    let malformed_returned = fixture.directory.path().join("malformed-returned.xml");
+    let malformed_evidence = fixture.directory.path().join("malformed-round-trip.json");
+    fs::write(&malformed_returned, "<LandXML").unwrap();
+    let malformed = fixture.verify_round_trip(&malformed_returned, &malformed_evidence);
+    assert!(!malformed.status.success());
+    let diagnostic = String::from_utf8_lossy(&malformed.stderr);
+    assert!(diagnostic.contains("PRT_XML_INVALID"), "{diagnostic}");
+    let document: serde_json::Value =
+        serde_json::from_slice(&fs::read(&malformed_evidence).unwrap()).unwrap();
+    assert_eq!(document["checks"]["parse"]["status"], "failed");
+    assert!(document["returned_landxml"]["namespace"].is_null());
+
+    let topology_returned = fixture.directory.path().join("topology-returned.xml");
+    let topology_evidence = fixture.directory.path().join("topology-round-trip.json");
+    let topology_changed = original.replacen("<F>1 9 2</F>", "<F>1 9 10</F>", 1);
+    assert_ne!(topology_changed, original);
+    fs::write(&topology_returned, topology_changed).unwrap();
+    let topology_failed = fixture.verify_round_trip(&topology_returned, &topology_evidence);
+    assert!(!topology_failed.status.success());
+    let diagnostic = String::from_utf8_lossy(&topology_failed.stderr);
+    assert!(diagnostic.contains("PRT_TOPOLOGY_DRIFT"), "{diagnostic}");
+    let document: serde_json::Value =
+        serde_json::from_slice(&fs::read(&topology_evidence).unwrap()).unwrap();
+    assert_eq!(document["checks"]["topology"]["status"], "failed");
+    assert_eq!(document["comparison"]["added_face_count"], 1);
+    assert_eq!(document["comparison"]["removed_face_count"], 1);
+    assert_eq!(document["comparison"]["mapped_point_count"], 62);
+    assert_eq!(document["comparison"]["unmatched_point_count"], 0);
+    assert_eq!(document["comparison"]["ambiguous_point_count"], 0);
+    assert!(document["comparison"]["maximum_horizontal_delta_metres"].is_number());
+    assert!(document["comparison"]["maximum_vertical_delta_metres"].is_number());
+    assert!(document["comparison"]["added_face_hash"].is_string());
+    assert!(document["comparison"]["removed_face_hash"].is_string());
+
+    let incomplete = ProcessFixture::new("round-trip-incomplete-run");
+    assert_success(&incomplete.run("start"));
+    let journal_path = incomplete.run_root.join("run.pwf");
+    let complete = fs::read(&journal_path).unwrap();
+    let ends = journal_frame_ends(&complete).unwrap();
+    restore_journal_prefix(&journal_path, &complete, ends[6]).unwrap();
+    let returned = incomplete.directory.path().join("returned.xml");
+    fs::copy(incomplete.run_root.join("terrain.xml"), &returned).unwrap();
+    let evidence = incomplete.directory.path().join("round-trip.json");
+    let operational = incomplete.verify_round_trip(&returned, &evidence);
+    assert!(!operational.status.success());
+    assert!(
+        !evidence.exists(),
+        "non-Complete Run must publish no evidence"
+    );
+    assert_eq!(fs::read(&journal_path).unwrap(), &complete[..ends[6]]);
+}
+
+#[test]
+fn verify_round_trip_never_overwrites_conflicting_or_run_root_targets() {
+    let fixture = ProcessFixture::new("round-trip-target-conflict");
+    assert_success(&fixture.run("start"));
+    let returned = fixture.directory.path().join("returned.xml");
+    fs::copy(fixture.run_root.join("terrain.xml"), &returned).unwrap();
+    let evidence = fixture.directory.path().join("round-trip.json");
+    let conflict = b"caller-owned evidence conflict";
+    fs::write(&evidence, conflict).unwrap();
+
+    let failed = fixture.verify_round_trip(&returned, &evidence);
+    assert!(!failed.status.success());
+    assert_eq!(fs::read(&evidence).unwrap(), conflict);
+
+    let inside_run = fixture.run_root.join("round-trip.json");
+    let failed = fixture.verify_round_trip(&returned, &inside_run);
+    assert!(!failed.status.success());
+    assert!(!inside_run.exists());
+}
+
+#[test]
 fn process_report_conflict_is_bounded_structured_and_non_destructive() {
     let fixture = ProcessFixture::new("diagnostic");
     assert_success(&fixture.run("start"));
@@ -139,6 +297,7 @@ fn process_help_and_invalid_input_are_bounded_and_do_not_create_a_run() {
     assert!(help.contains("terrain-demo start|resume"));
     assert!(help.contains("terrain-demo inspect"));
     assert!(help.contains("terrain-demo compare-landxml"));
+    assert!(help.contains("terrain-demo verify-round-trip"));
     assert!(help.len() < 4 * 1024);
 
     let fixture = ProcessFixture::new("invalid");
@@ -184,7 +343,7 @@ fn round_trip_process_failures_preserve_public_mappings() {
     assert_round_trip_failure(
         &resource_failure,
         "PRT_RESOURCE_LIMIT",
-        "use inputs within the named comparison limit or preserve them for a later slice",
+        "use inputs within the named round-trip limits",
     );
 
     let semantic_failure = comparison_process(&reference, &returned, "generated-fixture");
@@ -299,6 +458,21 @@ impl ProcessFixture {
             .arg(&self.run_root)
             .output()
             .expect("run terrain-demo workflow process")
+    }
+
+    fn verify_round_trip(&self, returned: &PathBuf, evidence: &PathBuf) -> Output {
+        Command::new(env!("CARGO_BIN_EXE_terrain-demo"))
+            .arg("verify-round-trip")
+            .args(["--downstream-app", "generated-fixture"])
+            .args(["--downstream-version", "test-only"])
+            .args(["--downstream-setting", "metric-tin-v1"])
+            .args(["--horizontal-tolerance-metres", "0"])
+            .args(["--vertical-tolerance-metres", "0"])
+            .arg(&self.run_root)
+            .arg(returned)
+            .arg(evidence)
+            .output()
+            .expect("verify process LandXML round trip")
     }
 }
 

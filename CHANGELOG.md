@@ -5,24 +5,28 @@ All notable changes to Punctra are documented here. The project follows
 
 ## Unreleased - 0.8.0-alpha.1
 
-- Accepted and activated the narrow v0.8 repository interoperability-
-  qualification design. The planned private `terrain-demo` path will compare a
-  caller-returned semantic LandXML 1.2 TIN with one Complete v0.7 Run and emit
-  a separate bounded canonical Round-Trip Evidence record.
+- Implemented the narrow v0.8 repository interoperability-qualification
+  design. The private `terrain-demo` path compares a caller-returned semantic
+  LandXML 1.2 TIN with one Complete v0.7 Run and emits a separate bounded
+  canonical Round-Trip Evidence record.
 - Fixed the caller declaration, bounded fail-closed parsing, explicit metric-
   metre unit checks, unique tolerance mapping, ambiguity rejection, exact face-
   topology comparison, no-overwrite evidence publication, and external-
-  evidence boundaries before the pending Run-bound publication slice.
-- Implemented the first two private delivery slices: bounded regular-file and
+  evidence boundaries.
+- Implemented the file-comparison delivery slices: bounded regular-file and
   DOM-backed LandXML subset parsing, unique tolerance matching, normalized TIN
   topology comparison, focused portability and semantic regressions, and an
   explicitly non-Run-bound `compare-landxml` CLI/process path. Its output
   states that canonical evidence was not published and external application
   execution was not verified.
-- Bumped workspace version metadata to `0.8.0-alpha.1`. This initial work does
-  not implement Run binding or evidence publication, alter the v0.7 eight-frame
-  journal or `audit.json`, complete the product MVP, or claim actual Civil 3D,
-  Bentley, partner, paid-pilot, conversion, or labor-savings evidence.
+- Added strict read-only Complete-Run binding, streaming LandXML coverage for
+  the full v0.7 export ceiling, stable semantic reason codes, canonical pass and
+  fail evidence, exact-existing reconciliation, no-replace publication, and
+  publication-fault/process regressions through `verify-round-trip`.
+- Bumped workspace version metadata to `0.8.0-alpha.1`. This repository slice
+  does not alter the v0.7 eight-frame journal or `audit.json`, complete the
+  product MVP, or claim actual Civil 3D, Bentley, partner, paid-pilot,
+  conversion, or labor-savings evidence.
 
 ## 0.7.0-alpha.1 - 2026-08-11
 

@@ -1,9 +1,8 @@
 # Point-Cloud Foundation Architecture
 
-Status: v0.1 through the narrow v0.7 technical-readiness slice implemented;
-the v0.8 repository qualification design is Active and its bounded file-
-comparison slices are implemented; Run binding, evidence publication, and
-broader terrain, export, and product layers remain deferred
+Status: v0.1 through the narrow v0.8 repository qualification slice implemented;
+broader terrain, export, external interoperability evidence, and product layers
+remain deferred
 
 The accepted versioned designs are authoritative:
 
@@ -224,10 +223,10 @@ product UI remain outside v0.7. Licensed-data, partner, named downstream-
 application, above-500-million-Point, and human-workflow evidence also remains
 outstanding.
 
-The accepted v0.8 design adds a private `terrain-demo` semantic LandXML
-comparison module and CLI without changing the public foundation shape. Its
-Run binding and separate evidence artifact remain pending; every v0.7 journal
-and report contract remains unchanged.
+The implemented v0.8 design adds private `terrain-demo` semantic LandXML
+comparison, read-only Complete-Run binding, full-export-ceiling streaming, and a
+separate canonical evidence artifact without changing the public foundation
+shape. Every v0.7 journal and report contract remains unchanged.
 
 ## Document map
 

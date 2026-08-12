@@ -1,21 +1,22 @@
 # Punctra Roadmap
 
 Status: living guidance
-Last reviewed: 2026-08-11
+Last reviewed: 2026-08-13
 
 This roadmap communicates direction, not a delivery promise. It has no fixed
 dates. Candidate releases may be split, merged, reordered, renamed, or skipped
 as technical and customer evidence changes. Milestone outcomes and dependency
 order matter more than version numbers.
 
-Only an **Active** release has committed scope. Punctra v0.1 through v0.7 are
-complete repository technical slices. v0.8 is Active only for the narrow
+Only an **Active** release has committed scope. Punctra v0.1 through v0.8 are
+complete repository technical slices. v0.8 is complete only for the narrow
 [repository interoperability qualification
 design](docs/design/design-partner-mvp-v0.8.md): a private post-Run semantic
-LandXML 1.2 comparison and separate evidence record. The bounded file-
-comparison slices are implemented; Run binding, evidence publication, and all
-external product evidence remain outstanding. Broader terrain, export, general
-editing, downstream automation, and application UI remain uncommitted.
+LandXML 1.2 comparison and separate evidence record. Run binding, bounded
+streaming comparison, canonical pass/fail evidence publication, and local
+repository verification are implemented. All external product evidence remains
+outstanding. Broader terrain, export, general editing, downstream automation,
+and application UI remain uncommitted.
 
 ## Working direction
 
@@ -63,8 +64,8 @@ Roadmap status labels are:
 
 ## Scope and evidence checkpoint
 
-Status: **v0.8 repository interoperability-qualification slice Active; file
-comparison implemented, Run-bound evidence and product evidence outstanding**
+Status: **v0.8 repository interoperability-qualification slice Complete;
+product evidence outstanding**
 
 The [implemented v0.5 design](docs/design/durable-document-core-v0.5.md) places
 exact classification selection, temporary Point Sets, sparse Revisions, and
@@ -84,8 +85,8 @@ Footprint, and exact LandXML/report targets reconcile without overwrite. Its
 generated tests and benchmark establish only those technical guarantees; they
 do not satisfy any external evidence item below.
 
-The accepted v0.8 slice does not broaden that workflow. It adds one private,
-post-Run verifier that will compare the exact v0.7 metric-metre LandXML TIN with
+The implemented v0.8 slice does not broaden that workflow. It adds one private,
+post-Run verifier that compares the exact v0.7 metric-metre LandXML TIN with
 a caller-returned LandXML 1.2 file under declared tolerances and publish a
 separate canonical evidence record. Caller-declared application/version/
 settings labels are not proof that the application ran. The v0.7 journal and
@@ -110,9 +111,9 @@ module. The detailed discovery signals and pivot criteria live in the
 
 ## Release sequence
 
-There is one Active pre-v1 repository slice and one provisional theme after the
-completed v0.7. This is a working count, not a requirement to publish exactly
-two more releases.
+There is no Active repository slice after the completed v0.8 and one
+provisional theme follows it. This is a working count, not a requirement to
+publish exactly one more release.
 
 ### v0.1 — Renderer foundation
 
@@ -381,12 +382,12 @@ tests are intentionally not relabeled as those facts.
 
 ### v0.8 — Design-partner MVP
 
-Status: **Active — narrow repository qualification only; product MVP remains
-outstanding**
+Status: **Complete — repository interoperability-qualification slice only;
+product MVP remains outstanding**
 
-Accepted repository outcome: implement the exact bounded post-Run verifier and
+Implemented repository outcome: the exact bounded post-Run verifier and
 evidence contract in the [v0.8 design](docs/design/design-partner-mvp-v0.8.md).
-The private `terrain-demo` path will:
+The private `terrain-demo` path:
 
 - require a Complete, unchanged v0.7 Run and leave its eight-frame journal,
   `terrain.xml`, and `audit.json` untouched;
@@ -399,7 +400,7 @@ The private `terrain-demo` path will:
 - create or exactly reconcile a bounded canonical Round-Trip Evidence record
   outside the Run root without overwriting different data.
 
-This Active scope does not automate or claim a run through Civil 3D, Bentley
+This implemented scope does not automate or claim a run through Civil 3D, Bentley
 software, or another named application. Repository-generated XML variants can
 complete technical tests only.
 
@@ -463,7 +464,7 @@ a reason to publish v1.
 |---|---|---|
 | Renderer and planning foundations | v0.1–v0.2 | Reusable bounded display engine and adaptive View planner. |
 | Benchmark/demo | v0.3–v0.6 | Headless technical path from verified LAS/LAZ to one narrow terrain deliverable; external workflow evidence remains separate. |
-| Design-partner MVP | v0.7–v0.8 | Active repository interoperability qualification; product completion still requires three firms, three paid pilots, and two conversion-or-measured-savings firms. |
+| Design-partner MVP | v0.7–v0.8 | Complete repository interoperability qualification; product completion still requires three firms, three paid pilots, and two conversion-or-measured-savings firms. |
 | Trustworthy v1 | v0.9–v1.0 | Explicitly supported, regression-tested, maintainable compatibility surface. |
 
 ## Deferred until evidence changes

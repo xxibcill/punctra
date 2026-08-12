@@ -27,8 +27,8 @@ use crate::{
     },
 };
 
-const REPORT_SCHEMA: &str = "punctra.terrain-workflow.audit.v1";
-const REPORT_HASH_DOMAIN: &[u8] = b"punctra-terrain-workflow-report-bytes-v1";
+pub(crate) const REPORT_SCHEMA: &str = "punctra.terrain-workflow.audit.v1";
+pub(crate) const REPORT_HASH_DOMAIN: &[u8] = b"punctra-terrain-workflow-report-bytes-v1";
 const HASH_BUFFER_BYTES: usize = 8 * 1024;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

@@ -24,6 +24,15 @@ pub(crate) enum FailureCode {
     RoundTripInvalidInput,
     RoundTripResourceLimit,
     RoundTripSemanticMismatch,
+    RoundTripXmlInvalid,
+    RoundTripSubsetUnsupported,
+    RoundTripCoordinateReferenceUnsupported,
+    RoundTripUnitDrift,
+    RoundTripPointCountDrift,
+    RoundTripVertexUnmatched,
+    RoundTripVertexAmbiguous,
+    RoundTripToleranceDrift,
+    RoundTripTopologyDrift,
     PublicationIndeterminate,
     Io,
     Internal,
@@ -46,6 +55,15 @@ impl FailureCode {
             Self::RoundTripInvalidInput => "PRT_INVALID_INPUT",
             Self::RoundTripResourceLimit => "PRT_RESOURCE_LIMIT",
             Self::RoundTripSemanticMismatch => "PRT_SEMANTIC_MISMATCH",
+            Self::RoundTripXmlInvalid => "PRT_XML_INVALID",
+            Self::RoundTripSubsetUnsupported => "PRT_SUBSET_UNSUPPORTED",
+            Self::RoundTripCoordinateReferenceUnsupported => "PRT_COORDINATE_REFERENCE_UNSUPPORTED",
+            Self::RoundTripUnitDrift => "PRT_UNIT_DRIFT",
+            Self::RoundTripPointCountDrift => "PRT_POINT_COUNT_DRIFT",
+            Self::RoundTripVertexUnmatched => "PRT_VERTEX_UNMATCHED",
+            Self::RoundTripVertexAmbiguous => "PRT_VERTEX_AMBIGUOUS",
+            Self::RoundTripToleranceDrift => "PRT_TOLERANCE_DRIFT",
+            Self::RoundTripTopologyDrift => "PRT_TOPOLOGY_DRIFT",
             Self::PublicationIndeterminate => "PWF_PUBLICATION_INDETERMINATE",
             Self::Io => "PWF_IO",
             Self::Internal => "PWF_INTERNAL",
@@ -109,6 +127,7 @@ pub(crate) enum PublicationPhase {
     JournalCheckpoint,
     LandXmlTarget,
     ReportTarget,
+    RoundTripEvidenceTarget,
     CompleteCheckpoint,
 }
 
@@ -122,6 +141,7 @@ impl PublicationPhase {
             Self::JournalCheckpoint => "journal-checkpoint",
             Self::LandXmlTarget => "landxml-target",
             Self::ReportTarget => "report-target",
+            Self::RoundTripEvidenceTarget => "round-trip-evidence-target",
             Self::CompleteCheckpoint => "complete-checkpoint",
         }
     }
@@ -189,9 +209,7 @@ impl RecoveryAction {
             Self::CorrectRoundTripInput => {
                 "correct the declaration or LandXML input, then retry the comparison"
             }
-            Self::UseSupportedRoundTripSize => {
-                "use inputs within the named comparison limit or preserve them for a later slice"
-            }
+            Self::UseSupportedRoundTripSize => "use inputs within the named round-trip limits",
             Self::ReviewReturnedLandXml => {
                 "review the downstream export settings or reject the returned deliverable"
             }

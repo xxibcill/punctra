@@ -1,7 +1,7 @@
 # Repository Interoperability Qualification Design (v0.8)
 
-Status: **Accepted and Active — bounded file-comparison slices implemented;
-Run-bound evidence publication and external product evidence remain outstanding**
+Status: **Implemented — repository interoperability-qualification slice
+Complete; external product evidence remains outstanding**
 
 This design is authoritative for the narrow Punctra v0.8 repository slice. It
 starts from the completed `0.7.0-alpha.1` technical-readiness work and adds one
@@ -9,7 +9,7 @@ post-Run interoperability qualification path. It does not complete the
 design-partner MVP, claim that a named downstream application was exercised,
 or turn `terrain-demo` into a supported product.
 
-The active repository outcome is deliberately smaller than the product
+The implemented repository outcome is deliberately smaller than the product
 milestone: privately parse a caller-returned LandXML 1.2 TIN, compare it with
 the exact LandXML produced by one Complete v0.7 Workflow Run, and publish a
 bounded canonical Round-Trip Evidence record. The caller, not Punctra,
@@ -33,9 +33,9 @@ round coordinates, drop a face, flip a diagonal, or merge nearby vertices.
 v0.8 therefore qualifies one semantic boundary without adding general
 LandXML import, downstream automation, or a public interoperability framework.
 
-## Accepted outcome
+## Implemented outcome
 
-One private `terrain-demo` command will:
+One private `terrain-demo` command:
 
 1. read one Complete v0.7 Run without repairing or mutating it;
 2. revalidate `run.pwf`, `terrain.xml`, and `audit.json` against the existing
@@ -66,13 +66,13 @@ It emits an explicitly non-Run-bound comparison summary. The summary says
 application execution verified false`. It is technical comparison output, not
 Round-Trip Evidence.
 
-The planned Run-bound CLI shape for the next delivery slice is:
+The implemented Run-bound CLI shape is:
 
 ```text
 terrain-demo verify-round-trip \
   --downstream-app APPLICATION \
   --downstream-version VERSION \
-  --downstream-setting KEY=VALUE ... \
+  --downstream-setting PROFILE \
   --horizontal-tolerance-metres H \
   --vertical-tolerance-metres V \
   RUN_ROOT RETURNED_LANDXML EVIDENCE_TARGET
@@ -131,26 +131,28 @@ that a firm accepted the deliverable.
 
 Qualification first captures regular-file and directory witnesses for the Run
 root, v0.7 files, returned file, and evidence parent. Symlinks and non-regular
-inputs are rejected. Each input is opened once, read under its captured
-identity and length, rechecked after the read, and then parsed from the captured
-immutable bytes. Replacement,
-truncation, or growth during the operation is a non-evaluated operational
-failure rather than a semantic pass or fail.
+inputs are rejected. Each input is opened once, read under its captured identity
+and length, and rechecked after the read. `compare-landxml` parses bounded
+captured bytes; `verify-round-trip` hashes and parses through a bounded streaming
+reader while holding the opened file. Replacement, truncation, or growth during
+the operation is a non-evaluated operational failure rather than a semantic
+pass or fail.
 
 The implemented witness uses device/inode identity on Unix and volume-serial/
 file-index identity on Windows. It fails closed on a filesystem or platform
 that does not expose one of those stable identities.
 
-The implemented `compare-landxml` slice applies this boundary only to its two
-explicit XML inputs. It neither opens a Run root nor claims the Complete
-checkpoint binding described below.
+The explicitly non-evidence `compare-landxml` command applies this boundary
+only to its two XML inputs. `verify-round-trip` additionally witnesses the Run
+root, opens and locks its journal read-only, validates the exact eight-frame
+Complete chain, and rechecks the Run before and after evidence publication.
 
 The Complete checkpoint's LandXML and report byte hashes bind the original
-files. The verifier also checks the Run Identity and request hash recorded by
-the journal and report. The returned file is bound by its BLAKE3 content hash
-and exact byte length. Filesystem paths are operational inputs, not semantic
-identity, and are not treated as evidence that a downstream application wrote
-the file.
+files. The verifier also checks the Run Identity, request hash, LandXML hash and
+length recorded by the journal and report, plus the unchanged v0.7 downstream
+nonclaim. The returned file is bound by its BLAKE3 content hash and exact byte
+length. Filesystem paths are operational inputs, not semantic identity, and are
+not treated as evidence that a downstream application wrote the file.
 
 ## Narrow LandXML semantic model
 
@@ -191,12 +193,15 @@ accept reference drift.
 
 ## Bounded fail-closed parsing
 
-The implemented comparison core is independent of the v0.6 encoder. It reads
-each regular, non-symlink input under a byte ceiling, parses it with
-`roxmltree` under a node ceiling, then builds only the narrow semantic TIN
-model. `RoundTripLimits` applies the same per-input ceilings to the reference
-and returned files and one cumulative vertex-comparison ceiling. The initial
-implemented defaults are:
+The comparison cores are independent of the v0.6 encoder. `compare-landxml`
+uses a bounded `roxmltree` DOM for its smaller diagnostic path;
+`verify-round-trip` uses `quick-xml` streaming so it can cover the full v0.7
+export ceiling without retaining XML source bytes or a DOM. Both build only the
+narrow semantic TIN model. `RoundTripLimits` applies the same per-input ceilings
+to the reference and returned files and one cumulative vertex-comparison
+ceiling.
+
+The `compare-landxml` defaults are:
 
 | Limit | Default |
 |---|---:|
@@ -210,12 +215,24 @@ implemented defaults are:
 | version label | 128 B |
 | settings-profile label | 1 KiB |
 
+The Run-bound streaming defaults are:
+
+| Limit | Default |
+|---|---:|
+| bytes per XML input | 4 GiB |
+| XML nodes per input | 60,000,000 |
+| XML text/attribute bytes per input | 4 GiB |
+| Points per semantic surface | 10,000,000 |
+| faces per semantic surface | 20,000,000 |
+| candidate vertex comparisons | 160,000,000 |
+| application label | 128 B |
+| version label | 128 B |
+| settings-profile label | 1 KiB |
+
 The file, XML-node, XML-text, Point, face, and comparison ceilings are hard
-semantic gates. The DOM and parser allocations are proportional to bounded
-input but are not independently measured or fallibly accounted; v0.8 does not
-label these ceilings as a measured peak-heap guarantee. The first slice also
-does not accept the full 4-GiB v0.7 export ceiling. A later streaming reader is
-required before Run-bound qualification can cover that entire range.
+semantic gates. Parser and semantic-model allocations are proportional to
+bounded input but are not independently measured or fallibly accounted; v0.8
+does not label these ceilings as a measured peak-heap guarantee.
 
 An unsupported construct, malformed XML, limit excess, invalid number, unknown
 semantic child, or incomplete document never yields a partial semantic model.
@@ -261,7 +278,7 @@ correspondence.
 
 After the vertex bijection is complete, each returned face is mapped to the
 original Point identities and reduced to its three sorted vertex identities.
-Triangle winding and order are ignored. The complete sorted sets must be equal.
+Triangle winding and order are ignored. The complete sorted multisets must be equal.
 A missing face, added face, duplicate face, changed diagonal, split/merged
 triangle, or reference to an unmatched Point is `topology_drift` even when all
 coordinates lie inside tolerance.
@@ -312,14 +329,14 @@ and is never overwritten. The CLI prints the evidence BLAKE3 hash and byte
 length only after publication is known complete; a post-link uncertainty is
 reported as indeterminate, not success.
 
-The implemented comparison command currently reports these stable diagnostic
+The explicitly non-evidence comparison command retains these broad diagnostic
 classes:
 
 - `PRT_INVALID_INPUT`;
 - `PRT_RESOURCE_LIMIT`; and
 - `PRT_SEMANTIC_MISMATCH`.
 
-Slice 3 will refine semantic evidence with stable reason codes beginning with:
+The Run-bound verifier publishes and reports these stable semantic reason codes:
 
 - `PRT_XML_INVALID`;
 - `PRT_SUBSET_UNSUPPORTED`;
@@ -369,7 +386,7 @@ test evidence only.
 
 ## Verification strategy
 
-Repository acceptance will require local tests for:
+Repository acceptance includes local tests for:
 
 - a byte-identical return and presentation-only rewrites of whitespace, order,
   identifiers, metadata, and triangle winding;
@@ -390,8 +407,8 @@ Repository acceptance will require local tests for:
   Civil 3D, Bentley software, or any other named application.
 
 All formatting, linting, tests, documentation checks, and applicable GPU
-acceptance remain local as documented in `CONTRIBUTING.md`. Activating this
-design does not claim those implementation gates have passed.
+acceptance remain local as documented in `CONTRIBUTING.md`. The release-gate
+results are local repository evidence only.
 
 ## Explicit exclusions
 
@@ -418,16 +435,16 @@ v0.8 does not add:
 
 ## Delivery slices
 
-Implementation is divided into four independently reviewable slices:
+Implementation was divided into four independently reviewable slices:
 
 1. **Implemented:** private bounded DOM-backed LandXML reader, semantic model,
    limits, regular-file witnesses, and malformed/resource test matrix;
 2. **Implemented:** metric/tolerance/ambiguity/topology comparison with input
    hashes, caller declaration, generated semantic-drift fixtures, and the
    explicitly non-evidence `compare-landxml` CLI;
-3. **Pending:** strict Complete-Run binding, canonical pass/fail evidence, and
-   no-replace publication/reconciliation faults; and
-4. **Pending:** end-to-end generated round-trip matrix, streaming coverage for
+3. **Implemented:** strict Complete-Run binding, canonical pass/fail evidence,
+   and no-replace publication/reconciliation faults; and
+4. **Implemented:** end-to-end generated round-trip matrix, streaming coverage for
    the full v0.7 export ceiling, documentation, independent review, and the
    complete local release gates.
 

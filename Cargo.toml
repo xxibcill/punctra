@@ -47,8 +47,10 @@ point-view = { path = "crates/point-view" }
 render-protocol = { path = "crates/render-protocol" }
 render-wgpu = { path = "crates/render-wgpu" }
 robust = "=1.2.0"
+quick-xml = "=0.41.0"
 roxmltree = "=0.21.1"
 serde = { version = "1.0.229", features = ["derive", "rc"] }
+serde_json = "=1.0.151"
 source-las = { path = "crates/source-las" }
 source-memory = { path = "crates/source-memory" }
 tempfile = "=3.24.0"

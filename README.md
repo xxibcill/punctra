@@ -60,15 +60,15 @@ with one safe recovery action. It does not add Breaklines or establish the
 external design-partner, production-data, downstream-application, paid-use,
 or human-workflow evidence required by the product milestone.
 
-Version 0.8.0-alpha.1 starts the accepted, Active
+Version 0.8.0-alpha.1 completes the repository slice in the implemented
 [repository interoperability qualification
-design](docs/design/design-partner-mvp-v0.8.md). Its narrow planned repository
-slice is a private `terrain-demo` semantic LandXML 1.2 round-trip verifier and
-separate canonical evidence output. The bounded file-to-file comparison core
-and explicitly non-evidence `compare-landxml` CLI are now implemented. Durable
-Run binding and canonical evidence publication remain pending; the v0.7
-journal and `audit.json` are unchanged, and no actual Civil 3D, Bentley,
-partner, paid-pilot, conversion, or labor-savings test is claimed.
+design](docs/design/design-partner-mvp-v0.8.md). The narrow implementation adds
+a private `terrain-demo` semantic LandXML 1.2 comparator, read-only Complete-Run
+binding, a streaming verifier covering the v0.7 export ceiling, and separate
+canonical pass/fail evidence published without replacement. The v0.7 journal
+and `audit.json` remain unchanged. No actual Civil 3D, Bentley, partner,
+paid-pilot, conversion, or labor-savings test is claimed, so the product MVP
+gates remain outstanding.
 
 Later direction and the exact external product gates are described in the
 [living roadmap](ROADMAP.md). Its candidate themes do not expand accepted
@@ -239,7 +239,7 @@ caller-requested Revert restores the baseline after the correction, and Source
 bytes remain unchanged. A v0.7 Workflow does not automatically Revert a
 committed classification Revision when a later phase fails.
 
-The first v0.8 slice can compare that exact export with a returned LandXML while
+The v0.8 comparison path can compare that exact export with a returned LandXML while
 ignoring Point/face order, Point renumbering, and triangle winding. The two
 operational paths may resolve to the same regular file or hard-linked content;
 semantic identity comes from the captured bytes rather than path identity.
@@ -260,6 +260,26 @@ This command rejects unit drift, out-of-tolerance coordinate drift, ambiguous
 vertex matches, and topology drift. Its summary is deliberately marked as not
 Run-bound and not canonical evidence; the application/version/settings labels
 are caller declarations, not proof that the named application ran.
+
+Use the completed Run-bound path to revalidate a Complete v0.7 Run and publish
+canonical pass or fail evidence outside its Run root:
+
+```bash
+cargo run --release -p terrain-demo -- verify-round-trip \
+  --downstream-app "CALLER-DECLARED APP" \
+  --downstream-version "CALLER-DECLARED VERSION" \
+  --downstream-setting "CALLER-DECLARED SETTINGS" \
+  --horizontal-tolerance-metres 0.001 \
+  --vertical-tolerance-metres 0.001 \
+  run-root returned.xml evidence/round-trip.json
+```
+
+The verifier rejects torn or non-Complete journals, revalidates the existing
+journal, `terrain.xml`, and `audit.json`, streams both XML inputs under the full
+v0.7 export ceilings, and never repairs or writes inside the Run root. Exact
+evidence bytes reconcile; a different existing target is never overwritten.
+Caller declarations and passing evidence still do not prove that the named
+application ran or satisfy any external product gate.
 
 The fixed Run-root children are `run.pwf`, `run.lock`, `terrain.xml`, and
 `audit.json`. Existing exact XML/report bytes reconcile; different caller-owned
@@ -416,6 +436,19 @@ here. These are generated local technical observations. Worker peak heap was
 not measured, and partner, production, downstream round-trip, and human-time
 acceptance remain unmeasured.
 
+## v0.8 repository verification evidence
+
+`terrain-demo` now has 83 package tests: 61 unit/private tests, 15 public
+workflow-facade tests, and seven process tests. The v0.8 additions cover the
+bounded DOM and full-export-ceiling streaming readers, UTF-8 and LandXML subset
+rejection, unique tolerance mapping, topology-difference facts, Complete-Run
+and immutable-input witnesses, canonical pass/fail evidence, exact-existing
+reconciliation, conflicting targets, cancellation, and publication-boundary
+faults. The full local formatting, strict lint, workspace test, rustdoc, stable
+fuzz, example, benchmark, and forced-GPU sequence in `CONTRIBUTING.md` completed
+on the reference development machine. These generated repository checks do not
+satisfy any external product gate.
+
 ## Development
 
 Install the pinned Rust toolchain, then run the authoritative local verification
@@ -426,6 +459,9 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace --all-features
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps
+cargo fmt --manifest-path fuzz/Cargo.toml --all --check
+cargo check --manifest-path fuzz/Cargo.toml --bin index_persistence
+cargo test --manifest-path fuzz/Cargo.toml --lib
 cargo bench -p point-view --bench planner
 cargo bench -p source-memory --bench read
 cargo bench -p source-las --bench read
@@ -433,10 +469,11 @@ cargo bench -p point-index --bench index
 cargo bench -p point-workspace --bench document
 cargo bench -p point-terrain --bench terrain
 cargo bench -p terrain-demo --bench journal
+cargo run -p source-memory --example memory_source
 cargo run -p point-index --example direct_use
-cargo run --release -p point-workspace --example classify -- \
-  survey.laz survey.laz.pidx survey.pcw 6
+cargo test -p point-workspace --all-features
 cargo run -p point-terrain --example derive
+cargo test -p point-terrain --all-features
 cargo test -p terrain-demo --test workflow
 cargo test -p terrain-demo --test process
 cargo test -p renderer-demo --test headless_smoke

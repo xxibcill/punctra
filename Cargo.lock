@@ -2230,6 +2230,7 @@ dependencies = [
  "point-source",
  "point-terrain",
  "point-workspace",
+ "quick-xml",
  "robust",
  "roxmltree",
  "serde_json",

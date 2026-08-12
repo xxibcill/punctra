@@ -18,8 +18,10 @@ point-index.workspace = true
 point-source.workspace = true
 point-terrain.workspace = true
 point-workspace.workspace = true
+quick-xml.workspace = true
 roxmltree.workspace = true
 robust.workspace = true
+serde_json.workspace = true
 source-las.workspace = true
 thiserror.workspace = true
 
@@ -33,7 +35,6 @@ windows-sys = { workspace = true, features = ["Win32_Storage_FileSystem"] }
 [dev-dependencies]
 criterion.workspace = true
 las.workspace = true
-serde_json = "1.0.151"
 
 [[bench]]
 name = "journal"

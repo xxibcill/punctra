@@ -10,6 +10,8 @@ mod journal;
 mod publication;
 mod report;
 mod roundtrip;
+mod roundtrip_evidence;
+mod roundtrip_stream;
 mod workflow;
 
 pub use cli::run_cli;
