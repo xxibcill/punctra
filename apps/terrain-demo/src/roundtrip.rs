@@ -1282,7 +1282,7 @@ fn match_points(
     let mut returned_to_reference = vec![usize::MAX; returned.len()];
     let mut facts = ComparisonFacts::default();
     for (reference_index, reference_point) in reference.iter().enumerate() {
-        let returned_index = unique_point_match(
+        let (returned_index, drift) = unique_point_match(
             reference_point,
             returned,
             &returned_by_easting,
@@ -1296,11 +1296,7 @@ fn match_points(
             ));
         }
         returned_to_reference[returned_index] = reference_index;
-        update_drift_facts(
-            &mut facts,
-            reference_point.position,
-            returned[returned_index].position,
-        );
+        update_drift_facts(&mut facts, drift);
     }
     Ok((returned_to_reference, facts))
 }
@@ -1364,7 +1360,7 @@ fn unique_point_match(
     tolerances: RoundTripTolerances,
     max_comparisons: u64,
     facts: &mut ComparisonFacts,
-) -> Result<usize, RoundTripFailure> {
+) -> Result<(usize, CoordinateDrift), RoundTripFailure> {
     let reference_easting = reference.position[0];
     let horizontal_tolerance = tolerances.horizontal_metres();
     let start = returned_by_easting.partition_point(|index| {
@@ -1389,12 +1385,9 @@ fn unique_point_match(
                 "vertex comparisons exceed the {max_comparisons} comparison limit"
             )));
         }
-        if points_within_tolerance(
-            reference.position,
-            returned[*returned_index].position,
-            tolerances,
-        ) && matched.replace(*returned_index).is_some()
-        {
+        let drift =
+            CoordinateDrift::between(reference.position, returned[*returned_index].position);
+        if drift.is_within(tolerances) && matched.replace((*returned_index, drift)).is_some() {
             return Err(RoundTripFailure::mismatch(
                 "vertex matching is ambiguous under the declared tolerances",
             ));
@@ -1415,28 +1408,38 @@ fn easting_is_above_window(candidate: f64, reference: f64, tolerance: f64) -> bo
     candidate > reference && candidate - reference > tolerance
 }
 
-fn points_within_tolerance(
-    reference: [f64; 3],
-    returned: [f64; 3],
-    tolerances: RoundTripTolerances,
-) -> bool {
-    let easting = (returned[0] - reference[0]).abs();
-    let northing = (returned[1] - reference[1]).abs();
-    let vertical = (returned[2] - reference[2]).abs();
-    easting.hypot(northing) <= tolerances.horizontal_metres()
-        && vertical <= tolerances.vertical_metres()
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct CoordinateDrift {
+    easting: f64,
+    northing: f64,
+    horizontal: f64,
+    vertical: f64,
 }
 
-fn update_drift_facts(facts: &mut ComparisonFacts, reference: [f64; 3], returned: [f64; 3]) {
-    let easting = (returned[0] - reference[0]).abs();
-    let northing = (returned[1] - reference[1]).abs();
-    let vertical = (returned[2] - reference[2]).abs();
-    facts.max_easting_drift_metres = facts.max_easting_drift_metres.max(easting);
-    facts.max_northing_drift_metres = facts.max_northing_drift_metres.max(northing);
-    facts.max_horizontal_drift_metres = facts
-        .max_horizontal_drift_metres
-        .max(easting.hypot(northing));
-    facts.max_vertical_drift_metres = facts.max_vertical_drift_metres.max(vertical);
+impl CoordinateDrift {
+    fn between(reference: [f64; 3], returned: [f64; 3]) -> Self {
+        let easting = (returned[0] - reference[0]).abs();
+        let northing = (returned[1] - reference[1]).abs();
+        let vertical = (returned[2] - reference[2]).abs();
+        Self {
+            easting,
+            northing,
+            horizontal: easting.hypot(northing),
+            vertical,
+        }
+    }
+
+    fn is_within(self, tolerances: RoundTripTolerances) -> bool {
+        self.horizontal <= tolerances.horizontal_metres()
+            && self.vertical <= tolerances.vertical_metres()
+    }
+}
+
+fn update_drift_facts(facts: &mut ComparisonFacts, drift: CoordinateDrift) {
+    facts.max_easting_drift_metres = facts.max_easting_drift_metres.max(drift.easting);
+    facts.max_northing_drift_metres = facts.max_northing_drift_metres.max(drift.northing);
+    facts.max_horizontal_drift_metres = facts.max_horizontal_drift_metres.max(drift.horizontal);
+    facts.max_vertical_drift_metres = facts.max_vertical_drift_metres.max(drift.vertical);
 }
 
 fn compare_topology(
