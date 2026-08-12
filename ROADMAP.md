@@ -8,15 +8,17 @@ dates. Candidate releases may be split, merged, reordered, renamed, or skipped
 as technical and customer evidence changes. Milestone outcomes and dependency
 order matter more than version numbers.
 
-Only an **Active** release has committed scope. Punctra v0.1 through v0.8 are
-complete repository technical slices. v0.8 is complete only for the narrow
+There is currently no **Active** repository release. Punctra v0.1 through v0.9
+are Complete repository technical slices. v0.8 is Complete only for the narrow
 [repository interoperability qualification
 design](docs/design/design-partner-mvp-v0.8.md): a private post-Run semantic
-LandXML 1.2 comparison and separate evidence record. Run binding, bounded
+LandXML 1.2 comparison and separate evidence record. Its Run binding, bounded
 streaming comparison, canonical pass/fail evidence publication, and local
-repository verification are implemented. All external product evidence remains
-outstanding. Broader terrain, export, general editing, downstream automation,
-and application UI remain uncommitted.
+verification were completed under v0.9. v0.9 is Complete and repository-
+verified only for the existing narrow [Trust and v1 Candidate
+design](docs/design/trust-v1-candidate-v0.9.md); it does not publish v1 or
+satisfy external product evidence. Broader terrain, export, general editing,
+downstream automation, and application UI remain uncommitted.
 
 ## Working direction
 
@@ -64,8 +66,9 @@ Roadmap status labels are:
 
 ## Scope and evidence checkpoint
 
-Status: **v0.8 repository interoperability-qualification slice Complete;
-product evidence outstanding**
+Status: **v0.8 repository interoperability-qualification slice Complete; v0.9
+Trust and v1 Candidate repository slice Complete and repository-verified; all
+external product evidence outstanding**
 
 The [implemented v0.5 design](docs/design/durable-document-core-v0.5.md) places
 exact classification selection, temporary Point Sets, sparse Revisions, and
@@ -111,9 +114,9 @@ module. The detailed discovery signals and pivot criteria live in the
 
 ## Release sequence
 
-There is no Active repository slice after the completed v0.8 and one
-provisional theme follows it. This is a working count, not a requirement to
-publish exactly one more release.
+There is no Active repository slice after the completed v0.9. v1.0 remains a
+provisional Candidate. This is a working sequence, not a requirement to
+publish the next numbered release.
 
 ### v0.1 — Renderer foundation
 
@@ -423,31 +426,46 @@ correctness tests.
 
 ### v0.9 — Trust and v1 candidate
 
-Status: **Candidate**
+Status: **Complete — repository-verified trust/v1-candidate slice only;
+external product evidence outstanding**
 
-Candidate outcome: qualify the proven scope for a v1 compatibility and support
-promise without adding another major feature family.
+Implemented outcome: qualify the proven repository scope for a v1
+compatibility and support promise without adding another major feature family,
+as fixed by the
+[v0.9 design](docs/design/trust-v1-candidate-v0.9.md).
 
-Likely scope:
+Delivered scope:
 
-- a tested, published CRS, vertical-reference, unit, and precision support
-  matrix;
-- robust terrain and export edge cases from the production regression corpus;
-- persisted-schema migration and recovery fixtures;
-- disk exhaustion, corrupt input, cancellation, device loss, and GPU-unavailable
-  behavior;
-- performance across declared commodity workstation classes;
-- public API review, documentation, examples, upgrade notes, and support
-  playbooks; and
-- local review packages or audit metadata where partners require them.
+- closed the inherited v0.8 Complete-Run binding and canonical-evidence gates;
+- published a tested CRS, vertical-reference, unit, precision, format,
+  platform, and device support matrix for the existing workflow;
+- retained the Spatial Index v1 goldens and completed owner-local persisted-v1
+  compatibility and recovery fixtures without inventing a second schema;
+- covered disk exhaustion, corrupt input, cancellation, device loss, and GPU-
+  unavailable behavior where the supported module or host seam owns it;
+- reproduced performance and resource ceilings on the declared local
+  workstation; and
+- reviewed exercised public interfaces, documentation, examples, upgrade
+  notes, and support playbooks.
 
-Evidence of readiness:
+Index filesystem failures remain bounded `PWF_IO` diagnostics with
+conservative publication certainty and reconciliation through resume. Initial
+work publication writes and syncs the complete header through an owned
+descriptor, publishes no-replace, and verifies the bound file before append or
+resume. Valid owned incomplete work is retained; cleanup does not delete a
+racing replacement. This closes the inherited partial-header gate.
 
-- no unresolved correctness or data-loss failure exists in the supported
-  workflow;
-- every supported persisted version has upgrade and recovery coverage;
+Repository evidence of readiness:
+
+- no known release-blocking correctness or data-loss failure remains in the
+  supported workflow;
+- every supported persisted version has frozen reopen and recovery coverage,
+  plus upgrade coverage when a second version actually exists;
 - resource ceilings and performance claims are reproducible locally; and
 - unsupported formats, transformations, and device capabilities fail clearly.
+
+Acceptance and local command evidence are recorded in the
+[v0.9.0 release record](docs/releases/v0.9.0.md).
 
 ### v1.0 — Trustworthy supported scope
 
@@ -455,8 +473,8 @@ Status: **Candidate**
 
 Release v1 when the narrow supported workflow repeatedly produces accepted
 deliverables, recovery guarantees are proven, resource use is bounded, and the
-public compatibility promise can be maintained. Reaching v0.9 is not by itself
-a reason to publish v1.
+public compatibility promise can be maintained. Completing v0.9 is not by
+itself a reason to publish v1.
 
 ## Product milestone map
 
@@ -465,7 +483,7 @@ a reason to publish v1.
 | Renderer and planning foundations | v0.1–v0.2 | Reusable bounded display engine and adaptive View planner. |
 | Benchmark/demo | v0.3–v0.6 | Headless technical path from verified LAS/LAZ to one narrow terrain deliverable; external workflow evidence remains separate. |
 | Design-partner MVP | v0.7–v0.8 | Complete repository interoperability qualification; product completion still requires three firms, three paid pilots, and two conversion-or-measured-savings firms. |
-| Trustworthy v1 | v0.9–v1.0 | Explicitly supported, regression-tested, maintainable compatibility surface. |
+| Trustworthy v1 | v0.9–v1.0 | v0.9 repository trust baseline Complete and repository-verified; v1.0 remains Candidate and requires external acceptance plus supported-scope qualification. |
 
 ## Deferred until evidence changes
 
