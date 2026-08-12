@@ -46,6 +46,7 @@ const SEMANTIC_HASH_DOMAIN: &[u8] = b"punctra-terrain-workflow-semantic-results-
 const LAS_CLASSIFICATION_ATTRIBUTE: u32 = 6;
 const MAX_INTENT_ORDINALS: usize = 1_000;
 const MAX_INTENT_CHECK_POINTS: usize = 256;
+const LIMIT_FACT_COUNT: usize = 115;
 
 /// Caller-owned paths for one durable terrain Workflow Run.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -992,7 +993,8 @@ fn advance(
         retained_observations_bytes(journal, request, limits, &audit, &baseline, &changed)
             .saturating_add(qa_retained_bytes(&qa))
             .saturating_add(
-                usize_u64(114).saturating_mul(usize_u64(std::mem::size_of::<LimitFact>())),
+                usize_u64(LIMIT_FACT_COUNT)
+                    .saturating_mul(usize_u64(std::mem::size_of::<LimitFact>())),
             ),
         limits.max_aggregate_working_bytes,
         WorkflowStage::Report,
@@ -1794,16 +1796,15 @@ fn limit_facts(
     limits: &WorkflowLimits,
     control: &OperationControl,
 ) -> Result<Vec<LimitFact>, &'static str> {
-    const FACT_COUNT: usize = 114;
     poll_control(control)?;
     let mut facts = Vec::new();
     facts
-        .try_reserve_exact(FACT_COUNT)
+        .try_reserve_exact(LIMIT_FACT_COUNT)
         .map_err(|_| "Workflow Limit Fact allocation failed")?;
 
     macro_rules! fact {
         ($name:expr, $value:expr) => {{
-            if facts.len() == FACT_COUNT {
+            if facts.len() == LIMIT_FACT_COUNT {
                 return Err("Workflow Limit Fact schema exceeded its fixed bound");
             }
             facts.push(LimitFact {
@@ -2037,6 +2038,7 @@ fn limit_facts(
         "journal.max_surface_name_bytes",
         limits.journal.max_surface_name_bytes
     );
+    fact!("journal.max_path_binding_bytes", PATH_BINDING_BYTES);
 
     fact!("report.max_output_bytes", limits.report.max_output_bytes);
     fact!("report.max_staging_bytes", limits.report.max_staging_bytes);
@@ -2055,7 +2057,7 @@ fn limit_facts(
         limits.max_aggregate_working_bytes
     );
     poll_control(control)?;
-    if facts.len() != FACT_COUNT {
+    if facts.len() != LIMIT_FACT_COUNT {
         return Err("Workflow Limit Fact schema is incomplete");
     }
     Ok(facts)
@@ -2983,6 +2985,17 @@ mod tests {
             context.revision,
             Some(RevisionId::from_bytes([4; 32]).unwrap())
         );
+    }
+
+    #[test]
+    fn canonical_limit_facts_name_the_path_binding_ceiling() {
+        let facts = limit_facts(&WorkflowLimits::default(), &OperationControl::new())
+            .expect("construct canonical Workflow Limit Facts");
+
+        assert_eq!(facts.len(), LIMIT_FACT_COUNT);
+        assert!(facts.iter().any(|fact| {
+            fact.name == "journal.max_path_binding_bytes" && fact.value == PATH_BINDING_BYTES
+        }));
     }
 
     #[test]

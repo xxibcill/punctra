@@ -652,8 +652,8 @@ the documented 10,000, 100,000, and 1,000,000-Point modes. The completed local
 | LandXML and report reconciliation | 96.871 ms | 97.629 ms | 98.365 ms |
 | Complete revalidation | 87.233 ms | 88.181 ms | 89.112 ms |
 
-The resulting journal was 2,804 bytes, the canonical report was 11,435 bytes,
-and the report named 114 semantic limit facts across eight frames. Worker peak
+The resulting journal was 2,804 bytes, the canonical report was 11,490 bytes,
+and the report named 115 semantic limit facts across eight frames. Worker peak
 heap is explicitly unmeasured. These observations use generated local data and
 are not labeled partner, production, downstream round-trip, or human-time
 evidence.

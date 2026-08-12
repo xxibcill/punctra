@@ -26,7 +26,7 @@ All notable changes to Punctra are documented here. The project follows
   revalidates Run-root identity before reporting status.
 - Added canonical report encoding with exact identities, request and semantic-
   result hashes, Revision Audit/Edit Footprint, baseline/changed Terrain facts,
-  conservative Surface Change Envelope, detached QA, stable LandXML facts, 114
+  conservative Surface Change Envelope, detached QA, stable LandXML facts, 115
   semantic limit facts, and explicit external-evidence nonclaims.
 - Added bounded structured Workflow failures with stable code, stage,
   publication certainty, known Run/Source/Workspace/Operation/Revision
@@ -54,7 +54,7 @@ All notable changes to Punctra are documented here. The project follows
   123.76/126.67/129.66 ms from a Retryable intent,
   96.871/97.629/98.365 ms for XML/report reconciliation, and
   87.233/88.181/89.112 ms for Complete revalidation. The completed journal was
-  2,804 bytes and the canonical report was 11,435 bytes across eight frames.
+  2,804 bytes and the canonical report was 11,490 bytes across eight frames.
   Worker peak heap was not measured.
 - Deferred durable Breaklines because they require both a Workspace persisted-
   schema evolution and a new constrained-triangulation kernel. External

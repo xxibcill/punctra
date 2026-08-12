@@ -362,7 +362,7 @@ workflow-facade, and three process—every eight-frame resume prefix, 12 public
 limit families, generated LAS/LAZ semantic-projection checks, scoped fault and
 representative cancellation/corruption coverage, known-identity validation,
 dropped-Workflow recovery, and a five-mode generated 10,000-Point benchmark.
-The completed Run used a 2,804-byte journal and 11,435-byte report with 114
+The completed Run used a 2,804-byte journal and 11,490-byte report with 115
 semantic limit facts.
 
 The product-level design-partner alpha outcome is not complete. Partner

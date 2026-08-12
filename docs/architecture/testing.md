@@ -329,7 +329,7 @@ local smoke is the 10,000-Point, ten-sample run.
 | Complete revalidation | 87.233 ms | 88.181 ms | 89.112 ms |
 
 The completed Run's durable journal was 2,804 bytes across eight frames. Its
-canonical report was 11,435 bytes and contained 114 semantic limit facts.
+canonical report was 11,490 bytes and contained 115 semantic limit facts.
 
 The intervals are local generated observations, not universal latency claims.
 Worker peak heap was not measured. No partner, production, downstream round-
