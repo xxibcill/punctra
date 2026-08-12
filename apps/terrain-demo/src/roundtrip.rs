@@ -924,7 +924,7 @@ fn parse_faces(
         validate_face(side, face, points)?;
         let canonical = canonical_face(face);
         if !unique_faces.insert(canonical) {
-            return Err(RoundTripFailure::invalid(format_args!(
+            return Err(RoundTripFailure::mismatch(format_args!(
                 "{side} contains a duplicate face"
             )));
         }
@@ -1638,6 +1638,24 @@ mod tests {
         let fixture = Fixture::new("topology-mismatch");
         let reference_xml = landxml(REFERENCE_POINTS, REFERENCE_FACES, false);
         let returned_xml = landxml(REFERENCE_POINTS, &["1 2 4", "2 3 4"], false);
+        let (reference, returned) = fixture.write_pair(&reference_xml, &returned_xml);
+
+        assert_kind(
+            verify(
+                &reference,
+                &returned,
+                tolerances(0.0, 0.0),
+                default_limits(),
+            ),
+            RoundTripFailureKind::SemanticMismatch,
+        );
+    }
+
+    #[test]
+    fn duplicate_face_is_a_topology_mismatch() {
+        let fixture = Fixture::new("duplicate-face");
+        let reference_xml = landxml(REFERENCE_POINTS, REFERENCE_FACES, false);
+        let returned_xml = landxml(REFERENCE_POINTS, &["1 2 3", "3 2 1"], false);
         let (reference, returned) = fixture.write_pair(&reference_xml, &returned_xml);
 
         assert_kind(
