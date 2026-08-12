@@ -257,9 +257,12 @@ impl From<ContractError> for WorkspaceError {
 
 impl From<IndexError> for WorkspaceError {
     fn from(source: IndexError) -> Self {
-        Self::Index {
-            diagnostic: WorkspaceDiagnostic::new(source.to_string()),
-            source,
+        match source {
+            IndexError::Runtime(RuntimeError::Cancelled) => Self::Cancelled,
+            source => Self::Index {
+                diagnostic: WorkspaceDiagnostic::new(source.to_string()),
+                source,
+            },
         }
     }
 }

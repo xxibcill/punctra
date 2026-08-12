@@ -101,6 +101,29 @@ impl MemoryMeter {
     }
 }
 
+struct DerivationContext<'a> {
+    limits: TerrainLimits,
+    work: WorkMeter,
+    memory: MemoryMeter,
+    control: &'a OperationControl,
+}
+
+impl<'a> DerivationContext<'a> {
+    fn new(limits: TerrainLimits, baseline_bytes: u64, control: &'a OperationControl) -> Self {
+        Self {
+            limits,
+            work: WorkMeter::new(),
+            memory: MemoryMeter::new(baseline_bytes),
+            control,
+        }
+    }
+
+    fn charge(&mut self, amount: u64) -> Result<(), TerrainError> {
+        self.work
+            .charge(amount, self.limits.max_work_units(), self.control)
+    }
+}
+
 /// Starts one deterministic single-worker Terrain Derivation.
 #[must_use]
 pub fn derive(
@@ -119,7 +142,6 @@ fn run(
     control: &OperationControl,
 ) -> Result<TerrainSurface, TerrainError> {
     control.check_cancelled()?;
-    let mut work = WorkMeter::new();
     if limits.point_rows().max_working_bytes() > limits.max_working_bytes() {
         return Err(TerrainError::resource(
             "Ground Input allocation bytes",
@@ -147,7 +169,7 @@ fn run(
         ));
     }
     let coordinate_reference = rows.source_metadata().coordinate_reference().clone();
-    let mut memory = MemoryMeter::new(coordinate_reference_bytes);
+    let mut context = DerivationContext::new(limits, coordinate_reference_bytes, control);
     let mut input = Vec::new();
 
     while let Some(batch) = pull_rows(&mut rows, control)? {
@@ -157,13 +179,9 @@ fn run(
             .zip(batch.positions().ticks())
             .zip(batch.effective_classifications())
         {
-            work.charge(1, limits.max_work_units(), control)?;
-            if classification != recipe.ground_classification() {
-                return Err(TerrainError::topology(
-                    "Snapshot Point stream returned a row outside the Ground Input predicate",
-                ));
-            }
-            reserve_input(&mut input, limits, &mut memory)?;
+            context.charge(1)?;
+            validate_ground_row(recipe, transform, ticks, classification)?;
+            reserve_input(&mut input, &mut context)?;
             input.push(InputVertex {
                 ticks,
                 point: PointId::new(batch.source(), ordinal),
@@ -190,41 +208,37 @@ fn run(
             actual: u64::try_from(input.len()).unwrap_or(u64::MAX),
         });
     }
-    merge_sort(&mut input, 0, limits, &mut work, &mut memory, control)?;
-    validate_xy(&input, limits, &mut work, control)?;
+    merge_sort(&mut input, 0, &mut context)?;
+    validate_xy(&input, &mut context)?;
     let retained_input = vector_bytes::<InputVertex>(input.capacity());
-    let (kernel, bounds) = normalize(
-        &input,
-        retained_input,
-        transform,
-        limits,
-        &mut work,
-        &mut memory,
-        control,
-    )?;
+    let (kernel, bounds) = normalize(&input, retained_input, transform, &mut context)?;
     let retained_kernel = vector_bytes::<PlanarPoint>(kernel.capacity());
-    let triangulation_budget = limits.max_working_bytes().saturating_sub(
-        memory
+    let triangulation_budget = context.limits.max_working_bytes().saturating_sub(
+        context
+            .memory
             .baseline
             .saturating_add(retained_input)
             .saturating_add(retained_kernel),
     );
-    let remaining_work = limits.max_work_units().saturating_sub(work.used);
+    let remaining_work = context
+        .limits
+        .max_work_units()
+        .saturating_sub(context.work.used);
     let triangulation = triangulate(
         &kernel,
         TriangulationLimits {
             max_working_bytes: triangulation_budget,
             max_steps: remaining_work,
         },
-        control,
+        context.control,
     )
     .map_err(|error| map_triangulation_error(&error))?;
-    work.charge(triangulation.steps, limits.max_work_units(), control)?;
-    memory.require(
+    context.charge(triangulation.steps)?;
+    context.memory.require(
         retained_input
             .saturating_add(retained_kernel)
             .saturating_add(triangulation.peak_working_bytes),
-        limits.max_working_bytes(),
+        context.limits.max_working_bytes(),
         "Terrain triangulation working bytes",
     )?;
 
@@ -238,22 +252,18 @@ fn run(
         &kernel,
         retained_kernel,
         input.len(),
-        limits,
-        &mut work,
-        &mut memory,
-        control,
+        &mut context,
     )?;
     drop(kernel);
 
     let mut vertices = allocate_exact::<SurfaceVertex>(
         input.len(),
         retained_input.saturating_add(vector_bytes::<[usize; 3]>(triangles.capacity())),
-        limits,
-        &mut memory,
+        &mut context,
         "Terrain vertex publication bytes",
     )?;
     for (index, vertex) in input.iter().enumerate() {
-        work.charge(1, limits.max_work_units(), control)?;
+        context.charge(1)?;
         let id = SurfaceVertexId::from_zero_based(index).ok_or_else(|| {
             TerrainError::resource(
                 "Surface vertex identity range",
@@ -270,12 +280,11 @@ fn run(
     let mut faces = allocate_exact::<SurfaceFace>(
         triangles.len(),
         retained_vertices.saturating_add(retained_triangles),
-        limits,
-        &mut memory,
+        &mut context,
         "Terrain face publication bytes",
     )?;
     for (index, triangle) in triangles.iter().copied().enumerate() {
-        work.charge(1, limits.max_work_units(), control)?;
+        context.charge(1)?;
         let id = SurfaceFaceId::from_zero_based(index).ok_or_else(|| {
             TerrainError::resource(
                 "Surface face identity range",
@@ -299,7 +308,7 @@ fn run(
 
     let hull_vertex_count = hull_vertex_count(vertices.len(), faces.len())?;
     let (geometry_hash, topology_hash) =
-        surface_hashes(transform, &vertices, &faces, limits, &mut work, control)?;
+        surface_hashes(transform, &vertices, &faces, &mut context)?;
     let recipe_hash = recipe_hash(recipe);
     let artifact_hash = artifact_hash(
         snapshot_provenance,
@@ -311,19 +320,19 @@ fn run(
         topology_hash,
     );
     let retained_surface_bytes = retained_surface_bytes(&vertices, &faces, &coordinate_reference);
-    if retained_surface_bytes > limits.max_surface_bytes() {
+    if retained_surface_bytes > context.limits.max_surface_bytes() {
         return Err(TerrainError::resource(
             "retained Terrain Surface bytes",
             retained_surface_bytes,
-            limits.max_surface_bytes(),
+            context.limits.max_surface_bytes(),
         ));
     }
-    memory.require(
+    context.memory.require(
         retained_surface_bytes.saturating_sub(coordinate_reference_bytes),
-        limits.max_working_bytes(),
+        context.limits.max_working_bytes(),
         "Terrain publication working bytes",
     )?;
-    control.check_cancelled()?;
+    context.control.check_cancelled()?;
 
     let descriptor = TerrainDescriptor::new(
         snapshot_provenance,
@@ -340,7 +349,7 @@ fn run(
         u64::try_from(faces.len()).unwrap_or(u64::MAX),
         hull_vertex_count,
         bounds,
-        memory.peak,
+        context.memory.peak,
         retained_surface_bytes,
         topology_steps,
     );
@@ -351,7 +360,7 @@ fn run(
             faces,
         }),
     };
-    control.complete_progress(work.used)?;
+    context.control.complete_progress(context.work.used)?;
     Ok(surface)
 }
 
@@ -379,23 +388,48 @@ fn terminal_summary(
     })
 }
 
+fn validate_ground_row(
+    recipe: TerrainRecipe,
+    transform: PositionTransform,
+    ticks: [i64; 3],
+    classification: u8,
+) -> Result<(), TerrainError> {
+    if classification != recipe.ground_classification() {
+        return Err(TerrainError::topology(
+            "Snapshot Point stream returned a row outside the Ground Input classification",
+        ));
+    }
+    let Some(bounds) = recipe.bounds() else {
+        return Ok(());
+    };
+    let world = transform.world_f64(ticks);
+    let minimum = bounds.min();
+    let maximum = bounds.max();
+    if (0..3).all(|axis| world[axis] >= minimum[axis] && world[axis] <= maximum[axis]) {
+        Ok(())
+    } else {
+        Err(TerrainError::topology(
+            "Snapshot Point stream returned a row outside the Ground Input bounds",
+        ))
+    }
+}
+
 fn reserve_input(
     input: &mut Vec<InputVertex>,
-    limits: TerrainLimits,
-    memory: &mut MemoryMeter,
+    context: &mut DerivationContext<'_>,
 ) -> Result<(), TerrainError> {
     let count = u64::try_from(input.len()).unwrap_or(u64::MAX);
-    if count >= limits.max_input_points() {
+    if count >= context.limits.max_input_points() {
         return Err(TerrainError::resource(
             "Ground Input Points",
             count.saturating_add(1),
-            limits.max_input_points(),
+            context.limits.max_input_points(),
         ));
     }
     if input.len() < input.capacity() {
         return Ok(());
     }
-    let max_capacity = usize::try_from(limits.max_input_points()).unwrap_or(usize::MAX);
+    let max_capacity = usize::try_from(context.limits.max_input_points()).unwrap_or(usize::MAX);
     let desired = input
         .capacity()
         .max(4)
@@ -405,9 +439,9 @@ fn reserve_input(
     reserve_to(
         input,
         desired,
-        limits.point_rows().max_working_bytes(),
-        limits.max_working_bytes(),
-        memory,
+        context.limits.point_rows().max_working_bytes(),
+        context.limits.max_working_bytes(),
+        &mut context.memory,
         "Ground Input allocation bytes",
     )
 }
@@ -452,8 +486,7 @@ fn reserve_to<T>(
 fn allocate_exact<T>(
     count: usize,
     retained_other: u64,
-    limits: TerrainLimits,
-    memory: &mut MemoryMeter,
+    context: &mut DerivationContext<'_>,
     limit: &'static str,
 ) -> Result<Vec<T>, TerrainError> {
     let mut result = Vec::new();
@@ -461,8 +494,8 @@ fn allocate_exact<T>(
         &mut result,
         count,
         retained_other,
-        limits.max_working_bytes(),
-        memory,
+        context.limits.max_working_bytes(),
+        &mut context.memory,
         limit,
     )?;
     Ok(result)
@@ -471,10 +504,7 @@ fn allocate_exact<T>(
 fn merge_sort<T: Copy + Ord>(
     values: &mut Vec<T>,
     retained_other: u64,
-    limits: TerrainLimits,
-    work: &mut WorkMeter,
-    memory: &mut MemoryMeter,
-    control: &OperationControl,
+    context: &mut DerivationContext<'_>,
 ) -> Result<(), TerrainError> {
     if values.len() < 2 {
         return Ok(());
@@ -483,64 +513,36 @@ fn merge_sort<T: Copy + Ord>(
     let mut scratch = allocate_exact::<T>(
         values.len(),
         retained,
-        limits,
-        memory,
+        context,
         "cancellable sort working bytes",
     )?;
     scratch.extend_from_slice(values);
-    let mut width = 1_usize;
-    let mut data_in_values = true;
-    while width < values.len() {
-        if data_in_values {
-            merge_pass(values, &mut scratch, width, limits, work, control)?;
-        } else {
-            merge_pass(&scratch, values, width, limits, work, control)?;
+    let output = crate::sort::merge_sort_by(
+        values,
+        &mut scratch,
+        |left, right| left.cmp(&right),
+        || context.charge(1),
+    )
+    .map_err(|error| match error {
+        crate::sort::MergeSortError::ScratchLength => {
+            TerrainError::topology("cancellable sort scratch length differs from its input")
         }
-        data_in_values = !data_in_values;
-        width = width.saturating_mul(2);
-    }
-    if !data_in_values {
+        crate::sort::MergeSortError::Step(error) => error,
+    })?;
+    if output == crate::sort::MergeSortOutput::Scratch {
         mem::swap(values, &mut scratch);
-    }
-    Ok(())
-}
-
-fn merge_pass<T: Copy + Ord>(
-    source: &[T],
-    destination: &mut [T],
-    width: usize,
-    limits: TerrainLimits,
-    work: &mut WorkMeter,
-    control: &OperationControl,
-) -> Result<(), TerrainError> {
-    for first in (0..source.len()).step_by(width.saturating_mul(2)) {
-        let middle = first.saturating_add(width).min(source.len());
-        let end = middle.saturating_add(width).min(source.len());
-        let (mut left, mut right) = (first, middle);
-        for slot in &mut destination[first..end] {
-            work.charge(1, limits.max_work_units(), control)?;
-            if right == end || (left < middle && source[left] <= source[right]) {
-                *slot = source[left];
-                left += 1;
-            } else {
-                *slot = source[right];
-                right += 1;
-            }
-        }
     }
     Ok(())
 }
 
 fn validate_xy(
     input: &[InputVertex],
-    limits: TerrainLimits,
-    work: &mut WorkMeter,
-    control: &OperationControl,
+    context: &mut DerivationContext<'_>,
 ) -> Result<(), TerrainError> {
     let mut min_y = input[0].ticks[1];
     let mut max_y = input[0].ticks[1];
     for pair in input.windows(2) {
-        work.charge(1, limits.max_work_units(), control)?;
+        context.charge(1)?;
         min_y = min_y.min(pair[1].ticks[1]);
         max_y = max_y.max(pair[1].ticks[1]);
         if pair[0].ticks[..2] == pair[1].ticks[..2] {
@@ -563,7 +565,7 @@ fn validate_xy(
     let origin = input[0].ticks;
     let second = input[1].ticks;
     for vertex in &input[2..] {
-        work.charge(1, limits.max_work_units(), control)?;
+        context.charge(1)?;
         let ax = i128::from(second[0]) - i128::from(origin[0]);
         let ay = i128::from(second[1]) - i128::from(origin[1]);
         let bx = i128::from(vertex.ticks[0]) - i128::from(origin[0]);
@@ -580,17 +582,14 @@ fn normalize(
     input: &[InputVertex],
     retained_input: u64,
     transform: PositionTransform,
-    limits: TerrainLimits,
-    work: &mut WorkMeter,
-    memory: &mut MemoryMeter,
-    control: &OperationControl,
+    context: &mut DerivationContext<'_>,
 ) -> Result<(Vec<PlanarPoint>, WorldBounds), TerrainError> {
     let mut min_x = input[0].ticks[0];
     let mut max_x = input[0].ticks[0];
     let mut min_y = input[0].ticks[1];
     let mut max_y = input[0].ticks[1];
     for vertex in &input[1..] {
-        work.charge(1, limits.max_work_units(), control)?;
+        context.charge(1)?;
         min_x = min_x.min(vertex.ticks[0]);
         max_x = max_x.max(vertex.ticks[0]);
         min_y = min_y.min(vertex.ticks[1]);
@@ -616,14 +615,13 @@ fn normalize(
     let mut kernel = allocate_exact::<PlanarPoint>(
         input.len(),
         retained_input,
-        limits,
-        memory,
+        context,
         "normalized kernel Point bytes",
     )?;
     let mut world_min = [f64::INFINITY; 3];
     let mut world_max = [f64::NEG_INFINITY; 3];
     for vertex in input {
-        work.charge(1, limits.max_work_units(), control)?;
+        context.charge(1)?;
         let dx = i128::from(vertex.ticks[0]) - i128::from(min_x);
         let dy = i128::from(vertex.ticks[1]) - i128::from(min_y);
         let point = PlanarPoint {
@@ -648,7 +646,7 @@ fn normalize(
         kernel.push(point);
     }
     for pair in kernel.windows(2) {
-        work.charge(1, limits.max_work_units(), control)?;
+        context.charge(1)?;
         if pair[0] == pair[1] {
             return Err(TerrainError::numeric(
                 "distinct XY ticks collapse to one normalized kernel coordinate",
@@ -664,21 +662,18 @@ fn canonicalize_faces(
     kernel: &[PlanarPoint],
     retained_kernel: u64,
     vertex_count: usize,
-    limits: TerrainLimits,
-    work: &mut WorkMeter,
-    memory: &mut MemoryMeter,
-    control: &OperationControl,
+    context: &mut DerivationContext<'_>,
 ) -> Result<(), TerrainError> {
     let face_count = u64::try_from(triangles.len()).unwrap_or(u64::MAX);
-    if face_count > limits.max_faces() {
+    if face_count > context.limits.max_faces() {
         return Err(TerrainError::resource(
             "Terrain faces",
             face_count,
-            limits.max_faces(),
+            context.limits.max_faces(),
         ));
     }
     for triangle in triangles.iter_mut() {
-        work.charge(1, limits.max_work_units(), control)?;
+        context.charge(1)?;
         if triangle.iter().any(|&index| index >= vertex_count)
             || triangle[0] == triangle[1]
             || triangle[1] == triangle[2]
@@ -709,9 +704,9 @@ fn canonicalize_faces(
             .map_or(0, |(position, _)| position);
         triangle.rotate_left(minimum);
     }
-    merge_sort(triangles, retained_kernel, limits, work, memory, control)?;
+    merge_sort(triangles, retained_kernel, context)?;
     for pair in triangles.windows(2) {
-        work.charge(1, limits.max_work_units(), control)?;
+        context.charge(1)?;
         if pair[0] == pair[1] {
             return Err(TerrainError::topology(
                 "triangulator returned a duplicate canonical face",
@@ -723,19 +718,18 @@ fn canonicalize_faces(
     let mut used = allocate_exact::<bool>(
         vertex_count,
         retained,
-        limits,
-        memory,
+        context,
         "Terrain vertex-coverage validation bytes",
     )?;
     used.resize(vertex_count, false);
     for triangle in triangles.iter() {
         for &index in triangle {
-            work.charge(1, limits.max_work_units(), control)?;
+            context.charge(1)?;
             used[index] = true;
         }
     }
     for &is_used in &used {
-        work.charge(1, limits.max_work_units(), control)?;
+        context.charge(1)?;
         if !is_used {
             return Err(TerrainError::topology(
                 "triangulator omitted a Ground Input vertex",
@@ -782,9 +776,7 @@ fn surface_hashes(
     transform: PositionTransform,
     vertices: &[SurfaceVertex],
     faces: &[SurfaceFace],
-    limits: TerrainLimits,
-    work: &mut WorkMeter,
-    control: &OperationControl,
+    context: &mut DerivationContext<'_>,
 ) -> Result<(ContentHash, ContentHash), TerrainError> {
     let mut geometry = domain_hasher(GEOMETRY_HASH_DOMAIN);
     let mut topology = domain_hasher(TOPOLOGY_HASH_DOMAIN);
@@ -800,7 +792,7 @@ fn surface_hashes(
             .to_le_bytes(),
     );
     for vertex in vertices {
-        work.charge(1, limits.max_work_units(), control)?;
+        context.charge(1)?;
         geometry.update(&vertex.id().get().to_le_bytes());
         geometry.update(vertex.point().source().as_bytes());
         geometry.update(&vertex.point().ordinal().to_le_bytes());
@@ -811,7 +803,7 @@ fn surface_hashes(
     geometry.update(&u64::try_from(faces.len()).unwrap_or(u64::MAX).to_le_bytes());
     topology.update(&u64::try_from(faces.len()).unwrap_or(u64::MAX).to_le_bytes());
     for face in faces {
-        work.charge(1, limits.max_work_units(), control)?;
+        context.charge(1)?;
         geometry.update(&face.id().get().to_le_bytes());
         topology.update(&face.id().get().to_le_bytes());
         for vertex in face.vertices() {

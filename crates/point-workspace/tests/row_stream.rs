@@ -102,7 +102,10 @@ fn assert_batch_contract(batch: &SnapshotPointBatch, limits: PointRowLimits) {
     assert_eq!(batch.len(), batch.positions().len());
     assert_eq!(batch.len(), batch.effective_classifications().len());
     assert!(u64::try_from(batch.len()).unwrap() <= limits.max_batch_points());
-    assert!(batch.estimated_payload_bytes() <= limits.max_batch_payload_bytes());
+    let payload_bytes = u64::try_from(batch.len())
+        .unwrap_or(u64::MAX)
+        .saturating_mul(ROW_BYTES);
+    assert!(payload_bytes <= limits.max_batch_payload_bytes());
     assert!(batch.ordinals().windows(2).all(|pair| pair[0] < pair[1]));
     for row in 0..batch.len() {
         assert_eq!(
@@ -295,6 +298,26 @@ fn output_failure_and_cancellation_are_fused_without_a_summary() {
     assert!(matches!(cancelled.next(), Err(WorkspaceError::Cancelled)));
     assert!(cancelled.summary().is_none());
     assert!(cancelled.next().expect("cancellation is fused").is_none());
+
+    let plan_blocked = PointRowLimits::new(
+        CandidateLimits::new(0, 0, 0, 0),
+        defaults.source_read_budget(),
+        defaults.max_overlay_segments(),
+        defaults.max_overlay_bytes(),
+        defaults.max_output_points(),
+        defaults.max_batch_points(),
+        defaults.max_batch_payload_bytes(),
+        defaults.max_working_bytes(),
+    );
+    let mut cancelled_before_planning = snapshot
+        .point_rows(PointQuery::all(), plan_blocked)
+        .expect("stream exposes cancellation before candidate planning");
+    cancelled_before_planning.handle().cancel();
+    assert!(matches!(
+        cancelled_before_planning.next(),
+        Err(WorkspaceError::Cancelled)
+    ));
+    assert!(cancelled_before_planning.summary().is_none());
 }
 
 #[test]

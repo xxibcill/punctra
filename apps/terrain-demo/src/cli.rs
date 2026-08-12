@@ -5,11 +5,12 @@
 use std::{ffi::OsString, path::PathBuf};
 
 use point_terrain::{CheckPoint, CheckPointId, LandXmlOptions, TerrainRecipe};
+use point_workspace::{OperationId, RevisionId};
 
 use crate::{
-    WorkflowFailure, WorkflowLimits, WorkflowPaths, WorkflowRunIntent,
+    WorkflowFailure, WorkflowLimits, WorkflowPaths, WorkflowRunId, WorkflowRunIntent,
     diagnostic::{Certainty, FailureCode, FailureContext, RecoveryAction, WorkflowStage},
-    inspect_run, resume_run,
+    inspect_and_repair_run, resume_run,
     roundtrip::{
         RoundTripDeclaration, RoundTripFailure, RoundTripFailureKind, RoundTripLimits,
         RoundTripReport, RoundTripTolerances, verify_landxml_round_trip,
@@ -39,12 +40,12 @@ Required start/resume options:
   --exclude-ground-ordinal N     exact Source ordinal; repeat for a nonempty set
   --date YYYY-MM-DD              deterministic LandXML document date
   --time HH:MM:SSZ               deterministic LandXML UTC document time
+  --assert-unknown-crs-metric    assert Source coordinates are metric metres
 
 Optional:
   --check-point ID,X,Y,Z         detached QA point; repeatable
   --non-ground-classification N  replacement class (default 1)
   --surface-name TEXT            LandXML Surface name
-  --assert-unknown-crs-metric    assert unknown Source CRS coordinates are metres
   -h, --help                     show this help
 
 Required compare-landxml options:
@@ -81,12 +82,12 @@ pub fn run_cli(arguments: impl IntoIterator<Item = OsString>) -> Result<String, 
     match parse(arguments)? {
         Command::Help => Ok(USAGE.to_owned()),
         Command::Inspect(root) => {
-            let status = inspect_run(root, WorkflowLimits::default())?;
+            let status = inspect_and_repair_run(root, WorkflowLimits::default())?;
             Ok(format!(
-                "Run {}\nOperation {}\nframes {}\ncomplete {}\n",
-                Hex(&status.run()),
-                Hex(&status.operation()),
-                status.frame_count(),
+                "Run {}\nOperation {}\nphase {}\ncomplete {}\n",
+                status.run(),
+                status.operation(),
+                status.phase().as_str(),
                 status.is_complete(),
             ))
         }
@@ -117,13 +118,12 @@ pub fn run_cli(arguments: impl IntoIterator<Item = OsString>) -> Result<String, 
                 start_run(paths, *intent, WorkflowLimits::default()).blocking_wait()?
             };
             Ok(format!(
-                "Run complete\nRun {}\nOperation {}\nRevision {}\nreport hash {}\nreport bytes {}\nframes {}\n",
-                Hex(&receipt.run()),
-                Hex(&receipt.operation()),
-                Hex(&receipt.revision()),
-                Hex(&receipt.report_hash()),
+                "Run complete\nRun {}\nOperation {}\nRevision {}\nreport hash {}\nreport bytes {}\n",
+                receipt.run(),
+                receipt.operation(),
+                receipt.revision(),
+                receipt.report_hash(),
                 receipt.report_bytes(),
-                receipt.frame_count(),
             ))
         }
     }
@@ -273,12 +273,19 @@ fn parse(arguments: impl IntoIterator<Item = OsString>) -> Result<Command, Workf
     )
     .map_err(|error| invalid(error.to_string()))?;
     if assert_unknown.is_some() {
-        landxml = landxml.allow_unknown_coordinate_reference_as_metric_metres();
+        landxml = landxml.assert_coordinates_are_metric_metres();
     }
+    let run = WorkflowRunId::new(run.ok_or_else(|| invalid("missing --run-id"))?)
+        .ok_or_else(|| invalid("Run ID must be nonzero"))?;
+    let operation =
+        OperationId::from_bytes(operation.ok_or_else(|| invalid("missing --operation-id"))?)
+            .map_err(|error| invalid(error.to_string()))?;
+    let baseline = RevisionId::from_bytes(baseline.ok_or_else(|| invalid("missing --baseline"))?)
+        .map_err(|error| invalid(error.to_string()))?;
     let intent = WorkflowRunIntent::new(
-        run.ok_or_else(|| invalid("missing --run-id"))?,
-        operation.ok_or_else(|| invalid("missing --operation-id"))?,
-        baseline.ok_or_else(|| invalid("missing --baseline"))?,
+        run,
+        operation,
+        baseline,
         ordinals,
         non_ground.unwrap_or(DEFAULT_NON_GROUND_CLASSIFICATION),
         TerrainRecipe::new(GROUND_CLASSIFICATION),

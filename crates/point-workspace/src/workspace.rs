@@ -7,7 +7,10 @@ use std::task::{Context, Poll};
 
 use blake3::Hasher;
 use foundation_runtime::{CancellationToken, Job, OperationControl, OperationHandle};
-use point_contracts::{AttributeId, ContentHash, PointId, SourceId};
+use point_contracts::{
+    AttributeDataType, AttributeDefinition, AttributeId, ContentHash, MAX_ATTRIBUTE_NAME_BYTES,
+    PointBatch, PointId, SourceId,
+};
 use point_index::PreparedIndex;
 use point_source::Source;
 
@@ -20,15 +23,17 @@ use crate::model::{
     WorkspaceSchema,
 };
 use crate::persistence::{
-    CandidateFacts, Catalog, CatalogLimits, ClassificationRequestFacts, MANIFEST_BYTES,
-    ManifestFacts, OperationRecord, PersistedPointSetFacts, PersistenceError, REJECTION_BYTES,
-    ReadLimits, RejectionFacts, RevisionKind as PersistedRevisionKind, RevisionRow, RowReadLimits,
-    SealedRevision, Store, ValidatedRevision, WriteLimits,
+    ATTRIBUTE_DATA_TYPE_U8, CandidateFacts, Catalog, CatalogLimits, ClassificationRequestFacts,
+    MANIFEST_BYTES, ManifestFacts, PersistedAttributeDefinition, PersistedPointSetFacts,
+    PersistenceError, REJECTION_BYTES, ReadLimits, RejectionFacts,
+    RevisionKind as PersistedRevisionKind, RevisionRow, RowReadLimits, SealedRevision, Store,
+    ValidatedRevision, WriteLimits,
     classification_request_digest as persisted_classification_request_digest,
     revert_request_digest as persisted_revert_request_digest,
 };
 pub(crate) use crate::persistence::{OverlayLimits, OverlayUsage};
 use crate::point_set::{PointSetRecord, PointSetRecordBatches};
+use crate::util::allocation_bytes;
 
 const SOURCE_CONTRACT_DOMAIN: &[u8] = b"punctra-workspace-source-contract-v1";
 const ROOT_REVISION_DOMAIN: &[u8] = b"punctra-workspace-root-revision-v1";
@@ -66,7 +71,9 @@ pub struct CommitJob {
     operation: OperationId,
     phase: Arc<PublicationPhase>,
     session: Arc<Session>,
-    inner: Job<CommitOutcome, WorkspaceError>,
+    abandoned: Arc<AtomicBool>,
+    handle: OperationHandle,
+    inner: Option<Job<CommitOutcome, WorkspaceError>>,
 }
 
 impl Workspace {
@@ -136,7 +143,9 @@ impl Workspace {
         CommitJob::spawn(
             Arc::clone(&self.session),
             operation,
-            move |session, phase, control| run_commit(&session, request, limits, &phase, &control),
+            move |session, phase, control, abandoned| {
+                run_commit(&session, request, limits, &phase, &control, &abandoned)
+            },
         )
     }
 
@@ -146,7 +155,9 @@ impl Workspace {
         CommitJob::spawn(
             Arc::clone(&self.session),
             operation,
-            move |session, phase, control| run_retry(&session, operation, limits, &phase, &control),
+            move |session, phase, control, abandoned| {
+                run_retry(&session, operation, limits, &phase, &control, &abandoned)
+            },
         )
     }
 
@@ -182,34 +193,41 @@ impl CommitJob {
                 Arc<Session>,
                 Arc<PublicationPhase>,
                 OperationControl,
+                Arc<AtomicBool>,
             ) -> Result<CommitOutcome, WorkspaceError>
             + Send
             + 'static,
     {
         let phase = Arc::new(PublicationPhase::new());
+        let abandoned = Arc::new(AtomicBool::new(false));
         let worker_session = Arc::clone(&session);
         let worker_phase = Arc::clone(&phase);
+        let worker_abandoned = Arc::clone(&abandoned);
         let inner = Job::spawn(move |control| {
-            let mut certainty = MutationCertaintyGuard::new(
+            let mut certainty = MutationCertaintyGuard::with_abandonment(
                 Arc::clone(&worker_session.poisoned),
                 Arc::clone(&worker_phase),
+                Arc::clone(&worker_abandoned),
             );
-            let result = work(worker_session, worker_phase, control);
+            let result = work(worker_session, worker_phase, control, worker_abandoned);
             certainty.observe(&result);
             result
         });
+        let handle = inner.handle();
         Self {
             operation,
             phase,
             session,
-            inner,
+            abandoned,
+            handle,
+            inner: Some(inner),
         }
     }
 
     /// Returns a cloneable runtime observation and cancellation capability.
     #[must_use]
     pub fn handle(&self) -> OperationHandle {
-        self.inner.handle()
+        self.handle.clone()
     }
 
     /// Waits for a certainty-preserving terminal commit result.
@@ -218,8 +236,13 @@ impl CommitJob {
     ///
     /// Returns only failures known to precede durable publication. A failure
     /// after publication begins becomes `CommitOutcome::Indeterminate`.
-    pub fn blocking_wait(self) -> Result<CommitOutcome, WorkspaceError> {
-        let result = self.inner.blocking_wait();
+    ///
+    /// # Panics
+    ///
+    /// Panics if this Job has already returned its result through `Future` polling.
+    pub fn blocking_wait(mut self) -> Result<CommitOutcome, WorkspaceError> {
+        let inner = self.inner.take().expect("CommitJob result is not consumed");
+        let result = inner.blocking_wait();
         finish_commit_result(
             self.operation,
             self.phase.as_ref(),
@@ -240,11 +263,16 @@ impl CommitJob {
     ///
     /// Returns only failures known to precede durable publication. A failure
     /// after publication begins becomes `CommitOutcome::Indeterminate`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if this Job has already returned its result through `Future` polling.
     pub fn blocking_wait_cancelled_by(
-        self,
+        mut self,
         parent: &CancellationToken,
     ) -> Result<CommitOutcome, WorkspaceError> {
-        let result = self.inner.blocking_wait_cancelled_by(parent);
+        let inner = self.inner.take().expect("CommitJob result is not consumed");
+        let result = inner.blocking_wait_cancelled_by(parent);
         finish_commit_result(
             self.operation,
             self.phase.as_ref(),
@@ -258,14 +286,35 @@ impl Future for CommitJob {
     type Output = Result<CommitOutcome, WorkspaceError>;
 
     fn poll(mut self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Self::Output> {
-        match Pin::new(&mut self.inner).poll(context) {
+        let poll = Pin::new(
+            self.inner
+                .as_mut()
+                .expect("a completed CommitJob must not be polled again"),
+        )
+        .poll(context);
+        match poll {
             Poll::Pending => Poll::Pending,
-            Poll::Ready(result) => Poll::Ready(finish_commit_result(
-                self.operation,
-                self.phase.as_ref(),
-                self.session.as_ref(),
-                result,
-            )),
+            Poll::Ready(result) => {
+                self.inner.take();
+                Poll::Ready(finish_commit_result(
+                    self.operation,
+                    self.phase.as_ref(),
+                    self.session.as_ref(),
+                    result,
+                ))
+            }
+        }
+    }
+}
+
+impl Drop for CommitJob {
+    fn drop(&mut self) {
+        if self.inner.is_some() {
+            self.abandoned.store(true, Ordering::SeqCst);
+            self.handle.cancel();
+            if self.phase.current().is_some() {
+                self.session.poisoned.store(true, Ordering::SeqCst);
+            }
         }
     }
 }
@@ -276,7 +325,7 @@ impl std::fmt::Debug for CommitJob {
             .debug_struct("CommitJob")
             .field("operation", &self.operation)
             .field("phase", &self.phase.current())
-            .field("handle", &self.inner.handle())
+            .field("handle", &self.handle)
             .finish_non_exhaustive()
     }
 }
@@ -286,15 +335,32 @@ struct PublicationPhase(AtomicU8);
 struct MutationCertaintyGuard {
     poisoned: Arc<AtomicBool>,
     phase: Arc<PublicationPhase>,
+    abandoned: Option<Arc<AtomicBool>>,
     armed: bool,
     force_poison: bool,
 }
 
 impl MutationCertaintyGuard {
+    #[cfg(test)]
     fn new(poisoned: Arc<AtomicBool>, phase: Arc<PublicationPhase>) -> Self {
         Self {
             poisoned,
             phase,
+            abandoned: None,
+            armed: true,
+            force_poison: false,
+        }
+    }
+
+    fn with_abandonment(
+        poisoned: Arc<AtomicBool>,
+        phase: Arc<PublicationPhase>,
+        abandoned: Arc<AtomicBool>,
+    ) -> Self {
+        Self {
+            poisoned,
+            phase,
+            abandoned: Some(abandoned),
             armed: true,
             force_poison: false,
         }
@@ -309,6 +375,15 @@ impl MutationCertaintyGuard {
     }
 
     fn observe(&mut self, result: &Result<CommitOutcome, WorkspaceError>) {
+        if self.phase.current().is_some()
+            && self
+                .abandoned
+                .as_ref()
+                .is_some_and(|abandoned| abandoned.load(Ordering::SeqCst))
+        {
+            self.force_poison();
+            return;
+        }
         match result {
             Ok(CommitOutcome::Committed(_) | CommitOutcome::Rejected(_)) => self.disarm(),
             Ok(CommitOutcome::Indeterminate(_)) => self.force_poison(),
@@ -448,8 +523,9 @@ impl Snapshot {
     ///
     /// # Errors
     ///
-    /// Returns a candidate-planning, Source, or resource failure before the
-    /// stream can be started.
+    /// Returns when the bounded stream state cannot be created. Candidate-
+    /// planning, Source, and resource failures encountered by the lazy read are
+    /// returned from [`crate::SnapshotPointBatches::next`].
     pub fn point_rows(
         &self,
         query: crate::PointQuery,
@@ -486,6 +562,27 @@ pub(crate) struct Session {
     writer_waiters: std::sync::atomic::AtomicUsize,
 }
 
+#[derive(Clone, Copy)]
+pub(crate) struct EffectiveClassificationBudget {
+    working_bytes: u64,
+    overlay_blocks: u64,
+    overlay_bytes: u64,
+}
+
+impl EffectiveClassificationBudget {
+    pub(crate) const fn new(
+        max_working_bytes: u64,
+        max_overlay_blocks: u64,
+        max_overlay_bytes: u64,
+    ) -> Self {
+        Self {
+            working_bytes: max_working_bytes,
+            overlay_blocks: max_overlay_blocks,
+            overlay_bytes: max_overlay_bytes,
+        }
+    }
+}
+
 impl Session {
     fn ensure_mutable(&self) -> Result<(), WorkspaceError> {
         if self.poisoned.load(Ordering::SeqCst) {
@@ -512,6 +609,44 @@ impl Session {
 
     pub(crate) fn scratch_path(&self) -> &Path {
         self.store.scratch()
+    }
+
+    pub(crate) fn effective_classifications(
+        &self,
+        revision: RevisionId,
+        batch: &PointBatch,
+        existing_working_bytes: u64,
+        budget: EffectiveClassificationBudget,
+        usage: &mut OverlayUsage,
+        control: &OperationControl,
+    ) -> Result<Vec<u8>, WorkspaceError> {
+        let source_values = batch
+            .attributes()
+            .get(self.classification_attribute())
+            .and_then(|column| column.values().as_u8())
+            .ok_or_else(|| {
+                WorkspaceError::incompatible(
+                    "classification Source column is absent or no longer U8",
+                )
+            })?;
+        let mut effective =
+            copy_classifications(source_values, existing_working_bytes, budget.working_bytes)?;
+        let overlay_working_bytes = budget.working_bytes.saturating_sub(
+            existing_working_bytes.saturating_add(allocation_bytes::<u8>(effective.capacity())),
+        );
+        self.apply_overlays(
+            revision,
+            batch.first_ordinal(),
+            &mut effective,
+            OverlayLimits {
+                max_blocks: budget.overlay_blocks,
+                max_payload_bytes: budget.overlay_bytes,
+                max_block_bytes: overlay_working_bytes.min(budget.overlay_bytes),
+            },
+            usage,
+            control,
+        )?;
+        Ok(effective)
     }
 
     pub(crate) fn apply_overlays(
@@ -595,26 +730,52 @@ impl Session {
     }
 }
 
+fn copy_classifications(
+    source_values: &[u8],
+    existing_working_bytes: u64,
+    max_working_bytes: u64,
+) -> Result<Vec<u8>, WorkspaceError> {
+    let source_bytes = u64::try_from(source_values.len()).unwrap_or(u64::MAX);
+    require_effective_working(
+        existing_working_bytes.saturating_add(source_bytes),
+        max_working_bytes,
+    )?;
+    let mut effective = Vec::new();
+    effective
+        .try_reserve_exact(source_values.len())
+        .map_err(|_| WorkspaceError::ResourceLimit {
+            limit: "effective classification working bytes",
+            required: source_bytes,
+            allowed: max_working_bytes,
+        })?;
+    require_effective_working(
+        existing_working_bytes.saturating_add(allocation_bytes::<u8>(effective.capacity())),
+        max_working_bytes,
+    )?;
+    effective.extend_from_slice(source_values);
+    Ok(effective)
+}
+
+fn require_effective_working(required: u64, allowed: u64) -> Result<(), WorkspaceError> {
+    if required > allowed {
+        return Err(WorkspaceError::ResourceLimit {
+            limit: "effective classification working bytes",
+            required,
+            allowed,
+        });
+    }
+    Ok(())
+}
+
 fn run_commit(
     session: &Arc<Session>,
     request: CommitRequest,
     limits: CommitLimits,
     phase: &Arc<PublicationPhase>,
     control: &OperationControl,
+    abandoned: &Arc<AtomicBool>,
 ) -> Result<CommitOutcome, WorkspaceError> {
-    session.ensure_mutable()?;
-    control.check_cancelled()?;
-    #[cfg(test)]
-    session.writer_waiters.fetch_add(1, Ordering::SeqCst);
-    let writer = session.writer.lock();
-    #[cfg(test)]
-    session.writer_waiters.fetch_sub(1, Ordering::SeqCst);
-    let _writer = writer.map_err(|_| WorkspaceError::Poisoned)?;
-    control.check_cancelled()?;
-    let mut certainty =
-        MutationCertaintyGuard::new(Arc::clone(&session.poisoned), Arc::clone(phase));
-    let result = (|| {
-        session.ensure_mutable()?;
+    run_guarded_mutation(session, phase, control, abandoned, || {
         let (operation, kind) = request.into_parts();
         match kind {
             CommitRequestKind::SetClassification { points, value } => {
@@ -624,9 +785,7 @@ fn run_commit(
                 commit_revert(session, operation, expected_head, limits, phase, control)
             }
         }
-    })();
-    certainty.observe(&result);
-    result
+    })
 }
 
 fn run_retry(
@@ -635,7 +794,40 @@ fn run_retry(
     limits: CommitLimits,
     phase: &Arc<PublicationPhase>,
     control: &OperationControl,
+    abandoned: &Arc<AtomicBool>,
 ) -> Result<CommitOutcome, WorkspaceError> {
+    run_guarded_mutation(session, phase, control, abandoned, || {
+        let state = operation_state(session, operation)?;
+        if let Err(uncertainty) = state.sync_durable_directory(session, operation) {
+            return Ok(CommitOutcome::Indeterminate(uncertainty));
+        }
+        let ready = match state {
+            OperationState::Committed(committed) => {
+                return Ok(CommitOutcome::Committed(receipt_from_revision(&committed)?));
+            }
+            OperationState::Rejected(rejection) => {
+                return Ok(CommitOutcome::Rejected(rejection_reason(rejection)?));
+            }
+            OperationState::Ready(ready) => ready,
+            OperationState::NotRecorded => {
+                return Err(WorkspaceError::OperationNotRetryable { operation });
+            }
+        };
+        enforce_ready_limits(&ready, limits)?;
+        commit_ready(session, &ready, limits, 0, phase, control)
+    })
+}
+
+fn run_guarded_mutation<F>(
+    session: &Arc<Session>,
+    phase: &Arc<PublicationPhase>,
+    control: &OperationControl,
+    abandoned: &Arc<AtomicBool>,
+    work: F,
+) -> Result<CommitOutcome, WorkspaceError>
+where
+    F: FnOnce() -> Result<CommitOutcome, WorkspaceError>,
+{
     session.ensure_mutable()?;
     control.check_cancelled()?;
     #[cfg(test)]
@@ -645,35 +837,15 @@ fn run_retry(
     session.writer_waiters.fetch_sub(1, Ordering::SeqCst);
     let _writer = writer.map_err(|_| WorkspaceError::Poisoned)?;
     control.check_cancelled()?;
-    let mut certainty =
-        MutationCertaintyGuard::new(Arc::clone(&session.poisoned), Arc::clone(phase));
-    let result = (|| {
-        session.ensure_mutable()?;
-        let (committed, record) = operation_state(session, operation)?;
-        if let Some(committed) = committed {
-            if let Some(outcome) = commit_sync_uncertainty(session, operation, false) {
-                return Ok(outcome);
-            }
-            return Ok(CommitOutcome::Committed(receipt_from_revision(&committed)?));
-        }
-        let Some(record) = record else {
-            return Err(WorkspaceError::OperationNotRetryable { operation });
-        };
-        if let Some(rejection) = record.rejection {
-            if let Some(outcome) = commit_sync_uncertainty(session, operation, true) {
-                return Ok(outcome);
-            }
-            return Ok(CommitOutcome::Rejected(rejection_reason(rejection)?));
-        }
-        let ready = record
-            .ready
-            .ok_or(WorkspaceError::OperationNotRetryable { operation })?;
-        if let Some(outcome) = commit_sync_uncertainty(session, operation, true) {
-            return Ok(outcome);
-        }
-        enforce_ready_limits(&ready, limits)?;
-        commit_ready(session, &ready, limits, 0, phase, control)
-    })();
+    let mut certainty = MutationCertaintyGuard::with_abandonment(
+        Arc::clone(&session.poisoned),
+        Arc::clone(phase),
+        Arc::clone(abandoned),
+    );
+    let result = match session.ensure_mutable() {
+        Ok(()) => work(),
+        Err(error) => Err(error),
+    };
     certainty.observe(&result);
     result
 }
@@ -819,7 +991,7 @@ fn commit_revert(
             revision: expected_head,
         })?;
     require(
-        head.facts.row_count,
+        head.row_count(),
         limits.max_changed_points(),
         "changed Points",
     )?;
@@ -913,20 +1085,20 @@ fn commit_ready(
     phase: &PublicationPhase,
     control: &OperationControl,
 ) -> Result<CommitOutcome, WorkspaceError> {
-    let expected = RevisionId::from_bytes(ready.facts.candidate.parent)?;
+    let expected = RevisionId::from_bytes(ready.parent())?;
     let actual = current_head(session)?;
     if expected != actual {
         return record_rejection(
             session,
-            OperationId::from_bytes(ready.facts.candidate.operation)?,
-            ready.facts.candidate.request_digest,
+            OperationId::from_bytes(ready.operation())?,
+            ready.request_digest(),
             CommitRejection::StaleHead { expected, actual },
             limits,
             phase,
             control,
         );
     }
-    if ready.facts.candidate.sequence != next_sequence(session)? {
+    if ready.sequence() != next_sequence(session)? {
         return Err(WorkspaceError::corrupt(
             "ready payload sequence is not the next linear Revision",
         ));
@@ -985,85 +1157,93 @@ fn existing_operation(
     phase: &PublicationPhase,
     control: &OperationControl,
 ) -> Result<Option<CommitOutcome>, WorkspaceError> {
-    let (committed, record) = operation_state(session, operation)?;
-    if let Some(committed) = committed {
-        if committed.facts.candidate.request_digest != request_digest {
-            return Ok(Some(CommitOutcome::Rejected(
-                CommitRejection::OperationConflict,
-            )));
-        }
-        if let Some(outcome) = commit_sync_uncertainty(session, operation, false) {
-            return Ok(Some(outcome));
-        }
-        return Ok(Some(CommitOutcome::Committed(receipt_from_revision(
-            &committed,
-        )?)));
-    }
-    let Some(record) = record else {
+    let state = operation_state(session, operation)?;
+    let Some(existing_digest) = state.request_digest() else {
         return Ok(None);
     };
-    if let Some(rejection) = record.rejection {
-        if rejection.request_digest != request_digest {
-            return Ok(Some(CommitOutcome::Rejected(
-                CommitRejection::OperationConflict,
-            )));
-        }
-        if let Some(outcome) = commit_sync_uncertainty(session, operation, true) {
-            return Ok(Some(outcome));
-        }
-        return Ok(Some(CommitOutcome::Rejected(rejection_reason(rejection)?)));
-    }
-    let Some(ready) = record.ready else {
-        return Ok(None);
-    };
-    if ready.facts.candidate.request_digest != request_digest {
+    if existing_digest != request_digest {
         return Ok(Some(CommitOutcome::Rejected(
             CommitRejection::OperationConflict,
         )));
     }
-    if let Some(outcome) = commit_sync_uncertainty(session, operation, true) {
-        return Ok(Some(outcome));
+    if let Err(uncertainty) = state.sync_durable_directory(session, operation) {
+        return Ok(Some(CommitOutcome::Indeterminate(uncertainty)));
     }
-    Ok(Some(commit_ready(
-        session, &ready, limits, 0, phase, control,
-    )?))
+    match state {
+        OperationState::Committed(committed) => Ok(Some(CommitOutcome::Committed(
+            receipt_from_revision(&committed)?,
+        ))),
+        OperationState::Rejected(rejection) => {
+            Ok(Some(CommitOutcome::Rejected(rejection_reason(rejection)?)))
+        }
+        OperationState::Ready(ready) => Ok(Some(commit_ready(
+            session, &ready, limits, 0, phase, control,
+        )?)),
+        OperationState::NotRecorded => Ok(None),
+    }
+}
+
+enum OperationState {
+    Committed(Arc<ValidatedRevision>),
+    Rejected(RejectionFacts),
+    Ready(Arc<ValidatedRevision>),
+    NotRecorded,
+}
+
+impl OperationState {
+    fn request_digest(&self) -> Option<[u8; 32]> {
+        match self {
+            Self::Committed(revision) | Self::Ready(revision) => Some(revision.request_digest()),
+            Self::Rejected(rejection) => Some(rejection.request_digest),
+            Self::NotRecorded => None,
+        }
+    }
+
+    fn sync_durable_directory(
+        &self,
+        session: &Session,
+        operation: OperationId,
+    ) -> Result<(), CommitUncertainty> {
+        let (result, phase) = match self {
+            Self::Committed(_) => (
+                session.store.sync_revisions(),
+                CommitPhase::RevisionDirectorySync,
+            ),
+            Self::Rejected(_) | Self::Ready(_) => (
+                session.store.sync_operations(),
+                CommitPhase::OperationPublication,
+            ),
+            Self::NotRecorded => return Ok(()),
+        };
+        result.map_err(|error| {
+            CommitUncertainty::new(operation, phase, map_persistence(error).to_string())
+        })
+    }
 }
 
 fn operation_state(
     session: &Session,
     operation: OperationId,
-) -> Result<(Option<Arc<ValidatedRevision>>, Option<OperationRecord>), WorkspaceError> {
+) -> Result<OperationState, WorkspaceError> {
     let catalog = session
         .catalog
         .read()
         .map_err(|_| WorkspaceError::Poisoned)?;
-    Ok((
-        catalog.committed_operation(operation.into_bytes()).cloned(),
-        catalog.operation(operation.into_bytes()).cloned(),
-    ))
-}
-
-fn commit_sync_uncertainty(
-    session: &Session,
-    operation: OperationId,
-    operation_directory: bool,
-) -> Option<CommitOutcome> {
-    let result = if operation_directory {
-        session.store.sync_operations()
-    } else {
-        session.store.sync_revisions()
+    if let Some(committed) = catalog.committed_operation(operation.into_bytes()) {
+        return Ok(OperationState::Committed(Arc::clone(committed)));
+    }
+    let Some(record) = catalog.operation(operation.into_bytes()) else {
+        return Ok(OperationState::NotRecorded);
     };
-    result.err().map(|error| {
-        CommitOutcome::Indeterminate(CommitUncertainty::new(
-            operation,
-            if operation_directory {
-                CommitPhase::OperationPublication
-            } else {
-                CommitPhase::RevisionDirectorySync
-            },
-            map_persistence(error).to_string(),
-        ))
-    })
+    if let Some(rejection) = record.rejection {
+        return Ok(OperationState::Rejected(rejection));
+    }
+    Ok(record
+        .ready
+        .as_ref()
+        .map_or(OperationState::NotRecorded, |ready| {
+            OperationState::Ready(Arc::clone(ready))
+        }))
 }
 
 struct PointSetRows<'a> {
@@ -1382,7 +1562,7 @@ fn enforce_ready_limits(
     ready: &ValidatedRevision,
     limits: CommitLimits,
 ) -> Result<(), WorkspaceError> {
-    if let Some(point_set) = ready.facts.candidate.point_set {
+    if let Some(point_set) = ready.point_set() {
         require(
             point_set.exact_count,
             limits.max_selected_points(),
@@ -1390,12 +1570,12 @@ fn enforce_ready_limits(
         )?;
     }
     require(
-        ready.facts.row_count,
+        ready.row_count(),
         limits.max_changed_points(),
         "changed Points",
     )?;
     require(
-        ready.facts.block_count,
+        ready.block_count(),
         limits.max_input_frames(),
         "ready input frames",
     )?;
@@ -1417,7 +1597,7 @@ fn enforce_ready_limits(
 }
 
 fn receipt_from_revision(revision: &ValidatedRevision) -> Result<CommitReceipt, WorkspaceError> {
-    let operation = OperationId::from_bytes(revision.facts.candidate.operation)?;
+    let operation = OperationId::from_bytes(revision.operation())?;
     Ok(CommitReceipt::new(
         operation,
         revision_info_from_persisted(revision)?,
@@ -1512,26 +1692,25 @@ fn recorded_intent(
     session: &Session,
     ready: &ValidatedRevision,
 ) -> Result<RecordedIntent, WorkspaceError> {
-    let candidate = ready.facts.candidate;
-    let operation = OperationId::from_bytes(candidate.operation)?;
-    let parent_revision = RevisionId::from_bytes(candidate.parent)?;
+    let operation = OperationId::from_bytes(ready.operation())?;
+    let parent_revision = RevisionId::from_bytes(ready.parent())?;
     let parent = SnapshotProvenance::new(
         session.identity,
         session.source().identity(),
         parent_revision,
     );
-    let revision = RevisionId::from_bytes(ready.facts.revision)?;
-    let kind = match candidate.kind {
+    let revision = RevisionId::from_bytes(ready.revision())?;
+    let kind = match ready.kind() {
         PersistedRevisionKind::SetClassification(value) => RevisionKind::SetClassification {
             value,
-            changed_points: ready.facts.row_count,
+            changed_points: ready.row_count(),
         },
         PersistedRevisionKind::Revert => RevisionKind::Revert {
             reverted_revision: parent_revision,
-            changed_points: ready.facts.row_count,
+            changed_points: ready.row_count(),
         },
     };
-    let point_set = candidate.point_set.map(|facts| {
+    let point_set = ready.point_set().map(|facts| {
         PointSetMetadata::new(
             parent,
             facts.exact_count,
@@ -1541,10 +1720,10 @@ fn recorded_intent(
     });
     Ok(RecordedIntent::new(
         operation,
-        ContentHash::new(candidate.request_digest),
+        ContentHash::new(ready.request_digest()),
         parent,
         revision,
-        candidate.sequence,
+        ready.sequence(),
         kind,
         point_set,
     ))
@@ -1571,47 +1750,25 @@ fn resolve_operation(
         .lock()
         .map_err(|_| WorkspaceError::Poisoned)?;
     session.ensure_mutable()?;
-    let (committed, record) = operation_state(session, operation)?;
-    if let Some(committed) = committed {
-        if let Err(error) = session.store.sync_revisions() {
-            session.poisoned.store(true, Ordering::SeqCst);
-            return Ok(OperationResolution::Indeterminate(CommitUncertainty::new(
-                operation,
-                CommitPhase::RevisionDirectorySync,
-                map_persistence(error).to_string(),
-            )));
-        }
-        return Ok(OperationResolution::Committed(receipt_from_revision(
-            &committed,
-        )?));
-    }
-    let Some(record) = record else {
-        return Ok(OperationResolution::NotRecorded);
-    };
-    if let Some(rejection) = record.rejection {
-        if let Err(error) = session.store.sync_operations() {
-            session.poisoned.store(true, Ordering::SeqCst);
-            return Ok(OperationResolution::Indeterminate(CommitUncertainty::new(
-                operation,
-                CommitPhase::OperationPublication,
-                map_persistence(error).to_string(),
-            )));
-        }
-        return Ok(OperationResolution::Rejected(recorded_rejection(
-            rejection,
-        )?));
-    }
-    let Some(ready) = record.ready else {
-        return Ok(OperationResolution::NotRecorded);
-    };
-    if let Err(error) = session.store.sync_operations() {
+    let state = operation_state(session, operation)?;
+    if let Err(uncertainty) = state.sync_durable_directory(session, operation) {
         session.poisoned.store(true, Ordering::SeqCst);
-        return Ok(OperationResolution::Indeterminate(CommitUncertainty::new(
-            operation,
-            CommitPhase::OperationPublication,
-            map_persistence(error).to_string(),
-        )));
+        return Ok(OperationResolution::Indeterminate(uncertainty));
     }
+    let ready = match state {
+        OperationState::Committed(committed) => {
+            return Ok(OperationResolution::Committed(receipt_from_revision(
+                &committed,
+            )?));
+        }
+        OperationState::Rejected(rejection) => {
+            return Ok(OperationResolution::Rejected(recorded_rejection(
+                rejection,
+            )?));
+        }
+        OperationState::Ready(ready) => ready,
+        OperationState::NotRecorded => return Ok(OperationResolution::NotRecorded),
+    };
     let intent = recorded_intent(session, &ready)?;
     if intent.parent().revision() == current_head(session)? {
         return Ok(OperationResolution::Retryable(Box::new(intent)));
@@ -1678,15 +1835,15 @@ fn create_workspace(
     control: &OperationControl,
 ) -> Result<Workspace, WorkspaceError> {
     control.check_cancelled()?;
-    schema.validate_source(index.source())?;
+    let classification = schema.classification_definition(index.source())?;
     validate_root_limits(limits)?;
     let identity = WorkspaceId::generate()?;
-    let source_contract = source_contract(index.source(), schema);
+    let source_contract = source_contract(index.source(), classification);
     let root_revision = root_revision(identity, index.source().identity(), source_contract)?;
     let manifest = manifest_facts(
         identity,
         index.source(),
-        schema,
+        classification,
         root_revision,
         source_contract,
     );
@@ -1722,10 +1879,10 @@ fn open_workspace(
     let store = Store::open(root).map_err(map_persistence)?;
     let manifest = store.read_manifest().map_err(map_persistence)?;
     let identity = WorkspaceId::from_bytes(manifest.workspace)?;
-    let classification = AttributeId::new(manifest.classification_attribute)?;
+    let classification = AttributeId::new(manifest.classification.id)?;
     let schema = WorkspaceSchema::new(classification);
-    schema.validate_source(index.source())?;
-    validate_manifest(&manifest, index.source(), schema)?;
+    let classification = schema.classification_definition(index.source())?;
+    validate_manifest(&manifest, index.source(), classification)?;
     control.check_cancelled()?;
     let catalog = store
         .recover(&manifest, catalog_limits(limits)?, control)
@@ -1812,7 +1969,7 @@ fn catalog_limits(limits: OpenLimits) -> Result<CatalogLimits, WorkspaceError> {
 fn manifest_facts(
     identity: WorkspaceId,
     source: &Source,
-    schema: WorkspaceSchema,
+    classification: &AttributeDefinition,
     root_revision: RevisionId,
     source_contract: [u8; 32],
 ) -> ManifestFacts {
@@ -1831,7 +1988,7 @@ fn manifest_facts(
             scale[1].to_bits(),
             scale[2].to_bits(),
         ],
-        classification_attribute: schema.classification().get(),
+        classification: persisted_attribute_definition(classification),
         root_revision: root_revision.into_bytes(),
         source_contract,
     }
@@ -1840,9 +1997,9 @@ fn manifest_facts(
 fn validate_manifest(
     manifest: &ManifestFacts,
     source: &Source,
-    schema: WorkspaceSchema,
+    classification: &AttributeDefinition,
 ) -> Result<(), WorkspaceError> {
-    let expected_contract = source_contract(source, schema);
+    let expected_contract = source_contract(source, classification);
     let expected_transform = source.metadata().position_transform();
     let expected_offset = expected_transform.offset();
     let expected_scale = expected_transform.scale();
@@ -1857,7 +2014,7 @@ fn validate_manifest(
     if manifest.source != source.identity().into_bytes()
         || manifest.source_point_count != source.metadata().point_count()
         || manifest.position_transform_bits != expected_transform_bits
-        || manifest.classification_attribute != schema.classification().get()
+        || manifest.classification != persisted_attribute_definition(classification)
         || manifest.source_contract != expected_contract
     {
         return Err(WorkspaceError::incompatible(
@@ -1874,7 +2031,7 @@ fn validate_manifest(
     Ok(())
 }
 
-fn source_contract(source: &Source, schema: WorkspaceSchema) -> [u8; 32] {
+fn source_contract(source: &Source, classification: &AttributeDefinition) -> [u8; 32] {
     let transform = source.metadata().position_transform();
     let mut hasher = Hasher::new();
     hasher.update(SOURCE_CONTRACT_DOMAIN);
@@ -1883,8 +2040,27 @@ fn source_contract(source: &Source, schema: WorkspaceSchema) -> [u8; 32] {
     for value in transform.offset().into_iter().chain(transform.scale()) {
         hasher.update(&value.to_bits().to_le_bytes());
     }
-    hasher.update(&schema.classification().get().to_le_bytes());
+    let definition = persisted_attribute_definition(classification);
+    hasher.update(&definition.id.to_le_bytes());
+    hasher.update(&definition.name_len.to_le_bytes());
+    hasher.update(&definition.name[..classification.name().len()]);
+    hasher.update(&[definition.data_type]);
     *hasher.finalize().as_bytes()
+}
+
+fn persisted_attribute_definition(
+    definition: &AttributeDefinition,
+) -> PersistedAttributeDefinition {
+    debug_assert_eq!(definition.data_type(), AttributeDataType::U8);
+    let mut name = [0_u8; MAX_ATTRIBUTE_NAME_BYTES];
+    name[..definition.name().len()].copy_from_slice(definition.name().as_bytes());
+    PersistedAttributeDefinition {
+        id: definition.id().get(),
+        name_len: u32::try_from(definition.name().len())
+            .expect("validated Attribute names fit in u32"),
+        name,
+        data_type: ATTRIBUTE_DATA_TYPE_U8,
+    }
 }
 
 fn root_revision(
@@ -1903,26 +2079,25 @@ fn root_revision(
 fn revision_info_from_persisted(
     persisted: &crate::persistence::ValidatedRevision,
 ) -> Result<RevisionInfo, WorkspaceError> {
-    let facts = persisted.facts;
-    let id = RevisionId::from_bytes(facts.revision)?;
-    let parent = RevisionId::from_bytes(facts.candidate.parent)?;
-    let operation = crate::model::OperationId::from_bytes(facts.candidate.operation)?;
-    let kind = match facts.candidate.kind {
+    let id = RevisionId::from_bytes(persisted.revision())?;
+    let parent = RevisionId::from_bytes(persisted.parent())?;
+    let operation = crate::model::OperationId::from_bytes(persisted.operation())?;
+    let kind = match persisted.kind() {
         crate::persistence::RevisionKind::SetClassification(value) => {
             RevisionKind::SetClassification {
                 value,
-                changed_points: facts.row_count,
+                changed_points: persisted.row_count(),
             }
         }
         crate::persistence::RevisionKind::Revert => RevisionKind::Revert {
             reverted_revision: parent,
-            changed_points: facts.row_count,
+            changed_points: persisted.row_count(),
         },
     };
     Ok(RevisionInfo::new(
         id,
         Some(parent),
-        facts.candidate.sequence,
+        persisted.sequence(),
         Some(operation),
         kind,
     ))
@@ -1993,34 +2168,20 @@ mod tests {
 
     #[test]
     fn manifest_requires_exact_single_file_capacity() {
-        let below = OpenLimits::new(
-            MANIFEST_BYTES as u64,
-            0,
-            1,
-            0,
-            0,
-            0,
-            MANIFEST_BYTES as u64 - 1,
-            MANIFEST_BYTES as u64,
-            0,
-            0,
-        );
+        let below = OpenLimits::new()
+            .with_max_manifest_bytes(MANIFEST_BYTES as u64)
+            .with_max_revision_files(1)
+            .with_max_single_file_bytes(MANIFEST_BYTES as u64 - 1)
+            .with_max_total_persisted_bytes(MANIFEST_BYTES as u64);
         assert!(matches!(
             validate_root_limits(below),
             Err(WorkspaceError::ResourceLimit { .. })
         ));
-        let exact = OpenLimits::new(
-            MANIFEST_BYTES as u64,
-            0,
-            1,
-            0,
-            0,
-            0,
-            MANIFEST_BYTES as u64,
-            MANIFEST_BYTES as u64,
-            0,
-            0,
-        );
+        let exact = OpenLimits::new()
+            .with_max_manifest_bytes(MANIFEST_BYTES as u64)
+            .with_max_revision_files(1)
+            .with_max_single_file_bytes(MANIFEST_BYTES as u64)
+            .with_max_total_persisted_bytes(MANIFEST_BYTES as u64);
         validate_root_limits(exact).expect("exact manifest single-file boundary");
     }
 
@@ -2121,6 +2282,59 @@ mod tests {
         }
     }
 
+    #[test]
+    fn manifest_rechecks_the_complete_classification_definition() {
+        use point_contracts::{
+            AttributeColumn, AttributeColumns, AttributeValues, CoordinateReference,
+            PositionTransform,
+        };
+        use source_memory::MemorySource;
+
+        let classification = AttributeId::new(7).expect("classification identity");
+        let definition =
+            AttributeDefinition::new(classification, "classification", AttributeDataType::U8)
+                .expect("classification definition");
+        let columns = AttributeColumns::new(
+            vec![
+                AttributeColumn::new(definition, AttributeValues::u8(vec![0]))
+                    .expect("classification column"),
+            ],
+            1,
+        )
+        .expect("aligned columns");
+        let source = source_memory::open(
+            MemorySource::from_columns(
+                PositionTransform::new([0.0; 3], [1.0; 3]).expect("transform"),
+                CoordinateReference::Unknown,
+                vec![[0, 0, 0]],
+                columns,
+            )
+            .expect("memory Source"),
+        )
+        .blocking_wait()
+        .expect("open Source");
+        let persisted_definition = source
+            .metadata()
+            .attributes()
+            .get(classification)
+            .expect("classification definition");
+        let identity = WorkspaceId::from_bytes([1; 16]).expect("Workspace identity");
+        let contract = source_contract(&source, persisted_definition);
+        let root = root_revision(identity, source.identity(), contract).expect("root Revision");
+        let manifest = manifest_facts(identity, &source, persisted_definition, root, contract);
+        let renamed = AttributeDefinition::new(
+            classification,
+            "semantic_classification",
+            AttributeDataType::U8,
+        )
+        .expect("renamed definition");
+
+        assert!(matches!(
+            validate_manifest(&manifest, &source, &renamed),
+            Err(WorkspaceError::Incompatible { .. })
+        ));
+    }
+
     // End-to-end fixture intentionally keeps create, reject, reopen, and
     // reconciliation in one test so the durable evidence cannot be partial.
     #[allow(clippy::too_many_lines)]
@@ -2217,7 +2431,7 @@ mod tests {
         let unknown = RevisionId::from_bytes([13; 32]).expect("opaque expected Revision");
         let stale = reopened
             .commit(
-                CommitRequest::revert(stale_operation, unknown),
+                CommitRequest::revert_head(stale_operation, unknown),
                 CommitLimits::default(),
             )
             .blocking_wait()
@@ -2383,6 +2597,21 @@ mod tests {
 
     #[test]
     fn dropping_commit_during_post_ready_panic_poisoned_retained_workspace() {
+        assert_dropped_commit_poisons(
+            FaultPoint::OperationLostAcknowledgement,
+            test_fault::Action::PauseThenPanic,
+        );
+    }
+
+    #[test]
+    fn dropping_completed_post_publication_commit_poisons_retained_workspace() {
+        assert_dropped_commit_poisons(
+            FaultPoint::RevisionLostAcknowledgement,
+            test_fault::Action::PauseThenContinue,
+        );
+    }
+
+    fn assert_dropped_commit_poisons(point: FaultPoint, action: test_fault::Action) {
         use point_contracts::{
             AttributeColumn, AttributeColumns, AttributeDataType, AttributeDefinition,
             AttributeValues, CoordinateReference, PositionTransform,
@@ -2437,11 +2666,7 @@ mod tests {
             .blocking_wait()
             .expect("select Point Set");
 
-        let fault = test_fault::Guard::install(
-            &workspace_path,
-            FaultPoint::OperationLostAcknowledgement,
-            test_fault::Action::PauseThenPanic,
-        );
+        let fault = test_fault::Guard::install(&workspace_path, point, action);
         let job = workspace.commit(
             CommitRequest::set_classification(
                 OperationId::from_bytes([1; 16]).expect("first Operation"),

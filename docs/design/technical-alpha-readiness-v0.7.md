@@ -273,7 +273,7 @@ pub fn resume_run(
     limits: WorkflowLimits,
 ) -> WorkflowJob;
 
-pub fn inspect_run(
+pub fn inspect_and_repair_run(
     run_root: impl AsRef<Path>,
     limits: WorkflowLimits,
 ) -> Result<WorkflowStatus, WorkflowFailure>;
@@ -288,13 +288,15 @@ Points, sorts them canonically, requires a nonempty unique ordinal set and
 unique Check Point identities, and rejects zero/invalid identities or equal
 Ground/replacement classes.
 
-`WorkflowReceipt` exposes Run, Operation, changed Revision, report hash/bytes,
-and frame count. `WorkflowStatus` exposes Run, Operation, verified frame count,
-and Complete status. `WorkflowLimits` composes the public index, Workspace row/
-selection/commit/audit, Terrain, QA, and LandXML limits with intent, envelope,
-journal, report, and aggregate working ceilings. Builders replace each public
-child-limit family and expose intent-count, envelope, journal-byte, report-byte,
-and aggregate-working controls for constrained runs and evidence.
+`WorkflowReceipt` exposes Run, Operation, changed Revision, and report
+hash/bytes. `WorkflowStatus` exposes Run, Operation, the last semantically
+validated durable `WorkflowPhase`, and Complete status. Private journal frame
+counts do not cross the application facade. `WorkflowLimits` composes the
+public index, Workspace row/selection/commit/audit, Terrain, QA, and LandXML
+limits with intent, envelope, journal, report, and aggregate working ceilings.
+Builders replace each public child-limit family and expose intent-count,
+envelope, journal-byte, report-byte, and aggregate-working controls for
+constrained runs and evidence.
 
 `WorkflowPaths` supplies Source, index, Workspace, and Run-root paths on every
 start or resume. Paths are not reconstructed from journal bytes. The journal
@@ -336,14 +338,14 @@ terrain-demo inspect RUN_ROOT
 ```
 
 Start/resume require `--run-id HEX32`, `--operation-id HEX32`,
-`--baseline HEX64`, one or more `--exclude-ground-ordinal N` values, and
-explicit `--date`/`--time` LandXML values. Detached observations use repeated
-`--check-point ID,X,Y,Z`; the replacement classification, Surface name, and
-explicit unknown-CRS metric assertion are bounded options. Resume repeats the
+`--baseline HEX64`, one or more `--exclude-ground-ordinal N` values, explicit
+`--date`/`--time` LandXML values, and `--assert-unknown-crs-metric`. Detached
+observations use repeated `--check-point ID,X,Y,Z`; the replacement
+classification and Surface name are bounded options. Resume repeats the
 identical request. Inspect opens only the Run root and reports Run, Operation,
-verified frame count, and Complete status. It may repair a torn final journal
-suffix to the last verified frame, but it never opens Source, index, Workspace,
-LandXML, or report state.
+the last semantically validated durable phase, and Complete status. It may
+repair a torn final journal suffix to the last verified frame, but it never
+opens Source, index, Workspace, LandXML, or report state.
 
 ## Journal format
 
@@ -652,8 +654,8 @@ the documented 10,000, 100,000, and 1,000,000-Point modes. The completed local
 | LandXML and report reconciliation | 96.871 ms | 97.629 ms | 98.365 ms |
 | Complete revalidation | 87.233 ms | 88.181 ms | 89.112 ms |
 
-The resulting journal was 2,804 bytes, the canonical report was 11,435 bytes,
-and the report named 114 semantic limit facts across eight frames. Worker peak
+The resulting journal was 2,804 bytes, the canonical report was 11,490 bytes,
+and the report named 115 semantic limit facts across eight frames. Worker peak
 heap is explicitly unmeasured. These observations use generated local data and
 are not labeled partner, production, downstream round-trip, or human-time
 evidence.

@@ -98,6 +98,7 @@ version, so a delayed plan cannot remove a newer replacement.
 
 ## Validation and errors
 
+The shared `render-protocol::Viewport` contract rejects empty physical extents.
 Planning rejects malformed hierarchy snapshots before updating hysteresis:
 
 - duplicate node or batch keys;
@@ -106,7 +107,7 @@ Planning rejects malformed hierarchy snapshots before updating hysteresis:
 - non-finite or inverted bounds;
 - negative or non-finite geometric error;
 - invalid node costs; and
-- an empty viewport or resource-accounting overflow.
+- resource-accounting overflow.
 
 An empty hierarchy produces no requests, retained nodes, or retirements. A
 fully culled hierarchy produces no requests or retention; resident batches are

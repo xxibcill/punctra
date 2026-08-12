@@ -1,7 +1,8 @@
 use std::{
+    ffi::OsString,
     fmt::{self, Write as _},
     fs::{self, File, OpenOptions},
-    io::{self, BufWriter, Read, Write},
+    io::{self, Read, Write},
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
 };
@@ -12,6 +13,7 @@ use point_contracts::ContentHash;
 
 use crate::{
     LandXmlDisposition, LandXmlJob, LandXmlLimits, LandXmlReceipt, TerrainError, TerrainSurface,
+    numeric::canonical_zero,
 };
 
 const LANDXML_NAMESPACE: &str = "http://www.landxml.org/schema/LandXML-1.2";
@@ -51,7 +53,7 @@ pub struct LandXmlOptions {
     surface_name: Box<str>,
     document_date: Box<str>,
     document_time: Box<str>,
-    allow_unknown_coordinate_reference: bool,
+    coordinates_are_metric_metres: bool,
 }
 
 impl LandXmlOptions {
@@ -66,32 +68,32 @@ impl LandXmlOptions {
     /// XML-invalid Surface name, an impossible calendar date, or an invalid
     /// UTC time.
     pub fn metric_metres(
-        surface_name: impl Into<String>,
-        document_date: impl Into<String>,
-        document_time: impl Into<String>,
+        surface_name: impl AsRef<str>,
+        document_date: impl AsRef<str>,
+        document_time: impl AsRef<str>,
     ) -> Result<Self, TerrainError> {
-        let surface_name = surface_name.into();
-        validate_surface_name(&surface_name)?;
-        let document_date = document_date.into();
-        validate_date(&document_date)?;
-        let document_time = document_time.into();
-        validate_time(&document_time)?;
+        let surface_name = surface_name.as_ref();
+        let document_date = document_date.as_ref();
+        let document_time = document_time.as_ref();
+        validate_surface_name(surface_name)?;
+        validate_date(document_date)?;
+        validate_time(document_time)?;
         Ok(Self {
-            surface_name: surface_name.into_boxed_str(),
-            document_date: document_date.into_boxed_str(),
-            document_time: document_time.into_boxed_str(),
-            allow_unknown_coordinate_reference: false,
+            surface_name: surface_name.into(),
+            document_date: document_date.into(),
+            document_time: document_time.into(),
+            coordinates_are_metric_metres: false,
         })
     }
 
-    /// Explicitly asserts that an unknown Source reference uses metric metres.
+    /// Explicitly asserts that Source coordinates use metric metres.
     ///
-    /// This does not infer, transform, or attach a Coordinate Reference. It is
-    /// the caller's checked assertion that Source X/Y/Z already mean easting,
-    /// northing, and elevation in metres.
+    /// The Coordinate Reference is opaque to this crate, so the exporter does
+    /// not infer or transform its units. This is the caller's checked assertion
+    /// that Source X/Y/Z already mean easting, northing, and elevation in metres.
     #[must_use]
-    pub fn allow_unknown_coordinate_reference_as_metric_metres(mut self) -> Self {
-        self.allow_unknown_coordinate_reference = true;
+    pub fn assert_coordinates_are_metric_metres(mut self) -> Self {
+        self.coordinates_are_metric_metres = true;
         self
     }
 
@@ -113,10 +115,10 @@ impl LandXmlOptions {
         &self.document_time
     }
 
-    /// Reports the explicit unknown-reference metric-metre assertion.
+    /// Reports the explicit Source-coordinate metric-metre assertion.
     #[must_use]
-    pub const fn allows_unknown_coordinate_reference(&self) -> bool {
-        self.allow_unknown_coordinate_reference
+    pub const fn coordinates_are_metric_metres_asserted(&self) -> bool {
+        self.coordinates_are_metric_metres
     }
 }
 
@@ -127,13 +129,15 @@ pub(crate) fn start(
     limits: LandXmlLimits,
 ) -> LandXmlJob {
     let surface = surface.clone();
-    let target = target.as_ref().to_path_buf();
+    let target = copy_target_path(target.as_ref(), limits);
     Job::spawn(move |control| {
-        publish(
+        let target = target?;
+        publish_accounted(
             &surface,
-            &target,
+            &target.path,
             &options,
             limits,
+            target.allocated_bytes,
             &control,
             &ProductionPublicationHook,
         )
@@ -147,24 +151,74 @@ pub(crate) fn start_ensure(
     limits: LandXmlLimits,
 ) -> LandXmlJob {
     let surface = surface.clone();
-    let target = target.as_ref().to_path_buf();
+    let target = copy_target_path(target.as_ref(), limits);
     Job::spawn(move |control| {
-        ensure(
+        let target = target?;
+        ensure_accounted(
             &surface,
-            &target,
+            &target.path,
             &options,
             limits,
+            target.allocated_bytes,
             &control,
             &ProductionPublicationHook,
         )
     })
 }
 
+struct OwnedTargetPath {
+    path: PathBuf,
+    allocated_bytes: u64,
+}
+
+fn copy_target_path(target: &Path, limits: LandXmlLimits) -> Result<OwnedTargetPath, TerrainError> {
+    let requested = target.as_os_str().as_encoded_bytes().len();
+    let requested_bytes = u64::try_from(requested).unwrap_or(u64::MAX);
+    require_limit(
+        "LandXML working bytes",
+        requested_bytes,
+        limits.max_working_bytes(),
+    )?;
+
+    let mut storage = OsString::new();
+    storage.try_reserve_exact(requested).map_err(|_| {
+        TerrainError::resource(
+            "LandXML target path allocation",
+            requested_bytes,
+            limits.max_working_bytes(),
+        )
+    })?;
+    storage.push(target.as_os_str());
+    let allocated_bytes = u64::try_from(storage.capacity()).unwrap_or(u64::MAX);
+    require_limit(
+        "LandXML working bytes",
+        allocated_bytes,
+        limits.max_working_bytes(),
+    )?;
+    Ok(OwnedTargetPath {
+        path: storage.into(),
+        allocated_bytes,
+    })
+}
+
+#[cfg(test)]
 fn publish<H: PublicationHook>(
     surface: &TerrainSurface,
     target: &Path,
     options: &LandXmlOptions,
     limits: LandXmlLimits,
+    control: &OperationControl,
+    hook: &H,
+) -> Result<LandXmlReceipt, TerrainError> {
+    publish_accounted(surface, target, options, limits, 0, control, hook)
+}
+
+fn publish_accounted<H: PublicationHook>(
+    surface: &TerrainSurface,
+    target: &Path,
+    options: &LandXmlOptions,
+    limits: LandXmlLimits,
+    retained_target_bytes: u64,
     control: &OperationControl,
     hook: &H,
 ) -> Result<LandXmlReceipt, TerrainError> {
@@ -186,7 +240,14 @@ fn publish<H: PublicationHook>(
         }
     }
 
-    let mut prepared = prepare_export(surface, target, options, limits, control)?;
+    let mut prepared = prepare_export(
+        surface,
+        target,
+        options,
+        limits,
+        retained_target_bytes,
+        control,
+    )?;
     hook.reach(PublicationBoundary::BeforeLink, control)
         .map_err(|error| {
             TerrainError::io("run LandXML pre-link boundary", target.display(), error)
@@ -211,6 +272,7 @@ fn publish<H: PublicationHook>(
         PublicationCompletion {
             target,
             buffer_bytes: prepared.buffer_bytes,
+            retained_target_bytes,
             limits,
             total_progress: prepared.total_progress,
             disposition: LandXmlDisposition::Created,
@@ -218,6 +280,7 @@ fn publish<H: PublicationHook>(
     )
 }
 
+#[cfg(test)]
 fn ensure<H: PublicationHook>(
     surface: &TerrainSurface,
     target: &Path,
@@ -226,9 +289,28 @@ fn ensure<H: PublicationHook>(
     control: &OperationControl,
     hook: &H,
 ) -> Result<LandXmlReceipt, TerrainError> {
+    ensure_accounted(surface, target, options, limits, 0, control, hook)
+}
+
+fn ensure_accounted<H: PublicationHook>(
+    surface: &TerrainSurface,
+    target: &Path,
+    options: &LandXmlOptions,
+    limits: LandXmlLimits,
+    retained_target_bytes: u64,
+    control: &OperationControl,
+    hook: &H,
+) -> Result<LandXmlReceipt, TerrainError> {
     control.check_cancelled()?;
     validate_export(surface, target, options, limits)?;
-    let mut prepared = prepare_export(surface, target, options, limits, control)?;
+    let mut prepared = prepare_export(
+        surface,
+        target,
+        options,
+        limits,
+        retained_target_bytes,
+        control,
+    )?;
     match fs::symlink_metadata(target) {
         Ok(metadata) => reconcile_existing(surface, target, &metadata, prepared, control, hook),
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
@@ -254,6 +336,7 @@ fn ensure<H: PublicationHook>(
                     PublicationCompletion {
                         target,
                         buffer_bytes: prepared.buffer_bytes,
+                        retained_target_bytes,
                         limits,
                         total_progress: prepared.total_progress,
                         disposition: LandXmlDisposition::Created,
@@ -285,6 +368,7 @@ struct PreparedExport<'a> {
     expected: FileFacts,
     target: &'a Path,
     buffer_bytes: usize,
+    retained_target_bytes: u64,
     total_progress: u64,
     limits: LandXmlLimits,
 }
@@ -294,6 +378,7 @@ fn prepare_export<'a>(
     target: &'a Path,
     options: &LandXmlOptions,
     limits: LandXmlLimits,
+    retained_target_bytes: u64,
     control: &OperationControl,
 ) -> Result<PreparedExport<'a>, TerrainError> {
     let parent_path = target_parent(target);
@@ -304,7 +389,8 @@ fn prepare_export<'a>(
             error,
         )
     })?;
-    let buffer_bytes = choose_buffer_bytes(limits)?;
+    let write_buffer = allocate_write_buffer(limits, retained_target_bytes)?;
+    let buffer_bytes = write_buffer.capacity();
     let (stage, stage_file) = create_stage(parent)?;
     let total_elements = surface
         .descriptor()
@@ -323,7 +409,7 @@ fn prepare_export<'a>(
         StageEncoding {
             file: stage_file,
             path: stage.path(),
-            buffer_bytes,
+            write_buffer,
         },
         EncodingProgress {
             elements: total_elements,
@@ -345,8 +431,14 @@ fn prepare_export<'a>(
         )
     })?;
     let stage_metadata = stage.metadata();
-    let verified =
-        verify_existing_regular_file(stage.path(), stage_metadata, buffer_bytes, limits, control)?;
+    let verified = verify_existing_regular_file(
+        stage.path(),
+        stage_metadata,
+        buffer_bytes,
+        retained_target_bytes,
+        limits,
+        control,
+    )?;
     stage.verify().map_err(|error| {
         TerrainError::io(
             "reverify LandXML stage ownership",
@@ -370,6 +462,7 @@ fn prepare_export<'a>(
         expected,
         target,
         buffer_bytes,
+        retained_target_bytes,
         total_progress,
         limits,
     })
@@ -379,6 +472,7 @@ fn prepare_export<'a>(
 struct PublicationCompletion<'a> {
     target: &'a Path,
     buffer_bytes: usize,
+    retained_target_bytes: u64,
     limits: LandXmlLimits,
     total_progress: u64,
     disposition: LandXmlDisposition,
@@ -402,6 +496,7 @@ fn finish_publication<H: PublicationHook>(
         stage,
         completion.target,
         completion.buffer_bytes,
+        completion.retained_target_bytes,
         completion.limits,
         control,
     )
@@ -409,7 +504,6 @@ fn finish_publication<H: PublicationHook>(
         expected_hash: expected.hash,
     })?;
     if published != *expected {
-        remove_mismatched_target_if_owned(stage, completion.target);
         return Err(TerrainError::ExportIndeterminate {
             expected_hash: expected.hash,
         });
@@ -472,26 +566,6 @@ fn finish_publication<H: PublicationHook>(
     Ok(receipt(surface, expected, completion.disposition))
 }
 
-#[cfg(unix)]
-fn remove_mismatched_target_if_owned(stage: &StageGuard, target: &Path) {
-    let Ok(stage_metadata) = stage.verified_metadata() else {
-        return;
-    };
-    let Ok(target_metadata) = fs::symlink_metadata(target) else {
-        return;
-    };
-    if stage_metadata.file_type().is_file()
-        && target_metadata.file_type().is_file()
-        && same_file_identity(&stage_metadata, &target_metadata)
-        && fs::remove_file(target).is_ok()
-    {
-        let _ = stage.sync_parent();
-    }
-}
-
-#[cfg(not(unix))]
-fn remove_mismatched_target_if_owned(_stage: &StageGuard, _target: &Path) {}
-
 fn reconcile_existing(
     surface: &TerrainSurface,
     target: &Path,
@@ -517,6 +591,7 @@ fn reconcile_existing(
         target,
         metadata,
         prepared.buffer_bytes,
+        prepared.retained_target_bytes,
         prepared.limits,
         control,
     )?;
@@ -599,6 +674,8 @@ fn receipt(
     LandXmlReceipt::new(
         disposition,
         surface.descriptor().artifact_hash(),
+        surface.descriptor().recipe_hash(),
+        surface.descriptor().input_hash(),
         surface.descriptor().geometry_hash(),
         surface.descriptor().topology_hash(),
         expected.hash,
@@ -630,7 +707,7 @@ fn encode_stage(
     progress: EncodingProgress,
 ) -> Result<FileFacts, TerrainError> {
     let bounded = BoundedHashWriter::new(stage.file, limits);
-    let mut writer = BufWriter::with_capacity(stage.buffer_bytes, bounded);
+    let mut writer = PreallocatedBufWriter::new(bounded, stage.write_buffer);
     write_document(
         &mut writer,
         surface,
@@ -640,10 +717,7 @@ fn encode_stage(
         progress.elements,
         progress.total,
     )?;
-    writer.flush().map_err(map_write_error)?;
-    let bounded = writer
-        .into_inner()
-        .map_err(|error| map_write_error(error.into_error()))?;
+    let bounded = writer.finish().map_err(map_write_error)?;
     let (file, hash, bytes) = bounded.finish();
     file.sync_all()
         .map_err(|error| TerrainError::io("sync LandXML stage", stage.path.display(), error))?;
@@ -654,7 +728,7 @@ fn encode_stage(
 struct StageEncoding<'a> {
     file: File,
     path: &'a Path,
-    buffer_bytes: usize,
+    write_buffer: Vec<u8>,
 }
 
 #[derive(Clone, Copy)]
@@ -704,12 +778,9 @@ fn validate_export(
         surface.descriptor().face_count(),
         limits.max_faces(),
     )?;
-    if surface.descriptor().coordinate_reference().is_unknown()
-        && !options.allows_unknown_coordinate_reference()
-    {
-        return Err(TerrainError::invalid(
-            "LandXML Coordinate Reference",
-            "unknown Source reference requires an explicit metric-metre assertion",
+    if !options.coordinates_are_metric_metres_asserted() {
+        return Err(TerrainError::unsupported_metric_export(
+            "Source coordinates require an explicit metric-metre assertion",
         ));
     }
     let escaped_name_bytes = escaped_len(options.surface_name())?;
@@ -980,6 +1051,7 @@ fn verify_linked_target(
     stage: &StageGuard,
     target: &Path,
     buffer_bytes: usize,
+    retained_target_bytes: u64,
     limits: LandXmlLimits,
     control: &OperationControl,
 ) -> Result<FileFacts, TerrainError> {
@@ -997,8 +1069,14 @@ fn verify_linked_target(
     if !same_file_identity(&stage_before, &target_before) {
         return Err(changed_target_error());
     }
-    let facts =
-        verify_existing_regular_file(target, &target_before, buffer_bytes, limits, control)?;
+    let facts = verify_existing_regular_file(
+        target,
+        &target_before,
+        buffer_bytes,
+        retained_target_bytes,
+        limits,
+        control,
+    )?;
     let stage_after = stage.verified_metadata().map_err(|error| {
         TerrainError::io(
             "reinspect linked LandXML stage",
@@ -1020,6 +1098,7 @@ fn verify_existing_regular_file(
     path: &Path,
     initial_metadata: &fs::Metadata,
     buffer_bytes: usize,
+    retained_target_bytes: u64,
     limits: LandXmlLimits,
     control: &OperationControl,
 ) -> Result<FileFacts, TerrainError> {
@@ -1034,7 +1113,14 @@ fn verify_existing_regular_file(
         .map_err(|error| TerrainError::io("reinspect LandXML target", path.display(), error))?;
     require_stable_target(initial_metadata, &opened_metadata, &current_metadata)?;
 
-    let facts = verify_open_file(&mut file, path, buffer_bytes, limits, Some(control))?;
+    let facts = verify_open_file(
+        &mut file,
+        path,
+        buffer_bytes,
+        retained_target_bytes,
+        limits,
+        Some(control),
+    )?;
     let verified_metadata = file.metadata().map_err(|error| {
         TerrainError::io("reinspect open LandXML target", path.display(), error)
     })?;
@@ -1055,9 +1141,16 @@ fn verify_open_file(
     file: &mut File,
     path: &Path,
     buffer_bytes: usize,
+    retained_target_bytes: u64,
     limits: LandXmlLimits,
     control: Option<&OperationControl>,
 ) -> Result<FileFacts, TerrainError> {
+    require_working_allocation(
+        "LandXML verification working bytes",
+        retained_target_bytes,
+        u64::try_from(buffer_bytes).unwrap_or(u64::MAX),
+        limits,
+    )?;
     let mut buffer = Vec::new();
     buffer.try_reserve_exact(buffer_bytes).map_err(|_| {
         TerrainError::resource(
@@ -1067,10 +1160,11 @@ fn verify_open_file(
         )
     })?;
     buffer.resize(buffer_bytes, 0);
-    require_limit(
+    require_working_allocation(
         "LandXML verification working bytes",
+        retained_target_bytes,
         u64::try_from(buffer.capacity()).unwrap_or(u64::MAX),
-        limits.max_working_bytes(),
+        limits,
     )?;
     let mut hasher = Hasher::new();
     let mut bytes = 0_u64;
@@ -1145,10 +1239,10 @@ fn same_file_identity(left: &fs::Metadata, right: &fs::Metadata) -> bool {
 fn same_file_identity(left: &fs::Metadata, right: &fs::Metadata) -> bool {
     use std::os::windows::fs::MetadataExt;
 
-    left.file_attributes() == right.file_attributes()
-        && left.creation_time() == right.creation_time()
-        && left.last_write_time() == right.last_write_time()
-        && left.file_size() == right.file_size()
+    left.volume_serial_number().is_some()
+        && left.volume_serial_number() == right.volume_serial_number()
+        && left.file_index().is_some()
+        && left.file_index() == right.file_index()
 }
 
 #[cfg(not(any(unix, windows)))]
@@ -1161,7 +1255,10 @@ fn sync_directory(path: &Path) -> io::Result<()> {
     File::open(path)?.sync_all()
 }
 
-fn choose_buffer_bytes(limits: LandXmlLimits) -> Result<usize, TerrainError> {
+fn allocate_write_buffer(
+    limits: LandXmlLimits,
+    retained_target_bytes: u64,
+) -> Result<Vec<u8>, TerrainError> {
     if limits.max_write_buffer_bytes() == 0 {
         return Err(TerrainError::resource(
             "LandXML write buffer bytes",
@@ -1169,23 +1266,58 @@ fn choose_buffer_bytes(limits: LandXmlLimits) -> Result<usize, TerrainError> {
             limits.max_write_buffer_bytes(),
         ));
     }
-    if limits.max_working_bytes() == 0 {
+    let available_working = limits
+        .max_working_bytes()
+        .saturating_sub(retained_target_bytes);
+    if available_working == 0 {
         return Err(TerrainError::resource(
             "LandXML working bytes",
-            1,
+            retained_target_bytes.saturating_add(1),
             limits.max_working_bytes(),
         ));
     }
-    let allowed = limits
-        .max_write_buffer_bytes()
-        .min(limits.max_working_bytes());
-    usize::try_from(allowed.min(64 * 1024)).map_err(|_| {
+    let allowed = limits.max_write_buffer_bytes().min(available_working);
+    let requested = usize::try_from(allowed.min(64 * 1024)).map_err(|_| {
         TerrainError::resource(
             "LandXML write buffer bytes",
             allowed,
             u64::try_from(usize::MAX).unwrap_or(u64::MAX),
         )
-    })
+    })?;
+    let mut buffer = Vec::new();
+    buffer.try_reserve_exact(requested).map_err(|_| {
+        TerrainError::resource(
+            "LandXML write buffer allocation",
+            u64::try_from(requested).unwrap_or(u64::MAX),
+            allowed,
+        )
+    })?;
+    let actual = u64::try_from(buffer.capacity()).unwrap_or(u64::MAX);
+    require_limit(
+        "LandXML write buffer bytes",
+        actual,
+        limits.max_write_buffer_bytes(),
+    )?;
+    require_working_allocation(
+        "LandXML working bytes",
+        retained_target_bytes,
+        actual,
+        limits,
+    )?;
+    Ok(buffer)
+}
+
+fn require_working_allocation(
+    name: &'static str,
+    retained_bytes: u64,
+    allocation_bytes: u64,
+    limits: LandXmlLimits,
+) -> Result<(), TerrainError> {
+    require_limit(
+        name,
+        retained_bytes.saturating_add(allocation_bytes),
+        limits.max_working_bytes(),
+    )
 }
 
 fn require_limit(name: &'static str, required: u64, allowed: u64) -> Result<(), TerrainError> {
@@ -1323,8 +1455,55 @@ fn escaped_len(value: &str) -> Result<usize, TerrainError> {
     })
 }
 
-fn canonical_zero(value: f64) -> f64 {
-    if value == 0.0 { 0.0 } else { value }
+struct PreallocatedBufWriter<W> {
+    inner: W,
+    buffer: Vec<u8>,
+}
+
+impl<W: Write> PreallocatedBufWriter<W> {
+    fn new(inner: W, buffer: Vec<u8>) -> Self {
+        debug_assert!(buffer.is_empty());
+        debug_assert!(buffer.capacity() > 0);
+        Self { inner, buffer }
+    }
+
+    fn flush_buffer(&mut self) -> io::Result<()> {
+        self.inner.write_all(&self.buffer)?;
+        self.buffer.clear();
+        Ok(())
+    }
+
+    fn finish(mut self) -> io::Result<W> {
+        self.flush()?;
+        Ok(self.inner)
+    }
+}
+
+impl<W: Write> Write for PreallocatedBufWriter<W> {
+    fn write(&mut self, input: &[u8]) -> io::Result<usize> {
+        if input.is_empty() {
+            return Ok(0);
+        }
+        if self.buffer.len() == self.buffer.capacity() {
+            self.flush_buffer()?;
+        }
+        if input.len() >= self.buffer.capacity() {
+            if !self.buffer.is_empty() {
+                self.flush_buffer()?;
+            }
+            return self.inner.write(input);
+        }
+        let written = input
+            .len()
+            .min(self.buffer.capacity().saturating_sub(self.buffer.len()));
+        self.buffer.extend_from_slice(&input[..written]);
+        Ok(written)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.flush_buffer()?;
+        self.inner.flush()
+    }
 }
 
 struct BoundedHashWriter {
@@ -1502,10 +1681,7 @@ fn same_directory_identity(left: &fs::Metadata, right: &fs::Metadata) -> bool {
 
 #[cfg(windows)]
 fn same_directory_identity(left: &fs::Metadata, right: &fs::Metadata) -> bool {
-    use std::os::windows::fs::MetadataExt;
-
-    left.file_attributes() == right.file_attributes()
-        && left.creation_time() == right.creation_time()
+    same_file_identity(left, right)
 }
 
 #[cfg(not(any(unix, windows)))]
@@ -1625,6 +1801,25 @@ mod tests {
     use super::*;
     use crate::{TerrainLimits, TerrainRecipe};
 
+    #[cfg(windows)]
+    #[test]
+    fn windows_identity_distinguishes_distinct_same_content_files() {
+        let fixture = ExportFixture::new("windows-identity");
+        let original = fixture.path("original.bin");
+        let linked = fixture.path("linked.bin");
+        let distinct = fixture.path("distinct.bin");
+        fs::write(&original, b"same bytes").expect("write original identity fixture");
+        fs::hard_link(&original, &linked).expect("create same-file hard link");
+        fs::write(&distinct, b"same bytes").expect("write distinct identity fixture");
+
+        let original = fs::metadata(original).expect("inspect original identity");
+        let linked = fs::metadata(linked).expect("inspect linked identity");
+        let distinct = fs::metadata(distinct).expect("inspect distinct identity");
+
+        assert!(same_file_identity(&original, &linked));
+        assert!(!same_file_identity(&original, &distinct));
+    }
+
     const GROUND: u8 = 2;
 
     #[derive(Clone, Copy)]
@@ -1651,6 +1846,21 @@ mod tests {
                 }
                 _ => Ok(()),
             }
+        }
+    }
+
+    struct CorruptTargetHook(PathBuf);
+
+    impl PublicationHook for CorruptTargetHook {
+        fn reach(
+            &self,
+            boundary: PublicationBoundary,
+            _control: &OperationControl,
+        ) -> io::Result<()> {
+            if boundary == PublicationBoundary::TargetVerification {
+                fs::write(&self.0, b"corrupted after publication")?;
+            }
+            Ok(())
         }
     }
 
@@ -1773,6 +1983,73 @@ mod tests {
             );
             fixture.assert_no_stages();
         }
+    }
+
+    #[test]
+    fn verification_mismatch_is_indeterminate_and_preserves_the_target() {
+        let fixture = ExportFixture::new("verification-mismatch");
+        let target = fixture.path("corrupted.xml");
+        let control = OperationControl::new();
+        let failure = publish(
+            &fixture.surface,
+            &target,
+            &options(),
+            LandXmlLimits::default(),
+            &control,
+            &CorruptTargetHook(target.clone()),
+        )
+        .expect_err("post-link verification mismatch returns no receipt");
+        let TerrainError::ExportIndeterminate { expected_hash } = failure else {
+            panic!("post-link verification mismatch must be indeterminate");
+        };
+        let published = fs::read(&target).expect("indeterminate target remains inspectable");
+        assert_ne!(
+            expected_hash,
+            ContentHash::new(*blake3::hash(&published).as_bytes())
+        );
+        assert_ne!(control.progress().phase(), ProgressPhase::COMPLETE);
+        fixture.assert_no_stages();
+    }
+
+    #[test]
+    fn declared_non_metric_reference_requires_an_explicit_metric_assertion() {
+        let coordinate_reference = CoordinateReference::wkt(
+            "PROJCRS[\"Local feet\",CS[Cartesian,3],LENGTHUNIT[\"foot\",0.3048]]",
+        )
+        .expect("fixture Coordinate Reference is valid");
+        let fixture =
+            ExportFixture::with_coordinate_reference("declared-feet", coordinate_reference);
+        let target = fixture.path("feet.xml");
+        let failure = publish(
+            &fixture.surface,
+            &target,
+            &LandXmlOptions::metric_metres("Feet", "2026-08-10", "12:34:56Z")
+                .expect("fixture LandXML options are valid"),
+            LandXmlLimits::default(),
+            &OperationControl::new(),
+            &ProductionPublicationHook,
+        )
+        .expect_err("opaque declared units are not guessed as metres");
+        assert!(matches!(
+            failure,
+            TerrainError::UnsupportedMetricExport { .. }
+        ));
+        assert!(!target.exists());
+
+        let receipt = publish(
+            &fixture.surface,
+            &target,
+            &LandXmlOptions::metric_metres("Feet", "2026-08-10", "12:34:56Z")
+                .expect("fixture LandXML options are valid")
+                .assert_coordinates_are_metric_metres(),
+            LandXmlLimits::default(),
+            &OperationControl::new(),
+            &ProductionPublicationHook,
+        )
+        .expect("explicitly asserted coordinates export deterministically");
+        assert!(receipt.byte_length() > 0);
+        assert!(target.exists());
+        fixture.assert_no_stages();
     }
 
     #[test]
@@ -2260,7 +2537,7 @@ mod tests {
     fn options() -> LandXmlOptions {
         LandXmlOptions::metric_metres("Fault Fixture", "2026-08-10", "12:34:56Z")
             .expect("fault fixture options are valid")
-            .allow_unknown_coordinate_reference_as_metric_metres()
+            .assert_coordinates_are_metric_metres()
     }
 
     struct ExportFixture {
@@ -2270,6 +2547,13 @@ mod tests {
 
     impl ExportFixture {
         fn new(label: &str) -> Self {
+            Self::with_coordinate_reference(label, CoordinateReference::Unknown)
+        }
+
+        fn with_coordinate_reference(
+            label: &str,
+            coordinate_reference: CoordinateReference,
+        ) -> Self {
             static NEXT_DIRECTORY: AtomicU64 = AtomicU64::new(1);
             let sequence = NEXT_DIRECTORY.fetch_add(1, Ordering::Relaxed);
             let directory = std::env::temp_dir().join(format!(
@@ -2293,7 +2577,7 @@ mod tests {
             let transform =
                 PositionTransform::new([0.0; 3], [1.0; 3]).expect("fixture transform is valid");
             let memory =
-                MemorySource::from_columns(transform, CoordinateReference::Unknown, ticks, columns)
+                MemorySource::from_columns(transform, coordinate_reference, ticks, columns)
                     .expect("fixture Source is valid");
             let source = source_memory::open(memory)
                 .blocking_wait()

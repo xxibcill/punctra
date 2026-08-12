@@ -12,7 +12,7 @@ use std::{
 
 use blake3::Hasher;
 use foundation_runtime::{Job, OperationControl};
-use point_contracts::{PointId, WorldBounds};
+use point_contracts::{ContentHash, PointId, WorldBounds};
 use point_index::{IndexError, PrepareLimits};
 use point_source::SourceError;
 use point_terrain::{
@@ -32,9 +32,10 @@ use crate::{
     },
     journal::{
         self, AuditObserved, Checkpoint, Complete, ExportEnsured, IntentCheckPoint, Journal,
-        JournalError, JournalLimits, QaObserved, ReportEnsured, RevisionResolved, RunId,
-        SurfaceObserved, WorkflowIntent as DurableIntent,
+        JournalError, JournalLimits, QaObserved, ReportEnsured, RevisionResolved, SurfaceObserved,
+        WorkflowIntent as DurableIntent, WorkflowRunId,
     },
+    publication::same_file_identity,
     report::{self, LimitFact, ReportError, ReportFacts, ReportLimits, SurfaceChangeEnvelope},
 };
 
@@ -45,6 +46,7 @@ const SEMANTIC_HASH_DOMAIN: &[u8] = b"punctra-terrain-workflow-semantic-results-
 const LAS_CLASSIFICATION_ATTRIBUTE: u32 = 6;
 const MAX_INTENT_ORDINALS: usize = 1_000;
 const MAX_INTENT_CHECK_POINTS: usize = 256;
+const LIMIT_FACT_COUNT: usize = 115;
 
 /// Caller-owned paths for one durable terrain Workflow Run.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -92,14 +94,52 @@ impl WorkflowPaths {
 /// Complete caller-selected immutable intent for one Workflow Run.
 #[derive(Clone, Debug)]
 pub struct WorkflowRunIntent {
-    run: [u8; 16],
-    operation: [u8; 16],
-    baseline_revision: [u8; 32],
+    run: WorkflowRunId,
+    operation: OperationId,
+    baseline_revision: RevisionId,
     correction_ordinals: Box<[u64]>,
     non_ground_classification: u8,
     recipe: TerrainRecipe,
     check_points: Box<[CheckPoint]>,
     landxml: LandXmlOptions,
+}
+
+/// Last semantically validated durable phase of one Workflow Run.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum WorkflowPhase {
+    /// The immutable Run intent and bindings are durable.
+    IntentRecorded,
+    /// The Workspace Operation has one resolved Revision.
+    RevisionResolved,
+    /// The exact Revision Audit has been observed.
+    AuditObserved,
+    /// Both Terrain Surfaces and their change envelope have been observed.
+    SurfacesObserved,
+    /// Detached Check Point QA has been observed.
+    QaObserved,
+    /// The exact `LandXML` output has been ensured.
+    ExportEnsured,
+    /// The canonical audit report has been ensured.
+    ReportEnsured,
+    /// Every final fact has been revalidated and the Run is complete.
+    Complete,
+}
+
+impl WorkflowPhase {
+    /// Returns the stable presentation name for this semantic phase.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::IntentRecorded => "intent-recorded",
+            Self::RevisionResolved => "revision-resolved",
+            Self::AuditObserved => "audit-observed",
+            Self::SurfacesObserved => "surfaces-observed",
+            Self::QaObserved => "qa-observed",
+            Self::ExportEnsured => "export-ensured",
+            Self::ReportEnsured => "report-ensured",
+            Self::Complete => "complete",
+        }
+    }
 }
 
 impl WorkflowRunIntent {
@@ -111,15 +151,21 @@ impl WorkflowRunIntent {
     /// identity, classification, ordinal set, or Check Point set is invalid.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        run: [u8; 16],
-        operation: [u8; 16],
-        baseline_revision: [u8; 32],
+        run: WorkflowRunId,
+        operation: OperationId,
+        baseline_revision: RevisionId,
         correction_ordinals: impl IntoIterator<Item = u64>,
         non_ground_classification: u8,
         recipe: TerrainRecipe,
         check_points: impl IntoIterator<Item = CheckPoint>,
         landxml: LandXmlOptions,
     ) -> Result<Self, WorkflowFailure> {
+        if !landxml.coordinates_are_metric_metres_asserted() {
+            return Err(WorkflowFailure::invalid(
+                WorkflowStage::Validate,
+                "LandXML requires an explicit metric-metre coordinate assertion",
+            ));
+        }
         let mut ordinals = collect_bounded(
             correction_ordinals,
             MAX_INTENT_ORDINALS,
@@ -132,12 +178,6 @@ impl WorkflowRunIntent {
                 "correction ordinals must be a nonempty unique set",
             ));
         }
-        RunId::new(run)
-            .map_err(|error| WorkflowFailure::invalid(WorkflowStage::Validate, error))?;
-        OperationId::from_bytes(operation)
-            .map_err(|error| WorkflowFailure::invalid(WorkflowStage::Validate, error))?;
-        RevisionId::from_bytes(baseline_revision)
-            .map_err(|error| WorkflowFailure::invalid(WorkflowStage::Validate, error))?;
         if recipe.ground_classification() == non_ground_classification {
             return Err(WorkflowFailure::invalid(
                 WorkflowStage::Validate,
@@ -173,19 +213,19 @@ impl WorkflowRunIntent {
 
     /// Returns the caller-owned Run identity.
     #[must_use]
-    pub const fn run(&self) -> [u8; 16] {
+    pub const fn run(&self) -> WorkflowRunId {
         self.run
     }
 
     /// Returns the caller-owned durable Workspace Operation identity.
     #[must_use]
-    pub const fn operation(&self) -> [u8; 16] {
+    pub const fn operation(&self) -> OperationId {
         self.operation
     }
 
     /// Returns the expected baseline Revision identity.
     #[must_use]
-    pub const fn baseline_revision(&self) -> [u8; 32] {
+    pub const fn baseline_revision(&self) -> RevisionId {
         self.baseline_revision
     }
 }
@@ -336,33 +376,32 @@ impl WorkflowLimits {
 /// Successful stable facts for one complete Workflow Run.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct WorkflowReceipt {
-    run: [u8; 16],
-    operation: [u8; 16],
-    revision: [u8; 32],
-    report_hash: [u8; 32],
+    run: WorkflowRunId,
+    operation: OperationId,
+    revision: RevisionId,
+    report_hash: ContentHash,
     report_bytes: u64,
-    frame_count: u64,
 }
 
 impl WorkflowReceipt {
     /// Returns the Run identity.
     #[must_use]
-    pub const fn run(self) -> [u8; 16] {
+    pub const fn run(self) -> WorkflowRunId {
         self.run
     }
     /// Returns the Workspace Operation identity.
     #[must_use]
-    pub const fn operation(self) -> [u8; 16] {
+    pub const fn operation(self) -> OperationId {
         self.operation
     }
     /// Returns the changed Revision identity.
     #[must_use]
-    pub const fn revision(self) -> [u8; 32] {
+    pub const fn revision(self) -> RevisionId {
         self.revision
     }
     /// Returns the canonical report byte hash.
     #[must_use]
-    pub const fn report_hash(self) -> [u8; 32] {
+    pub const fn report_hash(self) -> ContentHash {
         self.report_hash
     }
     /// Returns the canonical report byte count.
@@ -370,42 +409,36 @@ impl WorkflowReceipt {
     pub const fn report_bytes(self) -> u64 {
         self.report_bytes
     }
-    /// Returns the exact durable journal frame count.
-    #[must_use]
-    pub const fn frame_count(self) -> u64 {
-        self.frame_count
-    }
 }
 
 /// Verified journal status for one Run.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct WorkflowStatus {
-    run: [u8; 16],
-    operation: [u8; 16],
-    frame_count: u64,
-    complete: bool,
+    run: WorkflowRunId,
+    operation: OperationId,
+    phase: WorkflowPhase,
 }
 
 impl WorkflowStatus {
     /// Returns the Run identity.
     #[must_use]
-    pub const fn run(self) -> [u8; 16] {
+    pub const fn run(self) -> WorkflowRunId {
         self.run
     }
     /// Returns the durable Operation identity.
     #[must_use]
-    pub const fn operation(self) -> [u8; 16] {
+    pub const fn operation(self) -> OperationId {
         self.operation
     }
-    /// Returns the exact verified frame count.
+    /// Returns the last semantically validated durable phase.
     #[must_use]
-    pub const fn frame_count(self) -> u64 {
-        self.frame_count
+    pub const fn phase(self) -> WorkflowPhase {
+        self.phase
     }
     /// Reports whether the Complete checkpoint is durable.
     #[must_use]
     pub const fn is_complete(self) -> bool {
-        self.complete
+        matches!(self.phase, WorkflowPhase::Complete)
     }
 }
 
@@ -432,44 +465,81 @@ pub fn resume_run(
     Job::spawn(move |control| run(&paths, &intent, &limits, false, &control))
 }
 
-/// Inspects one journal after verifying its format, hash chain, and semantic links.
+/// Inspects one journal and durably repairs a torn final suffix when needed.
+///
+/// A repair truncates the journal to its last verified checkpoint and syncs that
+/// truncation before returning the semantic durable status.
 ///
 /// # Errors
 ///
 /// Returns a structured failure when the Run lock, journal bytes, hash chain,
 /// semantic checkpoint links, or resource limits cannot be verified.
-pub fn inspect_run(
+pub fn inspect_and_repair_run(
     run_root: impl AsRef<Path>,
     limits: WorkflowLimits,
 ) -> Result<WorkflowStatus, WorkflowFailure> {
     let run_root = run_root.as_ref();
+    require_workflow_bytes(
+        limits.journal.max_working_bytes,
+        limits.max_aggregate_working_bytes,
+        WorkflowStage::Inspect,
+        FailureContext::default(),
+    )?;
     let witness = DirectoryWitness::capture(run_root)
         .map_err(|error| io_failure(WorkflowStage::Inspect, error, FailureContext::default()))?;
-    let _lock = RunLock::acquire(&run_root.join("run.lock"))
+    let lock = RunLock::acquire(&run_root.join("run.lock"))
         .map_err(|error| lock_failure(error, FailureContext::default()))?;
-    witness
-        .verify()
+    verify_run_binding(&lock, &witness)
         .map_err(|error| io_failure(WorkflowStage::Inspect, error, FailureContext::default()))?;
     let journal = Journal::open(&run_root.join("run.pwf"), limits.journal).map_err(|error| {
         journal_failure(WorkflowStage::Inspect, error, FailureContext::default())
     })?;
-    witness.verify().map_err(|error| {
+    let context = durable_context(journal.run(), journal.intent());
+    verify_run_binding(&lock, &witness).map_err(|error| {
         WorkflowFailure::new(
             FailureCode::PublicationIndeterminate,
             WorkflowStage::Inspect,
             Certainty::Indeterminate(PublicationPhase::JournalCheckpoint),
-            FailureContext::default(),
+            context,
             error,
             RecoveryAction::ResumeSameRun,
         )
     })?;
     let intent = journal.intent();
-    Ok(WorkflowStatus {
-        run: journal.run().into_bytes(),
-        operation: intent.operation,
-        frame_count: usize_u64(journal.checkpoints().len()),
-        complete: matches!(journal.checkpoints().last(), Some(Checkpoint::Complete(_))),
-    })
+    let operation = OperationId::from_bytes(intent.operation).map_err(|_| {
+        journal_failure(
+            WorkflowStage::Inspect,
+            JournalError::Invalid("Workspace Operation Identity is all zero"),
+            context,
+        )
+    })?;
+    let phase = journal
+        .checkpoints()
+        .last()
+        .map(checkpoint_phase)
+        .ok_or_else(|| {
+            journal_failure(
+                WorkflowStage::Inspect,
+                JournalError::Corrupt("journal has no validated durable phase"),
+                context,
+            )
+        })?;
+    let status = WorkflowStatus {
+        run: journal.run(),
+        operation,
+        phase,
+    };
+    verify_run_binding(&lock, &witness).map_err(|error| {
+        WorkflowFailure::new(
+            FailureCode::PublicationIndeterminate,
+            WorkflowStage::Inspect,
+            Certainty::Indeterminate(PublicationPhase::JournalCheckpoint),
+            context,
+            error,
+            RecoveryAction::ResumeSameRun,
+        )
+    })?;
+    Ok(status)
 }
 
 fn run(
@@ -482,21 +552,32 @@ fn run(
     validate_run_root(&paths.run_root, base_context(request))?;
     let witness = DirectoryWitness::capture(&paths.run_root)
         .map_err(|error| io_failure(WorkflowStage::Validate, error, base_context(request)))?;
-    let _lock = RunLock::acquire(&paths.lock())
+    let lock = RunLock::acquire(&paths.lock())
         .map_err(|error| lock_failure(error, base_context(request)))?;
-    witness
-        .verify()
+    verify_run_binding(&lock, &witness)
         .map_err(|error| io_failure(WorkflowStage::Lock, error, base_context(request)))?;
 
+    require_workflow_bytes(
+        request_retained_bytes(request),
+        limits.max_aggregate_working_bytes,
+        WorkflowStage::Source,
+        base_context(request),
+    )?;
     let path_bindings = path_bindings(paths)
         .map_err(|error| journal_failure(WorkflowStage::Validate, error, base_context(request)))?;
     let resumed_journal = if start {
         None
     } else {
+        require_workflow_bytes(
+            request_retained_bytes(request).saturating_add(limits.journal.max_working_bytes),
+            limits.max_aggregate_working_bytes,
+            WorkflowStage::Intent,
+            base_context(request),
+        )?;
         let journal = Journal::open(&paths.journal(), limits.journal).map_err(|error| {
             journal_failure(WorkflowStage::Intent, error, base_context(request))
         })?;
-        witness.verify().map_err(|error| {
+        verify_run_binding(&lock, &witness).map_err(|error| {
             WorkflowFailure::new(
                 FailureCode::PublicationIndeterminate,
                 WorkflowStage::Intent,
@@ -509,18 +590,27 @@ fn run(
         validate_supplied_intent(journal.intent(), request, path_bindings)?;
         Some(journal)
     };
+    let entry_retained_bytes = run_entry_retained_bytes(request, resumed_journal.as_ref());
+    require_workflow_bytes(
+        entry_retained_bytes,
+        limits.max_aggregate_working_bytes,
+        WorkflowStage::Source,
+        base_context(request),
+    )?;
 
     let source = source_las::open(&paths.source)
         .blocking_wait_cancelled_by(&control.token())
         .map_err(|error| {
             source_failure(WorkflowStage::Source, error, control, base_context(request))
         })?;
+    verify_run_binding(&lock, &witness)
+        .map_err(|error| io_failure(WorkflowStage::Source, error, base_context(request)))?;
     let source_id = source.identity();
     if let Some(journal) = resumed_journal.as_ref()
         && journal.intent().source != source_id.into_bytes()
     {
         let mut mismatch_context = base_context(request);
-        mismatch_context.source = Some(source_id.into_bytes());
+        mismatch_context.source = Some(source_id);
         return Err(WorkflowFailure::new(
             FailureCode::SourceMismatch,
             WorkflowStage::Source,
@@ -530,15 +620,38 @@ fn run(
             RecoveryAction::RestoreExpectedSource,
         ));
     }
+    require_workflow_bytes(
+        entry_retained_bytes
+            .saturating_add(limits.prepare.max_source_batch_payload_bytes())
+            .saturating_add(limits.prepare.max_adapter_working_bytes())
+            .saturating_add(limits.prepare.max_build_working_bytes())
+            .saturating_add(limits.prepare.max_resident_metadata_bytes()),
+        limits.max_aggregate_working_bytes,
+        WorkflowStage::Index,
+        base_context(request),
+    )?;
     let index = point_index::prepare(source, &paths.index, limits.prepare)
         .blocking_wait_cancelled_by(&control.token())
         .map_err(|error| {
             index_failure(WorkflowStage::Index, error, control, base_context(request))
         })?;
+    verify_run_binding(&lock, &witness)
+        .map_err(|error| io_failure(WorkflowStage::Index, error, base_context(request)))?;
     let mut context = base_context(request);
-    context.source = Some(source_id.into_bytes());
+    context.source = Some(source_id);
+    require_workflow_bytes(
+        entry_retained_bytes
+            .saturating_add(limits.prepare.max_resident_metadata_bytes())
+            .saturating_add(limits.open.max_working_bytes())
+            .saturating_add(limits.open.max_resident_metadata_bytes()),
+        limits.max_aggregate_working_bytes,
+        WorkflowStage::Workspace,
+        context,
+    )?;
     let workspace = open_workspace(index, &paths.workspace, limits.open, control, context)?;
-    context.workspace = Some(workspace.identity().into_bytes());
+    verify_run_binding(&lock, &witness)
+        .map_err(|error| io_failure(WorkflowStage::Workspace, error, context))?;
+    context.workspace = Some(workspace.identity());
     if let Some(journal) = resumed_journal.as_ref()
         && journal.intent().workspace != workspace.identity().into_bytes()
     {
@@ -574,8 +687,7 @@ fn run(
             RecoveryAction::CorrectInvalidRequest,
         ));
     }
-    let baseline_id = RevisionId::from_bytes(request.baseline_revision)
-        .map_err(|error| WorkflowFailure::invalid(WorkflowStage::Validate, error))?;
+    let baseline_id = request.baseline_revision;
     if start && workspace.head().provenance().revision() != baseline_id {
         return Err(WorkflowFailure::new(
             FailureCode::StaleBaseline,
@@ -587,10 +699,9 @@ fn run(
         ));
     }
     require_workflow_bytes(
-        request_retained_bytes(request)
+        entry_retained_bytes
             .saturating_add(limits.prepare.max_resident_metadata_bytes())
             .saturating_add(limits.open.max_resident_metadata_bytes())
-            .saturating_add(resumed_journal.as_ref().map_or(0, Journal::retained_bytes))
             .saturating_add(limits.rows.max_working_bytes()),
         limits.max_aggregate_working_bytes,
         WorkflowStage::Selection,
@@ -604,6 +715,17 @@ fn run(
         control,
         context,
     )?;
+    verify_run_binding(&lock, &witness)
+        .map_err(|error| io_failure(WorkflowStage::Selection, error, context))?;
+    require_workflow_bytes(
+        entry_retained_bytes
+            .saturating_add(limits.prepare.max_resident_metadata_bytes())
+            .saturating_add(limits.open.max_resident_metadata_bytes())
+            .saturating_add(limits.journal.max_working_bytes),
+        limits.max_aggregate_working_bytes,
+        WorkflowStage::Intent,
+        context,
+    )?;
     let durable = durable_intent(
         request,
         source_id.into_bytes(),
@@ -612,8 +734,7 @@ fn run(
         limits.journal,
     )
     .map_err(|error| journal_failure(WorkflowStage::Validate, error, context))?;
-    witness
-        .verify()
+    verify_run_binding(&lock, &witness)
         .map_err(|error| io_failure(WorkflowStage::Intent, error, context))?;
     let mut journal = if start {
         Journal::create(&paths.journal(), durable, limits.journal)
@@ -632,7 +753,7 @@ fn run(
         }
         journal
     };
-    witness.verify().map_err(|error| {
+    verify_run_binding(&lock, &witness).map_err(|error| {
         if start {
             WorkflowFailure::new(
                 FailureCode::PublicationIndeterminate,
@@ -653,6 +774,7 @@ fn run(
         &workspace,
         &mut journal,
         &witness,
+        &lock,
         control,
         context,
     )
@@ -665,13 +787,12 @@ fn advance(
     workspace: &Workspace,
     journal: &mut Journal,
     witness: &DirectoryWitness,
+    lock: &RunLock,
     control: &OperationControl,
     mut context: FailureContext,
 ) -> Result<WorkflowReceipt, WorkflowFailure> {
-    let baseline_id = RevisionId::from_bytes(request.baseline_revision)
-        .map_err(|error| WorkflowFailure::invalid(WorkflowStage::Validate, error))?;
-    let operation = OperationId::from_bytes(request.operation)
-        .map_err(|error| WorkflowFailure::invalid(WorkflowStage::Validate, error))?;
+    let baseline_id = request.baseline_revision;
+    let operation = request.operation;
     let resolution = workspace.resolve_operation(operation).map_err(|error| {
         workspace_failure(WorkflowStage::ResolveOperation, error, control, context)
     })?;
@@ -707,12 +828,15 @@ fn advance(
         .blocking_wait_cancelled_by(&control.token())
         .map_err(|error| workspace_failure(WorkflowStage::Selection, error, control, context))?;
     if expected_points.metadata().exact_count() != usize_u64(request.correction_ordinals.len()) {
-        return Err(WorkflowFailure::invalid(
+        return Err(WorkflowFailure::invalid_with_context(
             WorkflowStage::Selection,
+            context,
             "one or more explicit ordinals do not exist",
         ));
     }
     let expected_metadata = *expected_points.metadata();
+    verify_run_binding(lock, witness)
+        .map_err(|error| io_failure(WorkflowStage::Selection, error, context))?;
     require_workflow_bytes(
         workflow_retained_bytes(journal, request, limits)
             .saturating_add(limits.selection.max_resident_bytes())
@@ -732,7 +856,24 @@ fn advance(
         control,
         context,
     )?;
-    context.revision = Some(revision.id().into_bytes());
+    context.revision = Some(revision.id());
+    let revision_fact = RevisionResolved {
+        operation: request.operation.into_bytes(),
+        revision: revision.id().into_bytes(),
+        parent: revision.parent().unwrap_or(baseline_id).into_bytes(),
+        sequence: revision.sequence(),
+        kind: 1,
+    };
+    record(
+        journal,
+        witness,
+        lock,
+        control,
+        Checkpoint::RevisionResolved(revision_fact),
+        WorkflowStage::ResolveOperation,
+        context,
+    )?;
+
     require_workflow_bytes(
         workflow_retained_bytes(journal, request, limits)
             .saturating_add(limits.audit.max_working_bytes()),
@@ -753,26 +894,11 @@ fn advance(
         expected_metadata.point_id_hash(),
         context,
     )?;
-    let revision_fact = RevisionResolved {
-        operation: request.operation,
-        revision: revision.id().into_bytes(),
-        parent: revision.parent().unwrap_or(baseline_id).into_bytes(),
-        sequence: revision.sequence(),
-        kind: 1,
-    };
-    record(
-        journal,
-        witness,
-        control,
-        Checkpoint::RevisionResolved(revision_fact),
-        WorkflowStage::ResolveOperation,
-        context,
-    )?;
-
     let audit_fact = audit_checkpoint(&audit);
     record(
         journal,
         witness,
+        lock,
         control,
         Checkpoint::AuditObserved(audit_fact),
         WorkflowStage::RevisionAudit,
@@ -797,6 +923,8 @@ fn advance(
     )
     .blocking_wait_cancelled_by(&control.token())
     .map_err(|error| terrain_failure(WorkflowStage::Terrain, error, control, context))?;
+    verify_run_binding(lock, witness)
+        .map_err(|error| io_failure(WorkflowStage::Terrain, error, context))?;
     require_workflow_bytes(
         workflow_retained_bytes(journal, request, limits)
             .saturating_add(audit.retained_result_bytes())
@@ -815,6 +943,8 @@ fn advance(
     )
     .blocking_wait_cancelled_by(&control.token())
     .map_err(|error| terrain_failure(WorkflowStage::Terrain, error, control, context))?;
+    verify_run_binding(lock, witness)
+        .map_err(|error| io_failure(WorkflowStage::Terrain, error, context))?;
     require_workflow_bytes(
         workflow_retained_bytes(journal, request, limits)
             .saturating_add(audit.retained_result_bytes())
@@ -843,22 +973,22 @@ fn advance(
     record(
         journal,
         witness,
+        lock,
         control,
         Checkpoint::SurfaceObserved(surface_fact),
         WorkflowStage::Terrain,
         context,
     )?;
 
-    require_workflow_bytes(
-        retained_observations_bytes(journal, request, limits, &audit, &baseline, &changed)
-            .saturating_add(limits.qa.max_working_bytes()),
-        limits.max_aggregate_working_bytes,
-        WorkflowStage::CheckPointQa,
+    let qa_input = copy_check_points_for_job(
+        &request.check_points,
+        retained_observations_bytes(journal, request, limits, &audit, &baseline, &changed),
+        limits,
         context,
     )?;
 
     let qa = changed
-        .check_points(request.check_points.iter().copied(), limits.qa)
+        .check_points(qa_input, limits.qa)
         .blocking_wait_cancelled_by(&control.token())
         .map_err(|error| terrain_failure(WorkflowStage::CheckPointQa, error, control, context))?;
     let qa_hash = qa_hash(&qa, control)
@@ -871,6 +1001,7 @@ fn advance(
     record(
         journal,
         witness,
+        lock,
         control,
         Checkpoint::QaObserved(qa_fact),
         WorkflowStage::CheckPointQa,
@@ -885,19 +1016,12 @@ fn advance(
         WorkflowStage::LandXml,
         context,
     )?;
-    witness
-        .verify()
+    verify_run_binding(lock, witness)
         .map_err(|error| io_failure(WorkflowStage::LandXml, error, context))?;
     let landxml = changed
         .ensure_landxml(paths.landxml(), request.landxml.clone(), limits.landxml)
         .blocking_wait_cancelled_by(&control.token())
-        .map_err(|error| {
-            if control.check_cancelled().is_err() {
-                cancelled_failure(WorkflowStage::LandXml, context)
-            } else {
-                terrain_output_failure(WorkflowStage::LandXml, error, control, context)
-            }
-        })?;
+        .map_err(|error| terrain_output_failure(WorkflowStage::LandXml, error, control, context))?;
     let export_fact = ExportEnsured {
         revision: revision.id().into_bytes(),
         surface_artifact_hash: changed.descriptor().artifact_hash().into_bytes(),
@@ -910,6 +1034,7 @@ fn advance(
     record(
         journal,
         witness,
+        lock,
         control,
         Checkpoint::ExportEnsured(export_fact),
         WorkflowStage::LandXml,
@@ -924,7 +1049,8 @@ fn advance(
         retained_observations_bytes(journal, request, limits, &audit, &baseline, &changed)
             .saturating_add(qa_retained_bytes(&qa))
             .saturating_add(
-                usize_u64(114).saturating_mul(usize_u64(std::mem::size_of::<LimitFact>())),
+                usize_u64(LIMIT_FACT_COUNT)
+                    .saturating_mul(usize_u64(std::mem::size_of::<LimitFact>())),
             ),
         limits.max_aggregate_working_bytes,
         WorkflowStage::Report,
@@ -969,8 +1095,7 @@ fn advance(
         landxml,
         limits: &limit_facts,
     };
-    witness
-        .verify()
+    verify_run_binding(lock, witness)
         .map_err(|error| io_failure(WorkflowStage::Report, error, context))?;
     let report = report::ensure_report(&paths.report(), &report_facts, limits.report, control)
         .map_err(|error| report_failure(WorkflowStage::Report, error, context))?;
@@ -986,6 +1111,7 @@ fn advance(
     record(
         journal,
         witness,
+        lock,
         control,
         Checkpoint::ReportEnsured(report_fact),
         WorkflowStage::Report,
@@ -994,18 +1120,13 @@ fn advance(
     control
         .check_cancelled()
         .map_err(|_| cancelled_failure(WorkflowStage::Complete, context))?;
-    witness
-        .verify()
+    verify_run_binding(lock, witness)
         .map_err(|error| io_failure(WorkflowStage::Complete, error, context))?;
     let final_landxml = changed
         .ensure_landxml(paths.landxml(), request.landxml.clone(), limits.landxml)
         .blocking_wait_cancelled_by(&control.token())
         .map_err(|error| {
-            if control.check_cancelled().is_err() {
-                cancelled_failure(WorkflowStage::Complete, context)
-            } else {
-                terrain_output_failure(WorkflowStage::Complete, error, control, context)
-            }
+            terrain_output_failure(WorkflowStage::Complete, error, control, context)
         })?;
     if final_landxml.content_hash() != landxml.content_hash()
         || final_landxml.byte_length() != landxml.byte_length()
@@ -1051,6 +1172,7 @@ fn advance(
     record(
         journal,
         witness,
+        lock,
         control,
         Checkpoint::Complete(complete),
         WorkflowStage::Complete,
@@ -1066,14 +1188,28 @@ fn advance(
             RecoveryAction::ResumeSameRun,
         )
     })?;
+    verify_run_binding(lock, witness)
+        .map_err(|error| checkpoint_binding_failure(WorkflowStage::Complete, error, context))?;
     Ok(WorkflowReceipt {
         run: request.run,
         operation: request.operation,
-        revision: revision.id().into_bytes(),
-        report_hash: report.content_hash,
+        revision: revision.id(),
+        report_hash: ContentHash::new(report.content_hash),
         report_bytes: report.byte_length,
-        frame_count: usize_u64(journal.checkpoints().len()),
     })
+}
+
+fn checkpoint_phase(checkpoint: &Checkpoint) -> WorkflowPhase {
+    match checkpoint {
+        Checkpoint::Intent(_) => WorkflowPhase::IntentRecorded,
+        Checkpoint::RevisionResolved(_) => WorkflowPhase::RevisionResolved,
+        Checkpoint::AuditObserved(_) => WorkflowPhase::AuditObserved,
+        Checkpoint::SurfaceObserved(_) => WorkflowPhase::SurfacesObserved,
+        Checkpoint::QaObserved(_) => WorkflowPhase::QaObserved,
+        Checkpoint::ExportEnsured(_) => WorkflowPhase::ExportEnsured,
+        Checkpoint::ReportEnsured(_) => WorkflowPhase::ReportEnsured,
+        Checkpoint::Complete(_) => WorkflowPhase::Complete,
+    }
 }
 
 fn open_workspace(
@@ -1282,8 +1418,9 @@ fn validate_ground_ordinals(
         for ordinal in batch.ordinals() {
             if let Some(expected) = request.correction_ordinals.get(next_requested) {
                 if expected < ordinal {
-                    return Err(WorkflowFailure::invalid(
+                    return Err(WorkflowFailure::invalid_with_context(
                         WorkflowStage::Selection,
+                        context,
                         "a correction ordinal is not Ground in the expected baseline",
                     ));
                 }
@@ -1294,8 +1431,9 @@ fn validate_ground_ordinals(
         }
     }
     if next_requested != request.correction_ordinals.len() {
-        return Err(WorkflowFailure::invalid(
+        return Err(WorkflowFailure::invalid_with_context(
             WorkflowStage::Selection,
+            context,
             "every correction ordinal must be Ground in the expected baseline and Recipe bounds",
         ));
     }
@@ -1310,11 +1448,11 @@ fn durable_intent(
     limits: JournalLimits,
 ) -> Result<DurableIntent, JournalError> {
     DurableIntent::new(
-        RunId::new(request.run)?,
+        request.run,
         source,
         workspace,
-        request.baseline_revision,
-        request.operation,
+        request.baseline_revision.into_bytes(),
+        request.operation.into_bytes(),
         request.correction_ordinals.clone(),
         request.recipe.ground_classification(),
         request.non_ground_classification,
@@ -1330,7 +1468,7 @@ fn durable_intent(
         request.landxml.surface_name().into(),
         request.landxml.document_date().into(),
         request.landxml.document_time().into(),
-        request.landxml.allows_unknown_coordinate_reference(),
+        request.landxml.coordinates_are_metric_metres_asserted(),
         bindings,
         limits,
     )
@@ -1350,9 +1488,9 @@ fn validate_supplied_intent(
                 left.id == right.id().get()
                     && left.position_bits == right.position().map(f64::to_bits)
             });
-    if durable.run.into_bytes() != supplied.run
-        || durable.operation != supplied.operation
-        || durable.baseline_revision != supplied.baseline_revision
+    if durable.run != supplied.run
+        || durable.operation != supplied.operation.into_bytes()
+        || durable.baseline_revision != supplied.baseline_revision.into_bytes()
         || durable.correction_ordinals.as_ref() != supplied.correction_ordinals.as_ref()
         || durable.ground_classification != supplied.recipe.ground_classification()
         || durable.non_ground_classification != supplied.non_ground_classification
@@ -1361,7 +1499,8 @@ fn validate_supplied_intent(
         || durable.surface_name.as_ref() != supplied.landxml.surface_name()
         || durable.document_date.as_ref() != supplied.landxml.document_date()
         || durable.document_time.as_ref() != supplied.landxml.document_time()
-        || durable.allow_unknown_metric != supplied.landxml.allows_unknown_coordinate_reference()
+        || durable.coordinates_are_metric_metres_asserted
+            != supplied.landxml.coordinates_are_metric_metres_asserted()
         || durable.path_bindings != path_bindings
     {
         return Err(WorkflowFailure::new(
@@ -1728,16 +1867,15 @@ fn limit_facts(
     limits: &WorkflowLimits,
     control: &OperationControl,
 ) -> Result<Vec<LimitFact>, &'static str> {
-    const FACT_COUNT: usize = 114;
     poll_control(control)?;
     let mut facts = Vec::new();
     facts
-        .try_reserve_exact(FACT_COUNT)
+        .try_reserve_exact(LIMIT_FACT_COUNT)
         .map_err(|_| "Workflow Limit Fact allocation failed")?;
 
     macro_rules! fact {
         ($name:expr, $value:expr) => {{
-            if facts.len() == FACT_COUNT {
+            if facts.len() == LIMIT_FACT_COUNT {
                 return Err("Workflow Limit Fact schema exceeded its fixed bound");
             }
             facts.push(LimitFact {
@@ -1971,6 +2109,7 @@ fn limit_facts(
         "journal.max_surface_name_bytes",
         limits.journal.max_surface_name_bytes
     );
+    fact!("journal.max_path_binding_bytes", PATH_BINDING_BYTES);
 
     fact!("report.max_output_bytes", limits.report.max_output_bytes);
     fact!("report.max_staging_bytes", limits.report.max_staging_bytes);
@@ -1989,7 +2128,7 @@ fn limit_facts(
         limits.max_aggregate_working_bytes
     );
     poll_control(control)?;
-    if facts.len() != FACT_COUNT {
+    if facts.len() != LIMIT_FACT_COUNT {
         return Err("Workflow Limit Fact schema is incomplete");
     }
     Ok(facts)
@@ -1998,6 +2137,7 @@ fn limit_facts(
 fn record(
     journal: &mut Journal,
     witness: &DirectoryWitness,
+    lock: &RunLock,
     control: &OperationControl,
     checkpoint: Checkpoint,
     stage: WorkflowStage,
@@ -2006,27 +2146,33 @@ fn record(
     control
         .check_cancelled()
         .map_err(|_| cancelled_failure(stage, context))?;
-    witness
-        .verify()
-        .map_err(|error| io_failure(stage, error, context))?;
+    verify_run_binding(lock, witness).map_err(|error| io_failure(stage, error, context))?;
     journal
         .record(checkpoint)
         .map(|_| ())
         .map_err(|error| journal_failure(stage, error, context))?;
-    witness.verify().map_err(|error| {
-        WorkflowFailure::new(
-            FailureCode::PublicationIndeterminate,
-            stage,
-            Certainty::Indeterminate(if stage == WorkflowStage::Complete {
-                PublicationPhase::CompleteCheckpoint
-            } else {
-                PublicationPhase::JournalCheckpoint
-            }),
-            context,
-            error,
-            RecoveryAction::ResumeSameRun,
-        )
-    })
+    verify_run_binding(lock, witness)
+        .map_err(|error| checkpoint_binding_failure(stage, error, context))
+}
+
+fn checkpoint_binding_failure(
+    stage: WorkflowStage,
+    error: io::Error,
+    context: FailureContext,
+) -> WorkflowFailure {
+    let publication_phase = if stage == WorkflowStage::Complete {
+        PublicationPhase::CompleteCheckpoint
+    } else {
+        PublicationPhase::JournalCheckpoint
+    };
+    WorkflowFailure::new(
+        FailureCode::PublicationIndeterminate,
+        stage,
+        Certainty::Indeterminate(publication_phase),
+        context,
+        error,
+        RecoveryAction::ResumeSameRun,
+    )
 }
 
 fn bounds_bits(bounds: Option<WorldBounds>) -> Option<[[u64; 2]; 3]> {
@@ -2043,10 +2189,20 @@ fn bounds_bits(bounds: Option<WorldBounds>) -> Option<[[u64; 2]; 3]> {
 
 fn base_context(request: &WorkflowRunIntent) -> FailureContext {
     FailureContext {
-        run: RunId::new(request.run).ok(),
+        run: Some(request.run),
         operation: Some(request.operation),
         revision: Some(request.baseline_revision),
         ..FailureContext::default()
+    }
+}
+
+fn durable_context(run: WorkflowRunId, intent: &DurableIntent) -> FailureContext {
+    FailureContext {
+        run: Some(run),
+        source: Some(point_contracts::SourceId::new(intent.source)),
+        workspace: point_workspace::WorkspaceId::from_bytes(intent.workspace).ok(),
+        operation: OperationId::from_bytes(intent.operation).ok(),
+        revision: RevisionId::from_bytes(intent.baseline_revision).ok(),
     }
 }
 
@@ -2162,9 +2318,7 @@ fn source_failure(
             FailureCode::ResourceLimit,
             RecoveryAction::RaiseLimitOrNarrow,
         ),
-        SourceError::InvalidBudget { .. }
-        | SourceError::InvalidSourceSpan { .. }
-        | SourceError::UnknownAttribute { .. } => (
+        SourceError::InvalidBudget { .. } | SourceError::InvalidSourceSpan { .. } => (
             FailureCode::InvalidRequest,
             RecoveryAction::CorrectInvalidRequest,
         ),
@@ -2543,17 +2697,19 @@ fn validate_run_root(path: &Path, context: FailureContext) -> Result<(), Workflo
 }
 
 struct RunLock {
-    _file: File,
+    file: File,
+    path: PathBuf,
+    identity: fs::Metadata,
 }
 
 impl RunLock {
     fn acquire(path: &Path) -> io::Result<Self> {
         let initial = match fs::symlink_metadata(path) {
             Ok(metadata) => {
-                if !metadata.file_type().is_file() {
+                if !is_empty_regular_lock(&metadata) {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidInput,
-                        "run.lock is not a regular non-symlink file",
+                        "run.lock must be an empty regular non-symlink file",
                     ));
                 }
                 Some(metadata)
@@ -2569,12 +2725,12 @@ impl RunLock {
             .open(path)?;
         let opened = file.metadata()?;
         let current = fs::symlink_metadata(path)?;
-        if !opened.file_type().is_file()
-            || !current.file_type().is_file()
-            || !lock_same_file_identity(&opened, &current)
+        if !is_empty_regular_lock(&opened)
+            || !is_empty_regular_lock(&current)
+            || !same_file_identity(&opened, &current)
             || initial
                 .as_ref()
-                .is_some_and(|value| !lock_same_file_identity(value, &opened))
+                .is_some_and(|value| !same_file_identity(value, &opened))
         {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -2583,36 +2739,44 @@ impl RunLock {
         }
         file.try_lock().map_err(io::Error::from)?;
         let locked_path = fs::symlink_metadata(path)?;
-        if !locked_path.file_type().is_file() || !lock_same_file_identity(&opened, &locked_path) {
+        if !is_empty_regular_lock(&locked_path) || !same_file_identity(&opened, &locked_path) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                "run.lock changed identity while it was locked",
+                "run.lock changed identity or contents while it was locked",
             ));
         }
-        Ok(Self { _file: file })
+        Ok(Self {
+            file,
+            path: path.to_path_buf(),
+            identity: opened,
+        })
+    }
+
+    fn verify(&self) -> io::Result<()> {
+        let opened = self.file.metadata()?;
+        let current = fs::symlink_metadata(&self.path)?;
+        if is_empty_regular_lock(&opened)
+            && is_empty_regular_lock(&current)
+            && same_file_identity(&self.identity, &opened)
+            && same_file_identity(&opened, &current)
+        {
+            Ok(())
+        } else {
+            Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "run.lock path no longer names the locked file",
+            ))
+        }
     }
 }
 
-#[cfg(unix)]
-fn lock_same_file_identity(left: &fs::Metadata, right: &fs::Metadata) -> bool {
-    use std::os::unix::fs::MetadataExt;
-
-    left.dev() == right.dev() && left.ino() == right.ino()
+fn is_empty_regular_lock(metadata: &fs::Metadata) -> bool {
+    metadata.file_type().is_file() && metadata.len() == 0
 }
 
-#[cfg(windows)]
-fn lock_same_file_identity(left: &fs::Metadata, right: &fs::Metadata) -> bool {
-    use std::os::windows::fs::MetadataExt;
-
-    left.file_attributes() == right.file_attributes()
-        && left.creation_time() == right.creation_time()
-        && left.last_write_time() == right.last_write_time()
-        && left.file_size() == right.file_size()
-}
-
-#[cfg(not(any(unix, windows)))]
-fn lock_same_file_identity(_left: &fs::Metadata, _right: &fs::Metadata) -> bool {
-    false
+fn verify_run_binding(lock: &RunLock, witness: &DirectoryWitness) -> io::Result<()> {
+    witness.verify()?;
+    lock.verify()
 }
 
 struct DirectoryWitness {
@@ -2621,6 +2785,10 @@ struct DirectoryWitness {
     device: u64,
     #[cfg(unix)]
     inode: u64,
+    #[cfg(windows)]
+    volume_serial_number: u32,
+    #[cfg(windows)]
+    file_index: u64,
 }
 
 impl DirectoryWitness {
@@ -2641,19 +2809,47 @@ impl DirectoryWitness {
                 inode: metadata.ino(),
             })
         }
-        #[cfg(not(unix))]
+        #[cfg(windows)]
         {
-            let _ = metadata;
+            use std::os::windows::fs::MetadataExt;
+
+            let volume_serial_number = metadata.volume_serial_number().ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "Run root volume identity is unavailable",
+                )
+            })?;
+            let file_index = metadata.file_index().ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "Run root file identity is unavailable",
+                )
+            })?;
             Ok(Self {
                 path: path.to_path_buf(),
+                volume_serial_number,
+                file_index,
             })
         }
+        #[cfg(not(any(unix, windows)))]
+        Ok(Self {
+            path: path.to_path_buf(),
+        })
     }
 
     fn verify(&self) -> io::Result<()> {
         let current = Self::capture(&self.path)?;
         #[cfg(unix)]
         if current.device != self.device || current.inode != self.inode {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Run root directory identity changed",
+            ));
+        }
+        #[cfg(windows)]
+        if current.volume_serial_number != self.volume_serial_number
+            || current.file_index != self.file_index
+        {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "Run root directory identity changed",
@@ -2677,6 +2873,10 @@ fn workflow_retained_bytes(
         .saturating_add(limits.prepare.max_resident_metadata_bytes())
         .saturating_add(limits.open.max_resident_metadata_bytes())
         .saturating_add(request_retained_bytes(request))
+}
+
+fn run_entry_retained_bytes(request: &WorkflowRunIntent, journal: Option<&Journal>) -> u64 {
+    request_retained_bytes(request).saturating_add(journal.map_or(0, Journal::retained_bytes))
 }
 
 fn request_retained_bytes(request: &WorkflowRunIntent) -> u64 {
@@ -2711,6 +2911,60 @@ fn retained_observations_bytes(
 fn qa_retained_bytes(qa: &point_terrain::CheckPointReport) -> u64 {
     usize_u64(std::mem::size_of::<point_terrain::CheckPointReport>())
         .saturating_add(usize_u64(std::mem::size_of_val(qa.results())))
+}
+
+fn copy_check_points_for_job(
+    check_points: &[CheckPoint],
+    retained_bytes: u64,
+    limits: &WorkflowLimits,
+    context: FailureContext,
+) -> Result<Vec<CheckPoint>, WorkflowFailure> {
+    let count = usize_u64(check_points.len());
+    if count > limits.qa.max_check_points() {
+        return Err(WorkflowFailure::new(
+            FailureCode::ResourceLimit,
+            WorkflowStage::CheckPointQa,
+            Certainty::PrePublication,
+            context,
+            format_args!(
+                "detached Check Point count requires {count}, limit {}",
+                limits.qa.max_check_points()
+            ),
+            RecoveryAction::RaiseLimitOrNarrow,
+        ));
+    }
+    let requested_bytes = usize_u64(std::mem::size_of_val(check_points));
+    require_workflow_bytes(
+        retained_bytes
+            .saturating_add(requested_bytes)
+            .saturating_add(limits.qa.max_working_bytes()),
+        limits.max_aggregate_working_bytes,
+        WorkflowStage::CheckPointQa,
+        context,
+    )?;
+    let mut owned = Vec::new();
+    owned.try_reserve_exact(check_points.len()).map_err(|_| {
+        WorkflowFailure::new(
+            FailureCode::ResourceLimit,
+            WorkflowStage::CheckPointQa,
+            Certainty::PrePublication,
+            context,
+            "failed to allocate bounded detached Check Point job input",
+            RecoveryAction::RaiseLimitOrNarrow,
+        )
+    })?;
+    let allocated_bytes =
+        usize_u64(owned.capacity()).saturating_mul(usize_u64(std::mem::size_of::<CheckPoint>()));
+    require_workflow_bytes(
+        retained_bytes
+            .saturating_add(allocated_bytes)
+            .saturating_add(limits.qa.max_working_bytes()),
+        limits.max_aggregate_working_bytes,
+        WorkflowStage::CheckPointQa,
+        context,
+    )?;
+    owned.extend_from_slice(check_points);
+    Ok(owned)
 }
 
 fn require_workflow_bytes(
@@ -2788,6 +3042,206 @@ mod tests {
     use point_workspace::{WorkspaceSchema, create};
 
     use super::workflow_test_support::{TestDirectory, write_las_family_fixture};
+
+    #[test]
+    fn run_root_witness_detects_same_path_replacement() {
+        let directory = TestDirectory::new("run-root-witness").expect("create test directory");
+        let run_root = directory.path().join("run-root");
+        let moved_root = directory.path().join("moved-run-root");
+        fs::create_dir(&run_root).expect("create witnessed Run root");
+        let witness = DirectoryWitness::capture(&run_root).expect("capture Run root identity");
+
+        fs::rename(&run_root, &moved_root).expect("move witnessed Run root");
+        fs::create_dir(&run_root).expect("install same-path replacement");
+
+        assert!(witness.verify().is_err());
+
+        fs::remove_dir(&run_root).expect("remove replacement Run root");
+        fs::rename(&moved_root, &run_root).expect("restore witnessed Run root");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn run_lock_detects_same_path_replacement_while_held() {
+        let directory = TestDirectory::new("run-lock-witness").expect("create test directory");
+        let path = directory.path().join("run.lock");
+        let moved = directory.path().join("moved.lock");
+        let lock = RunLock::acquire(&path).expect("acquire original Run lock");
+
+        fs::rename(&path, &moved).expect("move locked path");
+        File::create(&path).expect("install replacement lock file");
+        let replacement = RunLock::acquire(&path).expect("replacement path has a distinct lock");
+
+        assert!(lock.verify().is_err());
+
+        drop(replacement);
+        fs::remove_file(&path).expect("remove replacement lock");
+        fs::rename(&moved, &path).expect("restore original lock path");
+        assert!(lock.verify().is_ok());
+    }
+
+    #[test]
+    fn durable_context_preserves_valid_identities_when_operation_is_invalid() {
+        let run = WorkflowRunId::new([1; 16]).expect("nonzero Run identity");
+        let mut intent = DurableIntent::new(
+            run,
+            [2; 32],
+            [3; 16],
+            [4; 32],
+            [5; 16],
+            vec![7].into_boxed_slice(),
+            2,
+            1,
+            None,
+            Vec::new().into_boxed_slice(),
+            "Ground".into(),
+            "2026-08-12".into(),
+            "00:00:00Z".into(),
+            true,
+            [[6; 32], [7; 32], [8; 32], [9; 32]],
+            JournalLimits::default(),
+        )
+        .expect("create valid durable Intent");
+        intent.operation = [0; 16];
+
+        let context = durable_context(run, &intent);
+
+        assert_eq!(context.run, Some(run));
+        assert_eq!(
+            context.source,
+            Some(point_contracts::SourceId::new([2; 32]))
+        );
+        assert_eq!(
+            context.workspace,
+            Some(point_workspace::WorkspaceId::from_bytes([3; 16]).unwrap())
+        );
+        assert_eq!(context.operation, None);
+        assert_eq!(
+            context.revision,
+            Some(RevisionId::from_bytes([4; 32]).unwrap())
+        );
+    }
+
+    #[test]
+    fn canonical_limit_facts_name_the_path_binding_ceiling() {
+        let facts = limit_facts(&WorkflowLimits::default(), &OperationControl::new())
+            .expect("construct canonical Workflow Limit Facts");
+
+        assert_eq!(facts.len(), LIMIT_FACT_COUNT);
+        assert!(facts.iter().any(|fact| {
+            fact.name == "journal.max_path_binding_bytes" && fact.value == PATH_BINDING_BYTES
+        }));
+    }
+
+    #[test]
+    fn resumed_run_entry_bytes_include_the_open_journal() {
+        let directory = TestDirectory::new("resume-entry-bytes").expect("create test directory");
+        let run = WorkflowRunId::new([1; 16]).expect("nonzero Run identity");
+        let operation = test_operation(2);
+        let baseline = RevisionId::from_bytes([3; 32]).expect("nonzero Revision identity");
+        let request = WorkflowRunIntent::new(
+            run,
+            operation,
+            baseline,
+            [7],
+            1,
+            TerrainRecipe::new(2),
+            [],
+            LandXmlOptions::metric_metres("Ground", "2026-08-12", "00:00:00Z")
+                .expect("valid deterministic LandXML options")
+                .assert_coordinates_are_metric_metres(),
+        )
+        .expect("create Workflow intent");
+        let durable = DurableIntent::new(
+            run,
+            [4; 32],
+            [5; 16],
+            baseline.into_bytes(),
+            operation.into_bytes(),
+            vec![7].into_boxed_slice(),
+            2,
+            1,
+            None,
+            Vec::new().into_boxed_slice(),
+            "Ground".into(),
+            "2026-08-12".into(),
+            "00:00:00Z".into(),
+            true,
+            [[6; 32], [7; 32], [8; 32], [9; 32]],
+            JournalLimits::default(),
+        )
+        .expect("create durable Workflow intent");
+        let journal = Journal::create(
+            &directory.path().join("run.pwf"),
+            durable,
+            JournalLimits::default(),
+        )
+        .expect("create Run journal");
+
+        assert_eq!(
+            run_entry_retained_bytes(&request, Some(&journal)),
+            request_retained_bytes(&request).saturating_add(journal.retained_bytes())
+        );
+        assert!(journal.retained_bytes() > 0);
+    }
+
+    #[test]
+    fn workflow_intent_requires_metric_coordinates_before_run_creation() {
+        let failure = WorkflowRunIntent::new(
+            WorkflowRunId::new([1; 16]).expect("nonzero Run identity"),
+            test_operation(2),
+            RevisionId::from_bytes([3; 32]).expect("nonzero Revision identity"),
+            [4],
+            1,
+            point_terrain::TerrainRecipe::new(2),
+            [],
+            point_terrain::LandXmlOptions::metric_metres("Ground", "2026-08-12", "00:00:00Z")
+                .expect("valid deterministic LandXML options"),
+        )
+        .expect_err("an unasserted metric request must fail before Run creation");
+
+        assert_eq!(failure.code(), "PWF_INVALID_REQUEST");
+        assert_eq!(failure.stage(), "validate");
+        assert_eq!(failure.certainty(), "pre_publication");
+        assert!(failure.to_string().contains("metric-metre"));
+    }
+
+    #[test]
+    fn post_complete_binding_failure_preserves_indeterminate_certainty() {
+        let failure = checkpoint_binding_failure(
+            WorkflowStage::Complete,
+            io::Error::new(io::ErrorKind::InvalidData, "Run binding changed"),
+            FailureContext::default(),
+        );
+
+        assert_eq!(failure.code(), "PWF_PUBLICATION_INDETERMINATE");
+        assert_eq!(failure.stage(), "complete-checkpoint");
+        assert_eq!(failure.certainty(), "indeterminate");
+        assert_eq!(failure.publication_phase(), Some("complete-checkpoint"));
+        assert_eq!(
+            failure.recovery_action(),
+            "resume the same Run with the same identities and paths"
+        );
+    }
+
+    #[test]
+    fn post_link_landxml_failure_remains_indeterminate_after_parent_cancellation() {
+        let control = OperationControl::new();
+        control.cancel();
+
+        let failure = terrain_output_failure(
+            WorkflowStage::LandXml,
+            point_terrain::TerrainError::ExportIndeterminate {
+                expected_hash: point_contracts::ContentHash::new([1; 32]),
+            },
+            &control,
+            FailureContext::default(),
+        );
+
+        assert_eq!(failure.code(), "PWF_PUBLICATION_INDETERMINATE");
+        assert_eq!(failure.certainty(), "indeterminate");
+        assert_eq!(failure.publication_phase(), Some("landxml-target"));
+    }
 
     #[test]
     fn revert_restores_an_empty_baseline_surface_change_envelope() {

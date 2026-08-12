@@ -12,10 +12,13 @@ mod hashes;
 mod limits;
 mod model;
 mod persistence;
+mod point_id_hash;
 mod point_rows;
 mod point_set;
+mod query;
 mod revision_audit;
 mod selection;
+mod util;
 mod workspace;
 
 pub use error::{MAX_WORKSPACE_DIAGNOSTIC_BYTES, WorkspaceDiagnostic, WorkspaceError};

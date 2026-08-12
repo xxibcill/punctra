@@ -71,7 +71,7 @@ fn thin_process_starts_resumes_and_inspects_one_durable_run() {
         .expect("inspect workflow process");
     assert_success(&inspected);
     let inspection = String::from_utf8_lossy(&inspected.stdout);
-    assert!(inspection.contains("frames 8"), "{inspection}");
+    assert!(inspection.contains("phase complete"), "{inspection}");
     assert!(inspection.contains("complete true"), "{inspection}");
 
     let resumed = fixture.run("resume");
@@ -252,7 +252,6 @@ fn assert_complete_summary(output: &Output) {
         "Revision ",
         "report hash ",
         "report bytes ",
-        "frames 8",
     ] {
         assert!(stdout.contains(expected), "missing {expected:?}\n{stdout}");
     }
@@ -272,12 +271,29 @@ fn assert_landxml(bytes: &[u8]) {
     assert_eq!(root.attribute("version"), Some("1.2"));
     assert_eq!(root.attribute("date"), Some("2026-08-10"));
     assert_eq!(root.attribute("time"), Some("00:00:00Z"));
+
+    let metric = document
+        .descendants()
+        .find(|node| node.has_tag_name((LANDXML_NAMESPACE, "Metric")))
+        .expect("metric Units declaration exists");
+    assert_eq!(metric.attribute("linearUnit"), Some("meter"));
+    let surface = document
+        .descendants()
+        .find(|node| node.has_tag_name((LANDXML_NAMESPACE, "Surface")))
+        .expect("Surface exists");
+    assert_eq!(surface.attribute("name"), Some("Punctra Ground Surface"));
     assert_eq!(
         document
             .descendants()
             .filter(|node| node.has_tag_name((LANDXML_NAMESPACE, "P")))
             .count(),
         62,
+    );
+    assert!(
+        document
+            .descendants()
+            .any(|node| node.has_tag_name((LANDXML_NAMESPACE, "F"))),
+        "LandXML must contain at least one face",
     );
 }
 

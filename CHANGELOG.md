@@ -47,7 +47,7 @@ All notable changes to Punctra are documented here. The project follows
   revalidates Run-root identity before reporting status.
 - Added canonical report encoding with exact identities, request and semantic-
   result hashes, Revision Audit/Edit Footprint, baseline/changed Terrain facts,
-  conservative Surface Change Envelope, detached QA, stable LandXML facts, 114
+  conservative Surface Change Envelope, detached QA, stable LandXML facts, 115
   semantic limit facts, and explicit external-evidence nonclaims.
 - Added bounded structured Workflow failures with stable code, stage,
   publication certainty, known Run/Source/Workspace/Operation/Revision
@@ -75,7 +75,7 @@ All notable changes to Punctra are documented here. The project follows
   123.76/126.67/129.66 ms from a Retryable intent,
   96.871/97.629/98.365 ms for XML/report reconciliation, and
   87.233/88.181/89.112 ms for Complete revalidation. The completed journal was
-  2,804 bytes and the canonical report was 11,435 bytes across eight frames.
+  2,804 bytes and the canonical report was 11,490 bytes across eight frames.
   Worker peak heap was not measured.
 - Deferred durable Breaklines because they require both a Workspace persisted-
   schema evolution and a new constrained-triangulation kernel. External
@@ -87,7 +87,7 @@ All notable changes to Punctra are documented here. The project follows
 - Added the exact classification-aware `Snapshot::point_rows` pull stream with
   exact ticks, effective classification, stable Point Identity, deterministic
   ordering and hashes, cumulative hard limits, fused cancellation, and a
-  complete-only terminal summary. The `point-workspace` package now has 67
+  complete-only terminal summary. The `point-workspace` package now has 72
   tests, including six public Point-row integration tests.
 - Added one deep `point-terrain` crate. Its single-worker robust triangulation
   derives a deterministic unconstrained in-memory 2.5D `TerrainSurface` with
@@ -103,9 +103,10 @@ All notable changes to Punctra are documented here. The project follows
   `roxmltree` semantic verification.
 - Added a public Source-to-Terrain example, a generated 10k/100k/1M-capable
   terrain benchmark, and the GPU-free `terrain-demo` LAS/LAZ process caller.
-  `point-terrain` has 41 package tests—15 unit/private and 26 integration—plus
+  `point-terrain` has 46 package tests—17 unit/private and 29 integration—plus
   one documentation test;
-  `terrain-demo` has one generated LAS/LAZ process test.
+  `terrain-demo` has two process tests covering generated LAS/LAZ and failed
+  changed-Surface Derivation recovery.
 - Recorded the local 10,000-Point baseline: Derivation 11.983–12.049 ms,
   detached QA 94.907–95.164 us for three Check Points and 19,604 face tests,
   and durable 1,030,118-byte LandXML creation 18.020–18.311 ms. Descriptor
@@ -197,6 +198,8 @@ All notable changes to Punctra are documented here. The project follows
 - Added point, byte, and batch-aware request planning with progressive parent
   Coverage and LOD hysteresis.
 - Added deterministic, generation-safe retention and retirement decisions.
+- Added one validated renderer-neutral viewport contract shared by planning
+  and rendering.
 - Upgraded the synthetic demo to represent more than 10 million logical Points
   under fixed renderer residency limits.
 - Added local CPU planner benchmarks and planner-to-renderer GPU acceptance

@@ -1,8 +1,4 @@
-use std::{
-    collections::{BTreeSet, VecDeque},
-    io, mem,
-    time::Instant,
-};
+use std::{collections::VecDeque, io, mem, time::Instant};
 
 use point_index::{DisplayCoverage, IndexNodeId, IndexReadSummary, NodeReadBudget, PreparedIndex};
 use point_view::{AvailableNode, AxisAlignedBox, NodeKey, NodeRequest, NodeStatus};
@@ -15,6 +11,10 @@ use crate::scene::{SceneMetrics, SceneResult};
 
 const STAGING_POINT_BUDGET: u64 = 65_536;
 const STAGING_BYTE_BUDGET: u64 = 16 * 1_024 * 1_024;
+const QUEUE_BUDGET: QueueBudget = QueueBudget {
+    max_nodes: 640,
+    max_host_bytes: STAGING_BYTE_BUDGET,
+};
 const HIERARCHY_BYTE_BUDGET: u64 = 512 * 1_024 * 1_024;
 const HIERARCHY_FIXED_WORKING_BYTES: u64 = 64 * 1_024;
 // The fixed allowance covers handles/containers. The per-node allowance covers
@@ -24,6 +24,12 @@ const HIERARCHY_FIXED_WORKING_BYTES: u64 = 64 * 1_024;
 const HIERARCHY_WORKING_BYTES_PER_NODE: u64 = 2 * 1_024;
 // Index display samples contain positions only; this color makes no Source attribute claim.
 const POSITION_ONLY_COLOR: [u8; 4] = [190, 205, 220, 255];
+
+#[derive(Clone, Copy, Debug)]
+struct QueueBudget {
+    max_nodes: u64,
+    max_host_bytes: u64,
+}
 
 #[derive(Clone, Copy, Debug)]
 struct RealNode {
@@ -135,37 +141,49 @@ impl RealCloudScene {
         &mut self,
         demanded_nodes: &[NodeKey],
         requests: &[NodeRequest],
-    ) {
-        let previously_queued = self.pending.drain(..).collect::<BTreeSet<_>>();
-        let newly_requested = requests
-            .iter()
-            .map(|request| request.node())
-            .collect::<BTreeSet<_>>();
-        let mut retained_requests = BTreeSet::new();
-        let mut encountered_requests = BTreeSet::new();
+    ) -> SceneResult<()> {
+        self.reconcile_requests_with_budget(demanded_nodes, requests, QUEUE_BUDGET)
+    }
+
+    fn reconcile_requests_with_budget(
+        &mut self,
+        demanded_nodes: &[NodeKey],
+        requests: &[NodeRequest],
+        budget: QueueBudget,
+    ) -> SceneResult<()> {
+        let mut next_pending = VecDeque::new();
+        let mut reserved_host_bytes = 0;
+        debug_assert!(
+            requests
+                .iter()
+                .all(|request| demanded_nodes.contains(&request.node()))
+        );
         for key in demanded_nodes.iter().copied() {
-            let was_queued = previously_queued.contains(&key);
-            let was_requested_now = newly_requested.contains(&key);
-            if !was_queued && !was_requested_now {
+            let was_pending = self.pending.contains(&key);
+            let newly_requested = requests.iter().any(|request| request.node() == key);
+            if !was_pending && !newly_requested {
                 continue;
             }
-            if was_queued {
-                retained_requests.insert(key);
-            }
-            if was_requested_now {
-                encountered_requests.insert(key);
-            }
-            let index = self.node_index(key);
-            let available = &mut self.planning_nodes[index];
-            if available.status() == NodeStatus::Missing && was_requested_now {
-                *available = available.with_status(NodeStatus::Requested);
-            }
-            if available.status() == NodeStatus::Requested && (was_queued || was_requested_now) {
-                self.pending.push_back(key);
+            let available = self.planning_nodes[self.node_index(key)];
+            if matches!(
+                available.status(),
+                NodeStatus::Missing | NodeStatus::Requested
+            ) && !admit_queued_node(
+                &mut next_pending,
+                key,
+                queued_node_reservation(available)?,
+                &mut reserved_host_bytes,
+                budget,
+            )? {
+                break;
             }
         }
-        debug_assert_eq!(encountered_requests, newly_requested);
-        for key in previously_queued.difference(&retained_requests).copied() {
+
+        for pending_index in 0..self.pending.len() {
+            let key = self.pending[pending_index];
+            if next_pending.contains(&key) {
+                continue;
+            }
             let was_cancelled = {
                 let index = self.node_index(key);
                 let available = &mut self.planning_nodes[index];
@@ -180,9 +198,20 @@ impl RealCloudScene {
                 self.cancelled_requests = self.cancelled_requests.saturating_add(1);
             }
         }
+        for key in next_pending.iter().copied() {
+            let index = self.node_index(key);
+            let available = &mut self.planning_nodes[index];
+            if available.status() == NodeStatus::Missing
+                && requests.iter().any(|request| request.node() == key)
+            {
+                *available = available.with_status(NodeStatus::Requested);
+            }
+        }
+        self.pending = next_pending;
 
         let queued = u64::try_from(self.pending.len()).unwrap_or(u64::MAX);
         self.peak_queued_batches = self.peak_queued_batches.max(queued);
+        Ok(())
     }
 
     /// Materializes no more than one queued hierarchy node.
@@ -393,6 +422,85 @@ impl RealCloudScene {
     }
 }
 
+/// Admits one node or defers it when only the aggregate queue budget is full.
+///
+/// A node that cannot fit an otherwise empty queue is a configuration error.
+/// Once at least one higher-priority node is retained, reaching either aggregate
+/// limit is normal backpressure and the caller leaves the remaining nodes for a
+/// later plan.
+fn admit_queued_node(
+    pending: &mut VecDeque<NodeKey>,
+    key: NodeKey,
+    node_reservation: u64,
+    reserved_host_bytes: &mut u64,
+    budget: QueueBudget,
+) -> SceneResult<bool> {
+    if budget.max_nodes == 0 {
+        return Err(resource_limit("queued nodes", budget.max_nodes));
+    }
+    ensure_queue_bytes(1, node_reservation, budget.max_host_bytes)?;
+
+    let required_nodes = u64::try_from(pending.len())
+        .unwrap_or(u64::MAX)
+        .saturating_add(1);
+    if required_nodes > budget.max_nodes {
+        return Ok(false);
+    }
+    let next_reservations = reserved_host_bytes
+        .checked_add(node_reservation)
+        .ok_or_else(|| invalid_data("queued node host reservations overflowed"))?;
+    if pending.len() == pending.capacity() {
+        let required_capacity = pending.len().saturating_add(1);
+        let mut grown = VecDeque::new();
+        grown
+            .try_reserve_exact(required_capacity)
+            .map_err(|error| invalid_data(format!("could not reserve request queue: {error}")))?;
+        if queue_charge(grown.capacity(), next_reservations)? > budget.max_host_bytes {
+            if pending.is_empty() {
+                return Err(resource_limit(
+                    "request queue host bytes",
+                    budget.max_host_bytes,
+                ));
+            }
+            return Ok(false);
+        }
+        grown.extend(pending.iter().copied());
+        *pending = grown;
+    } else if queue_charge(pending.capacity(), next_reservations)? > budget.max_host_bytes {
+        return Ok(false);
+    }
+    pending.push_back(key);
+    *reserved_host_bytes = next_reservations;
+    Ok(true)
+}
+
+fn queued_node_reservation(available: AvailableNode) -> SceneResult<u64> {
+    let point_count = usize::try_from(available.point_count())
+        .map_err(|_| invalid_data("queued node Point count does not fit host address space"))?;
+    batch_staging_charge(point_count)
+}
+
+fn ensure_queue_bytes(capacity: usize, reservations: u64, allowed: u64) -> SceneResult<()> {
+    if queue_charge(capacity, reservations)? > allowed {
+        return Err(resource_limit("request queue host bytes", allowed));
+    }
+    Ok(())
+}
+
+fn queue_charge(capacity: usize, reservations: u64) -> SceneResult<u64> {
+    let capacity =
+        u64::try_from(capacity).map_err(|_| invalid_data("request queue capacity overflowed"))?;
+    let node_bytes = u64::try_from(mem::size_of::<NodeKey>())
+        .map_err(|_| invalid_data("request queue node size does not fit u64"))?;
+    let container_bytes = u64::try_from(mem::size_of::<VecDeque<NodeKey>>())
+        .map_err(|_| invalid_data("request queue container size does not fit u64"))?;
+    capacity
+        .checked_mul(node_bytes)
+        .and_then(|bytes| bytes.checked_add(container_bytes))
+        .and_then(|bytes| bytes.checked_add(reservations))
+        .ok_or_else(|| invalid_data("request queue byte charge overflowed"))
+}
+
 fn node_key(id: IndexNodeId) -> SceneResult<NodeKey> {
     Ok(NodeKey::new(id.get())?)
 }
@@ -510,7 +618,7 @@ mod tests {
     use point_contracts::{AttributeColumns, CoordinateReference, PositionTransform};
     use point_index::PrepareLimits;
     use point_view::{AvailableNodes, PlanningBudget, ViewPlan, ViewPlanner};
-    use render_protocol::{Camera, RenderLimits, RenderStateModel, RenderUpdate};
+    use render_protocol::{Camera, RenderLimits, RenderStateModel, RenderUpdate, Viewport};
     use source_memory::MemorySource;
 
     use crate::{
@@ -522,7 +630,6 @@ mod tests {
 
     const TEST_GENERATION: ViewGenerationKey =
         ViewGenerationKey::new(render_protocol::ViewId::new(91), 1);
-    const VIEWPORT: [u32; 2] = [1_280, 800];
 
     #[test]
     fn hierarchy_preflight_has_an_exact_working_set_boundary() {
@@ -545,6 +652,194 @@ mod tests {
     }
 
     #[test]
+    fn queue_admission_limits_fail_without_mutating_scene_state() {
+        let directory = TestDirectory::new().unwrap();
+        let mut scene = fixture_scene(directory.path()).unwrap();
+        let visible = visible_camera(&scene);
+        let mut planner = ViewPlanner::default();
+        let plan = plan(&mut planner, &scene, &visible);
+        assert_eq!(plan.requests().len(), 1);
+        let original_status = scene.planning_nodes[0].status();
+        let original_metrics = scene.metrics();
+
+        assert!(
+            scene
+                .reconcile_requests_with_budget(
+                    plan.demanded_nodes(),
+                    plan.requests(),
+                    QueueBudget {
+                        max_nodes: 0,
+                        max_host_bytes: QUEUE_BUDGET.max_host_bytes,
+                    },
+                )
+                .is_err()
+        );
+        assert!(scene.pending.is_empty());
+        assert_eq!(scene.planning_nodes[0].status(), original_status);
+        assert_eq!(scene.metrics(), original_metrics);
+
+        assert!(
+            scene
+                .reconcile_requests_with_budget(
+                    plan.demanded_nodes(),
+                    plan.requests(),
+                    QueueBudget {
+                        max_nodes: 1,
+                        max_host_bytes: 0,
+                    },
+                )
+                .is_err()
+        );
+        assert!(scene.pending.is_empty());
+        assert_eq!(scene.planning_nodes[0].status(), original_status);
+        assert_eq!(scene.metrics(), original_metrics);
+    }
+
+    #[test]
+    fn queue_admission_defers_after_the_priority_prefix_fills_host_budget() {
+        let first = NodeKey::new(1).unwrap();
+        let second = NodeKey::new(2).unwrap();
+        let node_reservation = 1_024;
+        let mut pending = VecDeque::new();
+        let mut reserved_host_bytes = 0;
+
+        assert!(
+            admit_queued_node(
+                &mut pending,
+                first,
+                node_reservation,
+                &mut reserved_host_bytes,
+                QueueBudget {
+                    max_nodes: 2,
+                    max_host_bytes: u64::MAX,
+                },
+            )
+            .unwrap()
+        );
+        let one_node_bytes = queue_charge(pending.capacity(), reserved_host_bytes).unwrap();
+
+        assert!(
+            !admit_queued_node(
+                &mut pending,
+                second,
+                node_reservation,
+                &mut reserved_host_bytes,
+                QueueBudget {
+                    max_nodes: 2,
+                    max_host_bytes: one_node_bytes,
+                },
+            )
+            .unwrap()
+        );
+        assert_eq!(pending, VecDeque::from([first]));
+        assert_eq!(reserved_host_bytes, node_reservation);
+    }
+
+    #[test]
+    fn retained_requests_follow_the_current_planner_priority() {
+        let directory = TestDirectory::new().unwrap();
+        let mut scene = fixture_scene(directory.path()).unwrap();
+        let first = scene.planning_nodes[0];
+        let second_key = NodeKey::new(2).unwrap();
+        let second = AvailableNode::new(
+            second_key,
+            Some(first.key()),
+            first.bounds(),
+            first.geometric_error(),
+            first.point_count(),
+            first.estimated_bytes(),
+            BatchKey::new(second_key.get()),
+            NodeStatus::Requested,
+        )
+        .unwrap();
+        scene.planning_nodes[0] = first.with_status(NodeStatus::Requested);
+        scene.planning_nodes.push(second);
+        scene.nodes.push(RealNode {
+            index_id: IndexNodeId::new(second_key.get()).unwrap(),
+            coverage: scene.nodes[0].coverage,
+            covered_source_point_count: scene.nodes[0].covered_source_point_count,
+            latest_issued_version: 0,
+        });
+        scene.pending = VecDeque::from([first.key(), second_key]);
+
+        scene
+            .reconcile_requests_with_budget(
+                &[second_key, first.key()],
+                &[],
+                QueueBudget {
+                    max_nodes: 1,
+                    max_host_bytes: u64::MAX,
+                },
+            )
+            .unwrap();
+
+        assert_eq!(scene.pending, VecDeque::from([second_key]));
+        assert_eq!(scene.planning_nodes[0].status(), NodeStatus::Missing);
+        assert_eq!(scene.planning_nodes[1].status(), NodeStatus::Requested);
+    }
+
+    #[test]
+    fn bridge_rejects_an_oversized_advertised_node_before_staging() {
+        let directory = TestDirectory::new().unwrap();
+        let mut scene = fixture_scene(directory.path()).unwrap();
+        let original_metrics = scene.metrics();
+        let oversized = requested_available(
+            scene.planning_nodes[0],
+            STAGING_POINT_BUDGET.saturating_add(1),
+        );
+        queue_available(&mut scene, 0, oversized);
+
+        let error = scene.next_batch().unwrap_err();
+
+        assert!(error.to_string().contains("node staging Points exceeded"));
+        assert_eq!(scene.planning_nodes[0].status(), NodeStatus::Missing);
+        assert_eq!(scene.nodes[0].latest_issued_version, 0);
+        assert_eq!(scene.metrics(), original_metrics);
+    }
+
+    #[test]
+    fn bridge_rejects_terminal_summary_count_and_coverage_mismatches() {
+        let directory = TestDirectory::new().unwrap();
+
+        let mut count_mismatch = fixture_scene(directory.path()).unwrap();
+        let original_metrics = count_mismatch.metrics();
+        let advertised = requested_available(
+            count_mismatch.planning_nodes[0],
+            count_mismatch.planning_nodes[0]
+                .point_count()
+                .saturating_add(1),
+        );
+        queue_available(&mut count_mismatch, 0, advertised);
+        let error = count_mismatch.next_batch().unwrap_err();
+        assert!(error.to_string().contains("terminal summary did not match"));
+        assert_eq!(count_mismatch.metrics(), original_metrics);
+        assert_eq!(
+            count_mismatch.planning_nodes[0].status(),
+            NodeStatus::Missing
+        );
+
+        let mut coverage_mismatch = fixture_scene(directory.path()).unwrap();
+        assert_eq!(
+            coverage_mismatch.nodes[0].coverage,
+            DisplayCoverage::Complete
+        );
+        coverage_mismatch.nodes[0].coverage = DisplayCoverage::Sampled;
+        let original_metrics = coverage_mismatch.metrics();
+        let advertised = requested_available(
+            coverage_mismatch.planning_nodes[0],
+            coverage_mismatch.planning_nodes[0].point_count(),
+        );
+        queue_available(&mut coverage_mismatch, 0, advertised);
+        let error = coverage_mismatch.next_batch().unwrap_err();
+        assert!(error.to_string().contains("terminal summary did not match"));
+        assert_eq!(coverage_mismatch.metrics(), original_metrics);
+        assert_eq!(
+            coverage_mismatch.planning_nodes[0].status(),
+            NodeStatus::Missing
+        );
+    }
+
+    #[test]
     fn camera_change_prunes_an_already_requested_real_node() {
         let directory = TestDirectory::new().unwrap();
         let mut scene = fixture_scene(directory.path()).unwrap();
@@ -555,14 +850,18 @@ mod tests {
         let first = plan(&mut planner, &scene, &visible);
 
         assert_eq!(first.demanded_nodes().len(), 1);
-        scene.reconcile_requests(first.demanded_nodes(), first.requests());
+        scene
+            .reconcile_requests(first.demanded_nodes(), first.requests())
+            .unwrap();
         assert_eq!(scene.pending.len(), 1);
         assert_eq!(scene.planning_nodes[0].status(), NodeStatus::Requested);
 
         let hidden = hidden_camera(&scene);
         let changed = plan(&mut planner, &scene, &hidden);
         assert!(changed.demanded_nodes().is_empty());
-        scene.reconcile_requests(changed.demanded_nodes(), changed.requests());
+        scene
+            .reconcile_requests(changed.demanded_nodes(), changed.requests())
+            .unwrap();
 
         assert!(scene.pending.is_empty());
         assert_eq!(scene.planning_nodes[0].status(), NodeStatus::Missing);
@@ -577,7 +876,9 @@ mod tests {
         let visible = visible_camera(&scene);
         let mut planner = ViewPlanner::default();
         let first_plan = plan(&mut planner, &scene, &visible);
-        scene.reconcile_requests(first_plan.demanded_nodes(), first_plan.requests());
+        scene
+            .reconcile_requests(first_plan.demanded_nodes(), first_plan.requests())
+            .unwrap();
 
         let first = scene.next_batch().unwrap().unwrap();
         assert_eq!(first.version(), BatchVersion::new(1));
@@ -613,7 +914,9 @@ mod tests {
         assert_eq!(scene.metrics().staged_points, 0);
 
         let retry_plan = plan(&mut planner, &scene, &visible);
-        scene.reconcile_requests(retry_plan.demanded_nodes(), retry_plan.requests());
+        scene
+            .reconcile_requests(retry_plan.demanded_nodes(), retry_plan.requests())
+            .unwrap();
         let first = scene.next_batch().unwrap().unwrap();
         assert_eq!(first.version(), BatchVersion::new(2));
 
@@ -637,7 +940,9 @@ mod tests {
         scene.mark_retired(first_key, first_version);
 
         let second_plan = plan(&mut planner, &scene, &visible);
-        scene.reconcile_requests(second_plan.demanded_nodes(), second_plan.requests());
+        scene
+            .reconcile_requests(second_plan.demanded_nodes(), second_plan.requests())
+            .unwrap();
         let second = scene.next_batch().unwrap().unwrap();
         assert_eq!(second.version(), BatchVersion::new(3));
         let second_key = second.key();
@@ -670,6 +975,28 @@ mod tests {
         RealCloudScene::new(TEST_GENERATION, index)
     }
 
+    fn requested_available(original: AvailableNode, point_count: u64) -> AvailableNode {
+        let estimated_bytes = point_count
+            .checked_mul(ESTIMATED_GPU_BYTES_PER_POINT)
+            .unwrap();
+        AvailableNode::new(
+            original.key(),
+            original.parent(),
+            original.bounds(),
+            original.geometric_error(),
+            point_count,
+            estimated_bytes,
+            original.batch_key(),
+            NodeStatus::Requested,
+        )
+        .unwrap()
+    }
+
+    fn queue_available(scene: &mut RealCloudScene, index: usize, available: AvailableNode) {
+        scene.planning_nodes[index] = available;
+        scene.pending.push_back(available.key());
+    }
+
     fn visible_camera(scene: &RealCloudScene) -> Camera {
         OrbitCamera::new(scene.camera_target(), scene.camera_radius())
             .as_render_camera()
@@ -695,7 +1022,7 @@ mod tests {
         planner
             .plan(
                 camera,
-                VIEWPORT,
+                Viewport::new(1_280, 800).unwrap(),
                 AvailableNodes::new(TEST_GENERATION, nodes),
                 PlanningBudget::new(
                     RESIDENT_POINT_BUDGET,

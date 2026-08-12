@@ -17,8 +17,7 @@ use point_terrain::{
 };
 use point_workspace::{
     CommitLimits, CommitOutcome, CommitRequest, OpenLimits, OperationId, OperationResolution,
-    PointRowLimits, PointSetLimits, RevisionAuditLimits, RevisionId, Workspace, WorkspaceSchema,
-    create, open,
+    PointRowLimits, PointSetLimits, RevisionAuditLimits, Workspace, WorkspaceSchema, create, open,
 };
 use serde_json::Value;
 use support::{
@@ -26,8 +25,8 @@ use support::{
     restore_journal_prefix, semantic_report_projection, write_las_family_fixture,
 };
 use terrain_demo::{
-    WorkflowLimits, WorkflowPaths, WorkflowReceipt, WorkflowRunIntent, inspect_run, resume_run,
-    start_run,
+    WorkflowLimits, WorkflowPaths, WorkflowPhase, WorkflowReceipt, WorkflowRunId,
+    WorkflowRunIntent, inspect_and_repair_run, resume_run, start_run,
 };
 
 const GROUND: u8 = 2;
@@ -35,6 +34,16 @@ const NON_GROUND: u8 = 1;
 const CLASSIFICATION_ATTRIBUTE: u32 = 6;
 const RETURN_NUMBER_ATTRIBUTE: u32 = 2;
 const EXPECTED_FRAME_COUNT: usize = 8;
+const EXPECTED_PHASES: [WorkflowPhase; EXPECTED_FRAME_COUNT] = [
+    WorkflowPhase::IntentRecorded,
+    WorkflowPhase::RevisionResolved,
+    WorkflowPhase::AuditObserved,
+    WorkflowPhase::SurfacesObserved,
+    WorkflowPhase::QaObserved,
+    WorkflowPhase::ExportEnsured,
+    WorkflowPhase::ReportEnsured,
+    WorkflowPhase::Complete,
+];
 
 #[test]
 fn every_checkpoint_prefix_resumes_to_one_revision_and_the_same_report() {
@@ -42,7 +51,6 @@ fn every_checkpoint_prefix_resumes_to_one_revision_and_the_same_report() {
     let immutable_source = fs::read(&fixture.source).expect("read immutable Source fixture");
 
     let expected = fixture.start();
-    assert_eq!(expected.frame_count(), EXPECTED_FRAME_COUNT as u64);
     let expected_report = fixture.report_bytes();
     let expected_landxml = fixture.landxml_bytes();
     let complete_journal = fixture.journal_bytes();
@@ -54,9 +62,9 @@ fn every_checkpoint_prefix_resumes_to_one_revision_and_the_same_report() {
     for (prefix, end) in frame_ends.iter().copied().enumerate() {
         restore_journal_prefix(&fixture.journal(), &complete_journal, end)
             .expect("durably restore completed-run journal prefix");
-        let before = inspect_run(&fixture.run_root, WorkflowLimits::default())
+        let before = inspect_and_repair_run(&fixture.run_root, WorkflowLimits::default())
             .expect("inspect verified journal prefix");
-        assert_eq!(before.frame_count(), (prefix + 1) as u64);
+        assert_eq!(before.phase(), EXPECTED_PHASES[prefix]);
         assert_eq!(before.is_complete(), prefix + 1 == EXPECTED_FRAME_COUNT);
 
         let resumed = fixture.resume();
@@ -88,7 +96,7 @@ fn torn_suffix_repairs_but_version_reserved_and_sequence_corruption_do_not() {
     let mut torn = complete.clone();
     torn.extend_from_slice(b"torn final frame prefix");
     overwrite_and_sync(&fixture.journal(), &torn).expect("install torn final suffix");
-    let status = inspect_run(&fixture.run_root, WorkflowLimits::default())
+    let status = inspect_and_repair_run(&fixture.run_root, WorkflowLimits::default())
         .expect("reader repairs a provably torn final suffix");
     assert!(status.is_complete());
     assert_eq!(fixture.journal_bytes(), complete);
@@ -102,7 +110,8 @@ fn torn_suffix_repairs_but_version_reserved_and_sequence_corruption_do_not() {
         corrupt[offset..offset + replacement.len()].copy_from_slice(&replacement);
         overwrite_and_sync(&fixture.journal(), &corrupt)
             .unwrap_or_else(|error| panic!("install {label} corruption: {error}"));
-        let Err(error) = inspect_run(&fixture.run_root, WorkflowLimits::default()) else {
+        let Err(error) = inspect_and_repair_run(&fixture.run_root, WorkflowLimits::default())
+        else {
             panic!("{label} corruption must fail closed");
         };
         assert_eq!(error.code(), "PWF_JOURNAL_CORRUPT", "{label}: {error}");
@@ -156,14 +165,15 @@ fn journal_corruption_limits_locking_and_path_binding_fail_closed() {
     let limit = WorkflowLimits::default().with_max_journal_bytes(
         u64::try_from(complete_journal.len() - 1).expect("journal size fits u64"),
     );
-    let error = inspect_run(&fixture.run_root, limit).expect_err("journal byte ceiling must bind");
+    let error = inspect_and_repair_run(&fixture.run_root, limit)
+        .expect_err("journal byte ceiling must bind");
     assert_eq!(error.code(), "PWF_RESOURCE_LIMIT");
     assert_eq!(fixture.journal_bytes(), complete_journal);
 
     let mut corrupt = complete_journal.clone();
     *corrupt.last_mut().expect("journal is nonempty") ^= 1;
     overwrite_and_sync(&fixture.journal(), &corrupt).expect("install corrupt complete frame");
-    let error = inspect_run(&fixture.run_root, WorkflowLimits::default())
+    let error = inspect_and_repair_run(&fixture.run_root, WorkflowLimits::default())
         .expect_err("complete frame corruption must fail closed");
     assert_eq!(error.code(), "PWF_JOURNAL_CORRUPT");
     assert_eq!(fixture.journal_bytes(), corrupt);
@@ -175,12 +185,27 @@ fn journal_corruption_limits_locking_and_path_binding_fail_closed() {
         .open(fixture.lock())
         .expect("open workflow lock file");
     lock.try_lock().expect("acquire independent exclusive lock");
-    let error = inspect_run(&fixture.run_root, WorkflowLimits::default())
+    let error = inspect_and_repair_run(&fixture.run_root, WorkflowLimits::default())
         .expect_err("concurrent inspection must not pass the Run lock");
     assert_eq!(error.code(), "PWF_IO");
     assert!(error.to_string().contains("lock"));
     drop(lock);
-    assert!(inspect_run(&fixture.run_root, WorkflowLimits::default()).is_ok());
+    assert!(inspect_and_repair_run(&fixture.run_root, WorkflowLimits::default()).is_ok());
+
+    overwrite_and_sync(&fixture.lock(), b"unexpected lock payload")
+        .expect("install nonempty workflow lock file");
+    let error = inspect_and_repair_run(&fixture.run_root, WorkflowLimits::default())
+        .expect_err("nonempty run.lock must fail its fixed schema");
+    assert_eq!(error.code(), "PWF_IO");
+    assert_eq!(error.stage(), "lock");
+    overwrite_and_sync(&fixture.lock(), b"").expect("restore empty workflow lock file");
+    assert!(inspect_and_repair_run(&fixture.run_root, WorkflowLimits::default()).is_ok());
+
+    let aggregate_limit = WorkflowLimits::default().with_max_aggregate_working_bytes(1);
+    let error = inspect_and_repair_run(&fixture.run_root, aggregate_limit)
+        .expect_err("aggregate ceiling must bind before journal inspection");
+    assert_eq!(error.code(), "PWF_RESOURCE_LIMIT");
+    assert_eq!(fixture.journal_bytes(), complete_journal);
 
     let alternate_source = fixture
         .directory
@@ -204,6 +229,27 @@ fn journal_corruption_limits_locking_and_path_binding_fail_closed() {
     assert_eq!(error.code(), "PWF_JOURNAL_CONFLICT");
     assert_eq!(fixture.journal_bytes(), journal_before);
     fixture.assert_single_operation_revision(expected);
+}
+
+#[test]
+fn aggregate_limit_preflights_before_rebuildable_index_publication() {
+    let fixture = WorkflowFixture::new("aggregate-preflight", "las", 64, 30);
+    fs::remove_file(&fixture.index).expect("remove rebuildable fixture index");
+    assert!(!fixture.index.exists());
+
+    let error = start_run(
+        fixture.paths.clone(),
+        fixture.intent.clone(),
+        WorkflowLimits::default().with_max_aggregate_working_bytes(1),
+    )
+    .blocking_wait()
+    .expect_err("aggregate ceiling must fail before index preparation");
+
+    assert_eq!(error.code(), "PWF_RESOURCE_LIMIT");
+    assert_eq!(error.stage(), "source");
+    assert!(!fixture.index.exists());
+    assert!(!fixture.journal().exists());
+    fixture.assert_single_operation_revision(fixture.start());
 }
 
 #[test]
@@ -270,14 +316,13 @@ fn cancelling_the_parent_run_never_publishes_a_false_complete_checkpoint() {
     assert_eq!(error.code(), "PWF_CANCELLED");
 
     if fixture.journal().exists() {
-        let status = inspect_run(&fixture.run_root, WorkflowLimits::default())
+        let status = inspect_and_repair_run(&fixture.run_root, WorkflowLimits::default())
             .expect("cancelled Run journal remains inspectable");
         assert!(
             !status.is_complete(),
             "a cancelled workflow must not claim Complete",
         );
         let receipt = fixture.resume();
-        assert_eq!(receipt.frame_count(), EXPECTED_FRAME_COUNT as u64);
         fixture.assert_single_operation_revision(receipt);
     } else {
         assert!(
@@ -332,7 +377,6 @@ fn dropping_an_active_workflow_never_publishes_complete_and_can_resume() {
         "dropping an active workflow must not publish Complete",
     );
     let receipt = fixture.resume();
-    assert_eq!(receipt.frame_count(), EXPECTED_FRAME_COUNT as u64);
     fixture.assert_single_operation_revision(receipt);
     assert_eq!(
         fs::read(&fixture.source).expect("reread drop-test Source fixture"),
@@ -353,9 +397,9 @@ fn report_limits_and_landxml_conflicts_resume_without_a_second_revision() {
     assert_eq!(error.code(), "PWF_RESOURCE_LIMIT");
     assert!(!limited.report().exists());
     assert!(limited.run_root.join("terrain.xml").is_file());
-    let status = inspect_run(&limited.run_root, WorkflowLimits::default())
+    let status = inspect_and_repair_run(&limited.run_root, WorkflowLimits::default())
         .expect("inspect Run stopped at the report limit");
-    assert_eq!(status.frame_count(), 6);
+    assert_eq!(status.phase(), WorkflowPhase::ExportEnsured);
     assert!(!status.is_complete());
     let recovered = limited.resume();
     limited.assert_single_operation_revision(recovered);
@@ -376,9 +420,9 @@ fn report_limits_and_landxml_conflicts_resume_without_a_second_revision() {
         fs::read(conflicting.run_root.join("terrain.xml")).unwrap(),
         caller_bytes,
     );
-    let status = inspect_run(&conflicting.run_root, WorkflowLimits::default())
+    let status = inspect_and_repair_run(&conflicting.run_root, WorkflowLimits::default())
         .expect("inspect Run stopped before LandXML checkpoint");
-    assert_eq!(status.frame_count(), 5);
+    assert_eq!(status.phase(), WorkflowPhase::QaObserved);
     assert!(!status.is_complete());
     fs::remove_file(conflicting.run_root.join("terrain.xml"))
         .expect("caller removes its conflicting target");
@@ -501,8 +545,7 @@ fn stale_head_and_a_differently_bound_rejection_do_not_mutate_the_run() {
         )
         .blocking_wait()
         .expect("materialize rejection fixture Points");
-    let intended_operation =
-        OperationId::from_bytes(rejected.intent.operation()).expect("valid intended Operation");
+    let intended_operation = rejected.intent.operation();
     let outcome = workspace
         .commit(
             CommitRequest::set_classification(intended_operation, point_set, GROUND),
@@ -512,7 +555,7 @@ fn stale_head_and_a_differently_bound_rejection_do_not_mutate_the_run() {
         .expect("publish definitive no-change rejection");
     assert!(matches!(outcome, CommitOutcome::Rejected(_)));
     assert_eq!(
-        workspace.head().provenance().revision().into_bytes(),
+        workspace.head().provenance().revision(),
         rejected.intent.baseline_revision(),
     );
     drop(workspace);
@@ -525,16 +568,16 @@ fn stale_head_and_a_differently_bound_rejection_do_not_mutate_the_run() {
     .blocking_wait()
     .expect_err("same Operation bound to a different request must conflict");
     assert_eq!(error.code(), "PWF_JOURNAL_CONFLICT");
-    let status = inspect_run(&rejected.run_root, WorkflowLimits::default())
+    let status = inspect_and_repair_run(&rejected.run_root, WorkflowLimits::default())
         .expect("inspect rejected Run Intent");
-    assert_eq!(status.frame_count(), 1);
+    assert_eq!(status.phase(), WorkflowPhase::IntentRecorded);
     assert!(!status.is_complete());
 }
 
 #[test]
 fn changed_source_and_workspace_identities_are_named_before_run_mutation() {
     let fixture = WorkflowFixture::new("identity-mismatch", "las", 64, 111);
-    let expected = fixture.start();
+    fixture.start();
     let source_bytes = fs::read(&fixture.source).expect("read expected Source bytes");
     let journal = fixture.journal_bytes();
 
@@ -583,7 +626,6 @@ fn changed_source_and_workspace_identities_are_named_before_run_mutation() {
     .expect_err("changed Workspace lineage must fail before Run mutation");
     assert_eq!(error.code(), "PWF_WORKSPACE_MISMATCH", "{error}");
     assert_eq!(fixture.journal_bytes(), journal);
-    assert_eq!(expected.frame_count(), EXPECTED_FRAME_COUNT as u64);
 }
 
 #[test]
@@ -619,10 +661,7 @@ fn non_las_classification_workspace_is_rejected_before_run_or_workspace_mutation
     assert_eq!(workspace.head().provenance().revision(), baseline);
     assert!(matches!(
         workspace
-            .resolve_operation(
-                OperationId::from_bytes(fixture.intent.operation())
-                    .expect("valid workflow Operation")
-            )
+            .resolve_operation(fixture.intent.operation())
             .expect("resolve untouched Operation"),
         OperationResolution::NotRecorded
     ));
@@ -640,9 +679,9 @@ fn retryable_workspace_intent_resumes_with_the_recorded_operation() {
     .blocking_wait()
     .expect_err("selection ceiling stops after durable Intent");
     assert_eq!(error.code(), "PWF_RESOURCE_LIMIT", "{error}");
-    let status = inspect_run(&fixture.run_root, WorkflowLimits::default())
+    let status = inspect_and_repair_run(&fixture.run_root, WorkflowLimits::default())
         .expect("inspect Intent-only workflow Run");
-    assert_eq!(status.frame_count(), 1);
+    assert_eq!(status.phase(), WorkflowPhase::IntentRecorded);
     assert!(!status.is_complete());
 
     let workspace = fixture.open_workspace();
@@ -657,8 +696,7 @@ fn retryable_workspace_intent_resumes_with_the_recorded_operation() {
         )
         .blocking_wait()
         .expect("materialize retryable Operation Points");
-    let operation =
-        OperationId::from_bytes(fixture.intent.operation()).expect("valid workflow Operation");
+    let operation = fixture.intent.operation();
     let obstruction = RevisionDirectoryBlocker::install(&fixture.workspace)
         .expect("replace test-owned revisions directory after Workspace open");
     let outcome = workspace
@@ -686,7 +724,6 @@ fn retryable_workspace_intent_resumes_with_the_recorded_operation() {
 
     let receipt = fixture.resume();
     assert_eq!(receipt.operation(), fixture.intent.operation());
-    assert_eq!(receipt.frame_count(), EXPECTED_FRAME_COUNT as u64);
     fixture.assert_single_operation_revision(receipt);
     assert_eq!(fs::read(&fixture.source).unwrap(), source_bytes);
 }
@@ -744,13 +781,14 @@ impl WorkflowFixture {
         )
         .blocking_wait()
         .expect("create baseline Workspace");
-        let baseline = workspace_handle.head().provenance().revision().into_bytes();
+        let baseline = workspace_handle.head().provenance().revision();
         drop(workspace_handle);
 
         let paths = WorkflowPaths::new(&source, &index, &workspace, &run_root);
         let intent = WorkflowRunIntent::new(
-            [identity; 16],
-            [identity.wrapping_add(1); 16],
+            WorkflowRunId::new([identity; 16]).expect("nonzero Workflow Run ID"),
+            OperationId::from_bytes([identity.wrapping_add(1); 16])
+                .expect("nonzero Workspace Operation ID"),
             baseline,
             [9_u64, 10],
             NON_GROUND,
@@ -773,7 +811,7 @@ impl WorkflowFixture {
                 "00:00:00Z",
             )
             .expect("valid deterministic LandXML options")
-            .allow_unknown_coordinate_reference_as_metric_metres(),
+            .assert_coordinates_are_metric_metres(),
         )
         .expect("construct bounded workflow intent");
         Self {
@@ -810,19 +848,13 @@ impl WorkflowFixture {
     fn assert_single_operation_revision(&self, receipt: WorkflowReceipt) {
         let workspace = self.open_workspace();
         let head = workspace.head().provenance().revision();
-        assert_eq!(head.into_bytes(), receipt.revision());
+        assert_eq!(head, receipt.revision());
         let info = workspace
             .revision_info(head)
             .expect("read workflow Revision facts");
         assert_eq!(info.sequence(), 1, "only Root and one edit Revision exist");
-        assert_eq!(
-            info.operation(),
-            Some(OperationId::from_bytes(receipt.operation()).expect("valid Operation ID")),
-        );
-        assert_eq!(
-            RevisionId::from_bytes(receipt.revision()).expect("valid receipt Revision"),
-            info.id(),
-        );
+        assert_eq!(info.operation(), Some(receipt.operation()),);
+        assert_eq!(receipt.revision(), info.id(),);
     }
 
     fn open_workspace(&self) -> Workspace {
@@ -890,7 +922,7 @@ fn wait_for_journal_frames(path: &Path, minimum: usize) {
 fn wait_for_unlocked_status(run_root: &Path) -> terrain_demo::WorkflowStatus {
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
-        match inspect_run(run_root, WorkflowLimits::default()) {
+        match inspect_and_repair_run(run_root, WorkflowLimits::default()) {
             Ok(status) => return status,
             Err(error) if error.stage() == "lock" && Instant::now() < deadline => {
                 thread::sleep(Duration::from_millis(1));
@@ -920,19 +952,7 @@ fn one_byte_index_artifact_limits() -> PrepareLimits {
 }
 
 fn one_byte_workspace_manifest_limits() -> OpenLimits {
-    let defaults = OpenLimits::default();
-    OpenLimits::new(
-        1,
-        defaults.max_operation_records(),
-        defaults.max_revision_files(),
-        defaults.max_revision_blocks(),
-        defaults.max_revision_rows(),
-        defaults.max_revision_block_bytes(),
-        defaults.max_single_file_bytes(),
-        defaults.max_total_persisted_bytes(),
-        defaults.max_working_bytes(),
-        defaults.max_resident_metadata_bytes(),
-    )
+    OpenLimits::default().with_max_manifest_bytes(1)
 }
 
 fn one_output_point_row_limits() -> PointRowLimits {
@@ -950,18 +970,7 @@ fn one_output_point_row_limits() -> PointRowLimits {
 }
 
 fn one_selected_point_commit_limits() -> CommitLimits {
-    let defaults = CommitLimits::default();
-    CommitLimits::new(
-        1,
-        defaults.max_changed_points(),
-        defaults.max_input_frames(),
-        defaults.max_block_points(),
-        defaults.max_block_bytes(),
-        defaults.max_working_bytes(),
-        defaults.max_temporary_bytes(),
-        defaults.max_revision_bytes(),
-        defaults.max_total_durable_bytes(),
-    )
+    CommitLimits::default().with_max_selected_points(1)
 }
 
 fn one_changed_point_audit_limits() -> RevisionAuditLimits {
@@ -1027,9 +1036,16 @@ fn resource_limit_problem(label: &str, identity: u8, limits: &WorkflowLimits) ->
         "{label}: a limited run must not publish its final report",
     );
     let receipt = if fixture.journal().exists() {
-        let status = inspect_run(&fixture.run_root, WorkflowLimits::default())
+        let status = inspect_and_repair_run(&fixture.run_root, WorkflowLimits::default())
             .unwrap_or_else(|error| panic!("{label}: inspect limited Run: {error}"));
         assert!(!status.is_complete(), "{label}: false Complete checkpoint");
+        if label == "audit-limit" {
+            assert_eq!(
+                status.phase(),
+                WorkflowPhase::RevisionResolved,
+                "the resolved Revision must be durable before its audit starts",
+            );
+        }
         fixture.resume()
     } else {
         fixture.start()

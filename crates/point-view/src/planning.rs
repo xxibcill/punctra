@@ -2,7 +2,7 @@ use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, BinaryHeap};
 
 use glam::DVec3;
-use render_protocol::Camera;
+use render_protocol::{Camera, Viewport};
 
 use crate::{
     AvailableNode, AvailableNodes, AxisAlignedBox, NodeKey, NodeRequest, NodeStatus, PlanError,
@@ -12,21 +12,12 @@ use crate::{
 pub(super) fn plan(
     planner: &mut ViewPlanner,
     camera: &Camera,
-    viewport: [u32; 2],
+    viewport: Viewport,
     available_nodes: AvailableNodes<'_>,
     budget: PlanningBudget,
 ) -> Result<ViewPlan, PlanError> {
-    if viewport.contains(&0) {
-        return Err(PlanError::InvalidViewport);
-    }
-
-    let hierarchy = Hierarchy::new(available_nodes.nodes)?;
     let projection = Projection::new(camera, viewport);
-    let visibility = hierarchy
-        .nodes
-        .iter()
-        .map(|node| projection.node_projection(node))
-        .collect::<Vec<_>>();
+    let hierarchy = ProjectedHierarchy::new(available_nodes.nodes, &projection)?;
     let previous_refinements = if planner.active_generation == Some(available_nodes.view_generation)
     {
         &planner.refined_nodes
@@ -34,18 +25,12 @@ pub(super) fn plan(
         &BTreeSet::new()
     };
 
-    let (target_cut, next_refinements) = select_target_cut(
-        &hierarchy,
-        &visibility,
-        previous_refinements,
-        planner.config,
-        budget,
-    )?;
-    let retained_mask = required_residents(&hierarchy, &visibility, &target_cut);
-    let demanded_nodes = demanded_nodes(&hierarchy, &visibility, &target_cut);
+    let (target_cut, next_refinements) =
+        select_target_cut(&hierarchy, previous_refinements, planner.config, budget)?;
+    let retained_mask = required_residents(&hierarchy, &target_cut);
+    let demanded_nodes = demanded_nodes(&hierarchy, &target_cut);
     let requests = select_requests(
         &hierarchy,
-        &visibility,
         &target_cut,
         &retained_mask,
         budget,
@@ -69,15 +54,16 @@ pub(super) fn plan(
 }
 
 #[derive(Debug)]
-struct Hierarchy {
+struct ProjectedHierarchy {
     nodes: Vec<AvailableNode>,
+    node_projections: Vec<NodeProjection>,
     parents: Vec<Option<usize>>,
     children: Vec<Vec<usize>>,
     roots: Vec<usize>,
 }
 
-impl Hierarchy {
-    fn new(input_nodes: &[AvailableNode]) -> Result<Self, PlanError> {
+impl ProjectedHierarchy {
+    fn new(input_nodes: &[AvailableNode], projection: &Projection) -> Result<Self, PlanError> {
         let mut nodes = input_nodes.to_vec();
         nodes.sort_by_key(|node| node.key);
         validate_unique_keys(&nodes)?;
@@ -100,9 +86,14 @@ impl Hierarchy {
                 roots.push(index);
             }
         }
+        let node_projections = nodes
+            .iter()
+            .map(|node| projection.node_projection(node))
+            .collect();
 
         Ok(Self {
             nodes,
+            node_projections,
             parents,
             children,
             roots,
@@ -226,7 +217,7 @@ struct Projection {
 }
 
 impl Projection {
-    fn new(camera: &Camera, viewport: [u32; 2]) -> Self {
+    fn new(camera: &Camera, viewport: Viewport) -> Self {
         let eye = DVec3::from_array(camera.eye());
         let world_basis = camera.world_basis();
         let forward = DVec3::from_array(world_basis.forward());
@@ -234,10 +225,10 @@ impl Projection {
         let up = DVec3::from_array(world_basis.up());
         let half_vertical_tangent =
             (f64::from(camera.vertical_field_of_view_radians()) * 0.5).tan();
-        let aspect_ratio = f64::from(viewport[0]) / f64::from(viewport[1]);
+        let aspect_ratio = f64::from(viewport.aspect_ratio());
         let near_distance = f64::from(camera.near_distance());
         let far_distance = f64::from(camera.far_distance());
-        let pixel_scale = f64::from(viewport[1]) / (2.0 * half_vertical_tangent);
+        let pixel_scale = f64::from(viewport.height()) / (2.0 * half_vertical_tangent);
         let frustum = Frustum::new(
             eye,
             forward,
@@ -257,14 +248,14 @@ impl Projection {
         }
     }
 
-    fn node_projection(self, node: &AvailableNode) -> NodeProjection {
+    fn node_projection(&self, node: &AvailableNode) -> NodeProjection {
         NodeProjection {
             visible: self.frustum.intersects(node.bounds),
             screen_error: self.screen_error(node),
         }
     }
 
-    fn screen_error(self, node: &AvailableNode) -> f64 {
+    fn screen_error(&self, node: &AvailableNode) -> f64 {
         let min = node.bounds.min;
         let max = node.bounds.max;
         let center = DVec3::new(
@@ -280,8 +271,26 @@ impl Projection {
         let center_depth = self.forward.dot(center - self.eye);
         let depth_radius = self.forward.abs().dot(half_extent);
         let nearest_depth = (center_depth - depth_radius).max(self.near_distance);
-        node.geometric_error * self.pixel_scale / nearest_depth
+        multiply_divide(node.geometric_error, self.pixel_scale, nearest_depth)
     }
+}
+
+fn multiply_divide(left: f64, right: f64, divisor: f64) -> f64 {
+    if left == 0.0 || right == 0.0 {
+        return 0.0;
+    }
+
+    let product = left * right;
+    if product.is_normal() {
+        return product / divisor;
+    }
+
+    let (left_fraction, left_exponent) = libm::frexp(left);
+    let (right_fraction, right_exponent) = libm::frexp(right);
+    let (divisor_fraction, divisor_exponent) = libm::frexp(divisor);
+    let fraction = left_fraction * right_fraction / divisor_fraction;
+    let exponent = left_exponent + right_exponent - divisor_exponent;
+    libm::scalbn(fraction, exponent)
 }
 
 fn axis_half_extent(min: f64, max: f64) -> f64 {
@@ -306,7 +315,7 @@ impl Plane {
         }
     }
 
-    fn excludes(self, bounds: AxisAlignedBox) -> bool {
+    fn excludes(&self, bounds: AxisAlignedBox) -> bool {
         let support = DVec3::new(
             if self.normal.x >= 0.0 {
                 bounds.max[0]
@@ -326,12 +335,21 @@ impl Plane {
         );
         let scaled_support = support * PLANE_EVALUATION_SCALE;
         let scaled_origin = self.camera_origin * PLANE_EVALUATION_SCALE;
-        self.normal.dot(scaled_support - scaled_origin) + self.offset * PLANE_EVALUATION_SCALE < 0.0
+        let relative_support = scaled_support - scaled_origin;
+        let scaled_offset = self.offset * PLANE_EVALUATION_SCALE;
+        let evaluation = self.normal.dot(relative_support) + scaled_offset;
+        let subtraction_magnitude = scaled_support.abs() + scaled_origin.abs();
+        let evaluation_magnitude =
+            self.normal.abs().dot(subtraction_magnitude) + scaled_offset.abs();
+        let roundoff_bound = evaluation_magnitude * PLANE_EVALUATION_ROUNDOFF_FACTOR;
+        evaluation < -roundoff_bound
     }
 }
 
 // One eighth leaves headroom for opposite-sign subtraction and a three-axis unit-normal dot.
 const PLANE_EVALUATION_SCALE: f64 = 0.125;
+// Plane construction and evaluation use several rounded operations; expand the plane outward.
+const PLANE_EVALUATION_ROUNDOFF_FACTOR: f64 = f64::EPSILON * 16.0;
 
 #[derive(Clone, Copy, Debug)]
 struct Frustum {
@@ -363,7 +381,7 @@ impl Frustum {
         }
     }
 
-    fn intersects(self, bounds: AxisAlignedBox) -> bool {
+    fn intersects(&self, bounds: AxisAlignedBox) -> bool {
         self.planes.iter().all(|plane| !plane.excludes(bounds))
     }
 }
@@ -399,8 +417,7 @@ impl Ord for RefinementCandidate {
 }
 
 fn select_target_cut(
-    hierarchy: &Hierarchy,
-    visibility: &[NodeProjection],
+    hierarchy: &ProjectedHierarchy,
     previous_refinements: &BTreeSet<NodeKey>,
     config: crate::PlannerConfig,
     budget: PlanningBudget,
@@ -409,14 +426,13 @@ fn select_target_cut(
         .roots
         .iter()
         .copied()
-        .filter(|index| visibility[*index].visible)
+        .filter(|index| hierarchy.node_projections[*index].visible)
         .collect::<BTreeSet<_>>();
     let mut candidates = BinaryHeap::new();
     for index in target_cut.iter().copied() {
         push_candidate(
             &mut candidates,
             hierarchy,
-            visibility,
             previous_refinements,
             config,
             index,
@@ -429,18 +445,31 @@ fn select_target_cut(
         .iter()
         .enumerate()
         .filter(|(index, node)| {
-            !visibility[*index].visible && previous_refinements.contains(&node.key)
+            !hierarchy.node_projections[*index].visible && previous_refinements.contains(&node.key)
         })
         .map(|(_, node)| node.key)
         .collect::<BTreeSet<_>>();
     while let Some(candidate) = candidates.pop() {
-        if !target_cut.remove(&candidate.index) {
+        if !target_cut.contains(&candidate.index) {
             continue;
         }
+        let candidate_node = &hierarchy.nodes[candidate.index];
+        if candidate_node.status == NodeStatus::Missing
+            && !has_visible_coverage(hierarchy, candidate.index)
+            && target_is_requestable_in_current_cut(
+                hierarchy,
+                &target_cut,
+                budget,
+                candidate.index,
+            )?
+        {
+            continue;
+        }
+        target_cut.remove(&candidate.index);
         let visible_children = hierarchy.children[candidate.index]
             .iter()
             .copied()
-            .filter(|child| visibility[*child].visible)
+            .filter(|child| hierarchy.node_projections[*child].visible)
             .collect::<Vec<_>>();
         target_cut.extend(visible_children.iter().copied());
         let candidate_was_transition_target = missing_transition_targets.remove(&candidate.index);
@@ -453,7 +482,6 @@ fn select_target_cut(
 
         if !transition_targets_fit_budget(
             hierarchy,
-            visibility,
             &target_cut,
             &missing_transition_targets,
             budget,
@@ -476,7 +504,6 @@ fn select_target_cut(
             push_candidate(
                 &mut candidates,
                 hierarchy,
-                visibility,
                 previous_refinements,
                 config,
                 child,
@@ -488,22 +515,20 @@ fn select_target_cut(
 
 fn push_candidate(
     candidates: &mut BinaryHeap<RefinementCandidate>,
-    hierarchy: &Hierarchy,
-    visibility: &[NodeProjection],
+    hierarchy: &ProjectedHierarchy,
     previous_refinements: &BTreeSet<NodeKey>,
     config: crate::PlannerConfig,
     index: usize,
 ) {
     let node = &hierarchy.nodes[index];
-    let has_coverage = matches!(node.status, NodeStatus::Resident { .. })
-        || has_visible_resident_descendant(hierarchy, visibility, index);
+    let has_coverage = has_visible_coverage(hierarchy, index);
     let has_visible_children = hierarchy.children[index]
         .iter()
-        .any(|child| visibility[*child].visible);
-    if has_coverage
+        .any(|child| hierarchy.node_projections[*child].visible);
+    if (has_coverage || node.status == NodeStatus::Missing)
         && has_visible_children
         && exceeds_refinement_threshold(
-            visibility[index].screen_error,
+            hierarchy.node_projections[index].screen_error,
             previous_refinements.contains(&node.key),
             config,
         )
@@ -511,19 +536,33 @@ fn push_candidate(
         candidates.push(RefinementCandidate {
             index,
             key: node.key,
-            screen_error: visibility[index].screen_error,
+            screen_error: hierarchy.node_projections[index].screen_error,
         });
     }
 }
 
-fn has_visible_resident_descendant(
-    hierarchy: &Hierarchy,
-    visibility: &[NodeProjection],
-    index: usize,
-) -> bool {
+fn has_visible_coverage(hierarchy: &ProjectedHierarchy, index: usize) -> bool {
+    matches!(hierarchy.nodes[index].status, NodeStatus::Resident { .. })
+        || has_visible_resident_descendant(hierarchy, index)
+}
+
+fn target_is_requestable_in_current_cut(
+    hierarchy: &ProjectedHierarchy,
+    target_cut: &BTreeSet<usize>,
+    budget: PlanningBudget,
+    target: usize,
+) -> Result<bool, PlanError> {
+    let retained_mask = required_residents(hierarchy, target_cut);
+    Ok(
+        select_request_indices(hierarchy, target_cut, &retained_mask, budget)?
+            .is_some_and(|requests| requests.contains(&target)),
+    )
+}
+
+fn has_visible_resident_descendant(hierarchy: &ProjectedHierarchy, index: usize) -> bool {
     let mut pending = hierarchy.children[index].clone();
     while let Some(descendant) = pending.pop() {
-        if !visibility[descendant].visible {
+        if !hierarchy.node_projections[descendant].visible {
             continue;
         }
         if matches!(
@@ -550,15 +589,14 @@ fn exceeds_refinement_threshold(
 }
 
 fn transition_targets_fit_budget(
-    hierarchy: &Hierarchy,
-    visibility: &[NodeProjection],
+    hierarchy: &ProjectedHierarchy,
     target_cut: &BTreeSet<usize>,
     missing_transition_targets: &BTreeSet<usize>,
     budget: PlanningBudget,
 ) -> Result<bool, PlanError> {
-    let retained_mask = required_residents(hierarchy, visibility, target_cut);
+    let retained_mask = required_residents(hierarchy, target_cut);
     let Some(request_indices) =
-        select_request_indices(hierarchy, visibility, target_cut, &retained_mask, budget)?
+        select_request_indices(hierarchy, target_cut, &retained_mask, budget)?
     else {
         return Ok(false);
     };
@@ -571,11 +609,7 @@ fn transition_targets_fit_budget(
         .all(|index| request_indices.contains(index)))
 }
 
-fn required_residents(
-    hierarchy: &Hierarchy,
-    visibility: &[NodeProjection],
-    target_cut: &BTreeSet<usize>,
-) -> Vec<bool> {
+fn required_residents(hierarchy: &ProjectedHierarchy, target_cut: &BTreeSet<usize>) -> Vec<bool> {
     let mut retained = vec![false; hierarchy.nodes.len()];
     let mut unavailable_targets = vec![false; hierarchy.nodes.len()];
 
@@ -588,19 +622,12 @@ fn required_residents(
         }
     }
     for root in hierarchy.roots.iter().copied() {
-        retain_resident_descendants(
-            hierarchy,
-            visibility,
-            &unavailable_targets,
-            root,
-            false,
-            &mut retained,
-        );
+        retain_resident_descendants(hierarchy, &unavailable_targets, root, false, &mut retained);
     }
     retained
 }
 
-fn retain_resident_ancestors(hierarchy: &Hierarchy, index: usize, retained: &mut [bool]) {
+fn retain_resident_ancestors(hierarchy: &ProjectedHierarchy, index: usize, retained: &mut [bool]) {
     let mut parent = hierarchy.parents[index];
     while let Some(parent_index) = parent {
         if matches!(
@@ -615,8 +642,7 @@ fn retain_resident_ancestors(hierarchy: &Hierarchy, index: usize, retained: &mut
 }
 
 fn retain_resident_descendants(
-    hierarchy: &Hierarchy,
-    visibility: &[NodeProjection],
+    hierarchy: &ProjectedHierarchy,
     unavailable_targets: &[bool],
     index: usize,
     below_unavailable_target: bool,
@@ -626,7 +652,7 @@ fn retain_resident_descendants(
     while let Some((descendant, below_unavailable_target)) = pending.pop() {
         let below_unavailable_target = below_unavailable_target || unavailable_targets[descendant];
         if below_unavailable_target
-            && visibility[descendant].visible
+            && hierarchy.node_projections[descendant].visible
             && matches!(
                 hierarchy.nodes[descendant].status,
                 NodeStatus::Resident { .. }
@@ -645,15 +671,14 @@ fn retain_resident_descendants(
 }
 
 fn select_requests(
-    hierarchy: &Hierarchy,
-    visibility: &[NodeProjection],
+    hierarchy: &ProjectedHierarchy,
     target_cut: &BTreeSet<usize>,
     retained_mask: &[bool],
     budget: PlanningBudget,
     view_generation: render_protocol::ViewGenerationKey,
 ) -> Result<Vec<NodeRequest>, PlanError> {
     let Some(request_indices) =
-        select_request_indices(hierarchy, visibility, target_cut, retained_mask, budget)?
+        select_request_indices(hierarchy, target_cut, retained_mask, budget)?
     else {
         return Ok(Vec::new());
     };
@@ -668,15 +693,14 @@ fn select_requests(
                 batch_key: node.batch_key,
                 point_count: node.point_count,
                 estimated_bytes: node.estimated_bytes,
-                screen_space_error_pixels: request_screen_error(hierarchy, visibility, index),
+                screen_space_error_pixels: request_screen_error(hierarchy, index),
             }
         })
         .collect())
 }
 
 fn select_request_indices(
-    hierarchy: &Hierarchy,
-    visibility: &[NodeProjection],
+    hierarchy: &ProjectedHierarchy,
     target_cut: &BTreeSet<usize>,
     retained_mask: &[bool],
     budget: PlanningBudget,
@@ -687,7 +711,7 @@ fn select_request_indices(
     }
 
     let mut request_indices = Vec::new();
-    for index in ordered_nonresident_targets(hierarchy, visibility, target_cut) {
+    for index in ordered_nonresident_targets(hierarchy, target_cut) {
         if hierarchy.nodes[index].status != NodeStatus::Missing {
             continue;
         }
@@ -702,20 +726,15 @@ fn select_request_indices(
     Ok(Some(request_indices))
 }
 
-fn demanded_nodes(
-    hierarchy: &Hierarchy,
-    visibility: &[NodeProjection],
-    target_cut: &BTreeSet<usize>,
-) -> Vec<NodeKey> {
-    ordered_nonresident_targets(hierarchy, visibility, target_cut)
+fn demanded_nodes(hierarchy: &ProjectedHierarchy, target_cut: &BTreeSet<usize>) -> Vec<NodeKey> {
+    ordered_nonresident_targets(hierarchy, target_cut)
         .into_iter()
         .map(|index| hierarchy.nodes[index].key)
         .collect()
 }
 
 fn ordered_nonresident_targets(
-    hierarchy: &Hierarchy,
-    visibility: &[NodeProjection],
+    hierarchy: &ProjectedHierarchy,
     target_cut: &BTreeSet<usize>,
 ) -> Vec<usize> {
     let mut targets = target_cut
@@ -724,20 +743,20 @@ fn ordered_nonresident_targets(
         .filter(|index| !matches!(hierarchy.nodes[*index].status, NodeStatus::Resident { .. }))
         .collect::<Vec<_>>();
     targets.sort_by(|left, right| {
-        request_screen_error(hierarchy, visibility, *right)
-            .total_cmp(&request_screen_error(hierarchy, visibility, *left))
+        request_screen_error(hierarchy, *right)
+            .total_cmp(&request_screen_error(hierarchy, *left))
             .then_with(|| hierarchy.nodes[*left].key.cmp(&hierarchy.nodes[*right].key))
     });
     targets
 }
 
-fn request_screen_error(hierarchy: &Hierarchy, visibility: &[NodeProjection], index: usize) -> f64 {
+fn request_screen_error(hierarchy: &ProjectedHierarchy, index: usize) -> f64 {
     let priority_source = hierarchy.parents[index].unwrap_or(index);
-    visibility[priority_source].screen_error
+    hierarchy.node_projections[priority_source].screen_error
 }
 
 fn actual_resource_usage(
-    hierarchy: &Hierarchy,
+    hierarchy: &ProjectedHierarchy,
     retained_mask: &[bool],
     requests: &[NodeRequest],
 ) -> Result<ResourceUsage, PlanError> {
@@ -755,7 +774,7 @@ fn actual_resource_usage(
 }
 
 fn reserved_resource_usage(
-    hierarchy: &Hierarchy,
+    hierarchy: &ProjectedHierarchy,
     resource_mask: &[bool],
 ) -> Result<ResourceUsage, PlanError> {
     let mut usage = ResourceUsage::default();
@@ -785,7 +804,7 @@ fn add_node_usage(usage: &mut ResourceUsage, node: &AvailableNode) -> Result<(),
 }
 
 fn retained_nodes(
-    hierarchy: &Hierarchy,
+    hierarchy: &ProjectedHierarchy,
     retained_mask: &[bool],
     view_generation: render_protocol::ViewGenerationKey,
 ) -> Vec<RetainedNode> {
@@ -811,7 +830,7 @@ fn retained_nodes(
 }
 
 fn retirements(
-    hierarchy: &Hierarchy,
+    hierarchy: &ProjectedHierarchy,
     retained_mask: &[bool],
     view_generation: render_protocol::ViewGenerationKey,
 ) -> Vec<Retirement> {

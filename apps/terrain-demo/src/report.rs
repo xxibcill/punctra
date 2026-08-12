@@ -4,11 +4,13 @@
 #![allow(clippy::struct_field_names, clippy::too_many_lines)]
 
 use std::{
-    fmt,
-    fs::{self, File, OpenOptions},
+    fs::{self, File},
     io::{self, Read, Write},
     path::{Path, PathBuf},
 };
+
+#[cfg(test)]
+use std::{fmt, fs::OpenOptions};
 
 use blake3::Hasher;
 use foundation_runtime::OperationControl;
@@ -17,7 +19,13 @@ use point_terrain::{CheckPointOutcome, CheckPointReport, LandXmlReceipt, Terrain
 use point_workspace::RevisionAudit;
 use thiserror::Error;
 
-use crate::journal::{Digest, RunId};
+use crate::{
+    journal::{Digest, WorkflowRunId},
+    publication::{
+        DirectoryWitness, StageCreationError, StageGuard, create_stage as create_publication_stage,
+        same_file_identity, sync_directory,
+    },
+};
 
 const REPORT_SCHEMA: &str = "punctra.terrain-workflow.audit.v1";
 const REPORT_HASH_DOMAIN: &[u8] = b"punctra-terrain-workflow-report-bytes-v1";
@@ -80,7 +88,7 @@ pub(crate) struct LimitFact {
 }
 
 pub(crate) struct ReportFacts<'a> {
-    pub(crate) run: RunId,
+    pub(crate) run: WorkflowRunId,
     pub(crate) request_hash: Digest,
     pub(crate) source: Digest,
     pub(crate) workspace: [u8; 16],
@@ -378,10 +386,7 @@ fn finish_publication(
                 ))
             }
         })
-        .map_err(|error| {
-            remove_mismatched_target_if_owned(stage.path(), target, parent);
-            indeterminate(target, expected.hash, error)
-        })?;
+        .map_err(|error| indeterminate(target, expected.hash, error))?;
     require_post_link_boundary(
         hook,
         PublicationBoundary::ParentSync,
@@ -977,28 +982,6 @@ fn same_file_state(left: &fs::Metadata, right: &fs::Metadata) -> bool {
         )
 }
 
-#[cfg(unix)]
-fn same_file_identity(left: &fs::Metadata, right: &fs::Metadata) -> bool {
-    use std::os::unix::fs::MetadataExt;
-
-    left.dev() == right.dev() && left.ino() == right.ino()
-}
-
-#[cfg(windows)]
-fn same_file_identity(left: &fs::Metadata, right: &fs::Metadata) -> bool {
-    use std::os::windows::fs::MetadataExt;
-
-    left.file_attributes() == right.file_attributes()
-        && left.creation_time() == right.creation_time()
-        && left.last_write_time() == right.last_write_time()
-        && left.file_size() == right.file_size()
-}
-
-#[cfg(not(any(unix, windows)))]
-fn same_file_identity(_left: &fs::Metadata, _right: &fs::Metadata) -> bool {
-    false
-}
-
 fn validate_limits(limits: ReportLimits) -> Result<(), ReportError> {
     require(1, limits.max_output_bytes, "report output bytes")?;
     require(1, limits.max_staging_bytes, "report staging bytes")?;
@@ -1036,168 +1019,31 @@ fn create_stage(
     parent: &Path,
     control: &OperationControl,
 ) -> Result<(StageGuard, File), ReportError> {
-    for _ in 0..64 {
-        check_cancelled(control)?;
-        let mut random = [0; 16];
-        getrandom::fill(&mut random)
-            .map_err(|_| ReportError::Invalid("system randomness is unavailable"))?;
-        let stage = parent.join(format!(".punctra-report-{}.tmp", Hex(&random)));
-        match OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create_new(true)
-            .open(&stage)
-        {
-            Ok(file) => {
-                let metadata = file
-                    .metadata()
-                    .map_err(|source| ReportError::io("inspect report stage", &stage, source))?;
-                return Ok((StageGuard::new(stage, parent.to_path_buf(), metadata), file));
+    create_publication_stage(
+        parent,
+        "report",
+        || check_cancelled(control),
+        |error| match error {
+            StageCreationError::RandomnessUnavailable => {
+                ReportError::Invalid("system randomness is unavailable")
             }
-            Err(source) if source.kind() == io::ErrorKind::AlreadyExists => {}
-            Err(source) => return Err(ReportError::io("create report stage", &stage, source)),
-        }
-    }
-    Err(ReportError::Invalid(
-        "report staging name space is exhausted",
-    ))
+            StageCreationError::NamespaceExhausted => {
+                ReportError::Invalid("report staging name space is exhausted")
+            }
+            StageCreationError::Inspect { path, source } => {
+                ReportError::io("inspect report stage", &path, source)
+            }
+            StageCreationError::Create { path, source } => {
+                ReportError::io("create report stage", &path, source)
+            }
+        },
+    )
 }
 
-fn sync_directory(path: &Path) -> io::Result<()> {
-    File::open(path)?.sync_all()
-}
-
-struct DirectoryWitness {
-    path: PathBuf,
-    #[cfg(unix)]
-    device: u64,
-    #[cfg(unix)]
-    inode: u64,
-}
-
-impl DirectoryWitness {
-    fn capture(path: &Path) -> io::Result<Self> {
-        let metadata = fs::symlink_metadata(path)?;
-        if !metadata.file_type().is_dir() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "report parent is not a non-symlink directory",
-            ));
-        }
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::MetadataExt;
-
-            Ok(Self {
-                path: path.to_path_buf(),
-                device: metadata.dev(),
-                inode: metadata.ino(),
-            })
-        }
-        #[cfg(not(unix))]
-        {
-            let _ = metadata;
-            Ok(Self {
-                path: path.to_path_buf(),
-            })
-        }
-    }
-
-    fn verify(&self) -> io::Result<()> {
-        let current = Self::capture(&self.path)?;
-        #[cfg(unix)]
-        if current.device != self.device || current.inode != self.inode {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "report parent directory identity changed",
-            ));
-        }
-        Ok(())
-    }
-}
-
-struct StageGuard {
-    path: Option<PathBuf>,
-    parent: PathBuf,
-    identity: fs::Metadata,
-}
-
-impl StageGuard {
-    fn new(path: PathBuf, parent: PathBuf, identity: fs::Metadata) -> Self {
-        Self {
-            path: Some(path),
-            parent,
-            identity,
-        }
-    }
-
-    fn path(&self) -> &Path {
-        self.path
-            .as_deref()
-            .expect("a live report stage has a path")
-    }
-
-    fn verify(&self) -> io::Result<()> {
-        let metadata = fs::symlink_metadata(self.path())?;
-        if metadata.file_type().is_file() && same_file_identity(&self.identity, &metadata) {
-            Ok(())
-        } else {
-            Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "report stage identity changed",
-            ))
-        }
-    }
-
-    fn remove(&mut self) -> io::Result<()> {
-        let Some(path) = self.path.as_ref() else {
-            return Ok(());
-        };
-        self.verify()?;
-        match fs::remove_file(path) {
-            Ok(()) => {}
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-            Err(error) => return Err(error),
-        }
-        self.path = None;
-        Ok(())
-    }
-
-    fn discard(&mut self) {
-        if self.path.is_some() && self.verify().is_ok() && self.remove().is_ok() {
-            let _ = sync_directory(&self.parent);
-        }
-    }
-}
-
-impl Drop for StageGuard {
-    fn drop(&mut self) {
-        self.discard();
-    }
-}
-
-#[cfg(unix)]
-fn remove_mismatched_target_if_owned(stage: &Path, target: &Path, parent: &Path) {
-    let Ok(stage_metadata) = fs::symlink_metadata(stage) else {
-        return;
-    };
-    let Ok(target_metadata) = fs::symlink_metadata(target) else {
-        return;
-    };
-    if stage_metadata.file_type().is_file()
-        && target_metadata.file_type().is_file()
-        && same_file_identity(&stage_metadata, &target_metadata)
-        && fs::remove_file(target).is_ok()
-    {
-        let _ = sync_directory(parent);
-    }
-}
-
-#[cfg(not(unix))]
-fn remove_mismatched_target_if_owned(_stage: &Path, _target: &Path, _parent: &Path) {}
-
+#[cfg(test)]
 struct Hex<'a>(&'a [u8]);
 
+#[cfg(test)]
 impl fmt::Display for Hex<'_> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         for byte in self.0 {
@@ -1222,6 +1068,11 @@ mod tests {
             target: &'a Path,
             bytes: &'a [u8],
             replace: bool,
+        },
+        ModifyInPlace {
+            boundary: PublicationBoundary,
+            target: &'a Path,
+            bytes: &'a [u8],
         },
     }
 
@@ -1252,6 +1103,11 @@ mod tests {
                     }
                     write_synced(target, bytes)
                 }
+                TestAction::ModifyInPlace {
+                    boundary: expected,
+                    target,
+                    bytes,
+                } if boundary == expected => overwrite_synced(target, bytes),
                 _ => Ok(()),
             }
         }
@@ -1430,6 +1286,33 @@ mod tests {
         directory.assert_no_stages();
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn post_link_in_place_modification_is_preserved() {
+        let directory = Directory::new("in-place-modification");
+        let target = directory.path.join("audit.json");
+        let concurrent_bytes = b"concurrent writer bytes\n";
+        let (mut stage, expected) = directory.prepared(b"canonical report\n");
+        let failure = publish_prepared(
+            &target,
+            &mut stage,
+            expected,
+            &OperationControl::new(),
+            &TestHook(TestAction::ModifyInPlace {
+                boundary: PublicationBoundary::TargetVerification,
+                target: &target,
+                bytes: concurrent_bytes,
+            }),
+        )
+        .expect_err("a modified post-link target has no receipt");
+        assert!(matches!(failure, ReportError::Indeterminate { .. }));
+        assert_eq!(fs::read(&target).unwrap(), concurrent_bytes);
+        drop(stage);
+        assert_eq!(fs::read(&target).unwrap(), concurrent_bytes);
+        fs::remove_file(target).unwrap();
+        directory.assert_no_stages();
+    }
+
     #[test]
     fn stage_guard_never_removes_a_replacement_path() {
         let directory = Directory::new("stage-replacement");
@@ -1560,11 +1443,18 @@ mod tests {
         sync_directory(path.parent().unwrap())
     }
 
+    fn overwrite_synced(path: &Path, bytes: &[u8]) -> io::Result<()> {
+        let mut file = OpenOptions::new().write(true).truncate(true).open(path)?;
+        file.write_all(bytes)?;
+        file.sync_all()
+    }
+
     const fn action_name(action: TestAction<'_>) -> &'static str {
         match action {
             TestAction::Failure(_) => "failure",
             TestAction::Cancellation(_) => "cancellation",
             TestAction::Install { .. } => "install",
+            TestAction::ModifyInPlace { .. } => "modify-in-place",
         }
     }
 

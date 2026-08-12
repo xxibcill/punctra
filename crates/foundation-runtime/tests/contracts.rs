@@ -98,6 +98,45 @@ fn parent_cancellation_reaches_a_linked_active_child() {
 }
 
 #[test]
+fn root_cancellation_reaches_a_grandchild_awaited_by_a_linked_parent() {
+    let root = CancellationToken::new();
+    let waiter_root = root.clone();
+    let (release_parent_sender, release_parent_receiver) = mpsc::sync_channel(0);
+    let (child_started_sender, child_started_receiver) = mpsc::sync_channel(0);
+    let parent = Job::<bool, RuntimeError>::spawn(move |parent_control| {
+        release_parent_receiver
+            .recv()
+            .expect("the linked parent should be ready");
+        let child = Job::<bool, RuntimeError>::spawn(move |child_control| {
+            child_started_sender
+                .send(())
+                .expect("the grandchild observer should still exist");
+            let deadline = std::time::Instant::now() + Duration::from_millis(250);
+            while std::time::Instant::now() < deadline {
+                child_control.check_cancelled()?;
+                std::thread::park_timeout(Duration::from_millis(1));
+            }
+            Ok(false)
+        });
+        child.blocking_wait_cancelled_by(&parent_control.token())
+    });
+    let waiter = std::thread::spawn(move || parent.blocking_wait_cancelled_by(&waiter_root));
+
+    release_parent_sender
+        .send(())
+        .expect("the parent should still be waiting");
+    child_started_receiver
+        .recv()
+        .expect("the grandchild should report startup");
+    root.cancel();
+
+    assert_eq!(
+        waiter.join().expect("the linked waiter should not panic"),
+        Err(RuntimeError::Cancelled)
+    );
+}
+
+#[test]
 fn child_cancellation_does_not_cancel_its_parent() {
     let parent = CancellationToken::new();
     let job = Job::<(), RuntimeError>::spawn(|control| {

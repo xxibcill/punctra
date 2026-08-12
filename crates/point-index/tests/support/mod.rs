@@ -19,10 +19,12 @@ use point_contracts::{
 };
 use point_index::{IndexNodeId, IndexPointBatch, IndexReadSummary, NodeReadBudget, PreparedIndex};
 use point_source::adapter::{
-    AdapterRead, AdapterReadRequest, AdapterVerified, CandidateAdapter, FullVerification,
-    ReadAdapter,
+    AdapterContract, AdapterRead, AdapterReadRequest, AdapterVerified, CandidateAdapter,
+    FullVerification, ReadAdapter,
 };
-use point_source::{OpenOptions, Source, SourceCandidate, SourceError, SourcePreview, SourceSpan};
+use point_source::{
+    OpenOptions, ReadLimit, Source, SourceCandidate, SourceError, SourcePreview, SourceSpan,
+};
 use source_memory::{MemoryFaultControl, MemorySource};
 
 pub const BLOCK_POINTS: usize = 65_536;
@@ -163,9 +165,7 @@ impl BudgetedCandidate {
             required_adapter_bytes: self.required_adapter_bytes,
         });
         AdapterVerified::new(
-            "budgeted-test",
-            "1",
-            "canonical fixture row order",
+            AdapterContract::new("budgeted-test", "1", "canonical fixture row order").unwrap(),
             Arc::clone(&self.metadata),
             ContentHash::new([0xB4; 32]),
             vec![1],
@@ -213,7 +213,7 @@ impl ReadAdapter for BudgetedReadAdapter {
         let allowed = request.budget().max_adapter_working_bytes();
         if self.required_adapter_bytes > allowed {
             return Err(SourceError::ResourceLimit {
-                limit: "adapter working bytes",
+                limit: ReadLimit::AdapterWorkingBytes,
                 required: self.required_adapter_bytes,
                 allowed,
             });

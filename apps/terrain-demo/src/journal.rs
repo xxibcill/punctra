@@ -9,6 +9,7 @@
 )]
 
 use std::{
+    fmt,
     fs::{self, File, OpenOptions},
     io::{self, Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
@@ -16,6 +17,11 @@ use std::{
 
 use blake3::Hasher;
 use thiserror::Error;
+
+use crate::publication::{
+    DirectoryWitness, StageCreationError, StageGuard, create_stage as create_publication_stage,
+    same_file_identity, sync_directory,
+};
 
 const HEADER_MAGIC: &[u8; 8] = b"PTWFJ001";
 const FRAME_MAGIC: &[u8; 4] = b"PWF1";
@@ -110,20 +116,40 @@ impl Default for JournalLimits {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct RunId([u8; 16]);
+/// Caller-owned nonzero identity of one durable terrain Workflow Run.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct WorkflowRunId([u8; 16]);
 
-impl RunId {
-    pub(crate) fn new(bytes: [u8; 16]) -> Result<Self, JournalError> {
+impl WorkflowRunId {
+    /// Creates a Workflow Run identity from checked opaque bytes.
+    #[must_use]
+    pub fn new(bytes: [u8; 16]) -> Option<Self> {
         if bytes == [0; 16] {
-            Err(JournalError::Invalid("Run Identity is all zero"))
+            None
         } else {
-            Ok(Self(bytes))
+            Some(Self(bytes))
         }
     }
 
-    pub(crate) const fn into_bytes(self) -> [u8; 16] {
+    /// Borrows the opaque identity bytes.
+    #[must_use]
+    pub const fn as_bytes(&self) -> &[u8; 16] {
+        &self.0
+    }
+
+    /// Returns the opaque identity bytes.
+    #[must_use]
+    pub const fn into_bytes(self) -> [u8; 16] {
         self.0
+    }
+}
+
+impl fmt::Display for WorkflowRunId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for byte in self.0 {
+            write!(formatter, "{byte:02x}")?;
+        }
+        Ok(())
     }
 }
 
@@ -135,7 +161,7 @@ pub(crate) struct IntentCheckPoint {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct WorkflowIntent {
-    pub(crate) run: RunId,
+    pub(crate) run: WorkflowRunId,
     pub(crate) request_hash: Digest,
     pub(crate) source: Digest,
     pub(crate) workspace: [u8; 16],
@@ -152,7 +178,7 @@ pub(crate) struct WorkflowIntent {
     pub(crate) surface_name: Box<str>,
     pub(crate) document_date: Box<str>,
     pub(crate) document_time: Box<str>,
-    pub(crate) allow_unknown_metric: bool,
+    pub(crate) coordinates_are_metric_metres_asserted: bool,
     pub(crate) options_hash: Digest,
     pub(crate) path_bindings: [Digest; 4],
 }
@@ -160,7 +186,7 @@ pub(crate) struct WorkflowIntent {
 impl WorkflowIntent {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
-        run: RunId,
+        run: WorkflowRunId,
         source: Digest,
         workspace: [u8; 16],
         baseline_revision: Digest,
@@ -173,7 +199,7 @@ impl WorkflowIntent {
         surface_name: Box<str>,
         document_date: Box<str>,
         document_time: Box<str>,
-        allow_unknown_metric: bool,
+        coordinates_are_metric_metres_asserted: bool,
         path_bindings: [Digest; 4],
         limits: JournalLimits,
     ) -> Result<Self, JournalError> {
@@ -184,7 +210,7 @@ impl WorkflowIntent {
             &surface_name,
             &document_date,
             &document_time,
-            allow_unknown_metric,
+            coordinates_are_metric_metres_asserted,
         );
         let mut intent = Self {
             run,
@@ -204,7 +230,7 @@ impl WorkflowIntent {
             surface_name,
             document_date,
             document_time,
-            allow_unknown_metric,
+            coordinates_are_metric_metres_asserted,
             options_hash,
             path_bindings,
         };
@@ -214,7 +240,8 @@ impl WorkflowIntent {
     }
 
     fn validate(&self, limits: JournalLimits) -> Result<(), JournalError> {
-        RunId::new(self.run.into_bytes())?;
+        WorkflowRunId::new(self.run.into_bytes())
+            .ok_or(JournalError::Invalid("Run Identity is all zero"))?;
         if self.operation == [0; 16] {
             return Err(JournalError::Invalid(
                 "Workspace Operation Identity is all zero",
@@ -290,7 +317,7 @@ impl WorkflowIntent {
                     &self.surface_name,
                     &self.document_date,
                     &self.document_time,
-                    self.allow_unknown_metric,
+                    self.coordinates_are_metric_metres_asserted,
                 )
         {
             return Err(JournalError::Corrupt("Intent canonical input hash differs"));
@@ -647,8 +674,9 @@ impl FrameKind {
 pub(crate) struct Journal {
     path: PathBuf,
     file: File,
+    identity: fs::Metadata,
     limits: JournalLimits,
-    run: RunId,
+    run: WorkflowRunId,
     checkpoints: Vec<Checkpoint>,
     previous_hash: Digest,
     end: u64,
@@ -728,17 +756,19 @@ impl Journal {
 
     pub(crate) fn open(path: &Path, limits: JournalLimits) -> Result<Self, JournalError> {
         validate_limits(limits)?;
-        require_regular_file(path)?;
+        let target_identity = require_regular_file(path)?;
         let mut file = OpenOptions::new()
             .read(true)
             .write(true)
             .open(path)
             .map_err(|source| JournalError::io("open journal", path, source))?;
         file.try_lock().map_err(map_lock_error)?;
-        let file_bytes = file
+        let identity = file
             .metadata()
-            .map_err(|source| JournalError::io("inspect journal", path, source))?
-            .len();
+            .map_err(|source| JournalError::io("inspect journal", path, source))?;
+        verify_recognized_journal(&file, path, &target_identity)
+            .map_err(|source| JournalError::io("verify opened journal target", path, source))?;
+        let file_bytes = identity.len();
         require(file_bytes, limits.max_journal_bytes, "journal bytes")?;
         let (run, header_hash) = read_header(&mut file, path)?;
         let mut scan = scan_frames(&mut file, path, limits, file_bytes, header_hash, run)?;
@@ -757,9 +787,12 @@ impl Journal {
             file.sync_data()
                 .map_err(|source| JournalError::io("sync repaired journal", path, source))?;
         }
+        verify_recognized_journal(&file, path, &identity)
+            .map_err(|source| JournalError::io("revalidate opened journal target", path, source))?;
         Ok(Self {
             path: path.to_path_buf(),
             file,
+            identity,
             limits,
             run,
             checkpoints: scan.checkpoints,
@@ -769,7 +802,7 @@ impl Journal {
         })
     }
 
-    pub(crate) const fn run(&self) -> RunId {
+    pub(crate) const fn run(&self) -> WorkflowRunId {
         self.run
     }
 
@@ -850,6 +883,9 @@ impl Journal {
                 allowed: self.limits.max_journal_bytes,
             })?;
         require(required, self.limits.max_journal_bytes, "journal bytes")?;
+        self.verify_recognized_path().map_err(|source| {
+            JournalError::io("verify journal append target", &self.path, source)
+        })?;
         self.file
             .seek(SeekFrom::Start(self.end))
             .map_err(|source| JournalError::io("seek journal append", &self.path, source))?;
@@ -858,6 +894,9 @@ impl Journal {
             .map_err(|source| {
                 JournalError::io("run journal pre-append boundary", &self.path, source)
             })?;
+        self.verify_recognized_path().map_err(|source| {
+            JournalError::io("revalidate journal append target", &self.path, source)
+        })?;
         self.poisoned = true;
         self.file
             .write_all(&frame)
@@ -893,11 +932,23 @@ impl Journal {
                 expected_hash,
                 source,
             })?;
+        self.verify_recognized_path()
+            .map_err(|source| JournalError::CheckpointIndeterminate {
+                path: self.path.clone(),
+                kind: checkpoint.kind() as u16,
+                sequence,
+                expected_hash,
+                source,
+            })?;
         self.poisoned = false;
         self.previous_hash = copy_digest(&frame[frame.len() - FRAME_HASH_BYTES..]);
         self.end = required;
         self.checkpoints.push(checkpoint);
         Ok(true)
+    }
+
+    fn verify_recognized_path(&self) -> io::Result<()> {
+        verify_recognized_journal(&self.file, &self.path, &self.identity)
     }
 }
 
@@ -933,7 +984,7 @@ pub(crate) enum JournalError {
     #[error("journal publication is indeterminate for {path}")]
     Indeterminate {
         path: PathBuf,
-        run: RunId,
+        run: WorkflowRunId,
         request_hash: Digest,
         #[source]
         source: io::Error,
@@ -971,7 +1022,7 @@ fn scan_frames(
     limits: JournalLimits,
     file_bytes: u64,
     header_hash: Digest,
-    run: RunId,
+    run: WorkflowRunId,
 ) -> Result<Scan, JournalError> {
     let mut checkpoints = Vec::new();
     let retained_slots = as_usize(limits.max_frames.min(8))?;
@@ -1303,7 +1354,7 @@ fn decode_checkpoint(
     kind: FrameKind,
     bytes: &[u8],
     limits: JournalLimits,
-    run: RunId,
+    run: WorkflowRunId,
 ) -> Result<Checkpoint, JournalError> {
     match kind {
         FrameKind::Intent => {
@@ -1335,7 +1386,7 @@ fn encode_intent(value: &WorkflowIntent, bytes: &mut Vec<u8>) -> Result<(), Jour
     bytes.push(value.ground_classification);
     bytes.push(value.non_ground_classification);
     bytes.push(u8::from(value.recipe_bounds_bits.is_some()));
-    bytes.push(u8::from(value.allow_unknown_metric));
+    bytes.push(u8::from(value.coordinates_are_metric_metres_asserted));
     encode_optional_bounds(value.recipe_bounds_bits, bytes);
     push_u32(bytes, as_u32(value.correction_ordinals.len())?);
     push_u32(bytes, as_u32(value.check_points.len())?);
@@ -1361,7 +1412,7 @@ fn encode_intent(value: &WorkflowIntent, bytes: &mut Vec<u8>) -> Result<(), Jour
 fn decode_intent(
     bytes: &[u8],
     limits: JournalLimits,
-    run: RunId,
+    run: WorkflowRunId,
 ) -> Result<WorkflowIntent, JournalError> {
     if bytes.len() < INTENT_FIXED_BYTES {
         return Err(JournalError::Corrupt("Intent payload is truncated"));
@@ -1458,7 +1509,7 @@ fn decode_intent(
         ground_classification: bytes[384],
         non_ground_classification: bytes[385],
         recipe_bounds_bits: bounds,
-        allow_unknown_metric: decode_bool(bytes[387])?,
+        coordinates_are_metric_metres_asserted: decode_bool(bytes[387])?,
         correction_ordinals: ordinals.into_boxed_slice(),
         check_points: check_points.into_boxed_slice(),
         surface_name,
@@ -1686,7 +1737,7 @@ fn decode_complete(bytes: &[u8]) -> Result<Complete, JournalError> {
     })
 }
 
-fn encode_header(run: RunId) -> [u8; HEADER_BYTES] {
+fn encode_header(run: WorkflowRunId) -> [u8; HEADER_BYTES] {
     let mut bytes = [0; HEADER_BYTES];
     bytes[..8].copy_from_slice(HEADER_MAGIC);
     bytes[8..12].copy_from_slice(&DISK_VERSION.to_le_bytes());
@@ -1702,7 +1753,7 @@ fn encode_header(run: RunId) -> [u8; HEADER_BYTES] {
     bytes
 }
 
-fn read_header(file: &mut File, path: &Path) -> Result<(RunId, Digest), JournalError> {
+fn read_header(file: &mut File, path: &Path) -> Result<(WorkflowRunId, Digest), JournalError> {
     file.seek(SeekFrom::Start(0))
         .map_err(|source| JournalError::io("seek journal header", path, source))?;
     let mut bytes = [0; HEADER_BYTES];
@@ -1730,7 +1781,9 @@ fn read_header(file: &mut File, path: &Path) -> Result<(RunId, Digest), JournalE
     if expected != recorded {
         return Err(JournalError::Corrupt("journal header checksum differs"));
     }
-    Ok((RunId::new(copy_array(&bytes[24..40]))?, recorded))
+    let run = WorkflowRunId::new(copy_array(&bytes[24..40]))
+        .ok_or(JournalError::Invalid("Run Identity is all zero"))?;
+    Ok((run, recorded))
 }
 
 fn validate_stage(
@@ -1895,7 +1948,7 @@ fn request_hash(intent: &WorkflowIntent) -> Digest {
     hasher.update(&[
         intent.ground_classification,
         intent.non_ground_classification,
-        u8::from(intent.allow_unknown_metric),
+        u8::from(intent.coordinates_are_metric_metres_asserted),
     ]);
     for binding in intent.path_bindings {
         hasher.update(&binding);
@@ -1956,14 +2009,19 @@ fn hash_recipe(ground: u8, bounds: Option<[[u64; 2]; 3]>) -> Digest {
     *hasher.finalize().as_bytes()
 }
 
-fn hash_options(name: &str, date: &str, time: &str, allow_unknown: bool) -> Digest {
+fn hash_options(
+    name: &str,
+    date: &str,
+    time: &str,
+    coordinates_are_metric_metres_asserted: bool,
+) -> Digest {
     let mut hasher = Hasher::new();
     hasher.update(OPTIONS_HASH_DOMAIN);
     for value in [name.as_bytes(), date.as_bytes(), time.as_bytes()] {
         hasher.update(&as_u64(value.len()).to_le_bytes());
         hasher.update(value);
     }
-    hasher.update(&[u8::from(allow_unknown)]);
+    hasher.update(&[u8::from(coordinates_are_metric_metres_asserted)]);
     *hasher.finalize().as_bytes()
 }
 
@@ -2127,165 +2185,50 @@ fn require_absent(path: &Path) -> Result<(), JournalError> {
     }
 }
 
-fn require_regular_file(path: &Path) -> Result<(), JournalError> {
+fn require_regular_file(path: &Path) -> Result<fs::Metadata, JournalError> {
     let metadata = fs::symlink_metadata(path)
         .map_err(|source| JournalError::io("inspect journal", path, source))?;
     if metadata.file_type().is_file() {
-        Ok(())
+        Ok(metadata)
     } else {
         Err(JournalError::Invalid("journal is not a regular file"))
     }
 }
 
+fn verify_recognized_journal(file: &File, path: &Path, identity: &fs::Metadata) -> io::Result<()> {
+    let opened = file.metadata()?;
+    let target = fs::symlink_metadata(path)?;
+    if opened.file_type().is_file()
+        && target.file_type().is_file()
+        && same_file_identity(identity, &opened)
+        && same_file_identity(&opened, &target)
+    {
+        Ok(())
+    } else {
+        Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "recognized journal target identity changed",
+        ))
+    }
+}
+
 fn create_stage(parent: &Path) -> Result<(StageGuard, File), JournalError> {
-    for _ in 0..64 {
-        let mut random = [0; 16];
-        getrandom::fill(&mut random).map_err(|_| JournalError::Entropy)?;
-        let path = parent.join(format!(".punctra-workflow-{}.tmp", hex(&random)));
-        match OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create_new(true)
-            .open(&path)
-        {
-            Ok(file) => {
-                let metadata = file
-                    .metadata()
-                    .map_err(|source| JournalError::io("inspect journal stage", &path, source))?;
-                return Ok((StageGuard::new(path, parent.to_path_buf(), metadata), file));
+    create_publication_stage(
+        parent,
+        "workflow",
+        || Ok(()),
+        |error| match error {
+            StageCreationError::RandomnessUnavailable | StageCreationError::NamespaceExhausted => {
+                JournalError::Entropy
             }
-            Err(source) if source.kind() == io::ErrorKind::AlreadyExists => {}
-            Err(source) => return Err(JournalError::io("create journal stage", &path, source)),
-        }
-    }
-    Err(JournalError::Entropy)
-}
-
-struct StageGuard {
-    path: Option<PathBuf>,
-    parent: PathBuf,
-    identity: fs::Metadata,
-}
-
-impl StageGuard {
-    fn new(path: PathBuf, parent: PathBuf, identity: fs::Metadata) -> Self {
-        Self {
-            path: Some(path),
-            parent,
-            identity,
-        }
-    }
-
-    fn path(&self) -> &Path {
-        self.path
-            .as_deref()
-            .expect("a live journal stage has a path")
-    }
-
-    fn verify(&self) -> io::Result<()> {
-        let metadata = fs::symlink_metadata(self.path())?;
-        if metadata.file_type().is_file() && same_file_identity(&self.identity, &metadata) {
-            Ok(())
-        } else {
-            Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "journal stage identity changed",
-            ))
-        }
-    }
-
-    fn remove(&mut self) -> io::Result<()> {
-        let Some(path) = self.path.as_ref() else {
-            return Ok(());
-        };
-        self.verify()?;
-        fs::remove_file(path)?;
-        self.path = None;
-        Ok(())
-    }
-
-    fn discard(&mut self) {
-        if self.path.is_some() && self.verify().is_ok() && self.remove().is_ok() {
-            let _ = sync_directory(&self.parent);
-        }
-    }
-}
-
-impl Drop for StageGuard {
-    fn drop(&mut self) {
-        self.discard();
-    }
-}
-
-struct DirectoryWitness {
-    path: PathBuf,
-    #[cfg(unix)]
-    device: u64,
-    #[cfg(unix)]
-    inode: u64,
-}
-
-impl DirectoryWitness {
-    fn capture(path: &Path) -> io::Result<Self> {
-        let metadata = fs::symlink_metadata(path)?;
-        if !metadata.file_type().is_dir() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "journal parent is not a non-symlink directory",
-            ));
-        }
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::MetadataExt as _;
-
-            Ok(Self {
-                path: path.to_path_buf(),
-                device: metadata.dev(),
-                inode: metadata.ino(),
-            })
-        }
-        #[cfg(not(unix))]
-        {
-            let _ = metadata;
-            Ok(Self {
-                path: path.to_path_buf(),
-            })
-        }
-    }
-
-    fn verify(&self) -> io::Result<()> {
-        let current = Self::capture(&self.path)?;
-        #[cfg(unix)]
-        if current.device != self.device || current.inode != self.inode {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "journal parent directory identity changed",
-            ));
-        }
-        Ok(())
-    }
-}
-
-#[cfg(unix)]
-fn same_file_identity(left: &fs::Metadata, right: &fs::Metadata) -> bool {
-    use std::os::unix::fs::MetadataExt as _;
-
-    left.dev() == right.dev() && left.ino() == right.ino()
-}
-
-#[cfg(windows)]
-fn same_file_identity(left: &fs::Metadata, right: &fs::Metadata) -> bool {
-    use std::os::windows::fs::MetadataExt as _;
-
-    left.volume_serial_number().is_some()
-        && left.volume_serial_number() == right.volume_serial_number()
-        && left.file_index().is_some()
-        && left.file_index() == right.file_index()
-}
-
-#[cfg(not(any(unix, windows)))]
-fn same_file_identity(_left: &fs::Metadata, _right: &fs::Metadata) -> bool {
-    false
+            StageCreationError::Inspect { path, source } => {
+                JournalError::io("inspect journal stage", &path, source)
+            }
+            StageCreationError::Create { path, source } => {
+                JournalError::io("create journal stage", &path, source)
+            }
+        },
+    )
 }
 
 fn map_lock_error(error: std::fs::TryLockError) -> JournalError {
@@ -2295,10 +2238,6 @@ fn map_lock_error(error: std::fs::TryLockError) -> JournalError {
     } else {
         JournalError::io("lock journal", Path::new("journal"), source)
     }
-}
-
-fn sync_directory(path: &Path) -> io::Result<()> {
-    File::open(path)?.sync_all()
 }
 
 fn target_parent(path: &Path) -> &Path {
@@ -2390,6 +2329,7 @@ fn copy_array<const N: usize>(bytes: &[u8]) -> [u8; N] {
     bytes.try_into().expect("validated fixed-width slice")
 }
 
+#[cfg(test)]
 fn hex(bytes: &[u8]) -> String {
     use std::fmt::Write as _;
     let mut output = String::with_capacity(bytes.len() * 2);
@@ -2548,6 +2488,59 @@ mod tests {
     }
 
     #[test]
+    fn checkpoint_append_rejects_a_replaced_recognized_path() {
+        let directory = Directory::new("checkpoint-path-replacement");
+        let path = directory.path.join("run.pwf");
+        let moved = directory.path.join("moved.pwf");
+        let expected_intent = intent();
+        let checkpoint = checkpoints(&expected_intent)[0].clone();
+        let mut journal =
+            Journal::create(&path, expected_intent, JournalLimits::default()).unwrap();
+        let recognized_bytes = fs::read(&path).unwrap();
+
+        fs::rename(&path, &moved).unwrap();
+        fs::copy(&moved, &path).unwrap();
+
+        let failure = journal
+            .record(checkpoint)
+            .expect_err("a byte-identical replacement is not the recognized journal");
+        assert!(matches!(failure, JournalError::Io { .. }));
+        assert!(!journal.poisoned);
+        assert_eq!(fs::read(&path).unwrap(), recognized_bytes);
+        assert_eq!(fs::read(&moved).unwrap(), recognized_bytes);
+    }
+
+    #[test]
+    fn post_write_path_replacement_is_indeterminate_and_preserved() {
+        let directory = Directory::new("checkpoint-post-write-replacement");
+        let path = directory.path.join("run.pwf");
+        let expected_intent = intent();
+        let checkpoint = checkpoints(&expected_intent)[0].clone();
+        let replacement = b"caller replacement after checkpoint sync";
+        let mut journal =
+            Journal::create(&path, expected_intent, JournalLimits::default()).unwrap();
+
+        let failure = journal
+            .record_with_hook(
+                checkpoint,
+                &TestHook(TestAction::InstallAt {
+                    boundary: PublicationBoundary::CheckpointAfterSync,
+                    target: &path,
+                    bytes: replacement,
+                    replace: true,
+                }),
+            )
+            .expect_err("a replaced target cannot acknowledge the checkpoint");
+
+        assert!(matches!(
+            failure,
+            JournalError::CheckpointIndeterminate { sequence: 1, .. }
+        ));
+        assert!(journal.poisoned);
+        assert_eq!(fs::read(path).unwrap(), replacement);
+    }
+
+    #[test]
     fn intent_create_race_and_post_link_replacement_preserve_caller_bytes() {
         let directory = Directory::new("intent-races");
         let raced = directory.path.join("raced.pwf");
@@ -2656,7 +2649,7 @@ mod tests {
 
     fn intent() -> WorkflowIntent {
         WorkflowIntent::new(
-            RunId::new([1; 16]).unwrap(),
+            WorkflowRunId::new([1; 16]).unwrap(),
             [2; 32],
             [3; 16],
             [4; 32],

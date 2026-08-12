@@ -37,105 +37,188 @@ pub(crate) struct SceneMetrics {
     pub(crate) cancelled_requests: u64,
 }
 
-/// Private concrete choice between the original fixture and a prepared Source.
-#[derive(Debug)]
-pub(crate) enum Scene {
-    Synthetic(SyntheticScene),
-    Real(Box<RealCloudScene>),
+trait SceneBackend: std::fmt::Debug {
+    fn planning_nodes(&self) -> PlanningNodes<'_>;
+    fn reconcile_requests(
+        &mut self,
+        demanded_nodes: &[NodeKey],
+        requests: &[NodeRequest],
+    ) -> SceneResult<()>;
+    fn next_batch(&mut self) -> SceneResult<Option<PointBatch>>;
+    fn mark_resident(&mut self, key: BatchKey, version: BatchVersion);
+    fn mark_retired(&mut self, key: BatchKey, version: BatchVersion);
+    fn mark_rejected(&mut self, key: BatchKey, version: BatchVersion);
+    fn camera_target(&self) -> [f64; 3];
+    fn camera_radius(&self) -> f64;
+    fn highlight_ids(&self) -> Vec<PointId>;
+    fn metrics(&self) -> SceneMetrics;
+    fn label(&self) -> &'static str;
 }
+
+impl SceneBackend for SyntheticScene {
+    fn planning_nodes(&self) -> PlanningNodes<'_> {
+        PlanningNodes::Synthetic(SyntheticScene::planning_nodes(self))
+    }
+
+    fn reconcile_requests(
+        &mut self,
+        demanded_nodes: &[NodeKey],
+        requests: &[NodeRequest],
+    ) -> SceneResult<()> {
+        SyntheticScene::reconcile_requests(self, demanded_nodes, requests);
+        Ok(())
+    }
+
+    fn next_batch(&mut self) -> SceneResult<Option<PointBatch>> {
+        Ok(SyntheticScene::next_batch(self)?)
+    }
+
+    fn mark_resident(&mut self, key: BatchKey, version: BatchVersion) {
+        SyntheticScene::mark_resident(self, key, version);
+    }
+
+    fn mark_retired(&mut self, key: BatchKey, version: BatchVersion) {
+        SyntheticScene::mark_retired(self, key, version);
+    }
+
+    fn mark_rejected(&mut self, key: BatchKey, version: BatchVersion) {
+        SyntheticScene::mark_rejected(self, key, version);
+    }
+
+    fn camera_target(&self) -> [f64; 3] {
+        SCENE_TARGET
+    }
+
+    fn camera_radius(&self) -> f64 {
+        SCENE_RADIUS
+    }
+
+    fn highlight_ids(&self) -> Vec<PointId> {
+        SyntheticScene::highlight_ids()
+    }
+
+    fn metrics(&self) -> SceneMetrics {
+        SceneMetrics {
+            logical_points: LOGICAL_POINT_COUNT,
+            resident_batches: SyntheticScene::resident_batches(self),
+            queued_batches: SyntheticScene::pending_batches(self),
+            ..SceneMetrics::default()
+        }
+    }
+
+    fn label(&self) -> &'static str {
+        "synthetic"
+    }
+}
+
+impl SceneBackend for RealCloudScene {
+    fn planning_nodes(&self) -> PlanningNodes<'_> {
+        PlanningNodes::Real(RealCloudScene::planning_nodes(self))
+    }
+
+    fn reconcile_requests(
+        &mut self,
+        demanded_nodes: &[NodeKey],
+        requests: &[NodeRequest],
+    ) -> SceneResult<()> {
+        RealCloudScene::reconcile_requests(self, demanded_nodes, requests)
+    }
+
+    fn next_batch(&mut self) -> SceneResult<Option<PointBatch>> {
+        RealCloudScene::next_batch(self)
+    }
+
+    fn mark_resident(&mut self, key: BatchKey, version: BatchVersion) {
+        RealCloudScene::mark_resident(self, key, version);
+    }
+
+    fn mark_retired(&mut self, key: BatchKey, version: BatchVersion) {
+        RealCloudScene::mark_retired(self, key, version);
+    }
+
+    fn mark_rejected(&mut self, key: BatchKey, version: BatchVersion) {
+        RealCloudScene::mark_rejected(self, key, version);
+    }
+
+    fn camera_target(&self) -> [f64; 3] {
+        RealCloudScene::camera_target(self)
+    }
+
+    fn camera_radius(&self) -> f64 {
+        RealCloudScene::camera_radius(self)
+    }
+
+    fn highlight_ids(&self) -> Vec<PointId> {
+        Vec::new()
+    }
+
+    fn metrics(&self) -> SceneMetrics {
+        RealCloudScene::metrics(self)
+    }
+
+    fn label(&self) -> &'static str {
+        "verified LAS/LAZ"
+    }
+}
+
+/// Private type-erased choice between the original fixture and a prepared Source.
+#[derive(Debug)]
+pub(crate) struct Scene(Box<dyn SceneBackend>);
 
 impl Scene {
     pub(crate) fn synthetic(generation: ViewGenerationKey) -> SceneResult<Self> {
-        Ok(Self::Synthetic(SyntheticScene::new(generation)?))
+        Ok(Self(Box::new(SyntheticScene::new(generation)?)))
     }
 
     pub(crate) fn real(scene: RealCloudScene) -> Self {
-        Self::Real(Box::new(scene))
+        Self(Box::new(scene))
     }
 
     pub(crate) fn planning_nodes(&self) -> PlanningNodes<'_> {
-        match self {
-            Self::Synthetic(scene) => PlanningNodes::Synthetic(scene.planning_nodes()),
-            Self::Real(scene) => PlanningNodes::Real(scene.planning_nodes()),
-        }
+        self.0.planning_nodes()
     }
 
     pub(crate) fn reconcile_requests(
         &mut self,
         demanded_nodes: &[NodeKey],
         requests: &[NodeRequest],
-    ) {
-        match self {
-            Self::Synthetic(scene) => scene.reconcile_requests(demanded_nodes, requests),
-            Self::Real(scene) => scene.reconcile_requests(demanded_nodes, requests),
-        }
+    ) -> SceneResult<()> {
+        self.0.reconcile_requests(demanded_nodes, requests)
     }
 
     pub(crate) fn next_batch(&mut self) -> SceneResult<Option<PointBatch>> {
-        match self {
-            Self::Synthetic(scene) => Ok(scene.next_batch()?),
-            Self::Real(scene) => scene.next_batch(),
-        }
+        self.0.next_batch()
     }
 
     pub(crate) fn mark_resident(&mut self, key: BatchKey, version: BatchVersion) {
-        match self {
-            Self::Synthetic(scene) => scene.mark_resident(key, version),
-            Self::Real(scene) => scene.mark_resident(key, version),
-        }
+        self.0.mark_resident(key, version);
     }
 
     pub(crate) fn mark_retired(&mut self, key: BatchKey, version: BatchVersion) {
-        match self {
-            Self::Synthetic(scene) => scene.mark_retired(key, version),
-            Self::Real(scene) => scene.mark_retired(key, version),
-        }
+        self.0.mark_retired(key, version);
     }
 
     pub(crate) fn mark_rejected(&mut self, key: BatchKey, version: BatchVersion) {
-        match self {
-            Self::Synthetic(scene) => scene.mark_rejected(key, version),
-            Self::Real(scene) => scene.mark_rejected(key, version),
-        }
+        self.0.mark_rejected(key, version);
     }
 
     pub(crate) fn camera_target(&self) -> [f64; 3] {
-        match self {
-            Self::Synthetic(_) => SCENE_TARGET,
-            Self::Real(scene) => scene.camera_target(),
-        }
+        self.0.camera_target()
     }
 
     pub(crate) fn camera_radius(&self) -> f64 {
-        match self {
-            Self::Synthetic(_) => SCENE_RADIUS,
-            Self::Real(scene) => scene.camera_radius(),
-        }
+        self.0.camera_radius()
     }
 
     pub(crate) fn highlight_ids(&self) -> Vec<PointId> {
-        match self {
-            Self::Synthetic(_) => SyntheticScene::highlight_ids(),
-            Self::Real(_) => Vec::new(),
-        }
+        self.0.highlight_ids()
     }
 
     pub(crate) fn metrics(&self) -> SceneMetrics {
-        match self {
-            Self::Synthetic(scene) => SceneMetrics {
-                logical_points: LOGICAL_POINT_COUNT,
-                resident_batches: scene.resident_batches(),
-                queued_batches: scene.pending_batches(),
-                ..SceneMetrics::default()
-            },
-            Self::Real(scene) => scene.metrics(),
-        }
+        self.0.metrics()
     }
 
-    pub(crate) const fn label(&self) -> &'static str {
-        match self {
-            Self::Synthetic(_) => "synthetic",
-            Self::Real(_) => "verified LAS/LAZ",
-        }
+    pub(crate) fn label(&self) -> &'static str {
+        self.0.label()
     }
 }

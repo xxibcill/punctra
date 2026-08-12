@@ -70,7 +70,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let target = directory.path().join("terrain.xml");
     let options =
         LandXmlOptions::metric_metres("Punctra Terrain Example", "2026-08-10", "12:34:56Z")?
-            .allow_unknown_coordinate_reference_as_metric_metres();
+            .assert_coordinates_are_metric_metres();
     let receipt = surface
         .export_landxml(&target, options, LandXmlLimits::default())
         .blocking_wait()?;

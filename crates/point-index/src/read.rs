@@ -4,7 +4,10 @@ use foundation_runtime::{
 use point_contracts::{PointId, PositionTransform, SourceId, SourceProvenance};
 use point_source::{AttributeSelection, PointBatches, ReadBudget, ReadRequest, SourceSpan};
 
-use crate::{DisplayCoverage, IndexError, IndexNode, IndexNodeId, NodeReadBudget, PreparedIndex};
+use crate::{
+    DisplayCoverage, IndexError, IndexLimit, IndexNode, IndexNodeId, NodeReadBudget, PreparedIndex,
+    limits::require,
+};
 
 const SAMPLE_BYTES: u64 = 32;
 const SOURCE_POSITION_BYTES: u64 = 24;
@@ -438,27 +441,31 @@ fn validate_budget(node: &IndexNode, budget: NodeReadBudget) -> Result<(), Index
     require(
         node.display_point_count,
         budget.max_emitted_points(),
-        "emitted display Points",
+        IndexLimit::EmittedDisplayPoints,
     )?;
     if node.source_span.is_some() {
-        require(1, budget.max_source_spans(), "Source spans")?;
-        require(1, budget.max_source_batch_points(), "Source batch Points")?;
+        require(1, budget.max_source_spans(), IndexLimit::SourceSpans)?;
+        require(
+            1,
+            budget.max_source_batch_points(),
+            IndexLimit::SourceBatchPoints,
+        )?;
         require(
             SOURCE_POSITION_BYTES,
             budget.max_source_batch_payload_bytes(),
-            "Source batch payload bytes",
+            IndexLimit::SourceBatchPayloadBytes,
         )?;
     }
     require(
         SAMPLE_BYTES,
         budget.max_display_batch_bytes(),
-        "display batch bytes",
+        IndexLimit::DisplayBatchBytes,
     )?;
     if node.source_span.is_none() {
         require(
             node.display_point_count.saturating_mul(SAMPLE_BYTES),
             budget.max_index_buffer_bytes(),
-            "index buffer bytes",
+            IndexLimit::IndexBufferBytes,
         )?;
     }
     Ok(())
@@ -474,21 +481,10 @@ fn max_batch_points(node: &IndexNode, budget: NodeReadBudget) -> Result<u64, Ind
     }
     if points == 0 {
         return Err(IndexError::ResourceLimit {
-            limit: "display batch Points",
+            limit: IndexLimit::DisplayBatchPoints,
             required: 1,
             allowed: 0,
         });
     }
     Ok(points)
-}
-
-fn require(required: u64, allowed: u64, limit: &'static str) -> Result<(), IndexError> {
-    if required > allowed {
-        return Err(IndexError::ResourceLimit {
-            limit,
-            required,
-            allowed,
-        });
-    }
-    Ok(())
 }

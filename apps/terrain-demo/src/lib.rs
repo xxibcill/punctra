@@ -6,13 +6,15 @@
 mod cli;
 mod diagnostic;
 mod journal;
+mod publication;
 mod report;
 mod roundtrip;
 mod workflow;
 
 pub use cli::run_cli;
 pub use diagnostic::WorkflowFailure;
+pub use journal::WorkflowRunId;
 pub use workflow::{
-    WorkflowJob, WorkflowLimits, WorkflowPaths, WorkflowReceipt, WorkflowRunIntent, WorkflowStatus,
-    inspect_run, resume_run, start_run,
+    WorkflowJob, WorkflowLimits, WorkflowPaths, WorkflowPhase, WorkflowReceipt, WorkflowRunIntent,
+    WorkflowStatus, inspect_and_repair_run, resume_run, start_run,
 };

@@ -19,7 +19,7 @@ use point_index::{PrepareLimits, PreparedIndex};
 use point_view::{AvailableNodes, PlannerConfig, PlanningBudget, ResourceUsage, ViewPlanner};
 use real_cloud::RealCloudScene;
 use render_protocol::{
-    RenderLimits, RenderStateModel, RenderUpdate, UpdateReport, ViewGenerationKey, ViewId,
+    RenderLimits, RenderStateModel, RenderUpdate, UpdateReport, ViewGenerationKey, ViewId, Viewport,
 };
 use render_wgpu::{Camera, Frame, FrameReport, PointStyle, RendererConfig, WgpuRenderer};
 use scene::{Scene, SceneMetrics};
@@ -160,12 +160,12 @@ fn run_headless_smoke(mut scene: Scene) -> DemoResult<()> {
         let nodes = scene.planning_nodes();
         planner.plan(
             &camera,
-            [1_280, 800],
+            Viewport::new(1_280, 800)?,
             AvailableNodes::new(VIEW_GENERATION, nodes.as_slice()),
             PLANNING_BUDGET,
         )?
     };
-    scene.reconcile_requests(plan.demanded_nodes(), plan.requests());
+    scene.reconcile_requests(plan.demanded_nodes(), plan.requests())?;
 
     let Some(batch) = scene.next_batch()? else {
         if scene.metrics().logical_points == 0 {
@@ -502,7 +502,7 @@ impl Graphics {
         }
 
         let frame_started = Instant::now();
-        let viewport = [self.surface_config.width, self.surface_config.height];
+        let viewport = Viewport::new(self.surface_config.width, self.surface_config.height)?;
         let camera = self.camera.as_render_camera()?;
         self.plan_view(&camera, viewport)?;
         self.stream_next_batch()?;
@@ -583,7 +583,7 @@ impl Graphics {
         Ok(())
     }
 
-    fn plan_view(&mut self, camera: &Camera, viewport: [u32; 2]) -> DemoResult<()> {
+    fn plan_view(&mut self, camera: &Camera, viewport: Viewport) -> DemoResult<()> {
         let plan = {
             let planning_nodes = self.scene.planning_nodes();
             self.planner.plan(
@@ -606,7 +606,7 @@ impl Graphics {
             plan.requests()
         };
         self.scene
-            .reconcile_requests(plan.demanded_nodes(), requests);
+            .reconcile_requests(plan.demanded_nodes(), requests)?;
         self.metrics.record_plan(
             u64::try_from(plan.requests().len()).expect("the request count fits in u64"),
             plan.resource_usage(),

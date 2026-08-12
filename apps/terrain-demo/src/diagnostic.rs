@@ -1,8 +1,10 @@
 use std::fmt::{self, Write as _};
 
 use foundation_runtime::RuntimeError;
+use point_contracts::SourceId;
+use point_workspace::{OperationId, RevisionId, WorkspaceId};
 
-use crate::journal::RunId;
+use crate::journal::WorkflowRunId;
 
 const MAX_DIAGNOSTIC_BYTES: usize = 1_024;
 const ELLIPSIS: &str = "...";
@@ -147,11 +149,11 @@ impl Certainty {
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(crate) struct FailureContext {
-    pub(crate) run: Option<RunId>,
-    pub(crate) source: Option<[u8; 32]>,
-    pub(crate) workspace: Option<[u8; 16]>,
-    pub(crate) operation: Option<[u8; 16]>,
-    pub(crate) revision: Option<[u8; 32]>,
+    pub(crate) run: Option<WorkflowRunId>,
+    pub(crate) source: Option<SourceId>,
+    pub(crate) workspace: Option<WorkspaceId>,
+    pub(crate) operation: Option<OperationId>,
+    pub(crate) revision: Option<RevisionId>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -282,11 +284,19 @@ impl WorkflowFailure {
     }
 
     pub(crate) fn invalid(stage: WorkflowStage, error: impl fmt::Display) -> Self {
+        Self::invalid_with_context(stage, FailureContext::default(), error)
+    }
+
+    pub(crate) fn invalid_with_context(
+        stage: WorkflowStage,
+        context: FailureContext,
+        error: impl fmt::Display,
+    ) -> Self {
         Self::new(
             FailureCode::InvalidRequest,
             stage,
             Certainty::PrePublication,
-            FailureContext::default(),
+            context,
             error,
             RecoveryAction::CorrectInvalidRequest,
         )
@@ -335,31 +345,31 @@ impl WorkflowFailure {
 
     /// Returns the Run identity when known.
     #[must_use]
-    pub fn run(&self) -> Option<[u8; 16]> {
-        self.context.run.map(RunId::into_bytes)
+    pub fn run(&self) -> Option<WorkflowRunId> {
+        self.context.run
     }
 
     /// Returns the Source identity when known.
     #[must_use]
-    pub const fn source(&self) -> Option<[u8; 32]> {
+    pub const fn source(&self) -> Option<SourceId> {
         self.context.source
     }
 
     /// Returns the Workspace identity when known.
     #[must_use]
-    pub const fn workspace(&self) -> Option<[u8; 16]> {
+    pub const fn workspace(&self) -> Option<WorkspaceId> {
         self.context.workspace
     }
 
     /// Returns the Operation identity when known.
     #[must_use]
-    pub const fn operation(&self) -> Option<[u8; 16]> {
+    pub const fn operation(&self) -> Option<OperationId> {
         self.context.operation
     }
 
     /// Returns the Revision identity when known.
     #[must_use]
-    pub const fn revision(&self) -> Option<[u8; 32]> {
+    pub const fn revision(&self) -> Option<RevisionId> {
         self.context.revision
     }
 }
@@ -375,19 +385,19 @@ impl fmt::Display for WorkflowFailure {
         self.certainty.write(formatter)?;
         write!(formatter, "]")?;
         if let Some(run) = self.context.run {
-            write!(formatter, " run={}", Hex(&run.into_bytes()))?;
+            write!(formatter, " run={run}")?;
         }
         if let Some(source) = self.context.source {
-            write!(formatter, " source={}", Hex(&source))?;
+            write!(formatter, " source={source}")?;
         }
         if let Some(workspace) = self.context.workspace {
-            write!(formatter, " workspace={}", Hex(&workspace))?;
+            write!(formatter, " workspace={workspace}")?;
         }
         if let Some(operation) = self.context.operation {
-            write!(formatter, " operation={}", Hex(&operation))?;
+            write!(formatter, " operation={operation}")?;
         }
         if let Some(revision) = self.context.revision {
-            write!(formatter, " revision={}", Hex(&revision))?;
+            write!(formatter, " revision={revision}")?;
         }
         write!(
             formatter,
@@ -424,17 +434,6 @@ impl From<RuntimeError> for WorkflowFailure {
     }
 }
 
-struct Hex<'a>(&'a [u8]);
-
-impl fmt::Display for Hex<'_> {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for byte in self.0 {
-            write!(formatter, "{byte:02x}")?;
-        }
-        Ok(())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -446,8 +445,8 @@ mod tests {
             WorkflowStage::Commit,
             Certainty::Indeterminate(PublicationPhase::WorkspaceRevision),
             FailureContext {
-                run: Some(RunId::new([1; 16]).unwrap()),
-                operation: Some([2; 16]),
+                run: Some(WorkflowRunId::new([1; 16]).unwrap()),
+                operation: Some(OperationId::from_bytes([2; 16]).unwrap()),
                 ..FailureContext::default()
             },
             "ก".repeat(MAX_DIAGNOSTIC_BYTES),
@@ -459,5 +458,28 @@ mod tests {
         assert!(text.contains("workspace-revision"));
         assert!(text.contains("operation=020202"));
         assert!(text.contains("resolve the recorded Operation"));
+    }
+
+    #[test]
+    fn invalid_failure_can_preserve_known_identities() {
+        let context = FailureContext {
+            run: Some(WorkflowRunId::new([1; 16]).unwrap()),
+            source: Some(SourceId::new([2; 32])),
+            workspace: Some(WorkspaceId::from_bytes([3; 16]).unwrap()),
+            operation: Some(OperationId::from_bytes([4; 16]).unwrap()),
+            revision: Some(RevisionId::from_bytes([5; 32]).unwrap()),
+        };
+
+        let failure = WorkflowFailure::invalid_with_context(
+            WorkflowStage::Selection,
+            context,
+            "invalid selection",
+        );
+
+        assert_eq!(failure.run(), context.run);
+        assert_eq!(failure.source(), context.source);
+        assert_eq!(failure.workspace(), context.workspace);
+        assert_eq!(failure.operation(), context.operation);
+        assert_eq!(failure.revision(), context.revision);
     }
 }

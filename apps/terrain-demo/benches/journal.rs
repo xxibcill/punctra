@@ -31,7 +31,8 @@ use support::{
     write_las_family_fixture,
 };
 use terrain_demo::{
-    WorkflowLimits, WorkflowPaths, WorkflowReceipt, WorkflowRunIntent, resume_run, start_run,
+    WorkflowLimits, WorkflowPaths, WorkflowReceipt, WorkflowRunId, WorkflowRunIntent, resume_run,
+    start_run,
 };
 
 const POINT_COUNT_ENV: &str = "PUNCTRA_TERRAIN_WORKFLOW_BENCH_POINTS";
@@ -94,17 +95,19 @@ fn benchmark_workflow(criterion: &mut Criterion) {
 fn report_resource_evidence(point_count: usize) {
     let fixture = BenchFixture::new(point_count);
     let receipt = fixture.start();
-    let journal_bytes = fs::metadata(fixture.run_root.join("run.pwf"))
-        .expect("measure benchmark journal")
+    let journal = fs::read(fixture.run_root.join("run.pwf")).expect("read benchmark journal");
+    let frame_count = journal_frame_ends(&journal)
+        .expect("parse benchmark journal")
         .len();
     let report =
         fs::read(fixture.run_root.join("audit.json")).expect("read benchmark resource report");
     let report_json: serde_json::Value =
         serde_json::from_slice(&report).expect("parse benchmark resource report");
     eprintln!(
-        "terrain-workflow generated evidence: points={point_count} journal_bytes={journal_bytes} report_bytes={} frames={} semantic_limits={}",
+        "terrain-workflow generated evidence: points={point_count} journal_bytes={} report_bytes={} frames={} semantic_limits={}",
+        journal.len(),
         receipt.report_bytes(),
-        receipt.frame_count(),
+        frame_count,
         report_json["limits"],
     );
     eprintln!(
@@ -169,13 +172,13 @@ impl BenchFixture {
         )
         .blocking_wait()
         .expect("create benchmark Workspace");
-        let baseline = workspace_handle.head().provenance().revision().into_bytes();
+        let baseline = workspace_handle.head().provenance().revision();
         drop(workspace_handle);
 
         let paths = WorkflowPaths::new(&source, &index, &workspace, &run_root);
         let intent = WorkflowRunIntent::new(
-            identity(sequence, 1),
-            identity(sequence, 2),
+            WorkflowRunId::new(identity(sequence, 1)).expect("nonzero benchmark Run ID"),
+            OperationId::from_bytes(identity(sequence, 2)).expect("nonzero benchmark Operation ID"),
             baseline,
             [9_u64, 10],
             1,
@@ -194,7 +197,7 @@ impl BenchFixture {
             ],
             LandXmlOptions::metric_metres("Punctra Generated Benchmark", "2026-08-10", "00:00:00Z")
                 .expect("valid benchmark LandXML options")
-                .allow_unknown_coordinate_reference_as_metric_metres(),
+                .assert_coordinates_are_metric_metres(),
         )
         .expect("construct benchmark workflow Intent");
         Self {
@@ -244,8 +247,7 @@ impl BenchFixture {
             )
             .blocking_wait()
             .expect("materialize benchmark retryable Points");
-        let operation =
-            OperationId::from_bytes(fixture.intent.operation()).expect("valid benchmark Operation");
+        let operation = fixture.intent.operation();
         let obstruction = RevisionDirectoryBlocker::install(&fixture.workspace)
             .expect("obstruct benchmark Revision publication");
         let outcome = workspace

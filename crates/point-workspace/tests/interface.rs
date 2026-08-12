@@ -8,6 +8,13 @@ use point_workspace::{OpenLimits, RevisionKind, WorkspaceError, WorkspaceSchema,
 use support::{classification_attribute, prepare_fixture};
 
 #[test]
+fn commit_job_is_a_nameable_public_capability() {
+    fn accepts_public_commit_job(_: Option<point_workspace::CommitJob>) {}
+
+    accepts_public_commit_job(None);
+}
+
+#[test]
 fn deterministic_fixture_retains_complete_source_and_schema() {
     let (_temporary, index, ticks, classifications) = prepare_fixture("fixture", 257);
     assert_eq!(

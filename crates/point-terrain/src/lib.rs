@@ -23,7 +23,7 @@
 //!     "2026-08-10",
 //!     "00:00:00Z",
 //! )?
-//! .allow_unknown_coordinate_reference_as_metric_metres();
+//! .assert_coordinates_are_metric_metres();
 //! let receipt = surface
 //!     .ensure_landxml("existing-ground.xml", options, LandXmlLimits::default())
 //!     .blocking_wait()?;
@@ -40,7 +40,9 @@ mod error;
 mod landxml;
 mod limits;
 mod model;
+mod numeric;
 mod qa;
+mod sort;
 mod triangulation;
 
 pub use derive::derive;
@@ -68,7 +70,7 @@ impl TerrainSurface {
     #[must_use]
     pub fn check_points<I>(&self, check_points: I, limits: CheckPointLimits) -> CheckPointJob
     where
-        I: IntoIterator<Item = CheckPoint>,
+        I: IntoIterator<Item = CheckPoint> + Send + 'static,
     {
         qa::start(self, check_points, limits)
     }

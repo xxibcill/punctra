@@ -7,10 +7,13 @@ use std::{
     sync::{
         Arc,
         atomic::{AtomicUsize, Ordering},
+        mpsc::{Receiver, SyncSender, sync_channel},
     },
+    time::Duration,
 };
 
 use foundation_runtime::ProgressPhase;
+use point_contracts::PositionTransform;
 use point_terrain::{
     CheckPoint, CheckPointId, CheckPointLimits, CheckPointOutcome, SurfaceFaceId, SurfaceVertexId,
     TerrainError, TerrainSurface,
@@ -207,6 +210,141 @@ fn compensated_statistics_retain_small_residuals_across_large_cancellation() {
 }
 
 #[test]
+fn root_mean_square_accepts_large_finite_residuals() {
+    let fixture = TerrainFixture::new(
+        "qa-large-rms",
+        vec![[0, 0, 0], [10, 0, 0], [0, 10, 0]],
+        vec![2; 3],
+    );
+    let surface = derive_surface(fixture.snapshot(), 2);
+
+    let report = surface
+        .check_points(
+            [check_point(1, [0.0, 0.0, 1.0e200])],
+            CheckPointLimits::default(),
+        )
+        .blocking_wait()
+        .expect("a representable RMS must not overflow during accumulation");
+
+    let statistics = report.statistics();
+    assert_eq!(statistics.mean(), Some(1.0e200));
+    assert_eq!(statistics.root_mean_square(), Some(1.0e200));
+}
+
+#[test]
+fn mean_accepts_repeated_large_finite_residuals() {
+    let fixture = TerrainFixture::new(
+        "qa-large-mean",
+        vec![[0, 0, 0], [10, 0, 0], [0, 10, 0]],
+        vec![2; 3],
+    );
+    let surface = derive_surface(fixture.snapshot(), 2);
+
+    let report = surface
+        .check_points(
+            [
+                check_point(1, [0.0, 0.0, 1.0e308]),
+                check_point(2, [0.0, 0.0, 1.0e308]),
+            ],
+            CheckPointLimits::default(),
+        )
+        .blocking_wait()
+        .expect("a representable mean must not overflow during accumulation");
+
+    let statistics = report.statistics();
+    assert_eq!(statistics.mean(), Some(1.0e308));
+    assert_eq!(statistics.root_mean_square(), Some(1.0e308));
+}
+
+#[test]
+fn finite_extreme_world_coordinates_remain_sampleable() {
+    let transform = PositionTransform::new([0.0; 3], [1.0e200, 1.0e200, 1.0])
+        .expect("finite extreme transform is valid");
+    let fixture = TerrainFixture::with_transform(
+        "qa-extreme-world",
+        transform,
+        vec![[0, 0, 0], [1, 0, 0], [0, 1, 0]],
+        vec![2; 3],
+    );
+    let surface = derive_surface(fixture.snapshot(), 2);
+
+    let report = surface
+        .check_points(
+            [check_point(1, [2.0e199, 2.0e199, 0.0])],
+            CheckPointLimits::default(),
+        )
+        .blocking_wait()
+        .expect("finite world geometry is supported");
+
+    let CheckPointOutcome::Sampled {
+        surface_z,
+        residual,
+        ..
+    } = report.results()[0].outcome()
+    else {
+        panic!("interior Check Point must not become a gap at large world magnitudes");
+    };
+    assert_eq!(surface_z.to_bits(), 0.0_f64.to_bits());
+    assert_eq!(residual.to_bits(), 0.0_f64.to_bits());
+}
+
+#[test]
+fn large_world_offsets_do_not_collapse_a_valid_surface_face() {
+    let transform = PositionTransform::new([1.0e12, 1.0e15, 0.0], [0.000_122_070_312_5, 0.25, 1.0])
+        .expect("finite offset transform is valid");
+    let fixture = TerrainFixture::with_transform(
+        "qa-large-offset",
+        transform,
+        vec![[0, 0, 0], [1, 0, 0], [0, 1, 0]],
+        vec![2; 3],
+    );
+    let surface = derive_surface(fixture.snapshot(), 2);
+    let vertex = transform.world_f64([0, 0, 0]);
+
+    let report = surface
+        .check_points([check_point(1, vertex)], CheckPointLimits::default())
+        .blocking_wait()
+        .expect("a Surface vertex remains sampleable after normalization");
+
+    assert!(matches!(
+        report.results()[0].outcome(),
+        CheckPointOutcome::Sampled {
+            surface_z: 0.0,
+            residual: 0.0,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn rounded_world_vertices_remain_sampleable_in_the_surface_local_frame() {
+    let transform = PositionTransform::new([1.0e20, 1.0e20, 0.0], [1.0; 3])
+        .expect("finite offset transform is valid");
+    let fixture = TerrainFixture::with_transform(
+        "qa-rounded-world-vertices",
+        transform,
+        vec![[0, 0, 0], [1, 0, 0], [0, 1, 0]],
+        vec![2; 3],
+    );
+    let surface = derive_surface(fixture.snapshot(), 2);
+    let vertex = transform.world_f64([0, 0, 0]);
+
+    let report = surface
+        .check_points([check_point(1, vertex)], CheckPointLimits::default())
+        .blocking_wait()
+        .expect("a rounded Surface vertex remains sampleable");
+
+    assert!(matches!(
+        report.results()[0].outcome(),
+        CheckPointOutcome::Sampled {
+            surface_z: 0.0,
+            residual: 0.0,
+            ..
+        }
+    ));
+}
+
+#[test]
 fn duplicate_identities_and_every_qa_resource_family_fail_without_a_report() {
     let (_fixture, surface) = planar_surface("qa-limits");
     let surface = &surface;
@@ -244,7 +382,7 @@ fn duplicate_identities_and_every_qa_resource_family_fail_without_a_report() {
 }
 
 #[test]
-fn count_limit_collects_only_max_plus_one_synchronously() {
+fn count_limit_collects_only_max_plus_one_in_the_worker() {
     let (_fixture, surface) = planar_surface("qa-count");
     let pulls = Arc::new(AtomicUsize::new(0));
     let input = UnhintedCheckPoints {
@@ -257,10 +395,10 @@ fn count_limit_collects_only_max_plus_one_synchronously() {
         input,
         CheckPointLimits::new(2, u64::MAX, u64::MAX, u64::MAX),
     );
-    assert_eq!(pulls.load(Ordering::Relaxed), 3);
     let error = job
         .blocking_wait()
         .expect_err("third Check Point exceeds the count limit");
+    assert_eq!(pulls.load(Ordering::Relaxed), 3);
     assert!(matches!(
         error,
         TerrainError::ResourceLimit {
@@ -269,6 +407,30 @@ fn count_limit_collects_only_max_plus_one_synchronously() {
             allowed: 2,
         }
     ));
+}
+
+#[test]
+fn cancellation_during_input_collection_returns_no_report() {
+    let (_fixture, surface) = planar_surface("qa-collection-cancel");
+    let (started_sender, started_receiver) = sync_channel(0);
+    let (release_sender, release_receiver) = sync_channel(0);
+    let input = GatedCheckPoints {
+        started: Some(started_sender),
+        release: release_receiver,
+        yielded: false,
+    };
+    let job = surface.check_points(input, CheckPointLimits::default());
+    let handle = job.handle();
+    started_receiver
+        .recv_timeout(Duration::from_secs(5))
+        .expect("worker begins Check Point input collection");
+    handle.cancel();
+    release_sender
+        .send(())
+        .expect("release the worker's in-flight iterator pull");
+
+    assert!(matches!(job.blocking_wait(), Err(TerrainError::Cancelled)));
+    assert_ne!(handle.progress().phase(), ProgressPhase::COMPLETE);
 }
 
 #[test]
@@ -331,6 +493,32 @@ struct UnhintedCheckPoints {
     next_id: u64,
     remaining: usize,
     pulls: Arc<AtomicUsize>,
+}
+
+struct GatedCheckPoints {
+    started: Option<SyncSender<()>>,
+    release: Receiver<()>,
+    yielded: bool,
+}
+
+impl Iterator for GatedCheckPoints {
+    type Item = CheckPoint;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.yielded {
+            return None;
+        }
+        self.started
+            .take()
+            .expect("fixture iterator starts once")
+            .send(())
+            .expect("test waits for collection to start");
+        self.release
+            .recv()
+            .expect("test releases the blocked iterator");
+        self.yielded = true;
+        Some(check_point(1, [1.0, 1.0, 0.0]))
+    }
 }
 
 impl Iterator for UnhintedCheckPoints {
