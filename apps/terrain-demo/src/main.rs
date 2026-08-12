@@ -149,7 +149,6 @@ fn exercise_classification_correction_and_revert(
         workspace,
         CommitRequest::set_classification(correction_operation, target, NON_GROUND_CLASSIFICATION),
         "classification correction",
-        correction_operation,
         recovery,
     )?;
     let changed: AppResult<TerrainSurface> = (|| {
@@ -163,7 +162,6 @@ fn exercise_classification_correction_and_revert(
         workspace,
         CommitRequest::revert_head(revert_operation, correction_revision),
         "immediate-head Revert",
-        revert_operation,
         recovery,
     )?;
     let restored = derive_ground(workspace.snapshot(revert_revision)?)?;

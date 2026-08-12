@@ -68,9 +68,9 @@ pub(crate) fn commit_with_recovery(
     workspace: Workspace,
     request: CommitRequest,
     action: &'static str,
-    operation: OperationId,
     recovery: &RecoveryPaths<'_>,
 ) -> AppResult<(Workspace, RevisionId)> {
+    let operation = request.operation();
     save_recovery_record(
         &recovery.record,
         RecoveryRecord {
