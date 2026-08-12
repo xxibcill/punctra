@@ -273,7 +273,7 @@ pub fn resume_run(
     limits: WorkflowLimits,
 ) -> WorkflowJob;
 
-pub fn inspect_run(
+pub fn inspect_and_repair_run(
     run_root: impl AsRef<Path>,
     limits: WorkflowLimits,
 ) -> Result<WorkflowStatus, WorkflowFailure>;

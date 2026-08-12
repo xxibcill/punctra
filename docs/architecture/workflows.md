@@ -323,10 +323,10 @@ sequenceDiagram
     RUN->>TER: recompute immutable Audit/Terrain/QA facts
     RUN-->>CALLER: same complete receipt
 
-    CALLER->>RUN: inspect_run(run_root, limits)
+    CALLER->>RUN: inspect_and_repair_run(run_root, limits)
     RUN->>DISK: lock; verify journal format/hash/semantic chain
     RUN->>DISK: repair only torn suffix; revalidate root identity
-    RUN-->>CALLER: Run/Operation/frame-count/complete status
+    RUN-->>CALLER: Run/Operation/semantic-phase status
 ~~~
 
 The exact monotonic frame order is `Intent`, `RevisionResolved`,

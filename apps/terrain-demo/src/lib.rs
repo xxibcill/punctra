@@ -15,5 +15,5 @@ pub use diagnostic::WorkflowFailure;
 pub use journal::WorkflowRunId;
 pub use workflow::{
     WorkflowJob, WorkflowLimits, WorkflowPaths, WorkflowPhase, WorkflowReceipt, WorkflowRunIntent,
-    WorkflowStatus, inspect_run, resume_run, start_run,
+    WorkflowStatus, inspect_and_repair_run, resume_run, start_run,
 };

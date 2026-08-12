@@ -178,16 +178,17 @@ let recovered = resume_run(paths, intent, WorkflowLimits::default())
     .blocking_wait()?;
 assert_eq!(recovered, receipt);
 
-let status = inspect_run("run-root", WorkflowLimits::default())?;
+let status = inspect_and_repair_run("run-root", WorkflowLimits::default())?;
 assert!(status.is_complete());
 ~~~
 
 `start_run` and `resume_run` return `WorkflowJob`, whose active child waits use
-linked cancellation. `inspect_run` acquires the Run lock and verifies the
-journal format, hash chain, and semantic frame links without opening or
-mutating Source, index, or Workspace state. It may truncate a torn final suffix
-to the last verified journal frame, then revalidates Run-root identity; a root
-replacement after repair is publication-indeterminate. The private workflow resolves
+linked cancellation. `inspect_and_repair_run` acquires the Run lock, verifies
+the journal format, hash chain, and semantic frame links, and explicitly
+repairs a torn final suffix without opening or mutating Source, index, or
+Workspace state. When repair is needed, it truncates that suffix to the last
+verified journal frame, then revalidates Run-root identity; a root replacement
+after repair is publication-indeterminate. The private workflow resolves
 Committed, Rejected, Retryable, NotRecorded, and Indeterminate Workspace
 Operation states with the original identity. It opens but never creates the
 Workspace; an absent Workspace is `PWF_INVALID_REQUEST` before Run creation or

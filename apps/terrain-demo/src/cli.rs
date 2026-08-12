@@ -8,8 +8,8 @@ use point_terrain::{CheckPoint, CheckPointId, LandXmlOptions, TerrainRecipe};
 use point_workspace::{OperationId, RevisionId};
 
 use crate::{
-    WorkflowFailure, WorkflowLimits, WorkflowPaths, WorkflowRunId, WorkflowRunIntent, inspect_run,
-    resume_run, start_run,
+    WorkflowFailure, WorkflowLimits, WorkflowPaths, WorkflowRunId, WorkflowRunIntent,
+    inspect_and_repair_run, resume_run, start_run,
 };
 
 const DEFAULT_SURFACE_NAME: &str = "Punctra Ground Surface";
@@ -62,7 +62,7 @@ pub fn run_cli(arguments: impl IntoIterator<Item = OsString>) -> Result<String, 
     match parse(arguments)? {
         Command::Help => Ok(USAGE.to_owned()),
         Command::Inspect(root) => {
-            let status = inspect_run(root, WorkflowLimits::default())?;
+            let status = inspect_and_repair_run(root, WorkflowLimits::default())?;
             Ok(format!(
                 "Run {}\nOperation {}\nphase {}\ncomplete {}\n",
                 status.run(),

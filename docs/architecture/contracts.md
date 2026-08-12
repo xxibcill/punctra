@@ -373,9 +373,10 @@ selection or commit. `resume_run` requires identical paths and intent, resolves
 the same Workspace Operation Identity, recomputes immutable work, and appends or
 validates exactly these monotonic frames: `Intent`, `RevisionResolved`,
 `AuditObserved`, `SurfaceObserved`, `QaObserved`, `ExportEnsured`,
-`ReportEnsured`, and `Complete`. `inspect_run` verifies the journal format, hash
-chain, semantic links, and Run lock without opening external workflow state;
-it may durably repair a torn final suffix to the last verified frame. It then
+`ReportEnsured`, and `Complete`. `inspect_and_repair_run` verifies the journal
+format, hash chain, semantic links, and Run lock without opening external
+workflow state; it may durably repair a torn final suffix to the last verified
+frame. It then
 revalidates Run-root identity. Replacement after repair is
 `PWF_PUBLICATION_INDETERMINATE` at `inspect` with publication phase
 `journal-checkpoint`, never false inspection success.

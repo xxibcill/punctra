@@ -465,13 +465,16 @@ pub fn resume_run(
     Job::spawn(move |control| run(&paths, &intent, &limits, false, &control))
 }
 
-/// Inspects one journal after verifying its format, hash chain, and semantic links.
+/// Inspects one journal and durably repairs a torn final suffix when needed.
+///
+/// A repair truncates the journal to its last verified checkpoint and syncs that
+/// truncation before returning the semantic durable status.
 ///
 /// # Errors
 ///
 /// Returns a structured failure when the Run lock, journal bytes, hash chain,
 /// semantic checkpoint links, or resource limits cannot be verified.
-pub fn inspect_run(
+pub fn inspect_and_repair_run(
     run_root: impl AsRef<Path>,
     limits: WorkflowLimits,
 ) -> Result<WorkflowStatus, WorkflowFailure> {

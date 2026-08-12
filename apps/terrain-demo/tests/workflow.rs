@@ -26,7 +26,7 @@ use support::{
 };
 use terrain_demo::{
     WorkflowLimits, WorkflowPaths, WorkflowPhase, WorkflowReceipt, WorkflowRunId,
-    WorkflowRunIntent, inspect_run, resume_run, start_run,
+    WorkflowRunIntent, inspect_and_repair_run, resume_run, start_run,
 };
 
 const GROUND: u8 = 2;
@@ -62,7 +62,7 @@ fn every_checkpoint_prefix_resumes_to_one_revision_and_the_same_report() {
     for (prefix, end) in frame_ends.iter().copied().enumerate() {
         restore_journal_prefix(&fixture.journal(), &complete_journal, end)
             .expect("durably restore completed-run journal prefix");
-        let before = inspect_run(&fixture.run_root, WorkflowLimits::default())
+        let before = inspect_and_repair_run(&fixture.run_root, WorkflowLimits::default())
             .expect("inspect verified journal prefix");
         assert_eq!(before.phase(), EXPECTED_PHASES[prefix]);
         assert_eq!(before.is_complete(), prefix + 1 == EXPECTED_FRAME_COUNT);
@@ -96,7 +96,7 @@ fn torn_suffix_repairs_but_version_reserved_and_sequence_corruption_do_not() {
     let mut torn = complete.clone();
     torn.extend_from_slice(b"torn final frame prefix");
     overwrite_and_sync(&fixture.journal(), &torn).expect("install torn final suffix");
-    let status = inspect_run(&fixture.run_root, WorkflowLimits::default())
+    let status = inspect_and_repair_run(&fixture.run_root, WorkflowLimits::default())
         .expect("reader repairs a provably torn final suffix");
     assert!(status.is_complete());
     assert_eq!(fixture.journal_bytes(), complete);
@@ -110,7 +110,8 @@ fn torn_suffix_repairs_but_version_reserved_and_sequence_corruption_do_not() {
         corrupt[offset..offset + replacement.len()].copy_from_slice(&replacement);
         overwrite_and_sync(&fixture.journal(), &corrupt)
             .unwrap_or_else(|error| panic!("install {label} corruption: {error}"));
-        let Err(error) = inspect_run(&fixture.run_root, WorkflowLimits::default()) else {
+        let Err(error) = inspect_and_repair_run(&fixture.run_root, WorkflowLimits::default())
+        else {
             panic!("{label} corruption must fail closed");
         };
         assert_eq!(error.code(), "PWF_JOURNAL_CORRUPT", "{label}: {error}");
@@ -164,14 +165,15 @@ fn journal_corruption_limits_locking_and_path_binding_fail_closed() {
     let limit = WorkflowLimits::default().with_max_journal_bytes(
         u64::try_from(complete_journal.len() - 1).expect("journal size fits u64"),
     );
-    let error = inspect_run(&fixture.run_root, limit).expect_err("journal byte ceiling must bind");
+    let error = inspect_and_repair_run(&fixture.run_root, limit)
+        .expect_err("journal byte ceiling must bind");
     assert_eq!(error.code(), "PWF_RESOURCE_LIMIT");
     assert_eq!(fixture.journal_bytes(), complete_journal);
 
     let mut corrupt = complete_journal.clone();
     *corrupt.last_mut().expect("journal is nonempty") ^= 1;
     overwrite_and_sync(&fixture.journal(), &corrupt).expect("install corrupt complete frame");
-    let error = inspect_run(&fixture.run_root, WorkflowLimits::default())
+    let error = inspect_and_repair_run(&fixture.run_root, WorkflowLimits::default())
         .expect_err("complete frame corruption must fail closed");
     assert_eq!(error.code(), "PWF_JOURNAL_CORRUPT");
     assert_eq!(fixture.journal_bytes(), corrupt);
@@ -183,24 +185,24 @@ fn journal_corruption_limits_locking_and_path_binding_fail_closed() {
         .open(fixture.lock())
         .expect("open workflow lock file");
     lock.try_lock().expect("acquire independent exclusive lock");
-    let error = inspect_run(&fixture.run_root, WorkflowLimits::default())
+    let error = inspect_and_repair_run(&fixture.run_root, WorkflowLimits::default())
         .expect_err("concurrent inspection must not pass the Run lock");
     assert_eq!(error.code(), "PWF_IO");
     assert!(error.to_string().contains("lock"));
     drop(lock);
-    assert!(inspect_run(&fixture.run_root, WorkflowLimits::default()).is_ok());
+    assert!(inspect_and_repair_run(&fixture.run_root, WorkflowLimits::default()).is_ok());
 
     overwrite_and_sync(&fixture.lock(), b"unexpected lock payload")
         .expect("install nonempty workflow lock file");
-    let error = inspect_run(&fixture.run_root, WorkflowLimits::default())
+    let error = inspect_and_repair_run(&fixture.run_root, WorkflowLimits::default())
         .expect_err("nonempty run.lock must fail its fixed schema");
     assert_eq!(error.code(), "PWF_IO");
     assert_eq!(error.stage(), "lock");
     overwrite_and_sync(&fixture.lock(), b"").expect("restore empty workflow lock file");
-    assert!(inspect_run(&fixture.run_root, WorkflowLimits::default()).is_ok());
+    assert!(inspect_and_repair_run(&fixture.run_root, WorkflowLimits::default()).is_ok());
 
     let aggregate_limit = WorkflowLimits::default().with_max_aggregate_working_bytes(1);
-    let error = inspect_run(&fixture.run_root, aggregate_limit)
+    let error = inspect_and_repair_run(&fixture.run_root, aggregate_limit)
         .expect_err("aggregate ceiling must bind before journal inspection");
     assert_eq!(error.code(), "PWF_RESOURCE_LIMIT");
     assert_eq!(fixture.journal_bytes(), complete_journal);
@@ -314,7 +316,7 @@ fn cancelling_the_parent_run_never_publishes_a_false_complete_checkpoint() {
     assert_eq!(error.code(), "PWF_CANCELLED");
 
     if fixture.journal().exists() {
-        let status = inspect_run(&fixture.run_root, WorkflowLimits::default())
+        let status = inspect_and_repair_run(&fixture.run_root, WorkflowLimits::default())
             .expect("cancelled Run journal remains inspectable");
         assert!(
             !status.is_complete(),
@@ -395,7 +397,7 @@ fn report_limits_and_landxml_conflicts_resume_without_a_second_revision() {
     assert_eq!(error.code(), "PWF_RESOURCE_LIMIT");
     assert!(!limited.report().exists());
     assert!(limited.run_root.join("terrain.xml").is_file());
-    let status = inspect_run(&limited.run_root, WorkflowLimits::default())
+    let status = inspect_and_repair_run(&limited.run_root, WorkflowLimits::default())
         .expect("inspect Run stopped at the report limit");
     assert_eq!(status.phase(), WorkflowPhase::ExportEnsured);
     assert!(!status.is_complete());
@@ -418,7 +420,7 @@ fn report_limits_and_landxml_conflicts_resume_without_a_second_revision() {
         fs::read(conflicting.run_root.join("terrain.xml")).unwrap(),
         caller_bytes,
     );
-    let status = inspect_run(&conflicting.run_root, WorkflowLimits::default())
+    let status = inspect_and_repair_run(&conflicting.run_root, WorkflowLimits::default())
         .expect("inspect Run stopped before LandXML checkpoint");
     assert_eq!(status.phase(), WorkflowPhase::QaObserved);
     assert!(!status.is_complete());
@@ -566,7 +568,7 @@ fn stale_head_and_a_differently_bound_rejection_do_not_mutate_the_run() {
     .blocking_wait()
     .expect_err("same Operation bound to a different request must conflict");
     assert_eq!(error.code(), "PWF_JOURNAL_CONFLICT");
-    let status = inspect_run(&rejected.run_root, WorkflowLimits::default())
+    let status = inspect_and_repair_run(&rejected.run_root, WorkflowLimits::default())
         .expect("inspect rejected Run Intent");
     assert_eq!(status.phase(), WorkflowPhase::IntentRecorded);
     assert!(!status.is_complete());
@@ -677,7 +679,7 @@ fn retryable_workspace_intent_resumes_with_the_recorded_operation() {
     .blocking_wait()
     .expect_err("selection ceiling stops after durable Intent");
     assert_eq!(error.code(), "PWF_RESOURCE_LIMIT", "{error}");
-    let status = inspect_run(&fixture.run_root, WorkflowLimits::default())
+    let status = inspect_and_repair_run(&fixture.run_root, WorkflowLimits::default())
         .expect("inspect Intent-only workflow Run");
     assert_eq!(status.phase(), WorkflowPhase::IntentRecorded);
     assert!(!status.is_complete());
@@ -920,7 +922,7 @@ fn wait_for_journal_frames(path: &Path, minimum: usize) {
 fn wait_for_unlocked_status(run_root: &Path) -> terrain_demo::WorkflowStatus {
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
-        match inspect_run(run_root, WorkflowLimits::default()) {
+        match inspect_and_repair_run(run_root, WorkflowLimits::default()) {
             Ok(status) => return status,
             Err(error) if error.stage() == "lock" && Instant::now() < deadline => {
                 thread::sleep(Duration::from_millis(1));
@@ -1034,7 +1036,7 @@ fn resource_limit_problem(label: &str, identity: u8, limits: &WorkflowLimits) ->
         "{label}: a limited run must not publish its final report",
     );
     let receipt = if fixture.journal().exists() {
-        let status = inspect_run(&fixture.run_root, WorkflowLimits::default())
+        let status = inspect_and_repair_run(&fixture.run_root, WorkflowLimits::default())
             .unwrap_or_else(|error| panic!("{label}: inspect limited Run: {error}"));
         assert!(!status.is_complete(), "{label}: false Complete checkpoint");
         if label == "audit-limit" {
