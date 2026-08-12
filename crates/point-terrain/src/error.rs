@@ -137,6 +137,19 @@ pub enum TerrainError {
         path: TerrainDiagnostic,
     },
 
+    /// An existing regular export target differs from the expected bytes.
+    #[error(
+        "LandXML target conflicts with expected content: expected {expected_hash}, actual {actual_hash} at {path}"
+    )]
+    ExportConflict {
+        /// Bounded target path.
+        path: TerrainDiagnostic,
+        /// Deterministic hash of the complete expected output.
+        expected_hash: ContentHash,
+        /// Hash of the complete existing regular target.
+        actual_hash: ContentHash,
+    },
+
     /// A terrain-owned filesystem operation failed.
     #[error("failed to {operation} {path}: {source}")]
     Io {

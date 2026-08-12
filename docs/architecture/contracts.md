@@ -1,7 +1,7 @@
 # Cross-Module Contracts and Invariants
 
-Status: v0.1 through the narrow v0.6 terrain/QA contracts implemented; broader
-terrain/export contracts remain deferred
+Status: v0.1 through the narrow v0.7 technical-readiness contracts implemented;
+broader terrain/export contracts remain deferred
 
 The versioned designs in [`docs/design`](../design) control exact release
 scope. This document summarizes the invariants that cross current crate seams.
@@ -15,6 +15,8 @@ scope. This document summarizes the invariants that cross current crate seams.
 - Display Coverage never substitutes for an exact result.
 - Source bytes are immutable; Workspace Edits are overlays.
 - Durable certainty is reported conservatively.
+- A Workflow checkpoint records a revalidated durable fact, never authority
+  independent of the module that owns that fact.
 
 ## Identity
 
@@ -62,6 +64,15 @@ reconciliation or retry.
 One Operation Identity can bind only one canonical intent. Reusing it with
 different content is a definitive `OperationConflict`; matching reuse is
 idempotent and can publish at most one Revision.
+
+### Workflow Run Identity
+
+The `terrain-demo` Run Identity is a caller-owned nonzero opaque 16-byte value
+for one complete durable Workflow intent. It is distinct from Workspace
+Identity, Workspace Operation Identity, and runtime Job Identity. The first
+`Intent` frame binds it to the canonical request and Source, index, Workspace,
+and Run-root path hashes. Start or resume with different meaning fails before
+Workflow mutation.
 
 ## Coordinates and exact values
 
@@ -129,6 +140,9 @@ Untrusted artifacts are discarded and rebuilt from the verified Source.
 index rather than separate Source and index values prevents mismatched
 capabilities. Create chooses one Source `AttributeId` whose exact type must be
 `U8`; open revalidates that schema and the persisted Source contract.
+`Workspace::schema()` returns that validated `WorkspaceSchema` without exposing
+private manifest representation. `terrain-demo` requires its
+`schema().classification()` to be Source Attribute 6.
 
 The public lifecycle is:
 
@@ -169,7 +183,7 @@ overlay through the pinned Revision, run final predicates, and publish a Point
 Set only after complete terminal Source verification.
 
 View samples, GPU picks, visibility, depth, and occlusion never exclude a
-Point. v0.6 has no polygon, corridor, frustum, screen-through, brush,
+Point. v0.7 has no polygon, corridor, frustum, screen-through, brush,
 visible-only, or occlusion Query.
 
 ### Exact Snapshot Point rows
@@ -242,9 +256,24 @@ After dropping the entire session graph and reopening, resolution is one of:
 `retry_operation` revalidates and links the complete ready payload. It does not
 need the expired Point Set.
 
+### Exact Revision Audit
+
+`Workspace::revision_audit(revision, RevisionAuditLimits)` rebuilds one
+immutable `RevisionAudit` without changing Workspace state. The root audit is
+canonically empty. A non-root audit validates the complete Revision structure
+and digest, streams exact Source positions for every strictly increasing changed
+ordinal, and publishes only after all joins and limits succeed.
+
+The audit reports `RevisionInfo`, sorted unique `(before, after, count)`
+classification transitions, changed Point count, the inclusive world-space Edit
+Footprint, ordered Source-aware Point membership hash, full content hash, and
+resource facts. A Revert audit has the same membership and footprint as the
+Revision it inverts, with reversed transitions. Historical results do not
+change after later commits.
+
 ## Persistence contract
 
-The private v0.5 Workspace layout is:
+The current private Workspace layout is:
 
 ~~~text
 workspace.pcw/
@@ -319,6 +348,58 @@ or terminal-progress failure is conservatively `ExportIndeterminate`; a
 `LandXmlReceipt` is returned only after durable completion. The independent
 `roxmltree` acceptance parser is test-only and shares no encoder helpers.
 
+`TerrainSurface::ensure_landxml` applies the same deterministic encoding and
+publication limits but also reconciles a pre-existing regular target. An exact
+length-and-content-hash match returns `ReconciledExisting`; any different,
+symlinked, or non-regular target fails without replacement. A raced target is
+rechecked through the same exact-existing path. `Created` versus
+`ReconciledExisting` describes one attempt; durable Workflow evidence records
+only stable `ensured_exact` semantics.
+
+## Durable terrain Workflow contract
+
+`terrain-demo` owns one application-level Run root with fixed recognized files:
+
+~~~text
+run-root/
+  run.pwf       # checksummed append-only journal
+  run.lock      # exclusive process lock
+  terrain.xml   # exactly ensured LandXML target
+  audit.json    # exactly ensured canonical report
+~~~
+
+`start_run` publishes the caller's complete `WorkflowRunIntent` before Point
+selection or commit. `resume_run` requires identical paths and intent, resolves
+the same Workspace Operation Identity, recomputes immutable work, and appends or
+validates exactly these monotonic frames: `Intent`, `RevisionResolved`,
+`AuditObserved`, `SurfaceObserved`, `QaObserved`, `ExportEnsured`,
+`ReportEnsured`, and `Complete`. `inspect_and_repair_run` verifies the journal
+format, hash chain, semantic links, and Run lock without opening external
+workflow state; it may durably repair a torn final suffix to the last verified
+frame. It then
+revalidates Run-root identity. Replacement after repair is
+`PWF_PUBLICATION_INDETERMINATE` at `inspect` with publication phase
+`journal-checkpoint`, never false inspection success.
+
+The caller must create the Workspace separately and bind the intent to its
+current `workspace.head().provenance().revision()`. Its selected `U8` Attribute
+must be Source Attribute 6, the `source-las` classification column.
+Start/resume open only; an absent Workspace is `PWF_INVALID_REQUEST` before Run
+creation or Workspace mutation.
+
+A synced frame is only a checkpoint. Resume revalidates it against Workspace
+state, recomputed Audit/Terrain/QA meaning, or exact XML/report bytes. Torn final
+suffixes can be repaired to the last complete frame; an invalid complete frame,
+gap, reordering, wrong version, path mismatch, or semantic mismatch fails
+closed. A classification Revision remains committed if a later phase fails.
+
+`audit.json` uses fixed UTF-8 key order and includes exact identities and
+request hashes, a named source-independent semantic-results hash, Revision
+Audit/Edit Footprint, baseline and changed Terrain facts, conservative Surface
+Change Envelope, QA, stable `ensured_exact` LandXML facts, all semantic limit
+facts, and explicit partner/downstream/human-acceptance nonclaims. Machine and
+elapsed-time observations do not enter canonical bytes.
+
 ## View and renderer contracts
 
 `point-view` is synchronous and renderer-neutral. For one frozen camera,
@@ -338,6 +419,12 @@ Runtime-neutral `Job<T, E>` values implement both `Future` and
 cancellation. Cancellation is observed only at boundaries where the operation
 can still report its durable certainty truthfully.
 
+`Job::blocking_wait_cancelled_by` links a synchronously awaited child directly
+to one parent `CancellationToken`. Parent cancellation is then visible to child
+control, reporters, and streams without polling or a hidden runtime. Child
+cancellation does not cancel the parent, and an uncooperative child retains the
+existing detached-worker limitation.
+
 Point and byte progress describe physical work; it does not imply semantic
 completion. Exact values are returned only after their terminal validation.
 
@@ -353,14 +440,17 @@ publication. Separate ledgers cover:
   working memory, and cumulative spill bytes;
 - Point-row candidate facts, Source batches, overlays, emitted rows, batch
   payload, working memory, and total rows;
-- Point-ID count, batch payload, read buffer, and working memory; and
+- Point-ID count, batch payload, read buffer, and working memory;
 - commit selected/changed Points, input frames, block sizes, work, temporary
   bytes, Revision bytes, and total durable bytes;
 - Ground Input rows, vertices/faces, topology work, overlapping working
   allocations, and retained Surface bytes;
-- detached Check Point inputs/results, location work, and report bytes; and
+- detached Check Point inputs/results, location work, and report bytes;
 - LandXML vertices/faces, output/staging/token/buffer bytes, and publication
-  work.
+  work; and
+- Workflow intent counts, journal/frame/path bytes, Revision Audit, Surface
+  Change Envelope, canonical report output/staging/buffer bytes, and combined
+  live orchestrator working bytes.
 
 Temporary and durable storage are distinct. Overlapping old/new allocations
 are charged together. An indivisible block that cannot fit fails explicitly.
@@ -373,6 +463,12 @@ lock/target conflict, I/O, prepublication runtime failure, poisoned mutation
 capability, and indeterminate durable certainty. Diagnostics are bounded and
 never embed unbounded external payloads. A Check Point gap is a successful
 explicit outcome, not an error.
+
+`WorkflowFailure` additionally exposes a stable `PWF_*` code, Workflow stage,
+certainty category, optional indeterminate publication phase, every known
+Run/Source/Workspace/Operation/Revision identity, and exactly one recovery
+action. The CLI prints the same bounded structured information and does not
+automatically retry uncertain mutation or replace a conflicting target.
 
 ## Deferred contracts
 

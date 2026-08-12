@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::task::{Context, Poll};
 
 use blake3::Hasher;
-use foundation_runtime::{Job, OperationControl, OperationHandle};
+use foundation_runtime::{CancellationToken, Job, OperationControl, OperationHandle};
 use point_contracts::{
     AttributeDataType, AttributeDefinition, AttributeId, ContentHash, MAX_ATTRIBUTE_NAME_BYTES,
     PointBatch, PointId, SourceId,
@@ -83,6 +83,12 @@ impl Workspace {
         self.session.identity
     }
 
+    /// Returns the immutable editable-Attribute schema fixed at creation.
+    #[must_use]
+    pub fn schema(&self) -> WorkspaceSchema {
+        self.session.schema
+    }
+
     /// Returns the immutable Source identity.
     #[must_use]
     pub fn source(&self) -> SourceId {
@@ -118,6 +124,16 @@ impl Workspace {
     /// Returns an unknown-Revision or poisoned-session error.
     pub fn revision_info(&self, revision: RevisionId) -> Result<RevisionInfo, WorkspaceError> {
         self.session.revision_info(revision)
+    }
+
+    /// Derives a complete bounded audit of one immutable Revision.
+    #[must_use]
+    pub fn revision_audit(
+        &self,
+        revision: RevisionId,
+        limits: crate::RevisionAuditLimits,
+    ) -> crate::RevisionAuditJob {
+        crate::revision_audit::start(Arc::clone(&self.session), revision, limits)
     }
 
     /// Starts one durable classification or immediate-head Revert operation.
@@ -227,6 +243,36 @@ impl CommitJob {
     pub fn blocking_wait(mut self) -> Result<CommitOutcome, WorkspaceError> {
         let inner = self.inner.take().expect("CommitJob result is not consumed");
         let result = inner.blocking_wait();
+        finish_commit_result(
+            self.operation,
+            self.phase.as_ref(),
+            self.session.as_ref(),
+            result,
+        )
+    }
+
+    /// Waits while linking this commit's cooperative cancellation to `parent`.
+    ///
+    /// Parent cancellation reaches the active commit worker but does not erase
+    /// publication certainty: cancellation before publication is returned as
+    /// an error, while any failure after publication begins is still mapped to
+    /// [`CommitOutcome::Indeterminate`]. Cancelling this commit does not cancel
+    /// `parent`, and the direct link exists only for this wait.
+    ///
+    /// # Errors
+    ///
+    /// Returns only failures known to precede durable publication. A failure
+    /// after publication begins becomes `CommitOutcome::Indeterminate`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if this Job has already returned its result through `Future` polling.
+    pub fn blocking_wait_cancelled_by(
+        mut self,
+        parent: &CancellationToken,
+    ) -> Result<CommitOutcome, WorkspaceError> {
+        let inner = self.inner.take().expect("CommitJob result is not consumed");
+        let result = inner.blocking_wait_cancelled_by(parent);
         finish_commit_result(
             self.operation,
             self.phase.as_ref(),
@@ -549,6 +595,10 @@ impl Session {
         &self.index
     }
 
+    pub(crate) const fn workspace_identity(&self) -> WorkspaceId {
+        self.identity
+    }
+
     pub(crate) fn source(&self) -> &Source {
         self.index.source()
     }
@@ -646,7 +696,10 @@ impl Session {
         Ok(())
     }
 
-    fn revision_info(&self, revision: RevisionId) -> Result<RevisionInfo, WorkspaceError> {
+    pub(crate) fn revision_info(
+        &self,
+        revision: RevisionId,
+    ) -> Result<RevisionInfo, WorkspaceError> {
         self.require_revision(revision)?;
         if revision.into_bytes() == self.manifest.root_revision {
             return Ok(RevisionInfo::new(
@@ -662,6 +715,18 @@ impl Session {
             .revision(revision.into_bytes())
             .ok_or(WorkspaceError::UnknownRevision { revision })?;
         revision_info_from_persisted(persisted)
+    }
+
+    pub(crate) fn revision_for_audit(
+        &self,
+        revision: RevisionId,
+    ) -> Result<Arc<ValidatedRevision>, WorkspaceError> {
+        self.require_revision(revision)?;
+        self.catalog
+            .read()
+            .map_err(|_| WorkspaceError::Poisoned)?
+            .revision_arc(revision.into_bytes())
+            .ok_or(WorkspaceError::UnknownRevision { revision })
     }
 }
 
@@ -771,6 +836,7 @@ where
     #[cfg(test)]
     session.writer_waiters.fetch_sub(1, Ordering::SeqCst);
     let _writer = writer.map_err(|_| WorkspaceError::Poisoned)?;
+    control.check_cancelled()?;
     let mut certainty = MutationCertaintyGuard::with_abandonment(
         Arc::clone(&session.poisoned),
         Arc::clone(phase),
@@ -2389,6 +2455,144 @@ mod tests {
             recorded.reason(),
             CommitRejection::StaleHead { expected, .. } if expected == unknown
         ));
+    }
+
+    fn create_one_point_workspace(directory: &TestDirectory, stem: &str) -> Workspace {
+        use point_contracts::{
+            AttributeColumn, AttributeColumns, AttributeDataType, AttributeDefinition,
+            AttributeValues, CoordinateReference, PositionTransform,
+        };
+        use point_index::{PrepareLimits, prepare};
+        use source_memory::MemorySource;
+
+        std::fs::create_dir(&directory.0).expect("fixture directory");
+        let classification = AttributeId::new(7).expect("classification identity");
+        let definition =
+            AttributeDefinition::new(classification, "classification", AttributeDataType::U8)
+                .expect("classification definition");
+        let columns = AttributeColumns::new(
+            vec![
+                AttributeColumn::new(definition, AttributeValues::u8(vec![0]))
+                    .expect("classification column"),
+            ],
+            1,
+        )
+        .expect("aligned columns");
+        let source = source_memory::open(
+            MemorySource::from_columns(
+                PositionTransform::new([0.0; 3], [1.0; 3]).expect("transform"),
+                CoordinateReference::Unknown,
+                vec![[0, 0, 0]],
+                columns,
+            )
+            .expect("memory Source"),
+        )
+        .blocking_wait()
+        .expect("open Source");
+        let index = prepare(
+            source,
+            directory.0.join(format!("{stem}.pidx")),
+            PrepareLimits::default(),
+        )
+        .blocking_wait()
+        .expect("prepare index");
+        create(
+            directory.0.join(format!("{stem}.pcw")),
+            index,
+            WorkspaceSchema::new(classification),
+            OpenLimits::default(),
+        )
+        .blocking_wait()
+        .expect("create Workspace")
+    }
+
+    #[test]
+    fn linked_parent_cancellation_before_publication_remains_definitive() {
+        let directory = TestDirectory::new();
+        let workspace = create_one_point_workspace(&directory, "linked-cancellation");
+        let points = workspace
+            .head()
+            .select(crate::PointQuery::all(), PointSetLimits::default())
+            .blocking_wait()
+            .expect("select Point Set");
+        let operation = OperationId::from_bytes([21; 16]).expect("Operation Identity");
+
+        let writer = workspace.session.writer.lock().unwrap();
+        let job = workspace.commit(
+            CommitRequest::set_classification(operation, points, 1),
+            CommitLimits::default(),
+        );
+        let handle = job.handle();
+        let wait_deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while workspace.session.writer_waiters.load(Ordering::SeqCst) == 0
+            && std::time::Instant::now() < wait_deadline
+        {
+            std::thread::yield_now();
+        }
+        assert_eq!(workspace.session.writer_waiters.load(Ordering::SeqCst), 1);
+
+        let parent = CancellationToken::new();
+        parent.cancel();
+        let result = std::thread::scope(|scope| {
+            let parent = &parent;
+            let waiter = scope.spawn(move || job.blocking_wait_cancelled_by(parent));
+            let link_deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            while handle.check_cancelled().is_ok() && std::time::Instant::now() < link_deadline {
+                std::thread::yield_now();
+            }
+            assert!(
+                handle.check_cancelled().is_err(),
+                "parent link becomes observable"
+            );
+            drop(writer);
+            waiter.join().expect("linked wait thread does not panic")
+        });
+
+        assert!(matches!(result, Err(WorkspaceError::Cancelled)));
+        assert_ne!(
+            handle.progress().phase(),
+            foundation_runtime::ProgressPhase::COMPLETE
+        );
+        assert_eq!(
+            workspace.resolve_operation(operation).unwrap(),
+            OperationResolution::NotRecorded
+        );
+        assert!(!workspace.session.poisoned.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn linked_wait_preserves_indeterminate_publication_mapping() {
+        let directory = TestDirectory::new();
+        let workspace = create_one_point_workspace(&directory, "linked-indeterminate");
+        let points = workspace
+            .head()
+            .select(crate::PointQuery::all(), PointSetLimits::default())
+            .blocking_wait()
+            .expect("select Point Set");
+        let operation = OperationId::from_bytes([22; 16]).expect("Operation Identity");
+        let workspace_path = directory.0.join("linked-indeterminate.pcw");
+        let fault = test_fault::Guard::install(
+            &workspace_path,
+            FaultPoint::OperationLostAcknowledgement,
+            test_fault::Action::Cancel,
+        );
+
+        let outcome = workspace
+            .commit(
+                CommitRequest::set_classification(operation, points, 1),
+                CommitLimits::default(),
+            )
+            .blocking_wait_cancelled_by(&CancellationToken::new())
+            .expect("post-publication cancellation maps to a certain outcome");
+        drop(fault);
+
+        assert!(matches!(
+            outcome,
+            CommitOutcome::Indeterminate(uncertainty)
+                if uncertainty.operation() == operation
+                    && uncertainty.phase() == CommitPhase::OperationPublication
+        ));
+        assert!(workspace.session.poisoned.load(Ordering::SeqCst));
     }
 
     #[test]

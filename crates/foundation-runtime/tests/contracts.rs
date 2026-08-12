@@ -3,8 +3,8 @@
 use std::{collections::VecDeque, sync::mpsc, time::Duration};
 
 use foundation_runtime::{
-    BatchStream, Job, OperationControl, OperationHandle, ProgressPhase, ProgressSnapshot,
-    RuntimeError,
+    BatchStream, CancellationToken, Job, OperationControl, OperationHandle, ProgressPhase,
+    ProgressSnapshot, RuntimeError,
 };
 
 #[test]
@@ -54,6 +54,156 @@ fn cancellation_is_shared_with_running_work() {
 }
 
 #[test]
+fn parent_cancelled_before_link_reaches_the_active_child() {
+    let parent = CancellationToken::new();
+    parent.cancel();
+    let job = Job::<(), RuntimeError>::spawn(|control| {
+        loop {
+            control.check_cancelled()?;
+            std::thread::park_timeout(Duration::from_millis(1));
+        }
+    });
+
+    assert_eq!(
+        job.blocking_wait_cancelled_by(&parent),
+        Err(RuntimeError::Cancelled)
+    );
+}
+
+#[test]
+fn parent_cancellation_reaches_a_linked_active_child() {
+    let parent = CancellationToken::new();
+    let waiter_parent = parent.clone();
+    let (started_sender, started_receiver) = mpsc::sync_channel(0);
+    let job = Job::<(), RuntimeError>::spawn(move |control| {
+        started_sender
+            .send(())
+            .expect("the cancellation test should still be waiting");
+        loop {
+            control.check_cancelled()?;
+            std::thread::park_timeout(Duration::from_millis(1));
+        }
+    });
+    let waiter = std::thread::spawn(move || job.blocking_wait_cancelled_by(&waiter_parent));
+    started_receiver
+        .recv()
+        .expect("the child should report startup");
+
+    parent.cancel();
+
+    assert_eq!(
+        waiter.join().expect("the blocking waiter should not panic"),
+        Err(RuntimeError::Cancelled)
+    );
+}
+
+#[test]
+fn root_cancellation_reaches_a_grandchild_awaited_by_a_linked_parent() {
+    let root = CancellationToken::new();
+    let waiter_root = root.clone();
+    let (release_parent_sender, release_parent_receiver) = mpsc::sync_channel(0);
+    let (child_started_sender, child_started_receiver) = mpsc::sync_channel(0);
+    let parent = Job::<bool, RuntimeError>::spawn(move |parent_control| {
+        release_parent_receiver
+            .recv()
+            .expect("the linked parent should be ready");
+        let child = Job::<bool, RuntimeError>::spawn(move |child_control| {
+            child_started_sender
+                .send(())
+                .expect("the grandchild observer should still exist");
+            let deadline = std::time::Instant::now() + Duration::from_millis(250);
+            while std::time::Instant::now() < deadline {
+                child_control.check_cancelled()?;
+                std::thread::park_timeout(Duration::from_millis(1));
+            }
+            Ok(false)
+        });
+        child.blocking_wait_cancelled_by(&parent_control.token())
+    });
+    let waiter = std::thread::spawn(move || parent.blocking_wait_cancelled_by(&waiter_root));
+
+    release_parent_sender
+        .send(())
+        .expect("the parent should still be waiting");
+    child_started_receiver
+        .recv()
+        .expect("the grandchild should report startup");
+    root.cancel();
+
+    assert_eq!(
+        waiter.join().expect("the linked waiter should not panic"),
+        Err(RuntimeError::Cancelled)
+    );
+}
+
+#[test]
+fn child_cancellation_does_not_cancel_its_parent() {
+    let parent = CancellationToken::new();
+    let job = Job::<(), RuntimeError>::spawn(|control| {
+        loop {
+            control.check_cancelled()?;
+            std::thread::park_timeout(Duration::from_millis(1));
+        }
+    });
+    let child = job.handle();
+
+    child.cancel();
+
+    assert_eq!(
+        job.blocking_wait_cancelled_by(&parent),
+        Err(RuntimeError::Cancelled)
+    );
+    assert!(!parent.is_cancelled());
+}
+
+#[test]
+fn parent_cancellation_after_child_success_is_harmless() {
+    let parent = CancellationToken::new();
+    let waiter_parent = parent.clone();
+    let (release_sender, release_receiver) = mpsc::sync_channel(0);
+    let job = Job::<u64, RuntimeError>::spawn(move |control| {
+        release_receiver
+            .recv()
+            .expect("the success test should release its child");
+        control.complete_progress(1)?;
+        Ok(42)
+    });
+    let child = job.handle();
+    let waiter = std::thread::spawn(move || job.blocking_wait_cancelled_by(&waiter_parent));
+
+    release_sender
+        .send(())
+        .expect("the child should still be waiting for release");
+    assert_eq!(
+        waiter.join().expect("the blocking waiter should not panic"),
+        Ok(42)
+    );
+    parent.cancel();
+
+    assert!(!child.token().is_cancelled());
+    assert_eq!(child.progress().phase(), ProgressPhase::COMPLETE);
+}
+
+#[test]
+fn linked_child_progress_remains_independent() {
+    let parent = OperationControl::new();
+    let parent_progress = ProgressSnapshot::new(ProgressPhase::new(7), 2, Some(5))
+        .expect("parent fixture progress should be coherent");
+    parent
+        .report_progress(parent_progress)
+        .expect("parent fixture progress should advance");
+    let job = Job::<u64, RuntimeError>::spawn(|control| {
+        control.complete_progress(1)?;
+        Ok(42)
+    });
+    let child = job.handle();
+
+    assert_eq!(job.blocking_wait_cancelled_by(&parent.token()), Ok(42));
+    assert_eq!(parent.progress(), parent_progress);
+    assert_eq!(child.progress().phase(), ProgressPhase::COMPLETE);
+}
+
+#[test]
 fn dropping_a_running_job_requests_cancellation() {
     let (started_sender, started_receiver) = mpsc::sync_channel(0);
     let (cancelled_sender, cancelled_receiver) = mpsc::sync_channel(0);
@@ -82,6 +232,40 @@ fn dropping_a_running_job_requests_cancellation() {
         .recv_timeout(Duration::from_secs(1))
         .expect("a dropped running Job should cancel its worker");
     assert!(handle.token().is_cancelled());
+}
+
+#[test]
+fn dropping_a_workflow_job_cancels_its_awaited_child() {
+    let (child_started_sender, child_started_receiver) = mpsc::sync_channel(0);
+    let (child_cancelled_sender, child_cancelled_receiver) = mpsc::sync_channel(0);
+    let workflow = Job::<(), RuntimeError>::spawn(move |workflow_control| {
+        let child = Job::<(), RuntimeError>::spawn(move |child_control| {
+            child_started_sender
+                .send(())
+                .expect("the workflow test should still be waiting for its child");
+            loop {
+                if let Err(error) = child_control.check_cancelled() {
+                    child_cancelled_sender
+                        .send(())
+                        .expect("the workflow test should still observe child cancellation");
+                    return Err(error);
+                }
+                std::thread::park_timeout(Duration::from_millis(1));
+            }
+        });
+        child.blocking_wait_cancelled_by(&workflow_control.token())
+    });
+    let workflow_handle = workflow.handle();
+    child_started_receiver
+        .recv()
+        .expect("the awaited child should report startup");
+
+    drop(workflow);
+
+    child_cancelled_receiver
+        .recv_timeout(Duration::from_secs(1))
+        .expect("dropping the workflow should cancel its awaited child");
+    assert!(workflow_handle.token().is_cancelled());
 }
 
 #[test]

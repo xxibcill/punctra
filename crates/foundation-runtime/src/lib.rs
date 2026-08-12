@@ -32,7 +32,7 @@ use std::{
     panic::{self, AssertUnwindSafe},
     pin::Pin,
     sync::{
-        Arc, Condvar, Mutex, MutexGuard,
+        Arc, Condvar, Mutex, MutexGuard, OnceLock, Weak,
         atomic::{AtomicBool, AtomicU64, Ordering},
     },
     task::{Context, Poll, Waker},
@@ -43,9 +43,9 @@ use thiserror::Error;
 static NEXT_JOB_ID: AtomicU64 = AtomicU64::new(1);
 
 /// Cooperative cancellation shared between callers and running work.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone)]
 pub struct CancellationToken {
-    cancelled: Arc<AtomicBool>,
+    state: Arc<CancellationState>,
 }
 
 impl CancellationToken {
@@ -59,13 +59,13 @@ impl CancellationToken {
     ///
     /// Cancellation is idempotent and remains observable by every clone.
     pub fn cancel(&self) {
-        self.cancelled.store(true, Ordering::Release);
+        self.state.cancelled.store(true, Ordering::Release);
     }
 
     /// Reports whether cancellation has been requested.
     #[must_use]
     pub fn is_cancelled(&self) -> bool {
-        self.cancelled.load(Ordering::Acquire)
+        self.state.is_cancelled()
     }
 
     /// Fails when cancellation has been requested.
@@ -79,6 +79,134 @@ impl CancellationToken {
             Err(RuntimeError::Cancelled)
         } else {
             Ok(())
+        }
+    }
+
+    fn link_parent(&self, parent: &Self) -> ParentCancellationLink {
+        ParentCancellationLink::install(self, parent)
+    }
+}
+
+impl Default for CancellationToken {
+    fn default() -> Self {
+        Self {
+            state: Arc::new(CancellationState::default()),
+        }
+    }
+}
+
+impl fmt::Debug for CancellationToken {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("CancellationToken")
+            .field("cancelled", &self.is_cancelled())
+            .finish_non_exhaustive()
+    }
+}
+
+#[derive(Default)]
+struct CancellationState {
+    cancelled: AtomicBool,
+    parent: OnceLock<LinkedParentCancellation>,
+}
+
+impl CancellationState {
+    fn is_cancelled(&self) -> bool {
+        if self.cancelled.load(Ordering::Acquire) {
+            return true;
+        }
+
+        let mut current = self.linked_parent();
+        let mut tortoise = current.clone();
+        let mut hare = current.clone();
+        while let Some(state) = current {
+            if state.cancelled.load(Ordering::Acquire) {
+                return true;
+            }
+            current = state.linked_parent();
+            tortoise = tortoise.and_then(|state| state.linked_parent());
+            hare = hare
+                .and_then(|state| state.linked_parent())
+                .and_then(|state| state.linked_parent());
+            if let (Some(tortoise), Some(hare)) = (&tortoise, &hare)
+                && Arc::ptr_eq(tortoise, hare)
+            {
+                return Self::linked_cycle_is_cancelled(tortoise);
+            }
+        }
+        false
+    }
+
+    fn linked_parent(&self) -> Option<Arc<Self>> {
+        self.parent.get().and_then(LinkedParentCancellation::state)
+    }
+
+    fn linked_cycle_is_cancelled(start: &Arc<Self>) -> bool {
+        let mut current = Some(Arc::clone(start));
+        while let Some(state) = current {
+            if state.cancelled.load(Ordering::Acquire) {
+                return true;
+            }
+            current = state.linked_parent();
+            if current
+                .as_ref()
+                .is_some_and(|state| Arc::ptr_eq(state, start))
+            {
+                return false;
+            }
+        }
+        false
+    }
+}
+
+struct LinkedParentCancellation {
+    state: Weak<CancellationState>,
+    active: AtomicBool,
+}
+
+impl LinkedParentCancellation {
+    fn state(&self) -> Option<Arc<CancellationState>> {
+        self.active
+            .load(Ordering::Acquire)
+            .then(|| self.state.upgrade())
+            .flatten()
+    }
+}
+
+struct ParentCancellationLink {
+    child: Weak<CancellationState>,
+}
+
+impl ParentCancellationLink {
+    fn install(child: &CancellationToken, parent: &CancellationToken) -> Self {
+        if Arc::ptr_eq(&child.state, &parent.state) {
+            return Self { child: Weak::new() };
+        }
+
+        assert!(
+            child
+                .state
+                .parent
+                .set(LinkedParentCancellation {
+                    state: Arc::downgrade(&parent.state),
+                    active: AtomicBool::new(true),
+                })
+                .is_ok(),
+            "a child cancellation token may link only one direct parent"
+        );
+        Self {
+            child: Arc::downgrade(&child.state),
+        }
+    }
+}
+
+impl Drop for ParentCancellationLink {
+    fn drop(&mut self) {
+        let Some(child) = self.child.upgrade() else {
+            return;
+        };
+        if let Some(parent) = child.parent.get() {
+            parent.active.store(false, Ordering::Release);
         }
     }
 }
@@ -527,6 +655,25 @@ where
     pub fn blocking_wait(self) -> Result<T, E> {
         self.shared.wait()
     }
+
+    /// Blocks until the job finishes while observing one root cancellation token.
+    ///
+    /// The direct parent link exists only for this wait. Cancellation of
+    /// `parent` becomes visible to the child worker's existing cooperative
+    /// cancellation checks. Cancelling the child does not cancel `parent`, and
+    /// the child retains its own progress lifecycle.
+    ///
+    /// A child that finishes before parent cancellation preserves its result.
+    /// This method starts no watcher thread, timer, or async runtime.
+    ///
+    /// # Errors
+    ///
+    /// Returns the worker closure's error, including cooperative cancellation
+    /// observed from the child or linked parent and converted runtime failures.
+    pub fn blocking_wait_cancelled_by(self, parent: &CancellationToken) -> Result<T, E> {
+        let _parent_link = self.handle.token().link_parent(parent);
+        self.shared.wait()
+    }
 }
 
 impl<T, E> Future for Job<T, E> {
@@ -744,4 +891,21 @@ fn wait_recovering<'a, T>(condvar: &Condvar, guard: MutexGuard<'a, T>) -> MutexG
     condvar
         .wait(guard)
         .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CancellationToken;
+
+    #[test]
+    fn linked_cancellation_cycles_remain_finite_and_observe_members() {
+        let first = CancellationToken::new();
+        let second = CancellationToken::new();
+        let _first_link = first.link_parent(&second);
+        let _second_link = second.link_parent(&first);
+
+        assert!(!first.is_cancelled());
+        second.cancel();
+        assert!(first.is_cancelled());
+    }
 }

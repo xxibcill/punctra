@@ -1,7 +1,7 @@
 # Verification Strategy
 
-Status: implemented verification through the narrow v0.6 terrain/QA slice; all
-gates run locally
+Status: implemented verification through the narrow v0.7 technical-readiness
+slice; all gates run locally
 
 Verification follows public contracts first. Private tests are used for fault
 injection and measured implementation boundaries that cannot be triggered
@@ -61,6 +61,7 @@ or customer value.
 - `Future` and `blocking_wait` equivalence;
 - monotonic progress;
 - fused cancellation;
+- parent cancellation linked directly into an actively awaited child Job;
 - panic-to-runtime-error mapping;
 - bounded pull-stream terminal behavior; and
 - no hidden async-runtime requirement.
@@ -95,9 +96,10 @@ LAS, and LAZ benchmarks enforce adapter-specific memory ceilings.
 
 ### point-workspace
 
-The v0.6 package has 72 tests: 26 integration tests through the public
-interface and 46 unit, fault-injection, and allocation gates. The public suites
-prove:
+The merged v0.7 package has 83 tests: 33 integration tests through the public
+interface and 50 unit, fault-injection, and allocation gates. It retains the
+v0.6 lifecycle, selection, row-stream, persistence, fault-injection, and
+allocation coverage and adds the Revision Audit suite. The public suites prove:
 
 - create, root identity, exclusive lock, complete-handle lifetime, and reopen;
 - schema rejection when the chosen classification Attribute is absent or not
@@ -117,14 +119,18 @@ prove:
 - prepublication failure for selection, ID-read, open, and commit hard limits;
 - committed, rejected, retryable, not-recorded, conflict, and indeterminate
   Operation reconciliation;
-- idempotent retry with at most one Revision; and
-- fail-closed corruption plus recoverable recognized scratch.
+- idempotent retry with at most one Revision;
+- fail-closed corruption plus recoverable recognized scratch;
 - exact ordered `Snapshot::point_rows` values at root, edited, historical, and
   Revert Snapshots;
 - partition-independent row membership/content hashes matching Point Set
-  membership and identical generated LAS/LAZ row values; and
+  membership and identical generated LAS/LAZ row values;
 - cumulative row limits, complete no-match behavior, fused error/cancellation,
-  and absence of a terminal summary after failure.
+  and absence of a terminal summary after failure; and
+- exact root/classification/Revert Revision Audit transitions, membership and
+  content hashes, Edit Footprints, historical immutability, Source partition
+  independence, every audit resource family, cancellation, and corruption
+  rejection.
 
 Private persistence tests inject error, cancellation, panic, and lost
 acknowledgement at candidate stage/file-sync/close/read-only/revalidation,
@@ -139,35 +145,79 @@ under a 64 MiB ceiling, with zero retained measured allocations.
 
 ### point-terrain and terrain-demo
 
-`point-terrain` has 46 package tests—17 unit/private and 29 integration—plus
-one documentation test:
+The `point-terrain` package and documentation suites cover:
 
-- 17 unit/private tests cover canonical input keys, deterministic robust
+- unit/private tests for canonical input keys, deterministic robust
   predicates, cocircular tie-breaking, the pinned `delaunator` oracle, bounded
-  topology work, cancellation, diagnostics, allocation preflight, and injected
-  post-publication LandXML certainty boundaries;
-- four public interface tests cover canonical facts, inclusive Ground Input,
+  topology work, large-world and extreme finite numeric behavior, cancellation,
+  diagnostics, allocation preflight, and injected post-publication LandXML
+  certainty boundaries;
+- public interface tests for canonical facts, inclusive Ground Input,
   partition-independent hashes, and historical/Edit/Revert Snapshots;
-- two topology tests prove counter-clockwise canonical manifold Delaunay disks
+- topology tests proving counter-clockwise canonical manifold Delaunay disks
   and the canonical cocircular diagonal;
-- seven resource tests cover insufficient, duplicate/conflicting, collinear,
+- resource tests for insufficient, duplicate/conflicting, collinear,
   unsupported numeric, input/output/face/work/working/retained limits, and
   cancellation without publication;
-- ten QA tests cover closed boundaries, stable face selection, ordered
+- QA tests for closed boundaries, stable face selection, rounded and
+  large-world sampling, ordered
   positive/negative/zero residuals, explicit gaps, compensated statistics,
-  duplicate identities, every QA resource family, bounded input consumption,
-  cancellation, and result-sealing overlap; and
-- six LandXML tests cover deterministic independent semantic parsing, explicit
-  coordinate/date/time assumptions, every XML resource family, target conflict,
-  cancellation, and durable publication certainty.
+  overflow-safe large finite statistics, duplicate identities, every QA
+  resource family, bounded input consumption, cancellation, and result-sealing
+  overlap; and
+- LandXML tests for deterministic independent semantic parsing, explicit
+  coordinate/date/time and metric-unit assumptions, every XML resource family,
+  target conflict, cancellation, and durable publication certainty.
 
 The `point-terrain` doctest and direct example compose the public Source/index/
-Workspace/Terrain/QA/LandXML APIs. `terrain-demo` has two process tests: one runs
-generated LAS and LAZ through the complete GPU-free caller, including explicit
-document date/time, unknown-CRS metric assertion, exact-ordinal classification
-correction, changed Ground Input, immediate-head Revert, exact restoration of
-geometry/topology/vertices/faces, and byte-identical Source data; the other
-proves a failed changed-Surface Derivation still Reverts the Workspace.
+Workspace/Terrain/QA/LandXML APIs. v0.7 adds exact-existing LandXML ensure tests
+for create, reconcile, conflict, races, symlink/non-regular rejection,
+publication faults, post-link cancellation certainty, and lost
+acknowledgement.
+
+`terrain-demo` has 43 package tests: 25 unit/private tests, 15 through the
+public workflow facade, and three through the process boundary. They cover:
+
+- every prefix of the eight-frame journal resuming to the same receipt and one
+  Operation Revision;
+- torn-final-suffix recovery plus representative complete-frame corruption,
+  lock, limit, and path-binding failures;
+- exact report reconciliation/conflict and LandXML/report recovery;
+- generated LAS/LAZ equality of the named source-independent semantic
+  projection while full identity-bearing reports honestly differ;
+- immediate parent cancellation and an active dropped Workflow without a false
+  `Complete` checkpoint, with resumability and unchanged Source bytes;
+- 12 public limit families, stale baseline, differently bound recorded
+  rejection, changed Source, changed Workspace identity, and deterministic
+  Retryable intent;
+- rejection of an existing Workspace whose public
+  `schema().classification()` is not Source Attribute 6, before Run or
+  Workspace mutation;
+- Run-root validation failures retaining the already-known Run, Operation, and
+  baseline Revision identities; and
+- bounded `start`, `resume`, and `inspect` CLI output and structured failures.
+
+The retained v0.6 process/regression coverage also proves deterministic
+generated LAS and LAZ Terrain semantics, exact changed Ground Input,
+byte-identical Source data, exact immediate-head Revert restoration of
+geometry/topology/vertices/faces, and explicit Revert behavior independently
+of the durable workflow facade. The superseded one-shot CLI grammar is not
+retained, and the v0.7 Workflow leaves a committed classification Revision in
+place when a later phase fails.
+
+This is representative public recovery evidence, not an exhaustive injected
+hook at every OS fault or active-child cancellation boundary. Private journal
+tests exhaust the application-defined Intent-publication and
+append-before-write, before-sync, and after-sync lost-acknowledgement boundaries
+using `Complete`. Private report tests exhaust the application-defined
+post-link boundaries. Representative report cases cover pre-link cancellation/
+failure, exact and conflicting `AlreadyExists` races, post-link replacement,
+target kind, staging/working limits, and stage/parent directory identity. These
+labels do not claim every possible OS fault, active-child cancellation, or
+corrupt journal topology.
+
+The private workflow suite also rederives the immediate-head Revert and proves
+an empty baseline-to-restored Surface Change Envelope.
 
 ### render-protocol and point-view
 
@@ -275,6 +325,28 @@ production LAS/LAZ, Sources above 500 million Points, named downstream Civil
 3D/Bentley round trips, partner tolerance, paid-use, and human-workflow evidence
 remain explicitly outstanding.
 
+## v0.7 Workflow benchmark evidence
+
+The `terrain-demo` Criterion benchmark uses only generated local LAS data and
+the public `start_run`/`resume_run` facade. It accepts exactly 10,000, 100,000,
+or 1,000,000 Points through `PUNCTRA_TERRAIN_WORKFLOW_BENCH_POINTS`; the recorded
+local smoke is the 10,000-Point, ten-sample run.
+
+| Mode | Lower | Estimate | Upper |
+|---|---:|---:|---:|
+| Cold start | 153.38 ms | 157.84 ms | 161.25 ms |
+| Resume after committed Edit | 113.23 ms | 114.88 ms | 117.08 ms |
+| Resume from Retryable Workspace intent | 123.76 ms | 126.67 ms | 129.66 ms |
+| LandXML and report reconciliation | 96.871 ms | 97.629 ms | 98.365 ms |
+| Complete revalidation | 87.233 ms | 88.181 ms | 89.112 ms |
+
+The completed Run's durable journal was 2,804 bytes across eight frames. Its
+canonical report was 11,490 bytes and contained 115 semantic limit facts.
+
+The intervals are local generated observations, not universal latency claims.
+Worker peak heap was not measured. No partner, production, downstream round-
+trip, paid-use, or human-time acceptance is inferred from this benchmark.
+
 ## Local verification lanes
 
 ### Change qualification
@@ -293,13 +365,15 @@ cargo bench -p source-las --bench read
 cargo bench -p point-index --bench index
 cargo bench -p point-workspace --bench document
 cargo bench -p point-terrain --bench terrain
+cargo bench -p terrain-demo --bench journal
 
 cargo run -p source-memory --example memory_source
 cargo run -p point-index --example direct_use
 cargo run --release -p point-workspace --example classify -- \
-  survey.laz survey.laz.pidx survey.pcw CLASSIFICATION_ATTRIBUTE_ID
+  survey.laz survey.laz.pidx survey.pcw 6
 cargo run -p point-terrain --example derive
 
+cargo test -p terrain-demo --test workflow
 cargo test -p terrain-demo --test process
 cargo test -p renderer-demo --test headless_smoke
 PUNCTRA_REQUIRE_GPU=1 cargo test -p render-wgpu --test offscreen
@@ -313,6 +387,8 @@ PUNCTRA_POINT_WORKSPACE_BENCH_POINTS=10000000 \
   cargo bench -p point-workspace --bench document
 PUNCTRA_TERRAIN_BENCH_POINTS=100000 \
   cargo bench -p point-terrain --bench terrain
+PUNCTRA_TERRAIN_WORKFLOW_BENCH_POINTS=100000 \
+  cargo bench -p terrain-demo --bench journal
 ~~~
 
 ### Release qualification

@@ -3,6 +3,64 @@
 All notable changes to Punctra are documented here. The project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased - 0.7.0
+
+- Implemented the v0.7 technical partner-alpha readiness design as a repository
+  technical-readiness slice. `foundation-runtime` Jobs can now wait with direct
+  parent-linked cancellation, without a polling thread or async runtime.
+- Added bounded exact `Workspace::revision_audit` reconstruction from immutable
+  Revision rows and exact Source positions. Audits expose Revision facts,
+  sorted classification transitions, changed Point membership and content
+  hashes, Edit Footprint, and resource accounting without changing Workspace
+  disk schema.
+- Added recovery-oriented `TerrainSurface::ensure_landxml`. It creates a missing
+  supported LandXML target or reconciles an exact regular file, fails closed on
+  conflicts and non-regular targets, and never overwrites caller data. Canonical
+  Workflow evidence records stable `ensured_exact` semantics rather than the
+  attempt-dependent create/reconcile disposition.
+- Replaced the one-shot `terrain-demo` path with a bounded durable Workflow
+  facade and thin `start`, `resume`, and journal-only `inspect` CLI. The fixed
+  Run root contains `run.pwf`, `run.lock`, `terrain.xml`, and `audit.json`; the
+  journal has exactly eight monotonic checksummed frames from `Intent` through
+  `Complete`. Inspect can repair only a provably torn final suffix and
+  revalidates Run-root identity before reporting status.
+- Added canonical report encoding with exact identities, request and semantic-
+  result hashes, Revision Audit/Edit Footprint, baseline/changed Terrain facts,
+  conservative Surface Change Envelope, detached QA, stable LandXML facts, 115
+  semantic limit facts, and explicit external-evidence nonclaims.
+- Added bounded structured Workflow failures with stable code, stage,
+  publication certainty, known Run/Source/Workspace/Operation/Revision
+  identities, and exactly one safe recovery action.
+- Added 35 `terrain-demo` package tests—18 unit/private, 14 public workflow-
+  facade, and three process tests—covering every eight-frame resume prefix,
+  single-Revision reconciliation, exact report conflict handling, 12 public
+  limit families,
+  LAS/LAZ semantic projection with honest identity differences, Source
+  immutability, stale/mismatched state, Retryable intent, cancellation,
+  identity-bearing Run-root validation, dropped-Workflow recovery, and CLI
+  diagnostics. Private tests exhaust the application-defined journal Intent
+  publication, `Complete` append-before-write/before-sync/after-sync lost-
+  acknowledgement, and report post-link boundary sets. Report pre-link
+  cancellation/failure, `AlreadyExists` races, post-link replacement, target
+  kind, staging/working limits, and stage/parent identity cases are
+  representative; every possible OS fault is not claimed.
+- Added the public `Workspace::schema` accessor used to enforce Source
+  classification Attribute 6 before Run or Workspace mutation, an empty
+  baseline-to-Revert Surface Change Envelope regression, and post-link LandXML
+  cancellation certainty coverage.
+- Added a five-mode generated 10,000-Point Workflow benchmark. Local intervals
+  (lower/estimate/upper) were 153.38/157.84/161.25 ms cold,
+  113.23/114.88/117.08 ms after a committed Edit,
+  123.76/126.67/129.66 ms from a Retryable intent,
+  96.871/97.629/98.365 ms for XML/report reconciliation, and
+  87.233/88.181/89.112 ms for Complete revalidation. The completed journal was
+  2,804 bytes and the canonical report was 11,490 bytes across eight frames.
+  Worker peak heap was not measured.
+- Deferred durable Breaklines because they require both a Workspace persisted-
+  schema evolution and a new constrained-triangulation kernel. External
+  partner, licensed-data, downstream, paid-use, and human-time evidence remains
+  outstanding and is not a v0.7 repository acceptance claim.
+
 ## 0.6.0 - 2026-08-10
 
 - Added the exact classification-aware `Snapshot::point_rows` pull stream with

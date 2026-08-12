@@ -537,6 +537,13 @@ impl Catalog {
             .map(Arc::as_ref)
     }
 
+    pub(crate) fn revision_arc(&self, id: RevisionBytes) -> Option<Arc<ValidatedRevision>> {
+        self.revisions
+            .iter()
+            .find(|revision| revision.facts.revision == id)
+            .map(Arc::clone)
+    }
+
     pub(crate) fn operation(&self, id: OperationBytes) -> Option<&OperationRecord> {
         self.operations
             .iter()
@@ -757,9 +764,37 @@ impl ValidatedRevision {
         limits: RowReadLimits,
         control: &'a OperationControl,
     ) -> Result<RevisionRows<'a>, PersistenceError> {
+        let mut file = open_read(&self.path)?;
+        let actual_file_bytes = file
+            .metadata()
+            .map_err(|source| io_error("read metadata", &self.path, source))?
+            .len();
+        if actual_file_bytes != self.file_bytes() {
+            return corrupt(
+                &self.path,
+                "Revision row source length differs from its validated length",
+            );
+        }
+
+        let mut header = [0_u8; REVISION_HEADER_BYTES];
+        read_exact(&mut file, &mut header, &self.path)?;
+        if header != encode_revision_header(&self.facts) {
+            return corrupt(
+                &self.path,
+                "Revision row source header differs from its validated facts",
+            );
+        }
+        let mut file_hasher = Hasher::new();
+        file_hasher.update(FILE_DOMAIN);
+        file_hasher.update(&header);
+        let mut delta_hasher = Hasher::new();
+        delta_hasher.update(DELTA_DOMAIN);
+
         Ok(RevisionRows {
             revision: self,
-            file: open_read(&self.path)?,
+            file,
+            file_hasher: Some(file_hasher),
+            delta_hasher: Some(delta_hasher),
             limits,
             control,
             next_block: 0,
@@ -849,6 +884,8 @@ impl ValidatedRevision {
 pub(crate) struct RevisionRows<'a> {
     revision: &'a ValidatedRevision,
     file: File,
+    file_hasher: Option<Hasher>,
+    delta_hasher: Option<Hasher>,
     limits: RowReadLimits,
     control: &'a OperationControl,
     next_block: usize,
@@ -875,7 +912,7 @@ impl Iterator for RevisionRows<'_> {
             }
             if self.next_block == self.revision.blocks.len() {
                 self.terminal = true;
-                return None;
+                return self.finish_file().err().map(Err);
             }
             if let Err(error) = self.load_next_block() {
                 self.terminal = true;
@@ -893,28 +930,97 @@ impl RevisionRows<'_> {
             &mut self.charged_frames,
             1,
             self.limits.max_frames,
-            "Revert input frames",
+            "Revision row input blocks",
         )?;
         charge(
             &mut self.charged_payload_bytes,
             block.payload_bytes,
             self.limits.max_payload_bytes,
-            "Revert input bytes",
+            "Revision row input bytes",
         )?;
+        let mut header = [0_u8; BLOCK_HEADER_BYTES];
+        read_exact(&mut self.file, &mut header, &self.revision.path)?;
+        self.file_hasher
+            .as_mut()
+            .expect("live Revision row reads retain their file hasher")
+            .update(&header);
+        let payload_offset = stream_position(&mut self.file, &self.revision.path)?;
+        if header
+            != encode_block_header(
+                block.row_count,
+                block.first_ordinal,
+                block.last_ordinal,
+                block.payload_bytes,
+                block.checksum,
+            )
+            || payload_offset != block.payload_offset
+        {
+            return corrupt(
+                &self.revision.path,
+                "Revision row source block header differs from validated metadata",
+            );
+        }
         drop(std::mem::take(&mut self.payload));
         self.payload = allocate_zeroed(
             block.payload_bytes,
             self.limits.max_working_bytes,
-            "Revert read buffer",
+            "Revision row read buffer",
             &self.revision.path,
         )?;
-        seek(&mut self.file, block.payload_offset, &self.revision.path)?;
         read_exact(&mut self.file, &mut self.payload, &self.revision.path)?;
+        self.file_hasher
+            .as_mut()
+            .expect("live Revision row reads retain their file hasher")
+            .update(&self.payload);
+        self.delta_hasher
+            .as_mut()
+            .expect("live Revision row reads retain their delta hasher")
+            .update(&self.payload);
         if block_checksum(&self.payload) != block.checksum {
-            return corrupt(&self.revision.path, "Revert source block checksum differs");
+            return corrupt(
+                &self.revision.path,
+                "Revision row source block checksum differs",
+            );
         }
         self.payload_offset = 0;
         self.next_block += 1;
+        Ok(())
+    }
+
+    fn finish_file(&mut self) -> Result<(), PersistenceError> {
+        check_cancelled(self.control)?;
+        if stream_position(&mut self.file, &self.revision.path)? != self.revision.facts.body_bytes {
+            return corrupt(
+                &self.revision.path,
+                "Revision row source body length differs from validated facts",
+            );
+        }
+        let mut footer = [0_u8; FOOTER_BYTES];
+        read_exact(&mut self.file, &mut footer, &self.revision.path)?;
+        let actual_digest = *self
+            .file_hasher
+            .take()
+            .expect("Revision row source file digest is finalized once")
+            .finalize()
+            .as_bytes();
+        if footer != encode_footer(self.revision.facts.body_bytes, actual_digest) {
+            return corrupt(
+                &self.revision.path,
+                "Revision row source footer or whole-file digest differs",
+            );
+        }
+        let actual_delta = *self
+            .delta_hasher
+            .take()
+            .expect("Revision row source delta digest is finalized once")
+            .finalize()
+            .as_bytes();
+        if actual_delta != self.revision.facts.delta_digest {
+            return corrupt(
+                &self.revision.path,
+                "Revision row source delta digest differs from validated facts",
+            );
+        }
         Ok(())
     }
 }

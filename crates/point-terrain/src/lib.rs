@@ -25,7 +25,7 @@
 //! )?
 //! .assert_coordinates_are_metric_metres();
 //! let receipt = surface
-//!     .export_landxml("existing-ground.xml", options, LandXmlLimits::default())
+//!     .ensure_landxml("existing-ground.xml", options, LandXmlLimits::default())
 //!     .blocking_wait()?;
 //! assert_eq!(receipt.vertex_count(), surface.descriptor().vertex_count());
 //! # Ok(())
@@ -51,8 +51,9 @@ pub use landxml::LandXmlOptions;
 pub use limits::{CheckPointLimits, LandXmlLimits, TerrainLimits};
 pub use model::{
     ALGORITHM_VERSION, CheckPoint, CheckPointId, CheckPointOutcome, CheckPointReport,
-    CheckPointResult, LandXmlReceipt, ResidualStatistics, SurfaceFace, SurfaceFaceId,
-    SurfaceVertex, SurfaceVertexId, TerrainDescriptor, TerrainRecipe, TerrainSurface,
+    CheckPointResult, LandXmlDisposition, LandXmlReceipt, ResidualStatistics, SurfaceFace,
+    SurfaceFaceId, SurfaceVertex, SurfaceVertexId, TerrainDescriptor, TerrainRecipe,
+    TerrainSurface,
 };
 
 /// One-worker deterministic Terrain Derivation job.
@@ -83,5 +84,21 @@ impl TerrainSurface {
         limits: LandXmlLimits,
     ) -> LandXmlJob {
         landxml::start(self, target, options, limits)
+    }
+
+    /// Ensures one exact metric-metre `LandXML` 1.2 target without replacement.
+    ///
+    /// A missing target is created through the same durable create-new
+    /// protocol as [`Self::export_landxml`]. A byte-identical existing regular
+    /// file is verified and reconciled. Any other existing target fails
+    /// without being modified.
+    #[must_use]
+    pub fn ensure_landxml(
+        &self,
+        target: impl AsRef<std::path::Path>,
+        options: LandXmlOptions,
+        limits: LandXmlLimits,
+    ) -> LandXmlJob {
+        landxml::start_ensure(self, target, options, limits)
     }
 }

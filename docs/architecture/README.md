@@ -1,7 +1,7 @@
 # Point-Cloud Foundation Architecture
 
-Status: v0.1 through the narrow v0.6 terrain/QA slice implemented; broader
-terrain, export, and product layers remain deferred
+Status: v0.1 through the narrow v0.7 technical-readiness slice implemented;
+broader terrain, export, and product layers remain deferred
 
 The accepted versioned designs are authoritative:
 
@@ -11,13 +11,17 @@ The accepted versioned designs are authoritative:
 - [v0.4 Out-of-core View](../design/out-of-core-view-v0.4.md)
 - [v0.5 Durable document core](../design/durable-document-core-v0.5.md)
 - [v0.6 Terrain and QA benchmark](../design/terrain-qa-benchmark-v0.6.md)
+- [v0.7 Technical partner-alpha readiness](../design/technical-alpha-readiness-v0.7.md)
 
 The current foundation is headless and embeddable. It reads immutable Sources,
 prepares a complete rebuildable Spatial Index, resolves progressive display,
 renders through a host-owned wgpu lifecycle, stores one narrow class of durable
 document Edit, and derives one narrow CPU-authoritative in-memory Terrain
-Surface with detached QA and a metric-metre LandXML deliverable. A crate exists
-only when its behavior, direct tests, and a caller exist.
+Surface with detached QA and a metric-metre LandXML deliverable. The headless
+`terrain-demo` application can run that path through one durable, resumable,
+audited Workflow Run without turning orchestration policy into another
+foundation crate. A crate exists only when its behavior, direct tests, and a
+caller exist.
 
 ## Current module shape
 
@@ -59,6 +63,9 @@ flowchart TD
     TDEMO --> WS
     TDEMO --> IDX
     TDEMO --> LAS
+    TDEMO --> SRC
+    TDEMO --> CT
+    TDEMO --> RT
 ~~~
 
 `point-workspace` is intentionally one deep crate. Exact selection and Point-
@@ -88,10 +95,13 @@ buffers, Workspace journal frames, spill files, or GPU buffers.
 - Source adapters own format decoding.
 - `point-index` owns `.pidx` construction, recovery, validation, and lookup.
 - `point-workspace` owns its manifest, Point Set spills, effective
-  classification overlays, immutable Revisions, and Operation records.
+  classification overlays, immutable Revisions, Operation records, and exact
+  rebuildable Revision Audits.
 - `point-terrain` owns Ground Input normalization, robust triangulation,
   canonical `SurfaceVertex`/`SurfaceFace` values, detached Check Point QA, and
-  the private LandXML encoder.
+  the private LandXML encoder and exact-target reconciliation.
+- `terrain-demo` owns its Run lock, eight-frame journal, cross-module recovery
+  policy, Surface Change Envelope, canonical report, and structured actions.
 - `render-protocol` owns generation and replacement semantics.
 - `point-view` owns deterministic culling, LOD demand, retention, and safe
   retirement decisions.
@@ -135,72 +145,56 @@ application UI remain deferred until an accepted design and caller earn them.
 
 ## Typical headless composition
 
-This uses the implemented v0.6 signatures. The full recovery branch is shown
-in the [classification example](../../crates/point-workspace/examples/classify.rs).
+The v0.7 application facade fixes the complete caller intent before mutation.
+The Run and Workspace Operation identities must be chosen and retained by the
+caller before `start_run`. The Workspace is created separately through
+`point-workspace`; the baseline is its current
+`workspace.head().provenance().revision()` and its selected `U8` Attribute is
+Source Attribute 6 (`source-las` classification):
 
 ~~~rust,ignore
-let source = source_las::open("survey.laz").blocking_wait()?;
-let index = point_index::prepare(
-    source,
+let paths = WorkflowPaths::new(
+    "survey.laz",
     "survey.laz.pidx",
-    PrepareLimits::default(),
-).blocking_wait()?;
-
-let workspace = point_workspace::create(
     "survey.pcw",
-    index,
-    WorkspaceSchema::new(classification_attribute),
-    OpenLimits::default(),
-).blocking_wait()?;
-
-let root = workspace.head();
-let selected = root.select(
-    PointQuery::within(bounds).classification_is(2),
-    PointSetLimits::default(),
-).blocking_wait()?;
-
-let operation = OperationId::generate()?;
-host_recovery.save(workspace.identity(), operation)?;
-let outcome = workspace.commit(
-    CommitRequest::set_classification(operation, selected, 1),
-    CommitLimits::default(),
-).blocking_wait()?;
-
-let revision = match outcome {
-    CommitOutcome::Committed(receipt) => receipt.revision(),
-    CommitOutcome::Rejected(reason) => return Err(reason.into()),
-    CommitOutcome::Indeterminate(uncertainty) => {
-        host_recovery.mark_indeterminate(
-            uncertainty.operation(),
-            uncertainty.phase(),
-        )?;
-        return Err("drop the session, reopen, and resolve this Operation".into());
-    }
-};
-
-let snapshot = workspace.snapshot(revision)?;
-
-let surface = point_terrain::derive(
-    snapshot,
+    "run-root",
+);
+let intent = WorkflowRunIntent::new(
+    caller_run_id,
+    caller_operation_id,
+    expected_baseline_revision,
+    ground_ordinals_to_exclude,
+    1,
     TerrainRecipe::new(2),
-    TerrainLimits::default(),
-).blocking_wait()?;
+    detached_check_points,
+    landxml_options,
+)?;
 
-let qa = surface
-    .check_points(check_points, CheckPointLimits::default())
+let receipt = start_run(paths.clone(), intent.clone(), WorkflowLimits::default())
     .blocking_wait()?;
-let export = surface
-    .export_landxml(target, options, LandXmlLimits::default())
+
+// After interruption, repeat the same paths and complete intent.
+let recovered = resume_run(paths, intent, WorkflowLimits::default())
     .blocking_wait()?;
+assert_eq!(recovered, receipt);
+
+let status = inspect_and_repair_run("run-root", WorkflowLimits::default())?;
+assert!(status.is_complete());
 ~~~
 
-After an indeterminate acknowledgement, the host drops every session handle,
-reopens with the same complete index and verified Source, and calls
-`resolve_operation` with the retained `OperationId`. A `Retryable` result is
-resumed with `retry_operation`; the host does not reconstruct the expired Point
-Set or invent a replacement identity.
+`start_run` and `resume_run` return `WorkflowJob`, whose active child waits use
+linked cancellation. `inspect_and_repair_run` acquires the Run lock, verifies
+the journal format, hash chain, and semantic frame links, and explicitly
+repairs a torn final suffix without opening or mutating Source, index, or
+Workspace state. When repair is needed, it truncates that suffix to the last
+verified journal frame, then revalidates Run-root identity; a root replacement
+after repair is publication-indeterminate. The private workflow resolves
+Committed, Rejected, Retryable, NotRecorded, and Indeterminate Workspace
+Operation states with the original identity. It opens but never creates the
+Workspace; an absent Workspace is `PWF_INVALID_REQUEST` before Run creation or
+Workspace mutation.
 
-## Scope boundary after v0.6
+## Scope boundary after v0.7
 
 Implemented document and terrain behavior is deliberately narrow:
 
@@ -208,18 +202,22 @@ Implemented document and terrain behavior is deliberately narrow:
 - one explicitly selected `U8` classification Attribute;
 - exact All, inclusive world-box, and explicit Point-ID selection;
 - uniform sparse classification assignment;
-- immediate-head Revert only; and
+- immediate-head Revert only;
 - one local exclusive Workspace session;
 - one exact, ordered, classification-aware Snapshot Point-row pull stream;
 - one-worker unconstrained 2.5D TIN Derivation with immutable in-memory
   `TerrainSurface` output;
-- bounded detached Check Point residual QA; and
-- one private durable create-new metric-metre LandXML 1.2 points/faces subset.
+- bounded detached Check Point residual QA;
+- one private metric-metre LandXML 1.2 points/faces subset with create-new and
+  exact-existing reconciliation;
+- exact immutable Revision Audits and Edit Footprints; and
+- one private eight-frame `terrain-demo` Workflow Run with canonical report,
+  exclusive lock, linked cancellation, and structured recovery actions.
 
 General predicate languages, position or other Attribute Edits, named Point
 Sets, branches, merge, compaction, multiple Sources, Breaklines, constrained or
 persistent terrain, general export/import, networking, autosave policy, and
-product UI remain outside v0.6. Licensed-data, partner, named downstream-
+product UI remain outside v0.7. Licensed-data, partner, named downstream-
 application, above-500-million-Point, and human-workflow evidence also remains
 outstanding.
 
