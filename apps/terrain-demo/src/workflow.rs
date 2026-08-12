@@ -891,13 +891,7 @@ fn advance(
     let landxml = changed
         .ensure_landxml(paths.landxml(), request.landxml.clone(), limits.landxml)
         .blocking_wait_cancelled_by(&control.token())
-        .map_err(|error| {
-            if control.check_cancelled().is_err() {
-                cancelled_failure(WorkflowStage::LandXml, context)
-            } else {
-                terrain_output_failure(WorkflowStage::LandXml, error, control, context)
-            }
-        })?;
+        .map_err(|error| terrain_output_failure(WorkflowStage::LandXml, error, control, context))?;
     let export_fact = ExportEnsured {
         revision: revision.id().into_bytes(),
         surface_artifact_hash: changed.descriptor().artifact_hash().into_bytes(),
@@ -1001,11 +995,7 @@ fn advance(
         .ensure_landxml(paths.landxml(), request.landxml.clone(), limits.landxml)
         .blocking_wait_cancelled_by(&control.token())
         .map_err(|error| {
-            if control.check_cancelled().is_err() {
-                cancelled_failure(WorkflowStage::Complete, context)
-            } else {
-                terrain_output_failure(WorkflowStage::Complete, error, control, context)
-            }
+            terrain_output_failure(WorkflowStage::Complete, error, control, context)
         })?;
     if final_landxml.content_hash() != landxml.content_hash()
         || final_landxml.byte_length() != landxml.byte_length()
@@ -2788,6 +2778,25 @@ mod tests {
     use point_workspace::{WorkspaceSchema, create};
 
     use super::workflow_test_support::{TestDirectory, write_las_family_fixture};
+
+    #[test]
+    fn post_link_landxml_failure_remains_indeterminate_after_parent_cancellation() {
+        let control = OperationControl::new();
+        control.cancel();
+
+        let failure = terrain_output_failure(
+            WorkflowStage::LandXml,
+            point_terrain::TerrainError::ExportIndeterminate {
+                expected_hash: point_contracts::ContentHash::new([1; 32]),
+            },
+            &control,
+            FailureContext::default(),
+        );
+
+        assert_eq!(failure.code(), "PWF_PUBLICATION_INDETERMINATE");
+        assert_eq!(failure.certainty(), "indeterminate");
+        assert_eq!(failure.publication_phase(), Some("landxml-target"));
+    }
 
     #[test]
     fn revert_restores_an_empty_baseline_surface_change_envelope() {
