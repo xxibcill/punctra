@@ -447,24 +447,35 @@ fn capture_regular_file(
     let path_metadata = fs::symlink_metadata(path).map_err(|error| {
         RoundTripFailure::invalid(format_args!("{side} cannot be inspected: {error}"))
     })?;
+    capture_inspected_regular_file(side, path, &path_metadata, max_file_bytes)
+}
+
+fn capture_inspected_regular_file<'a>(
+    side: InputSide,
+    path: &'a Path,
+    path_metadata: &Metadata,
+    max_file_bytes: u64,
+) -> Result<FileWitness<'a>, RoundTripFailure> {
     if path_metadata.file_type().is_symlink() || !path_metadata.is_file() {
         return Err(RoundTripFailure::invalid(format_args!(
             "{side} must be a regular file and not a symbolic link"
         )));
     }
-    let path_identity = require_file_identity(side, &path_metadata)?;
+    let path_identity = require_file_identity(side, path_metadata)?;
     check_file_bytes(side, path_metadata.len(), max_file_bytes)?;
 
-    let file = File::open(path).map_err(|error| {
+    let file = open_input_file(path).map_err(|error| {
         RoundTripFailure::invalid(format_args!("{side} cannot be opened: {error}"))
     })?;
+    #[cfg(windows)]
+    require_disk_file(side, &file)?;
     let open_metadata = file.metadata().map_err(|error| {
         RoundTripFailure::invalid(format_args!("{side} metadata cannot be read: {error}"))
     })?;
     let open_identity = require_file_identity(side, &open_metadata)?;
     if !open_metadata.is_file()
         || path_identity != open_identity
-        || !same_file_state(&path_metadata, &open_metadata)
+        || !same_file_state(path_metadata, &open_metadata)
     {
         return Err(RoundTripFailure::invalid(format_args!(
             "{side} changed while it was being opened"
@@ -475,6 +486,47 @@ fn capture_regular_file(
         file,
         metadata: open_metadata,
     })
+}
+
+#[cfg(unix)]
+fn open_input_file(path: &Path) -> std::io::Result<File> {
+    use std::os::unix::fs::OpenOptionsExt as _;
+
+    fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(path)
+}
+
+#[cfg(windows)]
+fn open_input_file(path: &Path) -> std::io::Result<File> {
+    use std::os::windows::fs::OpenOptionsExt as _;
+
+    fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT)
+        .open(path)
+}
+
+#[cfg(not(any(unix, windows)))]
+fn open_input_file(_path: &Path) -> std::io::Result<File> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "stable no-follow input capture is unavailable on this platform",
+    ))
+}
+
+#[cfg(windows)]
+fn require_disk_file(side: InputSide, file: &File) -> Result<(), RoundTripFailure> {
+    let file_type = winapi_util::file::typ(file).map_err(|error| {
+        RoundTripFailure::invalid(format_args!("{side} handle type cannot be read: {error}"))
+    })?;
+    if !file_type.is_disk() {
+        return Err(RoundTripFailure::invalid(format_args!(
+            "{side} must use a disk-backed regular file"
+        )));
+    }
+    Ok(())
 }
 
 fn read_regular_file(
@@ -2101,6 +2153,29 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn raced_symlink_and_fifo_replacements_fail_without_blocking() {
+        use std::os::unix::fs::symlink;
+
+        let fixture = Fixture::new("raced-non-regular-inputs");
+        let xml = landxml(REFERENCE_POINTS, REFERENCE_FACES, false);
+
+        let fifo = fixture.write("raced-fifo.xml", &xml);
+        let fifo_metadata = fs::symlink_metadata(&fifo).expect("inspect initial FIFO path");
+        fs::remove_file(&fifo).expect("remove initial FIFO-path file");
+        create_fifo(&fifo);
+        assert_capture_rejects_promptly(fifo, fifo_metadata);
+
+        let link = fixture.write("raced-link.xml", &xml);
+        let link_metadata = fs::symlink_metadata(&link).expect("inspect initial link path");
+        fs::remove_file(&link).expect("remove initial link-path file");
+        let link_target = fixture.path("raced-link-target.fifo");
+        create_fifo(&link_target);
+        symlink(link_target, &link).expect("replace regular file with FIFO link");
+        assert_capture_rejects_promptly(link, link_metadata);
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn captured_input_pair_rejects_replacement_before_consumption() {
         let fixture = Fixture::new("captured-pair-replacement");
         let xml = landxml(REFERENCE_POINTS, REFERENCE_FACES, false);
@@ -2215,6 +2290,40 @@ mod tests {
     ) {
         let error = result.expect_err("operation must fail");
         assert_eq!(error.kind(), expected, "{error}");
+    }
+
+    #[cfg(unix)]
+    fn create_fifo(path: &Path) {
+        let status = std::process::Command::new("mkfifo")
+            .arg(path)
+            .status()
+            .expect("invoke POSIX mkfifo");
+        assert!(
+            status.success(),
+            "create FIFO fixture at {}",
+            path.display()
+        );
+    }
+
+    #[cfg(unix)]
+    fn assert_capture_rejects_promptly(path: PathBuf, metadata: fs::Metadata) {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            let kind = super::capture_inspected_regular_file(
+                super::InputSide::Returned,
+                &path,
+                &metadata,
+                default_limits().file_bytes,
+            )
+            .err()
+            .map(|error| error.kind());
+            let _ = sender.send(kind);
+        });
+        let kind = receiver
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .expect("input capture must not block on a raced non-regular path");
+        assert_eq!(kind, Some(RoundTripFailureKind::InvalidInput));
+        worker.join().expect("input-capture worker must finish");
     }
 
     fn landxml(points: &[(&str, &str)], faces: &[&str], faces_first: bool) -> String {
