@@ -336,10 +336,10 @@ terrain-demo inspect RUN_ROOT
 ```
 
 Start/resume require `--run-id HEX32`, `--operation-id HEX32`,
-`--baseline HEX64`, one or more `--exclude-ground-ordinal N` values, and
-explicit `--date`/`--time` LandXML values. Detached observations use repeated
-`--check-point ID,X,Y,Z`; the replacement classification, Surface name, and
-explicit unknown-CRS metric assertion are bounded options. Resume repeats the
+`--baseline HEX64`, one or more `--exclude-ground-ordinal N` values, explicit
+`--date`/`--time` LandXML values, and `--assert-unknown-crs-metric`. Detached
+observations use repeated `--check-point ID,X,Y,Z`; the replacement
+classification and Surface name are bounded options. Resume repeats the
 identical request. Inspect opens only the Run root and reports Run, Operation,
 verified frame count, and Complete status. It may repair a torn final journal
 suffix to the last verified frame, but it never opens Source, index, Workspace,

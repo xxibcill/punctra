@@ -114,9 +114,9 @@ be in the baseline class-2 Ground Input. Optional detached observations use
 repeated `--check-point ID,X,Y,Z` arguments.
 
 `terrain-demo` requires metric-metre coordinates and performs no
-transformation. For a Source whose Coordinate Reference is explicitly unknown,
-the caller may add `--assert-unknown-crs-metric` only when that unit assertion
-is independently known to be true.
+transformation. The caller must pass `--assert-unknown-crs-metric` only when
+that unit assertion is independently known to be true; the application cannot
+infer units from the opaque Coordinate Reference.
 
 The durable v0.7 command replaces the v0.6 one-shot
 `--exercise-correction-revert` grammar. It still validates the correction

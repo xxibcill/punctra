@@ -122,6 +122,12 @@ impl WorkflowRunIntent {
         check_points: impl IntoIterator<Item = CheckPoint>,
         landxml: LandXmlOptions,
     ) -> Result<Self, WorkflowFailure> {
+        if !landxml.coordinates_are_metric_metres_asserted() {
+            return Err(WorkflowFailure::invalid(
+                WorkflowStage::Validate,
+                "LandXML requires an explicit metric-metre coordinate assertion",
+            ));
+        }
         let mut ordinals = collect_bounded(
             correction_ordinals,
             MAX_INTENT_ORDINALS,
@@ -3055,6 +3061,27 @@ mod tests {
         assert!(facts.iter().any(|fact| {
             fact.name == "journal.max_path_binding_bytes" && fact.value == PATH_BINDING_BYTES
         }));
+    }
+
+    #[test]
+    fn workflow_intent_requires_metric_coordinates_before_run_creation() {
+        let failure = WorkflowRunIntent::new(
+            WorkflowRunId::new([1; 16]).expect("nonzero Run identity"),
+            test_operation(2),
+            RevisionId::from_bytes([3; 32]).expect("nonzero Revision identity"),
+            [4],
+            1,
+            point_terrain::TerrainRecipe::new(2),
+            [],
+            point_terrain::LandXmlOptions::metric_metres("Ground", "2026-08-12", "00:00:00Z")
+                .expect("valid deterministic LandXML options"),
+        )
+        .expect_err("an unasserted metric request must fail before Run creation");
+
+        assert_eq!(failure.code(), "PWF_INVALID_REQUEST");
+        assert_eq!(failure.stage(), "validate");
+        assert_eq!(failure.certainty(), "pre_publication");
+        assert!(failure.to_string().contains("metric-metre"));
     }
 
     #[test]

@@ -192,8 +192,8 @@ the nonzero Run and Workspace Operation identities and the expected baseline
 Revision before invoking the command. Both the Workspace and `RUN_ROOT` must
 already exist. `terrain-demo` opens but never creates the Workspace; an absent
 Workspace fails with `PWF_INVALID_REQUEST` before Run creation or Workspace
-mutation. The Source must already use metric metres;
-`--assert-unknown-crs-metric` is an explicit caller assertion, not CRS
+mutation. The Source must already use metric metres, and the required
+`--assert-unknown-crs-metric` flag is an explicit caller assertion, not CRS
 inference:
 
 ```bash
