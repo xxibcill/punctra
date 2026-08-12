@@ -31,7 +31,8 @@ use support::{
     write_las_family_fixture,
 };
 use terrain_demo::{
-    WorkflowLimits, WorkflowPaths, WorkflowReceipt, WorkflowRunIntent, resume_run, start_run,
+    WorkflowLimits, WorkflowPaths, WorkflowReceipt, WorkflowRunId, WorkflowRunIntent, resume_run,
+    start_run,
 };
 
 const POINT_COUNT_ENV: &str = "PUNCTRA_TERRAIN_WORKFLOW_BENCH_POINTS";
@@ -169,13 +170,13 @@ impl BenchFixture {
         )
         .blocking_wait()
         .expect("create benchmark Workspace");
-        let baseline = workspace_handle.head().provenance().revision().into_bytes();
+        let baseline = workspace_handle.head().provenance().revision();
         drop(workspace_handle);
 
         let paths = WorkflowPaths::new(&source, &index, &workspace, &run_root);
         let intent = WorkflowRunIntent::new(
-            identity(sequence, 1),
-            identity(sequence, 2),
+            WorkflowRunId::new(identity(sequence, 1)).expect("nonzero benchmark Run ID"),
+            OperationId::from_bytes(identity(sequence, 2)).expect("nonzero benchmark Operation ID"),
             baseline,
             [9_u64, 10],
             1,
@@ -244,8 +245,7 @@ impl BenchFixture {
             )
             .blocking_wait()
             .expect("materialize benchmark retryable Points");
-        let operation =
-            OperationId::from_bytes(fixture.intent.operation()).expect("valid benchmark Operation");
+        let operation = fixture.intent.operation();
         let obstruction = RevisionDirectoryBlocker::install(&fixture.workspace)
             .expect("obstruct benchmark Revision publication");
         let outcome = workspace

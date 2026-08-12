@@ -12,7 +12,7 @@ use std::{
 
 use blake3::Hasher;
 use foundation_runtime::{Job, OperationControl};
-use point_contracts::{PointId, WorldBounds};
+use point_contracts::{ContentHash, PointId, WorldBounds};
 use point_index::{IndexError, PrepareLimits};
 use point_source::SourceError;
 use point_terrain::{
@@ -32,8 +32,8 @@ use crate::{
     },
     journal::{
         self, AuditObserved, Checkpoint, Complete, ExportEnsured, IntentCheckPoint, Journal,
-        JournalError, JournalLimits, QaObserved, ReportEnsured, RevisionResolved, RunId,
-        SurfaceObserved, WorkflowIntent as DurableIntent,
+        JournalError, JournalLimits, QaObserved, ReportEnsured, RevisionResolved, SurfaceObserved,
+        WorkflowIntent as DurableIntent, WorkflowRunId,
     },
     report::{self, LimitFact, ReportError, ReportFacts, ReportLimits, SurfaceChangeEnvelope},
 };
@@ -92,9 +92,9 @@ impl WorkflowPaths {
 /// Complete caller-selected immutable intent for one Workflow Run.
 #[derive(Clone, Debug)]
 pub struct WorkflowRunIntent {
-    run: [u8; 16],
-    operation: [u8; 16],
-    baseline_revision: [u8; 32],
+    run: WorkflowRunId,
+    operation: OperationId,
+    baseline_revision: RevisionId,
     correction_ordinals: Box<[u64]>,
     non_ground_classification: u8,
     recipe: TerrainRecipe,
@@ -111,9 +111,9 @@ impl WorkflowRunIntent {
     /// identity, classification, ordinal set, or Check Point set is invalid.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        run: [u8; 16],
-        operation: [u8; 16],
-        baseline_revision: [u8; 32],
+        run: WorkflowRunId,
+        operation: OperationId,
+        baseline_revision: RevisionId,
         correction_ordinals: impl IntoIterator<Item = u64>,
         non_ground_classification: u8,
         recipe: TerrainRecipe,
@@ -132,12 +132,6 @@ impl WorkflowRunIntent {
                 "correction ordinals must be a nonempty unique set",
             ));
         }
-        RunId::new(run)
-            .map_err(|error| WorkflowFailure::invalid(WorkflowStage::Validate, error))?;
-        OperationId::from_bytes(operation)
-            .map_err(|error| WorkflowFailure::invalid(WorkflowStage::Validate, error))?;
-        RevisionId::from_bytes(baseline_revision)
-            .map_err(|error| WorkflowFailure::invalid(WorkflowStage::Validate, error))?;
         if recipe.ground_classification() == non_ground_classification {
             return Err(WorkflowFailure::invalid(
                 WorkflowStage::Validate,
@@ -173,19 +167,19 @@ impl WorkflowRunIntent {
 
     /// Returns the caller-owned Run identity.
     #[must_use]
-    pub const fn run(&self) -> [u8; 16] {
+    pub const fn run(&self) -> WorkflowRunId {
         self.run
     }
 
     /// Returns the caller-owned durable Workspace Operation identity.
     #[must_use]
-    pub const fn operation(&self) -> [u8; 16] {
+    pub const fn operation(&self) -> OperationId {
         self.operation
     }
 
     /// Returns the expected baseline Revision identity.
     #[must_use]
-    pub const fn baseline_revision(&self) -> [u8; 32] {
+    pub const fn baseline_revision(&self) -> RevisionId {
         self.baseline_revision
     }
 }
@@ -336,10 +330,10 @@ impl WorkflowLimits {
 /// Successful stable facts for one complete Workflow Run.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct WorkflowReceipt {
-    run: [u8; 16],
-    operation: [u8; 16],
-    revision: [u8; 32],
-    report_hash: [u8; 32],
+    run: WorkflowRunId,
+    operation: OperationId,
+    revision: RevisionId,
+    report_hash: ContentHash,
     report_bytes: u64,
     frame_count: u64,
 }
@@ -347,22 +341,22 @@ pub struct WorkflowReceipt {
 impl WorkflowReceipt {
     /// Returns the Run identity.
     #[must_use]
-    pub const fn run(self) -> [u8; 16] {
+    pub const fn run(self) -> WorkflowRunId {
         self.run
     }
     /// Returns the Workspace Operation identity.
     #[must_use]
-    pub const fn operation(self) -> [u8; 16] {
+    pub const fn operation(self) -> OperationId {
         self.operation
     }
     /// Returns the changed Revision identity.
     #[must_use]
-    pub const fn revision(self) -> [u8; 32] {
+    pub const fn revision(self) -> RevisionId {
         self.revision
     }
     /// Returns the canonical report byte hash.
     #[must_use]
-    pub const fn report_hash(self) -> [u8; 32] {
+    pub const fn report_hash(self) -> ContentHash {
         self.report_hash
     }
     /// Returns the canonical report byte count.
@@ -380,8 +374,8 @@ impl WorkflowReceipt {
 /// Verified journal status for one Run.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct WorkflowStatus {
-    run: [u8; 16],
-    operation: [u8; 16],
+    run: WorkflowRunId,
+    operation: OperationId,
     frame_count: u64,
     complete: bool,
 }
@@ -389,12 +383,12 @@ pub struct WorkflowStatus {
 impl WorkflowStatus {
     /// Returns the Run identity.
     #[must_use]
-    pub const fn run(self) -> [u8; 16] {
+    pub const fn run(self) -> WorkflowRunId {
         self.run
     }
     /// Returns the durable Operation identity.
     #[must_use]
-    pub const fn operation(self) -> [u8; 16] {
+    pub const fn operation(self) -> OperationId {
         self.operation
     }
     /// Returns the exact verified frame count.
@@ -464,9 +458,16 @@ pub fn inspect_run(
         )
     })?;
     let intent = journal.intent();
+    let operation = OperationId::from_bytes(intent.operation).map_err(|_| {
+        journal_failure(
+            WorkflowStage::Inspect,
+            JournalError::Invalid("Workspace Operation Identity is all zero"),
+            FailureContext::default(),
+        )
+    })?;
     Ok(WorkflowStatus {
-        run: journal.run().into_bytes(),
-        operation: intent.operation,
+        run: journal.run(),
+        operation,
         frame_count: usize_u64(journal.checkpoints().len()),
         complete: matches!(journal.checkpoints().last(), Some(Checkpoint::Complete(_))),
     })
@@ -520,7 +521,7 @@ fn run(
         && journal.intent().source != source_id.into_bytes()
     {
         let mut mismatch_context = base_context(request);
-        mismatch_context.source = Some(source_id.into_bytes());
+        mismatch_context.source = Some(source_id);
         return Err(WorkflowFailure::new(
             FailureCode::SourceMismatch,
             WorkflowStage::Source,
@@ -536,9 +537,9 @@ fn run(
             index_failure(WorkflowStage::Index, error, control, base_context(request))
         })?;
     let mut context = base_context(request);
-    context.source = Some(source_id.into_bytes());
+    context.source = Some(source_id);
     let workspace = open_workspace(index, &paths.workspace, limits.open, control, context)?;
-    context.workspace = Some(workspace.identity().into_bytes());
+    context.workspace = Some(workspace.identity());
     if let Some(journal) = resumed_journal.as_ref()
         && journal.intent().workspace != workspace.identity().into_bytes()
     {
@@ -574,8 +575,7 @@ fn run(
             RecoveryAction::CorrectInvalidRequest,
         ));
     }
-    let baseline_id = RevisionId::from_bytes(request.baseline_revision)
-        .map_err(|error| WorkflowFailure::invalid(WorkflowStage::Validate, error))?;
+    let baseline_id = request.baseline_revision;
     if start && workspace.head().provenance().revision() != baseline_id {
         return Err(WorkflowFailure::new(
             FailureCode::StaleBaseline,
@@ -668,10 +668,8 @@ fn advance(
     control: &OperationControl,
     mut context: FailureContext,
 ) -> Result<WorkflowReceipt, WorkflowFailure> {
-    let baseline_id = RevisionId::from_bytes(request.baseline_revision)
-        .map_err(|error| WorkflowFailure::invalid(WorkflowStage::Validate, error))?;
-    let operation = OperationId::from_bytes(request.operation)
-        .map_err(|error| WorkflowFailure::invalid(WorkflowStage::Validate, error))?;
+    let baseline_id = request.baseline_revision;
+    let operation = request.operation;
     let resolution = workspace.resolve_operation(operation).map_err(|error| {
         workspace_failure(WorkflowStage::ResolveOperation, error, control, context)
     })?;
@@ -732,7 +730,7 @@ fn advance(
         control,
         context,
     )?;
-    context.revision = Some(revision.id().into_bytes());
+    context.revision = Some(revision.id());
     require_workflow_bytes(
         workflow_retained_bytes(journal, request, limits)
             .saturating_add(limits.audit.max_working_bytes()),
@@ -754,7 +752,7 @@ fn advance(
         context,
     )?;
     let revision_fact = RevisionResolved {
-        operation: request.operation,
+        operation: request.operation.into_bytes(),
         revision: revision.id().into_bytes(),
         parent: revision.parent().unwrap_or(baseline_id).into_bytes(),
         sequence: revision.sequence(),
@@ -1059,8 +1057,8 @@ fn advance(
     Ok(WorkflowReceipt {
         run: request.run,
         operation: request.operation,
-        revision: revision.id().into_bytes(),
-        report_hash: report.content_hash,
+        revision: revision.id(),
+        report_hash: ContentHash::new(report.content_hash),
         report_bytes: report.byte_length,
         frame_count: usize_u64(journal.checkpoints().len()),
     })
@@ -1300,11 +1298,11 @@ fn durable_intent(
     limits: JournalLimits,
 ) -> Result<DurableIntent, JournalError> {
     DurableIntent::new(
-        RunId::new(request.run)?,
+        request.run,
         source,
         workspace,
-        request.baseline_revision,
-        request.operation,
+        request.baseline_revision.into_bytes(),
+        request.operation.into_bytes(),
         request.correction_ordinals.clone(),
         request.recipe.ground_classification(),
         request.non_ground_classification,
@@ -1340,9 +1338,9 @@ fn validate_supplied_intent(
                 left.id == right.id().get()
                     && left.position_bits == right.position().map(f64::to_bits)
             });
-    if durable.run.into_bytes() != supplied.run
-        || durable.operation != supplied.operation
-        || durable.baseline_revision != supplied.baseline_revision
+    if durable.run != supplied.run
+        || durable.operation != supplied.operation.into_bytes()
+        || durable.baseline_revision != supplied.baseline_revision.into_bytes()
         || durable.correction_ordinals.as_ref() != supplied.correction_ordinals.as_ref()
         || durable.ground_classification != supplied.recipe.ground_classification()
         || durable.non_ground_classification != supplied.non_ground_classification
@@ -2033,7 +2031,7 @@ fn bounds_bits(bounds: Option<WorldBounds>) -> Option<[[u64; 2]; 3]> {
 
 fn base_context(request: &WorkflowRunIntent) -> FailureContext {
     FailureContext {
-        run: RunId::new(request.run).ok(),
+        run: Some(request.run),
         operation: Some(request.operation),
         revision: Some(request.baseline_revision),
         ..FailureContext::default()

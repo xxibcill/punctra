@@ -11,6 +11,7 @@ mod workflow;
 
 pub use cli::run_cli;
 pub use diagnostic::WorkflowFailure;
+pub use journal::WorkflowRunId;
 pub use workflow::{
     WorkflowJob, WorkflowLimits, WorkflowPaths, WorkflowReceipt, WorkflowRunIntent, WorkflowStatus,
     inspect_run, resume_run, start_run,

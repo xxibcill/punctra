@@ -9,6 +9,7 @@
 )]
 
 use std::{
+    fmt,
     fs::{self, File, OpenOptions},
     io::{self, Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
@@ -110,20 +111,40 @@ impl Default for JournalLimits {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct RunId([u8; 16]);
+/// Caller-owned nonzero identity of one durable terrain Workflow Run.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct WorkflowRunId([u8; 16]);
 
-impl RunId {
-    pub(crate) fn new(bytes: [u8; 16]) -> Result<Self, JournalError> {
+impl WorkflowRunId {
+    /// Creates a Workflow Run identity from checked opaque bytes.
+    #[must_use]
+    pub fn new(bytes: [u8; 16]) -> Option<Self> {
         if bytes == [0; 16] {
-            Err(JournalError::Invalid("Run Identity is all zero"))
+            None
         } else {
-            Ok(Self(bytes))
+            Some(Self(bytes))
         }
     }
 
-    pub(crate) const fn into_bytes(self) -> [u8; 16] {
+    /// Borrows the opaque identity bytes.
+    #[must_use]
+    pub const fn as_bytes(&self) -> &[u8; 16] {
+        &self.0
+    }
+
+    /// Returns the opaque identity bytes.
+    #[must_use]
+    pub const fn into_bytes(self) -> [u8; 16] {
         self.0
+    }
+}
+
+impl fmt::Display for WorkflowRunId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for byte in self.0 {
+            write!(formatter, "{byte:02x}")?;
+        }
+        Ok(())
     }
 }
 
@@ -135,7 +156,7 @@ pub(crate) struct IntentCheckPoint {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct WorkflowIntent {
-    pub(crate) run: RunId,
+    pub(crate) run: WorkflowRunId,
     pub(crate) request_hash: Digest,
     pub(crate) source: Digest,
     pub(crate) workspace: [u8; 16],
@@ -160,7 +181,7 @@ pub(crate) struct WorkflowIntent {
 impl WorkflowIntent {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
-        run: RunId,
+        run: WorkflowRunId,
         source: Digest,
         workspace: [u8; 16],
         baseline_revision: Digest,
@@ -214,7 +235,8 @@ impl WorkflowIntent {
     }
 
     fn validate(&self, limits: JournalLimits) -> Result<(), JournalError> {
-        RunId::new(self.run.into_bytes())?;
+        WorkflowRunId::new(self.run.into_bytes())
+            .ok_or(JournalError::Invalid("Run Identity is all zero"))?;
         if self.operation == [0; 16] {
             return Err(JournalError::Invalid(
                 "Workspace Operation Identity is all zero",
@@ -648,7 +670,7 @@ pub(crate) struct Journal {
     path: PathBuf,
     file: File,
     limits: JournalLimits,
-    run: RunId,
+    run: WorkflowRunId,
     checkpoints: Vec<Checkpoint>,
     previous_hash: Digest,
     end: u64,
@@ -769,7 +791,7 @@ impl Journal {
         })
     }
 
-    pub(crate) const fn run(&self) -> RunId {
+    pub(crate) const fn run(&self) -> WorkflowRunId {
         self.run
     }
 
@@ -933,7 +955,7 @@ pub(crate) enum JournalError {
     #[error("journal publication is indeterminate for {path}")]
     Indeterminate {
         path: PathBuf,
-        run: RunId,
+        run: WorkflowRunId,
         request_hash: Digest,
         #[source]
         source: io::Error,
@@ -971,7 +993,7 @@ fn scan_frames(
     limits: JournalLimits,
     file_bytes: u64,
     header_hash: Digest,
-    run: RunId,
+    run: WorkflowRunId,
 ) -> Result<Scan, JournalError> {
     let mut checkpoints = Vec::new();
     let retained_slots = as_usize(limits.max_frames.min(8))?;
@@ -1303,7 +1325,7 @@ fn decode_checkpoint(
     kind: FrameKind,
     bytes: &[u8],
     limits: JournalLimits,
-    run: RunId,
+    run: WorkflowRunId,
 ) -> Result<Checkpoint, JournalError> {
     match kind {
         FrameKind::Intent => {
@@ -1361,7 +1383,7 @@ fn encode_intent(value: &WorkflowIntent, bytes: &mut Vec<u8>) -> Result<(), Jour
 fn decode_intent(
     bytes: &[u8],
     limits: JournalLimits,
-    run: RunId,
+    run: WorkflowRunId,
 ) -> Result<WorkflowIntent, JournalError> {
     if bytes.len() < INTENT_FIXED_BYTES {
         return Err(JournalError::Corrupt("Intent payload is truncated"));
@@ -1686,7 +1708,7 @@ fn decode_complete(bytes: &[u8]) -> Result<Complete, JournalError> {
     })
 }
 
-fn encode_header(run: RunId) -> [u8; HEADER_BYTES] {
+fn encode_header(run: WorkflowRunId) -> [u8; HEADER_BYTES] {
     let mut bytes = [0; HEADER_BYTES];
     bytes[..8].copy_from_slice(HEADER_MAGIC);
     bytes[8..12].copy_from_slice(&DISK_VERSION.to_le_bytes());
@@ -1702,7 +1724,7 @@ fn encode_header(run: RunId) -> [u8; HEADER_BYTES] {
     bytes
 }
 
-fn read_header(file: &mut File, path: &Path) -> Result<(RunId, Digest), JournalError> {
+fn read_header(file: &mut File, path: &Path) -> Result<(WorkflowRunId, Digest), JournalError> {
     file.seek(SeekFrom::Start(0))
         .map_err(|source| JournalError::io("seek journal header", path, source))?;
     let mut bytes = [0; HEADER_BYTES];
@@ -1730,7 +1752,9 @@ fn read_header(file: &mut File, path: &Path) -> Result<(RunId, Digest), JournalE
     if expected != recorded {
         return Err(JournalError::Corrupt("journal header checksum differs"));
     }
-    Ok((RunId::new(copy_array(&bytes[24..40]))?, recorded))
+    let run = WorkflowRunId::new(copy_array(&bytes[24..40]))
+        .ok_or(JournalError::Invalid("Run Identity is all zero"))?;
+    Ok((run, recorded))
 }
 
 fn validate_stage(
@@ -2656,7 +2680,7 @@ mod tests {
 
     fn intent() -> WorkflowIntent {
         WorkflowIntent::new(
-            RunId::new([1; 16]).unwrap(),
+            WorkflowRunId::new([1; 16]).unwrap(),
             [2; 32],
             [3; 16],
             [4; 32],

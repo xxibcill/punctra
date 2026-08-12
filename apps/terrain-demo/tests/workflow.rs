@@ -17,8 +17,7 @@ use point_terrain::{
 };
 use point_workspace::{
     CommitLimits, CommitOutcome, CommitRequest, OpenLimits, OperationId, OperationResolution,
-    PointRowLimits, PointSetLimits, RevisionAuditLimits, RevisionId, Workspace, WorkspaceSchema,
-    create, open,
+    PointRowLimits, PointSetLimits, RevisionAuditLimits, Workspace, WorkspaceSchema, create, open,
 };
 use serde_json::Value;
 use support::{
@@ -26,8 +25,8 @@ use support::{
     restore_journal_prefix, semantic_report_projection, write_las_family_fixture,
 };
 use terrain_demo::{
-    WorkflowLimits, WorkflowPaths, WorkflowReceipt, WorkflowRunIntent, inspect_run, resume_run,
-    start_run,
+    WorkflowLimits, WorkflowPaths, WorkflowReceipt, WorkflowRunId, WorkflowRunIntent, inspect_run,
+    resume_run, start_run,
 };
 
 const GROUND: u8 = 2;
@@ -501,8 +500,7 @@ fn stale_head_and_a_differently_bound_rejection_do_not_mutate_the_run() {
         )
         .blocking_wait()
         .expect("materialize rejection fixture Points");
-    let intended_operation =
-        OperationId::from_bytes(rejected.intent.operation()).expect("valid intended Operation");
+    let intended_operation = rejected.intent.operation();
     let outcome = workspace
         .commit(
             CommitRequest::set_classification(intended_operation, point_set, GROUND),
@@ -512,7 +510,7 @@ fn stale_head_and_a_differently_bound_rejection_do_not_mutate_the_run() {
         .expect("publish definitive no-change rejection");
     assert!(matches!(outcome, CommitOutcome::Rejected(_)));
     assert_eq!(
-        workspace.head().provenance().revision().into_bytes(),
+        workspace.head().provenance().revision(),
         rejected.intent.baseline_revision(),
     );
     drop(workspace);
@@ -619,10 +617,7 @@ fn non_las_classification_workspace_is_rejected_before_run_or_workspace_mutation
     assert_eq!(workspace.head().provenance().revision(), baseline);
     assert!(matches!(
         workspace
-            .resolve_operation(
-                OperationId::from_bytes(fixture.intent.operation())
-                    .expect("valid workflow Operation")
-            )
+            .resolve_operation(fixture.intent.operation())
             .expect("resolve untouched Operation"),
         OperationResolution::NotRecorded
     ));
@@ -657,8 +652,7 @@ fn retryable_workspace_intent_resumes_with_the_recorded_operation() {
         )
         .blocking_wait()
         .expect("materialize retryable Operation Points");
-    let operation =
-        OperationId::from_bytes(fixture.intent.operation()).expect("valid workflow Operation");
+    let operation = fixture.intent.operation();
     let obstruction = RevisionDirectoryBlocker::install(&fixture.workspace)
         .expect("replace test-owned revisions directory after Workspace open");
     let outcome = workspace
@@ -744,13 +738,14 @@ impl WorkflowFixture {
         )
         .blocking_wait()
         .expect("create baseline Workspace");
-        let baseline = workspace_handle.head().provenance().revision().into_bytes();
+        let baseline = workspace_handle.head().provenance().revision();
         drop(workspace_handle);
 
         let paths = WorkflowPaths::new(&source, &index, &workspace, &run_root);
         let intent = WorkflowRunIntent::new(
-            [identity; 16],
-            [identity.wrapping_add(1); 16],
+            WorkflowRunId::new([identity; 16]).expect("nonzero Workflow Run ID"),
+            OperationId::from_bytes([identity.wrapping_add(1); 16])
+                .expect("nonzero Workspace Operation ID"),
             baseline,
             [9_u64, 10],
             NON_GROUND,
@@ -810,19 +805,13 @@ impl WorkflowFixture {
     fn assert_single_operation_revision(&self, receipt: WorkflowReceipt) {
         let workspace = self.open_workspace();
         let head = workspace.head().provenance().revision();
-        assert_eq!(head.into_bytes(), receipt.revision());
+        assert_eq!(head, receipt.revision());
         let info = workspace
             .revision_info(head)
             .expect("read workflow Revision facts");
         assert_eq!(info.sequence(), 1, "only Root and one edit Revision exist");
-        assert_eq!(
-            info.operation(),
-            Some(OperationId::from_bytes(receipt.operation()).expect("valid Operation ID")),
-        );
-        assert_eq!(
-            RevisionId::from_bytes(receipt.revision()).expect("valid receipt Revision"),
-            info.id(),
-        );
+        assert_eq!(info.operation(), Some(receipt.operation()),);
+        assert_eq!(receipt.revision(), info.id(),);
     }
 
     fn open_workspace(&self) -> Workspace {

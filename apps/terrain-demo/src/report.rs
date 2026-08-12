@@ -17,7 +17,7 @@ use point_terrain::{CheckPointOutcome, CheckPointReport, LandXmlReceipt, Terrain
 use point_workspace::RevisionAudit;
 use thiserror::Error;
 
-use crate::journal::{Digest, RunId};
+use crate::journal::{Digest, WorkflowRunId};
 
 const REPORT_SCHEMA: &str = "punctra.terrain-workflow.audit.v1";
 const REPORT_HASH_DOMAIN: &[u8] = b"punctra-terrain-workflow-report-bytes-v1";
@@ -80,7 +80,7 @@ pub(crate) struct LimitFact {
 }
 
 pub(crate) struct ReportFacts<'a> {
-    pub(crate) run: RunId,
+    pub(crate) run: WorkflowRunId,
     pub(crate) request_hash: Digest,
     pub(crate) source: Digest,
     pub(crate) workspace: [u8; 16],

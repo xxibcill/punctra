@@ -5,10 +5,11 @@
 use std::{ffi::OsString, path::PathBuf};
 
 use point_terrain::{CheckPoint, CheckPointId, LandXmlOptions, TerrainRecipe};
+use point_workspace::{OperationId, RevisionId};
 
 use crate::{
-    WorkflowFailure, WorkflowLimits, WorkflowPaths, WorkflowRunIntent, inspect_run, resume_run,
-    start_run,
+    WorkflowFailure, WorkflowLimits, WorkflowPaths, WorkflowRunId, WorkflowRunIntent, inspect_run,
+    resume_run, start_run,
 };
 
 const DEFAULT_SURFACE_NAME: &str = "Punctra Ground Surface";
@@ -64,8 +65,8 @@ pub fn run_cli(arguments: impl IntoIterator<Item = OsString>) -> Result<String, 
             let status = inspect_run(root, WorkflowLimits::default())?;
             Ok(format!(
                 "Run {}\nOperation {}\nframes {}\ncomplete {}\n",
-                Hex(&status.run()),
-                Hex(&status.operation()),
+                status.run(),
+                status.operation(),
                 status.frame_count(),
                 status.is_complete(),
             ))
@@ -82,10 +83,10 @@ pub fn run_cli(arguments: impl IntoIterator<Item = OsString>) -> Result<String, 
             };
             Ok(format!(
                 "Run complete\nRun {}\nOperation {}\nRevision {}\nreport hash {}\nreport bytes {}\nframes {}\n",
-                Hex(&receipt.run()),
-                Hex(&receipt.operation()),
-                Hex(&receipt.revision()),
-                Hex(&receipt.report_hash()),
+                receipt.run(),
+                receipt.operation(),
+                receipt.revision(),
+                receipt.report_hash(),
                 receipt.report_bytes(),
                 receipt.frame_count(),
             ))
@@ -236,10 +237,17 @@ fn parse(arguments: impl IntoIterator<Item = OsString>) -> Result<Command, Workf
     if assert_unknown.is_some() {
         landxml = landxml.allow_unknown_coordinate_reference_as_metric_metres();
     }
+    let run = WorkflowRunId::new(run.ok_or_else(|| invalid("missing --run-id"))?)
+        .ok_or_else(|| invalid("Run ID must be nonzero"))?;
+    let operation =
+        OperationId::from_bytes(operation.ok_or_else(|| invalid("missing --operation-id"))?)
+            .map_err(|error| invalid(error.to_string()))?;
+    let baseline = RevisionId::from_bytes(baseline.ok_or_else(|| invalid("missing --baseline"))?)
+        .map_err(|error| invalid(error.to_string()))?;
     let intent = WorkflowRunIntent::new(
-        run.ok_or_else(|| invalid("missing --run-id"))?,
-        operation.ok_or_else(|| invalid("missing --operation-id"))?,
-        baseline.ok_or_else(|| invalid("missing --baseline"))?,
+        run,
+        operation,
+        baseline,
         ordinals,
         non_ground.unwrap_or(DEFAULT_NON_GROUND_CLASSIFICATION),
         TerrainRecipe::new(GROUND_CLASSIFICATION),
@@ -442,15 +450,4 @@ fn resource(limit: &'static str, required: u64, allowed: u64) -> WorkflowFailure
         format_args!("{limit} requires {required}, limit {allowed}"),
         crate::diagnostic::RecoveryAction::RaiseLimitOrNarrow,
     )
-}
-
-struct Hex<'a>(&'a [u8]);
-
-impl std::fmt::Display for Hex<'_> {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        for byte in self.0 {
-            write!(formatter, "{byte:02x}")?;
-        }
-        Ok(())
-    }
 }
