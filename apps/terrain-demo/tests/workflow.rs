@@ -181,6 +181,12 @@ fn journal_corruption_limits_locking_and_path_binding_fail_closed() {
     drop(lock);
     assert!(inspect_run(&fixture.run_root, WorkflowLimits::default()).is_ok());
 
+    let aggregate_limit = WorkflowLimits::default().with_max_aggregate_working_bytes(1);
+    let error = inspect_run(&fixture.run_root, aggregate_limit)
+        .expect_err("aggregate ceiling must bind before journal inspection");
+    assert_eq!(error.code(), "PWF_RESOURCE_LIMIT");
+    assert_eq!(fixture.journal_bytes(), complete_journal);
+
     let alternate_source = fixture
         .directory
         .path()
@@ -203,6 +209,27 @@ fn journal_corruption_limits_locking_and_path_binding_fail_closed() {
     assert_eq!(error.code(), "PWF_JOURNAL_CONFLICT");
     assert_eq!(fixture.journal_bytes(), journal_before);
     fixture.assert_single_operation_revision(expected);
+}
+
+#[test]
+fn aggregate_limit_preflights_before_rebuildable_index_publication() {
+    let fixture = WorkflowFixture::new("aggregate-preflight", "las", 64, 30);
+    fs::remove_file(&fixture.index).expect("remove rebuildable fixture index");
+    assert!(!fixture.index.exists());
+
+    let error = start_run(
+        fixture.paths.clone(),
+        fixture.intent.clone(),
+        WorkflowLimits::default().with_max_aggregate_working_bytes(1),
+    )
+    .blocking_wait()
+    .expect_err("aggregate ceiling must fail before index preparation");
+
+    assert_eq!(error.code(), "PWF_RESOURCE_LIMIT");
+    assert_eq!(error.stage(), "source");
+    assert!(!fixture.index.exists());
+    assert!(!fixture.journal().exists());
+    fixture.assert_single_operation_revision(fixture.start());
 }
 
 #[test]

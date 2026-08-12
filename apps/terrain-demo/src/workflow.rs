@@ -437,6 +437,12 @@ pub fn inspect_run(
     limits: WorkflowLimits,
 ) -> Result<WorkflowStatus, WorkflowFailure> {
     let run_root = run_root.as_ref();
+    require_workflow_bytes(
+        limits.journal.max_working_bytes,
+        limits.max_aggregate_working_bytes,
+        WorkflowStage::Inspect,
+        FailureContext::default(),
+    )?;
     let witness = DirectoryWitness::capture(run_root)
         .map_err(|error| io_failure(WorkflowStage::Inspect, error, FailureContext::default()))?;
     let _lock = RunLock::acquire(&run_root.join("run.lock"))
@@ -489,11 +495,23 @@ fn run(
         .verify()
         .map_err(|error| io_failure(WorkflowStage::Lock, error, base_context(request)))?;
 
+    require_workflow_bytes(
+        request_retained_bytes(request),
+        limits.max_aggregate_working_bytes,
+        WorkflowStage::Source,
+        base_context(request),
+    )?;
     let path_bindings = path_bindings(paths)
         .map_err(|error| journal_failure(WorkflowStage::Validate, error, base_context(request)))?;
     let resumed_journal = if start {
         None
     } else {
+        require_workflow_bytes(
+            request_retained_bytes(request).saturating_add(limits.journal.max_working_bytes),
+            limits.max_aggregate_working_bytes,
+            WorkflowStage::Intent,
+            base_context(request),
+        )?;
         let journal = Journal::open(&paths.journal(), limits.journal).map_err(|error| {
             journal_failure(WorkflowStage::Intent, error, base_context(request))
         })?;
@@ -531,6 +549,16 @@ fn run(
             RecoveryAction::RestoreExpectedSource,
         ));
     }
+    require_workflow_bytes(
+        request_retained_bytes(request)
+            .saturating_add(limits.prepare.max_source_batch_payload_bytes())
+            .saturating_add(limits.prepare.max_adapter_working_bytes())
+            .saturating_add(limits.prepare.max_build_working_bytes())
+            .saturating_add(limits.prepare.max_resident_metadata_bytes()),
+        limits.max_aggregate_working_bytes,
+        WorkflowStage::Index,
+        base_context(request),
+    )?;
     let index = point_index::prepare(source, &paths.index, limits.prepare)
         .blocking_wait_cancelled_by(&control.token())
         .map_err(|error| {
@@ -538,6 +566,15 @@ fn run(
         })?;
     let mut context = base_context(request);
     context.source = Some(source_id);
+    require_workflow_bytes(
+        request_retained_bytes(request)
+            .saturating_add(limits.prepare.max_resident_metadata_bytes())
+            .saturating_add(limits.open.max_working_bytes())
+            .saturating_add(limits.open.max_resident_metadata_bytes()),
+        limits.max_aggregate_working_bytes,
+        WorkflowStage::Workspace,
+        context,
+    )?;
     let workspace = open_workspace(index, &paths.workspace, limits.open, control, context)?;
     context.workspace = Some(workspace.identity());
     if let Some(journal) = resumed_journal.as_ref()
@@ -602,6 +639,15 @@ fn run(
         request,
         limits.rows,
         control,
+        context,
+    )?;
+    require_workflow_bytes(
+        request_retained_bytes(request)
+            .saturating_add(limits.prepare.max_resident_metadata_bytes())
+            .saturating_add(limits.open.max_resident_metadata_bytes())
+            .saturating_add(limits.journal.max_working_bytes),
+        limits.max_aggregate_working_bytes,
+        WorkflowStage::Intent,
         context,
     )?;
     let durable = durable_intent(
