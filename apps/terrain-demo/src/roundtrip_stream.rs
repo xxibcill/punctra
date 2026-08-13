@@ -20,8 +20,8 @@ use crate::{
     roundtrip::{
         ParsedRoundTrip, ParsedSurface, Position, RoundTripDeclaration, RoundTripEvaluation,
         RoundTripFailure, RoundTripFileFacts, RoundTripLimits, RoundTripReason,
-        RoundTripTolerances, Triangle, evaluate_parsed_round_trip, semantic_evaluation_failure,
-        validate_face, validate_utf8_declaration,
+        RoundTripTolerances, Triangle, evaluate_parsed_round_trip, reject_duplicate_faces,
+        semantic_evaluation_failure, validate_face, validate_utf8_declaration,
     },
 };
 
@@ -784,7 +784,7 @@ impl<'a> StreamParser<'a> {
         Ok(())
     }
 
-    fn finish(self) -> Result<ParsedSurface, RoundTripFailure> {
+    fn finish(mut self) -> Result<ParsedSurface, RoundTripFailure> {
         if self.units_count != 1 || self.metric_count != 1 {
             return Err(self.unit_drift());
         }
@@ -800,6 +800,12 @@ impl<'a> StreamParser<'a> {
         {
             return Err(self.unsupported("LandXML TIN subset is incomplete"));
         }
+        let side = if self.side == "REFERENCE" {
+            crate::roundtrip::InputSide::Reference
+        } else {
+            crate::roundtrip::InputSide::Returned
+        };
+        reject_duplicate_faces(side, &mut self.faces)?;
         Ok(ParsedSurface {
             points: self.points,
             faces: self.faces,
@@ -1239,6 +1245,19 @@ mod tests {
             fs::write(&returned, returned_xml).unwrap();
             assert_failed_reason(&reference, &returned, RoundTripReason::UnitDrift);
         }
+    }
+
+    #[test]
+    fn streaming_identical_duplicate_faces_fail_qualification() {
+        let directory = Directory::new();
+        let reference = directory.path.join("reference.xml");
+        let returned = directory.path.join("returned.xml");
+        let duplicate =
+            xml("1", "2", "3", "1 2 3").replace("<F>1 2 3</F>", "<F>1 2 3</F><F>3 2 1</F>");
+        fs::write(&reference, &duplicate).unwrap();
+        fs::write(&returned, duplicate).unwrap();
+
+        assert_failed_reason(&reference, &returned, RoundTripReason::TopologyDrift);
     }
 
     #[test]

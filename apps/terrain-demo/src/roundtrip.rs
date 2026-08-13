@@ -1625,6 +1625,7 @@ fn parse_faces(
         validate_face(side, face, points)?;
         parsed_faces.push(face);
     }
+    reject_duplicate_faces(side, &mut parsed_faces)?;
     Ok(parsed_faces)
 }
 
@@ -1685,6 +1686,23 @@ pub(crate) fn validate_face(
         return Err(RoundTripFailure::semantic(
             RoundTripReason::XmlInvalid,
             format_args!("{side} contains a geometrically degenerate face"),
+        ));
+    }
+    Ok(())
+}
+
+pub(crate) fn reject_duplicate_faces(
+    side: InputSide,
+    faces: &mut [Triangle],
+) -> Result<(), RoundTripFailure> {
+    faces.sort_unstable_by_key(|face| face.canonical_point_indices());
+    if faces
+        .windows(2)
+        .any(|pair| pair[0].canonical_point_indices() == pair[1].canonical_point_indices())
+    {
+        return Err(RoundTripFailure::semantic(
+            RoundTripReason::TopologyDrift,
+            format_args!("{side} contains duplicate faces"),
         ));
     }
     Ok(())
@@ -2347,8 +2365,8 @@ mod tests {
     };
 
     use super::{
-        RoundTripDeclaration, RoundTripFailureKind, RoundTripLimits, RoundTripTolerances,
-        verify_landxml_round_trip,
+        RoundTripDeclaration, RoundTripFailureKind, RoundTripLimits, RoundTripReason,
+        RoundTripTolerances, verify_landxml_round_trip,
     };
 
     static NEXT_DIRECTORY: AtomicU64 = AtomicU64::new(1);
@@ -2572,6 +2590,23 @@ mod tests {
             ),
             RoundTripFailureKind::SemanticMismatch,
         );
+    }
+
+    #[test]
+    fn identical_duplicate_faces_fail_qualification() {
+        let fixture = Fixture::new("identical-duplicate-faces");
+        let duplicate_xml = landxml(REFERENCE_POINTS, &["1 2 3", "3 2 1"], false);
+        let (reference, returned) = fixture.write_pair(&duplicate_xml, &duplicate_xml);
+
+        let error = verify(
+            &reference,
+            &returned,
+            tolerances(0.0, 0.0),
+            default_limits(),
+        )
+        .expect_err("duplicate faces in both inputs must not compare equal");
+        assert_eq!(error.kind(), RoundTripFailureKind::SemanticMismatch);
+        assert_eq!(error.reason(), Some(RoundTripReason::TopologyDrift));
     }
 
     #[test]
