@@ -362,10 +362,8 @@ impl Error for RoundTripFailure {}
 pub(crate) struct RoundTripReport {
     declaration: RoundTripDeclaration,
     tolerances: RoundTripTolerances,
-    reference_content_hash: [u8; 32],
-    returned_content_hash: [u8; 32],
-    reference_bytes: u64,
-    returned_bytes: u64,
+    reference_facts: RoundTripFileFacts,
+    returned_facts: RoundTripFileFacts,
     vertex_count: u64,
     face_count: u64,
     comparison_count: u64,
@@ -385,10 +383,8 @@ pub(crate) struct RoundTripMismatch {
     tolerances: RoundTripTolerances,
     reason: RoundTripReason,
     diagnostic: BoundedDiagnostic,
-    reference_content_hash: [u8; 32],
-    returned_content_hash: [u8; 32],
-    reference_bytes: u64,
-    returned_bytes: u64,
+    reference_facts: RoundTripFileFacts,
+    returned_facts: RoundTripFileFacts,
     topology: Option<Box<TopologyDrift>>,
     returned_surface_name: Option<Box<str>>,
     returned_ignored_sections: Box<[Box<str>]>,
@@ -442,19 +438,19 @@ impl RoundTripReport {
     }
 
     pub(crate) const fn reference_content_hash(&self) -> [u8; 32] {
-        self.reference_content_hash
+        self.reference_facts.content_hash
     }
 
     pub(crate) const fn returned_content_hash(&self) -> [u8; 32] {
-        self.returned_content_hash
+        self.returned_facts.content_hash
     }
 
     pub(crate) const fn reference_bytes(&self) -> u64 {
-        self.reference_bytes
+        self.reference_facts.byte_length
     }
 
     pub(crate) const fn returned_bytes(&self) -> u64 {
-        self.returned_bytes
+        self.returned_facts.byte_length
     }
 
     pub(crate) const fn vertex_count(&self) -> u64 {
@@ -520,19 +516,19 @@ impl RoundTripMismatch {
     }
 
     pub(crate) const fn reference_content_hash(&self) -> [u8; 32] {
-        self.reference_content_hash
+        self.reference_facts.content_hash
     }
 
     pub(crate) const fn returned_content_hash(&self) -> [u8; 32] {
-        self.returned_content_hash
+        self.returned_facts.content_hash
     }
 
     pub(crate) const fn reference_bytes(&self) -> u64 {
-        self.reference_bytes
+        self.reference_facts.byte_length
     }
 
     pub(crate) const fn returned_bytes(&self) -> u64 {
-        self.returned_bytes
+        self.returned_facts.byte_length
     }
 
     pub(crate) fn topology(&self) -> Option<&TopologyDrift> {
@@ -701,8 +697,14 @@ pub(crate) fn evaluate_landxml_round_trip(
         capture_file_pair(reference_path, returned_path, limits.file_bytes)?;
     let reference = read_regular_file(InputSide::Reference, reference_witness, limits.file_bytes)?;
     let returned = read_regular_file(InputSide::Returned, returned_witness, limits.file_bytes)?;
-    let reference_hash = *blake3::hash(&reference.bytes).as_bytes();
-    let returned_hash = *blake3::hash(&returned.bytes).as_bytes();
+    let reference_facts = RoundTripFileFacts {
+        content_hash: *blake3::hash(&reference.bytes).as_bytes(),
+        byte_length: reference.bytes.len() as u64,
+    };
+    let returned_facts = RoundTripFileFacts {
+        content_hash: *blake3::hash(&returned.bytes).as_bytes(),
+        byte_length: returned.bytes.len() as u64,
+    };
     let evaluated = (|| {
         let reference_surface = parse_surface(InputSide::Reference, &reference.bytes, limits)?;
         let returned_surface = parse_surface(InputSide::Returned, &returned.bytes, limits)?;
@@ -720,10 +722,8 @@ pub(crate) fn evaluate_landxml_round_trip(
             Ok(RoundTripEvaluation::Passed(RoundTripReport {
                 declaration,
                 tolerances,
-                reference_content_hash: reference_hash,
-                returned_content_hash: returned_hash,
-                reference_bytes: reference.bytes.len() as u64,
-                returned_bytes: returned.bytes.len() as u64,
+                reference_facts,
+                returned_facts,
                 vertex_count: reference_surface.points.len() as u64,
                 face_count: reference_surface.faces.len() as u64,
                 comparison_count: comparison.comparison_count,
@@ -746,10 +746,8 @@ pub(crate) fn evaluate_landxml_round_trip(
                 tolerances,
                 reason: error.reason().expect("guarded semantic reason"),
                 diagnostic: BoundedDiagnostic::new(error.diagnostic()),
-                reference_content_hash: reference_hash,
-                returned_content_hash: returned_hash,
-                reference_bytes: reference.bytes.len() as u64,
-                returned_bytes: returned.bytes.len() as u64,
+                reference_facts,
+                returned_facts,
                 topology: error.topology,
                 returned_point_count: None,
                 returned_face_count: None,
@@ -786,10 +784,8 @@ pub(crate) fn evaluate_parsed_round_trip(
         Ok(comparison) => Ok(RoundTripEvaluation::Passed(RoundTripReport {
             declaration,
             tolerances,
-            reference_content_hash: reference_facts.content_hash,
-            returned_content_hash: returned_facts.content_hash,
-            reference_bytes: reference_facts.byte_length,
-            returned_bytes: returned_facts.byte_length,
+            reference_facts,
+            returned_facts,
             vertex_count: reference_surface.points.len() as u64,
             face_count: reference_surface.faces.len() as u64,
             comparison_count: comparison.comparison_count,
@@ -811,10 +807,8 @@ pub(crate) fn evaluate_parsed_round_trip(
                 tolerances,
                 reason: error.reason().expect("guarded semantic reason"),
                 diagnostic: BoundedDiagnostic::new(error.diagnostic()),
-                reference_content_hash: reference_facts.content_hash,
-                returned_content_hash: returned_facts.content_hash,
-                reference_bytes: reference_facts.byte_length,
-                returned_bytes: returned_facts.byte_length,
+                reference_facts,
+                returned_facts,
                 topology: error.topology,
                 returned_point_count: Some(returned_surface.points.len() as u64),
                 returned_face_count: Some(returned_surface.faces.len() as u64),
@@ -853,10 +847,8 @@ pub(crate) fn semantic_evaluation_failure(
         tolerances,
         reason: error.reason().expect("guarded semantic reason"),
         diagnostic: BoundedDiagnostic::new(error.diagnostic()),
-        reference_content_hash: reference_facts.content_hash,
-        returned_content_hash: returned_facts.content_hash,
-        reference_bytes: reference_facts.byte_length,
-        returned_bytes: returned_facts.byte_length,
+        reference_facts,
+        returned_facts,
         topology: error.topology,
         returned_surface_name,
         returned_ignored_sections,
