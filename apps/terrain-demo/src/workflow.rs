@@ -2417,8 +2417,8 @@ fn terrain_failure(
     control: &OperationControl,
     context: FailureContext,
 ) -> WorkflowFailure {
-    if control.check_cancelled().is_err()
-        || matches!(&error, point_terrain::TerrainError::Cancelled)
+    if matches!(&error, point_terrain::TerrainError::Cancelled)
+        || (control.check_cancelled().is_err() && !terrain_error_is_io(&error))
     {
         return cancelled_failure(stage, context);
     }
@@ -2458,13 +2458,25 @@ fn terrain_failure(
     }
 }
 
+fn terrain_error_is_io(error: &point_terrain::TerrainError) -> bool {
+    match error {
+        point_terrain::TerrainError::Io { .. } => true,
+        point_terrain::TerrainError::Workspace { source, .. } => {
+            matches!(source.as_ref(), WorkspaceError::Io { .. })
+        }
+        _ => false,
+    }
+}
+
 fn workspace_failure(
     stage: WorkflowStage,
     error: WorkspaceError,
     control: &OperationControl,
     context: FailureContext,
 ) -> WorkflowFailure {
-    if control.check_cancelled().is_err() || matches!(&error, WorkspaceError::Cancelled) {
+    if matches!(&error, WorkspaceError::Cancelled)
+        || (control.check_cancelled().is_err() && !matches!(&error, WorkspaceError::Io { .. }))
+    {
         return cancelled_failure(stage, context);
     }
     let (code, certainty, action) = match &error {
@@ -3155,6 +3167,69 @@ mod tests {
         assert_eq!(failure.code(), "PWF_IO");
         assert_eq!(failure.certainty(), "indeterminate");
         assert_eq!(failure.publication_phase(), Some("index-target"));
+    }
+
+    #[test]
+    fn terrain_io_wins_over_concurrent_ambient_cancellation() {
+        let control = OperationControl::new();
+        control.cancel();
+        let failure = terrain_failure(
+            WorkflowStage::Terrain,
+            point_terrain::TerrainError::Io {
+                operation: "read terrain input",
+                path: point_terrain::TerrainDiagnostic::new("terrain-input.bin"),
+                source: io::Error::other("injected terrain I/O"),
+            },
+            &control,
+            FailureContext::default(),
+        );
+
+        assert_eq!(failure.code(), "PWF_IO");
+        assert_eq!(failure.stage(), "terrain-derivation");
+        assert_eq!(failure.certainty(), "pre_publication");
+        assert!(failure.diagnostic().contains("terrain-input.bin"));
+        assert!(failure.diagnostic().contains("injected terrain I/O"));
+    }
+
+    #[test]
+    fn workspace_io_wins_over_concurrent_ambient_cancellation() {
+        let control = OperationControl::new();
+        control.cancel();
+        let workspace_io = WorkspaceError::Io {
+            operation: "read Workspace rows",
+            path: point_workspace::WorkspaceDiagnostic::new("rows.bin"),
+            source: io::Error::other("injected Workspace I/O"),
+        };
+        let failure = workspace_failure(
+            WorkflowStage::Selection,
+            workspace_io,
+            &control,
+            FailureContext::default(),
+        );
+
+        assert_eq!(failure.code(), "PWF_IO");
+        assert_eq!(failure.stage(), "exact-selection");
+        assert_eq!(failure.certainty(), "pre_publication");
+        assert!(failure.diagnostic().contains("rows.bin"));
+        assert!(failure.diagnostic().contains("injected Workspace I/O"));
+
+        let nested = terrain_failure(
+            WorkflowStage::Terrain,
+            point_terrain::TerrainError::from(WorkspaceError::Io {
+                operation: "read terrain Workspace rows",
+                path: point_workspace::WorkspaceDiagnostic::new("terrain-rows.bin"),
+                source: io::Error::other("injected nested Workspace I/O"),
+            }),
+            &control,
+            FailureContext::default(),
+        );
+        assert_eq!(nested.code(), "PWF_IO");
+        assert!(nested.diagnostic().contains("terrain-rows.bin"));
+        assert!(
+            nested
+                .diagnostic()
+                .contains("injected nested Workspace I/O")
+        );
     }
 
     #[test]
