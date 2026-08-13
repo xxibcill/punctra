@@ -296,8 +296,10 @@ A Point Set begins in bounded memory and automatically spills to the locked
 Workspace scratch directory when the resident threshold is crossed. Spill
 frames and the sealed footer are checksummed. Iteration is repeatable and
 bounded. The Point Set retains the Workspace lock, detects missing or modified
-spill data, and removes its spill after the final handle is dropped. It is not
-a durable named selection or a recovery record.
+spill data, and clears unpublished spill payload through its captured open
+handle after the final handle is dropped. The recognizable empty scratch alias
+is retained because portable pathname deletion could race a caller
+replacement. It is not a durable named selection or a recovery record.
 
 ## Revisions and Revert
 
@@ -366,7 +368,7 @@ and a final file digest. The commit protocol is:
    every fact and checksum;
 4. mark operation-record publication attempted, hard-link it without
    replacement as `<operation-id>.ready`, sync the operations directory, then
-   unlink its scratch name and sync scratch;
+   retain its recognizable scratch hard-link alias and sync scratch;
 5. recheck the expected head and mark the Commit Job as
    revision-publication-attempted;
 6. hard-link the read-only ready file without replacement at the next Revision
@@ -386,8 +388,9 @@ checksummed read-only rejection temporary, closes and revalidates it, publishes
 operations directory before returning `Rejected`. Failure after rejection
 publication begins returns `Indeterminate`. For one Operation ID, resolution
 precedence is matching Revision, recorded rejection, complete ready payload,
-then no record. Recovery only unlinks recognized scratch names; it never opens
-one for mutation.
+then no record. Recovery validates recognized scratch names but does not mutate
+their pathnames; unpublished payload is cleared only through an already-owned
+open handle.
 
 Standard-library advisory file locking excludes a second process while a
 Workspace, Snapshot, or Point Set handle remains alive. Multi-process readers
@@ -500,8 +503,9 @@ one-million-Point benchmark itself does not claim worker heap. Its public
 Point-ID iteration peaked at 2,621,440 caller-thread bytes with zero retained
 bytes. Resident-selection process RSS was 62,668,800 bytes; forced-spill RSS
 started at 62,685,184, sampled at 62,832,640, and therefore increased by
-147,456 bytes. The sealed temporary payload was 9,009,182 bytes and was removed
-with the final handle.
+147,456 bytes. The sealed temporary payload was 9,009,182 bytes and was cleared
+through the captured handle when the final handle was released; a recognizable
+empty scratch alias may remain.
 
 The sparse 10,000-Point classification/Revert pair measured approximately
 16.442/15.818 ms and 20.100 logical bytes per changed Point; the dense
@@ -534,6 +538,6 @@ v0.5 does not add:
   picking, application UI, or autosave policy.
 
 Deleting the index remains safe because Source and immutable Revision files are
-authoritative. Deleting GPU/View state changes no Workspace bytes. Deleting a
-process-scoped Point Set only removes a temporary selection and cannot remove a
-committed Revision.
+authoritative. Deleting GPU/View state changes no Workspace bytes. Releasing a
+process-scoped Point Set clears only its temporary selection payload through
+the captured handle and cannot remove a committed Revision.

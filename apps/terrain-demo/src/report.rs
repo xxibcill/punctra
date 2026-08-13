@@ -5,7 +5,7 @@
 
 use std::{
     fs::{self, File},
-    io::{self, Read, Write},
+    io::{self, Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
 };
 
@@ -28,7 +28,7 @@ use crate::{
 };
 
 const REPORT_SCHEMA: &str = "punctra.terrain-workflow.audit.v1";
-const REPORT_HASH_DOMAIN: &[u8] = b"punctra-terrain-workflow-report-bytes-v1";
+pub(crate) const REPORT_HASH_DOMAIN: &[u8] = b"punctra-terrain-workflow-report-bytes-v1";
 const HASH_BUFFER_BYTES: usize = 8 * 1024;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -217,7 +217,7 @@ fn ensure_report_with_hook<H: PublicationHook>(
     let stage_metadata = fs::symlink_metadata(guard.path())
         .map_err(|source| ReportError::io("inspect report stage", guard.path(), source))?;
     let readback = verify_existing_regular_file(guard.path(), &stage_metadata, limits, control)?;
-    if readback != expected {
+    if readback.facts != expected {
         return Err(ReportError::Invalid(
             "report stage changed during read-back",
         ));
@@ -273,7 +273,10 @@ fn publish_or_reconcile(
                 .verify()
                 .map_err(|source| ReportError::io("revalidate report parent", parent, source))?;
             match fs::hard_link(guard.path(), target) {
-                Ok(()) => finish_publication(context, guard, control, hook),
+                Ok(()) => {
+                    guard.mark_linked();
+                    finish_publication(context, guard, control, hook)
+                }
                 Err(source) if source.kind() == io::ErrorKind::AlreadyExists => {
                     let metadata = fs::symlink_metadata(target).map_err(|source| {
                         ReportError::io("inspect raced report target", target, source)
@@ -308,7 +311,10 @@ fn reconcile_existing(
     parent_witness
         .verify()
         .map_err(|_| changed_target_error(target))?;
-    let actual = verify_existing_regular_file(target, initial_metadata, limits, control)?;
+    let VerifiedTarget {
+        facts: actual,
+        mut witness,
+    } = verify_existing_regular_file(target, initial_metadata, limits, control)?;
     if actual != expected {
         return Err(ReportError::Conflict {
             path: target.to_path_buf(),
@@ -340,6 +346,17 @@ fn reconcile_existing(
     hook.reach(PublicationBoundary::TerminalAcknowledgement, control)
         .map_err(|source| ReportError::io("acknowledge reconciled report", target, source))?;
     check_cancelled(control)?;
+    let final_actual = witness.verify(target, limits, control)?;
+    if final_actual != expected {
+        return Err(ReportError::Conflict {
+            path: target.to_path_buf(),
+            expected_hash: expected.hash,
+            actual_hash: final_actual.hash,
+        });
+    }
+    parent_witness
+        .verify()
+        .map_err(|_| changed_target_error(target))?;
     Ok(ReportReceipt {
         disposition: ReportDisposition::ReconciledExisting,
         content_hash: expected.hash,
@@ -376,17 +393,18 @@ fn finish_publication(
             expected_hash: expected.hash,
             source,
         })?;
-    verify_linked_target(stage.path(), target, limits, control)
-        .and_then(|actual| {
-            if actual == expected {
-                Ok(())
-            } else {
-                Err(ReportError::Invalid(
-                    "published report bytes differ from the staged report",
-                ))
-            }
-        })
+    let VerifiedTarget {
+        facts: actual,
+        mut witness,
+    } = verify_linked_target(stage.path(), target, limits, control)
         .map_err(|error| indeterminate(target, expected.hash, error))?;
+    if actual != expected {
+        return Err(indeterminate(
+            target,
+            expected.hash,
+            ReportError::Invalid("published report bytes differ from the staged report"),
+        ));
+    }
     require_post_link_boundary(
         hook,
         PublicationBoundary::ParentSync,
@@ -439,6 +457,23 @@ fn finish_publication(
         target,
         expected.hash,
     )?;
+    let final_actual = witness
+        .verify(target, limits, control)
+        .map_err(|error| indeterminate(target, expected.hash, error))?;
+    if final_actual != expected {
+        return Err(indeterminate(
+            target,
+            expected.hash,
+            ReportError::Invalid("acknowledged report bytes differ from the published report"),
+        ));
+    }
+    parent_witness
+        .verify()
+        .map_err(|source| ReportError::Indeterminate {
+            path: target.to_path_buf(),
+            expected_hash: expected.hash,
+            source,
+        })?;
     Ok(ReportReceipt {
         disposition: ReportDisposition::Created,
         content_hash: expected.hash,
@@ -829,12 +864,60 @@ struct FileFacts {
     bytes: u64,
 }
 
+struct VerifiedTarget {
+    facts: FileFacts,
+    witness: StableTargetWitness,
+}
+
+struct StableTargetWitness {
+    file: File,
+    metadata: fs::Metadata,
+}
+
+impl StableTargetWitness {
+    fn verify(
+        &mut self,
+        path: &Path,
+        limits: ReportLimits,
+        control: &OperationControl,
+    ) -> Result<FileFacts, ReportError> {
+        let opened_metadata = self.file.metadata().map_err(|source| {
+            ReportError::io("inspect acknowledged report target", path, source)
+        })?;
+        let path_metadata = fs::symlink_metadata(path).map_err(|source| {
+            ReportError::io("reinspect acknowledged report target", path, source)
+        })?;
+        require_regular_target(path, &path_metadata)?;
+        if !same_file_state(&self.metadata, &opened_metadata)
+            || !same_file_state(&opened_metadata, &path_metadata)
+        {
+            return Err(changed_target_error(path));
+        }
+        self.file
+            .seek(SeekFrom::Start(0))
+            .map_err(|source| ReportError::io("rewind acknowledged report target", path, source))?;
+        let facts = verify_open_file(&mut self.file, path, limits, control)?;
+        let final_opened = self.file.metadata().map_err(|source| {
+            ReportError::io("reinspect acknowledged report target", path, source)
+        })?;
+        let final_path = fs::symlink_metadata(path).map_err(|source| {
+            ReportError::io("reinspect acknowledged report target", path, source)
+        })?;
+        if !same_file_state(&self.metadata, &final_opened)
+            || !same_file_state(&final_opened, &final_path)
+        {
+            return Err(changed_target_error(path));
+        }
+        Ok(facts)
+    }
+}
+
 fn verify_existing_regular_file(
     path: &Path,
     initial_metadata: &fs::Metadata,
     limits: ReportLimits,
     control: &OperationControl,
-) -> Result<FileFacts, ReportError> {
+) -> Result<VerifiedTarget, ReportError> {
     require_regular_target(path, initial_metadata)?;
     let mut file = File::open(path)
         .map_err(|source| ReportError::io("open existing report target", path, source))?;
@@ -853,11 +936,19 @@ fn verify_existing_regular_file(
     let final_metadata = fs::symlink_metadata(path)
         .map_err(|source| ReportError::io("reinspect verified report target", path, source))?;
     require_stable_target(path, &opened_metadata, &verified_metadata, &final_metadata)?;
-    if !same_file_state(&opened_metadata, &verified_metadata) || final_metadata.len() != facts.bytes
+    if !same_file_state(&opened_metadata, &verified_metadata)
+        || !same_file_state(&verified_metadata, &final_metadata)
+        || final_metadata.len() != facts.bytes
     {
         return Err(changed_target_error(path));
     }
-    Ok(facts)
+    Ok(VerifiedTarget {
+        facts,
+        witness: StableTargetWitness {
+            file,
+            metadata: verified_metadata,
+        },
+    })
 }
 
 fn verify_linked_target(
@@ -865,7 +956,7 @@ fn verify_linked_target(
     target: &Path,
     limits: ReportLimits,
     control: &OperationControl,
-) -> Result<FileFacts, ReportError> {
+) -> Result<VerifiedTarget, ReportError> {
     let stage_before = fs::symlink_metadata(stage)
         .map_err(|source| ReportError::io("inspect linked report stage", stage, source))?;
     let target_before = fs::symlink_metadata(target)
@@ -875,16 +966,16 @@ fn verify_linked_target(
     if !same_file_identity(&stage_before, &target_before) {
         return Err(changed_target_error(target));
     }
-    let facts = verify_existing_regular_file(target, &target_before, limits, control)?;
+    let verified = verify_existing_regular_file(target, &target_before, limits, control)?;
     let stage_after = fs::symlink_metadata(stage)
         .map_err(|source| ReportError::io("reinspect linked report stage", stage, source))?;
     let target_after = fs::symlink_metadata(target)
         .map_err(|source| ReportError::io("reinspect linked report target", target, source))?;
     require_stable_target(target, &stage_before, &stage_after, &target_after)?;
-    if !same_file_state(&stage_before, &stage_after) || stage_after.len() != facts.bytes {
+    if !same_file_state(&stage_before, &stage_after) || stage_after.len() != verified.facts.bytes {
         return Err(changed_target_error(target));
     }
-    Ok(facts)
+    Ok(verified)
 }
 
 fn verify_open_file(
@@ -974,12 +1065,31 @@ fn changed_target_error(path: &Path) -> ReportError {
     }
 }
 
+#[cfg(unix)]
 fn same_file_state(left: &fs::Metadata, right: &fs::Metadata) -> bool {
-    left.len() == right.len()
-        && matches!(
-            (left.modified(), right.modified()),
-            (Ok(left_modified), Ok(right_modified)) if left_modified == right_modified
-        )
+    use std::os::unix::fs::MetadataExt as _;
+
+    same_file_identity(left, right)
+        && left.len() == right.len()
+        && left.mtime() == right.mtime()
+        && left.mtime_nsec() == right.mtime_nsec()
+        && left.ctime() == right.ctime()
+        && left.ctime_nsec() == right.ctime_nsec()
+}
+
+#[cfg(windows)]
+fn same_file_state(left: &fs::Metadata, right: &fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt as _;
+
+    same_file_identity(left, right)
+        && left.len() == right.len()
+        && left.creation_time() == right.creation_time()
+        && left.last_write_time() == right.last_write_time()
+}
+
+#[cfg(not(any(unix, windows)))]
+fn same_file_state(_left: &fs::Metadata, _right: &fs::Metadata) -> bool {
+    false
 }
 
 fn validate_limits(limits: ReportLimits) -> Result<(), ReportError> {
@@ -1114,7 +1224,7 @@ mod tests {
     }
 
     #[test]
-    fn pre_link_failure_and_cancellation_leave_no_target_or_stage() {
+    fn pre_link_failure_and_cancellation_leave_no_target_or_owned_payload() {
         let directory = Directory::new("pre-link");
         for action in [
             TestAction::Failure(PublicationBoundary::BeforeLink),
@@ -1134,7 +1244,7 @@ mod tests {
             ));
             assert!(!target.exists());
             drop(stage);
-            directory.assert_no_stages();
+            directory.assert_stages_are_safe();
         }
     }
 
@@ -1168,7 +1278,7 @@ mod tests {
             ));
             assert_eq!(fs::read(&target).unwrap(), canonical);
             drop(stage);
-            directory.assert_no_stages();
+            directory.assert_stages_are_safe();
         }
     }
 
@@ -1202,7 +1312,7 @@ mod tests {
         .expect("retry reconciles exact durable bytes");
         assert_eq!(receipt.disposition, ReportDisposition::ReconciledExisting);
         assert_eq!(receipt.content_hash, expected.hash);
-        directory.assert_no_stages();
+        directory.assert_stages_are_safe();
     }
 
     #[test]
@@ -1257,7 +1367,7 @@ mod tests {
         assert_eq!(fs::read(&conflict_target).unwrap(), caller_bytes);
         drop(exact_stage);
         drop(conflict_stage);
-        directory.assert_no_stages();
+        directory.assert_stages_are_safe();
     }
 
     #[test]
@@ -1283,7 +1393,73 @@ mod tests {
         assert!(matches!(failure, ReportError::Indeterminate { .. }));
         assert_eq!(fs::read(&target).unwrap(), replacement);
         drop(stage);
-        directory.assert_no_stages();
+        directory.assert_stages_are_safe();
+    }
+
+    #[test]
+    fn late_created_target_replacement_is_never_acknowledged() {
+        let directory = Directory::new("late-created-replacement");
+        let canonical = b"canonical report\n";
+        let replacement = b"caller replacement\n";
+        for boundary in [
+            PublicationBoundary::ParentSync,
+            PublicationBoundary::StageRemoval,
+            PublicationBoundary::CleanupSync,
+            PublicationBoundary::TerminalAcknowledgement,
+        ] {
+            let target = directory.path.join(format!("{boundary:?}.json"));
+            let (mut stage, expected) = directory.prepared(canonical);
+            let failure = publish_prepared(
+                &target,
+                &mut stage,
+                expected,
+                &OperationControl::new(),
+                &TestHook(TestAction::Install {
+                    boundary,
+                    target: &target,
+                    bytes: replacement,
+                    replace: true,
+                }),
+            )
+            .expect_err("a replaced created target has no receipt");
+            assert!(matches!(failure, ReportError::Indeterminate { .. }));
+            assert_eq!(fs::read(&target).unwrap(), replacement);
+            drop(stage);
+        }
+        directory.assert_stages_are_safe();
+    }
+
+    #[test]
+    fn late_reconciled_target_replacement_is_never_acknowledged() {
+        let directory = Directory::new("late-reconciled-replacement");
+        let canonical = b"canonical report\n";
+        let replacement = b"caller replacement\n";
+        for boundary in [
+            PublicationBoundary::ParentSync,
+            PublicationBoundary::StageRemoval,
+            PublicationBoundary::CleanupSync,
+            PublicationBoundary::TerminalAcknowledgement,
+        ] {
+            let target = directory.path.join(format!("{boundary:?}.json"));
+            write_synced(&target, canonical).unwrap();
+            let (mut stage, expected) = directory.prepared(canonical);
+            publish_prepared(
+                &target,
+                &mut stage,
+                expected,
+                &OperationControl::new(),
+                &TestHook(TestAction::Install {
+                    boundary,
+                    target: &target,
+                    bytes: replacement,
+                    replace: true,
+                }),
+            )
+            .expect_err("a replaced reconciled target has no receipt");
+            assert_eq!(fs::read(&target).unwrap(), replacement);
+            drop(stage);
+        }
+        directory.assert_stages_are_safe();
     }
 
     #[cfg(unix)]
@@ -1310,7 +1486,7 @@ mod tests {
         drop(stage);
         assert_eq!(fs::read(&target).unwrap(), concurrent_bytes);
         fs::remove_file(target).unwrap();
-        directory.assert_no_stages();
+        directory.assert_stages_are_safe();
     }
 
     #[test]
@@ -1342,7 +1518,7 @@ mod tests {
         assert!(matches!(failure, ReportError::TargetConflict { .. }));
         assert!(target.is_dir());
         drop(stage);
-        directory.assert_no_stages();
+        directory.assert_stages_are_safe();
     }
 
     #[test]
@@ -1484,7 +1660,7 @@ mod tests {
             (stage, facts_for(bytes))
         }
 
-        fn assert_no_stages(&self) {
+        fn assert_stages_are_safe(&self) {
             let stages = fs::read_dir(&self.path)
                 .unwrap()
                 .filter_map(Result::ok)
@@ -1494,8 +1670,15 @@ mod tests {
                         .to_string_lossy()
                         .starts_with(".punctra-report-")
                 })
-                .count();
-            assert_eq!(stages, 0, "recognized report stages must be cleaned");
+                .collect::<Vec<_>>();
+            for stage in stages {
+                let metadata = stage.metadata().expect("inspect retained report stage");
+                assert!(metadata.is_file(), "retained report stage is regular");
+                assert!(
+                    metadata.len() <= ReportLimits::default().max_staging_bytes,
+                    "retained report stage is bounded"
+                );
+            }
         }
     }
 

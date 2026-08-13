@@ -1,7 +1,9 @@
 use std::{mem, sync::Arc};
 
 use foundation_runtime::CancellationToken;
-use point_contracts::{PositionTransform, SourceId, WorldBounds};
+use point_contracts::{
+    AttributeDataType, AttributeId, PositionTransform, SourceId, SourceMetadata, WorldBounds,
+};
 use point_source::{Source, SourceSpan};
 
 use crate::{
@@ -10,13 +12,274 @@ use crate::{
     read::{self, IndexPointBatches},
 };
 
-/// Persisted index recipe version implemented by this crate.
-pub const RECIPE_VERSION: u32 = 1;
+/// Position-only persisted index recipe retained for v0.9 compatibility.
+pub(crate) const POSITION_RECIPE_VERSION: u32 = 1;
 
-/// Persisted complete/work-file schema version implemented by this crate.
-pub const DISK_VERSION: u32 = 1;
+/// Inspection-sample persisted index recipe introduced in v0.10.
+pub(crate) const INSPECTION_RECIPE_VERSION: u32 = 2;
+
+/// Position-only complete/work-file schema retained for v0.9 compatibility.
+pub(crate) const DISK_VERSION_V1: u32 = 1;
+
+/// Inspection-sample complete/work-file schema introduced in v0.10.
+pub(crate) const DISK_VERSION_V2: u32 = 2;
 
 const CANDIDATE_CANCELLATION_CADENCE: u64 = 1_024;
+
+/// Stable Attribute identities retained by the inspection index recipe.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct InspectionAttributeIds {
+    intensity: AttributeId,
+    classification: AttributeId,
+    rgb: [AttributeId; 3],
+}
+
+impl InspectionAttributeIds {
+    /// Creates a narrow inspection profile with five distinct Attribute identities.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`IndexError::InvalidAttributeProfile`] when an identity is reused.
+    pub fn new(
+        intensity: AttributeId,
+        classification: AttributeId,
+        rgb: [AttributeId; 3],
+    ) -> Result<Self, IndexError> {
+        let mut ids = [intensity, classification, rgb[0], rgb[1], rgb[2]];
+        ids.sort_unstable();
+        if ids.windows(2).any(|pair| pair[0] == pair[1]) {
+            return Err(IndexError::InvalidAttributeProfile {
+                reason: "inspection Attribute identities must be distinct",
+            });
+        }
+        Ok(Self {
+            intensity,
+            classification,
+            rgb,
+        })
+    }
+
+    /// Returns the unsigned 16-bit intensity Attribute identity.
+    #[must_use]
+    pub const fn intensity(self) -> AttributeId {
+        self.intensity
+    }
+
+    /// Returns the unsigned 8-bit classification Attribute identity.
+    #[must_use]
+    pub const fn classification(self) -> AttributeId {
+        self.classification
+    }
+
+    /// Returns the red, green, and blue unsigned 16-bit Attribute identities.
+    #[must_use]
+    pub const fn rgb(self) -> [AttributeId; 3] {
+        self.rgb
+    }
+
+    pub(crate) const fn all(self) -> [AttributeId; 5] {
+        [
+            self.intensity,
+            self.classification,
+            self.rgb[0],
+            self.rgb[1],
+            self.rgb[2],
+        ]
+    }
+}
+
+/// Deterministic construction recipe selected by one preparation call.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum IndexRecipe {
+    /// The v0.9 position-only cache and 32-byte persisted sample record.
+    PositionOnlyV1,
+    /// The v0.10 bounded inspection cache and 42-byte persisted sample record.
+    InspectionV1(InspectionAttributeIds),
+}
+
+impl IndexRecipe {
+    pub(crate) const fn disk_version(self) -> u32 {
+        match self {
+            Self::PositionOnlyV1 => DISK_VERSION_V1,
+            Self::InspectionV1(_) => DISK_VERSION_V2,
+        }
+    }
+
+    pub(crate) const fn recipe_version(self) -> u32 {
+        match self {
+            Self::PositionOnlyV1 => POSITION_RECIPE_VERSION,
+            Self::InspectionV1(_) => INSPECTION_RECIPE_VERSION,
+        }
+    }
+
+    pub(crate) const fn sample_bytes(self) -> u64 {
+        match self {
+            Self::PositionOnlyV1 => 32,
+            Self::InspectionV1(_) => 42,
+        }
+    }
+
+    pub(crate) fn resolve_contract(
+        self,
+        metadata: &SourceMetadata,
+    ) -> Result<Option<DisplaySampleContract>, IndexError> {
+        let Self::InspectionV1(ids) = self else {
+            return Ok(None);
+        };
+        require_attribute_type(
+            metadata,
+            ids.intensity,
+            AttributeDataType::U16,
+            "inspection intensity Attribute is missing or is not U16",
+        )?;
+        require_attribute_type(
+            metadata,
+            ids.classification,
+            AttributeDataType::U8,
+            "inspection classification Attribute is missing or is not U8",
+        )?;
+        let rgb_present = ids.rgb.map(|id| {
+            metadata
+                .attributes()
+                .get(id)
+                .map(point_contracts::AttributeDefinition::data_type)
+        });
+        let rgb = match rgb_present {
+            [None, None, None] => None,
+            [
+                Some(AttributeDataType::U16),
+                Some(AttributeDataType::U16),
+                Some(AttributeDataType::U16),
+            ] => Some(ids.rgb),
+            _ => {
+                return Err(IndexError::InvalidAttributeProfile {
+                    reason: "inspection RGB Attributes must be all absent or all U16",
+                });
+            }
+        };
+        Ok(Some(DisplaySampleContract {
+            intensity: ids.intensity,
+            classification: ids.classification,
+            rgb,
+        }))
+    }
+}
+
+fn require_attribute_type(
+    metadata: &SourceMetadata,
+    id: AttributeId,
+    expected: AttributeDataType,
+    reason: &'static str,
+) -> Result<(), IndexError> {
+    if metadata
+        .attributes()
+        .get(id)
+        .is_none_or(|definition| definition.data_type() != expected)
+    {
+        return Err(IndexError::InvalidAttributeProfile { reason });
+    }
+    Ok(())
+}
+
+/// Exact raw inspection values available on every attributed display sample.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub struct DisplayAttributes {
+    rgb: [u16; 3],
+    intensity: u16,
+    classification: u8,
+}
+
+impl DisplayAttributes {
+    pub(crate) const fn new(intensity: u16, classification: u8, rgb: [u16; 3]) -> Self {
+        Self {
+            rgb,
+            intensity,
+            classification,
+        }
+    }
+
+    /// Returns the raw unsigned 16-bit intensity value.
+    #[must_use]
+    pub const fn intensity(self) -> u16 {
+        self.intensity
+    }
+
+    /// Returns the raw unsigned 8-bit classification value.
+    #[must_use]
+    pub const fn classification(self) -> u8 {
+        self.classification
+    }
+
+    /// Returns raw unsigned 16-bit red, green, and blue values.
+    ///
+    /// The values are zero when [`DisplaySampleContract::rgb`] is unavailable.
+    #[must_use]
+    pub const fn rgb(self) -> [u16; 3] {
+        self.rgb
+    }
+}
+
+/// Versioned Attribute contract carried by an inspection index.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DisplaySampleContract {
+    intensity: AttributeId,
+    classification: AttributeId,
+    rgb: Option<[AttributeId; 3]>,
+}
+
+impl DisplaySampleContract {
+    pub(crate) const fn new(
+        intensity: AttributeId,
+        classification: AttributeId,
+        rgb: Option<[AttributeId; 3]>,
+    ) -> Self {
+        Self {
+            intensity,
+            classification,
+            rgb,
+        }
+    }
+
+    /// Returns the unsigned 16-bit intensity Attribute identity.
+    #[must_use]
+    pub const fn intensity(self) -> AttributeId {
+        self.intensity
+    }
+
+    /// Returns the unsigned 8-bit classification Attribute identity.
+    #[must_use]
+    pub const fn classification(self) -> AttributeId {
+        self.classification
+    }
+
+    /// Returns RGB Attribute identities when the Source provides all three channels.
+    #[must_use]
+    pub const fn rgb(self) -> Option<[AttributeId; 3]> {
+        self.rgb
+    }
+
+    pub(crate) fn selected_ids(self) -> impl ExactSizeIterator<Item = AttributeId> {
+        let mut ids = [
+            self.intensity,
+            self.classification,
+            self.intensity,
+            self.intensity,
+            self.intensity,
+        ];
+        let length = if let Some(rgb) = self.rgb {
+            ids[2..].copy_from_slice(&rgb);
+            ids.len()
+        } else {
+            2
+        };
+        ids[..length].sort_unstable();
+        ids.into_iter().take(length)
+    }
+
+    pub(crate) const fn source_bytes_per_point(self) -> u64 {
+        if self.rgb.is_some() { 33 } else { 27 }
+    }
+}
 
 /// Stable nonzero identity of one hierarchy node.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -172,6 +435,8 @@ pub struct IndexDescriptor {
     pub(crate) world_bounds: Option<WorldBounds>,
     pub(crate) recipe_version: u32,
     pub(crate) disk_version: u32,
+    pub(crate) recipe: IndexRecipe,
+    pub(crate) display_sample_contract: Option<DisplaySampleContract>,
     pub(crate) node_count: u64,
     pub(crate) leaf_count: u64,
     pub(crate) artifact_checksum: [u8; 32],
@@ -214,6 +479,18 @@ impl IndexDescriptor {
         self.disk_version
     }
 
+    /// Returns the construction recipe required to open this artifact.
+    #[must_use]
+    pub const fn recipe(&self) -> IndexRecipe {
+        self.recipe
+    }
+
+    /// Returns the raw inspection sample contract for an attributed artifact.
+    #[must_use]
+    pub const fn display_sample_contract(&self) -> Option<DisplaySampleContract> {
+        self.display_sample_contract
+    }
+
     /// Returns the complete hierarchy node count.
     #[must_use]
     pub const fn node_count(&self) -> u64 {
@@ -251,6 +528,7 @@ pub struct PrepareReport {
     pub(crate) durable_points_reused: u64,
     pub(crate) source_points_read: u64,
     pub(crate) artifact_bytes: u64,
+    pub(crate) peak_temporary_disk_bytes: u64,
 }
 
 impl PrepareReport {
@@ -277,12 +555,22 @@ impl PrepareReport {
     pub const fn artifact_bytes(self) -> u64 {
         self.artifact_bytes
     }
+
+    /// Returns the exact observed combined peak of owned temporary index files.
+    ///
+    /// Build and resume count the retained rebuildable work cache, sample
+    /// spool, and unpublished complete-artifact temporary by logical length.
+    /// Opening an existing complete artifact reports zero.
+    #[must_use]
+    pub const fn peak_temporary_disk_bytes(self) -> u64 {
+        self.peak_temporary_disk_bytes
+    }
 }
 
 /// Complete conservative candidate spans and exact plan facts.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CandidatePlan {
-    spans: Box<[SourceSpan]>,
+    spans: Vec<SourceSpan>,
     candidate_point_count: u64,
     visited_node_count: u64,
 }
@@ -412,7 +700,7 @@ fn candidates(
     check_candidate_cancellation(cancellation)?;
     let Some(root) = hierarchy.root() else {
         return Ok(CandidatePlan {
-            spans: Box::new([]),
+            spans: Vec::new(),
             candidate_point_count: 0,
             visited_node_count: 0,
         });
@@ -489,7 +777,7 @@ fn candidates(
     }
     check_candidate_cancellation(cancellation)?;
     Ok(CandidatePlan {
-        spans: spans.into_boxed_slice(),
+        spans,
         candidate_point_count: candidate_points,
         visited_node_count: visited,
     })
@@ -550,7 +838,13 @@ fn push_charged(
     allowed: u64,
 ) -> Result<(), IndexError> {
     if stack.len() == stack.capacity() {
-        preflight_capacity::<IndexNodeId, SourceSpan>(stack.len() + 1, span_capacity, allowed)?;
+        let old_capacity = stack.capacity();
+        preflight_growth::<IndexNodeId, SourceSpan>(
+            old_capacity,
+            stack.len() + 1,
+            span_capacity,
+            allowed,
+        )?;
         stack
             .try_reserve_exact(1)
             .map_err(|_| IndexError::ResourceLimit {
@@ -558,6 +852,12 @@ fn push_charged(
                 required: allowed.saturating_add(1),
                 allowed,
             })?;
+        preflight_growth::<IndexNodeId, SourceSpan>(
+            old_capacity,
+            stack.capacity(),
+            span_capacity,
+            allowed,
+        )?;
     }
     check_working_bytes(stack.capacity(), span_capacity, allowed)?;
     stack.push(value);
@@ -571,7 +871,13 @@ fn push_span_charged(
     allowed: u64,
 ) -> Result<(), IndexError> {
     if spans.len() == spans.capacity() {
-        preflight_capacity::<IndexNodeId, SourceSpan>(stack_capacity, spans.len() + 1, allowed)?;
+        let old_capacity = spans.capacity();
+        preflight_growth::<SourceSpan, IndexNodeId>(
+            old_capacity,
+            spans.len() + 1,
+            stack_capacity,
+            allowed,
+        )?;
         spans
             .try_reserve_exact(1)
             .map_err(|_| IndexError::ResourceLimit {
@@ -579,24 +885,32 @@ fn push_span_charged(
                 required: allowed.saturating_add(1),
                 allowed,
             })?;
+        preflight_growth::<SourceSpan, IndexNodeId>(
+            old_capacity,
+            spans.capacity(),
+            stack_capacity,
+            allowed,
+        )?;
     }
     check_working_bytes(stack_capacity, spans.capacity(), allowed)?;
     spans.push(value);
     check_working_bytes(stack_capacity, spans.capacity(), allowed)
 }
 
-fn preflight_capacity<Stack, Span>(
-    stack_capacity: usize,
-    span_capacity: usize,
+fn preflight_growth<Growing, Retained>(
+    old_growing_capacity: usize,
+    new_growing_capacity: usize,
+    retained_capacity: usize,
     allowed: u64,
 ) -> Result<(), IndexError> {
-    let required = u64::try_from(stack_capacity)
+    let growing_capacity = old_growing_capacity.saturating_add(new_growing_capacity);
+    let required = u64::try_from(growing_capacity)
         .unwrap_or(u64::MAX)
-        .saturating_mul(u64::try_from(mem::size_of::<Stack>()).unwrap_or(u64::MAX))
+        .saturating_mul(u64::try_from(mem::size_of::<Growing>()).unwrap_or(u64::MAX))
         .saturating_add(
-            u64::try_from(span_capacity)
+            u64::try_from(retained_capacity)
                 .unwrap_or(u64::MAX)
-                .saturating_mul(u64::try_from(mem::size_of::<Span>()).unwrap_or(u64::MAX)),
+                .saturating_mul(u64::try_from(mem::size_of::<Retained>()).unwrap_or(u64::MAX)),
         );
     if required > allowed {
         return Err(IndexError::ResourceLimit {
@@ -637,4 +951,40 @@ fn merge_adjacent(spans: &mut Vec<SourceSpan>) -> Result<(), IndexError> {
     }
     spans.truncate(retained + 1);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn candidate_growth_preflight_charges_both_allocations() {
+        let node_bytes = u64::try_from(mem::size_of::<IndexNodeId>()).unwrap();
+        let span_bytes = u64::try_from(mem::size_of::<SourceSpan>()).unwrap();
+        let stack_required = 3_u64
+            .saturating_mul(node_bytes)
+            .saturating_add(2_u64.saturating_mul(span_bytes));
+        assert!(preflight_growth::<IndexNodeId, SourceSpan>(1, 2, 2, stack_required).is_ok());
+        assert!(matches!(
+            preflight_growth::<IndexNodeId, SourceSpan>(1, 2, 2, stack_required - 1),
+            Err(IndexError::ResourceLimit {
+                limit: IndexLimit::CandidateWorkingBytes,
+                required,
+                allowed,
+            }) if required == stack_required && allowed == stack_required - 1
+        ));
+
+        let spans_required = 3_u64
+            .saturating_mul(span_bytes)
+            .saturating_add(2_u64.saturating_mul(node_bytes));
+        assert!(preflight_growth::<SourceSpan, IndexNodeId>(1, 2, 2, spans_required).is_ok());
+        assert!(matches!(
+            preflight_growth::<SourceSpan, IndexNodeId>(1, 2, 2, spans_required - 1),
+            Err(IndexError::ResourceLimit {
+                limit: IndexLimit::CandidateWorkingBytes,
+                required,
+                allowed,
+            }) if required == spans_required && allowed == spans_required - 1
+        ));
+    }
 }

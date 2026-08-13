@@ -1,8 +1,9 @@
 //! Public-interface tests for owned renderer-neutral values.
 
 use render_protocol::{
-    BatchKey, BatchVersion, Camera, ESTIMATED_GPU_BYTES_PER_POINT, PointBatch, PointId,
-    ProtocolError, RenderPoint, SourceId, ViewGenerationKey, ViewId, Viewport, ViewportError,
+    BatchKey, BatchVersion, Camera, CameraProjection, ESTIMATED_GPU_BYTES_PER_POINT, PointBatch,
+    PointId, ProtocolError, RenderPoint, SourceId, ViewGenerationKey, ViewId, Viewport,
+    ViewportError,
 };
 
 const TEST_SOURCE: SourceId = SourceId::new([0x11; 32]);
@@ -51,8 +52,10 @@ fn camera_is_a_renderer_neutral_projection_contract() {
         [0.0, 0.0, 1.0].map(f64::to_bits)
     );
     assert_eq!(
-        camera.vertical_field_of_view_radians().to_bits(),
-        std::f32::consts::FRAC_PI_3.to_bits()
+        camera.projection(),
+        CameraProjection::Perspective {
+            vertical_field_of_view_radians: std::f32::consts::FRAC_PI_3,
+        }
     );
     assert_eq!(camera.near_distance().to_bits(), 0.1_f32.to_bits());
     assert_eq!(camera.far_distance().to_bits(), 10_000.0_f32.to_bits());
@@ -79,6 +82,33 @@ fn camera_is_a_renderer_neutral_projection_contract() {
         .view_projection_matrix(16.0 / 9.0)
         .expect("the validated camera should produce a finite projection");
     assert!(matrix.into_iter().all(f32::is_finite));
+}
+
+#[test]
+fn orthographic_camera_owns_an_explicit_world_height() {
+    let camera = Camera::orthographic(
+        [1_000_000.0, 2_000_000.0, 100.0],
+        [1_000_001.0, 2_000_000.0, 99.0],
+        [0.0, 0.0, 1.0],
+        750.0,
+        0.1,
+        10_000.0,
+    )
+    .expect("the orthographic contract camera should be valid");
+
+    assert_eq!(
+        camera.projection(),
+        CameraProjection::Orthographic {
+            vertical_world_height: 750.0,
+        }
+    );
+    assert!(
+        camera
+            .view_projection_matrix(16.0 / 9.0)
+            .unwrap()
+            .into_iter()
+            .all(f32::is_finite)
+    );
 }
 
 fn assert_vector_close(actual: [f64; 3], expected: [f64; 3]) {

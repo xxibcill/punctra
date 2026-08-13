@@ -147,6 +147,8 @@ fn report_selection_resources(workspace: &Workspace, workspace_path: &Path, poin
     assert_eq!(identity_allocations.bytes_current, 0);
     drop(resident);
 
+    let scratch_path = workspace_path.join("scratch");
+    let scratch_baseline = logical_directory_entry_bytes(&scratch_path);
     let rss_before_spill = process_rss_bytes().expect("sample pre-spill process RSS with ps");
     let spill_job = root.select(PointQuery::all(), forced_spill_limits());
     let handle = spill_job.handle();
@@ -165,15 +167,11 @@ fn report_selection_resources(workspace: &Workspace, workspace_path: &Path, poin
         .expect("resource-report forced-spill selection succeeds");
     peak_rss =
         peak_rss.max(process_rss_bytes().expect("sample completed-spill process RSS with ps"));
-    let scratch_path = workspace_path.join("scratch");
-    assert_eq!(
-        fs::read_dir(&scratch_path)
-            .expect("read completed spill directory")
-            .count(),
-        1,
-        "one append-only sealed spill owns the monotonically grown temporary payload"
+    let scratch_before_drop = logical_directory_entry_bytes(&scratch_path);
+    assert!(
+        scratch_before_drop > scratch_baseline,
+        "the live append-only spill contributes temporary payload"
     );
-    let peak_temporary_bytes = logical_directory_entry_bytes(&scratch_path);
     assert_eq!(spilled.metadata().exact_count(), point_count);
     eprintln!(
         "point-workspace resource evidence: points={} resident_process_rss={} spill_baseline_rss={} spill_peak_process_rss={} spill_peak_rss_delta={} spill_peak_temporary_bytes={}",
@@ -182,13 +180,17 @@ fn report_selection_resources(workspace: &Workspace, workspace_path: &Path, poin
         rss_before_spill,
         peak_rss,
         peak_rss.saturating_sub(rss_before_spill),
-        peak_temporary_bytes
+        scratch_before_drop
     );
     eprintln!(
         "point-workspace worker peak heap: unclaimed (process RSS is reported separately; synchronous allocation-counter evidence covers only public Point-ID iteration)"
     );
     drop(spilled);
-    assert_eq!(logical_directory_entry_bytes(&scratch_path), 0);
+    assert_eq!(
+        logical_directory_entry_bytes(&scratch_path),
+        scratch_baseline,
+        "dropping the final handle clears owned spill bytes without unlinking its name"
+    );
 }
 
 fn report_revision_resources(fixture: &Fixture, mut workspace: Workspace, workspace_path: &Path) {

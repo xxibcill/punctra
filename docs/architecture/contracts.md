@@ -1,7 +1,8 @@
 # Cross-Module Contracts and Invariants
 
-Status: existing contracts under Active v0.9 trust qualification; inherited
-Run-bound evidence and broader terrain/export contracts remain outstanding
+Status: existing contracts with the v0.10 professional inspection View
+repository implementation complete; field/support evidence and broader
+terrain/export contracts remain outstanding
 
 The versioned designs in [`docs/design`](../design) control exact release
 scope. This document summarizes the invariants that cross current crate seams.
@@ -112,6 +113,15 @@ support. COPC and remote reads remain deferred.
 `PrepareLimits`. It returns a complete `PreparedIndex` by opening a compatible
 artifact or deterministically building/resuming one. A complete artifact is
 checksummed, Source-bound, synced, and published without replacement.
+`prepare_with_recipe` adds one explicit recipe choice. `PositionOnlyV1` is the
+unchanged v1 path. `InspectionV1` validates and retains only `U16` intensity,
+`U8` classification, and optional all-or-none `U16` RGB values.
+`prepare_fresh_with_recipe` applies the same recipe contract only when both
+the complete and work paths are absent. It rejects and preserves existing or
+racing paths instead of opening or resuming them, so corpus and benchmark cold
+build measurements cannot silently include warm-open or recovery work. A
+successful build retains its recognized rebuildable work cache rather than
+risk deleting a caller replacement through a non-atomic pathname cleanup.
 
 The v0.4 persisted recipe fixes Source blocks at no more than 65,536 Points,
 uses a longest-centroid-extent median-split binary BVH with nonzero root-first
@@ -120,19 +130,27 @@ ticks)` samples per internal node. Disk version 1 stores multibyte integers and
 persisted `f64` bit patterns little-endian; magic values, Source identities,
 and BLAKE3 checksums retain their declared byte order.
 
+Disk/recipe version 2 retains the hierarchy and bottom-k ordinals, adds a
+checksummed 32-byte Attribute-profile header extension, and stores exact
+42-byte inspection samples. Internal reads require no Source replay; leaf
+reads project the bound Attributes in one contiguous Source span. V1 and v2
+targets remain mutually incompatible and are never automatically replaced.
+
 `PreparedIndex` retains the verified Source and exposes it by shared reference.
 Its candidate plan is a complete, sorted, disjoint set of Source spans that may
 contain false positives but must not omit any exact world-box match.
 
-Internal-node samples provide bounded display Coverage only. Complete leaf
-reads come from the retained Source. Neither samples nor hierarchy membership
-define Point Identity or exact Workspace Query results.
+Internal-node samples and optional raw display Attributes provide bounded
+display Coverage only. Complete leaf reads come from the retained Source.
+Neither samples nor hierarchy membership define Point Identity or exact
+Workspace Query results.
 
 Opening verifies deterministic bottom-k sample ordinals against descendant
 Source spans without rereading Source Points. Complete index artifacts are
 trusted local rebuildable caches: their unkeyed BLAKE3 checksums detect
 accidental corruption and concurrent mutation, not adversarial rewriting.
-Untrusted artifacts are discarded and rebuilt from the verified Source.
+Incompatible or corrupt targets are preserved and rejected. The caller may
+move/delete the rebuildable cache family and rebuild from the verified Source.
 
 ## Workspace contract
 
@@ -217,8 +235,11 @@ The Point Set retains bounded records in memory and automatically spills to a
 checksummed append-only file when its resident ceiling is crossed. Iteration
 through `PointSet::ids(PointIdReadLimits)` is repeatable and bounded. Missing,
 changed, truncated, or corrupt spill storage fails before false completion.
-The final handle removes the spill. A Point Set is not a durable named
-selection or recovery record.
+The final handle releases the spill but conservatively retains its recognized
+scratch name; it never deletes by pathname after a caller may have replaced
+that name. It clears the owned spill payload through the still-open file handle,
+so a replacement at the retained name is untouched. A Point Set is not a
+durable named selection or recovery record.
 
 ### Classification Revision and Revert
 
@@ -296,8 +317,19 @@ history and every published operation record under `OpenLimits`; it fails
 closed on gaps, forks, lineage/Source mismatch, duplicate identities, or
 corruption.
 
-Recognized incomplete scratch files are disposable. Recovery never opens a
-published immutable value for mutation.
+Recognized incomplete scratch files are disposable but conservatively retained.
+Recovery validates their private regular-file kind, ignores their contents,
+and never opens a published immutable value for mutation. Abandoned stages
+release payload bytes through an already-owned handle. A stage alias retained
+after no-replace hard-link publication shares the published inode and does not
+duplicate physical payload blocks.
+
+Point Set and commit temporary-byte ceilings are per selection or commit
+attempt; they do not claim a global cumulative ceiling over retained scratch
+names from earlier attempts. Owned-handle payload clearing is best-effort in
+destructors: an operating-system truncate or sync failure may retain the
+already-bounded attempt payload for explicit operator cleanup, without
+authorizing pathname deletion.
 
 ## Terrain Surface contract
 
@@ -345,7 +377,9 @@ Export stages and syncs a bounded sibling file, reopens and verifies it, then
 publishes by no-replace hard link and syncs the parent. Before publication,
 failure leaves no target. Once publication starts, verification, sync, cleanup,
 or terminal-progress failure is conservatively `ExportIndeterminate`; a
-`LandXmlReceipt` is returned only after durable completion. The independent
+`LandXmlReceipt` is returned only after durable completion. Cleanup verifies
+and conservatively retains the unique stage alias; after publication it is a
+hard link to the target and consumes no duplicate payload blocks. The independent
 `roxmltree` acceptance parser is test-only and shares no encoder helpers.
 
 `TerrainSurface::ensure_landxml` applies the same deterministic encoding and
@@ -363,7 +397,7 @@ only stable `ensured_exact` semantics.
 ~~~text
 run-root/
   run.pwf       # checksummed append-only journal
-  run.lock      # exclusive process lock
+  run.lock      # workflow-exclusive / qualification-shared process lock
   terrain.xml   # exactly ensured LandXML target
   audit.json    # exactly ensured canonical report
 ~~~
@@ -400,6 +434,53 @@ Change Envelope, QA, stable `ensured_exact` LandXML facts, all semantic limit
 facts, and explicit partner/downstream/human-acceptance nonclaims. Machine and
 elapsed-time observations do not enter canonical bytes.
 
+## Post-Run qualification contract
+
+`verify-round-trip` is a private `terrain-demo` application command, not a
+public foundation API. It requires an existing empty regular `run.lock`, holds
+it shared, witnesses the Run-root identity, and opens `run.pwf` strictly
+read-only. Qualification accepts only the exact validated eight-frame pattern
+ending in `Complete`; unlike `inspect`, it never truncates a torn suffix,
+creates a lock, repairs a Run, or writes a checkpoint.
+
+The qualifier revalidates journal identities/hashes, the Run-root path binding,
+the exact `terrain.xml` and `audit.json` length/content facts, and the report's
+Run/request/Source/Workspace/baseline/changed-Revision/Operation/LandXML
+bindings. It captures the returned regular LandXML under stable identity,
+length, and time facts, then performs the private narrow metric-TIN comparison.
+The existing non-evidence `compare-landxml` command remains independent and
+does not claim any Run binding.
+
+One linear canonical encoder emits
+`punctra.terrain-demo.landxml-round-trip-evidence.v1`. A complete semantic pass
+or fully evaluated semantic mismatch may create or exactly reconcile a target
+whose existing parent is outside the Run root. Publication uses a synced stage,
+no-replace hard link, read-back, parent sync, ownership-safe retained-alias
+cleanup, and final
+acknowledgement. Different caller bytes are a conflict. Operational failure
+publishes no final pass/fail evidence; semantic failure publishes canonical
+failed evidence and returns a distinct nonzero result. The record binds hashes,
+byte lengths, declarations, policy, check status, comparison facts, effective
+limits, and explicit external nonclaims, with no clock field.
+
+The comparator uses a bounded local XML stream over the exact captured file
+length. Defaults match the LandXML export contract: 4 GiB per XML input, 10
+million Points, and 20 million faces, plus 70,000,128 XML nodes, 4 GiB of XML
+text/attribute bytes, a 4-KiB lexical token, 8 MiB of accounted parser working
+bytes per input, 32 million candidate comparisons, and 4 GiB of accounted
+retained working bytes across parsing and comparison. DTDs and unsupported
+declarations fail before parser allocation; borrowed `quick-xml` token views do
+not own the stream state. Lexical scanning also binds
+comments, CDATA, processing instructions, entity references, namespace-stack
+growth, and bytes appended beyond the captured length.
+
+The pass/fail evidence records deterministic `accounted_*_peak_bytes` values.
+They charge exact requested algorithm payloads and concurrent buffers, not
+allocator metadata/slack, process RSS, or an observed heap. Each modeled
+collection growth is checked before its fallible reserve. This repository
+closure is technical evidence only; it does not establish that a downstream
+application ran or that a firm accepted the result.
+
 ## View and renderer contracts
 
 `point-view` is synchronous and renderer-neutral. For one frozen camera,
@@ -411,6 +492,29 @@ conditional safe retirements. It performs no I/O.
 `render-wgpu` records work into the host's encoder and never owns queue
 submission or device polling. A `RecordedFrame` pins exactly the displayed
 resources used by asynchronous picking. Picks are provisional Point hints.
+
+`CameraProjection` is explicit. Perspective uses vertical field of view;
+orthographic uses vertical world height. Orthographic frustum and
+screen-space-error calculations are depth-independent, while both modes retain
+the same large-world origin, near/far, depth, and Point-identity contracts.
+
+The private `renderer-demo` maps exactly one host-selected mode. Neutral and
+elevation require a position-only disk-v1 index; RGB, intensity, and
+classification require the matching disk-v2 inspection contract. RGB absence
+is an explicit invalid request, not a fallback. Every mapping changes only
+RGBA8: identity, position, geometry, generation/version, and Coverage remain
+equal across modes.
+
+The host presents demanded nodes, load candidates, actually issued work,
+retention/retirement, queue/staging, requested/resident nodes, and Sampled
+versus Complete resident Coverage as separate facts. Pausing issues no new
+requests. No loading or resident state is called Query completion.
+
+The local corpus manifest is bounded, rejects unknown fields, and requires
+explicit inspection and measurement permission per entry. The no-replace
+Viewing Report records only observed viewing operations, effective limits, and
+explicit false nonclaims. It omits private paths and project/firm identifiers;
+Source identity and machine facts remain caller-controlled sensitive data.
 
 ## Jobs, cancellation, and progress
 
@@ -450,8 +554,13 @@ publication. Separate ledgers cover:
   work; and
 - Workflow intent counts, journal/frame/path bytes, Revision Audit, Surface
   Change Envelope, canonical report output/staging/buffer bytes, and combined
-  live orchestrator working bytes.
+  live orchestrator working bytes; and
+- renderer-demo hierarchy, request queue, staging, renderer residency, corpus
+  manifest/report, navigation-trace, index temporary disk, and Source
+  verification measurement limits.
 
+Round-Trip qualification separately accounts parser file/nodes/text,
+Point/face/comparison, evidence output, and publication-buffer ceilings.
 Temporary and durable storage are distinct. Overlapping old/new allocations
 are charged together. An indivisible block that cannot fit fails explicitly.
 
@@ -470,9 +579,20 @@ Run/Source/Workspace/Operation/Revision identity, and exactly one recovery
 action. The CLI prints the same bounded structured information and does not
 automatically retry uncertain mutation or replace a conflicting target.
 
+The private LandXML comparator retains the `PRT_INVALID_INPUT`,
+`PRT_RESOURCE_LIMIT`, and `PRT_SEMANTIC_MISMATCH` families. Run-bound semantic
+evidence adds stable unit, Point-count, unmatched/ambiguous vertex, tolerance,
+and topology reason codes without treating caller declarations as observed
+application execution.
+
+`renderer-demo` failures expose one stable `PVIEW_*` code, one owning phase,
+bounded detail, and exactly one safe recovery action. Source, index,
+resource/cancellation, GPU, I/O, request, and internal failures remain distinct.
+
 ## Deferred contracts
 
 Breaklines, constrained or persisted terrain, general Attribute Point-row
-streams, general LandXML/import, persisted migration, multi-Source Workspaces,
-remote storage, and screen projection require later accepted designs. Their
-vocabulary in the roadmap is not a current public API promise.
+streams, general LandXML/import, migration beyond explicit index rebuild,
+multi-Source Workspaces, remote storage, and exact screen selection require
+later accepted designs. Their vocabulary in the roadmap is not a current
+public API promise.

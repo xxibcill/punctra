@@ -1,7 +1,8 @@
 # Repository and Dependency Layout
 
-Status: current under the Active v0.9 trust qualification; later crates are
-created only with accepted behavior and a caller
+Status: current with the v0.10 professional inspection View repository
+implementation present; later crates are created only with accepted behavior
+and a caller
 
 The repository is one Cargo workspace. Each current crate is independently
 buildable and exposes a smaller public interface than its private
@@ -18,12 +19,19 @@ ROADMAP.md
 apps/
   renderer-demo/
     src/
+      lib.rs
       main.rs
+      corpus.rs
+      diagnostic.rs
+      display.rs
       orbit_camera.rs
       real_cloud.rs
       scene.rs
       synthetic.rs
+    benches/
+      viewing.rs
     tests/
+      display_gpu.rs
       headless_smoke.rs
       planner.rs
 
@@ -33,11 +41,15 @@ apps/
       main.rs
       cli.rs
       diagnostic.rs
+      evidence.rs
       journal.rs
+      qualification.rs
       report.rs
+      roundtrip.rs
       workflow.rs
     benches/journal.rs
     tests/
+      fixtures/round-trip-evidence-v1/
       process.rs
       workflow.rs
       support/mod.rs
@@ -90,6 +102,8 @@ crates/
     benches/index.rs
     tests/
       candidates.rs
+      fixtures/v1/
+      fixtures/v2/
       interface.rs
       persistence.rs
 
@@ -165,6 +179,7 @@ crates/
 docs/
   architecture/
   design/
+  guides/
   adr/
   research/
 ~~~
@@ -238,11 +253,18 @@ cargo bench -p point-terrain --bench terrain
 cargo test -p terrain-demo --test workflow
 cargo test -p terrain-demo --test process
 cargo bench -p terrain-demo --bench journal
+cargo bench -p renderer-demo --bench viewing
 
 cargo bench -p point-view --bench planner
 cargo test -p renderer-demo --test headless_smoke
+PUNCTRA_REQUIRE_GPU=1 cargo test -p renderer-demo --test headless_smoke \
+  corpus_success_binds_trace_inputs_and_separate_resource_measurements -- --exact
 PUNCTRA_REQUIRE_GPU=1 cargo test -p render-wgpu --test offscreen
 PUNCTRA_REQUIRE_GPU=1 cargo test -p renderer-demo --test planner
+PUNCTRA_REQUIRE_GPU=1 cargo test -p renderer-demo --test display_gpu
+test -f docs/guides/first-las-laz.md
+jq -e . docs/guides/field-corpus.example.json >/dev/null
+git diff --check
 ~~~
 
 The Workspace direct example proves the one-deep-crate lifecycle without a GUI:
@@ -250,8 +272,10 @@ LAS/LAZ open, index prepare/open, Workspace create, exact classification
 selection, classification commit, immediate-head Revert, and reopen.
 The terrain example proves the public in-memory Source-to-LandXML composition.
 The `terrain-demo` workflow and process tests prove the generated LAS/LAZ
-durable start/resume/inspect composition; its journal benchmark measures five
-generated restart modes.
+durable start/resume/inspect composition plus strict post-Run
+`verify-round-trip` qualification. Owner-local pass and topology-failure
+fixtures pin canonical Round-Trip Evidence v1 bytes; the journal benchmark
+measures five generated restart modes.
 
 ## Private depth inside point-workspace
 
@@ -307,14 +331,20 @@ exporter registry is public.
 
 ## Persisted directories
 
-Index, Workspace, caller-owned Export storage, and the application Run root are
-separate:
+Position-only and attributed indexes, Workspace, caller-owned Export storage,
+and the application Run root are separate:
 
 ~~~text
 survey.laz                    # immutable Source, host-owned
-survey.laz.pidx               # complete rebuildable point-index artifact
-survey.laz.pidx.work          # disposable/resumable index sidecar when present
-survey.laz.pidx.samples       # disposable index construction sidecar when present
+survey.position-v1.pidx       # complete rebuildable position-only artifact
+survey.position-v1.pidx.work  # retained rebuildable/resumable v1 cache when present
+survey.position-v1.pidx.samples.<pid>.<sequence>
+                              # owned disposable v1 construction temporary
+
+survey.inspection-v2.pidx       # complete rebuildable attributed artifact
+survey.inspection-v2.pidx.work  # retained rebuildable/resumable v2 cache when present
+survey.inspection-v2.pidx.samples.<pid>.<sequence>
+                              # owned disposable v2 construction temporary
 
 survey.pcw/
   manifest.pwm               # point-workspace schema and lineage
@@ -338,7 +368,9 @@ Ownership rules:
 - only `point-index` interprets `.pidx` and its sidecars;
 - only `point-workspace` interprets the Workspace directory;
 - the Source remains outside the Workspace and is never rewritten;
-- a Point Set spill is temporary and retained only by live handles;
+- a live Point Set owns its spill payload; final-handle release clears that
+  payload through the open handle but conservatively retains the recognized
+  scratch name so pathname cleanup cannot race a caller replacement;
 - `TerrainSurface`, View, and GPU state are not persisted as authoritative
   document data; LandXML and `audit.json` are caller-requested deliverables;
   and
@@ -360,12 +392,13 @@ versions, and LandXML/journal/report format versions are separate axes. A Cargo
 - Golden fixtures are required before a persisted compatibility promise or a
   second persisted version is accepted.
 
-v0.9 begins without changing any persisted schema and does not invent a
-migration solely to exercise migration machinery. Source Record version 1,
-Spatial Index disk/recipe version 1, Workspace disk/semantic version 1,
-Terrain algorithm version 1, Workflow journal version 1, and the supported
-LandXML/report subsets evolve independently of Cargo versions. Frozen fixtures
-must precede any future second persisted version.
+v0.9 began without changing a persisted schema. V0.10 adds Spatial Index
+disk/recipe version 2 for bounded inspection samples while retaining immutable
+v1 complete/work fixtures and explicit caller-owned move/delete-and-rebuild
+migration. One path can hold only one recipe; incompatible artifacts/work are
+preserved and rejected. Source
+Record version 1, Workspace disk/semantic version 1, Terrain algorithm version
+1, Workflow journal version 1, and LandXML/report subsets evolve independently.
 
 ## Implementation order
 
@@ -379,7 +412,10 @@ Completed vertical slices are:
 6. one exact Snapshot Point-row stream plus one deep deterministic Terrain/QA/
    LandXML technical slice; and
 7. linked cancellation, exact Revision Audit/LandXML reconciliation, and one
-   private durable application Workflow Run with canonical evidence.
+   private durable application Workflow Run with canonical evidence; and
+8. the narrow disk-v2 inspection cache, five private display modes,
+   perspective/orthographic View, truthful progressive state/diagnostics, and
+   local permission-gated corpus reporting.
 
 The next accepted slice may add only terrain or workflow behavior earned by its
 real caller and evidence. COPC, general LandXML, UI, bindings, and other

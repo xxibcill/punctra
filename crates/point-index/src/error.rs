@@ -1,4 +1,4 @@
-use std::{fmt, io, path::PathBuf};
+use std::{fmt, io, path::PathBuf, sync::Arc};
 
 use foundation_runtime::RuntimeError;
 use point_source::SourceError;
@@ -121,6 +121,13 @@ pub enum IndexError {
         limit: IndexLimit,
     },
 
+    /// The selected inspection recipe does not match the Source Attribute schema.
+    #[error("invalid inspection Attribute profile: {reason}")]
+    InvalidAttributeProfile {
+        /// Bounded static profile mismatch category.
+        reason: &'static str,
+    },
+
     /// Work or retained output exceeded one caller-selected hard limit.
     #[error("index exceeded {limit}: required {required}, limit {allowed}")]
     ResourceLimit {
@@ -199,6 +206,19 @@ pub enum IndexError {
         source: io::Error,
     },
 
+    /// A filesystem operation on an already-owned path failed without copying
+    /// the path after filesystem mutation began.
+    #[error("failed to {operation} {path}: {source}")]
+    SharedPathIo {
+        /// Stable operation description.
+        operation: &'static str,
+        /// Exact path operated on, retained through shared ownership.
+        path: Arc<std::path::Path>,
+        /// Operating-system error.
+        #[source]
+        source: io::Error,
+    },
+
     /// Runtime-neutral cancellation or worker failure.
     #[error(transparent)]
     Runtime(#[from] RuntimeError),
@@ -209,6 +229,18 @@ impl IndexError {
         Self::Io {
             operation,
             path: path.into(),
+            source,
+        }
+    }
+
+    pub(crate) fn io_shared(
+        operation: &'static str,
+        path: Arc<std::path::Path>,
+        source: io::Error,
+    ) -> Self {
+        Self::SharedPathIo {
+            operation,
+            path,
             source,
         }
     }

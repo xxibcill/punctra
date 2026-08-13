@@ -18,7 +18,8 @@ use point_contracts::{
     WorldBounds,
 };
 use point_index::{
-    CandidateLimits, NodeReadBudget, PrepareDisposition, PrepareLimits, PreparedIndex, prepare,
+    CandidateLimits, IndexRecipe, NodeReadBudget, PrepareDisposition, PrepareLimits, PreparedIndex,
+    prepare, prepare_fresh_with_recipe,
 };
 use point_source::Source;
 use source_memory::{MemoryFaultControl, MemorySource};
@@ -247,9 +248,14 @@ fn drain_node(index: &PreparedIndex, node: point_index::IndexNodeId) -> u64 {
 }
 
 fn cold_prepare(source: &Source, target: &Path) -> PreparedIndex {
-    prepare(source.clone(), target, PrepareLimits::default())
-        .blocking_wait()
-        .expect("cold benchmark build succeeds")
+    prepare_fresh_with_recipe(
+        source.clone(),
+        target,
+        IndexRecipe::PositionOnlyV1,
+        PrepareLimits::default(),
+    )
+    .blocking_wait()
+    .expect("cold benchmark build succeeds")
 }
 
 fn configured_point_count() -> usize {

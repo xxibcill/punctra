@@ -1,7 +1,7 @@
 # Module Catalog
 
-Status: current module ownership under the Active v0.9 trust qualification;
-broader terrain and export modules deferred
+Status: current module ownership with the v0.10 professional inspection View
+repository implementation complete; broader terrain and export modules deferred
 
 This is the ownership map for implemented crates. Each crate has one public
 job. Several private files may cooperate behind one deep interface; private
@@ -22,12 +22,13 @@ file boundaries are not public module promises.
 | `render-protocol` | Define generation-safe renderer-neutral point display state. | Camera and display values | Validated updates and frame values |
 | `point-view` | Plan one frozen View over a host-owned hierarchy without I/O. | Camera, viewport, hierarchy/residency, budget | Demand, requests, retention, retirements |
 | `render-wgpu` | Maintain and draw one wgpu representation of render-protocol state. | Render updates, frame, host target | Recorded commands, report, provisional picks |
-| `renderer-demo` | Exercise synthetic or indexed LAS/LAZ View-to-render composition. | CLI or generated inputs | Interactive demo or GPU-free process smoke |
-| `terrain-demo` | Own one recoverable headless LAS/LAZ-to-terrain Workflow Run. | Caller-owned paths, identities, baseline, correction/QA intent, limits | Eight-frame journal, Revision, Terrain/QA evidence, LandXML, canonical report |
+| `renderer-demo` | Exercise synthetic or indexed LAS/LAZ View-to-render composition and local viewing measurement. | CLI, permitted corpus manifest, or generated inputs | Interactive demo, GPU-free process smoke, or canonical Viewing Report |
+| `terrain-demo` | Own one recoverable headless LAS/LAZ-to-terrain Workflow Run and its private post-Run qualification. | Caller-owned paths, identities, baseline, correction/QA intent, limits, and returned LandXML declaration | Eight-frame journal, Revision, Terrain/QA evidence, LandXML/report, and separate Round-Trip Evidence |
 
 `source-copc`, constrained or persisted terrain, general LandXML, general
 application UI, bindings, and remote storage are not implemented modules in
-v0.9.
+v0.10. Display policy remains private to `renderer-demo`; v0.10 does not add a
+public display-policy crate.
 
 ## 1. point-contracts
 
@@ -95,16 +96,38 @@ let index = point_index::prepare(
     PrepareLimits::default(),
 ).blocking_wait()?;
 
+let inspection_index = point_index::prepare_with_recipe(
+    attributed_source,
+    inspection_target,
+    IndexRecipe::InspectionV1(attribute_ids),
+    PrepareLimits::default(),
+).blocking_wait()?;
+
+let measured_cold_index = point_index::prepare_fresh_with_recipe(
+    measured_source,
+    absent_target,
+    IndexRecipe::PositionOnlyV1,
+    PrepareLimits::default(),
+).blocking_wait()?;
+
 let source = index.source();
 let candidates = index.candidates(bounds, CandidateLimits::default())?;
 ~~~
 
-It does not own exact classification predicates, Revision overlays, camera LOD,
-renderer updates, or Workspace persistence.
+`prepare` is the unchanged position-only disk-v1 path.
+`prepare_with_recipe` can select the disk-v2 inspection profile for raw
+intensity, classification, and optional all-or-none RGB display samples. It
+does not own color mapping, exact classification predicates, Revision overlays,
+camera LOD, renderer updates, or Workspace persistence.
+`prepare_fresh_with_recipe` is the ownership-safe cold-build variant used by
+the index and viewing benchmarks and the field-corpus runner. It never consumes
+an existing resumable work family merely to discover that a measurement was
+not cold.
 
-**Independent proof:** memory-source oracles, persistence/resume tests, generated
-LAS/LAZ process smoke, a direct-use example, and the index benchmark run without
-a Workspace or GPU.
+**Independent proof:** memory-source oracles, frozen v1/v2 complete/work
+fixtures, cold/resumed/warm persistence reads, corruption/limit/incompatible-
+target tests, generated LAS/LAZ process smoke, a direct-use example, and the
+index benchmark run without a Workspace or GPU.
 
 ## 5. point-workspace
 
@@ -279,20 +302,38 @@ policy into foundation interfaces.
 The demo can use generated hierarchy data or Full-verify a supported LAS/LAZ,
 build/open its index, materialize demanded nodes, and apply atomic renderer
 updates. Its `--smoke` mode accepts one complete CPU-model Upsert without a GPU.
+The v0.10 private display policy preserves neutral color by default and can map
+exact sampled world Z or raw inspection Attributes deterministically without
+changing Point Identity, geometry, or Coverage. Point-index owns only the
+versioned bounded raw samples; renderer-demo owns presentation mapping.
+
+The host also owns perspective/orthographic orbit-pan-zoom controls, truthful
+demand/issued/resident and Sampled/Complete Coverage presentation, stable
+`PVIEW_*` diagnostics, and the permission-gated bounded corpus manifest and
+canonical no-replace Viewing Report. Its report does not claim production
+corpus completion, professional preference, terrain capacity, partner
+acceptance, or human-time savings.
 
 The bridge is private because a second application has not proven a reusable
 materialization seam.
 
+**Independent proof:** CPU mapping/grammar/state tests, generated LAS/LAZ
+process smoke, corpus manifest/report/publication fixtures, renderer-neutral
+planner tests/benchmark, and required local offscreen GPU tests cover the
+private composition without turning it into a public framework.
+
 ## 11. terrain-demo
 
-**Job:** own one recoverable GPU-free LAS/LAZ-to-Terrain Workflow Run without
-turning application policy into another foundation crate.
+**Job:** own one recoverable GPU-free LAS/LAZ-to-Terrain Workflow Run and its
+private post-Run qualification without turning application policy into another
+foundation crate.
 
 The package exposes a small application facade: `WorkflowPaths`,
 `WorkflowRunIntent`, `WorkflowLimits`, `WorkflowPhase`, `WorkflowReceipt`,
 `WorkflowStatus`, `WorkflowFailure`, `start_run`, `resume_run`, and
-`inspect_and_repair_run`. The binary is a thin bounded grammar and presentation layer with
-`start`, `resume`, and `inspect` commands. Start/resume require the same
+`inspect_and_repair_run`. The binary is a thin bounded grammar and presentation
+layer with `start`, `resume`, `inspect`, `compare-landxml`, and
+`verify-round-trip` commands. Start/resume require the same
 caller-owned Run/Operation identities, expected baseline Revision, nonempty
 exact Ground-ordinal set, normalized Terrain Recipe, detached Check Points,
 LandXML options, four paths, and limits.
@@ -310,22 +351,32 @@ uses Source Attribute 6 (`source-las` classification) as the selected `U8`
 Attribute, and provides an already existing Run-root directory. An absent
 Workspace is an invalid request before Run creation or Workspace mutation.
 
-Private `journal`, `workflow`, `report`, and `diagnostic` modules own the
-exclusive Run lock, exact path bindings, eight-frame journal, Operation
+Private `journal`, `workflow`, `report`, `diagnostic`, `roundtrip`,
+`qualification`, and `evidence` modules own the exclusive workflow lock, shared
+qualification lock, exact path bindings, eight-frame journal, Operation
 resolution, Revision Audit, baseline/changed Derivation, conservative Surface
-Change Envelope, QA, LandXML/report reconciliation, and one-action structured
-failures. The fixed Run root contains `run.pwf`, `run.lock`, `terrain.xml`, and
-`audit.json`. No Terrain Surface or audit cache is persisted.
+Change Envelope, QA, LandXML/report reconciliation, strict non-repairing
+Complete-Run reads, semantic comparison, canonical evidence publication, and
+one-action structured failures. The fixed Run root contains `run.pwf`,
+`run.lock`, `terrain.xml`, and `audit.json`; qualification writes only its
+separate caller-owned target outside that root. No Terrain Surface or audit
+cache is persisted.
 
-**Independent proof:** 43 package tests—25 unit/private, 15 through the public
-workflow facade, and three through the process boundary—cover every
+**Independent proof:** 133 package tests—109 unit/private, 15 through the public
+workflow facade, eight through the process boundary, and one checked-Run v1
+golden-corpus test—cover every
 eight-frame restart prefix, one-Revision idempotence, exact report/XML conflict
 and recovery, 12 public limit families, LAS/LAZ semantic projection, Source
 immutability, stale/mismatched state, Retryable intent, cancellation,
 identity-bearing Run-root validation, dropped-Workflow recovery, and CLI
-diagnostics. The generated 10k/100k/1M-capable Criterion benchmark has five
+diagnostics. They also cover strict Complete-Run/artifact binding, nonmutation,
+canonical pass/fail evidence, exact reconciliation/conflict, semantic versus
+operational results, checked-in v1 pass/topology-failure evidence bytes, every
+post-link acknowledgement boundary, no-replace create races, and target
+replacement preservation.
+The generated 10k/100k/1M-capable Criterion benchmark has five
 cold/restart/reconciliation modes. Its evidence is generated-only and does not
-claim worker heap or external acceptance.
+claim the verifier's full 4-GiB ceiling, worker heap, or external acceptance.
 
 Private journal faults exhaust the application-defined Intent-publication and
 `Complete` append-before-write, before-sync, and after-sync lost-

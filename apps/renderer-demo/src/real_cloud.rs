@@ -1,29 +1,36 @@
-use std::{collections::VecDeque, io, mem, time::Instant};
+use std::{collections::VecDeque, mem, time::Instant};
 
-use point_index::{DisplayCoverage, IndexNodeId, IndexReadSummary, NodeReadBudget, PreparedIndex};
+use point_index::{
+    DisplayCoverage, DisplaySampleContract, IndexError, IndexNodeId, IndexReadSummary,
+    NodeReadBudget, PreparedIndex,
+};
 use point_view::{AvailableNode, AxisAlignedBox, NodeKey, NodeRequest, NodeStatus};
 use render_protocol::{
     BatchKey, BatchVersion, ESTIMATED_GPU_BYTES_PER_POINT, PointBatch, RenderPoint,
     ViewGenerationKey,
 };
 
-use crate::scene::{SceneMetrics, SceneResult};
+use crate::{
+    diagnostic::{ViewFailure, ViewPhase},
+    scene::{SceneMetrics, SceneResult},
+};
+use renderer_demo::display::{DisplayMode, PointColorizer};
 
-const STAGING_POINT_BUDGET: u64 = 65_536;
-const STAGING_BYTE_BUDGET: u64 = 16 * 1_024 * 1_024;
+pub(crate) const STAGING_POINT_BUDGET: u64 = 65_536;
+pub(crate) const STAGING_BYTE_BUDGET: u64 = 16 * 1_024 * 1_024;
 const QUEUE_BUDGET: QueueBudget = QueueBudget {
     max_nodes: 640,
     max_host_bytes: STAGING_BYTE_BUDGET,
 };
-const HIERARCHY_BYTE_BUDGET: u64 = 512 * 1_024 * 1_024;
+pub(crate) const QUEUED_NODE_BUDGET: u64 = QUEUE_BUDGET.max_nodes;
+pub(crate) const QUEUED_HOST_BYTE_BUDGET: u64 = QUEUE_BUDGET.max_host_bytes;
+pub(crate) const HIERARCHY_BYTE_BUDGET: u64 = 512 * 1_024 * 1_024;
 const HIERARCHY_FIXED_WORKING_BYTES: u64 = 64 * 1_024;
 // The fixed allowance covers handles/containers. The per-node allowance covers
 // PreparedIndex's retained IndexNode array, this bridge's side table and
 // cached AvailableNode snapshot, plus point-view's simultaneous hierarchy
 // clone, ordered indexes/sets, child lists, projections, and traversal arrays.
 const HIERARCHY_WORKING_BYTES_PER_NODE: u64 = 2 * 1_024;
-// Index display samples contain positions only; this color makes no Source attribute claim.
-const POSITION_ONLY_COLOR: [u8; 4] = [190, 205, 220, 255];
 
 #[derive(Clone, Copy, Debug)]
 struct QueueBudget {
@@ -43,6 +50,7 @@ struct RealNode {
 pub(crate) struct RealCloudScene {
     generation: ViewGenerationKey,
     index: PreparedIndex,
+    colorizer: PointColorizer,
     nodes: Vec<RealNode>,
     planning_nodes: Vec<AvailableNode>,
     pending: VecDeque<NodeKey>,
@@ -56,32 +64,47 @@ pub(crate) struct RealCloudScene {
     peak_staged_points: u64,
     peak_staged_bytes: u64,
     cancelled_requests: u64,
+    retired_batches: u64,
+    rejected_batches: u64,
 }
 
 impl RealCloudScene {
-    pub(crate) fn new(generation: ViewGenerationKey, index: PreparedIndex) -> SceneResult<Self> {
+    pub(crate) fn new(
+        generation: ViewGenerationKey,
+        index: PreparedIndex,
+        display_mode: DisplayMode,
+    ) -> SceneResult<Self> {
+        validate_display_contract(display_mode, index.descriptor().display_sample_contract())?;
         let node_count = index.hierarchy().nodes().len();
         let preflight_hierarchy_bytes = hierarchy_charge(node_count)?;
         if preflight_hierarchy_bytes > HIERARCHY_BYTE_BUDGET {
             return Err(resource_limit(
+                ViewPhase::Hierarchy,
                 "application hierarchy bytes",
                 HIERARCHY_BYTE_BUDGET,
             ));
         }
         let mut nodes = Vec::new();
-        nodes
-            .try_reserve_exact(node_count)
-            .map_err(|error| invalid_data(format!("could not reserve hierarchy: {error}")))?;
+        nodes.try_reserve_exact(node_count).map_err(|error| {
+            allocation_failure(
+                ViewPhase::Hierarchy,
+                format_args!("could not reserve hierarchy: {error}"),
+            )
+        })?;
         let mut planning_nodes = Vec::new();
         planning_nodes
             .try_reserve_exact(node_count)
             .map_err(|error| {
-                invalid_data(format!("could not reserve planning snapshot: {error}"))
+                allocation_failure(
+                    ViewPhase::Hierarchy,
+                    format_args!("could not reserve planning snapshot: {error}"),
+                )
             })?;
         if hierarchy_charge(nodes.capacity().max(planning_nodes.capacity()))?
             > HIERARCHY_BYTE_BUDGET
         {
             return Err(resource_limit(
+                ViewPhase::Hierarchy,
                 "application hierarchy bytes",
                 HIERARCHY_BYTE_BUDGET,
             ));
@@ -93,7 +116,12 @@ impl RealCloudScene {
             let estimated_bytes = indexed
                 .display_point_count()
                 .checked_mul(ESTIMATED_GPU_BYTES_PER_POINT)
-                .ok_or_else(|| invalid_data("index node renderer-byte cost overflowed"))?;
+                .ok_or_else(|| {
+                    internal_failure(
+                        ViewPhase::Hierarchy,
+                        "index node renderer-byte cost overflowed",
+                    )
+                })?;
             let available = AvailableNode::new(
                 key,
                 parent,
@@ -113,10 +141,12 @@ impl RealCloudScene {
             planning_nodes.push(available);
         }
 
-        let (camera_target, camera_radius) = camera_frame(index.descriptor().world_bounds())?;
+        let world_bounds = index.descriptor().world_bounds();
+        let (camera_target, camera_radius) = camera_frame(world_bounds)?;
         Ok(Self {
             generation,
             index,
+            colorizer: PointColorizer::for_source(display_mode, world_bounds),
             nodes,
             planning_nodes,
             pending: VecDeque::new(),
@@ -130,6 +160,8 @@ impl RealCloudScene {
             peak_staged_points: 0,
             peak_staged_bytes: 0,
             cancelled_requests: 0,
+            retired_batches: 0,
+            rejected_batches: 0,
         })
     }
 
@@ -141,7 +173,7 @@ impl RealCloudScene {
         &mut self,
         demanded_nodes: &[NodeKey],
         requests: &[NodeRequest],
-    ) -> SceneResult<()> {
+    ) -> SceneResult<u64> {
         self.reconcile_requests_with_budget(demanded_nodes, requests, QUEUE_BUDGET)
     }
 
@@ -150,9 +182,10 @@ impl RealCloudScene {
         demanded_nodes: &[NodeKey],
         requests: &[NodeRequest],
         budget: QueueBudget,
-    ) -> SceneResult<()> {
+    ) -> SceneResult<u64> {
         let mut next_pending = VecDeque::new();
         let mut reserved_host_bytes = 0;
+        let retained_queue_bytes = queue_container_charge(self.pending.capacity())?;
         debug_assert!(
             requests
                 .iter()
@@ -173,6 +206,7 @@ impl RealCloudScene {
                 key,
                 queued_node_reservation(available)?,
                 &mut reserved_host_bytes,
+                retained_queue_bytes,
                 budget,
             )? {
                 break;
@@ -198,6 +232,7 @@ impl RealCloudScene {
                 self.cancelled_requests = self.cancelled_requests.saturating_add(1);
             }
         }
+        let mut issued = 0_u64;
         for key in next_pending.iter().copied() {
             let index = self.node_index(key);
             let available = &mut self.planning_nodes[index];
@@ -205,13 +240,14 @@ impl RealCloudScene {
                 && requests.iter().any(|request| request.node() == key)
             {
                 *available = available.with_status(NodeStatus::Requested);
+                issued = issued.saturating_add(1);
             }
         }
         self.pending = next_pending;
 
         let queued = u64::try_from(self.pending.len()).unwrap_or(u64::MAX);
         self.peak_queued_batches = self.peak_queued_batches.max(queued);
-        Ok(())
+        Ok(issued)
     }
 
     /// Materializes no more than one queued hierarchy node.
@@ -279,6 +315,7 @@ impl RealCloudScene {
             }
         );
         *available = available.with_status(NodeStatus::Missing);
+        self.retired_batches = self.retired_batches.saturating_add(1);
     }
 
     pub(crate) fn mark_rejected(&mut self, key: BatchKey, version: BatchVersion) {
@@ -291,6 +328,7 @@ impl RealCloudScene {
         debug_assert_eq!(self.nodes[node_index].latest_issued_version, version.get());
         self.planning_nodes[node_index] =
             self.planning_nodes[node_index].with_status(NodeStatus::Missing);
+        self.rejected_batches = self.rejected_batches.saturating_add(1);
         self.clear_staging();
     }
 
@@ -303,14 +341,9 @@ impl RealCloudScene {
     }
 
     pub(crate) fn metrics(&self) -> SceneMetrics {
-        let resident_batches = self
-            .planning_nodes
-            .iter()
-            .filter(|node| matches!(node.status(), NodeStatus::Resident { .. }))
-            .count();
-        SceneMetrics {
+        let mut metrics = SceneMetrics {
             logical_points: self.index.descriptor().source_point_count(),
-            resident_batches: u64::try_from(resident_batches).unwrap_or(u64::MAX),
+            hierarchy_nodes: u64::try_from(self.planning_nodes.len()).unwrap_or(u64::MAX),
             queued_batches: u64::try_from(self.pending.len()).unwrap_or(u64::MAX),
             staged_points: self.staged_points,
             staged_bytes: self.staged_bytes,
@@ -318,7 +351,43 @@ impl RealCloudScene {
             peak_staged_points: self.peak_staged_points,
             peak_staged_bytes: self.peak_staged_bytes,
             cancelled_requests: self.cancelled_requests,
+            retired_batches: self.retired_batches,
+            rejected_batches: self.rejected_batches,
+            ..SceneMetrics::default()
+        };
+        for (available, real) in self.planning_nodes.iter().zip(&self.nodes) {
+            match available.status() {
+                NodeStatus::Missing => {
+                    metrics.missing_nodes = metrics.missing_nodes.saturating_add(1);
+                }
+                NodeStatus::Requested => {
+                    metrics.requested_nodes = metrics.requested_nodes.saturating_add(1);
+                }
+                NodeStatus::Resident { .. } => {
+                    metrics.resident_batches = metrics.resident_batches.saturating_add(1);
+                    metrics.resident_points = metrics
+                        .resident_points
+                        .saturating_add(available.point_count());
+                    match real.coverage {
+                        DisplayCoverage::Sampled => {
+                            metrics.sampled_resident_batches =
+                                metrics.sampled_resident_batches.saturating_add(1);
+                            metrics.sampled_resident_points = metrics
+                                .sampled_resident_points
+                                .saturating_add(available.point_count());
+                        }
+                        DisplayCoverage::Complete => {
+                            metrics.complete_resident_batches =
+                                metrics.complete_resident_batches.saturating_add(1);
+                            metrics.complete_resident_points = metrics
+                                .complete_resident_points
+                                .saturating_add(available.point_count());
+                        }
+                    }
+                }
+            }
         }
+        metrics
     }
 
     fn materialize(
@@ -327,50 +396,61 @@ impl RealCloudScene {
         available: AvailableNode,
     ) -> SceneResult<(PointBatch, u64)> {
         if available.point_count() > STAGING_POINT_BUDGET {
-            return Err(resource_limit("node staging Points", STAGING_POINT_BUDGET));
+            return Err(resource_limit(
+                ViewPhase::HostStaging,
+                "node staging Points",
+                STAGING_POINT_BUDGET,
+            ));
         }
-        let budget = NodeReadBudget::new(STAGING_POINT_BUDGET, STAGING_BYTE_BUDGET)?;
-        let mut stream = self.index.read_node(node.index_id, budget)?;
+        let budget = NodeReadBudget::new(STAGING_POINT_BUDGET, STAGING_BYTE_BUDGET)
+            .map_err(|error| index_read_failure(&error))?;
+        let mut stream = self
+            .index
+            .read_node(node.index_id, budget)
+            .map_err(|error| index_read_failure(&error))?;
         let origin = bounds_midpoint(available.bounds());
         let source = self.index.descriptor().source();
         let transform = self.index.descriptor().position_transform();
-        let capacity = usize::try_from(available.point_count())
-            .map_err(|_| invalid_data("node display count does not fit host address space"))?;
-        let reserved_staging_bytes = render_staging_charge(capacity, 0)?;
-        if reserved_staging_bytes > STAGING_BYTE_BUDGET {
-            return Err(resource_limit("node staging bytes", STAGING_BYTE_BUDGET));
-        }
-        let mut points = Vec::new();
-        points
-            .try_reserve_exact(capacity)
-            .map_err(|error| invalid_data(format!("could not reserve node staging: {error}")))?;
-        let actual_reserved_bytes = render_staging_charge(points.capacity(), 0)?;
-        if actual_reserved_bytes > STAGING_BYTE_BUDGET {
-            return Err(resource_limit("node staging bytes", STAGING_BYTE_BUDGET));
-        }
-        let mut peak_staged_bytes = actual_reserved_bytes;
+        let (mut points, mut peak_staged_bytes) = reserve_node_staging(available.point_count())?;
         let mut previous_ordinal = None;
 
-        while let Some(batch) = stream.next()? {
+        while let Some(batch) = stream.next().map_err(|error| index_read_failure(&error))? {
             if batch.node() != node.index_id
                 || batch.source() != source
                 || batch.transform() != transform
             {
-                return Err(invalid_data(
+                return Err(internal_failure(
+                    ViewPhase::NodeRead,
                     "index node batch identity changed during one stream",
                 ));
             }
-            for sample in batch.samples().iter().copied() {
+            let attributes = batch.display_attributes();
+            if self.colorizer.requires_attributes() != attributes.is_some() {
+                return Err(internal_failure(
+                    ViewPhase::NodeRead,
+                    "index display Attribute rows did not match the selected display mode",
+                ));
+            }
+            if attributes.is_some_and(|attributes| attributes.len() != batch.samples().len()) {
+                return Err(internal_failure(
+                    ViewPhase::NodeRead,
+                    "index display Attributes were not row-aligned with samples",
+                ));
+            }
+            for (row, sample) in batch.samples().iter().copied().enumerate() {
                 if previous_ordinal.is_some_and(|previous| previous >= sample.ordinal()) {
-                    return Err(invalid_data(
+                    return Err(internal_failure(
+                        ViewPhase::NodeRead,
                         "index node samples were not globally sorted and unique",
                     ));
                 }
                 previous_ordinal = Some(sample.ordinal());
-                let relative = relative_position(sample.world_position(transform), origin)?;
+                let world = sample.world_position(transform);
+                let relative = relative_position(world, origin)?;
                 points.push(RenderPoint::new(
                     relative,
-                    POSITION_ONLY_COLOR,
+                    self.colorizer
+                        .color(world[2], attributes.map(|values| values[row])),
                     sample.point_id(source),
                 )?);
             }
@@ -379,12 +459,19 @@ impl RealCloudScene {
                 batch.estimated_payload_bytes(),
             )?);
             if peak_staged_bytes > STAGING_BYTE_BUDGET {
-                return Err(resource_limit("node staging bytes", STAGING_BYTE_BUDGET));
+                return Err(resource_limit(
+                    ViewPhase::HostStaging,
+                    "node staging bytes",
+                    STAGING_BYTE_BUDGET,
+                ));
             }
         }
 
         let summary = stream.summary().ok_or_else(|| {
-            invalid_data("exhausted index node stream did not publish an exact summary")
+            internal_failure(
+                ViewPhase::NodeRead,
+                "exhausted index node stream did not publish an exact summary",
+            )
         })?;
         validate_summary(
             summary,
@@ -392,12 +479,12 @@ impl RealCloudScene {
             available,
             source,
             u64::try_from(points.len()).unwrap_or(u64::MAX),
+            self.index.descriptor().display_sample_contract(),
         )?;
 
-        let version = node
-            .latest_issued_version
-            .checked_add(1)
-            .ok_or_else(|| invalid_data("renderer batch version overflowed"))?;
+        let version = node.latest_issued_version.checked_add(1).ok_or_else(|| {
+            internal_failure(ViewPhase::HostStaging, "renderer batch version overflowed")
+        })?;
         let batch = PointBatch::new(
             self.generation,
             available.batch_key(),
@@ -422,6 +509,38 @@ impl RealCloudScene {
     }
 }
 
+fn reserve_node_staging(point_count: u64) -> SceneResult<(Vec<RenderPoint>, u64)> {
+    let capacity = usize::try_from(point_count).map_err(|_| {
+        internal_failure(
+            ViewPhase::HostStaging,
+            "node display count does not fit host address space",
+        )
+    })?;
+    if render_staging_charge(capacity, 0)? > STAGING_BYTE_BUDGET {
+        return Err(resource_limit(
+            ViewPhase::HostStaging,
+            "node staging bytes",
+            STAGING_BYTE_BUDGET,
+        ));
+    }
+    let mut points = Vec::new();
+    points.try_reserve_exact(capacity).map_err(|error| {
+        allocation_failure(
+            ViewPhase::HostStaging,
+            format_args!("could not reserve node staging: {error}"),
+        )
+    })?;
+    let retained_bytes = render_staging_charge(points.capacity(), 0)?;
+    if retained_bytes > STAGING_BYTE_BUDGET {
+        return Err(resource_limit(
+            ViewPhase::HostStaging,
+            "node staging bytes",
+            STAGING_BYTE_BUDGET,
+        ));
+    }
+    Ok((points, retained_bytes))
+}
+
 /// Admits one node or defers it when only the aggregate queue budget is full.
 ///
 /// A node that cannot fit an otherwise empty queue is a configuration error.
@@ -433,12 +552,22 @@ fn admit_queued_node(
     key: NodeKey,
     node_reservation: u64,
     reserved_host_bytes: &mut u64,
+    retained_queue_bytes: u64,
     budget: QueueBudget,
 ) -> SceneResult<bool> {
     if budget.max_nodes == 0 {
-        return Err(resource_limit("queued nodes", budget.max_nodes));
+        return Err(resource_limit(
+            ViewPhase::Planning,
+            "queued nodes",
+            budget.max_nodes,
+        ));
     }
-    ensure_queue_bytes(1, node_reservation, budget.max_host_bytes)?;
+    ensure_queue_bytes(
+        1,
+        node_reservation,
+        retained_queue_bytes,
+        budget.max_host_bytes,
+    )?;
 
     let required_nodes = u64::try_from(pending.len())
         .unwrap_or(u64::MAX)
@@ -448,16 +577,49 @@ fn admit_queued_node(
     }
     let next_reservations = reserved_host_bytes
         .checked_add(node_reservation)
-        .ok_or_else(|| invalid_data("queued node host reservations overflowed"))?;
+        .ok_or_else(|| {
+            internal_failure(
+                ViewPhase::Planning,
+                "queued node host reservations overflowed",
+            )
+        })?;
     if pending.len() == pending.capacity() {
         let required_capacity = pending.len().saturating_add(1);
+        if queue_growth_charge(
+            pending.capacity(),
+            required_capacity,
+            next_reservations,
+            retained_queue_bytes,
+        )? > budget.max_host_bytes
+        {
+            if pending.is_empty() {
+                return Err(resource_limit(
+                    ViewPhase::Planning,
+                    "request queue host bytes",
+                    budget.max_host_bytes,
+                ));
+            }
+            return Ok(false);
+        }
         let mut grown = VecDeque::new();
         grown
             .try_reserve_exact(required_capacity)
-            .map_err(|error| invalid_data(format!("could not reserve request queue: {error}")))?;
-        if queue_charge(grown.capacity(), next_reservations)? > budget.max_host_bytes {
+            .map_err(|error| {
+                allocation_failure(
+                    ViewPhase::Planning,
+                    format_args!("could not reserve request queue: {error}"),
+                )
+            })?;
+        if queue_growth_charge(
+            pending.capacity(),
+            grown.capacity(),
+            next_reservations,
+            retained_queue_bytes,
+        )? > budget.max_host_bytes
+        {
             if pending.is_empty() {
                 return Err(resource_limit(
+                    ViewPhase::Planning,
                     "request queue host bytes",
                     budget.max_host_bytes,
                 ));
@@ -466,7 +628,9 @@ fn admit_queued_node(
         }
         grown.extend(pending.iter().copied());
         *pending = grown;
-    } else if queue_charge(pending.capacity(), next_reservations)? > budget.max_host_bytes {
+    } else if queue_charge(pending.capacity(), next_reservations, retained_queue_bytes)?
+        > budget.max_host_bytes
+    {
         return Ok(false);
     }
     pending.push_back(key);
@@ -475,30 +639,79 @@ fn admit_queued_node(
 }
 
 fn queued_node_reservation(available: AvailableNode) -> SceneResult<u64> {
-    let point_count = usize::try_from(available.point_count())
-        .map_err(|_| invalid_data("queued node Point count does not fit host address space"))?;
+    let point_count = usize::try_from(available.point_count()).map_err(|_| {
+        internal_failure(
+            ViewPhase::Planning,
+            "queued node Point count does not fit host address space",
+        )
+    })?;
     batch_staging_charge(point_count)
 }
 
-fn ensure_queue_bytes(capacity: usize, reservations: u64, allowed: u64) -> SceneResult<()> {
-    if queue_charge(capacity, reservations)? > allowed {
-        return Err(resource_limit("request queue host bytes", allowed));
+fn ensure_queue_bytes(
+    capacity: usize,
+    reservations: u64,
+    retained_queue_bytes: u64,
+    allowed: u64,
+) -> SceneResult<()> {
+    if queue_charge(capacity, reservations, retained_queue_bytes)? > allowed {
+        return Err(resource_limit(
+            ViewPhase::Planning,
+            "request queue host bytes",
+            allowed,
+        ));
     }
     Ok(())
 }
 
-fn queue_charge(capacity: usize, reservations: u64) -> SceneResult<u64> {
-    let capacity =
-        u64::try_from(capacity).map_err(|_| invalid_data("request queue capacity overflowed"))?;
-    let node_bytes = u64::try_from(mem::size_of::<NodeKey>())
-        .map_err(|_| invalid_data("request queue node size does not fit u64"))?;
-    let container_bytes = u64::try_from(mem::size_of::<VecDeque<NodeKey>>())
-        .map_err(|_| invalid_data("request queue container size does not fit u64"))?;
+fn queue_charge(capacity: usize, reservations: u64, retained_queue_bytes: u64) -> SceneResult<u64> {
+    queue_container_charge(capacity)?
+        .checked_add(reservations)
+        .and_then(|bytes| bytes.checked_add(retained_queue_bytes))
+        .ok_or_else(|| {
+            internal_failure(ViewPhase::Planning, "request queue byte charge overflowed")
+        })
+}
+
+fn queue_growth_charge(
+    old_capacity: usize,
+    new_capacity: usize,
+    reservations: u64,
+    retained_queue_bytes: u64,
+) -> SceneResult<u64> {
+    queue_container_charge(old_capacity)?
+        .checked_add(queue_container_charge(new_capacity)?)
+        .and_then(|bytes| bytes.checked_add(reservations))
+        .and_then(|bytes| bytes.checked_add(retained_queue_bytes))
+        .ok_or_else(|| {
+            internal_failure(
+                ViewPhase::Planning,
+                "overlapping request queue byte charge overflowed",
+            )
+        })
+}
+
+fn queue_container_charge(capacity: usize) -> SceneResult<u64> {
+    let capacity = u64::try_from(capacity)
+        .map_err(|_| internal_failure(ViewPhase::Planning, "request queue capacity overflowed"))?;
+    let node_bytes = u64::try_from(mem::size_of::<NodeKey>()).map_err(|_| {
+        internal_failure(
+            ViewPhase::Planning,
+            "request queue node size does not fit u64",
+        )
+    })?;
+    let container_bytes = u64::try_from(mem::size_of::<VecDeque<NodeKey>>()).map_err(|_| {
+        internal_failure(
+            ViewPhase::Planning,
+            "request queue container size does not fit u64",
+        )
+    })?;
     capacity
         .checked_mul(node_bytes)
         .and_then(|bytes| bytes.checked_add(container_bytes))
-        .and_then(|bytes| bytes.checked_add(reservations))
-        .ok_or_else(|| invalid_data("request queue byte charge overflowed"))
+        .ok_or_else(|| {
+            internal_failure(ViewPhase::Planning, "request queue byte charge overflowed")
+        })
 }
 
 fn node_key(id: IndexNodeId) -> SceneResult<NodeKey> {
@@ -506,12 +719,21 @@ fn node_key(id: IndexNodeId) -> SceneResult<NodeKey> {
 }
 
 fn hierarchy_charge(node_capacity: usize) -> SceneResult<u64> {
-    let node_count = u64::try_from(node_capacity)
-        .map_err(|_| invalid_data("application hierarchy capacity overflowed"))?;
+    let node_count = u64::try_from(node_capacity).map_err(|_| {
+        internal_failure(
+            ViewPhase::Hierarchy,
+            "application hierarchy capacity overflowed",
+        )
+    })?;
     node_count
         .checked_mul(HIERARCHY_WORKING_BYTES_PER_NODE)
         .and_then(|bytes| bytes.checked_add(HIERARCHY_FIXED_WORKING_BYTES))
-        .ok_or_else(|| invalid_data("application hierarchy byte charge overflowed"))
+        .ok_or_else(|| {
+            internal_failure(
+                ViewPhase::Hierarchy,
+                "application hierarchy byte charge overflowed",
+            )
+        })
 }
 
 fn bounds_midpoint(bounds: AxisAlignedBox) -> [f64; 3] {
@@ -528,13 +750,17 @@ fn camera_frame(bounds: Option<point_contracts::WorldBounds>) -> SceneResult<([f
     let squared_diagonal = (0..3).try_fold(0.0, |sum, axis| {
         let extent = bounds.max()[axis] - bounds.min()[axis];
         let next = sum + extent * extent;
-        next.is_finite()
-            .then_some(next)
-            .ok_or_else(|| invalid_data("Source bounds are too large for a finite camera frame"))
+        next.is_finite().then_some(next).ok_or_else(|| {
+            internal_failure(
+                ViewPhase::Hierarchy,
+                "Source bounds are too large for a finite camera frame",
+            )
+        })
     })?;
     let radius = (squared_diagonal.sqrt() * 1.25).max(1.0);
     if radius * 8.0 > f64::from(f32::MAX) {
-        return Err(invalid_data(
+        return Err(internal_failure(
+            ViewPhase::Hierarchy,
             "Source bounds are too large for finite renderer camera clipping",
         ));
     }
@@ -547,7 +773,8 @@ fn relative_position(world: [f64; 3], origin: [f64; 3]) -> SceneResult<[f32; 3]>
     if relative.iter().any(|value| {
         !value.is_finite() || *value < f64::from(f32::MIN) || *value > f64::from(f32::MAX)
     }) {
-        return Err(invalid_data(
+        return Err(internal_failure(
+            ViewPhase::HostStaging,
             "origin-relative Source position does not fit finite renderer coordinates",
         ));
     }
@@ -563,17 +790,34 @@ fn batch_staging_charge(render_points: usize) -> SceneResult<u64> {
 }
 
 fn staging_charge<Container>(render_points: usize, current_index_bytes: u64) -> SceneResult<u64> {
-    let point_count = u64::try_from(render_points)
-        .map_err(|_| invalid_data("staged renderer point count overflowed"))?;
-    let render_point_bytes = u64::try_from(mem::size_of::<RenderPoint>())
-        .map_err(|_| invalid_data("renderer point size does not fit u64"))?;
-    let container_bytes = u64::try_from(mem::size_of::<Container>())
-        .map_err(|_| invalid_data("staging container size does not fit u64"))?;
+    let point_count = u64::try_from(render_points).map_err(|_| {
+        internal_failure(
+            ViewPhase::HostStaging,
+            "staged renderer point count overflowed",
+        )
+    })?;
+    let render_point_bytes = u64::try_from(mem::size_of::<RenderPoint>()).map_err(|_| {
+        internal_failure(
+            ViewPhase::HostStaging,
+            "renderer point size does not fit u64",
+        )
+    })?;
+    let container_bytes = u64::try_from(mem::size_of::<Container>()).map_err(|_| {
+        internal_failure(
+            ViewPhase::HostStaging,
+            "staging container size does not fit u64",
+        )
+    })?;
     point_count
         .checked_mul(render_point_bytes)
         .and_then(|bytes| bytes.checked_add(container_bytes))
         .and_then(|bytes| bytes.checked_add(current_index_bytes))
-        .ok_or_else(|| invalid_data("node staging byte charge overflowed"))
+        .ok_or_else(|| {
+            internal_failure(
+                ViewPhase::HostStaging,
+                "node staging byte charge overflowed",
+            )
+        })
 }
 
 fn validate_summary(
@@ -582,6 +826,7 @@ fn validate_summary(
     available: AvailableNode,
     source: render_protocol::SourceId,
     observed_points: u64,
+    expected_display_contract: Option<DisplaySampleContract>,
 ) -> SceneResult<()> {
     if summary.node() != node.index_id
         || summary.source() != source
@@ -589,42 +834,92 @@ fn validate_summary(
         || summary.emitted_point_count() != available.point_count()
         || summary.coverage() != node.coverage
         || summary.covered_source_point_count() != node.covered_source_point_count
+        || summary.display_sample_contract() != expected_display_contract
     {
-        return Err(invalid_data(
+        return Err(internal_failure(
+            ViewPhase::NodeRead,
             "index terminal summary did not match the staged node batch",
         ));
     }
     Ok(())
 }
 
-fn resource_limit(resource: &'static str, limit: u64) -> Box<dyn std::error::Error> {
-    invalid_data(format!(
-        "{resource} exceeded the application limit of {limit}"
+fn validate_display_contract(
+    mode: DisplayMode,
+    contract: Option<DisplaySampleContract>,
+) -> SceneResult<()> {
+    match (mode, contract) {
+        (DisplayMode::Neutral | DisplayMode::Elevation, None)
+        | (DisplayMode::Intensity | DisplayMode::Classification, Some(_)) => Ok(()),
+        (DisplayMode::Rgb, Some(contract)) if contract.rgb().is_some() => Ok(()),
+        (DisplayMode::Rgb, Some(_)) => Err(Box::new(ViewFailure::invalid_request(
+            "RGB display is unavailable because the verified Source lacks all three U16 RGB Attributes",
+        ))),
+        (DisplayMode::Rgb | DisplayMode::Intensity | DisplayMode::Classification, None) => {
+            Err(Box::new(ViewFailure::invalid_request(
+                "the selected attributed display requires a v2 inspection index",
+            )))
+        }
+        (DisplayMode::Neutral | DisplayMode::Elevation, Some(_)) => {
+            Err(Box::new(ViewFailure::invalid_request(
+                "neutral and elevation displays require the position-only v1 index recipe",
+            )))
+        }
+    }
+}
+
+fn resource_limit(
+    phase: ViewPhase,
+    resource: &'static str,
+    limit: u64,
+) -> Box<dyn std::error::Error> {
+    Box::new(ViewFailure::resource(
+        phase,
+        format_args!("{resource} exceeded the application limit of {limit}"),
     ))
 }
 
-fn invalid_data(message: impl Into<String>) -> Box<dyn std::error::Error> {
-    Box::new(io::Error::new(io::ErrorKind::InvalidData, message.into()))
+fn allocation_failure(
+    phase: ViewPhase,
+    message: impl std::fmt::Display,
+) -> Box<dyn std::error::Error> {
+    Box::new(ViewFailure::resource(phase, message))
+}
+
+fn index_read_failure(error: &IndexError) -> Box<dyn std::error::Error> {
+    Box::new(ViewFailure::index_read(error))
+}
+
+fn internal_failure(
+    phase: ViewPhase,
+    message: impl std::fmt::Display,
+) -> Box<dyn std::error::Error> {
+    Box::new(ViewFailure::internal(phase, message))
 }
 
 #[cfg(test)]
 mod tests {
     use std::{
-        fs,
+        fs, io,
         path::Path,
         sync::atomic::{AtomicU64, Ordering},
     };
 
-    use point_contracts::{AttributeColumns, CoordinateReference, PositionTransform};
+    use point_contracts::{
+        AttributeColumn, AttributeColumns, AttributeDataType, AttributeDefinition, AttributeId,
+        AttributeValues, CoordinateReference, PositionTransform,
+    };
     use point_index::PrepareLimits;
     use point_view::{AvailableNodes, PlanningBudget, ViewPlan, ViewPlanner};
     use render_protocol::{Camera, RenderLimits, RenderStateModel, RenderUpdate, Viewport};
     use source_memory::MemorySource;
 
     use crate::{
+        diagnostic::{RecoveryAction, ViewFailureCode},
         orbit_camera::OrbitCamera,
         synthetic::{RESIDENT_BATCH_BUDGET, RESIDENT_BYTE_BUDGET, RESIDENT_POINT_BUDGET},
     };
+    use renderer_demo::display::{DisplayMode, NEUTRAL_COLOR};
 
     use super::*;
 
@@ -709,6 +1004,7 @@ mod tests {
                 first,
                 node_reservation,
                 &mut reserved_host_bytes,
+                0,
                 QueueBudget {
                     max_nodes: 2,
                     max_host_bytes: u64::MAX,
@@ -716,7 +1012,7 @@ mod tests {
             )
             .unwrap()
         );
-        let one_node_bytes = queue_charge(pending.capacity(), reserved_host_bytes).unwrap();
+        let one_node_bytes = queue_charge(pending.capacity(), reserved_host_bytes, 0).unwrap();
 
         assert!(
             !admit_queued_node(
@@ -724,6 +1020,7 @@ mod tests {
                 second,
                 node_reservation,
                 &mut reserved_host_bytes,
+                0,
                 QueueBudget {
                     max_nodes: 2,
                     max_host_bytes: one_node_bytes,
@@ -733,6 +1030,81 @@ mod tests {
         );
         assert_eq!(pending, VecDeque::from([first]));
         assert_eq!(reserved_host_bytes, node_reservation);
+    }
+
+    #[test]
+    fn queue_growth_is_preflighted_before_reserving_a_larger_container() {
+        let mut pending = VecDeque::with_capacity(1);
+        for raw in 1..=pending.capacity() {
+            pending.push_back(NodeKey::new(u64::try_from(raw).unwrap()).unwrap());
+        }
+        let original = pending.clone();
+        let original_capacity = pending.capacity();
+        let mut reserved_host_bytes = 0;
+        let allowed = queue_charge(original_capacity, reserved_host_bytes, 0).unwrap();
+
+        assert!(
+            !admit_queued_node(
+                &mut pending,
+                NodeKey::new(u64::try_from(original_capacity + 1).unwrap()).unwrap(),
+                0,
+                &mut reserved_host_bytes,
+                0,
+                QueueBudget {
+                    max_nodes: u64::try_from(original_capacity + 1).unwrap(),
+                    max_host_bytes: allowed,
+                },
+            )
+            .unwrap()
+        );
+        assert_eq!(pending, original);
+        assert_eq!(pending.capacity(), original_capacity);
+        assert_eq!(reserved_host_bytes, 0);
+    }
+
+    #[test]
+    fn request_reconciliation_charges_the_old_and_rebuilt_queues_together() {
+        let directory = TestDirectory::new().unwrap();
+        let mut scene = fixture_scene(directory.path()).unwrap();
+        let root = scene.planning_nodes[0];
+        scene.planning_nodes[0] = root.with_status(NodeStatus::Requested);
+        scene.pending = VecDeque::with_capacity(8);
+        scene.pending.push_back(root.key());
+        let original_pending = scene.pending.clone();
+        let original_status = scene.planning_nodes[0].status();
+        let old_queue_bytes = queue_container_charge(scene.pending.capacity()).unwrap();
+
+        let error = scene
+            .reconcile_requests_with_budget(
+                &[root.key()],
+                &[],
+                QueueBudget {
+                    max_nodes: 1,
+                    max_host_bytes: old_queue_bytes,
+                },
+            )
+            .expect_err("the retained old queue leaves no budget for the rebuilt queue");
+        let failure = error.downcast_ref::<ViewFailure>().unwrap();
+        assert_eq!(failure.code(), ViewFailureCode::ResourceLimit);
+        assert_eq!(failure.phase(), ViewPhase::Planning);
+        assert_eq!(scene.pending, original_pending);
+        assert_eq!(scene.planning_nodes[0].status(), original_status);
+    }
+
+    #[test]
+    fn allocation_failures_keep_resource_code_action_and_owning_phase() {
+        for phase in [
+            ViewPhase::Hierarchy,
+            ViewPhase::Planning,
+            ViewPhase::HostStaging,
+        ] {
+            let failure = allocation_failure(phase, "injected allocation failure")
+                .downcast::<ViewFailure>()
+                .unwrap();
+            assert_eq!(failure.code(), ViewFailureCode::ResourceLimit);
+            assert_eq!(failure.phase(), phase);
+            assert_eq!(failure.action(), RecoveryAction::RaiseNamedLimit);
+        }
     }
 
     #[test]
@@ -886,6 +1258,7 @@ mod tests {
         assert!(scene.next_batch().unwrap().is_none());
         for (expected_ordinal, point) in first.points().iter().enumerate() {
             assert_eq!(point.point_id().source(), source);
+            assert_eq!(point.color(), NEUTRAL_COLOR);
             assert_eq!(
                 point.point_id().ordinal(),
                 u64::try_from(expected_ordinal).unwrap()
@@ -956,7 +1329,97 @@ mod tests {
         assert_eq!(scene.metrics().resident_batches, 1);
     }
 
+    #[test]
+    fn elevation_display_colors_index_samples_from_complete_source_z_bounds() {
+        let neutral_directory = TestDirectory::new().unwrap();
+        let elevation_directory = TestDirectory::new().unwrap();
+        let mut neutral = fixture_scene(neutral_directory.path()).unwrap();
+        let mut elevation =
+            fixture_scene_with_mode(elevation_directory.path(), DisplayMode::Elevation).unwrap();
+
+        let neutral_batch = materialize_first_batch(&mut neutral);
+        let elevation_batch = materialize_first_batch(&mut elevation);
+        assert_eq!(
+            neutral_batch.world_origin().map(f64::to_bits),
+            elevation_batch.world_origin().map(f64::to_bits)
+        );
+        assert_eq!(neutral_batch.point_count(), elevation_batch.point_count());
+        for (neutral, elevation) in neutral_batch.points().iter().zip(elevation_batch.points()) {
+            assert_eq!(neutral.point_id(), elevation.point_id());
+            assert_eq!(
+                neutral.relative_position().map(f32::to_bits),
+                elevation.relative_position().map(f32::to_bits)
+            );
+            assert_eq!(neutral.color(), NEUTRAL_COLOR);
+        }
+
+        let colors = elevation_batch
+            .points()
+            .iter()
+            .map(render_protocol::RenderPoint::color)
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            colors,
+            vec![
+                [68, 1, 84, 255],
+                [50, 103, 139, 255],
+                [74, 182, 112, 255],
+                [253, 231, 37, 255],
+            ]
+        );
+    }
+
+    #[test]
+    fn attributed_modes_change_only_exact_display_color() {
+        let mut batches = Vec::new();
+        for mode in [
+            DisplayMode::Rgb,
+            DisplayMode::Intensity,
+            DisplayMode::Classification,
+        ] {
+            let directory = TestDirectory::new().unwrap();
+            let mut scene = attributed_fixture_scene(directory.path(), mode).unwrap();
+            batches.push(materialize_first_batch(&mut scene));
+        }
+
+        for candidate in &batches[1..] {
+            assert_eq!(
+                batches[0].world_origin().map(f64::to_bits),
+                candidate.world_origin().map(f64::to_bits)
+            );
+            for (expected, actual) in batches[0].points().iter().zip(candidate.points()) {
+                assert_eq!(expected.point_id(), actual.point_id());
+                assert_eq!(
+                    expected.relative_position().map(f32::to_bits),
+                    actual.relative_position().map(f32::to_bits)
+                );
+            }
+        }
+        assert_eq!(batches[0].points()[0].color(), [0, 128, 255, 255]);
+        assert_eq!(batches[1].points()[0].color(), [0, 0, 0, 255]);
+        assert_eq!(batches[1].points()[1].color(), [128, 128, 128, 255]);
+        assert_eq!(batches[2].points()[0].color(), [139, 95, 57, 255]);
+        assert_eq!(batches[2].points()[1].color(), [220, 70, 70, 255]);
+    }
+
+    fn materialize_first_batch(scene: &mut RealCloudScene) -> PointBatch {
+        let visible = visible_camera(scene);
+        let plan = plan(&mut ViewPlanner::default(), scene, &visible);
+        scene
+            .reconcile_requests(plan.demanded_nodes(), plan.requests())
+            .unwrap();
+        scene.next_batch().unwrap().unwrap()
+    }
+
     fn fixture_scene(directory: &Path) -> SceneResult<RealCloudScene> {
+        fixture_scene_with_mode(directory, DisplayMode::Neutral)
+    }
+
+    fn fixture_scene_with_mode(
+        directory: &Path,
+        display_mode: DisplayMode,
+    ) -> SceneResult<RealCloudScene> {
         let ticks = vec![[0, 0, 0], [1, 2, 3], [2, 4, 6], [3, 6, 9]];
         let point_count = ticks.len();
         let input = MemorySource::from_columns(
@@ -972,7 +1435,72 @@ mod tests {
             PrepareLimits::default(),
         )
         .blocking_wait()?;
-        RealCloudScene::new(TEST_GENERATION, index)
+        RealCloudScene::new(TEST_GENERATION, index, display_mode)
+    }
+
+    fn attributed_fixture_scene(
+        directory: &Path,
+        display_mode: DisplayMode,
+    ) -> SceneResult<RealCloudScene> {
+        let ticks = vec![[0, 0, 0], [1, 2, 3], [2, 4, 6], [3, 6, 9]];
+        let point_count = ticks.len();
+        let column = |id, name, data_type, values| {
+            AttributeColumn::new(
+                AttributeDefinition::new(AttributeId::new(id).unwrap(), name, data_type).unwrap(),
+                values,
+            )
+            .unwrap()
+        };
+        let attributes = AttributeColumns::new(
+            vec![
+                column(
+                    1,
+                    "intensity",
+                    AttributeDataType::U16,
+                    AttributeValues::u16(vec![0, 32_768, u16::MAX, 1_000]),
+                ),
+                column(
+                    6,
+                    "classification",
+                    AttributeDataType::U8,
+                    AttributeValues::u8(vec![2, 6, 18, 19]),
+                ),
+                column(
+                    16,
+                    "red",
+                    AttributeDataType::U16,
+                    AttributeValues::u16(vec![0, u16::MAX, 32_768, 1_000]),
+                ),
+                column(
+                    17,
+                    "green",
+                    AttributeDataType::U16,
+                    AttributeValues::u16(vec![32_768, 0, u16::MAX, 2_000]),
+                ),
+                column(
+                    18,
+                    "blue",
+                    AttributeDataType::U16,
+                    AttributeValues::u16(vec![u16::MAX, 32_768, 0, 3_000]),
+                ),
+            ],
+            point_count,
+        )?;
+        let input = MemorySource::from_columns(
+            PositionTransform::new([4_000_000.0, 800_000.0, 120.0], [1.0; 3])?,
+            CoordinateReference::Unknown,
+            ticks,
+            attributes,
+        )?;
+        let source = source_memory::open(input).blocking_wait()?;
+        let index = point_index::prepare_with_recipe(
+            source,
+            directory.join("fixture.inspection.pidx"),
+            crate::display_index_recipe(display_mode)?,
+            PrepareLimits::default(),
+        )
+        .blocking_wait()?;
+        RealCloudScene::new(TEST_GENERATION, index, display_mode)
     }
 
     fn requested_available(original: AvailableNode, point_count: u64) -> AvailableNode {

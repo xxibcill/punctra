@@ -1,0 +1,85 @@
+{
+  "classification_attribute": {
+    "id": 101,
+    "name": "classification",
+    "type": "U8"
+  },
+  "committed_operation": "22222222222222222222222222222222",
+  "committed_revision": "002a7c622f202132150e7f68053714c22d7ef1182f8b02e684f509a674250b86",
+  "corpus": "punctra-point-workspace-owner-local-v1",
+  "disk_version": 1,
+  "files": [
+    {
+      "blake3": "97e2b2ac59f12105aaa8a9dc1ea2cf5689f0557d8bf465614696309c93689a77",
+      "bytes": 1252,
+      "path": "committed/manifest.pwm"
+    },
+    {
+      "blake3": "42eec168847d4875d9079e0a6cf365e051ec2c9ec2a82b0f8cf7c95a57ed7bd0",
+      "bytes": 534,
+      "path": "committed/operations/22222222222222222222222222222222.ready"
+    },
+    {
+      "blake3": "42eec168847d4875d9079e0a6cf365e051ec2c9ec2a82b0f8cf7c95a57ed7bd0",
+      "bytes": 534,
+      "path": "committed/revisions/00000000000000000001-002a7c622f202132150e7f68053714c22d7ef1182f8b02e684f509a674250b86.pwr"
+    },
+    {
+      "blake3": "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262",
+      "bytes": 0,
+      "path": "committed/workspace.lock"
+    },
+    {
+      "blake3": "97e2b2ac59f12105aaa8a9dc1ea2cf5689f0557d8bf465614696309c93689a77",
+      "bytes": 1252,
+      "path": "recorded-rejection/manifest.pwm"
+    },
+    {
+      "blake3": "205364e6858e0755154e52d4e24060b72775e8b897af99f920966d26c4e26435",
+      "bytes": 184,
+      "path": "recorded-rejection/operations/33333333333333333333333333333333.reject"
+    },
+    {
+      "blake3": "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262",
+      "bytes": 0,
+      "path": "recorded-rejection/workspace.lock"
+    },
+    {
+      "blake3": "97e2b2ac59f12105aaa8a9dc1ea2cf5689f0557d8bf465614696309c93689a77",
+      "bytes": 1252,
+      "path": "retryable-ready/manifest.pwm"
+    },
+    {
+      "blake3": "42eec168847d4875d9079e0a6cf365e051ec2c9ec2a82b0f8cf7c95a57ed7bd0",
+      "bytes": 534,
+      "path": "retryable-ready/operations/22222222222222222222222222222222.ready"
+    },
+    {
+      "blake3": "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262",
+      "bytes": 0,
+      "path": "retryable-ready/workspace.lock"
+    },
+    {
+      "blake3": "97e2b2ac59f12105aaa8a9dc1ea2cf5689f0557d8bf465614696309c93689a77",
+      "bytes": 1252,
+      "path": "root/manifest.pwm"
+    },
+    {
+      "blake3": "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262",
+      "bytes": 0,
+      "path": "root/workspace.lock"
+    }
+  ],
+  "generated_data": "synthetic quantized positions and U8 classifications only",
+  "point_count": 16,
+  "rejected_operation": "33333333333333333333333333333333",
+  "required_directories_per_state": [
+    "operations",
+    "revisions",
+    "scratch"
+  ],
+  "root_revision": "f71270baea2e66eda2aca00b4176e6a46b975ef5051b7a65c45084f31271955d",
+  "semantic_version": 1,
+  "source_id": "9d36149cba2c14b53c9c3ca954a61f1f7c41d48323041a3c41aca6cf06ef44f2",
+  "workspace_id": "5851f7226996e027405ee816abe18ef7"
+}

@@ -17,7 +17,8 @@ use crate::{
 /// Exact terminal facts for one successfully completed Source read.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SourceReadSummary {
-    provenance: SourceProvenance,
+    source: SourceId,
+    provenance: Arc<SourceProvenance>,
     spans: Arc<[SourceSpan]>,
     exact_count: u64,
     attributes: Arc<[AttributeId]>,
@@ -28,13 +29,13 @@ impl SourceReadSummary {
     /// Returns the immutable Source Identity.
     #[must_use]
     pub const fn source(&self) -> SourceId {
-        self.provenance.source()
+        self.source
     }
 
     /// Returns immutable detached Source provenance.
     #[must_use]
-    pub const fn provenance(&self) -> &SourceProvenance {
-        &self.provenance
+    pub fn provenance(&self) -> &SourceProvenance {
+        self.provenance.as_ref()
     }
 
     /// Returns the exact number of emitted Points.
@@ -71,7 +72,7 @@ pub struct PointBatches {
     spans: Arc<[SourceSpan]>,
     expected_attributes: Arc<[AttributeId]>,
     budget: ReadBudget,
-    provenance: SourceProvenance,
+    provenance: Arc<SourceProvenance>,
     control: OperationControl,
     adapter_read: Option<Box<dyn AdapterRead>>,
     span_index: usize,
@@ -86,7 +87,7 @@ impl PointBatches {
     pub(crate) fn start(
         source: SourceId,
         metadata: Arc<SourceMetadata>,
-        provenance: SourceProvenance,
+        provenance: Arc<SourceProvenance>,
         reader: &dyn ReadAdapter,
         request: ReadRequest,
     ) -> Result<Self, SourceError> {
@@ -395,7 +396,8 @@ impl PointBatches {
             });
         }
         let summary = SourceReadSummary {
-            provenance: self.provenance.clone(),
+            source: self.source,
+            provenance: Arc::clone(&self.provenance),
             spans: Arc::clone(&self.spans),
             exact_count: self.emitted_count,
             attributes: Arc::clone(&self.expected_attributes),

@@ -1,0 +1,81 @@
+{
+  "baseline_revision": "aa12deaa94d5575d4359d94294a2119534abbe28b13869ab9ffca50d82a24774",
+  "checkpoint_count": 8,
+  "committed_revision": "ef9a208166fbce2fe8c862b9c56e6ea2eba22dc445932569716e9ba17bb96ecc",
+  "corpus": "punctra-terrain-demo-owner-local-run-v1",
+  "disk_version": 1,
+  "files": [
+    {
+      "blake3": "3c377908de5660925921aa4e210638d8e76dc511768693590840e27a9c2de8ca",
+      "bytes": 1689,
+      "path": "README.md"
+    },
+    {
+      "blake3": "cef480e06ce64a75c166c3ab6253d4259742ded3c7069dc41e43761e28c7bd7e",
+      "bytes": 11452,
+      "path": "complete/audit.json"
+    },
+    {
+      "blake3": "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262",
+      "bytes": 0,
+      "path": "complete/run.lock"
+    },
+    {
+      "blake3": "227692db7f3c2c2cdb4c6be2963d3cbd4b07d189d9bf4ee5d8b800e7a8e21302",
+      "bytes": 2799,
+      "path": "complete/run.pwf"
+    },
+    {
+      "blake3": "0699e09e6d440e49aa6478b89985d393726d689e46778d325a93de0d60c16f4b",
+      "bytes": 6003,
+      "path": "complete/terrain.xml"
+    },
+    {
+      "blake3": "ef4a467a83640d93b2a30dd91668cb1e2fdcd1877693acf4c738be77adbdcc5f",
+      "bytes": 741,
+      "path": "prefixes/01-intent.pwf"
+    },
+    {
+      "blake3": "273433a5bef3918c93d17f277a6357b9ac850b518ae5b4578c61a66aa8c7cfb6",
+      "bytes": 925,
+      "path": "prefixes/02-revision-resolved.pwf"
+    },
+    {
+      "blake3": "fcc067c96903cf2bd2a22797d766d969e30f6f7566002b6e8d03b069610de07c",
+      "bytes": 1206,
+      "path": "prefixes/03-audit-observed.pwf"
+    },
+    {
+      "blake3": "5f838b61598fd0ac1c0035fdcb85a6a1424d9c8348fc2cd1da5eadf9f5146749",
+      "bytes": 1718,
+      "path": "prefixes/04-surface-observed.pwf"
+    },
+    {
+      "blake3": "af1b2ef19abeab73db0a3a12991881d31822653c3ff73d93cc498f875d6aa2c5",
+      "bytes": 1942,
+      "path": "prefixes/05-qa-observed.pwf"
+    },
+    {
+      "blake3": "2391e2fd1c25a06024e2a10a5370dcffff110e7de6dce8f39db432682f2c3193",
+      "bytes": 2199,
+      "path": "prefixes/06-export-ensured.pwf"
+    },
+    {
+      "blake3": "41bb35aa72ffb94202a126d3f99be20bdd2b998e81b64a6dea172b3e1b3c3acb",
+      "bytes": 2487,
+      "path": "prefixes/07-report-ensured.pwf"
+    },
+    {
+      "blake3": "227692db7f3c2c2cdb4c6be2963d3cbd4b07d189d9bf4ee5d8b800e7a8e21302",
+      "bytes": 2799,
+      "path": "prefixes/08-complete.pwf"
+    }
+  ],
+  "frame_version": 1,
+  "generated_data": "generated 64-point LAS workflow facts and exact canonical artifacts only",
+  "operation_id": "32323232323232323232323232323232",
+  "run_id": "31313131313131313131313131313131",
+  "semantic_version": 1,
+  "source_id": "12c80f40777e13053c56a9f1e9457a666fde644b8a89d6dfbfdb100b4a6924c4",
+  "workspace_id": "8054361498049dc73b4825a03accf613"
+}

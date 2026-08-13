@@ -1,10 +1,12 @@
 # Point-Cloud Foundation Architecture
 
 Status: v0.1 through the narrow v0.7 technical-readiness slice implemented;
-v0.8 is an incomplete repository-qualification alpha with bounded file
-comparison implemented; the v0.9 Trust and v1 Candidate design is Active and
-inherits Run binding and evidence publication before trust-readiness claims;
-broader terrain, export, and product layers remain deferred
+v0.8 is an incomplete repository-qualification alpha with bounded comparison
+and strict Run-bound evidence plus full-ceiling streaming implemented; v0.9 is
+an incomplete trust-qualification alpha with independent review complete and a
+complete local candidate record outstanding; the v0.10 professional inspection
+View repository implementation is complete with field/adoption publication
+outstanding; broader terrain, export, and product layers remain deferred
 
 The accepted versioned designs are authoritative:
 
@@ -17,6 +19,7 @@ The accepted versioned designs are authoritative:
 - [v0.7 Technical partner-alpha readiness](../design/technical-alpha-readiness-v0.7.md)
 - [v0.8 Repository interoperability qualification](../design/design-partner-mvp-v0.8.md)
 - [v0.9 Trust and v1 Candidate](../design/trust-v1-candidate-v0.9.md)
+- [v0.10 Field Qualification and Professional Inspection View](../design/field-inspection-view-v0.10.md)
 
 The current foundation is headless and embeddable. It reads immutable Sources,
 prepares a complete rebuildable Spatial Index, resolves progressive display,
@@ -40,6 +43,12 @@ flowchart TD
     APP --> RW["render-wgpu"]
     APP --> IDX["point-index"]
     APP --> SRC["point-source"]
+
+    RDEMO["renderer-demo"] --> VIEW
+    RDEMO --> RW
+    RDEMO --> IDX
+    RDEMO --> LAS
+    RDEMO --> SRC
 
     WS --> IDX
     WS --> SRC
@@ -111,6 +120,9 @@ buffers, Workspace journal frames, spill files, or GPU buffers.
 - `point-view` owns deterministic culling, LOD demand, retention, and safe
   retirement decisions.
 - `render-wgpu` owns GPU resources and command recording.
+- `renderer-demo` owns private display mapping, camera controls, real-cloud
+  scheduling/state presentation, `PVIEW_*` diagnostics, and local corpus
+  measurement/report policy.
 
 ### Exact work and display work stay distinct
 
@@ -199,7 +211,7 @@ Operation states with the original identity. It opens but never creates the
 Workspace; an absent Workspace is `PWF_INVALID_REQUEST` before Run creation or
 Workspace mutation.
 
-## Scope boundary after v0.7
+## Current scope boundary
 
 Implemented document and terrain behavior is deliberately narrow:
 
@@ -227,9 +239,19 @@ application, above-500-million-Point, and human-workflow evidence also remains
 outstanding.
 
 The accepted v0.8 design adds a private `terrain-demo` semantic LandXML
-comparison module and CLI without changing the public foundation shape. Its
-Run binding and separate evidence artifact remain pending; every v0.7 journal
-and report contract remains unchanged.
+comparison module and CLI without changing the public foundation shape.
+Fold-forward work binds the verifier strictly read-only to one Complete Run and
+publishes separate canonical no-replace evidence; every v0.7 journal and report
+contract remains unchanged. Declared downstream labels do not prove execution.
+
+The v0.10 View adds one narrow public index recipe rather than a general
+display framework. Disk v1 remains position-only for neutral/elevation. Disk
+v2 retains row-aligned raw `U16` intensity, `U8` classification, and optional
+all-or-none `U16` RGB for disposable display. The private host maps those
+values, supports perspective/orthographic navigation, labels progressive
+Coverage, reports structured failures, and runs permission-gated local corpus
+measurements. None changes exact Source, Workspace, Query, terrain, QA, or
+export semantics.
 
 ## Document map
 
@@ -240,3 +262,4 @@ and report contract remains unchanged.
 - [Repository and dependency layout](repository-layout.md)
 - [Verification strategy](testing.md)
 - [Architectural decisions](../adr/README.md)
+- [First LAS/LAZ guide](../guides/first-las-laz.md)

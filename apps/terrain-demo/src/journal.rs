@@ -683,6 +683,148 @@ pub(crate) struct Journal {
     poisoned: bool,
 }
 
+/// Immutable facts decoded from one exact, semantically valid Complete journal.
+#[derive(Debug)]
+pub(crate) struct CompleteJournalSnapshot {
+    path: PathBuf,
+    file: File,
+    identity: fs::Metadata,
+    intent: WorkflowIntent,
+    revision: RevisionResolved,
+    export: ExportEnsured,
+    report: ReportEnsured,
+    complete: Complete,
+    journal_hash: Digest,
+    byte_length: u64,
+}
+
+impl CompleteJournalSnapshot {
+    /// Opens and validates a Complete journal without repairing or writing it.
+    pub(crate) fn open(path: &Path, limits: JournalLimits) -> Result<Self, JournalError> {
+        validate_limits(limits)?;
+        let target_identity = require_regular_file(path)?;
+        let mut file = File::open(path)
+            .map_err(|source| JournalError::io("open journal read-only", path, source))?;
+        File::try_lock_shared(&file).map_err(map_lock_error)?;
+        let identity = file
+            .metadata()
+            .map_err(|source| JournalError::io("inspect journal", path, source))?;
+        verify_recognized_journal(&file, path, &target_identity).map_err(|source| {
+            JournalError::io("verify opened read-only journal target", path, source)
+        })?;
+        let file_bytes = identity.len();
+        require(file_bytes, limits.max_journal_bytes, "journal bytes")?;
+        let scan = read_validated_scan(&mut file, path, limits, file_bytes)?;
+        if scan.scan.end != file_bytes {
+            return Err(JournalError::Corrupt("Complete journal has a torn suffix"));
+        }
+        verify_recognized_journal_bytes(&file, path, &identity, file_bytes).map_err(|source| {
+            JournalError::io("revalidate read-only journal snapshot", path, source)
+        })?;
+        Self::from_scan(scan, file_bytes, path.to_path_buf(), file, identity)
+    }
+
+    fn from_scan(
+        scan: ValidatedScan,
+        byte_length: u64,
+        path: PathBuf,
+        file: File,
+        identity: fs::Metadata,
+    ) -> Result<Self, JournalError> {
+        let ValidatedScan { run, scan } = scan;
+        let Scan {
+            checkpoints,
+            previous_hash,
+            end: _,
+        } = scan;
+        let mut checkpoints = checkpoints.into_iter();
+        let Some(Checkpoint::Intent(intent)) = checkpoints.next() else {
+            return Err(incomplete_qualification_journal());
+        };
+        let Some(Checkpoint::RevisionResolved(revision)) = checkpoints.next() else {
+            return Err(incomplete_qualification_journal());
+        };
+        let Some(Checkpoint::AuditObserved(_)) = checkpoints.next() else {
+            return Err(incomplete_qualification_journal());
+        };
+        let Some(Checkpoint::SurfaceObserved(_)) = checkpoints.next() else {
+            return Err(incomplete_qualification_journal());
+        };
+        let Some(Checkpoint::QaObserved(_)) = checkpoints.next() else {
+            return Err(incomplete_qualification_journal());
+        };
+        let Some(Checkpoint::ExportEnsured(export)) = checkpoints.next() else {
+            return Err(incomplete_qualification_journal());
+        };
+        let Some(Checkpoint::ReportEnsured(report)) = checkpoints.next() else {
+            return Err(incomplete_qualification_journal());
+        };
+        let Some(Checkpoint::Complete(complete)) = checkpoints.next() else {
+            return Err(incomplete_qualification_journal());
+        };
+        if checkpoints.next().is_some() {
+            return Err(incomplete_qualification_journal());
+        }
+        debug_assert_eq!(intent.run, run);
+        Ok(Self {
+            path,
+            file,
+            identity,
+            intent: *intent,
+            revision,
+            export,
+            report,
+            complete,
+            journal_hash: previous_hash,
+            byte_length,
+        })
+    }
+
+    /// Revalidates the exact journal file whose shared lock remains held.
+    pub(crate) fn verify(&self) -> Result<(), JournalError> {
+        verify_recognized_journal_bytes(&self.file, &self.path, &self.identity, self.byte_length)
+            .map_err(|source| {
+                JournalError::io(
+                    "revalidate read-only Complete journal witness",
+                    &self.path,
+                    source,
+                )
+            })
+    }
+
+    pub(crate) fn intent(&self) -> &WorkflowIntent {
+        &self.intent
+    }
+
+    pub(crate) const fn revision(&self) -> RevisionResolved {
+        self.revision
+    }
+
+    pub(crate) const fn export(&self) -> ExportEnsured {
+        self.export
+    }
+
+    pub(crate) const fn report(&self) -> ReportEnsured {
+        self.report
+    }
+
+    pub(crate) const fn complete(&self) -> Complete {
+        self.complete
+    }
+
+    pub(crate) const fn journal_hash(&self) -> Digest {
+        self.journal_hash
+    }
+
+    pub(crate) const fn byte_length(&self) -> u64 {
+        self.byte_length
+    }
+}
+
+const fn incomplete_qualification_journal() -> JournalError {
+    JournalError::Invalid("qualification requires a Complete workflow journal")
+}
+
 impl Journal {
     pub(crate) fn create(
         path: &Path,
@@ -732,7 +874,7 @@ impl Journal {
             .verify()
             .map_err(|source| JournalError::io("revalidate journal parent", parent, source))?;
         match fs::hard_link(guard.path(), path) {
-            Ok(()) => {}
+            Ok(()) => guard.mark_linked(),
             Err(source) if source.kind() == io::ErrorKind::AlreadyExists => {
                 return Err(JournalError::Exists(path.to_path_buf()));
             }
@@ -751,6 +893,7 @@ impl Journal {
             hook,
         )?;
         drop(stage);
+        drop(guard);
         Self::open(path, limits)
     }
 
@@ -770,19 +913,9 @@ impl Journal {
             .map_err(|source| JournalError::io("verify opened journal target", path, source))?;
         let file_bytes = identity.len();
         require(file_bytes, limits.max_journal_bytes, "journal bytes")?;
-        let (run, header_hash) = read_header(&mut file, path)?;
-        let mut scan = scan_frames(&mut file, path, limits, file_bytes, header_hash, run)?;
-        let Some(Checkpoint::Intent(intent)) = scan.checkpoints.first_mut() else {
-            return Err(JournalError::Corrupt("journal does not begin with Intent"));
-        };
-        intent.run = run;
-        intent.validate(limits)?;
-        if request_hash(intent) != intent.request_hash {
-            return Err(JournalError::Corrupt("Intent request hash differs"));
-        }
-        validate_semantic_chain(&scan.checkpoints)?;
-        if scan.end != file_bytes {
-            file.set_len(scan.end)
+        let scan = read_validated_scan(&mut file, path, limits, file_bytes)?;
+        if scan.scan.end != file_bytes {
+            file.set_len(scan.scan.end)
                 .map_err(|source| JournalError::io("truncate torn journal tail", path, source))?;
             file.sync_data()
                 .map_err(|source| JournalError::io("sync repaired journal", path, source))?;
@@ -794,10 +927,10 @@ impl Journal {
             file,
             identity,
             limits,
-            run,
-            checkpoints: scan.checkpoints,
-            previous_hash: scan.previous_hash,
-            end: scan.end,
+            run: scan.run,
+            checkpoints: scan.scan.checkpoints,
+            previous_hash: scan.scan.previous_hash,
+            end: scan.scan.end,
             poisoned: false,
         })
     }
@@ -819,6 +952,11 @@ impl Journal {
 
     pub(crate) fn retained_bytes(&self) -> u64 {
         retained_checkpoint_bytes(&self.checkpoints)
+    }
+
+    #[cfg(test)]
+    pub(crate) const fn terminal_hash(&self) -> Digest {
+        self.previous_hash
     }
 
     pub(crate) fn record(&mut self, checkpoint: Checkpoint) -> Result<bool, JournalError> {
@@ -1014,6 +1152,31 @@ struct Scan {
     checkpoints: Vec<Checkpoint>,
     previous_hash: Digest,
     end: u64,
+}
+
+struct ValidatedScan {
+    run: WorkflowRunId,
+    scan: Scan,
+}
+
+fn read_validated_scan(
+    file: &mut File,
+    path: &Path,
+    limits: JournalLimits,
+    file_bytes: u64,
+) -> Result<ValidatedScan, JournalError> {
+    let (run, header_hash) = read_header(file, path)?;
+    let mut scan = scan_frames(file, path, limits, file_bytes, header_hash, run)?;
+    let Some(Checkpoint::Intent(intent)) = scan.checkpoints.first_mut() else {
+        return Err(JournalError::Corrupt("journal does not begin with Intent"));
+    };
+    intent.run = run;
+    intent.validate(limits)?;
+    if request_hash(intent) != intent.request_hash {
+        return Err(JournalError::Corrupt("Intent request hash differs"));
+    }
+    validate_semantic_chain(&scan.checkpoints)?;
+    Ok(ValidatedScan { run, scan })
 }
 
 fn scan_frames(
@@ -2212,6 +2375,56 @@ fn verify_recognized_journal(file: &File, path: &Path, identity: &fs::Metadata) 
     }
 }
 
+fn verify_recognized_journal_bytes(
+    file: &File,
+    path: &Path,
+    identity: &fs::Metadata,
+    expected_bytes: u64,
+) -> io::Result<()> {
+    verify_recognized_journal(file, path, identity)?;
+    let opened = file.metadata()?;
+    let target = fs::symlink_metadata(path)?;
+    if opened.len() == expected_bytes
+        && target.len() == expected_bytes
+        && same_journal_file_state(identity, &opened)
+        && same_journal_file_state(&opened, &target)
+    {
+        Ok(())
+    } else {
+        Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "recognized journal state changed while reading",
+        ))
+    }
+}
+
+#[cfg(unix)]
+fn same_journal_file_state(left: &fs::Metadata, right: &fs::Metadata) -> bool {
+    use std::os::unix::fs::MetadataExt as _;
+
+    same_file_identity(left, right)
+        && left.len() == right.len()
+        && left.mtime() == right.mtime()
+        && left.mtime_nsec() == right.mtime_nsec()
+        && left.ctime() == right.ctime()
+        && left.ctime_nsec() == right.ctime_nsec()
+}
+
+#[cfg(windows)]
+fn same_journal_file_state(left: &fs::Metadata, right: &fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt as _;
+
+    same_file_identity(left, right)
+        && left.len() == right.len()
+        && left.creation_time() == right.creation_time()
+        && left.last_write_time() == right.last_write_time()
+}
+
+#[cfg(not(any(unix, windows)))]
+fn same_journal_file_state(_left: &fs::Metadata, _right: &fs::Metadata) -> bool {
+    false
+}
+
 fn create_stage(parent: &Path) -> Result<(StageGuard, File), JournalError> {
     create_publication_stage(
         parent,
@@ -2346,6 +2559,99 @@ mod tests {
     use super::*;
 
     #[derive(Clone, Copy)]
+    struct GoldenRunFile {
+        path: &'static str,
+        bytes: &'static [u8],
+    }
+
+    fn golden_run_files() -> [GoldenRunFile; 13] {
+        [
+            GoldenRunFile {
+                path: "README.md",
+                bytes: include_bytes!("../tests/fixtures/run-v1/README.md"),
+            },
+            GoldenRunFile {
+                path: "complete/audit.json",
+                bytes: include_bytes!("../tests/fixtures/run-v1/complete/audit.json"),
+            },
+            GoldenRunFile {
+                path: "complete/run.lock",
+                bytes: include_bytes!("../tests/fixtures/run-v1/complete/run.lock"),
+            },
+            GoldenRunFile {
+                path: "complete/run.pwf",
+                bytes: include_bytes!("../tests/fixtures/run-v1/complete/run.pwf"),
+            },
+            GoldenRunFile {
+                path: "complete/terrain.xml",
+                bytes: include_bytes!("../tests/fixtures/run-v1/complete/terrain.xml"),
+            },
+            GoldenRunFile {
+                path: "prefixes/01-intent.pwf",
+                bytes: include_bytes!("../tests/fixtures/run-v1/prefixes/01-intent.pwf"),
+            },
+            GoldenRunFile {
+                path: "prefixes/02-revision-resolved.pwf",
+                bytes: include_bytes!("../tests/fixtures/run-v1/prefixes/02-revision-resolved.pwf"),
+            },
+            GoldenRunFile {
+                path: "prefixes/03-audit-observed.pwf",
+                bytes: include_bytes!("../tests/fixtures/run-v1/prefixes/03-audit-observed.pwf"),
+            },
+            GoldenRunFile {
+                path: "prefixes/04-surface-observed.pwf",
+                bytes: include_bytes!("../tests/fixtures/run-v1/prefixes/04-surface-observed.pwf"),
+            },
+            GoldenRunFile {
+                path: "prefixes/05-qa-observed.pwf",
+                bytes: include_bytes!("../tests/fixtures/run-v1/prefixes/05-qa-observed.pwf"),
+            },
+            GoldenRunFile {
+                path: "prefixes/06-export-ensured.pwf",
+                bytes: include_bytes!("../tests/fixtures/run-v1/prefixes/06-export-ensured.pwf"),
+            },
+            GoldenRunFile {
+                path: "prefixes/07-report-ensured.pwf",
+                bytes: include_bytes!("../tests/fixtures/run-v1/prefixes/07-report-ensured.pwf"),
+            },
+            GoldenRunFile {
+                path: "prefixes/08-complete.pwf",
+                bytes: include_bytes!("../tests/fixtures/run-v1/prefixes/08-complete.pwf"),
+            },
+        ]
+    }
+
+    fn golden_prefixes() -> [&'static [u8]; 8] {
+        [
+            include_bytes!("../tests/fixtures/run-v1/prefixes/01-intent.pwf"),
+            include_bytes!("../tests/fixtures/run-v1/prefixes/02-revision-resolved.pwf"),
+            include_bytes!("../tests/fixtures/run-v1/prefixes/03-audit-observed.pwf"),
+            include_bytes!("../tests/fixtures/run-v1/prefixes/04-surface-observed.pwf"),
+            include_bytes!("../tests/fixtures/run-v1/prefixes/05-qa-observed.pwf"),
+            include_bytes!("../tests/fixtures/run-v1/prefixes/06-export-ensured.pwf"),
+            include_bytes!("../tests/fixtures/run-v1/prefixes/07-report-ensured.pwf"),
+            include_bytes!("../tests/fixtures/run-v1/prefixes/08-complete.pwf"),
+        ]
+    }
+
+    fn write_fixture(path: &Path, bytes: &[u8]) {
+        fs::write(path, bytes).expect("materialize immutable Run fixture bytes");
+    }
+
+    fn failed_open_preserves(path: &Path, bytes: &[u8]) -> JournalError {
+        write_fixture(path, bytes);
+        let before = fs::read(path).expect("read mutation fixture before open");
+        let error = Journal::open(path, JournalLimits::default())
+            .expect_err("mutated Run fixture must fail closed");
+        assert_eq!(
+            fs::read(path).expect("read mutation fixture after open"),
+            before,
+            "failed journal open must not partially publish or repair bytes",
+        );
+        error
+    }
+
+    #[derive(Clone, Copy)]
     enum TestAction<'a> {
         FailAt(PublicationBoundary),
         InstallAt {
@@ -2393,7 +2699,7 @@ mod tests {
         .expect_err("a pre-link failure cannot create a Run");
         assert!(matches!(failure, JournalError::Io { .. }));
         assert!(!pre_link.exists());
-        directory.assert_no_stages();
+        directory.assert_stages_are_safe();
 
         for boundary in [
             PublicationBoundary::IntentTargetVerification,
@@ -2424,7 +2730,7 @@ mod tests {
                 .expect("a post-link journal is complete and recoverable");
             assert_eq!(reopened.intent(), &expected_intent);
             drop(reopened);
-            directory.assert_no_stages();
+            directory.assert_stages_are_safe();
         }
     }
 
@@ -2576,7 +2882,7 @@ mod tests {
         .expect_err("a post-link replacement has no receipt");
         assert!(matches!(failure, JournalError::Indeterminate { .. }));
         assert_eq!(fs::read(&replaced).unwrap(), replacement);
-        directory.assert_no_stages();
+        directory.assert_stages_are_safe();
     }
 
     #[test]
@@ -2608,6 +2914,331 @@ mod tests {
         assert_eq!(reopened.intent(), &intent);
         assert_eq!(reopened.checkpoints().len(), 8);
         assert_eq!(fs::metadata(path).unwrap().len(), bytes);
+    }
+
+    #[test]
+    fn v1_golden_manifest_matches_every_compiled_immutable_payload() {
+        let manifest: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/run-v1/manifest.json"))
+                .expect("checked Run fixture manifest is valid JSON");
+        assert_eq!(manifest["disk_version"], 1);
+        assert_eq!(manifest["semantic_version"], 1);
+        assert_eq!(manifest["frame_version"], 1);
+        assert_eq!(manifest["checkpoint_count"], 8);
+        assert_eq!(
+            manifest["generated_data"],
+            "generated 64-point LAS workflow facts and exact canonical artifacts only"
+        );
+        let entries = manifest["files"]
+            .as_array()
+            .expect("Run fixture manifest carries a file table");
+        assert_eq!(entries.len(), golden_run_files().len());
+        for file in golden_run_files() {
+            let entry = entries
+                .iter()
+                .find(|entry| entry["path"] == file.path)
+                .expect("every compiled Run fixture payload is manifested");
+            assert_eq!(entry["bytes"], file.bytes.len());
+            assert_eq!(
+                entry["blake3"],
+                blake3::hash(file.bytes).to_hex().to_string()
+            );
+        }
+    }
+
+    #[test]
+    fn v1_golden_prefixes_open_without_mutation_and_recover_only_torn_suffixes() {
+        let directory = Directory::new("golden-prefixes");
+        let prefixes = golden_prefixes();
+        for (index, prefix) in prefixes.iter().enumerate() {
+            let path = directory.path.join(format!("prefix-{}.pwf", index + 1));
+            write_fixture(&path, prefix);
+            let before = fs::read(&path).unwrap();
+            let journal = Journal::open(&path, JournalLimits::default())
+                .expect("every committed v1 checkpoint prefix opens");
+            assert_eq!(journal.run(), WorkflowRunId::new([0x31; 16]).unwrap());
+            assert_eq!(journal.checkpoints().len(), index + 1);
+            drop(journal);
+            assert_eq!(fs::read(&path).unwrap(), before);
+
+            let torn_path = directory
+                .path
+                .join(format!("torn-prefix-{}.pwf", index + 1));
+            write_fixture(&torn_path, prefix);
+            let suffix = prefixes.get(index + 1).map_or(&b"torn"[..], |next| {
+                &next[prefix.len()..prefix.len().saturating_add(17)]
+            });
+            fs::OpenOptions::new()
+                .append(true)
+                .open(&torn_path)
+                .unwrap()
+                .write_all(suffix)
+                .unwrap();
+            let repaired = Journal::open(&torn_path, JournalLimits::default())
+                .expect("writable recovery removes only a torn suffix");
+            assert_eq!(repaired.checkpoints().len(), index + 1);
+            drop(repaired);
+            assert_eq!(fs::read(torn_path).unwrap(), *prefix);
+        }
+    }
+
+    #[test]
+    fn v1_golden_writer_reproduces_every_checkpoint_boundary_exactly() {
+        let directory = Directory::new("golden-reproduction");
+        let input = directory.path.join("input.pwf");
+        write_fixture(
+            &input,
+            include_bytes!("../tests/fixtures/run-v1/complete/run.pwf"),
+        );
+        let opened = Journal::open(&input, JournalLimits::default())
+            .expect("open Complete golden journal for semantic facts");
+        let intent = opened.intent().clone();
+        let checkpoints = opened.checkpoints()[1..].to_vec();
+        drop(opened);
+
+        let output = directory.path.join("output.pwf");
+        let mut reproduced = Journal::create(&output, intent, JournalLimits::default())
+            .expect("reproduce golden Intent");
+        let prefixes = golden_prefixes();
+        assert_eq!(fs::read(&output).unwrap(), prefixes[0]);
+        for (index, checkpoint) in checkpoints.into_iter().enumerate() {
+            assert!(reproduced.record(checkpoint).unwrap());
+            assert_eq!(fs::read(&output).unwrap(), prefixes[index + 1]);
+        }
+    }
+
+    #[test]
+    fn v1_golden_complete_artifact_hashes_match_the_strict_journal_facts() {
+        let directory = Directory::new("golden-complete-artifacts");
+        let path = directory.path.join("run.pwf");
+        let journal_bytes = include_bytes!("../tests/fixtures/run-v1/complete/run.pwf");
+        let terrain = include_bytes!("../tests/fixtures/run-v1/complete/terrain.xml");
+        let report = include_bytes!("../tests/fixtures/run-v1/complete/audit.json");
+        write_fixture(&path, journal_bytes);
+        let snapshot = CompleteJournalSnapshot::open(&path, JournalLimits::default())
+            .expect("strictly open the eight-frame Complete golden Run");
+        assert_eq!(snapshot.byte_length(), journal_bytes.len() as u64);
+        assert_eq!(snapshot.export().byte_length, terrain.len() as u64);
+        assert_eq!(
+            snapshot.export().content_hash,
+            *blake3::hash(terrain).as_bytes()
+        );
+        let mut report_hasher = Hasher::new();
+        report_hasher.update(b"punctra-terrain-workflow-report-bytes-v1");
+        report_hasher.update(report);
+        assert_eq!(snapshot.report().byte_length, report.len() as u64);
+        assert_eq!(
+            snapshot.report().report_hash,
+            *report_hasher.finalize().as_bytes()
+        );
+        assert_eq!(
+            snapshot.complete().landxml_hash,
+            snapshot.export().content_hash
+        );
+        assert_eq!(
+            snapshot.complete().report_hash,
+            snapshot.report().report_hash
+        );
+    }
+
+    #[test]
+    fn v1_golden_future_version_checksum_and_lineage_mutations_fail_stably() {
+        let directory = Directory::new("golden-mutations");
+        let complete = include_bytes!("../tests/fixtures/run-v1/complete/run.pwf");
+
+        let mut future = complete.to_vec();
+        future[8..12].copy_from_slice(&2_u32.to_le_bytes());
+        assert!(matches!(
+            failed_open_preserves(&directory.path.join("future.pwf"), &future),
+            JournalError::Incompatible("journal disk or semantic version differs")
+        ));
+
+        let mut checksum = complete.to_vec();
+        *checksum.last_mut().unwrap() ^= 1;
+        assert!(matches!(
+            failed_open_preserves(&directory.path.join("checksum.pwf"), &checksum),
+            JournalError::Corrupt("journal frame checksum differs")
+        ));
+
+        let mut lineage = complete.to_vec();
+        let second_frame = golden_prefixes()[0].len();
+        lineage[second_frame + 6..second_frame + 8].copy_from_slice(&3_u16.to_le_bytes());
+        assert!(matches!(
+            failed_open_preserves(&directory.path.join("lineage.pwf"), &lineage),
+            JournalError::Corrupt("journal frame sequence or kind order differs")
+        ));
+    }
+
+    #[test]
+    fn v1_golden_truncation_and_source_binding_mutations_fail_without_repair() {
+        let directory = Directory::new("golden-binding-mutations");
+        let complete = include_bytes!("../tests/fixtures/run-v1/complete/run.pwf");
+        let mut truncated = complete[..complete.len() - 1].to_vec();
+        let truncated_path = directory.path.join("truncated.pwf");
+        write_fixture(&truncated_path, &truncated);
+        let before = fs::read(&truncated_path).unwrap();
+        assert!(matches!(
+            CompleteJournalSnapshot::open(&truncated_path, JournalLimits::default()),
+            Err(JournalError::Corrupt("Complete journal has a torn suffix"))
+        ));
+        assert_eq!(fs::read(&truncated_path).unwrap(), before);
+
+        let mut source_bound = golden_prefixes()[0].to_vec();
+        let frame_start = HEADER_BYTES;
+        let payload_start = frame_start + FRAME_HEADER_BYTES;
+        source_bound[payload_start + 32] ^= 1;
+        let payload_bytes = usize::try_from(u32::from_le_bytes(
+            source_bound[frame_start + 16..frame_start + 20]
+                .try_into()
+                .unwrap(),
+        ))
+        .unwrap();
+        let hash_start = payload_start + payload_bytes;
+        let header: [u8; FRAME_HEADER_BYTES] =
+            source_bound[frame_start..payload_start].try_into().unwrap();
+        let checksum = frame_hash(&header, &source_bound[payload_start..hash_start]);
+        source_bound[hash_start..hash_start + FRAME_HASH_BYTES].copy_from_slice(&checksum);
+        assert!(matches!(
+            failed_open_preserves(&directory.path.join("source-binding.pwf"), &source_bound),
+            JournalError::Corrupt("Intent request hash differs")
+        ));
+        truncated.clear();
+    }
+
+    #[test]
+    fn v1_golden_complete_open_honors_typed_journal_resource_limits() {
+        let directory = Directory::new("golden-resource-limit");
+        let path = directory.path.join("run.pwf");
+        let complete = include_bytes!("../tests/fixtures/run-v1/complete/run.pwf");
+        write_fixture(&path, complete);
+        let before = fs::read(&path).unwrap();
+        let limits = JournalLimits {
+            max_journal_bytes: complete.len() as u64 - 1,
+            ..JournalLimits::default()
+        };
+        assert!(matches!(
+            Journal::open(&path, limits),
+            Err(JournalError::Resource {
+                limit: "journal bytes",
+                required,
+                allowed,
+            }) if required == complete.len() as u64 && allowed == complete.len() as u64 - 1
+        ));
+        assert_eq!(fs::read(path).unwrap(), before);
+    }
+
+    #[test]
+    fn complete_snapshot_reads_exact_facts_without_changing_the_journal() {
+        let directory = Directory::new("complete-snapshot");
+        let path = directory.path.join("run.pwf");
+        let intent = intent();
+        let expected_checkpoints = checkpoints(&intent);
+        let Checkpoint::RevisionResolved(expected_revision) = expected_checkpoints[0] else {
+            unreachable!("fixture checkpoint zero is RevisionResolved");
+        };
+        let Checkpoint::ExportEnsured(expected_export) = expected_checkpoints[4] else {
+            unreachable!("fixture checkpoint four is ExportEnsured");
+        };
+        let Checkpoint::ReportEnsured(expected_report) = expected_checkpoints[5] else {
+            unreachable!("fixture checkpoint five is ReportEnsured");
+        };
+        let Checkpoint::Complete(expected_complete) = expected_checkpoints[6] else {
+            unreachable!("fixture checkpoint six is Complete");
+        };
+        let mut journal = Journal::create(&path, intent.clone(), JournalLimits::default()).unwrap();
+        for checkpoint in &expected_checkpoints {
+            journal.record(checkpoint.clone()).unwrap();
+        }
+        let expected_journal_hash = journal.previous_hash;
+        drop(journal);
+        let expected_bytes = fs::read(&path).unwrap();
+
+        let snapshot = CompleteJournalSnapshot::open(&path, JournalLimits::default()).unwrap();
+
+        assert_eq!(snapshot.intent(), &intent);
+        assert_eq!(snapshot.revision(), expected_revision);
+        assert_eq!(snapshot.export(), expected_export);
+        assert_eq!(snapshot.report(), expected_report);
+        assert_eq!(snapshot.complete(), expected_complete);
+        assert_eq!(snapshot.journal_hash(), expected_journal_hash);
+        assert_eq!(snapshot.byte_length(), expected_bytes.len() as u64);
+        assert_eq!(fs::read(path).unwrap(), expected_bytes);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn complete_snapshot_rejects_same_length_rewrite_with_restored_mtime() {
+        use std::fs::FileTimes;
+
+        let directory = Directory::new("complete-snapshot-rewrite");
+        let path = directory.path.join("run.pwf");
+        let expected_intent = intent();
+        let mut journal =
+            Journal::create(&path, expected_intent.clone(), JournalLimits::default()).unwrap();
+        for checkpoint in checkpoints(&expected_intent) {
+            journal.record(checkpoint).unwrap();
+        }
+        drop(journal);
+        let snapshot = CompleteJournalSnapshot::open(&path, JournalLimits::default()).unwrap();
+        let original = fs::metadata(&path).unwrap();
+        let original_modified = original.modified().unwrap();
+        let mut replacement = fs::read(&path).unwrap();
+        replacement[HEADER_BYTES - 1] ^= 1;
+
+        let mut writer = OpenOptions::new()
+            .write(true)
+            .truncate(true)
+            .open(&path)
+            .unwrap();
+        writer.write_all(&replacement).unwrap();
+        writer.sync_all().unwrap();
+        writer
+            .set_times(FileTimes::new().set_modified(original_modified))
+            .unwrap();
+        drop(writer);
+
+        let rewritten = fs::metadata(&path).unwrap();
+        assert_eq!(rewritten.len(), original.len());
+        assert_eq!(rewritten.modified().unwrap(), original_modified);
+        assert!(matches!(snapshot.verify(), Err(JournalError::Io { .. })));
+    }
+
+    #[test]
+    fn complete_snapshot_rejects_incomplete_and_torn_journals_without_repair() {
+        let directory = Directory::new("strict-snapshot-rejection");
+        let incomplete_path = directory.path.join("incomplete.pwf");
+        drop(Journal::create(&incomplete_path, intent(), JournalLimits::default()).unwrap());
+        let incomplete_bytes = fs::read(&incomplete_path).unwrap();
+
+        let incomplete = CompleteJournalSnapshot::open(&incomplete_path, JournalLimits::default())
+            .expect_err("an Intent-only journal is not a Complete-Run snapshot");
+        assert!(matches!(incomplete, JournalError::Invalid(_)));
+        assert_eq!(fs::read(&incomplete_path).unwrap(), incomplete_bytes);
+
+        let torn_path = directory.path.join("torn.pwf");
+        let expected_intent = intent();
+        let mut journal = Journal::create(
+            &torn_path,
+            expected_intent.clone(),
+            JournalLimits::default(),
+        )
+        .unwrap();
+        for checkpoint in checkpoints(&expected_intent) {
+            journal.record(checkpoint).unwrap();
+        }
+        drop(journal);
+        fs::OpenOptions::new()
+            .append(true)
+            .open(&torn_path)
+            .unwrap()
+            .write_all(b"torn")
+            .unwrap();
+        let torn_bytes = fs::read(&torn_path).unwrap();
+
+        let torn = CompleteJournalSnapshot::open(&torn_path, JournalLimits::default())
+            .expect_err("strict snapshots cannot repair a torn suffix");
+        assert!(matches!(torn, JournalError::Corrupt(_)));
+        assert_eq!(fs::read(torn_path).unwrap(), torn_bytes);
     }
 
     #[test]
@@ -2779,7 +3410,7 @@ mod tests {
             Self { path }
         }
 
-        fn assert_no_stages(&self) {
+        fn assert_stages_are_safe(&self) {
             let stages = fs::read_dir(&self.path)
                 .unwrap()
                 .filter_map(Result::ok)
@@ -2789,8 +3420,15 @@ mod tests {
                         .to_string_lossy()
                         .starts_with(".punctra-workflow-")
                 })
-                .count();
-            assert_eq!(stages, 0, "recognized journal stages must be cleaned");
+                .collect::<Vec<_>>();
+            for stage in stages {
+                let metadata = stage.metadata().expect("inspect retained journal stage");
+                assert!(metadata.is_file(), "retained journal stage is regular");
+                assert!(
+                    metadata.len() <= JournalLimits::default().max_journal_bytes,
+                    "retained journal stage is bounded"
+                );
+            }
         }
     }
 

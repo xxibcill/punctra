@@ -3,12 +3,15 @@
 Status: renderer, adaptive View planning, Real Sources, Spatial Index/out-of-
 core View, the narrow Workspace, v0.6 Terrain and Check Point QA, and the v0.7
 technical-readiness Workflow Run are implemented; v0.8 remains an incomplete
-interoperability-qualification alpha with bounded file comparison implemented;
-the narrow v0.9 Trust and v1 Candidate design is Active and inherits its
-Run-bound evidence closure before compatibility-readiness claims; broader
-terrain and product terms remain deferred
+interoperability-qualification alpha with Run-bound evidence and full-ceiling
+streaming implemented; v0.9 remains an incomplete trust-qualification alpha
+with independent Standards/Spec review complete but a complete local candidate
+record outstanding; the v0.10 professional inspection View repository
+implementation is complete while
+field, partner-validation, adoption-publication, and support evidence remain
+outstanding; broader terrain and product terms remain deferred
 
-Punctra v0.9 builds on the reusable render engine, renderer-neutral View
+Punctra v0.10 builds on the reusable render engine, renderer-neutral View
 planner, and verified Source path described in the accepted [v0.1 renderer
 design](docs/design/render-engine-v0.1.md), [v0.2 planning
 design](docs/design/adaptive-view-planning-v0.2.md), and [v0.3 Real Sources
@@ -31,15 +34,25 @@ one headless technical path and do not imply a partner-facing product.
 The accepted [v0.8 repository interoperability qualification
 design](docs/design/design-partner-mvp-v0.8.md) fixes the meanings of
 Downstream Declaration, Interoperability Qualification, Round-Trip Evidence,
-and Tolerance Profile for the post-Run verifier. The initial comparator exists,
-but those terms do not imply that Run-bound evidence was published or that a
-downstream product was exercised.
+and Tolerance Profile for the post-Run verifier. The bounded streaming
+comparator and canonical Run-bound pass/fail evidence path exist, but those
+terms do not imply that a downstream product was exercised or that a firm
+accepted the result.
 The accepted [v0.9 Trust and v1 Candidate
 design](docs/design/trust-v1-candidate-v0.9.md) fixes compatibility and support
 claims to the formats, persisted versions, platforms, limits, and failure
 behavior actually covered by frozen fixtures and reproducible local evidence.
 It does not create a broader product or silently promote the incomplete v0.8
 alpha.
+The accepted [v0.10 Field Qualification and Professional Inspection View
+design](docs/design/field-inspection-view-v0.10.md) fixes Display Mode and
+Display Mapping as disposable host-owned presentation policy over explicit
+Source or position values. A displayed color never becomes authoritative Point
+data. The implementation retains position-only disk-v1 samples for neutral and
+elevation display and adds a narrow disk-v2 inspection sample for raw RGB,
+intensity, and classification. Perspective and orthographic projections,
+progressive loading/Coverage facts, structured View failures, and local corpus
+measurements remain application policy rather than exact Query semantics.
 
 ## Artifact
 
@@ -85,6 +98,32 @@ The act of producing an Artifact from one explicit input provenance and one Reci
 
 _Avoid:_ processing when the specific operation is derivation
 
+## Display Mapping
+
+A deterministic CPU conversion from an explicit sampled position or raw
+Attribute value to the RGBA8 bytes carried by a View Batch. It changes only
+presentation and cannot create an exact Attribute value, Query result, or
+Workspace Edit.
+
+_Avoid:_ Attribute conversion, shader truth, measurement palette
+
+## Display Mode
+
+The host-selected Display Mapping used for one View. v0.10 modes are neutral,
+elevation, RGB, intensity, and classification. Unsupported or unavailable
+inputs fail explicitly rather than causing a guessed fallback.
+
+_Avoid:_ layer when no data layer changes, classification when referring to color
+
+## Display Sample
+
+A bounded identity-preserving index value used for progressive display.
+Internal-node samples have Sampled Coverage; complete leaf reads have Complete
+Coverage for that node. Neither is an exact Workspace Query merely because its
+stored values came from the authoritative Source.
+
+_Avoid:_ Query result, complete Source, authoritative GPU Point
+
 ## Downstream Declaration
 
 The caller's exact application label, version label, and settings associated
@@ -121,6 +160,15 @@ _Avoid:_ current value without naming the Snapshot, mutated Source value
 The act of encoding a Snapshot or Artifact for an external tool or file format. Export does not alter the Workspace.
 
 _Avoid:_ save when producing an external deliverable
+
+## Field Corpus
+
+A bounded local manifest of permitted Sources, opaque observation identities,
+declared machine context, display/projection choices, and navigation traces
+used to reproduce viewing measurements. Permission to inspect and measure is
+explicit per Source; redistribution permission is separate.
+
+_Avoid:_ public dataset, benchmark proof, production evidence without permission
 
 ## Ground Input
 
@@ -180,6 +228,14 @@ _Avoid:_ selection when referring to the materialized result rather than the int
 An Artifact containing ordered elevation samples and gaps along a path over a Terrain Surface.
 
 _Avoid:_ cross-section unless that narrower meaning is intended
+
+## Projection Mode
+
+The camera projection used for a View. Perspective and orthographic projection
+change screen projection and LOD calculations but not Source coordinates,
+Point Identity, Coverage, or exact Query behavior.
+
+_Avoid:_ Coordinate Reference, map projection, CRS
 
 ## Query
 
@@ -336,6 +392,16 @@ _Avoid:_ scene when referring to a request
 A bounded, renderer-neutral group of origin-relative display values and stable Point Identities produced for a View. A View Batch is disposable and is never authoritative geometry.
 
 _Avoid:_ GPU buffer, render chunk
+
+## Viewing Report
+
+A bounded local record of one Field Corpus run: declared and observed machine
+context, Source/index binding, timings, resource facts, Coverage, trace facts,
+failures, and explicit nonclaims. It is measurement evidence only for the
+operations recorded; it does not imply terrain capacity, professional
+preference, partner acceptance, downstream support, or human-time savings.
+
+_Avoid:_ certification, field qualification, performance promise
 
 ## Workflow Run
 

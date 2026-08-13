@@ -65,25 +65,53 @@ Version 0.8.0-alpha.1 started the accepted
 design](docs/design/design-partner-mvp-v0.8.md). Its narrow planned repository
 slice is a private `terrain-demo` semantic LandXML 1.2 round-trip verifier and
 separate canonical evidence output. The bounded file-to-file comparison core
-and explicitly non-evidence `compare-landxml` CLI are now implemented. Durable
-Run binding and canonical evidence publication remain pending. This alpha is
-not relabeled Complete; its remaining accepted repository work is inherited as
-a prerequisite by v0.9. The v0.7 journal and `audit.json` are unchanged, and
-no actual Civil 3D, Bentley, partner, paid-pilot, conversion, or labor-savings
-test is claimed.
+and explicitly non-evidence `compare-landxml` CLI are implemented. Fold-forward
+v0.10 prerequisite work now adds strict read-only Complete-Run qualification,
+canonical pass/fail evidence publication through `verify-round-trip`, and the
+full-ceiling streaming reader plus generated/golden qualification matrix.
+Independent Standards/Spec review completed with no P0–P3 findings. The
+complete one-commit local release record remains outstanding, so this alpha is
+not relabeled Complete. The v0.7 journal and
+`audit.json` are unchanged, and no actual Civil 3D, Bentley, partner,
+paid-pilot, conversion, or labor-savings test is claimed.
 
-Version 0.9.0-alpha.1 starts the accepted, Active [Trust and v1 Candidate
-design](docs/design/trust-v1-candidate-v0.9.md). It narrows work to qualifying
+Version 0.9.0-alpha.1 started the accepted [Trust and v1 Candidate
+design](docs/design/trust-v1-candidate-v0.9.md). It narrowed work to qualifying
 the existing headless workflow for a maintainable compatibility and support
 promise: close the inherited Run-bound qualification gap, freeze owner-local
 persisted-v1 fixtures beyond the inherited Spatial Index goldens, harden
 recovery and disk-failure behavior, publish the exact support matrix, and
 reproduce local resource and performance evidence. The first hardening slice
 preserves Spatial Index filesystem failures as recoverable `PWF_IO` diagnostics
-through `terrain-demo`, including bounded operation/path/error rendering. It
-deliberately does not delete a partially written initial `.work` header: an
-ownership-safe recovery protocol for that case remains a v0.9 readiness gate.
-This work adds no new product feature family.
+through `terrain-demo`, including bounded operation/path/error rendering.
+Fold-forward v0.10 prerequisite work now publishes the first complete synced
+`.work` header from a uniquely owned temporary with no replacement; unknown or
+partial pre-existing paths remain untouched and fail closed. It also completes
+the owner-local persisted-v1 fixture and representative recovery/support
+matrix. This work added no new product feature family. v0.9 remains an
+incomplete alpha with independent review complete but a complete one-commit
+local candidate record outstanding; that gate is a prerequisite of v0.10.
+
+Version 0.10.0-alpha.1 implements the repository track of the accepted [Field
+Qualification and Professional Inspection View
+design](docs/design/field-inspection-view-v0.10.md)
+from that exact v0.9 alpha base. It adds deterministic neutral, elevation,
+RGB, intensity, and classification display; perspective and orthographic
+navigation; explicit loading/Coverage state; bounded `PVIEW_*` diagnostics;
+the narrow disk-v2 inspection recipe for exact raw display samples; and a
+permission-gated local corpus runner with canonical nonclaim-bearing reports.
+The six later v0.8 comparator correctness fixes are also reconciled into the
+base. v0.8 and v0.9 are not relabeled Complete, and no production corpus,
+observed workflow, workstation, usability, partner, or support qualification
+is claimed. Spatial Index v1 remains supported and position-only; v2
+inspection samples are bounded rebuildable display data. Sampled colors are
+disposable display values, not exact Query, Edit, terrain, QA, or export
+results.
+
+To try the implemented View safely, follow the five-minute [first LAS/LAZ
+guide](docs/guides/first-las-laz.md). It separates position-only disk-v1 and
+attributed disk-v2 caches and explains what progressive Coverage does and does
+not mean.
 
 Later direction and the exact external product gates are described in the
 [living roadmap](ROADMAP.md). Its candidate themes do not expand accepted
@@ -146,8 +174,8 @@ no I/O and never mutates renderer state.
   verified, bounded Source interface; LAZ formats 9 and 10 are explicitly
   unsupported pending exact WavePacket14 codec support.
 - `point-index` prepares one deterministic checksummed fixed-block BVH, returns
-  conservative Source spans, and streams bounded display samples or complete
-  Source-backed leaves.
+  conservative Source spans, and streams bounded position-only disk-v1 or
+  attributed disk-v2 display samples plus complete Source-backed leaves.
 - `point-workspace` owns exact revision-pinned classification selection,
   process-scoped spillable Point Sets, immutable sparse classification
   Revisions, immediate-head Revert, Operation-ID recovery, and the narrow exact
@@ -161,7 +189,9 @@ no I/O and never mutates renderer state.
 - `point-view` plans deterministic, budgeted hierarchy requests and retirement.
 - `render-wgpu` owns GPU resources, pipelines, drawing, and picking.
 - `renderer-demo` exercises the engine with either generated point batches or
-  one Full-verified indexed LAS/LAZ Source.
+  one Full-verified indexed LAS/LAZ Source. It privately owns display mapping,
+  perspective/orthographic controls, truthful progressive state, structured
+  View diagnostics, and the local field-corpus runner.
 - `terrain-demo` owns the GPU-free, restartable LAS/LAZ-to-index-to-Workspace-
   to-terrain-to-QA-to-LandXML Workflow Run and its canonical audit report.
 
@@ -276,6 +306,40 @@ vertex matches, and topology drift. Its summary is deliberately marked as not
 Run-bound and not canonical evidence; the application/version/settings labels
 are caller declarations, not proof that the named application ran.
 
+The inherited Run-bound qualification slice adds the strict post-Run command:
+
+```bash
+cargo run --release -p terrain-demo -- verify-round-trip \
+  --downstream-app "CALLER-DECLARED APP" \
+  --downstream-version "CALLER-DECLARED VERSION" \
+  --downstream-setting "profile=CALLER-DECLARED SETTINGS" \
+  --horizontal-tolerance-metres 0.001 \
+  --vertical-tolerance-metres 0.001 \
+  run-root returned.xml round-trip-evidence.json
+```
+
+It accepts only an existing, exact eight-frame Complete Run, keeps the existing
+shared Run lock for the operation, and revalidates `run.pwf`, `terrain.xml`, and
+`audit.json` without repair or mutation. The evidence target must be outside
+the Run root. Exact existing evidence bytes reconcile; different existing
+bytes are never replaced. A fully evaluated semantic mismatch publishes
+canonical failed evidence and exits nonzero with its stable `PRT_*` reason.
+Malformed input, resource/I/O failure, changed Run artifacts, and publication
+uncertainty are operational failures and publish no final result.
+
+The evidence application, version, and settings are caller declarations only.
+Even passing evidence explicitly records that Punctra did not observe the
+downstream application run and does not establish vendor certification, firm
+acceptance, paid use, conversion, or measured labor savings.
+
+Checked-in generated pass and topology-failure evidence fixtures pin the v1
+schema's canonical bytes and hashes. The streaming verifier now covers the
+exporter's 4-GiB, 10-million-vertex, and 20-million-face ceilings with separate
+token, parser-working, retained-working, node, text, and comparison limits.
+Those generated fixtures did not by themselves supply independent review; the
+separate review is now complete. They still do not supply a complete one-commit
+local release record or any external product evidence.
+
 The fixed Run-root children are `run.pwf`, `run.lock`, `terrain.xml`, and
 `audit.json`. Existing exact XML/report bytes reconcile; different caller-owned
 targets fail without replacement. Inspect may durably truncate a torn final
@@ -297,31 +361,86 @@ session; retain that identity, then drop every Workspace/Snapshot/PointSet
 handle so `terrain-demo` can acquire the exclusive Workspace lock.
 
 Pass a real Source to Full-verify it, build or open its index, and render it.
-The optional target defaults to `SOURCE.pidx`:
+When the optional target is omitted, neutral/elevation default to
+`SOURCE.pidx`, while RGB/intensity/classification default to
+`SOURCE.inspection-v2.pidx`; the incompatible recipes never choose the same
+implicit path. Neutral color remains the default. Elevation is normalized by
+complete Source world-Z bounds. RGB and intensity scale exact raw `U16` values
+to RGBA8, while classification maps raw `U8` values through a fixed v0.10
+palette:
 
 ```bash
 cargo run --release -p renderer-demo -- survey.laz survey.laz.pidx
+cargo run --release -p renderer-demo -- \
+  --display elevation survey.laz survey.laz.pidx
+cargo run --release -p renderer-demo -- \
+  --display rgb survey.laz survey.inspection-v2.pidx
+cargo run --release -p renderer-demo -- \
+  --display intensity survey.laz survey.inspection-v2.pidx
+cargo run --release -p renderer-demo -- \
+  --display classification survey.laz survey.inspection-v2.pidx
 ```
+
+Neutral and elevation use the position-only disk-v1 recipe. RGB, intensity,
+and classification share the attributed disk-v2 inspection recipe. The two
+recipes cannot share a target: an incompatible complete or work target is
+preserved and rejected, so choose separate paths or explicitly move aside the
+rebuildable cache family before rebuilding. RGB additionally requires all
+three LAS `U16` color Attributes; there is no silent fallback.
 
 The same Source/index/planner/materializer path has a GPU-free process smoke
 mode that accepts one atomic CPU-model Upsert:
 
 ```bash
-cargo run --release -p renderer-demo -- --smoke survey.laz survey.laz.pidx
+cargo run --release -p renderer-demo -- \
+  --smoke --display classification survey.laz survey.inspection-v2.pidx
 ```
 
-- Left-drag orbits and the mouse wheel zooms.
+Display colors are sampled presentation values. They do not replace exact CPU
+inspection or make the GPU authoritative.
+
+- Left-drag orbits, middle-drag pans, and the mouse wheel zooms.
+- `P` toggles perspective/orthographic projection without changing the
+  target-plane scale.
 - `R` resets the camera, `H` toggles stable-ID highlights, and Space pauses or
-  resumes node materialization while planning and safe retirement continue.
+  resumes new node materialization while planning and safe retirement
+  continue.
 - Escape exits.
 
-The window title reports resident points and bytes, cumulative upload bytes,
-draw calls, FPS, frame time, encoding time, upload time, planner requests, and
-streaming progress. The synthetic hierarchy represents more than 10 million
-logical Points; both paths keep renderer residency at fixed point, byte, and
-batch limits. The real path additionally reports Full verification, index
-disposition and reuse, first accepted batch latency, queue depth, and staging
-peaks.
+The window title distinguishes LOD demand, load candidates, actually issued
+requests, retained/retired nodes, queue/staging facts, and requested/resident
+nodes. It names Sampled versus Complete resident Coverage and labels the
+projection and paused/streaming/steady state; none is called Query completion.
+The synthetic hierarchy represents more than 10 million logical Points; both
+paths keep renderer residency at fixed point, byte, and batch limits. The real
+path additionally reports Full verification, index disposition and reuse,
+first accepted batch latency, queue depth, and staging peaks. Failures use a
+stable `PVIEW_*` code, owning phase, bounded detail, and one safe recovery
+action.
+
+For reproducible local viewing measurements, copy the checked-in [field-corpus
+manifest example](docs/guides/field-corpus.example.json) only after confirming
+permission to inspect and measure every Source, then run:
+
+```bash
+cargo run --release -p renderer-demo -- corpus \
+  --manifest /private/path/to/field-corpus.json \
+  --report /private/path/to/viewing-report.json
+```
+
+The GPU-backed runner measures Full verification, cold/warm index preparation,
+first visible submission, a declared navigation trace, residency, and disk
+facts under recorded limits. Reports omit Source/index paths and opaque
+project/firm identifiers, publish without replacement, and encode explicit
+false nonclaims for production-corpus completion, partner acceptance,
+professional preference, terrain capacity, and human-time savings. They may
+still contain sensitive Source identity and machine facts and are not approved
+for publication by being generated.
+
+Each corpus entry must name a fresh, absent index target so the first timing is
+a genuine cold build; an existing or resumable target is rejected without
+replacement. The runner then immediately reopens the completed artifact and
+records a separate warm-open timing.
 
 ## v0.4 benchmark evidence
 
@@ -405,11 +524,17 @@ external gate remains outstanding.
 
 ## v0.7 benchmark evidence
 
-`terrain-demo` has 43 package tests: 25 unit/private fault and contract tests,
-15 public workflow-facade tests, and three process tests. The public suites
-cover every eight-frame resume prefix, 12 limit families, known-identity
-validation, and dropped-Workflow recovery; the private fault scope is
-documented precisely in the [verification strategy](docs/architecture/testing.md).
+`terrain-demo` now has 133 package tests: 109 unit/private fault and contract
+tests, 15 public workflow-facade tests, eight process tests, and one checked-Run
+v1 golden-corpus test. The retained
+v0.7 suites cover every eight-frame resume prefix, 12 limit families,
+known-identity validation, and dropped-Workflow recovery. The fold-forward v0.8
+coverage adds strict Complete-Run qualification, full-ceiling exact-byte
+streaming, canonical pass/fail evidence, checked-in v1 evidence fixtures,
+exact reconciliation, boundary/over-boundary allocation gates, and
+non-mutation cases. The private fault and algorithm-accounting scope is
+documented precisely in the [verification
+strategy](docs/architecture/testing.md).
 
 The checked-in `terrain-demo` Criterion benchmark exercises five restart modes
 through the public workflow facade with generated local LAS data. The local
@@ -431,6 +556,23 @@ here. These are generated local technical observations. Worker peak heap was
 not measured, and partner, production, downstream round-trip, and human-time
 acceptance remain unmeasured.
 
+## v0.10 reproducible viewing measurement
+
+The checked-in renderer viewing microbenchmark defaults to 100,000 generated
+Points and accepts a positive size through ten million:
+
+```bash
+PUNCTRA_RENDERER_VIEW_BENCH_POINTS=1000000 \
+  cargo bench -p renderer-demo --bench viewing
+```
+
+It measures a warm verified position-only index open and first bounded root
+display batch, and prints generated Point/node counts plus artifact and
+observed index-temporary bytes. No reference number is published here until a
+named local run is retained. This generated CPU/index benchmark is distinct
+from the permission-gated GPU corpus runner and proves neither production
+scale nor professional workflow performance.
+
 ## Development
 
 Install the pinned Rust toolchain, then run the authoritative local verification
@@ -448,15 +590,24 @@ cargo bench -p point-index --bench index
 cargo bench -p point-workspace --bench document
 cargo bench -p point-terrain --bench terrain
 cargo bench -p terrain-demo --bench journal
+cargo bench -p renderer-demo --bench viewing
 cargo run -p point-index --example direct_use
 cargo run --release -p point-workspace --example classify -- \
   survey.laz survey.laz.pidx survey.pcw 6
 cargo run -p point-terrain --example derive
+cargo test -p terrain-demo --lib --all-features
 cargo test -p terrain-demo --test workflow
 cargo test -p terrain-demo --test process
+cargo test -p terrain-demo --test run_golden_v1
 cargo test -p renderer-demo --test headless_smoke
+PUNCTRA_REQUIRE_GPU=1 cargo test -p renderer-demo --test headless_smoke \
+  corpus_success_binds_trace_inputs_and_separate_resource_measurements -- --exact
 PUNCTRA_REQUIRE_GPU=1 cargo test -p render-wgpu --test offscreen
 PUNCTRA_REQUIRE_GPU=1 cargo test -p renderer-demo --test planner
+PUNCTRA_REQUIRE_GPU=1 cargo test -p renderer-demo --test display_gpu
+test -f docs/guides/first-las-laz.md
+jq -e . docs/guides/field-corpus.example.json >/dev/null
+git diff --check
 ```
 
 Punctra currently targets Rust 1.90 and wgpu 30. The renderer demo requires a graphics

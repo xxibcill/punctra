@@ -262,7 +262,7 @@ fn publish_accounted<H: PublicationHook>(
     })?;
     // Once this create-new link succeeds, every remaining failure is
     // indeterminate because a complete target may be durably observable.
-    publish_target(prepared.stage.path(), target)?;
+    publish_target(&mut prepared.stage, target)?;
     finish_publication(
         surface,
         &mut prepared.stage,
@@ -327,21 +327,24 @@ fn ensure_accounted<H: PublicationHook>(
                 )
             })?;
             match fs::hard_link(prepared.stage.path(), target) {
-                Ok(()) => finish_publication(
-                    surface,
-                    &mut prepared.stage,
-                    &prepared.expected,
-                    control,
-                    hook,
-                    PublicationCompletion {
-                        target,
-                        buffer_bytes: prepared.buffer_bytes,
-                        retained_target_bytes,
-                        limits,
-                        total_progress: prepared.total_progress,
-                        disposition: LandXmlDisposition::Created,
-                    },
-                ),
+                Ok(()) => {
+                    prepared.stage.mark_linked();
+                    finish_publication(
+                        surface,
+                        &mut prepared.stage,
+                        &prepared.expected,
+                        control,
+                        hook,
+                        PublicationCompletion {
+                            target,
+                            buffer_bytes: prepared.buffer_bytes,
+                            retained_target_bytes,
+                            limits,
+                            total_progress: prepared.total_progress,
+                            disposition: LandXmlDisposition::Created,
+                        },
+                    )
+                }
                 Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
                     let metadata = fs::symlink_metadata(target).map_err(|error| {
                         TerrainError::io("inspect raced LandXML target", target.display(), error)
@@ -503,7 +506,7 @@ fn finish_publication<H: PublicationHook>(
     .map_err(|_| TerrainError::ExportIndeterminate {
         expected_hash: expected.hash,
     })?;
-    if published != *expected {
+    if published.facts != *expected {
         return Err(TerrainError::ExportIndeterminate {
             expected_hash: expected.hash,
         });
@@ -558,6 +561,23 @@ fn finish_publication<H: PublicationHook>(
         .map_err(|_| TerrainError::ExportIndeterminate {
             expected_hash: expected.hash,
         })?;
+    let final_facts = published
+        .witness
+        .verify(
+            completion.target,
+            completion.buffer_bytes,
+            completion.retained_target_bytes,
+            completion.limits,
+            control,
+        )
+        .map_err(|_| TerrainError::ExportIndeterminate {
+            expected_hash: expected.hash,
+        })?;
+    if final_facts != *expected {
+        return Err(TerrainError::ExportIndeterminate {
+            expected_hash: expected.hash,
+        });
+    }
     stage
         .verify_parent()
         .map_err(|_| TerrainError::ExportIndeterminate {
@@ -595,6 +615,7 @@ fn reconcile_existing(
         prepared.limits,
         control,
     )?;
+    let target_witness = StableTargetWitness::new(metadata.clone());
     if actual != prepared.expected {
         return Err(TerrainError::ExportConflict {
             path: crate::TerrainDiagnostic::new(target.display().to_string()),
@@ -636,6 +657,20 @@ fn reconcile_existing(
         )
     })?;
     control.complete_progress(prepared.total_progress)?;
+    let final_actual = target_witness.verify(
+        target,
+        prepared.buffer_bytes,
+        prepared.retained_target_bytes,
+        prepared.limits,
+        control,
+    )?;
+    if final_actual != prepared.expected {
+        return Err(TerrainError::ExportConflict {
+            path: crate::TerrainDiagnostic::new(target.display().to_string()),
+            expected_hash: prepared.expected.hash,
+            actual_hash: final_actual.hash,
+        });
+    }
     prepared.stage.verify_parent().map_err(|error| {
         TerrainError::io(
             "reverify reconciled LandXML parent directory",
@@ -737,9 +772,9 @@ struct EncodingProgress {
     total: u64,
 }
 
-fn publish_target(stage: &Path, target: &Path) -> Result<(), TerrainError> {
-    match fs::hard_link(stage, target) {
-        Ok(()) => {}
+fn publish_target(stage: &mut StageGuard, target: &Path) -> Result<(), TerrainError> {
+    match fs::hard_link(stage.path(), target) {
+        Ok(()) => stage.mark_linked(),
         Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
             return Err(TerrainError::TargetExists {
                 path: crate::TerrainDiagnostic::new(target.display().to_string()),
@@ -1021,7 +1056,10 @@ fn create_stage(parent: DirectoryWitness) -> Result<(StageGuard, File), TerrainE
                 let metadata = file.metadata().map_err(|error| {
                     TerrainError::io("inspect open LandXML stage", path.display(), error)
                 })?;
-                let stage = StageGuard::new(path, metadata, parent);
+                let cleanup_file = file.try_clone().map_err(|error| {
+                    TerrainError::io("retain open LandXML stage", path.display(), error)
+                })?;
+                let stage = StageGuard::new(path, metadata, parent, cleanup_file);
                 stage.verify().map_err(|error| {
                     TerrainError::io(
                         "verify created LandXML stage",
@@ -1054,7 +1092,7 @@ fn verify_linked_target(
     retained_target_bytes: u64,
     limits: LandXmlLimits,
     control: &OperationControl,
-) -> Result<FileFacts, TerrainError> {
+) -> Result<VerifiedTarget, TerrainError> {
     let stage_before = stage.verified_metadata().map_err(|error| {
         TerrainError::io(
             "inspect linked LandXML stage",
@@ -1091,7 +1129,10 @@ fn verify_linked_target(
     if !same_file_state(&stage_before, &stage_after) || stage_after.len() != facts.bytes {
         return Err(changed_target_error());
     }
-    Ok(facts)
+    Ok(VerifiedTarget {
+        facts,
+        witness: StableTargetWitness::new(target_after),
+    })
 }
 
 fn verify_existing_regular_file(
@@ -1192,7 +1233,8 @@ fn verify_open_file(
 }
 
 fn same_file_state(left: &fs::Metadata, right: &fs::Metadata) -> bool {
-    left.len() == right.len()
+    same_file_identity(left, right)
+        && left.len() == right.len()
         && matches!(
             (left.modified(), right.modified()),
             (Ok(left_modified), Ok(right_modified)) if left_modified == right_modified
@@ -1587,6 +1629,61 @@ struct FileFacts {
     hash: ContentHash,
 }
 
+struct VerifiedTarget {
+    facts: FileFacts,
+    witness: StableTargetWitness,
+}
+
+struct StableTargetWitness {
+    metadata: fs::Metadata,
+}
+
+impl StableTargetWitness {
+    const fn new(metadata: fs::Metadata) -> Self {
+        Self { metadata }
+    }
+
+    fn verify(
+        &self,
+        target: &Path,
+        buffer_bytes: usize,
+        retained_target_bytes: u64,
+        limits: LandXmlLimits,
+        control: &OperationControl,
+    ) -> Result<FileFacts, TerrainError> {
+        let current = fs::symlink_metadata(target).map_err(|error| {
+            TerrainError::io(
+                "reinspect acknowledged LandXML target",
+                target.display(),
+                error,
+            )
+        })?;
+        require_regular_target(&current)?;
+        if !same_file_state(&self.metadata, &current) {
+            return Err(changed_target_error());
+        }
+        let facts = verify_existing_regular_file(
+            target,
+            &self.metadata,
+            buffer_bytes,
+            retained_target_bytes,
+            limits,
+            control,
+        )?;
+        let final_metadata = fs::symlink_metadata(target).map_err(|error| {
+            TerrainError::io(
+                "reinspect acknowledged LandXML target",
+                target.display(),
+                error,
+            )
+        })?;
+        if !same_file_state(&self.metadata, &final_metadata) {
+            return Err(changed_target_error());
+        }
+        Ok(facts)
+    }
+}
+
 struct DirectoryWitness {
     path: PathBuf,
     metadata: fs::Metadata,
@@ -1693,14 +1790,18 @@ struct StageGuard {
     path: Option<PathBuf>,
     metadata: fs::Metadata,
     parent: DirectoryWitness,
+    file: File,
+    linked: bool,
 }
 
 impl StageGuard {
-    fn new(path: PathBuf, metadata: fs::Metadata, parent: DirectoryWitness) -> Self {
+    fn new(path: PathBuf, metadata: fs::Metadata, parent: DirectoryWitness, file: File) -> Self {
         Self {
             path: Some(path),
             metadata,
             parent,
+            file,
+            linked: false,
         }
     }
 
@@ -1724,6 +1825,10 @@ impl StageGuard {
         self.verified_metadata().map(|_| ())
     }
 
+    const fn mark_linked(&mut self) {
+        self.linked = true;
+    }
+
     fn verified_metadata(&self) -> io::Result<fs::Metadata> {
         self.parent.verify()?;
         let current = fs::symlink_metadata(self.path())?;
@@ -1741,7 +1846,12 @@ impl StageGuard {
             return self.parent.verify();
         }
         self.verify()?;
-        fs::remove_file(self.path())?;
+        if !self.linked {
+            self.file.set_len(0)?;
+            self.file.sync_all()?;
+        }
+        // Retain the unique alias. A published alias shares the target inode;
+        // an unpublished alias has been cleared through this owned handle.
         self.path = None;
         self.parent.verify()
     }
@@ -1800,6 +1910,34 @@ mod tests {
 
     use super::*;
     use crate::{TerrainLimits, TerrainRecipe};
+
+    #[test]
+    fn stage_cleanup_retains_only_cleared_or_published_aliases() {
+        let fixture = ExportFixture::new("stage-cleanup");
+
+        let parent = DirectoryWitness::capture(&fixture.directory).unwrap();
+        let (mut unpublished, mut unpublished_file) = create_stage(parent).unwrap();
+        unpublished_file.write_all(b"unpublished LandXML").unwrap();
+        unpublished_file.sync_all().unwrap();
+        let unpublished_path = unpublished.path().to_path_buf();
+        unpublished.remove().unwrap();
+        assert_eq!(fs::metadata(unpublished_path).unwrap().len(), 0);
+
+        let parent = DirectoryWitness::capture(&fixture.directory).unwrap();
+        let (mut published, mut published_file) = create_stage(parent).unwrap();
+        published_file.write_all(b"published LandXML").unwrap();
+        published_file.sync_all().unwrap();
+        let published_path = published.path().to_path_buf();
+        let target = fixture.path("published.xml");
+        fs::hard_link(&published_path, &target).unwrap();
+        published.mark_linked();
+        published.remove().unwrap();
+        assert!(same_file_identity(
+            &fs::metadata(published_path).unwrap(),
+            &fs::metadata(&target).unwrap()
+        ));
+        assert_eq!(fs::read(target).unwrap(), b"published LandXML");
+    }
 
     #[cfg(windows)]
     #[test]
@@ -1865,7 +2003,7 @@ mod tests {
     }
 
     #[test]
-    fn pre_link_failure_and_cancellation_publish_nothing_and_clean_the_stage() {
+    fn pre_link_failure_and_cancellation_publish_nothing_and_clear_owned_payload() {
         let fixture = ExportFixture::new("pre-link");
         let failed_target = fixture.path("failed.xml");
         let failed_control = OperationControl::new();
@@ -1881,7 +2019,7 @@ mod tests {
         assert!(matches!(failure, TerrainError::Io { .. }));
         assert!(!failed_target.exists());
         assert_ne!(failed_control.progress().phase(), ProgressPhase::COMPLETE);
-        fixture.assert_no_stages();
+        fixture.assert_stages_are_safe();
 
         let cancelled_target = fixture.path("cancelled.xml");
         let cancelled_control = OperationControl::new();
@@ -1900,7 +2038,7 @@ mod tests {
             cancelled_control.progress().phase(),
             ProgressPhase::COMPLETE
         );
-        fixture.assert_no_stages();
+        fixture.assert_stages_are_safe();
     }
 
     #[test]
@@ -1933,7 +2071,7 @@ mod tests {
                 ContentHash::new(*blake3::hash(&bytes).as_bytes())
             );
             assert_ne!(control.progress().phase(), ProgressPhase::COMPLETE);
-            fixture.assert_no_stages();
+            fixture.assert_stages_are_safe();
         }
     }
 
@@ -1981,7 +2119,7 @@ mod tests {
                 recovered.disposition(),
                 LandXmlDisposition::ReconciledExisting
             );
-            fixture.assert_no_stages();
+            fixture.assert_stages_are_safe();
         }
     }
 
@@ -2008,7 +2146,7 @@ mod tests {
             ContentHash::new(*blake3::hash(&published).as_bytes())
         );
         assert_ne!(control.progress().phase(), ProgressPhase::COMPLETE);
-        fixture.assert_no_stages();
+        fixture.assert_stages_are_safe();
     }
 
     #[test]
@@ -2049,7 +2187,7 @@ mod tests {
         .expect("explicitly asserted coordinates export deterministically");
         assert!(receipt.byte_length() > 0);
         assert!(target.exists());
-        fixture.assert_no_stages();
+        fixture.assert_stages_are_safe();
     }
 
     #[test]
@@ -2096,7 +2234,7 @@ mod tests {
         .expect_err("a conflicting raced target fails closed");
         assert!(matches!(error, TerrainError::ExportConflict { .. }));
         assert_eq!(fs::read(&conflicting_target).unwrap(), conflicting_bytes);
-        fixture.assert_no_stages();
+        fixture.assert_stages_are_safe();
     }
 
     #[test]
@@ -2140,7 +2278,7 @@ mod tests {
                 recovered.disposition(),
                 LandXmlDisposition::ReconciledExisting
             );
-            fixture.assert_no_stages();
+            fixture.assert_stages_are_safe();
         }
     }
 
@@ -2162,7 +2300,75 @@ mod tests {
 
         assert!(matches!(failure, TerrainError::ExportIndeterminate { .. }));
         assert_eq!(fs::read(&target).unwrap(), replacement);
-        fixture.assert_no_stages();
+        fixture.assert_stages_are_safe();
+    }
+
+    #[test]
+    fn created_target_replacement_at_every_late_boundary_is_never_acknowledged() {
+        let fixture = ExportFixture::new("created-final-target-witness");
+        for boundary in [
+            PublicationBoundary::ParentSync,
+            PublicationBoundary::StageRemoval,
+            PublicationBoundary::CleanupSync,
+            PublicationBoundary::TerminalProgress,
+        ] {
+            let target = fixture.path(&format!("created-{boundary:?}.xml"));
+            let replacement = format!("caller-owned replacement at {boundary:?}").into_bytes();
+
+            let failure = publish(
+                &fixture.surface,
+                &target,
+                &options(),
+                LandXmlLimits::default(),
+                &OperationControl::new(),
+                &ReplaceTargetAtBoundary::new(&target, replacement.clone(), boundary),
+            )
+            .expect_err("a replaced created target cannot produce a receipt");
+
+            assert!(matches!(failure, TerrainError::ExportIndeterminate { .. }));
+            assert_eq!(fs::read(&target).unwrap(), replacement);
+            fixture.assert_stages_are_safe();
+        }
+    }
+
+    #[test]
+    fn reconciled_target_replacement_at_every_late_boundary_is_never_acknowledged() {
+        let fixture = ExportFixture::new("reconciled-final-target-witness");
+        for boundary in [
+            PublicationBoundary::ParentSync,
+            PublicationBoundary::StageRemoval,
+            PublicationBoundary::CleanupSync,
+            PublicationBoundary::TerminalProgress,
+        ] {
+            let target = fixture.path(&format!("reconciled-{boundary:?}.xml"));
+            publish(
+                &fixture.surface,
+                &target,
+                &options(),
+                LandXmlLimits::default(),
+                &OperationControl::new(),
+                &ProductionPublicationHook,
+            )
+            .expect("seed export succeeds");
+            let replacement = format!("caller-owned replacement at {boundary:?}").into_bytes();
+
+            let failure = ensure(
+                &fixture.surface,
+                &target,
+                &options(),
+                LandXmlLimits::default(),
+                &OperationControl::new(),
+                &ReplaceTargetAtBoundary::new(&target, replacement.clone(), boundary),
+            )
+            .expect_err("a replaced reconciled target cannot produce a receipt");
+
+            assert!(matches!(
+                failure,
+                TerrainError::InvalidArgument { .. } | TerrainError::ExportConflict { .. }
+            ));
+            assert_eq!(fs::read(&target).unwrap(), replacement);
+            fixture.assert_stages_are_safe();
+        }
     }
 
     #[cfg(unix)]
@@ -2199,7 +2405,7 @@ mod tests {
                 .is_symlink()
         );
         assert_eq!(fs::read(&target).unwrap(), fs::read(&seed).unwrap());
-        fixture.assert_no_stages();
+        fixture.assert_stages_are_safe();
     }
 
     #[test]
@@ -2223,7 +2429,7 @@ mod tests {
         assert!(!target.exists());
         replacement.restore();
         fixture.remove_stages();
-        fixture.assert_no_stages();
+        fixture.assert_stages_are_safe();
     }
 
     #[test]
@@ -2250,7 +2456,7 @@ mod tests {
         replacement.restore();
         assert!(target.is_file());
         fixture.remove_stages();
-        fixture.assert_no_stages();
+        fixture.assert_stages_are_safe();
     }
 
     #[test]
@@ -2288,7 +2494,7 @@ mod tests {
         replacement.restore();
         assert_eq!(fs::read(&target).unwrap(), exact);
         fixture.remove_stages();
-        fixture.assert_no_stages();
+        fixture.assert_stages_are_safe();
     }
 
     #[test]
@@ -2324,7 +2530,7 @@ mod tests {
             .expect_err("injected reconciliation fault has no receipt");
             assert!(matches!(failure, TerrainError::Io { .. }));
             assert_eq!(fs::read(&target).unwrap(), exact);
-            fixture.assert_no_stages();
+            fixture.assert_stages_are_safe();
         }
 
         let cancellation = ensure(
@@ -2340,7 +2546,7 @@ mod tests {
         .expect_err("reconciliation cancellation has no receipt");
         assert!(matches!(cancellation, TerrainError::Cancelled));
         assert_eq!(fs::read(&target).unwrap(), exact);
-        fixture.assert_no_stages();
+        fixture.assert_stages_are_safe();
     }
 
     #[test]
@@ -2372,7 +2578,7 @@ mod tests {
 
         assert!(matches!(failure, TerrainError::InvalidArgument { .. }));
         assert_eq!(fs::read(&target).unwrap(), replacement);
-        fixture.assert_no_stages();
+        fixture.assert_stages_are_safe();
     }
 
     struct CreateTargetBeforeLink {
@@ -2405,6 +2611,36 @@ mod tests {
     struct ReplaceTargetAtVerification {
         target: PathBuf,
         bytes: Vec<u8>,
+    }
+
+    struct ReplaceTargetAtBoundary {
+        target: PathBuf,
+        bytes: Vec<u8>,
+        boundary: PublicationBoundary,
+    }
+
+    impl ReplaceTargetAtBoundary {
+        fn new(target: &Path, bytes: Vec<u8>, boundary: PublicationBoundary) -> Self {
+            Self {
+                target: target.to_path_buf(),
+                bytes,
+                boundary,
+            }
+        }
+    }
+
+    impl PublicationHook for ReplaceTargetAtBoundary {
+        fn reach(
+            &self,
+            boundary: PublicationBoundary,
+            _control: &OperationControl,
+        ) -> io::Result<()> {
+            if boundary == self.boundary {
+                fs::remove_file(&self.target)?;
+                fs::write(&self.target, &self.bytes)?;
+            }
+            Ok(())
+        }
     }
 
     #[cfg(unix)]
@@ -2611,14 +2847,25 @@ mod tests {
             self.directory.join(name)
         }
 
-        fn assert_no_stages(&self) {
+        fn assert_stages_are_safe(&self) {
             let stages = fs::read_dir(&self.directory)
                 .expect("read fault-test directory")
                 .filter_map(Result::ok)
-                .map(|entry| entry.file_name())
-                .filter(|name| name.to_string_lossy().starts_with(".punctra-landxml-"))
+                .filter(|entry| {
+                    entry
+                        .file_name()
+                        .to_string_lossy()
+                        .starts_with(".punctra-landxml-")
+                })
                 .collect::<Vec<_>>();
-            assert!(stages.is_empty(), "staging files remain: {stages:?}");
+            for stage in stages {
+                let metadata = stage.metadata().expect("inspect retained LandXML stage");
+                assert!(metadata.is_file(), "retained LandXML stage is regular");
+                assert!(
+                    metadata.len() <= LandXmlLimits::default().max_output_bytes(),
+                    "retained LandXML stage remains within the declared output ceiling"
+                );
+            }
         }
 
         fn remove_stages(&self) {

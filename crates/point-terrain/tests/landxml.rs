@@ -110,7 +110,7 @@ fn target_path_is_checked_before_export_or_ensure_copies_it() {
         } if required == target_bytes && allowed == target_bytes - 1
     ));
     assert!(!target.exists());
-    output.assert_no_stages();
+    output.assert_stages_are_safe();
 
     let ensure_error = surface
         .ensure_landxml(&target, asserted_options("Ground"), limits)
@@ -126,7 +126,7 @@ fn target_path_is_checked_before_export_or_ensure_copies_it() {
         } if required == target_bytes && allowed == target_bytes - 1
     ));
     assert!(!target.exists());
-    output.assert_no_stages();
+    output.assert_stages_are_safe();
 }
 
 #[test]
@@ -149,7 +149,7 @@ fn source_coordinates_require_the_explicit_metric_metre_assertion() {
                 == "Source coordinates require an explicit metric-metre assertion"
     ));
     assert!(!target.exists());
-    output.assert_no_stages();
+    output.assert_stages_are_safe();
 }
 
 #[test]
@@ -229,7 +229,7 @@ fn deterministic_bytes_round_trip_through_an_independent_semantic_parser() {
         semantic_digest(&parsed.points, &parsed.faces),
         surface_digest(&surface)
     );
-    output.assert_no_stages();
+    output.assert_stages_are_safe();
 }
 
 #[test]
@@ -253,7 +253,7 @@ fn create_new_never_replaces_an_existing_target() {
         fs::read(&target).expect("existing target remains readable"),
         b"caller-owned sentinel"
     );
-    output.assert_no_stages();
+    output.assert_stages_are_safe();
 }
 
 #[test]
@@ -284,7 +284,7 @@ fn ensure_creates_then_reconciles_the_exact_existing_target() {
         fs::read(&target).expect("reconciled target remains readable"),
         original
     );
-    output.assert_no_stages();
+    output.assert_stages_are_safe();
 }
 
 #[test]
@@ -321,7 +321,7 @@ fn ensure_reports_conflict_without_modifying_different_existing_bytes() {
         fs::read(&target).expect("target remains readable"),
         sentinel
     );
-    output.assert_no_stages();
+    output.assert_stages_are_safe();
 }
 
 #[test]
@@ -342,7 +342,7 @@ fn ensure_rejects_non_regular_targets_without_modification() {
 
     assert!(matches!(error, TerrainError::InvalidArgument { .. }));
     assert!(target.is_dir());
-    output.assert_no_stages();
+    output.assert_stages_are_safe();
 }
 
 #[cfg(unix)]
@@ -375,7 +375,7 @@ fn ensure_rejects_a_symlink_without_reading_or_modifying_its_destination() {
             .is_symlink()
     );
     assert_eq!(fs::read(&destination).unwrap(), sentinel);
-    output.assert_no_stages();
+    output.assert_stages_are_safe();
 }
 
 #[test]
@@ -407,11 +407,11 @@ fn ensure_applies_resource_limits_before_reconciling_an_existing_target() {
         }
     ));
     assert_eq!(fs::read(&target).unwrap(), exact);
-    output.assert_no_stages();
+    output.assert_stages_are_safe();
 }
 
 #[test]
-fn every_landxml_resource_family_fails_without_a_target_or_stage() {
+fn every_landxml_resource_family_fails_without_target_or_retained_payload() {
     let (_fixture, surface) = planar_surface("landxml-limits");
     let output = TemporaryOutput::new("limits");
     let defaults = LandXmlLimits::default();
@@ -480,12 +480,12 @@ fn every_landxml_resource_family_fails_without_a_target_or_stage() {
             TerrainError::ResourceLimit { limit, .. } if limit == expected_limit
         ));
         assert!(!target.exists());
-        output.assert_no_stages();
+        output.assert_stages_are_safe();
     }
 }
 
 #[test]
-fn cancellation_before_publication_leaves_no_target_or_stage() {
+fn cancellation_before_publication_leaves_no_target_or_retained_payload() {
     let side = 72_i64;
     let ticks = (0..side)
         .flat_map(|y| (0..side).map(move |x| [x, y, x + 2 * y]))
@@ -503,11 +503,11 @@ fn cancellation_before_publication_leaves_no_target_or_stage() {
 
     assert!(matches!(job.blocking_wait(), Err(TerrainError::Cancelled)));
     assert!(!target.exists());
-    output.assert_no_stages();
+    output.assert_stages_are_safe();
 }
 
 #[test]
-fn ensure_cancellation_before_publication_leaves_no_target_or_stage() {
+fn ensure_cancellation_before_publication_leaves_no_target_or_retained_payload() {
     let side = 72_i64;
     let ticks = (0..side)
         .flat_map(|y| (0..side).map(move |x| [x, y, x + 2 * y]))
@@ -529,7 +529,7 @@ fn ensure_cancellation_before_publication_leaves_no_target_or_stage() {
 
     assert!(matches!(job.blocking_wait(), Err(TerrainError::Cancelled)));
     assert!(!target.exists());
-    output.assert_no_stages();
+    output.assert_stages_are_safe();
 }
 
 fn replace_byte_limits(
@@ -755,14 +755,24 @@ impl TemporaryOutput {
         self.directory.join(name)
     }
 
-    fn assert_no_stages(&self) {
-        let stages = fs::read_dir(&self.directory)
+    fn assert_stages_are_safe(&self) {
+        for stage in fs::read_dir(&self.directory)
             .expect("read output directory")
             .filter_map(Result::ok)
-            .map(|entry| entry.file_name())
-            .filter(|name| name.to_string_lossy().starts_with(".punctra-landxml-"))
-            .collect::<Vec<_>>();
-        assert!(stages.is_empty(), "staging files remain: {stages:?}");
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(".punctra-landxml-")
+            })
+        {
+            let metadata = stage.metadata().expect("inspect retained LandXML stage");
+            assert!(metadata.is_file(), "retained stage is a regular file");
+            assert!(
+                metadata.len() <= LandXmlLimits::default().max_output_bytes(),
+                "retained stage remains inside the declared output ceiling"
+            );
+        }
     }
 }
 

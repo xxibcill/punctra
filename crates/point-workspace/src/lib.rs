@@ -3,6 +3,13 @@
 //! The crate owns exact Point selection, process-scoped spillable Point Sets,
 //! immutable classification Revisions, and crash-reconcilable commit intents.
 //! Source geometry and attributes remain authoritative and unchanged.
+//!
+//! # Interface classification
+//!
+//! The documented Workspace, Snapshot, Query, Edit, audit, limits, and error
+//! APIs are a **v1-candidate foundation surface**. Persisted stages and private
+//! recovery controls are not interfaces. This records v0.9 review intent, not
+//! a `1.0.0` or production-support claim.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]

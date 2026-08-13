@@ -12,49 +12,127 @@ use std::{
 
 use blake3::Hasher;
 use foundation_runtime::OperationControl;
-use point_contracts::{PositionTransform, SourceId, WorldBounds};
+use point_contracts::{AttributeId, PositionTransform, SourceId, WorldBounds};
 use point_source::{Source, SourceSpan};
 
 use crate::{
-    DisplayCoverage, IndexDescriptor, IndexError, IndexHierarchy, IndexLimit, IndexNode,
-    IndexNodeId, PrepareLimits,
+    DisplayAttributes, DisplayCoverage, DisplaySampleContract, IndexDescriptor, IndexError,
+    IndexHierarchy, IndexLimit, IndexNode, IndexNodeId, IndexRecipe, InspectionAttributeIds,
+    PrepareLimits,
     limits::require,
-    model::{DISK_VERSION, RECIPE_VERSION},
-    read::IndexSample,
-    tree::{BLOCK_POINTS, LeafRecord, MAX_NODE_SAMPLES, SAMPLE_BYTES, TreePlan},
+    model::{DISK_VERSION_V1, DISK_VERSION_V2, INSPECTION_RECIPE_VERSION, POSITION_RECIPE_VERSION},
+    read::StoredSample,
+    tree::{BLOCK_POINTS, LeafRecord, MAX_NODE_SAMPLES, TreePlan},
 };
 
 const WORK_MAGIC: &[u8; 8] = b"PNWRK004";
 const ARTIFACT_MAGIC: &[u8; 8] = b"PNIDX004";
 const FRAME_MAGIC: &[u8; 4] = b"BLK1";
-const WORK_HEADER_BODY_BYTES: usize = 168;
-const WORK_HEADER_BYTES: u64 = 200;
+const WORK_HEADER_V1_BODY_BYTES: usize = 168;
+const WORK_HEADER_V1_BYTES: u64 = 200;
+const WORK_HEADER_V2_BODY_BYTES: usize = 200;
+const WORK_HEADER_V2_BYTES: u64 = 232;
 const FRAME_PREFIX_BYTES: u64 = 40;
 const FRAME_FIXED_PAYLOAD_BYTES: u64 = 72;
-const ARTIFACT_HEADER_BYTES: u64 = 208;
+const ARTIFACT_HEADER_V1_BYTES: u64 = 208;
+const ARTIFACT_HEADER_V2_BYTES: u64 = 240;
 const NODE_RECORD_BYTES: u64 = 168;
 const ARTIFACT_CHECKSUM_BYTES: u64 = 32;
 const HASH_BUFFER_BYTES: u64 = 64 * 1024;
-const SAMPLE_HASH_DOMAIN: &[u8] = b"punctra-index-samples-v1";
+const SAMPLE_HASH_DOMAIN_V1: &[u8] = b"punctra-index-samples-v1";
+const SAMPLE_HASH_DOMAIN_V2: &[u8] = b"punctra-index-samples-v2";
 const ORDINAL_HASH_DOMAIN: u64 = 0x706e_6374_7261_0401;
 const TEMPORARY_CREATE_ATTEMPTS: usize = 128;
 
 static NEXT_TEMPORARY_FILE: AtomicU64 = AtomicU64::new(1);
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct PersistenceProfile {
+    recipe: IndexRecipe,
+    contract: Option<DisplaySampleContract>,
+}
+
+impl PersistenceProfile {
+    fn requested(
+        recipe: IndexRecipe,
+        contract: Option<DisplaySampleContract>,
+    ) -> Result<Self, IndexError> {
+        if matches!(recipe, IndexRecipe::PositionOnlyV1) != contract.is_none() {
+            return Err(IndexError::InvalidAttributeProfile {
+                reason: "inspection recipe and display contract differ",
+            });
+        }
+        Ok(Self { recipe, contract })
+    }
+
+    const fn sample_bytes(self) -> u64 {
+        self.recipe.sample_bytes()
+    }
+
+    const fn sample_width(self) -> usize {
+        match self.recipe {
+            IndexRecipe::PositionOnlyV1 => 32,
+            IndexRecipe::InspectionV1(_) => 42,
+        }
+    }
+
+    const fn work_header_body_bytes(self) -> usize {
+        match self.recipe {
+            IndexRecipe::PositionOnlyV1 => WORK_HEADER_V1_BODY_BYTES,
+            IndexRecipe::InspectionV1(_) => WORK_HEADER_V2_BODY_BYTES,
+        }
+    }
+
+    const fn work_header_bytes(self) -> u64 {
+        match self.recipe {
+            IndexRecipe::PositionOnlyV1 => WORK_HEADER_V1_BYTES,
+            IndexRecipe::InspectionV1(_) => WORK_HEADER_V2_BYTES,
+        }
+    }
+
+    const fn artifact_header_bytes(self) -> u64 {
+        match self.recipe {
+            IndexRecipe::PositionOnlyV1 => ARTIFACT_HEADER_V1_BYTES,
+            IndexRecipe::InspectionV1(_) => ARTIFACT_HEADER_V2_BYTES,
+        }
+    }
+
+    const fn sample_hash_domain(self) -> &'static [u8] {
+        match self.recipe {
+            IndexRecipe::PositionOnlyV1 => SAMPLE_HASH_DOMAIN_V1,
+            IndexRecipe::InspectionV1(_) => SAMPLE_HASH_DOMAIN_V2,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub(crate) struct ArtifactReader {
     file: Arc<Mutex<File>>,
     path: Arc<PathBuf>,
+    profile: PersistenceProfile,
+    identity: Arc<fs::Metadata>,
 }
 
 impl ArtifactReader {
+    pub(crate) fn verify_path_binding(&self) -> Result<(), IndexError> {
+        artifact_path_matches_open_file(
+            &lock_recovering(&self.file),
+            self.path.as_ref(),
+            &self.identity,
+        )?
+        .then_some(())
+        .ok_or(IndexError::CorruptArtifact {
+            reason: "artifact path changed before preparation acknowledgement",
+        })
+    }
+
     pub(crate) fn read_sample_block(
         &self,
         offset: u64,
         count: u64,
         expected_checksum: [u8; 32],
         max_buffer_bytes: u64,
-    ) -> Result<Vec<IndexSample>, IndexError> {
+    ) -> Result<Vec<StoredSample>, IndexError> {
         let mut file = lock_recovering(&self.file);
         read_persisted_samples(
             &mut file,
@@ -63,27 +141,128 @@ impl ArtifactReader {
             count,
             expected_checksum,
             SampleReadContext::ArtifactAfterOpen { max_buffer_bytes },
+            self.profile,
+        )
+    }
+
+    pub(crate) fn read_position_sample_block(
+        &self,
+        offset: u64,
+        count: u64,
+        expected_checksum: [u8; 32],
+        max_buffer_bytes: u64,
+    ) -> Result<Vec<crate::IndexSample>, IndexError> {
+        debug_assert!(matches!(self.profile.recipe, IndexRecipe::PositionOnlyV1));
+        let mut file = lock_recovering(&self.file);
+        read_persisted_position_samples(
+            &mut file,
+            self.path.as_ref(),
+            offset,
+            count,
+            expected_checksum,
+            max_buffer_bytes,
         )
     }
 }
 
+fn read_persisted_position_samples(
+    file: &mut File,
+    path: &Path,
+    offset: u64,
+    count: u64,
+    expected_checksum: [u8; 32],
+    max_buffer_bytes: u64,
+) -> Result<Vec<crate::IndexSample>, IndexError> {
+    let byte_count = count.checked_mul(32).ok_or(IndexError::CorruptArtifact {
+        reason: "sample block length overflowed",
+    })?;
+    require(
+        byte_count,
+        max_buffer_bytes,
+        IndexLimit::IndexSampleBufferBytes,
+    )?;
+    let capacity = usize::try_from(count).map_err(|_| IndexError::ResourceLimit {
+        limit: IndexLimit::AddressableSamplePoints,
+        required: count,
+        allowed: usize::MAX as u64,
+    })?;
+    let mut samples = Vec::new();
+    samples
+        .try_reserve_exact(capacity)
+        .map_err(|_| IndexError::ResourceLimit {
+            limit: IndexLimit::SampleBufferBytes,
+            required: byte_count,
+            allowed: max_buffer_bytes,
+        })?;
+    require(
+        allocated_bytes(samples.capacity(), mem::size_of::<crate::IndexSample>()),
+        max_buffer_bytes,
+        IndexLimit::IndexSampleBufferBytes,
+    )?;
+    file.seek(SeekFrom::Start(offset))
+        .map_err(|error| IndexError::io("seek in", path, error))?;
+    let mut hasher = Hasher::new();
+    hasher.update(SAMPLE_HASH_DOMAIN_V1);
+    for _ in 0..count {
+        let mut encoded = [0; 32];
+        file.read_exact(&mut encoded).map_err(|error| {
+            if error.kind() == std::io::ErrorKind::UnexpectedEof {
+                IndexError::CorruptArtifact {
+                    reason: "node sample block was truncated after open",
+                }
+            } else {
+                IndexError::io("read", path, error)
+            }
+        })?;
+        hasher.update(&encoded);
+        let mut decoder = Decoder::artifact(&encoded);
+        samples.push(crate::IndexSample::new(
+            decoder.u64("sample ordinal")?,
+            [
+                decoder.i64("sample x ticks")?,
+                decoder.i64("sample y ticks")?,
+                decoder.i64("sample z ticks")?,
+            ],
+        ));
+    }
+    if *hasher.finalize().as_bytes() != expected_checksum {
+        return Err(IndexError::CorruptArtifact {
+            reason: "node sample checksum differs after open",
+        });
+    }
+    if samples
+        .windows(2)
+        .any(|pair| pair[0].ordinal() >= pair[1].ordinal())
+    {
+        return Err(IndexError::CorruptArtifact {
+            reason: "samples are not sorted and unique",
+        });
+    }
+    Ok(samples)
+}
+
 #[derive(Clone, Copy)]
 enum SampleReadContext {
-    ArtifactAfterOpen { max_buffer_bytes: u64 },
-    Work,
+    ArtifactAfterOpen {
+        max_buffer_bytes: u64,
+    },
+    Work {
+        retained_bytes: u64,
+        max_build_working_bytes: u64,
+    },
 }
 
 impl SampleReadContext {
-    fn byte_count(self, count: u64) -> Result<u64, IndexError> {
+    fn byte_count(self, count: u64, sample_bytes: u64) -> Result<u64, IndexError> {
         match self {
             Self::ArtifactAfterOpen { .. } => {
                 count
-                    .checked_mul(SAMPLE_BYTES)
+                    .checked_mul(sample_bytes)
                     .ok_or(IndexError::CorruptArtifact {
                         reason: "sample block length overflowed",
                     })
             }
-            Self::Work => Ok(count.saturating_mul(SAMPLE_BYTES)),
+            Self::Work { .. } => Ok(count.saturating_mul(sample_bytes)),
         }
     }
 
@@ -94,28 +273,54 @@ impl SampleReadContext {
                 required: count,
                 allowed: usize::MAX as u64,
             },
-            Self::Work => corrupt("work", "sample count is not addressable"),
+            Self::Work { .. } => corrupt("work", "sample count is not addressable"),
         })
     }
 
     fn enforce_buffer_limit(self, capacity: usize) -> Result<(), IndexError> {
-        let Self::ArtifactAfterOpen { max_buffer_bytes } = self else {
-            return Ok(());
-        };
         let actual_bytes = u64::try_from(capacity)
             .unwrap_or(u64::MAX)
-            .saturating_mul(u64::try_from(mem::size_of::<IndexSample>()).unwrap_or(u64::MAX));
-        require(
-            actual_bytes,
-            max_buffer_bytes,
-            IndexLimit::IndexSampleBufferBytes,
-        )
+            .saturating_mul(u64::try_from(mem::size_of::<StoredSample>()).unwrap_or(u64::MAX));
+        match self {
+            Self::ArtifactAfterOpen { max_buffer_bytes } => require(
+                actual_bytes,
+                max_buffer_bytes,
+                IndexLimit::IndexSampleBufferBytes,
+            ),
+            Self::Work {
+                retained_bytes,
+                max_build_working_bytes,
+            } => require(
+                retained_bytes.saturating_add(actual_bytes),
+                max_build_working_bytes,
+                IndexLimit::BuildWorkingBytes,
+            ),
+        }
+    }
+
+    fn allocation_error(self, capacity: usize) -> IndexError {
+        let requested_bytes = allocated_bytes(capacity, mem::size_of::<StoredSample>());
+        match self {
+            Self::ArtifactAfterOpen { max_buffer_bytes } => IndexError::ResourceLimit {
+                limit: IndexLimit::SampleBufferBytes,
+                required: requested_bytes,
+                allowed: max_buffer_bytes,
+            },
+            Self::Work {
+                retained_bytes,
+                max_build_working_bytes,
+            } => IndexError::ResourceLimit {
+                limit: IndexLimit::BuildWorkingBytes,
+                required: retained_bytes.saturating_add(requested_bytes),
+                allowed: max_build_working_bytes,
+            },
+        }
     }
 
     fn decoder(self, bytes: &[u8]) -> Decoder<'_> {
         match self {
             Self::ArtifactAfterOpen { .. } => Decoder::artifact(bytes),
-            Self::Work => Decoder::work(bytes),
+            Self::Work { .. } => Decoder::work(bytes),
         }
     }
 
@@ -136,7 +341,7 @@ impl SampleReadContext {
             Self::ArtifactAfterOpen { .. } => IndexError::CorruptArtifact {
                 reason: "node sample checksum differs after open",
             },
-            Self::Work => corrupt("work", "sample block checksum or order differs"),
+            Self::Work { .. } => corrupt("work", "sample block checksum or order differs"),
         }
     }
 
@@ -145,7 +350,7 @@ impl SampleReadContext {
             Self::ArtifactAfterOpen { .. } => IndexError::CorruptArtifact {
                 reason: "samples are not sorted and unique",
             },
-            Self::Work => corrupt("work", "sample block checksum or order differs"),
+            Self::Work { .. } => corrupt("work", "sample block checksum or order differs"),
         }
     }
 }
@@ -157,35 +362,62 @@ fn read_persisted_samples(
     count: u64,
     expected_checksum: [u8; 32],
     context: SampleReadContext,
-) -> Result<Vec<IndexSample>, IndexError> {
-    let byte_count = context.byte_count(count)?;
+    profile: PersistenceProfile,
+) -> Result<Vec<StoredSample>, IndexError> {
+    let _byte_count = context.byte_count(count, profile.sample_bytes())?;
+    let capacity = context.capacity(count)?;
+    context.enforce_buffer_limit(capacity)?;
     let mut samples = Vec::new();
     samples
-        .try_reserve_exact(context.capacity(count)?)
-        .map_err(|_| IndexError::ResourceLimit {
-            limit: IndexLimit::SampleBufferBytes,
-            required: byte_count,
-            allowed: byte_count,
-        })?;
+        .try_reserve_exact(capacity)
+        .map_err(|_| context.allocation_error(capacity))?;
     context.enforce_buffer_limit(samples.capacity())?;
 
     file.seek(SeekFrom::Start(offset))
         .map_err(|error| IndexError::io("seek in", path, error))?;
     let mut hasher = Hasher::new();
-    hasher.update(SAMPLE_HASH_DOMAIN);
+    hasher.update(profile.sample_hash_domain());
     for _ in 0..count {
-        let mut encoded = [0_u8; 32];
-        file.read_exact(&mut encoded)
+        let mut encoded = [0_u8; 42];
+        let width = usize::try_from(profile.sample_bytes()).expect("sample width fits usize");
+        file.read_exact(&mut encoded[..width])
             .map_err(|error| context.read_error(path, error))?;
-        hasher.update(&encoded);
-        let mut decoder = context.decoder(&encoded);
+        hasher.update(&encoded[..width]);
+        let mut decoder = context.decoder(&encoded[..width]);
         let ordinal = decoder.u64("sample ordinal")?;
         let ticks = [
             decoder.i64("sample x ticks")?,
             decoder.i64("sample y ticks")?,
             decoder.i64("sample z ticks")?,
         ];
-        samples.push(IndexSample::new(ordinal, ticks));
+        let sample = match profile.recipe {
+            IndexRecipe::PositionOnlyV1 => StoredSample::position_only(ordinal, ticks),
+            IndexRecipe::InspectionV1(_) => {
+                let intensity = decoder.u16("sample intensity")?;
+                let classification = decoder.array::<1>("sample classification")?[0];
+                if decoder.array::<1>("sample reserved byte")?[0] != 0 {
+                    return Err(context.order_error());
+                }
+                let rgb = [
+                    decoder.u16("sample red")?,
+                    decoder.u16("sample green")?,
+                    decoder.u16("sample blue")?,
+                ];
+                if profile
+                    .contract
+                    .is_some_and(|contract| contract.rgb().is_none())
+                    && rgb != [0; 3]
+                {
+                    return Err(context.order_error());
+                }
+                StoredSample::attributed(
+                    ordinal,
+                    ticks,
+                    DisplayAttributes::new(intensity, classification, rgb),
+                )
+            }
+        };
+        samples.push(sample);
     }
     if *hasher.finalize().as_bytes() != expected_checksum {
         return Err(context.checksum_error());
@@ -206,11 +438,19 @@ pub(crate) struct OpenArtifact {
     pub(crate) artifact_bytes: u64,
 }
 
+impl OpenArtifact {
+    pub(crate) fn verify_path_binding(&self) -> Result<(), IndexError> {
+        self.reader.verify_path_binding()
+    }
+}
+
 pub(crate) struct WorkFile {
     file: File,
     path: PathBuf,
     leaves: Vec<LeafRecord>,
     durable_points: u64,
+    profile: PersistenceProfile,
+    peak_temporary_disk_bytes: u64,
 }
 
 impl WorkFile {
@@ -222,29 +462,84 @@ impl WorkFile {
         &self.leaves
     }
 
+    pub(crate) fn leaf_capacity(&self) -> usize {
+        self.leaves.capacity()
+    }
+
+    pub(crate) const fn peak_temporary_disk_bytes(&self) -> u64 {
+        self.peak_temporary_disk_bytes
+    }
+
+    pub(crate) fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub(crate) fn verify_path_binding(&self) -> Result<(), IndexError> {
+        let opened = self
+            .file
+            .metadata()
+            .map_err(|error| IndexError::io("reinspect open work file", &self.path, error))?;
+        let current = fs::symlink_metadata(&self.path)
+            .map_err(|error| IndexError::io("reinspect work path", &self.path, error))?;
+        if opened.file_type().is_file()
+            && current.file_type().is_file()
+            && same_file_state(&opened, &current)
+        {
+            Ok(())
+        } else {
+            Err(IndexError::IncompatibleWork {
+                reason: "work path changed before preparation acknowledgement",
+            })
+        }
+    }
+
+    fn observe_temporary_disk_bytes(
+        &mut self,
+        spool_bytes: u64,
+        artifact_temporary_bytes: u64,
+    ) -> Result<(), IndexError> {
+        let work_bytes = self
+            .file
+            .metadata()
+            .map_err(|error| IndexError::io("inspect", &self.path, error))?
+            .len();
+        self.peak_temporary_disk_bytes = self.peak_temporary_disk_bytes.max(
+            work_bytes
+                .saturating_add(spool_bytes)
+                .saturating_add(artifact_temporary_bytes),
+        );
+        Ok(())
+    }
+
     pub(crate) fn retained_metadata_bytes(&self) -> u64 {
         u64::try_from(self.leaves.capacity())
             .unwrap_or(u64::MAX)
             .saturating_mul(u64::try_from(mem::size_of::<LeafRecord>()).unwrap_or(u64::MAX))
     }
 
+    #[allow(clippy::too_many_lines)]
     pub(crate) fn append_block(
         &mut self,
         span: SourceSpan,
         bounds: WorldBounds,
-        samples: &[IndexSample],
+        samples: &[StoredSample],
         limits: PrepareLimits,
     ) -> Result<(), IndexError> {
         let retained = span.point_count().min(MAX_NODE_SAMPLES);
-        let validation_bytes = retained
-            .saturating_mul(u64::try_from(mem::size_of::<(u64, u64)>()).unwrap_or(u64::MAX))
-            .saturating_add(
-                retained.saturating_mul(u64::try_from(mem::size_of::<u64>()).unwrap_or(8)),
-            );
+        let live_sample_bytes = u64::try_from(samples.len())
+            .unwrap_or(u64::MAX)
+            .saturating_mul(u64::try_from(mem::size_of::<StoredSample>()).unwrap_or(u64::MAX));
+        let validation_bytes = live_sample_bytes.saturating_add(
+            retained
+                .saturating_mul(u64::try_from(mem::size_of::<(u64, u64)>()).unwrap_or(u64::MAX))
+                .saturating_add(
+                    retained.saturating_mul(u64::try_from(mem::size_of::<u64>()).unwrap_or(8)),
+                ),
+        );
         let payload_bytes = FRAME_FIXED_PAYLOAD_BYTES.saturating_add(
             u64::try_from(samples.len())
                 .unwrap_or(u64::MAX)
-                .saturating_mul(SAMPLE_BYTES),
+                .saturating_mul(self.profile.sample_bytes()),
         );
         require(
             self.retained_metadata_bytes()
@@ -254,7 +549,14 @@ impl WorkFile {
             limits.max_build_working_bytes(),
             IndexLimit::BuildWorkingBytes,
         )?;
-        validate_frame_values(span, bounds, samples)?;
+        validate_frame_values(
+            span,
+            bounds,
+            samples,
+            self.retained_metadata_bytes()
+                .saturating_add(live_sample_bytes),
+            limits.max_build_working_bytes(),
+        )?;
         if span.first_ordinal() != self.durable_points {
             return Err(IndexError::CorruptWork {
                 reason: "new work frame is not ordinal-contiguous",
@@ -263,12 +565,9 @@ impl WorkFile {
         let leaf_bytes = u64::try_from(self.leaves.capacity())
             .unwrap_or(u64::MAX)
             .saturating_mul(u64::try_from(mem::size_of::<LeafRecord>()).unwrap_or(u64::MAX));
-        let sample_bytes = u64::try_from(samples.len())
-            .unwrap_or(u64::MAX)
-            .saturating_mul(SAMPLE_BYTES);
         require(
             leaf_bytes
-                .saturating_add(sample_bytes)
+                .saturating_add(live_sample_bytes)
                 .saturating_add(payload_bytes)
                 .saturating_add(FRAME_PREFIX_BYTES),
             limits.max_build_working_bytes(),
@@ -279,7 +578,17 @@ impl WorkFile {
                 reason: "work contains more frames than the canonical Source block count",
             });
         }
-        let payload = encode_frame_payload(span, bounds, samples);
+        let retained_while_encoding = leaf_bytes
+            .saturating_add(live_sample_bytes)
+            .saturating_add(FRAME_PREFIX_BYTES);
+        let payload = encode_frame_payload(
+            span,
+            bounds,
+            samples,
+            self.profile,
+            retained_while_encoding,
+            limits,
+        )?;
         let payload_length =
             u32::try_from(payload.len()).map_err(|_| IndexError::ResourceLimit {
                 limit: IndexLimit::WorkFramePayloadBytes,
@@ -312,6 +621,7 @@ impl WorkFile {
             .and_then(|()| self.file.write_all(&payload))
             .and_then(|()| self.file.sync_data())
             .map_err(|error| IndexError::io("append and flush", &self.path, error))?;
+        self.observe_temporary_disk_bytes(0, 0)?;
 
         let sample_offset = frame_offset + FRAME_PREFIX_BYTES + FRAME_FIXED_PAYLOAD_BYTES;
         let sample_bytes = &payload[usize::try_from(FRAME_FIXED_PAYLOAD_BYTES).unwrap_or(72)..];
@@ -320,7 +630,7 @@ impl WorkFile {
             bounds,
             sample_offset,
             sample_count: u64::try_from(samples.len()).unwrap_or(u64::MAX),
-            sample_checksum: sample_checksum(sample_bytes),
+            sample_checksum: sample_checksum(sample_bytes, self.profile),
         });
         self.durable_points = span.end_ordinal();
         Ok(())
@@ -328,52 +638,272 @@ impl WorkFile {
 }
 
 pub(crate) fn target_exists(target: &Path) -> Result<bool, IndexError> {
-    target
-        .try_exists()
-        .map_err(|error| IndexError::io("inspect", target, error))
+    match fs::symlink_metadata(target) {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(IndexError::io("inspect", target, error)),
+    }
 }
 
 pub(crate) fn open_or_create_work(
     source: &Source,
     target: &Path,
+    recipe: IndexRecipe,
+    contract: Option<DisplaySampleContract>,
     limits: PrepareLimits,
+    resume_existing: bool,
     control: &OperationControl,
 ) -> Result<WorkFile, IndexError> {
-    preflight_work_initialization(source, limits, control)?;
+    let profile = PersistenceProfile::requested(recipe, contract)?;
+    preflight_work_initialization(source, profile, limits, control)?;
     let path = sibling_path(target, ".work")?;
     reject_symlink(&path, "work path is a symbolic link")?;
-    let file = match OpenOptions::new().read(true).write(true).open(&path) {
-        Ok(file) => file,
+    let opened = match OpenOptions::new().read(true).write(true).open(&path) {
+        Ok(file) if resume_existing => InitialWorkOpen::Existing(file),
+        Ok(_) => {
+            return Err(IndexError::IncompatibleWork {
+                reason: "fresh preparation work path already exists",
+            });
+        }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            match OpenOptions::new()
-                .read(true)
-                .write(true)
-                .create_new(true)
-                .open(&path)
-            {
-                Ok(file) => file,
-                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-                    OpenOptions::new()
-                        .read(true)
-                        .write(true)
-                        .open(&path)
-                        .map_err(|error| IndexError::io("open raced", &path, error))?
-                }
-                Err(error) => return Err(IndexError::io("create", path, error)),
-            }
+            create_or_open_initialized_work(source, target, &path, profile)?
         }
         Err(error) => return Err(IndexError::io("open", path, error)),
     };
-    acquire_work_ownership(&file, target)?;
+    let file = match opened {
+        InitialWorkOpen::Existing(_) if !resume_existing => {
+            return Err(IndexError::IncompatibleWork {
+                reason: "fresh preparation work path appeared concurrently",
+            });
+        }
+        InitialWorkOpen::Existing(file) => {
+            acquire_work_ownership(&file, target)?;
+            file
+        }
+        InitialWorkOpen::InitializedLocked(file) => {
+            if target_exists(target)? {
+                return Err(IndexError::IncompatibleArtifact {
+                    reason: "target appeared while its index was being initialized",
+                });
+            }
+            let leaves = reserve_leaf_metadata(source.metadata().point_count(), limits)?;
+            return Ok(WorkFile {
+                file,
+                path,
+                leaves,
+                durable_points: 0,
+                profile,
+                peak_temporary_disk_bytes: profile.work_header_bytes(),
+            });
+        }
+    };
     let file_bytes = file
         .metadata()
         .map_err(|error| IndexError::io("inspect", &path, error))?
         .len();
     if file_bytes == 0 {
-        initialize_work(source, path, file, limits)
-    } else {
-        scan_work(source, path, file, limits, control)
+        return Err(IndexError::CorruptWork {
+            reason: "work path is empty and has no provable index ownership",
+        });
     }
+    scan_work(source, path, file, profile, limits, control)
+}
+
+enum InitialWorkOpen {
+    Existing(File),
+    InitializedLocked(File),
+}
+
+/// Publishes the first work header only after its complete bytes are durable.
+///
+/// A unique temporary name proves ownership while the header is being written.
+/// The final `.work` name is created with a no-replace hard link, so another
+/// writer or a caller-owned path is never overwritten. Once the link exists,
+/// every retry sees either a complete header or a pre-existing path that is
+/// preserved and validated normally.
+fn create_or_open_initialized_work(
+    source: &Source,
+    target: &Path,
+    work_path: &Path,
+    profile: PersistenceProfile,
+) -> Result<InitialWorkOpen, IndexError> {
+    create_or_open_initialized_work_with(source, target, work_path, profile, &mut |_, _, _| Ok(()))
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum InitialWorkBoundary {
+    WriteHeader,
+    SyncHeader,
+    PublishLink,
+    SyncPublishedParent,
+    RemoveTemporary,
+    SyncCleanupParent,
+}
+
+fn create_or_open_initialized_work_with(
+    source: &Source,
+    target: &Path,
+    work_path: &Path,
+    profile: PersistenceProfile,
+    reach: &mut impl FnMut(InitialWorkBoundary, &Path, &Path) -> std::io::Result<()>,
+) -> Result<InitialWorkOpen, IndexError> {
+    let mut temporary = OwnedTemporaryFile::create(target, "work-header", true)?;
+    let temporary_path = Arc::clone(&temporary.path);
+    let header = encode_work_header(source, profile);
+    reach(InitialWorkBoundary::WriteHeader, &temporary_path, work_path).map_err(|error| {
+        IndexError::io_shared(
+            "write initial work header",
+            Arc::clone(&temporary_path),
+            error,
+        )
+    })?;
+    temporary.file_mut().write_all(&header).map_err(|error| {
+        IndexError::io_shared(
+            "write initial work header",
+            Arc::clone(&temporary_path),
+            error,
+        )
+    })?;
+    reach(InitialWorkBoundary::SyncHeader, &temporary_path, work_path).map_err(|error| {
+        IndexError::io_shared(
+            "flush initial work header",
+            Arc::clone(&temporary_path),
+            error,
+        )
+    })?;
+    temporary.file_mut().sync_all().map_err(|error| {
+        IndexError::io_shared(
+            "flush initial work header",
+            Arc::clone(&temporary_path),
+            error,
+        )
+    })?;
+    acquire_work_ownership(temporary.file_mut(), target)?;
+
+    reach(InitialWorkBoundary::PublishLink, &temporary_path, work_path).map_err(|error| {
+        IndexError::io("atomically publish initial work header", work_path, error)
+    })?;
+    if !temporary.source_path_matches_open_file()? {
+        return Err(IndexError::CorruptWork {
+            reason: "owned initial work-header path changed before publication",
+        });
+    }
+    if link_initial_work_header(&mut temporary, work_path)? {
+        // First make the complete final name durable. Failure leaves a
+        // valid, safely retryable work header at that name.
+        reach(
+            InitialWorkBoundary::SyncPublishedParent,
+            &temporary_path,
+            work_path,
+        )
+        .map_err(|error| IndexError::io("flush parent directory of", work_path, error))?;
+        sync_parent(work_path)?;
+        reach(
+            InitialWorkBoundary::RemoveTemporary,
+            &temporary_path,
+            work_path,
+        )
+        .map_err(|error| {
+            IndexError::io_shared(
+                "remove initial work-header temporary",
+                Arc::clone(&temporary_path),
+                error,
+            )
+        })?;
+        temporary.remove_owned_path("remove initial work-header temporary")?;
+        reach(
+            InitialWorkBoundary::SyncCleanupParent,
+            &temporary_path,
+            work_path,
+        )
+        .map_err(|error| IndexError::io("flush parent directory of", work_path, error))?;
+        sync_parent(work_path)?;
+        if !initial_work_header_matches(&mut temporary, &header)?
+            || !temporary.target_matches_open_file(work_path)?
+        {
+            return Err(IndexError::CorruptWork {
+                reason: "published initial work header changed before acknowledgement",
+            });
+        }
+        let file = temporary
+            .file
+            .take()
+            .expect("owned work-header temporary is open");
+        return Ok(InitialWorkOpen::InitializedLocked(file));
+    }
+    drop(temporary);
+    reject_symlink(work_path, "work path became a symbolic link")?;
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(work_path)
+        .map_err(|error| IndexError::io("open raced", work_path, error))?;
+    Ok(InitialWorkOpen::Existing(file))
+}
+
+fn link_initial_work_header(
+    temporary: &mut OwnedTemporaryFile,
+    work_path: &Path,
+) -> Result<bool, IndexError> {
+    match fs::hard_link(&temporary.path, work_path) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => return Ok(false),
+        Err(error) => {
+            return Err(IndexError::io(
+                "atomically publish initial work header",
+                work_path,
+                error,
+            ));
+        }
+    }
+    let source_matches = temporary.source_path_matches_open_file()?;
+    let target_matches = temporary.target_matches_open_file(work_path)?;
+    if target_matches {
+        // Even a conservative failure must not truncate a correctly linked
+        // target through the retained open handle.
+        temporary.mark_linked();
+    }
+    if !source_matches || !target_matches {
+        return Err(IndexError::CorruptWork {
+            reason: "initial work-header publication did not bind the owned file",
+        });
+    }
+    Ok(true)
+}
+
+fn initial_work_header_matches(
+    temporary: &mut OwnedTemporaryFile,
+    expected: &[u8],
+) -> Result<bool, IndexError> {
+    let temporary_path = Arc::clone(&temporary.path);
+    let file = temporary.file_mut();
+    let expected_len = u64::try_from(expected.len()).unwrap_or(u64::MAX);
+    if file
+        .metadata()
+        .map_err(|error| {
+            IndexError::io_shared(
+                "inspect published initial work header",
+                Arc::clone(&temporary_path),
+                error,
+            )
+        })?
+        .len()
+        != expected_len
+    {
+        return Ok(false);
+    }
+    let mut observed = [0_u8; 232];
+    file.seek(SeekFrom::Start(0))
+        .and_then(|_| file.read_exact(&mut observed[..expected.len()]))
+        .and_then(|()| file.seek(SeekFrom::End(0)).map(|_| ()))
+        .map_err(|error| {
+            IndexError::io_shared(
+                "verify published initial work header",
+                temporary_path,
+                error,
+            )
+        })?;
+    Ok(observed[..expected.len()] == *expected)
 }
 
 fn acquire_work_ownership(file: &File, target: &Path) -> Result<(), IndexError> {
@@ -396,34 +926,15 @@ fn acquire_work_ownership(file: &File, target: &Path) -> Result<(), IndexError> 
     Ok(())
 }
 
-fn initialize_work(
-    source: &Source,
-    path: PathBuf,
-    mut file: File,
-    limits: PrepareLimits,
-) -> Result<WorkFile, IndexError> {
-    let header = encode_work_header(source);
-    file.write_all(&header)
-        .and_then(|()| file.sync_data())
-        .map_err(|error| IndexError::io("write and flush", &path, error))?;
-    sync_parent(&path)?;
-    let leaves = reserve_leaf_metadata(source.metadata().point_count(), limits)?;
-    Ok(WorkFile {
-        file,
-        path,
-        leaves,
-        durable_points: 0,
-    })
-}
-
 fn preflight_work_initialization(
     source: &Source,
+    profile: PersistenceProfile,
     limits: PrepareLimits,
     control: &OperationControl,
 ) -> Result<(), IndexError> {
     control.check_cancelled()?;
     require(
-        WORK_HEADER_BYTES,
+        profile.work_header_bytes(),
         limits.max_incomplete_bytes(),
         IndexLimit::IncompleteIndexBytes,
     )?;
@@ -431,7 +942,7 @@ fn preflight_work_initialization(
     let leaf_bytes =
         leaf_count.saturating_mul(u64::try_from(mem::size_of::<LeafRecord>()).unwrap_or(u64::MAX));
     require(
-        leaf_bytes.saturating_add(WORK_HEADER_BYTES),
+        leaf_bytes.saturating_add(profile.work_header_bytes()),
         limits.max_build_working_bytes(),
         IndexLimit::BuildWorkingBytes,
     )
@@ -441,31 +952,42 @@ fn scan_work(
     source: &Source,
     path: PathBuf,
     mut file: File,
+    expected_profile: PersistenceProfile,
     limits: PrepareLimits,
     control: &OperationControl,
 ) -> Result<WorkFile, IndexError> {
     control.check_cancelled()?;
-    let file_bytes = file
+    let metadata = file
         .metadata()
-        .map_err(|error| IndexError::io("inspect", &path, error))?
-        .len();
+        .map_err(|error| IndexError::io("inspect", &path, error))?;
+    let file_bytes = metadata.len();
     require(
         file_bytes,
         limits.max_incomplete_bytes(),
         IndexLimit::IncompleteIndexBytes,
     )?;
-    if file_bytes < WORK_HEADER_BYTES {
+    if file_bytes < 16 {
         return Err(IndexError::CorruptWork {
             reason: "work header is truncated",
         });
     }
+    let actual_profile = read_work_profile(&mut file, &path, file_bytes, source)?;
+    if actual_profile != expected_profile {
+        return Err(IndexError::IncompatibleWork {
+            reason: "index recipe or inspection Attribute profile differs",
+        });
+    }
+    let header_bytes = actual_profile.work_header_bytes();
     let expected_leaf_count = canonical_leaf_count(source.metadata().point_count());
     let leaf_bytes = expected_leaf_count
         .saturating_mul(u64::try_from(mem::size_of::<LeafRecord>()).unwrap_or(u64::MAX));
-    let maximum_payload =
-        FRAME_FIXED_PAYLOAD_BYTES.saturating_add(MAX_NODE_SAMPLES.saturating_mul(SAMPLE_BYTES));
+    let maximum_payload = FRAME_FIXED_PAYLOAD_BYTES
+        .saturating_add(MAX_NODE_SAMPLES.saturating_mul(actual_profile.sample_bytes()));
     let scan_buffers = maximum_payload
-        .saturating_add(MAX_NODE_SAMPLES.saturating_mul(SAMPLE_BYTES))
+        .saturating_add(
+            MAX_NODE_SAMPLES
+                .saturating_mul(u64::try_from(mem::size_of::<StoredSample>()).unwrap_or(u64::MAX)),
+        )
         .saturating_add(
             MAX_NODE_SAMPLES
                 .saturating_mul(u64::try_from(mem::size_of::<(u64, u64)>()).unwrap_or(u64::MAX)),
@@ -473,18 +995,19 @@ fn scan_work(
         .saturating_add(
             MAX_NODE_SAMPLES.saturating_mul(u64::try_from(mem::size_of::<u64>()).unwrap_or(8)),
         )
-        .saturating_add(WORK_HEADER_BYTES)
+        .saturating_add(header_bytes)
         .saturating_add(FRAME_PREFIX_BYTES);
     require(
         leaf_bytes.saturating_add(scan_buffers),
         limits.max_build_working_bytes(),
         IndexLimit::BuildWorkingBytes,
     )?;
-    let mut header = vec![0; usize::try_from(WORK_HEADER_BYTES).unwrap_or(200)];
+    let mut header = vec![0; usize::try_from(header_bytes).unwrap_or(232)];
     file.seek(SeekFrom::Start(0))
         .and_then(|_| file.read_exact(&mut header))
         .map_err(|error| IndexError::io("read", &path, error))?;
-    validate_work_header(source, &header)?;
+    let validated_profile = validate_work_header(source, &header)?;
+    debug_assert_eq!(validated_profile, actual_profile);
 
     let mut leaves = reserve_leaf_metadata(source.metadata().point_count(), limits)?;
     let leaf_bytes = u64::try_from(leaves.capacity())
@@ -496,18 +1019,20 @@ fn scan_work(
         IndexLimit::BuildWorkingBytes,
     )?;
 
-    let mut next_frame = WORK_HEADER_BYTES;
+    let mut next_frame = header_bytes;
     let mut durable_points = 0_u64;
     while next_frame < file_bytes && durable_points < source.metadata().point_count() {
         control.check_cancelled()?;
-        match scan_frame(
-            &mut file,
-            &path,
-            next_frame,
+        let context = ScanFrameContext {
             file_bytes,
-            durable_points,
             source,
-        )? {
+            profile: actual_profile,
+            retained_bytes: leaf_bytes
+                .saturating_add(allocated_bytes(header.capacity(), mem::size_of::<u8>()))
+                .saturating_add(FRAME_PREFIX_BYTES),
+            max_build_working_bytes: limits.max_build_working_bytes(),
+        };
+        match scan_frame(&mut file, &path, next_frame, durable_points, context)? {
             Some((leaf, frame_end)) => {
                 leaves.push(leaf);
                 durable_points = leaf.span.end_ordinal();
@@ -526,17 +1051,34 @@ fn scan_work(
         path,
         leaves,
         durable_points,
+        profile: actual_profile,
+        peak_temporary_disk_bytes: file_bytes,
     })
+}
+
+#[derive(Clone, Copy)]
+struct ScanFrameContext<'a> {
+    file_bytes: u64,
+    source: &'a Source,
+    profile: PersistenceProfile,
+    retained_bytes: u64,
+    max_build_working_bytes: u64,
 }
 
 fn scan_frame(
     file: &mut File,
     path: &Path,
     offset: u64,
-    file_bytes: u64,
     expected_first: u64,
-    source: &Source,
+    context: ScanFrameContext<'_>,
 ) -> Result<Option<(LeafRecord, u64)>, IndexError> {
+    let ScanFrameContext {
+        file_bytes,
+        source,
+        profile,
+        retained_bytes,
+        max_build_working_bytes,
+    } = context;
     if file_bytes.saturating_sub(offset) < FRAME_PREFIX_BYTES {
         return Ok(None);
     }
@@ -558,23 +1100,51 @@ fn scan_frame(
     let Some(frame_end) = frame_end.filter(|end| *end <= file_bytes) else {
         return Ok(None);
     };
-    let maximum_payload =
-        FRAME_FIXED_PAYLOAD_BYTES.saturating_add(MAX_NODE_SAMPLES.saturating_mul(SAMPLE_BYTES));
+    let maximum_payload = FRAME_FIXED_PAYLOAD_BYTES
+        .saturating_add(MAX_NODE_SAMPLES.saturating_mul(profile.sample_bytes()));
     if payload_length < FRAME_FIXED_PAYLOAD_BYTES || payload_length > maximum_payload {
         return Ok(None);
     }
     let payload_size = usize::try_from(payload_length).map_err(|_| IndexError::CorruptWork {
         reason: "work frame payload is not addressable",
     })?;
-    let mut payload = vec![0; payload_size];
+    let mut payload = Vec::new();
+    payload
+        .try_reserve_exact(payload_size)
+        .map_err(|_| IndexError::ResourceLimit {
+            limit: IndexLimit::BuildWorkingBytes,
+            required: maximum_payload,
+            allowed: max_build_working_bytes,
+        })?;
+    let actual_payload_bytes = u64::try_from(payload.capacity()).unwrap_or(u64::MAX);
+    if retained_bytes.saturating_add(actual_payload_bytes) > max_build_working_bytes {
+        return Err(IndexError::ResourceLimit {
+            limit: IndexLimit::BuildWorkingBytes,
+            required: retained_bytes.saturating_add(actual_payload_bytes),
+            allowed: max_build_working_bytes,
+        });
+    }
+    payload.resize(payload_size, 0);
     file.read_exact(&mut payload)
         .map_err(|error| IndexError::io("read work frame from", path, error))?;
     if blake3::hash(&payload).as_bytes() != &prefix[8..40] {
         return Ok(None);
     }
-    let leaf = match decode_frame(&payload, offset, expected_first, source) {
+    let leaf = match decode_frame(
+        &payload,
+        offset,
+        expected_first,
+        source,
+        profile,
+        retained_bytes.saturating_add(actual_payload_bytes),
+        max_build_working_bytes,
+    ) {
         Ok(Some(leaf)) => leaf,
-        Err(error @ (IndexError::ResourceLimit { .. } | IndexError::Io { .. })) => {
+        Err(
+            error @ (IndexError::ResourceLimit { .. }
+            | IndexError::Io { .. }
+            | IndexError::SharedPathIo { .. }),
+        ) => {
             return Err(error);
         }
         Ok(None) | Err(_) => return Ok(None),
@@ -587,6 +1157,9 @@ fn decode_frame(
     frame_offset: u64,
     expected_first: u64,
     source: &Source,
+    profile: PersistenceProfile,
+    retained_bytes: u64,
+    max_build_working_bytes: u64,
 ) -> Result<Option<LeafRecord>, IndexError> {
     let mut decoder = Decoder::work(payload);
     let first = decoder.u64("work frame first ordinal")?;
@@ -606,7 +1179,7 @@ fn decode_frame(
         return Ok(None);
     }
     let expected_payload = FRAME_FIXED_PAYLOAD_BYTES
-        .checked_add(sample_count.saturating_mul(SAMPLE_BYTES))
+        .checked_add(sample_count.saturating_mul(profile.sample_bytes()))
         .ok_or(IndexError::CorruptWork {
             reason: "work frame sample length overflowed",
         })?;
@@ -615,8 +1188,23 @@ fn decode_frame(
     }
     let span = SourceSpan::new(first, count)?;
     let sample_bytes = &payload[usize::try_from(FRAME_FIXED_PAYLOAD_BYTES).unwrap_or(72)..];
-    let samples = decode_samples(sample_bytes, sample_count, "work frame")?;
-    match validate_frame_values(span, bounds, &samples) {
+    let samples = decode_samples(
+        sample_bytes,
+        sample_count,
+        "work frame",
+        profile,
+        retained_bytes,
+        max_build_working_bytes,
+    )?;
+    let sample_allocation_bytes =
+        allocated_bytes(samples.capacity(), mem::size_of::<StoredSample>());
+    match validate_frame_values(
+        span,
+        bounds,
+        &samples,
+        retained_bytes.saturating_add(sample_allocation_bytes),
+        max_build_working_bytes,
+    ) {
         Ok(()) => {}
         Err(error @ IndexError::ResourceLimit { .. }) => return Err(error),
         Err(_) => return Ok(None),
@@ -635,54 +1223,58 @@ fn decode_frame(
         bounds,
         sample_offset,
         sample_count,
-        sample_checksum: sample_checksum(sample_bytes),
+        sample_checksum: sample_checksum(sample_bytes, profile),
     }))
 }
 
 pub(crate) fn merge_samples(
-    left: &[IndexSample],
-    right: &[IndexSample],
+    left: &[StoredSample],
+    right: &[StoredSample],
     child_capacities: [usize; 2],
     retained_build_bytes: u64,
     limits: PrepareLimits,
-) -> Result<Vec<IndexSample>, IndexError> {
+) -> Result<Vec<StoredSample>, IndexError> {
     let retained = left
         .len()
         .saturating_add(right.len())
         .min(usize::try_from(MAX_NODE_SAMPLES).unwrap_or(4_096));
-    let mut selected = BinaryHeap::new();
-    selected
-        .try_reserve_exact(retained)
-        .map_err(|_| IndexError::ResourceLimit {
-            limit: IndexLimit::BuildWorkingBytes,
-            required: u64::try_from(retained).unwrap_or(u64::MAX).saturating_mul(
-                u64::try_from(mem::size_of::<(u64, u64, [i64; 3])>()).unwrap_or(u64::MAX),
-            ),
-            allowed: limits.max_build_working_bytes(),
-        })?;
     let allocated_bytes = |capacity: usize, item_bytes: usize| {
         u64::try_from(capacity)
             .unwrap_or(u64::MAX)
             .saturating_mul(u64::try_from(item_bytes).unwrap_or(u64::MAX))
     };
-    let before_output = retained_build_bytes
-        .saturating_add(allocated_bytes(
-            child_capacities[0],
-            mem::size_of::<IndexSample>(),
-        ))
-        .saturating_add(allocated_bytes(
-            child_capacities[1],
-            mem::size_of::<IndexSample>(),
-        ))
-        .saturating_add(allocated_bytes(
-            selected.capacity(),
-            mem::size_of::<(u64, u64, [i64; 3])>(),
-        ))
-        .saturating_add(
-            u64::try_from(retained)
-                .unwrap_or(u64::MAX)
-                .saturating_mul(SAMPLE_BYTES),
+    let child_bytes =
+        allocated_bytes(child_capacities[0], mem::size_of::<StoredSample>()).saturating_add(
+            allocated_bytes(child_capacities[1], mem::size_of::<StoredSample>()),
         );
+    let requested_heap_bytes =
+        allocated_bytes(retained, mem::size_of::<(u64, u64, StoredSample)>());
+    let requested_output_bytes = allocated_bytes(retained, mem::size_of::<StoredSample>());
+    let requested_peak = retained_build_bytes
+        .saturating_add(child_bytes)
+        .saturating_add(requested_heap_bytes)
+        .saturating_add(requested_output_bytes);
+    require(
+        requested_peak,
+        limits.max_build_working_bytes(),
+        IndexLimit::BuildWorkingBytes,
+    )?;
+    let mut selected = BinaryHeap::new();
+    selected
+        .try_reserve_exact(retained)
+        .map_err(|_| IndexError::ResourceLimit {
+            limit: IndexLimit::BuildWorkingBytes,
+            required: requested_peak,
+            allowed: limits.max_build_working_bytes(),
+        })?;
+    let actual_heap_bytes = allocated_bytes(
+        selected.capacity(),
+        mem::size_of::<(u64, u64, StoredSample)>(),
+    );
+    let before_output = retained_build_bytes
+        .saturating_add(child_bytes)
+        .saturating_add(actual_heap_bytes)
+        .saturating_add(requested_output_bytes);
     require(
         before_output,
         limits.max_build_working_bytes(),
@@ -691,11 +1283,7 @@ pub(crate) fn merge_samples(
     for sample in left.iter().chain(right.iter()).copied() {
         retain_bottom_k(
             &mut selected,
-            (
-                ordinal_priority(sample.ordinal()),
-                sample.ordinal(),
-                sample.ticks(),
-            ),
+            (ordinal_priority(sample.ordinal()), sample.ordinal(), sample),
             retained,
         );
     }
@@ -706,36 +1294,22 @@ pub(crate) fn merge_samples(
             limit: IndexLimit::BuildWorkingBytes,
             required: u64::try_from(retained)
                 .unwrap_or(u64::MAX)
-                .saturating_mul(SAMPLE_BYTES),
+                .saturating_mul(u64::try_from(mem::size_of::<StoredSample>()).unwrap_or(u64::MAX)),
             allowed: limits.max_build_working_bytes(),
         })?;
     let actual_peak = retained_build_bytes
-        .saturating_add(allocated_bytes(
-            child_capacities[0],
-            mem::size_of::<IndexSample>(),
-        ))
-        .saturating_add(allocated_bytes(
-            child_capacities[1],
-            mem::size_of::<IndexSample>(),
-        ))
-        .saturating_add(allocated_bytes(
-            selected.capacity(),
-            mem::size_of::<(u64, u64, [i64; 3])>(),
-        ))
+        .saturating_add(child_bytes)
+        .saturating_add(actual_heap_bytes)
         .saturating_add(allocated_bytes(
             samples.capacity(),
-            mem::size_of::<IndexSample>(),
+            mem::size_of::<StoredSample>(),
         ));
     require(
         actual_peak,
         limits.max_build_working_bytes(),
         IndexLimit::BuildWorkingBytes,
     )?;
-    samples.extend(
-        selected
-            .into_iter()
-            .map(|(_, ordinal, ticks)| IndexSample::new(ordinal, ticks)),
-    );
+    samples.extend(selected.into_iter().map(|(_, _, sample)| sample));
     samples.sort_unstable_by_key(|sample| sample.ordinal());
     Ok(samples)
 }
@@ -748,11 +1322,11 @@ pub(crate) fn ordinal_priority(ordinal: u64) -> u64 {
     value ^ (value >> 31)
 }
 
-fn encode_work_header(source: &Source) -> Vec<u8> {
-    let mut body = Vec::with_capacity(WORK_HEADER_BODY_BYTES);
+fn encode_work_header(source: &Source, profile: PersistenceProfile) -> Vec<u8> {
+    let mut body = Vec::with_capacity(profile.work_header_body_bytes());
     body.extend_from_slice(WORK_MAGIC);
-    push_u32(&mut body, DISK_VERSION);
-    push_u32(&mut body, RECIPE_VERSION);
+    push_u32(&mut body, profile.recipe.disk_version());
+    push_u32(&mut body, profile.recipe.recipe_version());
     push_u32(
         &mut body,
         u32::try_from(BLOCK_POINTS).expect("block size fits u32"),
@@ -765,19 +1339,21 @@ fn encode_work_header(source: &Source) -> Vec<u8> {
     push_u64(&mut body, source.metadata().point_count());
     push_transform(&mut body, source.metadata().position_transform());
     push_optional_bounds(&mut body, source.metadata().world_bounds());
-    debug_assert_eq!(body.len(), WORK_HEADER_BODY_BYTES);
+    push_profile_extension(&mut body, profile);
+    debug_assert_eq!(body.len(), profile.work_header_body_bytes());
     let checksum = blake3::hash(&body);
     body.extend_from_slice(checksum.as_bytes());
     body
 }
 
-fn validate_work_header(source: &Source, header: &[u8]) -> Result<(), IndexError> {
-    if header.len() != usize::try_from(WORK_HEADER_BYTES).unwrap_or(200) {
+fn validate_work_header(source: &Source, header: &[u8]) -> Result<PersistenceProfile, IndexError> {
+    if header.len() < 16 {
         return Err(IndexError::CorruptWork {
             reason: "work header has an invalid length",
         });
     }
-    let (body, expected_checksum) = header.split_at(WORK_HEADER_BODY_BYTES);
+    let body_length = header.len().saturating_sub(32);
+    let (body, expected_checksum) = header.split_at(body_length);
     if blake3::hash(body).as_bytes() != expected_checksum {
         return Err(IndexError::CorruptWork {
             reason: "work header checksum differs",
@@ -791,18 +1367,6 @@ fn validate_work_header(source: &Source, header: &[u8]) -> Result<(), IndexError
     }
     let disk = decoder.u32("work disk version")?;
     let recipe = decoder.u32("work recipe version")?;
-    if disk != DISK_VERSION {
-        return Err(IndexError::UnsupportedVersion {
-            kind: "incomplete-index disk",
-            version: disk,
-        });
-    }
-    if recipe != RECIPE_VERSION {
-        return Err(IndexError::UnsupportedVersion {
-            kind: "index recipe",
-            version: recipe,
-        });
-    }
     if decoder.u32("work block size")? != u32::try_from(BLOCK_POINTS).unwrap_or(u32::MAX)
         || decoder.u32("work sample size")? != u32::try_from(MAX_NODE_SAMPLES).unwrap_or(u32::MAX)
     {
@@ -814,6 +1378,12 @@ fn validate_work_header(source: &Source, header: &[u8]) -> Result<(), IndexError
     let point_count = decoder.u64("work Source Point count")?;
     let transform = decoder.transform("work Source transform")?;
     let bounds = decoder.optional_bounds("work Source bounds")?;
+    let profile = decode_profile_extension(&mut decoder, disk, recipe, "work")?;
+    if header.len() != usize::try_from(profile.work_header_bytes()).unwrap_or(232) {
+        return Err(IndexError::CorruptWork {
+            reason: "work header has an invalid length",
+        });
+    }
     if source_id != source.identity() {
         return Err(IndexError::IncompatibleWork {
             reason: "Source identity differs",
@@ -827,16 +1397,81 @@ fn validate_work_header(source: &Source, header: &[u8]) -> Result<(), IndexError
             reason: "Source count, transform, or bounds differ",
         });
     }
-    Ok(())
+    Ok(profile)
 }
 
-fn encode_frame_payload(span: SourceSpan, bounds: WorldBounds, samples: &[IndexSample]) -> Vec<u8> {
+fn read_work_profile(
+    file: &mut File,
+    path: &Path,
+    file_bytes: u64,
+    source: &Source,
+) -> Result<PersistenceProfile, IndexError> {
+    let mut prefix = [0_u8; 16];
+    file.seek(SeekFrom::Start(0))
+        .and_then(|_| file.read_exact(&mut prefix))
+        .map_err(|error| IndexError::io("read", path, error))?;
+    let mut decoder = Decoder::work(&prefix);
+    if decoder.array::<8>("work magic")? != *WORK_MAGIC {
+        return Err(IndexError::CorruptWork {
+            reason: "work header magic differs",
+        });
+    }
+    let disk = decoder.u32("work disk version")?;
+    let _recipe = decoder.u32("work recipe version")?;
+    let header_bytes = match disk {
+        DISK_VERSION_V1 => WORK_HEADER_V1_BYTES,
+        DISK_VERSION_V2 => WORK_HEADER_V2_BYTES,
+        version => {
+            return Err(IndexError::UnsupportedVersion {
+                kind: "incomplete-index disk",
+                version,
+            });
+        }
+    };
+    if file_bytes < header_bytes {
+        return Err(IndexError::CorruptWork {
+            reason: "work header is truncated",
+        });
+    }
+    let mut header = vec![0; usize::try_from(header_bytes).unwrap_or(232)];
+    file.seek(SeekFrom::Start(0))
+        .and_then(|_| file.read_exact(&mut header))
+        .map_err(|error| IndexError::io("read", path, error))?;
+    validate_work_header(source, &header)
+}
+
+fn encode_frame_payload(
+    span: SourceSpan,
+    bounds: WorldBounds,
+    samples: &[StoredSample],
+    profile: PersistenceProfile,
+    retained_bytes: u64,
+    limits: PrepareLimits,
+) -> Result<Vec<u8>, IndexError> {
     let capacity = FRAME_FIXED_PAYLOAD_BYTES.saturating_add(
         u64::try_from(samples.len())
             .unwrap_or(u64::MAX)
-            .saturating_mul(SAMPLE_BYTES),
+            .saturating_mul(profile.sample_bytes()),
     );
-    let mut payload = Vec::with_capacity(usize::try_from(capacity).unwrap_or(0));
+    let requested = usize::try_from(capacity).map_err(|_| IndexError::ResourceLimit {
+        limit: IndexLimit::BuildWorkingBytes,
+        required: capacity,
+        allowed: limits.max_build_working_bytes(),
+    })?;
+    let mut payload = Vec::new();
+    payload
+        .try_reserve_exact(requested)
+        .map_err(|_| IndexError::ResourceLimit {
+            limit: IndexLimit::BuildWorkingBytes,
+            required: retained_bytes.saturating_add(capacity),
+            allowed: limits.max_build_working_bytes(),
+        })?;
+    let actual_capacity = u64::try_from(payload.capacity()).unwrap_or(u64::MAX);
+    require(
+        retained_bytes.saturating_add(actual_capacity),
+        limits.max_build_working_bytes(),
+        IndexLimit::BuildWorkingBytes,
+    )?;
     push_u64(&mut payload, span.first_ordinal());
     push_u64(&mut payload, span.point_count());
     push_bounds(&mut payload, bounds);
@@ -845,14 +1480,16 @@ fn encode_frame_payload(span: SourceSpan, bounds: WorldBounds, samples: &[IndexS
         u32::try_from(samples.len()).expect("bounded sample count fits u32"),
     );
     push_u32(&mut payload, 0);
-    push_samples(&mut payload, samples);
-    payload
+    push_samples(&mut payload, samples, profile);
+    Ok(payload)
 }
 
 fn validate_frame_values(
     span: SourceSpan,
     _bounds: WorldBounds,
-    samples: &[IndexSample],
+    samples: &[StoredSample],
+    retained_bytes: u64,
+    allowed_bytes: u64,
 ) -> Result<(), IndexError> {
     let expected_samples = span.point_count().min(MAX_NODE_SAMPLES);
     if u64::try_from(samples.len()).unwrap_or(u64::MAX) != expected_samples {
@@ -871,7 +1508,7 @@ fn validate_frame_values(
             reason: "work frame samples are not sorted unique members",
         });
     }
-    if !has_expected_sample_ordinals(span, samples)? {
+    if !has_expected_sample_ordinals(span, samples, retained_bytes, allowed_bytes)? {
         return Err(IndexError::CorruptWork {
             reason: "work frame samples differ from stable bottom-k recipe",
         });
@@ -881,19 +1518,31 @@ fn validate_frame_values(
 
 fn has_expected_sample_ordinals(
     span: SourceSpan,
-    samples: &[IndexSample],
+    samples: &[StoredSample],
+    retained_bytes: u64,
+    allowed_bytes: u64,
 ) -> Result<bool, IndexError> {
     let capacity = usize::try_from(span.point_count().min(MAX_NODE_SAMPLES)).unwrap_or(4_096);
+    let requested_heap_bytes = allocated_bytes(capacity, mem::size_of::<(u64, u64)>());
+    require(
+        retained_bytes.saturating_add(requested_heap_bytes),
+        allowed_bytes,
+        IndexLimit::BuildWorkingBytes,
+    )?;
     let mut selected = BinaryHeap::new();
     selected
         .try_reserve_exact(capacity)
         .map_err(|_| IndexError::ResourceLimit {
             limit: IndexLimit::BuildWorkingBytes,
-            required: u64::try_from(capacity)
-                .unwrap_or(u64::MAX)
-                .saturating_mul(u64::try_from(mem::size_of::<(u64, u64)>()).unwrap_or(u64::MAX)),
-            allowed: u64::MAX,
+            required: retained_bytes.saturating_add(requested_heap_bytes),
+            allowed: allowed_bytes,
         })?;
+    let heap_bytes = allocated_bytes(selected.capacity(), mem::size_of::<(u64, u64)>());
+    require(
+        retained_bytes.saturating_add(heap_bytes),
+        allowed_bytes,
+        IndexLimit::BuildWorkingBytes,
+    )?;
     for row in 0..span.point_count() {
         let ordinal = span.first_ordinal() + row;
         retain_bottom_k(
@@ -902,16 +1551,32 @@ fn has_expected_sample_ordinals(
             capacity,
         );
     }
+    let requested_ordinal_bytes = allocated_bytes(capacity, mem::size_of::<u64>());
+    require(
+        retained_bytes
+            .saturating_add(heap_bytes)
+            .saturating_add(requested_ordinal_bytes),
+        allowed_bytes,
+        IndexLimit::BuildWorkingBytes,
+    )?;
     let mut ordinals = Vec::new();
     ordinals
         .try_reserve_exact(capacity)
         .map_err(|_| IndexError::ResourceLimit {
             limit: IndexLimit::BuildWorkingBytes,
-            required: u64::try_from(capacity)
-                .unwrap_or(u64::MAX)
-                .saturating_mul(u64::try_from(mem::size_of::<u64>()).unwrap_or(8)),
-            allowed: u64::MAX,
+            required: retained_bytes
+                .saturating_add(heap_bytes)
+                .saturating_add(requested_ordinal_bytes),
+            allowed: allowed_bytes,
         })?;
+    let ordinal_bytes = allocated_bytes(ordinals.capacity(), mem::size_of::<u64>());
+    require(
+        retained_bytes
+            .saturating_add(heap_bytes)
+            .saturating_add(ordinal_bytes),
+        allowed_bytes,
+        IndexLimit::BuildWorkingBytes,
+    )?;
     ordinals.extend(selected.into_iter().map(|(_, ordinal)| ordinal));
     ordinals.sort_unstable();
     Ok(ordinals
@@ -966,7 +1631,7 @@ fn reserve_leaf_metadata(
 }
 
 fn samples_within_bounds(
-    samples: &[IndexSample],
+    samples: &[StoredSample],
     transform: PositionTransform,
     bounds: WorldBounds,
 ) -> bool {
@@ -980,9 +1645,9 @@ fn samples_within_bounds(
     })
 }
 
-fn sample_checksum(bytes: &[u8]) -> [u8; 32] {
+fn sample_checksum(bytes: &[u8], profile: PersistenceProfile) -> [u8; 32] {
     let mut hasher = Hasher::new();
-    hasher.update(SAMPLE_HASH_DOMAIN);
+    hasher.update(profile.sample_hash_domain());
     hasher.update(bytes);
     *hasher.finalize().as_bytes()
 }
@@ -991,34 +1656,45 @@ fn decode_samples(
     bytes: &[u8],
     count: u64,
     kind: &'static str,
-) -> Result<Vec<IndexSample>, IndexError> {
-    let expected_bytes = count.saturating_mul(SAMPLE_BYTES);
+    profile: PersistenceProfile,
+    retained_bytes: u64,
+    allowed_bytes: u64,
+) -> Result<Vec<StoredSample>, IndexError> {
+    let expected_bytes = count.saturating_mul(profile.sample_bytes());
     if u64::try_from(bytes.len()).unwrap_or(u64::MAX) != expected_bytes {
         return Err(corrupt(kind, "sample byte length differs"));
     }
     let capacity =
         usize::try_from(count).map_err(|_| corrupt(kind, "sample count is not addressable"))?;
+    let requested_sample_bytes = allocated_bytes(capacity, mem::size_of::<StoredSample>());
+    require(
+        retained_bytes.saturating_add(requested_sample_bytes),
+        allowed_bytes,
+        IndexLimit::BuildWorkingBytes,
+    )?;
     let mut samples = Vec::new();
     samples
         .try_reserve_exact(capacity)
         .map_err(|_| IndexError::ResourceLimit {
             limit: IndexLimit::SampleBufferBytes,
-            required: expected_bytes,
-            allowed: expected_bytes,
+            required: retained_bytes.saturating_add(requested_sample_bytes),
+            allowed: allowed_bytes,
         })?;
+    require(
+        retained_bytes.saturating_add(allocated_bytes(
+            samples.capacity(),
+            mem::size_of::<StoredSample>(),
+        )),
+        allowed_bytes,
+        IndexLimit::BuildWorkingBytes,
+    )?;
     let mut decoder = if kind == "artifact" {
         Decoder::artifact(bytes)
     } else {
         Decoder::work(bytes)
     };
     for _ in 0..count {
-        let ordinal = decoder.u64("sample ordinal")?;
-        let ticks = [
-            decoder.i64("sample x ticks")?,
-            decoder.i64("sample y ticks")?,
-            decoder.i64("sample z ticks")?,
-        ];
-        samples.push(IndexSample::new(ordinal, ticks));
+        samples.push(decode_sample(&mut decoder, profile)?);
     }
     if samples
         .windows(2)
@@ -1027,6 +1703,43 @@ fn decode_samples(
         return Err(corrupt(kind, "samples are not sorted and unique"));
     }
     Ok(samples)
+}
+
+fn decode_sample(
+    decoder: &mut Decoder<'_>,
+    profile: PersistenceProfile,
+) -> Result<StoredSample, IndexError> {
+    let ordinal = decoder.u64("sample ordinal")?;
+    let ticks = [
+        decoder.i64("sample x ticks")?,
+        decoder.i64("sample y ticks")?,
+        decoder.i64("sample z ticks")?,
+    ];
+    let IndexRecipe::InspectionV1(_) = profile.recipe else {
+        return Ok(StoredSample::position_only(ordinal, ticks));
+    };
+    let intensity = decoder.u16("sample intensity")?;
+    let classification = decoder.array::<1>("sample classification")?[0];
+    if decoder.array::<1>("sample reserved byte")?[0] != 0 {
+        return Err(decoder.invalid("sample reserved byte is nonzero"));
+    }
+    let rgb = [
+        decoder.u16("sample red")?,
+        decoder.u16("sample green")?,
+        decoder.u16("sample blue")?,
+    ];
+    if profile
+        .contract
+        .is_some_and(|contract| contract.rgb().is_none())
+        && rgb != [0; 3]
+    {
+        return Err(decoder.invalid("unavailable RGB sample values are nonzero"));
+    }
+    Ok(StoredSample::attributed(
+        ordinal,
+        ticks,
+        DisplayAttributes::new(intensity, classification, rgb),
+    ))
 }
 
 fn corrupt(kind: &'static str, reason: &'static str) -> IndexError {
@@ -1065,10 +1778,6 @@ fn push_u64(bytes: &mut Vec<u8>, value: u64) {
     bytes.extend_from_slice(&value.to_le_bytes());
 }
 
-fn push_i64(bytes: &mut Vec<u8>, value: i64) {
-    bytes.extend_from_slice(&value.to_le_bytes());
-}
-
 fn push_f64(bytes: &mut Vec<u8>, value: f64) {
     bytes.extend_from_slice(&value.to_bits().to_le_bytes());
 }
@@ -1094,12 +1803,104 @@ fn push_optional_bounds(bytes: &mut Vec<u8>, bounds: Option<WorldBounds>) {
     }
 }
 
-fn push_samples(bytes: &mut Vec<u8>, samples: &[IndexSample]) {
-    for sample in samples {
-        push_u64(bytes, sample.ordinal());
-        for ticks in sample.ticks() {
-            push_i64(bytes, ticks);
+fn push_profile_extension(bytes: &mut Vec<u8>, profile: PersistenceProfile) {
+    let IndexRecipe::InspectionV1(ids) = profile.recipe else {
+        return;
+    };
+    push_u32(bytes, 1);
+    let capabilities = 0b11
+        | u32::from(
+            profile
+                .contract
+                .is_some_and(|contract| contract.rgb().is_some()),
+        ) << 2;
+    push_u32(bytes, capabilities);
+    for id in ids.all() {
+        push_u32(bytes, id.get());
+    }
+    push_u32(bytes, 42);
+}
+
+fn decode_profile_extension(
+    decoder: &mut Decoder<'_>,
+    disk: u32,
+    recipe: u32,
+    kind: &'static str,
+) -> Result<PersistenceProfile, IndexError> {
+    match disk {
+        DISK_VERSION_V1 => {
+            if recipe != POSITION_RECIPE_VERSION {
+                return Err(IndexError::UnsupportedVersion {
+                    kind: "index recipe",
+                    version: recipe,
+                });
+            }
+            Ok(PersistenceProfile {
+                recipe: IndexRecipe::PositionOnlyV1,
+                contract: None,
+            })
         }
+        DISK_VERSION_V2 => {
+            if recipe != INSPECTION_RECIPE_VERSION {
+                return Err(IndexError::UnsupportedVersion {
+                    kind: "index recipe",
+                    version: recipe,
+                });
+            }
+            let schema = decoder.u32("display sample schema version")?;
+            if schema != 1 {
+                return Err(IndexError::UnsupportedVersion {
+                    kind: "display sample schema",
+                    version: schema,
+                });
+            }
+            let capabilities = decoder.u32("display sample capabilities")?;
+            if capabilities & !0b111 != 0 || capabilities & 0b11 != 0b11 {
+                return Err(corrupt(kind, "display sample capabilities are invalid"));
+            }
+            let mut raw_ids = [0_u32; 5];
+            for raw in &mut raw_ids {
+                *raw = decoder.u32("display sample Attribute identity")?;
+            }
+            if decoder.u32("display sample record bytes")? != 42 {
+                return Err(corrupt(kind, "display sample record width differs"));
+            }
+            let mut ids = [AttributeId::new(1).expect("one is nonzero"); 5];
+            for (id, raw) in ids.iter_mut().zip(raw_ids) {
+                *id = AttributeId::new(raw)
+                    .map_err(|_| corrupt(kind, "display sample Attribute identity is zero"))?;
+            }
+            let attribute_ids =
+                InspectionAttributeIds::new(ids[0], ids[1], [ids[2], ids[3], ids[4]]).map_err(
+                    |_| corrupt(kind, "display sample Attribute identities are not distinct"),
+                )?;
+            let rgb = (capabilities & 0b100 != 0).then_some(attribute_ids.rgb());
+            Ok(PersistenceProfile {
+                recipe: IndexRecipe::InspectionV1(attribute_ids),
+                contract: Some(DisplaySampleContract::new(
+                    attribute_ids.intensity(),
+                    attribute_ids.classification(),
+                    rgb,
+                )),
+            })
+        }
+        version => Err(IndexError::UnsupportedVersion {
+            kind: if kind == "artifact" {
+                "complete-index disk"
+            } else {
+                "incomplete-index disk"
+            },
+            version,
+        }),
+    }
+}
+
+fn push_samples(bytes: &mut Vec<u8>, samples: &[StoredSample], profile: PersistenceProfile) {
+    let width = profile.sample_width();
+    for sample in samples {
+        assert_sample_matches_profile(*sample, profile);
+        let wire = sample.wire_bytes();
+        bytes.extend_from_slice(&wire[..width]);
     }
 }
 
@@ -1154,6 +1955,10 @@ impl<'bytes> Decoder<'bytes> {
 
     fn u32(&mut self, field: &'static str) -> Result<u32, IndexError> {
         Ok(u32::from_le_bytes(self.array(field)?))
+    }
+
+    fn u16(&mut self, field: &'static str) -> Result<u16, IndexError> {
+        Ok(u16::from_le_bytes(self.array(field)?))
     }
 
     fn u64(&mut self, field: &'static str) -> Result<u64, IndexError> {
@@ -1242,8 +2047,59 @@ struct SampleLocation {
 
 struct OwnedTemporaryFile {
     file: Option<File>,
-    path: PathBuf,
+    path: Arc<Path>,
+    identity: fs::Metadata,
     owned: bool,
+    linked: bool,
+}
+
+#[cfg(unix)]
+fn same_file_identity(left: &fs::Metadata, right: &fs::Metadata) -> bool {
+    use std::os::unix::fs::MetadataExt;
+
+    left.dev() == right.dev() && left.ino() == right.ino()
+}
+
+#[cfg(windows)]
+fn same_file_identity(left: &fs::Metadata, right: &fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt;
+
+    left.volume_serial_number().is_some()
+        && left.volume_serial_number() == right.volume_serial_number()
+        && left.file_index().is_some()
+        && left.file_index() == right.file_index()
+}
+
+#[cfg(not(any(unix, windows)))]
+fn same_file_identity(_left: &fs::Metadata, _right: &fs::Metadata) -> bool {
+    false
+}
+
+#[cfg(unix)]
+fn same_file_state(left: &fs::Metadata, right: &fs::Metadata) -> bool {
+    use std::os::unix::fs::MetadataExt;
+
+    same_file_identity(left, right)
+        && left.len() == right.len()
+        && left.mtime() == right.mtime()
+        && left.mtime_nsec() == right.mtime_nsec()
+        && left.ctime() == right.ctime()
+        && left.ctime_nsec() == right.ctime_nsec()
+}
+
+#[cfg(windows)]
+fn same_file_state(left: &fs::Metadata, right: &fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt;
+
+    same_file_identity(left, right)
+        && left.len() == right.len()
+        && left.creation_time() == right.creation_time()
+        && left.last_write_time() == right.last_write_time()
+}
+
+#[cfg(not(any(unix, windows)))]
+fn same_file_state(_left: &fs::Metadata, _right: &fs::Metadata) -> bool {
+    false
 }
 
 impl OwnedTemporaryFile {
@@ -1252,30 +2108,37 @@ impl OwnedTemporaryFile {
         for _ in 0..TEMPORARY_CREATE_ATTEMPTS {
             let sequence = NEXT_TEMPORARY_FILE.fetch_add(1, Ordering::Relaxed);
             let suffix = format!(".{role}.{}.{sequence}", std::process::id());
-            let path = sibling_path(target, &suffix)?;
+            let path: Arc<Path> = sibling_path(target, &suffix)?.into();
             match OpenOptions::new()
                 .read(read)
                 .write(true)
                 .create_new(true)
-                .open(&path)
+                .open(path.as_ref())
             {
                 Ok(file) => {
+                    let identity = file.metadata().map_err(|error| {
+                        IndexError::io_shared("inspect created", Arc::clone(&path), error)
+                    })?;
                     return Ok(Self {
                         file: Some(file),
                         path,
+                        identity,
                         owned: true,
+                        linked: false,
                     });
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
                     last_path = Some(path);
                 }
-                Err(error) => return Err(IndexError::io("create", &path, error)),
+                Err(error) => {
+                    return Err(IndexError::io_shared("create", Arc::clone(&path), error));
+                }
             }
         }
         let path = last_path.expect("temporary creation attempts are nonzero");
-        Err(IndexError::io(
+        Err(IndexError::io_shared(
             "create",
-            &path,
+            path,
             std::io::Error::new(
                 std::io::ErrorKind::AlreadyExists,
                 "could not reserve a unique temporary file name",
@@ -1287,21 +2150,88 @@ impl OwnedTemporaryFile {
         self.file.as_mut().expect("owned temporary file is open")
     }
 
-    fn close_and_remove(mut self, operation: &'static str) -> Result<(), IndexError> {
-        self.file.take();
-        fs::remove_file(&self.path)
-            .map_err(|error| IndexError::io(operation, &self.path, error))?;
+    fn mark_linked(&mut self) {
+        self.linked = true;
+    }
+
+    fn source_path_matches_open_file(&self) -> Result<bool, IndexError> {
+        let opened = self
+            .file
+            .as_ref()
+            .expect("owned temporary file is open")
+            .metadata()
+            .map_err(|error| {
+                IndexError::io_shared("inspect owned temporary", Arc::clone(&self.path), error)
+            })?;
+        let current = match fs::symlink_metadata(self.path.as_ref()) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Err(error) => {
+                return Err(IndexError::io_shared(
+                    "inspect owned temporary path",
+                    Arc::clone(&self.path),
+                    error,
+                ));
+            }
+        };
+        Ok(opened.file_type().is_file()
+            && current.file_type().is_file()
+            && same_file_identity(&self.identity, &opened)
+            && same_file_identity(&opened, &current))
+    }
+
+    fn target_matches_open_file(&self, target: &Path) -> Result<bool, IndexError> {
+        let opened = self
+            .file
+            .as_ref()
+            .expect("owned temporary file is open")
+            .metadata()
+            .map_err(|error| {
+                IndexError::io_shared("inspect owned temporary", Arc::clone(&self.path), error)
+            })?;
+        let current = match fs::symlink_metadata(target) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Err(_) => return Ok(false),
+        };
+        Ok(opened.file_type().is_file()
+            && current.file_type().is_file()
+            && same_file_identity(&self.identity, &opened)
+            && same_file_identity(&opened, &current))
+    }
+
+    fn remove_owned_path(&mut self, operation: &'static str) -> Result<(), IndexError> {
+        if !self.owned {
+            return Ok(());
+        }
+        if !self.linked {
+            let file = self
+                .file
+                .as_mut()
+                .expect("owned temporary contents remain open until retirement");
+            file.set_len(0)
+                .and_then(|()| file.sync_all())
+                .map_err(|error| IndexError::io_shared(operation, Arc::clone(&self.path), error))?;
+        }
+        // Retain the unique alias. For a linked publication it is another name
+        // for the published inode and retains no duplicate blocks. Otherwise
+        // the owned handle was truncated before close. The pathname is never
+        // touched, so a racing replacement remains at its original name.
         self.owned = false;
+        Ok(())
+    }
+
+    fn close_and_remove(mut self, operation: &'static str) -> Result<(), IndexError> {
+        self.remove_owned_path(operation)?;
+        self.file.take();
         Ok(())
     }
 }
 
 impl Drop for OwnedTemporaryFile {
     fn drop(&mut self) {
+        let _ = self.remove_owned_path("remove owned temporary");
         self.file.take();
-        if self.owned {
-            let _ = fs::remove_file(&self.path);
-        }
     }
 }
 
@@ -1322,7 +2252,7 @@ pub(crate) fn finalize(
         });
     }
     let mut spool = OwnedTemporaryFile::create(target, "samples", true)?;
-    let spool_path = spool.path.clone();
+    let spool_path = Arc::clone(&spool.path);
     let mut locations = Vec::new();
     locations
         .try_reserve_exact(plan.nodes.len())
@@ -1349,10 +2279,26 @@ pub(crate) fn finalize(
                 .expect("planned internal nodes have two children");
             let left = locations[left].expect("reverse root-first order resolves child samples");
             let right = locations[right].expect("reverse root-first order resolves child samples");
-            let left_samples = read_location(work, spool.file_mut(), &spool_path, left)?;
-            let right_samples = read_location(work, spool.file_mut(), &spool_path, right)?;
             let retained_bytes =
-                retained_finalization_metadata_bytes(work, plan, locations.capacity());
+                retained_finalization_runtime_bytes(work, plan, locations.capacity());
+            let left_samples = read_location(
+                work,
+                spool.file_mut(),
+                &spool_path,
+                left,
+                retained_bytes,
+                limits,
+            )?;
+            let left_bytes =
+                allocated_bytes(left_samples.capacity(), mem::size_of::<StoredSample>());
+            let right_samples = read_location(
+                work,
+                spool.file_mut(),
+                &spool_path,
+                right,
+                retained_bytes.saturating_add(left_bytes),
+                limits,
+            )?;
             let samples = merge_samples(
                 &left_samples,
                 &right_samples,
@@ -1372,7 +2318,7 @@ pub(crate) fn finalize(
     spool
         .file_mut()
         .sync_data()
-        .map_err(|error| IndexError::io("flush", &spool_path, error))?;
+        .map_err(|error| IndexError::io_shared("flush", Arc::clone(&spool_path), error))?;
 
     let internal_sample_count = plan
         .nodes
@@ -1384,7 +2330,7 @@ pub(crate) fn finalize(
         .ok_or(IndexError::ResourceLimit {
             limit: IndexLimit::ArtifactSamplePoints,
             required: u64::MAX,
-            allowed: limits.max_artifact_bytes() / SAMPLE_BYTES,
+            allowed: limits.max_artifact_bytes() / work.profile.sample_bytes(),
         })?;
     let node_count = u64::try_from(plan.nodes.len()).unwrap_or(u64::MAX);
     let node_table_bytes =
@@ -1395,22 +2341,22 @@ pub(crate) fn finalize(
                 required: u64::MAX,
                 allowed: limits.max_artifact_bytes(),
             })?;
-    let sample_bytes =
-        internal_sample_count
-            .checked_mul(SAMPLE_BYTES)
-            .ok_or(IndexError::ResourceLimit {
-                limit: IndexLimit::ArtifactBytes,
-                required: u64::MAX,
-                allowed: limits.max_artifact_bytes(),
-            })?;
-    let sample_offset =
-        ARTIFACT_HEADER_BYTES
-            .checked_add(node_table_bytes)
-            .ok_or(IndexError::ResourceLimit {
-                limit: IndexLimit::ArtifactBytes,
-                required: u64::MAX,
-                allowed: limits.max_artifact_bytes(),
-            })?;
+    let sample_bytes = internal_sample_count
+        .checked_mul(work.profile.sample_bytes())
+        .ok_or(IndexError::ResourceLimit {
+            limit: IndexLimit::ArtifactBytes,
+            required: u64::MAX,
+            allowed: limits.max_artifact_bytes(),
+        })?;
+    let sample_offset = work
+        .profile
+        .artifact_header_bytes()
+        .checked_add(node_table_bytes)
+        .ok_or(IndexError::ResourceLimit {
+            limit: IndexLimit::ArtifactBytes,
+            required: u64::MAX,
+            allowed: limits.max_artifact_bytes(),
+        })?;
     let artifact_bytes = sample_offset
         .checked_add(sample_bytes)
         .and_then(|value| value.checked_add(ARTIFACT_CHECKSUM_BYTES))
@@ -1432,9 +2378,10 @@ pub(crate) fn finalize(
         node_table_bytes,
         sample_offset,
         sample_bytes,
+        work.profile,
     );
     let mut temporary = OwnedTemporaryFile::create(target, "tmp", false)?;
-    let temporary_path = temporary.path.clone();
+    let temporary_path = Arc::clone(&temporary.path);
     let mut artifact_hasher = Hasher::new();
     write_hashed(
         temporary.file_mut(),
@@ -1451,7 +2398,10 @@ pub(crate) fn finalize(
         } else {
             let offset = next_artifact_sample;
             next_artifact_sample = next_artifact_sample
-                .checked_add(node.display_point_count.saturating_mul(SAMPLE_BYTES))
+                .checked_add(
+                    node.display_point_count
+                        .saturating_mul(work.profile.sample_bytes()),
+                )
                 .ok_or(IndexError::CorruptArtifact {
                     reason: "artifact sample offsets overflowed",
                 })?;
@@ -1476,12 +2426,20 @@ pub(crate) fn finalize(
         }
         control.check_cancelled()?;
         let location = locations[index].expect("internal node sample location exists");
-        let samples = read_location(work, spool.file_mut(), &spool_path, location)?;
+        let samples = read_location(
+            work,
+            spool.file_mut(),
+            &spool_path,
+            location,
+            retained_finalization_runtime_bytes(work, plan, locations.capacity()),
+            limits,
+        )?;
         write_samples_hashed(
             temporary.file_mut(),
             &temporary_path,
             &mut artifact_hasher,
             &samples,
+            work.profile,
         )?;
     }
     let checksum = artifact_hasher.finalize();
@@ -1489,45 +2447,60 @@ pub(crate) fn finalize(
         .file_mut()
         .write_all(checksum.as_bytes())
         .and_then(|()| temporary.file_mut().sync_all())
-        .map_err(|error| IndexError::io("finish and flush", &temporary_path, error))?;
+        .map_err(|error| {
+            IndexError::io_shared("finish and flush", Arc::clone(&temporary_path), error)
+        })?;
     let actual_bytes = temporary
         .file_mut()
         .metadata()
-        .map_err(|error| IndexError::io("inspect", &temporary_path, error))?
+        .map_err(|error| IndexError::io_shared("inspect", Arc::clone(&temporary_path), error))?
         .len();
     if actual_bytes != artifact_bytes {
         return Err(IndexError::CorruptArtifact {
             reason: "new artifact length differs from its deterministic layout",
         });
     }
+    let spool_bytes = spool
+        .file_mut()
+        .metadata()
+        .map_err(|error| IndexError::io_shared("inspect", Arc::clone(&spool_path), error))?
+        .len();
+    work.observe_temporary_disk_bytes(spool_bytes, actual_bytes)?;
     control.check_cancelled()?;
     if target_exists(target)? {
         return Err(IndexError::IncompatibleArtifact {
             reason: "target appeared before atomic publication",
         });
     }
-    publish_no_replace(&temporary_path, target)?;
+    publish_no_replace(&mut temporary, target)?;
     sync_parent(target)?;
     temporary.close_and_remove("remove published temporary")?;
-    fs::remove_file(&work.path)
-        .map_err(|error| IndexError::io("remove completed work file", &work.path, error))?;
+    // Keep the predictable work path as a rebuildable recovery cache. There is
+    // no portable conditional-unlink primitive that can atomically prove the
+    // pathname still names this open file; check-then-remove could delete a
+    // caller's concurrently installed replacement.
     spool.close_and_remove("remove sample spool")?;
     sync_parent(target)?;
     Ok(())
 }
 
-fn publish_no_replace(temporary: &Path, target: &Path) -> Result<(), IndexError> {
+fn publish_no_replace(temporary: &mut OwnedTemporaryFile, target: &Path) -> Result<(), IndexError> {
     publish_no_replace_with(temporary, target, |source, destination| {
         fs::hard_link(source, destination)
     })
 }
 
 fn publish_no_replace_with(
-    temporary: &Path,
+    temporary: &mut OwnedTemporaryFile,
     target: &Path,
     hard_link: impl FnOnce(&Path, &Path) -> std::io::Result<()>,
 ) -> Result<(), IndexError> {
-    match hard_link(temporary, target) {
+    if !temporary.source_path_matches_open_file()? {
+        return Err(IndexError::CorruptArtifact {
+            reason: "owned artifact temporary path changed before publication",
+        });
+    }
+    match hard_link(&temporary.path, target) {
         Ok(()) => {}
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
             return Err(IndexError::IncompatibleArtifact {
@@ -1536,14 +2509,26 @@ fn publish_no_replace_with(
         }
         Err(error) => return Err(IndexError::io("atomically publish", target, error)),
     }
+    let source_matches = temporary.source_path_matches_open_file()?;
+    let target_matches = temporary.target_matches_open_file(target)?;
+    if target_matches {
+        // Avoid truncating the published target through the retained handle
+        // even when a source-alias race forces a conservative failure.
+        temporary.mark_linked();
+    }
+    if !source_matches || !target_matches {
+        return Err(IndexError::CorruptArtifact {
+            reason: "artifact publication did not bind the owned temporary file",
+        });
+    }
     Ok(())
 }
 
 fn append_spool_samples(
-    work: &WorkFile,
+    work: &mut WorkFile,
     spool: &mut File,
     spool_path: &Path,
-    samples: &[IndexSample],
+    samples: &[StoredSample],
     limits: PrepareLimits,
 ) -> Result<SampleLocation, IndexError> {
     let offset = spool
@@ -1551,7 +2536,7 @@ fn append_spool_samples(
         .map_err(|error| IndexError::io("seek to end of", spool_path, error))?;
     let bytes = u64::try_from(samples.len())
         .unwrap_or(u64::MAX)
-        .saturating_mul(SAMPLE_BYTES);
+        .saturating_mul(work.profile.sample_bytes());
     let work_bytes = work
         .file
         .metadata()
@@ -1563,14 +2548,18 @@ fn append_spool_samples(
         IndexLimit::IncompleteAndSampleSpoolBytes,
     )?;
     let mut hasher = Hasher::new();
-    hasher.update(SAMPLE_HASH_DOMAIN);
+    hasher.update(work.profile.sample_hash_domain());
+    let width = work.profile.sample_width();
     for sample in samples {
-        let encoded = encode_sample(*sample);
-        hasher.update(&encoded);
+        assert_sample_matches_profile(*sample, work.profile);
+        let wire = sample.wire_bytes();
+        let encoded = &wire[..width];
+        hasher.update(encoded);
         spool
-            .write_all(&encoded)
+            .write_all(encoded)
             .map_err(|error| IndexError::io("append to", spool_path, error))?;
     }
+    work.observe_temporary_disk_bytes(offset.saturating_add(bytes), 0)?;
     Ok(SampleLocation {
         storage: SampleStorage::Spool,
         offset,
@@ -1584,7 +2573,13 @@ fn read_location(
     spool: &mut File,
     spool_path: &Path,
     location: SampleLocation,
-) -> Result<Vec<IndexSample>, IndexError> {
+    retained_bytes: u64,
+    limits: PrepareLimits,
+) -> Result<Vec<StoredSample>, IndexError> {
+    let context = SampleReadContext::Work {
+        retained_bytes,
+        max_build_working_bytes: limits.max_build_working_bytes(),
+    };
     match location.storage {
         SampleStorage::Work => read_persisted_samples(
             &mut work.file,
@@ -1592,7 +2587,8 @@ fn read_location(
             location.offset,
             location.count,
             location.checksum,
-            SampleReadContext::Work,
+            context,
+            work.profile,
         ),
         SampleStorage::Spool => read_persisted_samples(
             spool,
@@ -1600,7 +2596,8 @@ fn read_location(
             location.offset,
             location.count,
             location.checksum,
-            SampleReadContext::Work,
+            context,
+            work.profile,
         ),
     }
 }
@@ -1612,25 +2609,25 @@ fn encode_artifact_header(
     node_table_bytes: u64,
     sample_offset: u64,
     sample_bytes: u64,
+    profile: PersistenceProfile,
 ) -> Vec<u8> {
-    let mut bytes = Vec::with_capacity(usize::try_from(ARTIFACT_HEADER_BYTES).unwrap_or(208));
+    let header_bytes = profile.artifact_header_bytes();
+    let mut bytes = Vec::with_capacity(usize::try_from(header_bytes).unwrap_or(240));
     bytes.extend_from_slice(ARTIFACT_MAGIC);
-    push_u32(&mut bytes, DISK_VERSION);
-    push_u32(&mut bytes, RECIPE_VERSION);
+    push_u32(&mut bytes, profile.recipe.disk_version());
+    push_u32(&mut bytes, profile.recipe.recipe_version());
     bytes.extend_from_slice(source.identity().as_bytes());
     push_u64(&mut bytes, source.metadata().point_count());
     push_transform(&mut bytes, source.metadata().position_transform());
     push_optional_bounds(&mut bytes, source.metadata().world_bounds());
     push_u64(&mut bytes, node_count);
     push_u64(&mut bytes, leaf_count);
-    push_u64(&mut bytes, ARTIFACT_HEADER_BYTES);
+    push_u64(&mut bytes, header_bytes);
     push_u64(&mut bytes, node_table_bytes);
     push_u64(&mut bytes, sample_offset);
     push_u64(&mut bytes, sample_bytes);
-    debug_assert_eq!(
-        bytes.len(),
-        usize::try_from(ARTIFACT_HEADER_BYTES).unwrap_or(208)
-    );
+    push_profile_extension(&mut bytes, profile);
+    debug_assert_eq!(bytes.len(), usize::try_from(header_bytes).unwrap_or(240));
     bytes
 }
 
@@ -1699,23 +2696,25 @@ fn write_samples_hashed(
     file: &mut File,
     path: &Path,
     hasher: &mut Hasher,
-    samples: &[IndexSample],
+    samples: &[StoredSample],
+    profile: PersistenceProfile,
 ) -> Result<(), IndexError> {
+    let width = profile.sample_width();
     for sample in samples {
-        let encoded = encode_sample(*sample);
-        write_hashed(file, path, hasher, &encoded)?;
+        assert_sample_matches_profile(*sample, profile);
+        let wire = sample.wire_bytes();
+        write_hashed(file, path, hasher, &wire[..width])?;
     }
     Ok(())
 }
 
-fn encode_sample(sample: IndexSample) -> [u8; 32] {
-    let mut encoded = [0_u8; 32];
-    encoded[..8].copy_from_slice(&sample.ordinal().to_le_bytes());
-    for (axis, ticks) in sample.ticks().into_iter().enumerate() {
-        let start = 8 + axis * 8;
-        encoded[start..start + 8].copy_from_slice(&ticks.to_le_bytes());
+fn assert_sample_matches_profile(sample: StoredSample, profile: PersistenceProfile) {
+    if matches!(profile.recipe, IndexRecipe::InspectionV1(_)) {
+        assert!(
+            sample.attributes().is_some(),
+            "inspection samples carry row-aligned raw Attributes"
+        );
     }
-    encoded
 }
 
 fn reject_symlink(path: &Path, kind: &'static str) -> Result<(), IndexError> {
@@ -1770,19 +2769,27 @@ fn finalization_working_bytes_with_locations(
     plan: &TreePlan,
     location_capacity: usize,
 ) -> u64 {
-    let retained_metadata = retained_finalization_metadata_bytes(work, plan, location_capacity);
+    let retained_metadata = retained_finalization_runtime_bytes(work, plan, location_capacity);
     let child_samples = MAX_NODE_SAMPLES
-        .saturating_mul(u64::try_from(mem::size_of::<IndexSample>()).unwrap_or(u64::MAX))
+        .saturating_mul(u64::try_from(mem::size_of::<StoredSample>()).unwrap_or(u64::MAX))
         .saturating_mul(2);
-    let selection_heap = MAX_NODE_SAMPLES
-        .saturating_mul(u64::try_from(mem::size_of::<(u64, u64, [i64; 3])>()).unwrap_or(u64::MAX));
+    let selection_heap = MAX_NODE_SAMPLES.saturating_mul(
+        u64::try_from(mem::size_of::<(u64, u64, StoredSample)>()).unwrap_or(u64::MAX),
+    );
     let merged_samples = MAX_NODE_SAMPLES
-        .saturating_mul(u64::try_from(mem::size_of::<IndexSample>()).unwrap_or(u64::MAX));
+        .saturating_mul(u64::try_from(mem::size_of::<StoredSample>()).unwrap_or(u64::MAX));
     retained_metadata
         .saturating_add(child_samples)
         .saturating_add(selection_heap)
         .saturating_add(merged_samples)
-        .saturating_add(1_024)
+}
+
+fn retained_finalization_runtime_bytes(
+    work: &WorkFile,
+    plan: &TreePlan,
+    location_capacity: usize,
+) -> u64 {
+    retained_finalization_metadata_bytes(work, plan, location_capacity).saturating_add(1_024)
 }
 
 fn retained_finalization_metadata_bytes(
@@ -1807,6 +2814,7 @@ fn retained_finalization_metadata_bytes(
 }
 
 struct ArtifactHeader {
+    profile: PersistenceProfile,
     source: SourceId,
     point_count: u64,
     transform: PositionTransform,
@@ -1823,22 +2831,28 @@ struct ArtifactHeader {
 pub(crate) fn open_complete(
     source: &Source,
     target: &Path,
+    requested_recipe: IndexRecipe,
     limits: PrepareLimits,
     control: &OperationControl,
 ) -> Result<OpenArtifact, IndexError> {
     control.check_cancelled()?;
     reject_complete_symlink(target)?;
     let mut file = File::open(target).map_err(|error| IndexError::io("open", target, error))?;
-    let artifact_bytes = file
+    let initial_file_state = file
         .metadata()
-        .map_err(|error| IndexError::io("inspect", target, error))?
-        .len();
+        .map_err(|error| IndexError::io("inspect", target, error))?;
+    if !artifact_path_matches_open_file(&file, target, &initial_file_state)? {
+        return Err(IndexError::CorruptArtifact {
+            reason: "artifact path changed while it was being opened",
+        });
+    }
+    let artifact_bytes = initial_file_state.len();
     require(
         artifact_bytes,
         limits.max_artifact_bytes(),
         IndexLimit::ArtifactBytes,
     )?;
-    let minimum_bytes = ARTIFACT_HEADER_BYTES.saturating_add(ARTIFACT_CHECKSUM_BYTES);
+    let minimum_bytes = ARTIFACT_HEADER_V1_BYTES.saturating_add(ARTIFACT_CHECKSUM_BYTES);
     if artifact_bytes < minimum_bytes {
         return Err(IndexError::CorruptArtifact {
             reason: "artifact is shorter than its fixed header and checksum",
@@ -1852,12 +2866,50 @@ pub(crate) fn open_complete(
     let artifact_checksum =
         verify_artifact_checksum(&mut file, target, artifact_bytes, limits, control)?;
 
-    let mut header_bytes = [0_u8; 208];
+    let mut prefix = [0_u8; 16];
     file.seek(SeekFrom::Start(0))
         .map_err(|error| IndexError::io("seek to header in", target, error))?;
-    file.read_exact(&mut header_bytes)
+    file.read_exact(&mut prefix)
+        .map_err(|error| IndexError::io("read header from", target, error))?;
+    let mut prefix_decoder = Decoder::artifact(&prefix);
+    if prefix_decoder.array::<8>("artifact magic")? != *ARTIFACT_MAGIC {
+        return Err(IndexError::CorruptArtifact {
+            reason: "artifact magic differs",
+        });
+    }
+    let disk = prefix_decoder.u32("artifact disk version")?;
+    let _recipe = prefix_decoder.u32("artifact recipe version")?;
+    let header_length = match disk {
+        DISK_VERSION_V1 => ARTIFACT_HEADER_V1_BYTES,
+        DISK_VERSION_V2 => ARTIFACT_HEADER_V2_BYTES,
+        version => {
+            return Err(IndexError::UnsupportedVersion {
+                kind: "complete-index disk",
+                version,
+            });
+        }
+    };
+    if artifact_bytes < header_length.saturating_add(ARTIFACT_CHECKSUM_BYTES) {
+        return Err(IndexError::CorruptArtifact {
+            reason: "artifact is shorter than its fixed header and checksum",
+        });
+    }
+    let mut header_bytes = vec![0; usize::try_from(header_length).unwrap_or(240)];
+    file.seek(SeekFrom::Start(0))
+        .and_then(|_| file.read_exact(&mut header_bytes))
         .map_err(|error| IndexError::io("read header from", target, error))?;
     let header = decode_artifact_header(&header_bytes)?;
+    if header.profile.recipe != requested_recipe {
+        return Err(IndexError::IncompatibleArtifact {
+            reason: "index recipe or inspection Attribute profile differs",
+        });
+    }
+    let source_contract = requested_recipe.resolve_contract(source.metadata())?;
+    if header.profile.contract != source_contract {
+        return Err(IndexError::IncompatibleArtifact {
+            reason: "Source inspection Attribute availability differs",
+        });
+    }
     validate_artifact_layout(&header, artifact_bytes)?;
     validate_artifact_binding(source, &header)?;
     require(
@@ -1921,7 +2973,12 @@ pub(crate) fn open_complete(
         let mut record = [0_u8; 168];
         file.read_exact(&mut record)
             .map_err(|error| IndexError::io("read node table from", target, error))?;
-        let node = decode_node_record(index, &record, &mut expected_sample_offset)?;
+        let node = decode_node_record(
+            index,
+            &record,
+            &mut expected_sample_offset,
+            header.profile.sample_bytes(),
+        )?;
         nodes.push(node);
     }
     if expected_sample_offset != header.sample_offset.saturating_add(header.sample_bytes) {
@@ -1929,7 +2986,14 @@ pub(crate) fn open_complete(
             reason: "node sample ranges do not exactly cover the sample section",
         });
     }
-    validate_topology(&nodes, source, header.leaf_count, limits, control)?;
+    validate_topology(
+        &nodes,
+        source,
+        header.leaf_count,
+        header.profile.sample_bytes(),
+        limits,
+        control,
+    )?;
     let hierarchy = IndexHierarchy::new(nodes);
     require(
         hierarchy.estimated_resident_bytes(),
@@ -1939,6 +3003,8 @@ pub(crate) fn open_complete(
     let reader = ArtifactReader {
         file: Arc::new(Mutex::new(file)),
         path: Arc::new(target.to_path_buf()),
+        profile: header.profile,
+        identity: Arc::new(initial_file_state.clone()),
     };
     validate_persisted_samples(&reader, &hierarchy, source, limits, control)?;
     let final_checksum = verify_artifact_checksum(
@@ -1949,10 +3015,11 @@ pub(crate) fn open_complete(
         control,
     )?;
     if final_checksum != artifact_checksum
-        || fs::metadata(target)
-            .map_err(|error| IndexError::io("reinspect", target, error))?
-            .len()
-            != artifact_bytes
+        || !artifact_path_matches_open_file(
+            &lock_recovering(&reader.file),
+            target,
+            &initial_file_state,
+        )?
     {
         return Err(IndexError::CorruptArtifact {
             reason: "artifact changed while it was being opened",
@@ -1963,8 +3030,10 @@ pub(crate) fn open_complete(
         source_point_count: header.point_count,
         position_transform: header.transform,
         world_bounds: header.bounds,
-        recipe_version: RECIPE_VERSION,
-        disk_version: DISK_VERSION,
+        recipe_version: header.profile.recipe.recipe_version(),
+        disk_version: header.profile.recipe.disk_version(),
+        recipe: header.profile.recipe,
+        display_sample_contract: header.profile.contract,
         node_count: header.node_count,
         leaf_count: header.leaf_count,
         artifact_checksum,
@@ -1977,7 +3046,24 @@ pub(crate) fn open_complete(
     })
 }
 
-fn decode_artifact_header(bytes: &[u8; 208]) -> Result<ArtifactHeader, IndexError> {
+fn artifact_path_matches_open_file(
+    file: &File,
+    target: &Path,
+    initial: &fs::Metadata,
+) -> Result<bool, IndexError> {
+    let opened = file
+        .metadata()
+        .map_err(|error| IndexError::io("reinspect open artifact", target, error))?;
+    let current = fs::symlink_metadata(target)
+        .map_err(|error| IndexError::io("reinspect artifact path", target, error))?;
+    Ok(initial.file_type().is_file()
+        && opened.file_type().is_file()
+        && current.file_type().is_file()
+        && same_file_state(initial, &opened)
+        && same_file_state(&opened, &current))
+}
+
+fn decode_artifact_header(bytes: &[u8]) -> Result<ArtifactHeader, IndexError> {
     let mut decoder = Decoder::artifact(bytes);
     if decoder.array::<8>("artifact magic")? != *ARTIFACT_MAGIC {
         return Err(IndexError::CorruptArtifact {
@@ -1986,29 +3072,29 @@ fn decode_artifact_header(bytes: &[u8; 208]) -> Result<ArtifactHeader, IndexErro
     }
     let disk = decoder.u32("artifact disk version")?;
     let recipe = decoder.u32("artifact recipe version")?;
-    if disk != DISK_VERSION {
-        return Err(IndexError::UnsupportedVersion {
-            kind: "complete-index disk",
-            version: disk,
-        });
-    }
-    if recipe != RECIPE_VERSION {
-        return Err(IndexError::UnsupportedVersion {
-            kind: "index recipe",
-            version: recipe,
-        });
-    }
+    let source = SourceId::new(decoder.array("artifact Source identity")?);
+    let point_count = decoder.u64("artifact Source Point count")?;
+    let transform = decoder.transform("artifact Source transform")?;
+    let bounds = decoder.optional_bounds("artifact Source bounds")?;
+    let node_count = decoder.u64("artifact node count")?;
+    let leaf_count = decoder.u64("artifact leaf count")?;
+    let node_table_offset = decoder.u64("artifact node table offset")?;
+    let node_table_bytes = decoder.u64("artifact node table bytes")?;
+    let sample_offset = decoder.u64("artifact sample offset")?;
+    let sample_bytes = decoder.u64("artifact sample bytes")?;
+    let profile = decode_profile_extension(&mut decoder, disk, recipe, "artifact")?;
     Ok(ArtifactHeader {
-        source: SourceId::new(decoder.array("artifact Source identity")?),
-        point_count: decoder.u64("artifact Source Point count")?,
-        transform: decoder.transform("artifact Source transform")?,
-        bounds: decoder.optional_bounds("artifact Source bounds")?,
-        node_count: decoder.u64("artifact node count")?,
-        leaf_count: decoder.u64("artifact leaf count")?,
-        node_table_offset: decoder.u64("artifact node table offset")?,
-        node_table_bytes: decoder.u64("artifact node table bytes")?,
-        sample_offset: decoder.u64("artifact sample offset")?,
-        sample_bytes: decoder.u64("artifact sample bytes")?,
+        profile,
+        source,
+        point_count,
+        transform,
+        bounds,
+        node_count,
+        leaf_count,
+        node_table_offset,
+        node_table_bytes,
+        sample_offset,
+        sample_bytes,
     })
 }
 
@@ -2024,14 +3110,16 @@ fn validate_artifact_layout(
                 reason: "artifact node table length overflowed",
             })?;
     let checksum_offset = artifact_bytes.saturating_sub(ARTIFACT_CHECKSUM_BYTES);
-    if header.node_table_offset != ARTIFACT_HEADER_BYTES
+    if header.node_table_offset != header.profile.artifact_header_bytes()
         || header.node_table_bytes != expected_node_bytes
         || header.sample_offset
             != header
                 .node_table_offset
                 .saturating_add(header.node_table_bytes)
         || header.sample_offset.saturating_add(header.sample_bytes) != checksum_offset
-        || !header.sample_bytes.is_multiple_of(SAMPLE_BYTES)
+        || !header
+            .sample_bytes
+            .is_multiple_of(header.profile.sample_bytes())
     {
         return Err(IndexError::CorruptArtifact {
             reason: "artifact offsets or lengths are not canonical",
@@ -2118,6 +3206,7 @@ fn decode_node_record(
     expected_index: u64,
     bytes: &[u8; 168],
     expected_sample_offset: &mut u64,
+    sample_bytes: u64,
 ) -> Result<IndexNode, IndexError> {
     let mut decoder = Decoder::artifact(bytes);
     let id_value = decoder.u64("node identity")?;
@@ -2192,7 +3281,7 @@ fn decode_node_record(
             reason: "internal right child is zero",
         })?;
         *expected_sample_offset = expected_sample_offset
-            .checked_add(display_point_count.saturating_mul(SAMPLE_BYTES))
+            .checked_add(display_point_count.saturating_mul(sample_bytes))
             .ok_or(IndexError::CorruptArtifact {
                 reason: "node sample range overflowed",
             })?;
@@ -2234,6 +3323,7 @@ fn validate_topology(
     nodes: &[IndexNode],
     source: &Source,
     leaf_count: u64,
+    sample_bytes: u64,
     limits: PrepareLimits,
     control: &OperationControl,
 ) -> Result<(), IndexError> {
@@ -2255,7 +3345,7 @@ fn validate_topology(
     let leaf_bytes =
         leaf_count.saturating_mul(u64::try_from(mem::size_of::<SourceSpan>()).unwrap_or(u64::MAX));
     require(
-        leaf_bytes.saturating_add(MAX_NODE_SAMPLES.saturating_mul(SAMPLE_BYTES)),
+        leaf_bytes.saturating_add(MAX_NODE_SAMPLES.saturating_mul(sample_bytes)),
         limits.max_build_working_bytes(),
         IndexLimit::ArtifactValidationWorkingBytes,
     )?;
@@ -2271,7 +3361,7 @@ fn validate_topology(
         .unwrap_or(u64::MAX)
         .saturating_mul(u64::try_from(mem::size_of::<SourceSpan>()).unwrap_or(u64::MAX));
     require(
-        actual_leaf_bytes.saturating_add(MAX_NODE_SAMPLES.saturating_mul(SAMPLE_BYTES)),
+        actual_leaf_bytes.saturating_add(MAX_NODE_SAMPLES.saturating_mul(sample_bytes)),
         limits.max_build_working_bytes(),
         IndexLimit::ArtifactValidationWorkingBytes,
     )?;
@@ -2446,7 +3536,7 @@ impl ArtifactSampleValidator<'_> {
         )?;
         drop(left);
         drop(right);
-        self.validate_node_samples(node, &expected, retained_bytes)?;
+        self.validate_node_samples(node, &expected, expected.capacity(), retained_bytes)?;
         Ok(expected)
     }
 
@@ -2480,23 +3570,29 @@ impl ArtifactSampleValidator<'_> {
         &self,
         node: &IndexNode,
         expected: &[u64],
+        expected_capacity: usize,
         retained_bytes: u64,
     ) -> Result<(), IndexError> {
-        let expected_bytes = allocated_bytes(expected.len(), mem::size_of::<u64>());
+        let expected_bytes = allocated_bytes(expected_capacity, mem::size_of::<u64>());
         let actual_bytes = node
             .display_point_count
-            .saturating_mul(u64::try_from(mem::size_of::<IndexSample>()).unwrap_or(u64::MAX));
-        self.require_memory(
-            retained_bytes
-                .saturating_add(expected_bytes)
-                .saturating_add(actual_bytes),
-        )?;
+            .saturating_mul(u64::try_from(mem::size_of::<StoredSample>()).unwrap_or(u64::MAX));
+        let retained_with_expected = retained_bytes.saturating_add(expected_bytes);
+        self.require_memory(retained_with_expected.saturating_add(actual_bytes))?;
+        let available_sample_bytes = self
+            .limits
+            .max_build_working_bytes()
+            .saturating_sub(retained_with_expected);
         let samples = self.reader.read_sample_block(
             node.sample_offset,
             node.display_point_count,
             node.sample_checksum,
-            self.limits.max_build_working_bytes(),
+            available_sample_bytes,
         )?;
+        self.require_memory(retained_with_expected.saturating_add(allocated_bytes(
+            samples.capacity(),
+            mem::size_of::<StoredSample>(),
+        )))?;
         if !expected
             .iter()
             .copied()
@@ -2597,13 +3693,212 @@ fn reject_complete_symlink(path: &Path) -> Result<(), IndexError> {
 
 #[cfg(test)]
 mod publication_tests {
+    use std::{cell::RefCell, path::PathBuf, time::SystemTime};
+
+    use point_contracts::{AttributeColumns, CoordinateReference, PositionTransform};
+    use source_memory::MemorySource;
+
     use super::*;
 
     #[test]
+    fn sample_wire_encoding_uses_stack_bytes_without_per_sample_allocation() {
+        let position_sample = StoredSample::position_only(7, [-3, 5, 11]);
+        let position_profile = PersistenceProfile::requested(IndexRecipe::PositionOnlyV1, None)
+            .expect("position-only profile is valid");
+        let ids = InspectionAttributeIds::new(
+            AttributeId::new(1).expect("nonzero Attribute identity"),
+            AttributeId::new(2).expect("nonzero Attribute identity"),
+            [
+                AttributeId::new(3).expect("nonzero Attribute identity"),
+                AttributeId::new(4).expect("nonzero Attribute identity"),
+                AttributeId::new(5).expect("nonzero Attribute identity"),
+            ],
+        )
+        .expect("distinct inspection Attribute identities");
+        let inspection_profile = PersistenceProfile::requested(
+            IndexRecipe::InspectionV1(ids),
+            Some(DisplaySampleContract::new(
+                ids.intensity(),
+                ids.classification(),
+                Some(ids.rgb()),
+            )),
+        )
+        .expect("inspection profile is valid");
+        let inspection_sample = StoredSample::attributed(
+            13,
+            [17, 19, 23],
+            DisplayAttributes::new(65_535, 18, [1, 32_768, 65_535]),
+        );
+        let mut position_bytes = Vec::with_capacity(position_profile.sample_width());
+        let mut inspection_bytes = Vec::with_capacity(inspection_profile.sample_width());
+
+        let allocations = allocation_counter::measure(|| {
+            push_samples(&mut position_bytes, &[position_sample], position_profile);
+            push_samples(
+                &mut inspection_bytes,
+                &[inspection_sample],
+                inspection_profile,
+            );
+        });
+
+        assert_eq!(allocations.bytes_total, 0);
+        assert_eq!(
+            position_bytes,
+            position_sample.wire_bytes()[..position_profile.sample_width()]
+        );
+        assert_eq!(
+            inspection_bytes,
+            inspection_sample.wire_bytes()[..inspection_profile.sample_width()]
+        );
+    }
+
+    #[test]
+    fn frame_encoding_charges_actual_capacity_with_retained_allocations() {
+        let profile = PersistenceProfile::requested(IndexRecipe::PositionOnlyV1, None)
+            .expect("position-only profile is valid");
+        let span = SourceSpan::new(0, 1).expect("one-Point span is valid");
+        let bounds = WorldBounds::new([0.0; 3], [0.0; 3]).expect("point bounds are valid");
+        let samples = [StoredSample::position_only(0, [0; 3])];
+        let retained = 1_024;
+        let probe = encode_frame_payload(
+            span,
+            bounds,
+            &samples,
+            profile,
+            retained,
+            PrepareLimits::default(),
+        )
+        .expect("default working limit admits one frame");
+        let required = retained.saturating_add(u64::try_from(probe.capacity()).unwrap_or(u64::MAX));
+
+        let exact = encode_frame_payload(
+            span,
+            bounds,
+            &samples,
+            profile,
+            retained,
+            PrepareLimits::default().with_max_build_working_bytes(required),
+        )
+        .expect("exact actual-capacity peak is inclusive");
+        assert_eq!(exact, probe);
+
+        let error = encode_frame_payload(
+            span,
+            bounds,
+            &samples,
+            profile,
+            retained,
+            PrepareLimits::default().with_max_build_working_bytes(required - 1),
+        )
+        .expect_err("one byte below the actual-capacity peak must fail");
+        assert!(matches!(
+            error,
+            IndexError::ResourceLimit {
+                limit: IndexLimit::BuildWorkingBytes,
+                required: observed,
+                allowed,
+            } if observed == required && allowed == required - 1
+        ));
+    }
+
+    #[test]
+    fn finalization_reads_and_merge_charge_all_live_allocations() {
+        let retained_bytes = 1_024;
+        let sample_capacity = 17;
+        let sample_bytes = allocated_bytes(sample_capacity, mem::size_of::<StoredSample>());
+        let exact_context = SampleReadContext::Work {
+            retained_bytes,
+            max_build_working_bytes: retained_bytes.saturating_add(sample_bytes),
+        };
+        exact_context
+            .enforce_buffer_limit(sample_capacity)
+            .expect("the exact retained-plus-sample peak is inclusive");
+        let error = SampleReadContext::Work {
+            retained_bytes,
+            max_build_working_bytes: retained_bytes.saturating_add(sample_bytes) - 1,
+        }
+        .enforce_buffer_limit(sample_capacity)
+        .expect_err("one byte below the retained-plus-sample peak must fail");
+        assert!(matches!(
+            error,
+            IndexError::ResourceLimit {
+                limit: IndexLimit::BuildWorkingBytes,
+                required,
+                allowed,
+            } if required == retained_bytes + sample_bytes && allowed == required - 1
+        ));
+
+        let left = vec![StoredSample::position_only(0, [0; 3])];
+        let right = vec![StoredSample::position_only(1, [1; 3])];
+        let retained = left.len() + right.len();
+        let mut heap_probe = BinaryHeap::<(u64, u64, StoredSample)>::new();
+        heap_probe
+            .try_reserve_exact(retained)
+            .expect("tiny heap probe is addressable");
+        let mut output_probe = Vec::<StoredSample>::new();
+        output_probe
+            .try_reserve_exact(retained)
+            .expect("tiny output probe is addressable");
+        let exact_peak = retained_bytes
+            .saturating_add(allocated_bytes(
+                left.capacity(),
+                mem::size_of::<StoredSample>(),
+            ))
+            .saturating_add(allocated_bytes(
+                right.capacity(),
+                mem::size_of::<StoredSample>(),
+            ))
+            .saturating_add(allocated_bytes(
+                heap_probe.capacity(),
+                mem::size_of::<(u64, u64, StoredSample)>(),
+            ))
+            .saturating_add(allocated_bytes(
+                output_probe.capacity(),
+                mem::size_of::<StoredSample>(),
+            ));
+        drop((heap_probe, output_probe));
+
+        let merged = merge_samples(
+            &left,
+            &right,
+            [left.capacity(), right.capacity()],
+            retained_bytes,
+            PrepareLimits::default().with_max_build_working_bytes(exact_peak),
+        )
+        .expect("the exact child, heap, and output peak is inclusive");
+        assert_eq!(
+            merged
+                .iter()
+                .map(|sample| sample.ordinal())
+                .collect::<Vec<_>>(),
+            [0, 1]
+        );
+
+        let error = merge_samples(
+            &left,
+            &right,
+            [left.capacity(), right.capacity()],
+            retained_bytes,
+            PrepareLimits::default().with_max_build_working_bytes(exact_peak - 1),
+        )
+        .expect_err("one byte below the full merge peak must fail before mutation");
+        assert!(matches!(
+            error,
+            IndexError::ResourceLimit {
+                limit: IndexLimit::BuildWorkingBytes,
+                required,
+                allowed,
+            } if required == exact_peak && allowed == exact_peak - 1
+        ));
+    }
+
+    #[test]
     fn publication_error_retains_operation_target_and_os_error() {
-        let temporary = Path::new("fixture.pidx.tmp.123.1");
-        let target = Path::new("fixture.pidx");
-        let error = publish_no_replace_with(temporary, target, |_, _| {
+        let directory = TestDirectory::new("publication-error");
+        let target = directory.path.join("fixture.pidx");
+        let mut temporary =
+            OwnedTemporaryFile::create(&target, "publication-error", true).expect("create stage");
+        let error = publish_no_replace_with(&mut temporary, &target, |_, _| {
             Err(std::io::Error::from_raw_os_error(13))
         })
         .unwrap_err();
@@ -2619,5 +3914,425 @@ mod publication_tests {
         assert_eq!(operation, "atomically publish");
         assert_eq!(path, target);
         assert_eq!(source.raw_os_error(), Some(13));
+    }
+
+    #[test]
+    fn artifact_publication_never_acknowledges_a_replaced_temporary_source() {
+        let directory = TestDirectory::new("artifact-publication-source-replacement");
+        let target = directory.path.join("fixture.pidx");
+        let moved = directory.path.join("owned-artifact-moved-aside");
+        let sentinel = b"caller replacement published by an injected race";
+        let mut temporary =
+            OwnedTemporaryFile::create(&target, "artifact-race", true).expect("create stage");
+        temporary
+            .file_mut()
+            .write_all(b"owned artifact bytes")
+            .and_then(|()| temporary.file_mut().sync_all())
+            .expect("write owned artifact fixture");
+
+        let error = publish_no_replace_with(&mut temporary, &target, |source, destination| {
+            fs::rename(source, &moved)?;
+            fs::write(source, sentinel)?;
+            fs::hard_link(source, destination)
+        })
+        .expect_err("a replacement source must never receive a success acknowledgement");
+
+        assert!(matches!(error, IndexError::CorruptArtifact { .. }));
+        assert_eq!(
+            fs::read(&target).expect("racing target is preserved"),
+            sentinel
+        );
+        assert_eq!(
+            fs::read(&temporary.path).expect("racing source alias is preserved"),
+            sentinel
+        );
+        drop(temporary);
+        assert_eq!(
+            fs::read(&target).expect("drop never mutates the racing target"),
+            sentinel
+        );
+        assert_eq!(
+            fs::metadata(&moved)
+                .expect("owned inode remains as an empty diagnostic alias")
+                .len(),
+            0
+        );
+    }
+
+    #[test]
+    fn artifact_open_rejects_a_same_length_path_replacement() {
+        let directory = TestDirectory::new("artifact-open-path-replacement");
+        let target = directory.path.join("fixture.pidx");
+        let moved = directory.path.join("opened-artifact-moved-aside");
+        fs::write(&target, b"artifact A").expect("write first artifact fixture");
+        let file = File::open(&target).expect("open first artifact fixture");
+        let initial = file.metadata().expect("inspect first artifact fixture");
+        assert!(
+            artifact_path_matches_open_file(&file, &target, &initial)
+                .expect("initial binding is inspectable")
+        );
+
+        fs::rename(&target, &moved).expect("move the opened artifact aside");
+        fs::write(&target, b"artifact B").expect("install same-length replacement");
+
+        assert!(
+            !artifact_path_matches_open_file(&file, &target, &initial)
+                .expect("replacement binding is inspectable")
+        );
+        assert_eq!(
+            fs::read(&target).expect("replacement remains"),
+            b"artifact B"
+        );
+    }
+
+    #[test]
+    fn every_initial_work_header_boundary_is_retryable_and_cleans_only_its_stage() {
+        let boundaries = [
+            (InitialWorkBoundary::WriteHeader, false),
+            (InitialWorkBoundary::SyncHeader, false),
+            (InitialWorkBoundary::PublishLink, false),
+            (InitialWorkBoundary::SyncPublishedParent, true),
+            (InitialWorkBoundary::RemoveTemporary, true),
+            (InitialWorkBoundary::SyncCleanupParent, true),
+        ];
+        for (boundary, published) in boundaries {
+            let directory = TestDirectory::new("initial-work-boundary");
+            let target = directory.path.join("fixture.pidx");
+            let work_path = sibling_path(&target, ".work").expect("fixture work path is valid");
+            let source = empty_source();
+            let profile = PersistenceProfile::requested(IndexRecipe::PositionOnlyV1, None)
+                .expect("position-only profile is valid");
+
+            let result = create_or_open_initialized_work_with(
+                &source,
+                &target,
+                &work_path,
+                profile,
+                &mut |reached, _, _| {
+                    if reached == boundary {
+                        Err(std::io::Error::from_raw_os_error(5))
+                    } else {
+                        Ok(())
+                    }
+                },
+            );
+            let Err(error) = result else {
+                panic!("injected initial-work boundary must fail")
+            };
+            let (IndexError::Io { source: error, .. }
+            | IndexError::SharedPathIo { source: error, .. }) = error
+            else {
+                panic!("initial-work boundary failure lost its I/O category")
+            };
+            assert_eq!(error.raw_os_error(), Some(5));
+            assert_eq!(work_path.exists(), published, "boundary: {boundary:?}");
+            assert_safe_work_header_residue(&directory.path);
+
+            let work = open_or_create_work(
+                &source,
+                &target,
+                IndexRecipe::PositionOnlyV1,
+                None,
+                PrepareLimits::default(),
+                true,
+                &OperationControl::new(),
+            )
+            .expect("retry opens or publishes one complete work header");
+            assert_eq!(work.durable_points(), 0);
+            assert_eq!(
+                fs::metadata(&work_path).expect("work header exists").len(),
+                200
+            );
+            drop(work);
+            assert_safe_work_header_residue(&directory.path);
+        }
+    }
+
+    #[test]
+    fn initial_work_no_replace_race_preserves_the_existing_path() {
+        let directory = TestDirectory::new("initial-work-race");
+        let target = directory.path.join("fixture.pidx");
+        let work_path = sibling_path(&target, ".work").expect("fixture work path is valid");
+        let source = empty_source();
+        let profile = PersistenceProfile::requested(IndexRecipe::PositionOnlyV1, None)
+            .expect("position-only profile is valid");
+        let sentinel = b"racing caller-owned work path";
+
+        let opened = create_or_open_initialized_work_with(
+            &source,
+            &target,
+            &work_path,
+            profile,
+            &mut |boundary, _, work| {
+                if boundary == InitialWorkBoundary::PublishLink {
+                    fs::write(work, sentinel)?;
+                }
+                Ok(())
+            },
+        )
+        .expect("a no-replace race opens the existing path for normal validation");
+        assert!(matches!(&opened, InitialWorkOpen::Existing(_)));
+        drop(opened);
+        assert_eq!(fs::read(&work_path).expect("racing path remains"), sentinel);
+        assert_safe_work_header_residue(&directory.path);
+    }
+
+    #[test]
+    fn initial_work_never_publishes_a_replaced_temporary_source() {
+        let directory = TestDirectory::new("initial-work-source-replacement");
+        let target = directory.path.join("fixture.pidx");
+        let work_path = sibling_path(&target, ".work").expect("fixture work path is valid");
+        let moved = directory.path.join("owned-work-header-moved-aside");
+        let source = empty_source();
+        let profile = PersistenceProfile::requested(IndexRecipe::PositionOnlyV1, None)
+            .expect("position-only profile is valid");
+        let sentinel = b"caller replacement at the temporary source alias";
+
+        let result = create_or_open_initialized_work_with(
+            &source,
+            &target,
+            &work_path,
+            profile,
+            &mut |boundary, temporary, _| {
+                if boundary == InitialWorkBoundary::PublishLink {
+                    fs::rename(temporary, &moved)?;
+                    fs::write(temporary, sentinel)?;
+                }
+                Ok(())
+            },
+        );
+        let Err(error) = result else {
+            panic!("a replaced temporary source must fail before publication")
+        };
+
+        assert!(matches!(error, IndexError::CorruptWork { .. }));
+        assert!(!work_path.exists(), "no final work path may be published");
+        assert_eq!(
+            fs::read(
+                directory
+                    .path
+                    .read_dir()
+                    .expect("read fixture directory")
+                    .filter_map(Result::ok)
+                    .map(|entry| entry.path())
+                    .find(|path| {
+                        path.file_name()
+                            .is_some_and(|name| name.to_string_lossy().contains(".work-header."))
+                    })
+                    .expect("replacement temporary alias remains")
+            )
+            .expect("read replacement temporary alias"),
+            sentinel
+        );
+        assert_eq!(
+            fs::metadata(&moved)
+                .expect("owned work-header inode remains for diagnosis")
+                .len(),
+            0
+        );
+    }
+
+    #[test]
+    fn initial_work_cleanup_preserves_a_temporary_path_replacement() {
+        let directory = TestDirectory::new("initial-work-replacement");
+        let target = directory.path.join("fixture.pidx");
+        let work_path = sibling_path(&target, ".work").expect("fixture work path is valid");
+        let source = empty_source();
+        let profile = PersistenceProfile::requested(IndexRecipe::PositionOnlyV1, None)
+            .expect("position-only profile is valid");
+        let replacement_path = RefCell::new(None::<PathBuf>);
+        let sentinel = b"replacement owned by another actor";
+
+        let opened = create_or_open_initialized_work_with(
+            &source,
+            &target,
+            &work_path,
+            profile,
+            &mut |boundary, temporary, _| {
+                if boundary == InitialWorkBoundary::RemoveTemporary {
+                    fs::remove_file(temporary)?;
+                    fs::write(temporary, sentinel)?;
+                    replacement_path.replace(Some(temporary.to_path_buf()));
+                }
+                Ok(())
+            },
+        )
+        .expect("replacement does not invalidate the complete final work header");
+        assert!(matches!(&opened, InitialWorkOpen::InitializedLocked(_)));
+        drop(opened);
+        assert_eq!(
+            fs::metadata(&work_path).expect("work header exists").len(),
+            200
+        );
+        let replacement_path = replacement_path
+            .into_inner()
+            .expect("the cleanup hook recorded its replacement");
+        assert_eq!(
+            fs::read(replacement_path).expect("replacement remains untouched"),
+            sentinel
+        );
+    }
+
+    #[test]
+    fn dropping_owned_work_never_removes_a_path_replacement() {
+        let directory = TestDirectory::new("fresh-work-completion-replacement");
+        let target = directory.path.join("fixture.pidx");
+        let work_path = sibling_path(&target, ".work").expect("fixture work path is valid");
+        let moved_work = directory.path.join("owned-work-moved-aside");
+        let sentinel = b"caller replacement installed while the fresh build was running";
+        let source = empty_source();
+        let work = open_or_create_work(
+            &source,
+            &target,
+            IndexRecipe::PositionOnlyV1,
+            None,
+            PrepareLimits::default(),
+            false,
+            &OperationControl::new(),
+        )
+        .expect("fresh preparation creates one owned work header");
+
+        fs::rename(&work_path, &moved_work).expect("move the owned open work path aside");
+        fs::write(&work_path, sentinel).expect("install a caller-owned replacement");
+        drop(work);
+
+        assert_eq!(
+            fs::read(&work_path).expect("caller replacement remains"),
+            sentinel
+        );
+        assert_eq!(
+            fs::metadata(&moved_work)
+                .expect("owned open work path remains available for diagnosis")
+                .len(),
+            200
+        );
+    }
+
+    #[test]
+    fn v1_append_preflights_live_stored_samples_before_validation_allocations() {
+        let directory = TestDirectory::new("v1-append-live-sample-budget");
+        let target = directory.path.join("fixture.pidx");
+        let source = empty_source();
+        let control = OperationControl::new();
+        let mut work = open_or_create_work(
+            &source,
+            &target,
+            IndexRecipe::PositionOnlyV1,
+            None,
+            PrepareLimits::default(),
+            false,
+            &control,
+        )
+        .expect("fresh preparation creates one owned work header");
+        let sample_count = usize::try_from(MAX_NODE_SAMPLES).unwrap();
+        let samples = (0..sample_count)
+            .map(|ordinal| StoredSample::position_only(u64::try_from(ordinal).unwrap(), [0; 3]))
+            .collect::<Vec<_>>();
+        let span = SourceSpan::new(0, MAX_NODE_SAMPLES).unwrap();
+        let bounds = WorldBounds::new([0.0; 3], [0.0; 3]).unwrap();
+        let retained = work.retained_metadata_bytes();
+        let live = allocated_bytes(samples.len(), mem::size_of::<StoredSample>());
+        let heap = allocated_bytes(sample_count, mem::size_of::<(u64, u64)>());
+        let ordinals = allocated_bytes(sample_count, mem::size_of::<u64>());
+        let payload = FRAME_FIXED_PAYLOAD_BYTES.saturating_add(MAX_NODE_SAMPLES.saturating_mul(32));
+        let required = retained
+            .saturating_add(live)
+            .saturating_add(heap)
+            .saturating_add(ordinals)
+            .saturating_add(payload)
+            .saturating_add(FRAME_PREFIX_BYTES);
+
+        let error = work
+            .append_block(
+                span,
+                bounds,
+                &samples,
+                PrepareLimits::default().with_max_build_working_bytes(required - 1),
+            )
+            .expect_err("one byte below the live validation peak must fail before allocation");
+        assert!(matches!(
+            error,
+            IndexError::ResourceLimit {
+                limit: IndexLimit::BuildWorkingBytes,
+                required: observed,
+                allowed,
+            } if observed == required && allowed == required - 1
+        ));
+
+        let exact_preflight = work.append_block(
+            span,
+            bounds,
+            &samples,
+            PrepareLimits::default().with_max_build_working_bytes(required),
+        );
+        assert!(matches!(
+            exact_preflight,
+            Err(IndexError::CorruptWork {
+                reason: "work contains more frames than the canonical Source block count"
+            })
+        ));
+    }
+
+    fn empty_source() -> Source {
+        let memory = MemorySource::from_columns(
+            PositionTransform::new([0.0; 3], [1.0; 3]).expect("identity transform is valid"),
+            CoordinateReference::Unknown,
+            Vec::new(),
+            AttributeColumns::empty(0),
+        )
+        .expect("empty fixture Source is valid");
+        source_memory::open(memory)
+            .blocking_wait()
+            .expect("empty fixture Source opens")
+    }
+
+    fn assert_safe_work_header_residue(directory: &Path) {
+        let stages = fs::read_dir(directory)
+            .expect("read fixture directory")
+            .map(|entry| entry.expect("read fixture entry"))
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .contains(".work-header.")
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            !stages.is_empty(),
+            "one retained work-header alias is expected"
+        );
+        for stage in stages {
+            let metadata = stage.metadata().expect("inspect retained stage alias");
+            assert!(metadata.is_file(), "retained stage alias must be regular");
+            assert!(
+                matches!(metadata.len(), 0 | 200),
+                "unlinked stages are empty and linked stages retain one header"
+            );
+        }
+    }
+
+    struct TestDirectory {
+        path: PathBuf,
+    }
+
+    impl TestDirectory {
+        fn new(label: &str) -> Self {
+            let timestamp = SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos();
+            let path = std::env::temp_dir().join(format!(
+                "punctra-point-index-{label}-{}-{timestamp}",
+                std::process::id()
+            ));
+            fs::create_dir(&path).expect("create fixture directory");
+            Self { path }
+        }
+    }
+
+    impl Drop for TestDirectory {
+        fn drop(&mut self) {
+            fs::remove_dir_all(&self.path).expect("remove fixture directory");
+        }
     }
 }

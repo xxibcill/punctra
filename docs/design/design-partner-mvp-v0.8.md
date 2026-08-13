@@ -1,8 +1,9 @@
 # Repository Interoperability Qualification Design (v0.8)
 
-Status: **Accepted but incomplete alpha — bounded file-comparison slices
-implemented; remaining repository scope inherited by active v0.9; external
-product evidence remains outstanding**
+Status: **Accepted but incomplete alpha — bounded comparison, Run-bound
+evidence, full-ceiling streaming, and generated/golden coverage implemented;
+independent review complete; the complete local candidate record and external
+product evidence remain outstanding**
 
 This design is authoritative for the narrow Punctra v0.8 repository slice. It
 starts from the completed `0.7.0-alpha.1` technical-readiness work and adds one
@@ -17,9 +18,13 @@ bounded canonical Round-Trip Evidence record. The caller, not Punctra,
 declares the downstream application, version, settings, and comparison
 tolerances.
 
-The v0.8 alpha stopped after delivery slices 1 and 2. It is not relabeled
-Complete. Delivery slices 3 and 4 are inherited as prerequisite closure work
-by the active [v0.9 Trust and v1 Candidate design](trust-v1-candidate-v0.9.md).
+The v0.8 alpha stopped after delivery slices 1 and 2. Fold-forward v0.10
+prerequisite work implements delivery slice 3 and the repository-controlled
+streaming, generated-fixture, and documentation work in delivery slice 4. The
+independent Standards/Spec review completed on 2026-08-13 with no P0–P3
+findings. The release remains incomplete pending the complete one-commit local
+candidate record required by the [v0.9 Trust and v1 Candidate
+design](trust-v1-candidate-v0.9.md), plus its separate external evidence.
 
 ## Why this is the next slice
 
@@ -71,7 +76,7 @@ It emits an explicitly non-Run-bound comparison summary. The summary says
 application execution verified false`. It is technical comparison output, not
 Round-Trip Evidence.
 
-The planned Run-bound CLI shape for the next delivery slice is:
+The implemented Run-bound CLI shape is:
 
 ```text
 terrain-demo verify-round-trip \
@@ -196,31 +201,43 @@ accept reference drift.
 
 ## Bounded fail-closed parsing
 
-The implemented comparison core is independent of the v0.6 encoder. It reads
-each regular, non-symlink input under a byte ceiling, parses it with
-`roxmltree` under a node ceiling, then builds only the narrow semantic TIN
-model. `RoundTripLimits` applies the same per-input ceilings to the reference
-and returned files and one cumulative vertex-comparison ceiling. The initial
-implemented defaults are:
+The implemented comparison core is independent of the v0.6 encoder. It captures
+each regular, non-symlink input under stable identity/length/time facts, hashes
+only that captured length plus an over-length sentinel, and streams the same
+bounded bytes through a local streaming XML parser with borrowed `quick-xml`
+token views. A fallibly allocated local lexical guard recognizes normal
+tags, comments, CDATA, processing instructions, and references before exposing
+them to the parser; it rejects DTDs/unsupported declarations, over-limit
+tokens, over-limit namespace nesting, truncation, and appended bytes without a
+whole-file or DOM allocation. `RoundTripLimits` applies the same per-input
+ceilings to the reference and returned files plus cumulative comparison and
+retained-data ceilings. The defaults are:
 
 | Limit | Default |
 |---|---:|
-| bytes per XML input | 256 MiB |
-| XML nodes per input | 8,000,000 |
-| XML text/attribute bytes per input | 256 MiB |
-| Points per semantic surface | 2,000,000 |
-| faces per semantic surface | 4,000,000 |
+| bytes per XML input | 4 GiB |
+| XML nodes per input | 70,000,128 |
+| XML text/attribute bytes per input | 4 GiB |
+| lexical token bytes per input | 4 KiB |
+| accounted parser working bytes per input | 8 MiB |
+| Points per semantic surface | 10,000,000 |
+| faces per semantic surface | 20,000,000 |
 | candidate vertex comparisons | 32,000,000 |
+| accounted retained working bytes across both inputs/comparison | 4 GiB |
 | application label | 128 B |
 | version label | 128 B |
 | settings-profile label | 1 KiB |
 
-The file, XML-node, XML-text, Point, face, and comparison ceilings are hard
-semantic gates. The DOM and parser allocations are proportional to bounded
-input but are not independently measured or fallibly accounted; v0.8 does not
-label these ceilings as a measured peak-heap guarantee. The first slice also
-does not accept the full 4-GiB v0.7 export ceiling. A later streaming reader is
-required before Run-bound qualification can cover that entire range.
+The file, XML-node, XML-text, token, parser, Point, face, comparison, and
+retained ceilings are inclusive fail-closed gates. Parser and retained peaks in
+evidence are deterministic algorithm charges: fixed read/scanner and exact-
+compare buffers, exact requested event/token/stack/text payloads, retained
+semantic collections, comparison mappings/topology, and the bounded diagnostic
+sample. They exclude allocator metadata/slack, process RSS, and measured heap;
+no worker-heap observation is inferred. Every modeled dynamic growth uses a
+fallible reserve after its projected charge passes the ceiling. The reader
+therefore covers the full v0.7 export ceiling without claiming a general
+LandXML parser or physical allocator/RSS measurement.
 
 An unsupported construct, malformed XML, limit excess, invalid number, unknown
 semantic child, or incomplete document never yields a partial semantic model.
@@ -317,14 +334,14 @@ and is never overwritten. The CLI prints the evidence BLAKE3 hash and byte
 length only after publication is known complete; a post-link uncertainty is
 reported as indeterminate, not success.
 
-The implemented comparison command currently reports these stable diagnostic
-classes:
+Both commands retain these stable diagnostic classes:
 
 - `PRT_INVALID_INPUT`;
 - `PRT_RESOURCE_LIMIT`; and
 - `PRT_SEMANTIC_MISMATCH`.
 
-Slice 3 will refine semantic evidence with stable reason codes beginning with:
+Run-bound semantic evidence additionally records stable reason codes beginning
+with:
 
 - `PRT_XML_INVALID`;
 - `PRT_SUBSET_UNSUPPORTED`;
@@ -425,16 +442,19 @@ v0.8 does not add:
 
 Implementation is divided into four independently reviewable slices:
 
-1. **Implemented:** private bounded DOM-backed LandXML reader, semantic model,
-   limits, regular-file witnesses, and malformed/resource test matrix;
+1. **Implemented:** private exact-byte bounded streaming LandXML reader,
+   semantic model, stable regular-file witnesses, deterministic parser/retained
+   accounting, and malformed/resource boundary matrix;
 2. **Implemented:** metric/tolerance/ambiguity/topology comparison with input
    hashes, caller declaration, generated semantic-drift fixtures, and the
    explicitly non-evidence `compare-landxml` CLI;
-3. **Pending:** strict Complete-Run binding, canonical pass/fail evidence, and
-   no-replace publication/reconciliation faults; and
-4. **Pending:** end-to-end generated round-trip matrix, streaming coverage for
-   the full v0.7 export ceiling, documentation, independent review, and the
-   complete local release gates.
+3. **Implemented:** strict Complete-Run binding, canonical pass/fail evidence,
+   and no-replace publication/reconciliation with focused non-mutation,
+   conflict, and operational-failure coverage; and
+4. **Repository work implemented; release gate pending:** end-to-end generated
+   round-trip matrix, full v0.7 export-ceiling streaming, golden fixtures, and
+   documentation are present and independently reviewed. The complete
+   one-commit local release sequence remains outstanding.
 
 No delivery slice may be described as downstream-application, partner, pilot,
 conversion, or labor-savings evidence unless the corresponding external gate

@@ -3,7 +3,7 @@ use std::fs::{self, File, OpenOptions, Permissions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use blake3::Hasher;
 use foundation_runtime::OperationControl;
@@ -428,15 +428,156 @@ pub(crate) enum PersistenceError {
 #[derive(Debug)]
 pub(crate) struct SealedRevision {
     file: ValidatedRevision,
+    scratch_payload: ScratchPayload,
 }
 
 pub(crate) struct PreparedRejection {
-    facts: RejectionFacts,
     scratch_path: PathBuf,
     target_path: PathBuf,
     file: Option<File>,
     bytes: [u8; REJECTION_BYTES],
-    cleanup_scratch: bool,
+    scratch_payload: ScratchPayload,
+}
+
+#[derive(Debug)]
+struct ScratchPayload {
+    file: File,
+    clear_on_drop: AtomicBool,
+}
+
+impl ScratchPayload {
+    const fn new(file: File) -> Self {
+        Self {
+            file,
+            clear_on_drop: AtomicBool::new(true),
+        }
+    }
+
+    fn retain_for_published_link(&self) {
+        self.clear_on_drop.store(false, Ordering::Relaxed);
+    }
+}
+
+#[derive(Clone, Copy)]
+enum PublicationContent<'a> {
+    Exact(&'a [u8]),
+    Revision(&'a ValidatedRevision),
+}
+
+#[derive(Debug)]
+struct PublicationSourceWitness {
+    file: File,
+    metadata: fs::Metadata,
+}
+
+impl PublicationSourceWitness {
+    fn from_retained(file: &File, path: &Path) -> Result<Self, PersistenceError> {
+        let file = file
+            .try_clone()
+            .map_err(|source| io_error("retain publication source capability", path, source))?;
+        Self::from_open_file(file, path)
+    }
+
+    fn capture(path: &Path) -> Result<Self, PersistenceError> {
+        let before = publication_path_metadata(path)?;
+        let file = File::open(path)
+            .map_err(|source| io_error("capture publication source", path, source))?;
+        let witness = Self::from_open_file(file, path)?;
+        if !same_file_state(&before, &witness.metadata) {
+            return Err(publication_binding_error(path));
+        }
+        Ok(witness)
+    }
+
+    fn from_open_file(file: File, path: &Path) -> Result<Self, PersistenceError> {
+        let metadata = file
+            .metadata()
+            .map_err(|source| io_error("inspect publication source capability", path, source))?;
+        if !metadata.file_type().is_file() {
+            return Err(publication_binding_error(path));
+        }
+        let witness = Self { file, metadata };
+        witness.verify_source_path(path)?;
+        Ok(witness)
+    }
+
+    fn verify_source(
+        &self,
+        path: &Path,
+        content: PublicationContent<'_>,
+    ) -> Result<(), PersistenceError> {
+        self.verify_source_path(path)?;
+        verify_publication_content(&self.file, path, content)?;
+        self.verify_source_path(path)
+    }
+
+    fn verify_linked_paths(&self, source: &Path, target: &Path) -> Result<(), PersistenceError> {
+        self.verify_source_path(source)?;
+        let target_before = publication_path_metadata(target)?;
+        let target_file = File::open(target)
+            .map_err(|error| io_error("open linked publication target", target, error))?;
+        let target_opened = target_file
+            .metadata()
+            .map_err(|error| io_error("inspect linked publication target", target, error))?;
+        let target_after = publication_path_metadata(target)?;
+        if !same_file_state(&self.metadata, &target_before)
+            || !same_file_state(&self.metadata, &target_opened)
+            || !same_file_state(&self.metadata, &target_after)
+        {
+            return Err(publication_binding_error(target));
+        }
+        self.verify_source_path(source)
+    }
+
+    fn verify_final(
+        &self,
+        source: &Path,
+        target: &Path,
+        content: PublicationContent<'_>,
+    ) -> Result<(), PersistenceError> {
+        self.verify_linked_paths(source, target)?;
+        verify_publication_content(&self.file, source, content)?;
+        self.verify_linked_paths(source, target)
+    }
+
+    fn verify_source_path(&self, path: &Path) -> Result<(), PersistenceError> {
+        let handle_metadata = self
+            .file
+            .metadata()
+            .map_err(|source| io_error("reinspect publication source capability", path, source))?;
+        let path_metadata = publication_path_metadata(path)?;
+        if !same_file_state(&self.metadata, &handle_metadata)
+            || !same_file_state(&self.metadata, &path_metadata)
+        {
+            return Err(publication_binding_error(path));
+        }
+        Ok(())
+    }
+}
+
+fn publication_path_metadata(path: &Path) -> Result<fs::Metadata, PersistenceError> {
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|source| io_error("inspect publication path binding", path, source))?;
+    if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
+        return Err(publication_binding_error(path));
+    }
+    Ok(metadata)
+}
+
+fn publication_binding_error(path: &Path) -> PersistenceError {
+    corrupt_value(
+        path,
+        "publication source or target changed while binding the immutable payload",
+    )
+}
+
+impl Drop for ScratchPayload {
+    fn drop(&mut self) {
+        if self.clear_on_drop.swap(false, Ordering::Relaxed) {
+            let _ = self.file.set_len(0);
+            let _ = self.file.sync_all();
+        }
+    }
 }
 
 impl PreparedRejection {
@@ -444,14 +585,6 @@ impl PreparedRejection {
         (REJECTION_BYTES as u64)
             .saturating_add(u64::try_from(self.scratch_path.capacity()).unwrap_or(u64::MAX))
             .saturating_add(u64::try_from(self.target_path.capacity()).unwrap_or(u64::MAX))
-    }
-}
-
-impl Drop for PreparedRejection {
-    fn drop(&mut self) {
-        if self.cleanup_scratch {
-            let _ = fs::remove_file(&self.scratch_path);
-        }
     }
 }
 
@@ -471,11 +604,9 @@ impl SealedRevision {
     pub(crate) fn retained_working_bytes(&self) -> u64 {
         self.file.retained_working_bytes()
     }
-}
 
-impl Drop for SealedRevision {
-    fn drop(&mut self) {
-        let _ = fs::remove_file(&self.file.path);
+    fn retain_for_published_link(&self) {
+        self.scratch_payload.retain_for_published_link();
     }
 }
 
@@ -483,6 +614,7 @@ impl Drop for SealedRevision {
 pub(crate) struct ValidatedRevision {
     path: PathBuf,
     facts: RevisionFacts,
+    file_digest: DigestBytes,
     blocks: Arc<Vec<BlockMetadata>>,
 }
 
@@ -747,6 +879,7 @@ impl ValidatedRevision {
         Self {
             path,
             facts: self.facts,
+            file_digest: self.file_digest,
             blocks: Arc::clone(&self.blocks),
         }
     }
@@ -1031,14 +1164,13 @@ pub(crate) struct Store {
     operations: PathBuf,
     revisions: PathBuf,
     scratch: PathBuf,
-    lock: Option<File>,
-    remove_on_drop: bool,
+    _lock: File,
 }
 
 impl Store {
     pub(crate) fn create(root: &Path) -> Result<Self, PersistenceError> {
         let resumed = create_or_recognize_incomplete_root(root)?;
-        let mut lock = Some(acquire_lock(root)?);
+        let lock = acquire_lock(root)?;
         if resumed {
             validate_incomplete_root(root)?;
         }
@@ -1053,11 +1185,10 @@ impl Store {
             Ok(())
         })();
         if let Err(error) = setup {
-            let detached = detach_incomplete_root(root);
-            drop(lock.take());
-            if let Some(detached) = detached {
-                let _ = fs::remove_dir_all(detached);
-            }
+            // A create failure cannot prove that every path in the tree still
+            // names the inode created by this attempt. Retain the recognized
+            // incomplete root so a caller replacement is never removed.
+            drop(lock);
             return Err(error);
         }
         let store = Self {
@@ -1065,10 +1196,9 @@ impl Store {
             operations,
             revisions,
             scratch,
-            lock,
-            remove_on_drop: true,
+            _lock: lock,
         };
-        store.clean_recognized_scratch()?;
+        store.validate_recognized_scratch()?;
         Ok(store)
     }
 
@@ -1083,8 +1213,7 @@ impl Store {
             operations,
             revisions,
             scratch,
-            lock: Some(lock),
-            remove_on_drop: false,
+            _lock: lock,
         })
     }
 
@@ -1112,34 +1241,40 @@ impl Store {
         facts: &ManifestFacts,
     ) -> Result<(), PersistenceError> {
         let (scratch_path, mut scratch_file) = create_temporary(&self.scratch, "manifest", "tmp")?;
-        let result = (|| {
+        let scratch_payload = ScratchPayload::new(scratch_file.try_clone().map_err(|source| {
+            io_error("retain owned manifest scratch file", &scratch_path, source)
+        })?);
+        (|| {
             inject_fault(&self.root, FaultPoint::ManifestStage)?;
             let bytes = encode_manifest(facts);
             write_all(&mut scratch_file, &bytes, &scratch_path)?;
             sync_file(&scratch_file, &scratch_path)?;
+            make_file_read_only(&scratch_file, &scratch_path)?;
             drop(scratch_file);
-            make_read_only(&scratch_path)?;
+            let source =
+                PublicationSourceWitness::from_retained(&scratch_payload.file, &scratch_path)?;
             let manifest_path = self.root.join("manifest.pwm");
             inject_fault(&self.root, FaultPoint::ManifestLink)?;
+            source.verify_source(&scratch_path, PublicationContent::Exact(&bytes))?;
             publish_link(&scratch_path, &manifest_path)?;
+            scratch_payload.retain_for_published_link();
+            source.verify_linked_paths(&scratch_path, &manifest_path)?;
             inject_fault(&self.root, FaultPoint::ManifestDirectorySync)?;
             sync_directory(&self.root)?;
             inject_fault(&self.root, FaultPoint::ManifestParentDirectorySync)?;
             sync_directory(workspace_parent(&self.root))?;
-            self.remove_on_drop = false;
             // Creation has no uncertainty result. Once the manifest directory
             // entry is synced, completion must win over a lost acknowledgement.
             let _ = inject_fault(&self.root, FaultPoint::ManifestLostAcknowledgement);
-            // The parent sync is the create commit point. Scratch cleanup cannot
-            // revoke a successfully created Workspace.
-            let _ = remove_file(&scratch_path);
-            let _ = sync_directory(&self.scratch);
+            source.verify_final(
+                &scratch_path,
+                &manifest_path,
+                PublicationContent::Exact(&bytes),
+            )?;
+            // Retain the recognized stage. Pathname deletion cannot prove that
+            // the name was not replaced after the last validation.
             Ok(())
-        })();
-        if result.is_err() {
-            let _ = fs::remove_file(&scratch_path);
-        }
-        result
+        })()
     }
 
     pub(crate) fn read_manifest(&self) -> Result<ManifestFacts, PersistenceError> {
@@ -1162,11 +1297,15 @@ impl Store {
         I: IntoIterator<Item = Result<RevisionRow, PersistenceError>>,
     {
         let (path, file) = create_temporary(&self.scratch, "revision", "tmp")?;
-        let result = write_candidate_file(&path, file, facts, rows, limits, control);
-        if result.is_err() {
-            let _ = fs::remove_file(&path);
-        }
-        result
+        let scratch_payload = ScratchPayload::new(
+            file.try_clone()
+                .map_err(|source| io_error("retain owned Revision scratch file", &path, source))?,
+        );
+        let validated = write_candidate_file(&path, file, facts, rows, limits, control)?;
+        Ok(SealedRevision {
+            file: validated,
+            scratch_payload,
+        })
     }
 
     pub(crate) fn prepare_ready(
@@ -1226,15 +1365,25 @@ impl Store {
     where
         F: FnOnce() -> Result<(), PersistenceError>,
     {
+        let source =
+            PublicationSourceWitness::from_retained(&sealed.scratch_payload.file, sealed.path())?;
         mark_publication_attempted()?;
         inject_fault(&self.root, FaultPoint::ReadyLink)?;
+        source.verify_source(sealed.path(), PublicationContent::Revision(&sealed.file))?;
         publish_link(sealed.path(), &prepared.path)?;
+        sealed.retain_for_published_link();
+        source.verify_linked_paths(sealed.path(), &prepared.path)?;
         inject_fault(&self.root, FaultPoint::OperationsDirectorySync)?;
         sync_directory(&self.operations)?;
         inject_fault(&self.root, FaultPoint::OperationLostAcknowledgement)?;
         inject_fault(&self.root, FaultPoint::ReadyCleanup)?;
-        remove_file(sealed.path())?;
-        sync_directory(&self.scratch)?;
+        source.verify_final(
+            sealed.path(),
+            &prepared.path,
+            PublicationContent::Revision(&sealed.file),
+        )?;
+        // The immutable ready link is durable. Retain the recognized scratch
+        // alias because deleting by pathname could remove a caller replacement.
         Ok(prepared)
     }
 
@@ -1303,13 +1452,21 @@ impl Store {
         F: FnOnce() -> Result<(), PersistenceError>,
         G: FnOnce(),
     {
+        let source = PublicationSourceWitness::capture(&ready.path)?;
         mark_publication_attempted()?;
         inject_fault(&self.root, FaultPoint::RevisionLink)?;
+        source.verify_source(&ready.path, PublicationContent::Revision(ready))?;
         publish_link(&ready.path, &prepared.path)?;
+        source.verify_linked_paths(&ready.path, &prepared.path)?;
         mark_directory_sync_attempted();
         inject_fault(&self.root, FaultPoint::RevisionDirectorySync)?;
         sync_directory(&self.revisions)?;
         inject_fault(&self.root, FaultPoint::RevisionLostAcknowledgement)?;
+        source.verify_final(
+            &ready.path,
+            &prepared.path,
+            PublicationContent::Revision(ready),
+        )?;
         Ok(prepared)
     }
 
@@ -1353,13 +1510,15 @@ impl Store {
             "rejection publication working bytes",
         )?;
         let (scratch_path, file) = create_temporary(&self.scratch, "reject", "tmp")?;
+        let scratch_payload = ScratchPayload::new(file.try_clone().map_err(|source| {
+            io_error("retain owned rejection scratch file", &scratch_path, source)
+        })?);
         let prepared = PreparedRejection {
-            facts,
             scratch_path,
             target_path: self.rejection_path(facts.operation),
             file: Some(file),
             bytes: encode_rejection(&facts),
-            cleanup_scratch: true,
+            scratch_payload,
         };
         ensure_at_most(
             prepared.working_bytes(),
@@ -1399,21 +1558,39 @@ impl Store {
             write_all(&mut scratch_file, &prepared.bytes, &prepared.scratch_path)?;
             inject_fault(&self.root, FaultPoint::RejectionFileSync)?;
             sync_file(&scratch_file, &prepared.scratch_path)?;
-            drop(scratch_file);
             inject_fault(&self.root, FaultPoint::RejectionReadOnly)?;
-            make_read_only(&prepared.scratch_path)?;
+            make_file_read_only(&scratch_file, &prepared.scratch_path)?;
+            drop(scratch_file);
+            let source = PublicationSourceWitness::from_retained(
+                &prepared.scratch_payload.file,
+                &prepared.scratch_path,
+            )?;
             inject_fault(&self.root, FaultPoint::RejectionRevalidate)?;
-            validate_rejection_file(&prepared.scratch_path, Some(prepared.facts.operation))?;
+            source.verify_source(
+                &prepared.scratch_path,
+                PublicationContent::Exact(&prepared.bytes),
+            )?;
             mark_publication_attempted()?;
             inject_fault(&self.root, FaultPoint::RejectionLink)?;
+            source.verify_source(
+                &prepared.scratch_path,
+                PublicationContent::Exact(&prepared.bytes),
+            )?;
             publish_link(&prepared.scratch_path, &prepared.target_path)?;
+            prepared.scratch_payload.retain_for_published_link();
+            source.verify_linked_paths(&prepared.scratch_path, &prepared.target_path)?;
             inject_fault(&self.root, FaultPoint::RejectionDirectorySync)?;
             sync_directory(&self.operations)?;
             inject_fault(&self.root, FaultPoint::RejectionLostAcknowledgement)?;
             inject_fault(&self.root, FaultPoint::RejectionCleanup)?;
-            remove_file(&prepared.scratch_path)?;
-            prepared.cleanup_scratch = false;
-            sync_directory(&self.scratch)
+            source.verify_final(
+                &prepared.scratch_path,
+                &prepared.target_path,
+                PublicationContent::Exact(&prepared.bytes),
+            )?;
+            // Retain the recognized scratch alias. Recovery ignores it and no
+            // pathname deletion can race a replacement.
+            Ok(())
         })()
     }
 
@@ -1423,7 +1600,7 @@ impl Store {
         limits: CatalogLimits,
         control: &OperationControl,
     ) -> Result<Catalog, PersistenceError> {
-        self.clean_recognized_scratch()?;
+        self.validate_recognized_scratch()?;
         let mut ledger = RecoveryLedger::default();
         let revisions = self.read_revisions(manifest, limits, &mut ledger, control)?;
         let operations =
@@ -1458,8 +1635,7 @@ impl Store {
             .join(format!("{sequence:020}-{}.pwr", encode_hex(&revision)))
     }
 
-    fn clean_recognized_scratch(&self) -> Result<(), PersistenceError> {
-        let mut removed_any = false;
+    fn validate_recognized_scratch(&self) -> Result<(), PersistenceError> {
         for entry in read_directory(&self.scratch)? {
             let entry =
                 entry.map_err(|source| io_error("read scratch entry", &self.scratch, source))?;
@@ -1475,12 +1651,7 @@ impl Store {
                         "recognized scratch entry is not a private real file",
                     );
                 }
-                remove_file(&entry.path())?;
-                removed_any = true;
             }
-        }
-        if removed_any {
-            sync_directory(&self.scratch)?;
         }
         Ok(())
     }
@@ -1894,41 +2065,6 @@ fn validate_candidate_request(
     Ok(())
 }
 
-impl Drop for Store {
-    fn drop(&mut self) {
-        if !self.remove_on_drop {
-            return;
-        }
-        // Detach the exact create-new tree while its advisory lock is still
-        // held. A concurrent create can then use the original pathname and
-        // cannot be deleted by cleanup of this detached inode tree.
-        let detached = detach_incomplete_root(&self.root);
-        drop(self.lock.take());
-        if let Some(detached) = detached {
-            let _ = fs::remove_dir_all(detached);
-        }
-    }
-}
-
-fn detach_incomplete_root(root: &Path) -> Option<PathBuf> {
-    static NEXT_ABORT: AtomicU64 = AtomicU64::new(0);
-    let parent = root.parent()?;
-    let name = root.file_name()?.to_string_lossy();
-    for _ in 0..64 {
-        let sequence = NEXT_ABORT.fetch_add(1, Ordering::Relaxed);
-        let target = parent.join(format!(
-            ".{name}.punctra-aborted-{}-{sequence:016x}",
-            std::process::id()
-        ));
-        match fs::rename(root, &target) {
-            Ok(()) => return Some(target),
-            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
-            Err(_) => return None,
-        }
-    }
-    None
-}
-
 #[derive(Clone, Copy)]
 enum OperationFileKind {
     Ready,
@@ -1943,7 +2079,7 @@ fn write_candidate_file<I>(
     rows: I,
     limits: WriteLimits,
     control: &OperationControl,
-) -> Result<SealedRevision, PersistenceError>
+) -> Result<ValidatedRevision, PersistenceError>
 where
     I: IntoIterator<Item = Result<RevisionRow, PersistenceError>>,
 {
@@ -2073,9 +2209,13 @@ where
     inject_fault(path, FaultPoint::CandidateFileSync)?;
     sync_file(&file, path)?;
     inject_fault(path, FaultPoint::CandidateClose)?;
+    let validation_file = file
+        .try_clone()
+        .map_err(|source| io_error("retain candidate validation capability", path, source))?;
     drop(file);
     inject_fault(path, FaultPoint::CandidateReadOnly)?;
-    make_read_only(path)?;
+    make_file_read_only(&validation_file, path)?;
+    let source = PublicationSourceWitness::from_retained(&validation_file, path)?;
 
     let read_limits = ReadLimits {
         max_file_bytes: limits.max_file_bytes,
@@ -2085,8 +2225,9 @@ where
         max_working_bytes: limits.max_working_bytes,
     };
     inject_fault(path, FaultPoint::CandidateRevalidate)?;
-    let validated = validate_revision_file(path, read_limits, Some(control))?;
-    Ok(SealedRevision { file: validated })
+    let validated = validate_revision_open_file(validation_file, path, read_limits, Some(control))?;
+    source.verify_source(path, PublicationContent::Revision(&validated))?;
+    Ok(validated)
 }
 
 fn revision_base_metadata_bytes(path: &PathBuf) -> u64 {
@@ -2253,7 +2394,17 @@ fn validate_revision_file(
     limits: ReadLimits,
     control: Option<&OperationControl>,
 ) -> Result<ValidatedRevision, PersistenceError> {
-    let mut file = open_read(path)?;
+    let file = open_read(path)?;
+    validate_revision_open_file(file, path, limits, control)
+}
+
+#[allow(clippy::too_many_lines)]
+fn validate_revision_open_file(
+    mut file: File,
+    path: &Path,
+    limits: ReadLimits,
+    control: Option<&OperationControl>,
+) -> Result<ValidatedRevision, PersistenceError> {
     let file_bytes = file
         .metadata()
         .map_err(|source| io_error("read metadata", path, source))?
@@ -2412,6 +2563,7 @@ fn validate_revision_file(
     Ok(ValidatedRevision {
         path: path.to_path_buf(),
         facts,
+        file_digest: footer_digest,
         blocks: Arc::new(blocks),
     })
 }
@@ -3129,6 +3281,65 @@ fn hash_file_prefix(
     Ok(*hasher.finalize().as_bytes())
 }
 
+fn verify_publication_content(
+    file: &File,
+    path: &Path,
+    expected: PublicationContent<'_>,
+) -> Result<(), PersistenceError> {
+    let mut file = file
+        .try_clone()
+        .map_err(|source| io_error("retain publication verification handle", path, source))?;
+    match expected {
+        PublicationContent::Exact(expected) => {
+            let expected_len = u64::try_from(expected.len()).unwrap_or(u64::MAX);
+            ensure_exact_file_length(&file, expected_len, path)?;
+            seek(&mut file, 0, path)?;
+            let mut buffer = [0_u8; 4096];
+            for expected_chunk in expected.chunks(buffer.len()) {
+                let actual = &mut buffer[..expected_chunk.len()];
+                read_exact(&mut file, actual, path)?;
+                if actual != expected_chunk {
+                    return Err(publication_binding_error(path));
+                }
+            }
+        }
+        PublicationContent::Revision(expected) => {
+            ensure_exact_file_length(&file, expected.file_bytes(), path)?;
+            let digest = hash_publication_prefix(&mut file, expected.facts.body_bytes, path)?;
+            if digest != expected.file_digest {
+                return Err(publication_binding_error(path));
+            }
+            seek(&mut file, expected.facts.body_bytes, path)?;
+            let mut footer = [0_u8; FOOTER_BYTES];
+            read_exact(&mut file, &mut footer, path)?;
+            if footer != encode_footer(expected.facts.body_bytes, expected.file_digest) {
+                return Err(publication_binding_error(path));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn hash_publication_prefix(
+    file: &mut File,
+    byte_count: u64,
+    path: &Path,
+) -> Result<DigestBytes, PersistenceError> {
+    seek(file, 0, path)?;
+    let mut remaining = byte_count;
+    let mut buffer = [0_u8; 8192];
+    let mut hasher = Hasher::new();
+    hasher.update(FILE_DOMAIN);
+    while remaining > 0 {
+        let requested = usize::try_from(remaining.min(buffer.len() as u64))
+            .expect("bounded publication verification read fits usize");
+        read_exact(file, &mut buffer[..requested], path)?;
+        hasher.update(&buffer[..requested]);
+        remaining -= requested as u64;
+    }
+    Ok(*hasher.finalize().as_bytes())
+}
+
 fn encode_row(row: RevisionRow, bytes: &mut Vec<u8>) {
     bytes.extend_from_slice(&row.ordinal.to_le_bytes());
     bytes.push(row.before);
@@ -3300,12 +3511,46 @@ fn publish_link(source: &Path, target: &Path) -> Result<(), PersistenceError> {
     })
 }
 
-fn make_read_only(path: &Path) -> Result<(), PersistenceError> {
-    let metadata =
-        fs::metadata(path).map_err(|source| io_error("read permissions", path, source))?;
+#[cfg(unix)]
+fn same_file_identity(left: &fs::Metadata, right: &fs::Metadata) -> bool {
+    use std::os::unix::fs::MetadataExt as _;
+
+    left.dev() == right.dev() && left.ino() == right.ino()
+}
+
+#[cfg(windows)]
+fn same_file_identity(left: &fs::Metadata, right: &fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt as _;
+
+    left.volume_serial_number().is_some()
+        && left.volume_serial_number() == right.volume_serial_number()
+        && left.file_index().is_some()
+        && left.file_index() == right.file_index()
+}
+
+#[cfg(not(any(unix, windows)))]
+fn same_file_identity(_left: &fs::Metadata, _right: &fs::Metadata) -> bool {
+    false
+}
+
+fn same_file_state(left: &fs::Metadata, right: &fs::Metadata) -> bool {
+    let same_modified_time = matches!(
+        (left.modified(), right.modified()),
+        (Ok(left), Ok(right)) if left == right
+    );
+    same_file_identity(left, right)
+        && left.len() == right.len()
+        && left.permissions().readonly() == right.permissions().readonly()
+        && same_modified_time
+}
+
+fn make_file_read_only(file: &File, path: &Path) -> Result<(), PersistenceError> {
+    let metadata = file
+        .metadata()
+        .map_err(|source| io_error("read permissions", path, source))?;
     let mut permissions: Permissions = metadata.permissions();
     permissions.set_readonly(true);
-    fs::set_permissions(path, permissions)
+    file.set_permissions(permissions)
         .map_err(|source| io_error("seal file read-only", path, source))
 }
 
@@ -3468,10 +3713,6 @@ fn stream_position(file: &mut File, path: &Path) -> Result<u64, PersistenceError
 fn sync_file(file: &File, path: &Path) -> Result<(), PersistenceError> {
     file.sync_all()
         .map_err(|source| io_error("sync file", path, source))
-}
-
-fn remove_file(path: &Path) -> Result<(), PersistenceError> {
-    fs::remove_file(path).map_err(|source| io_error("remove scratch file", path, source))
 }
 
 fn file_length(path: &Path) -> Result<u64, PersistenceError> {
@@ -3965,6 +4206,27 @@ mod tests {
         store
     }
 
+    fn scratch_with_prefix(root: &Path, prefix: &str) -> PathBuf {
+        let mut matches = fs::read_dir(root.join("scratch"))
+            .expect("read test scratch")
+            .map(|entry| entry.expect("read test scratch entry").path())
+            .filter(|path| {
+                path.file_name()
+                    .and_then(std::ffi::OsStr::to_str)
+                    .is_some_and(|name| name.starts_with(prefix))
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(matches.len(), 1, "one {prefix} scratch entry");
+        matches.pop().expect("one matching scratch entry")
+    }
+
+    fn replace_with_caller_file(path: &Path) -> PathBuf {
+        let owned = path.with_extension("owned-boundary");
+        fs::rename(path, &owned).expect("move the publication-owned file aside");
+        fs::write(path, b"caller replacement").expect("install caller replacement");
+        owned
+    }
+
     fn sealed(store: &Store) -> SealedRevision {
         store
             .seal_candidate(
@@ -3999,6 +4261,72 @@ mod tests {
             decode_manifest(&corrupt_bytes, Path::new("manifest")),
             Err(PersistenceError::Corrupt { .. })
         ));
+    }
+
+    #[test]
+    fn v1_golden_writers_reproduce_every_persisted_payload_exactly() {
+        let manifest_bytes: &[u8; MANIFEST_BYTES] =
+            include_bytes!("../tests/fixtures/workspace-v1/root/manifest.pwm");
+        let manifest_facts = decode_manifest(manifest_bytes, Path::new("golden-manifest.pwm"))
+            .expect("decode golden Workspace manifest");
+        assert_eq!(encode_manifest(&manifest_facts), *manifest_bytes);
+
+        let directory = TestDirectory::new();
+        fs::create_dir(directory.path()).expect("create golden reproduction directory");
+        let rejection_bytes: &[u8; REJECTION_BYTES] = include_bytes!(
+            "../tests/fixtures/workspace-v1/recorded-rejection/operations/33333333333333333333333333333333.reject"
+        );
+        let rejection_path = directory
+            .path()
+            .join("33333333333333333333333333333333.reject");
+        fs::write(&rejection_path, rejection_bytes).expect("materialize golden rejection");
+        let rejection_facts = validate_rejection_file(&rejection_path, Some([0x33; 16]))
+            .expect("decode golden rejection");
+        assert_eq!(encode_rejection(&rejection_facts), *rejection_bytes);
+
+        let revision_bytes = include_bytes!(
+            "../tests/fixtures/workspace-v1/committed/revisions/00000000000000000001-002a7c622f202132150e7f68053714c22d7ef1182f8b02e684f509a674250b86.pwr"
+        );
+        let revision_path = directory.path().join("golden-input.pwr");
+        fs::write(&revision_path, revision_bytes).expect("materialize golden Revision");
+        let control = OperationControl::new();
+        let revision =
+            validate_revision_file(&revision_path, catalog_limits().read, Some(&control))
+                .expect("validate golden Revision");
+        let rows = revision
+            .rows(
+                RowReadLimits {
+                    max_frames: 16,
+                    max_payload_bytes: 1 << 20,
+                    max_working_bytes: 1 << 20,
+                },
+                &control,
+            )
+            .expect("open golden Revision rows")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("read all golden Revision rows");
+        let output_path = directory.path().join("golden-output.pwr");
+        let output = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create_new(true)
+            .open(&output_path)
+            .expect("create reproduced Revision");
+        let mut limits = write_limits();
+        limits.rows_per_block = 3;
+        let reproduced = write_candidate_file(
+            &output_path,
+            output,
+            revision.facts.candidate,
+            rows.into_iter().map(Ok),
+            limits,
+            &control,
+        )
+        .expect("reproduce golden Revision");
+        assert_eq!(
+            fs::read(&reproduced.path).expect("read reproduced Revision"),
+            revision_bytes
+        );
     }
 
     #[test]
@@ -4142,7 +4470,7 @@ mod tests {
     }
 
     #[test]
-    fn empty_candidate_needs_no_block_capacity_and_sealed_drop_cleans_stage() {
+    fn empty_candidate_needs_no_block_capacity_and_sealed_drop_retains_stage() {
         let directory = TestDirectory::new();
         let store = initialized_store(&directory);
         let no_block_limits = WriteLimits {
@@ -4169,7 +4497,360 @@ mod tests {
         let path = stage.path().to_path_buf();
         assert!(path.exists());
         drop(stage);
-        assert!(!path.exists());
+        assert!(path.exists());
+        assert_eq!(fs::metadata(path).unwrap().len(), 0);
+    }
+
+    #[test]
+    fn sealed_revision_drop_preserves_a_stage_path_replacement() {
+        let directory = TestDirectory::new();
+        let store = initialized_store(&directory);
+        let stage = sealed(&store);
+        let path = stage.path().to_path_buf();
+        let owned = path.with_extension("owned-tmp");
+        fs::rename(&path, &owned).expect("move the owned stage away from its captured name");
+        fs::write(&path, b"caller replacement").expect("install caller replacement");
+
+        drop(stage);
+
+        assert_eq!(fs::read(&path).unwrap(), b"caller replacement");
+        assert_eq!(fs::metadata(owned).unwrap().len(), 0);
+    }
+
+    #[test]
+    fn prepared_rejection_drop_preserves_a_stage_path_replacement() {
+        let directory = TestDirectory::new();
+        let store = initialized_store(&directory);
+        let facts = RejectionFacts {
+            workspace: manifest().workspace,
+            operation: candidate().operation,
+            request_digest: candidate().request_digest,
+            reason_code: 3,
+            expected_head: [0; REVISION_ID_BYTES],
+            actual_head: [0; REVISION_ID_BYTES],
+        };
+        let prepared = store
+            .prepare_rejection(facts, u64::MAX)
+            .expect("prepare rejection stage");
+        let path = prepared.scratch_path.clone();
+        let owned = path.with_extension("owned-tmp");
+        fs::rename(&path, &owned).expect("move the owned stage away from its captured name");
+        fs::write(&path, b"caller replacement").expect("install caller replacement");
+
+        drop(prepared);
+
+        assert_eq!(fs::read(&path).unwrap(), b"caller replacement");
+        assert_eq!(fs::metadata(owned).unwrap().len(), 0);
+    }
+
+    #[test]
+    fn manifest_publication_rejects_source_replacement_at_every_boundary() {
+        for point in [
+            FaultPoint::ManifestLink,
+            FaultPoint::ManifestDirectorySync,
+            FaultPoint::ManifestParentDirectorySync,
+            FaultPoint::ManifestLostAcknowledgement,
+        ] {
+            let directory = TestDirectory::new();
+            let mut store = Store::create(directory.path()).expect("create premanifest Store");
+            let fault = test_fault::Guard::install(
+                directory.path(),
+                point,
+                test_fault::Action::PauseThenContinue,
+            );
+            std::thread::scope(|scope| {
+                let publication = scope.spawn(|| store.publish_manifest(&manifest()));
+                fault.wait_until_hit();
+                let path = scratch_with_prefix(directory.path(), "manifest-");
+                let owned = replace_with_caller_file(&path);
+                fault.release();
+                let result = publication
+                    .join()
+                    .expect("manifest publication thread does not panic");
+                assert!(
+                    result.is_err(),
+                    "a source replaced at {point:?} must not be acknowledged"
+                );
+                assert_eq!(fs::read(&path).unwrap(), b"caller replacement");
+                assert!(owned.is_file());
+            });
+        }
+    }
+
+    #[test]
+    fn ready_publication_rejects_source_replacement_at_every_boundary() {
+        for point in [
+            FaultPoint::ReadyLink,
+            FaultPoint::OperationsDirectorySync,
+            FaultPoint::OperationLostAcknowledgement,
+            FaultPoint::ReadyCleanup,
+        ] {
+            let directory = TestDirectory::new();
+            let store = initialized_store(&directory);
+            let stage = sealed(&store);
+            let path = stage.path().to_path_buf();
+            let fault = test_fault::Guard::install(
+                directory.path(),
+                point,
+                test_fault::Action::PauseThenContinue,
+            );
+            std::thread::scope(|scope| {
+                let publication = scope.spawn(|| store.publish_ready(&stage, || Ok(())));
+                fault.wait_until_hit();
+                let owned = replace_with_caller_file(&path);
+                fault.release();
+                let result = publication
+                    .join()
+                    .expect("ready publication thread does not panic");
+                assert!(
+                    result.is_err(),
+                    "a source replaced at {point:?} must not be acknowledged"
+                );
+                assert_eq!(fs::read(&path).unwrap(), b"caller replacement");
+                assert!(owned.is_file());
+            });
+        }
+    }
+
+    #[test]
+    fn revision_publication_rejects_source_replacement_at_every_boundary() {
+        for point in [
+            FaultPoint::RevisionLink,
+            FaultPoint::RevisionDirectorySync,
+            FaultPoint::RevisionLostAcknowledgement,
+        ] {
+            let directory = TestDirectory::new();
+            let store = initialized_store(&directory);
+            let stage = sealed(&store);
+            let ready = store
+                .publish_ready(&stage, || Ok(()))
+                .expect("publish ready source");
+            let path = ready.path.clone();
+            let fault = test_fault::Guard::install(
+                directory.path(),
+                point,
+                test_fault::Action::PauseThenContinue,
+            );
+            std::thread::scope(|scope| {
+                let publication = scope.spawn(|| store.publish_revision(&ready, || Ok(()), || {}));
+                fault.wait_until_hit();
+                let owned = replace_with_caller_file(&path);
+                fault.release();
+                let result = publication
+                    .join()
+                    .expect("Revision publication thread does not panic");
+                assert!(
+                    result.is_err(),
+                    "a source replaced at {point:?} must not be acknowledged"
+                );
+                assert_eq!(fs::read(&path).unwrap(), b"caller replacement");
+                assert!(owned.is_file());
+            });
+        }
+    }
+
+    #[test]
+    fn rejection_publication_rejects_source_replacement_at_every_boundary() {
+        for point in [
+            FaultPoint::RejectionLink,
+            FaultPoint::RejectionDirectorySync,
+            FaultPoint::RejectionLostAcknowledgement,
+            FaultPoint::RejectionCleanup,
+        ] {
+            let directory = TestDirectory::new();
+            let store = initialized_store(&directory);
+            let rejection = RejectionFacts {
+                workspace: manifest().workspace,
+                operation: candidate().operation,
+                request_digest: candidate().request_digest,
+                reason_code: 3,
+                expected_head: [0; REVISION_ID_BYTES],
+                actual_head: [0; REVISION_ID_BYTES],
+            };
+            let fault = test_fault::Guard::install(
+                directory.path(),
+                point,
+                test_fault::Action::PauseThenContinue,
+            );
+            std::thread::scope(|scope| {
+                let publication = scope.spawn(|| store.publish_rejection(rejection, || Ok(())));
+                fault.wait_until_hit();
+                let path = scratch_with_prefix(directory.path(), "reject-");
+                let owned = replace_with_caller_file(&path);
+                fault.release();
+                let result = publication
+                    .join()
+                    .expect("rejection publication thread does not panic");
+                assert!(
+                    result.is_err(),
+                    "a source replaced at {point:?} must not be acknowledged"
+                );
+                assert_eq!(fs::read(&path).unwrap(), b"caller replacement");
+                assert!(owned.is_file());
+            });
+        }
+    }
+
+    #[test]
+    fn manifest_publication_rejects_target_replacement_after_link() {
+        for point in [
+            FaultPoint::ManifestDirectorySync,
+            FaultPoint::ManifestParentDirectorySync,
+            FaultPoint::ManifestLostAcknowledgement,
+        ] {
+            let directory = TestDirectory::new();
+            let mut store = Store::create(directory.path()).expect("create premanifest Store");
+            let target = directory.path().join("manifest.pwm");
+            let fault = test_fault::Guard::install(
+                directory.path(),
+                point,
+                test_fault::Action::PauseThenContinue,
+            );
+            std::thread::scope(|scope| {
+                let publication = scope.spawn(|| store.publish_manifest(&manifest()));
+                fault.wait_until_hit();
+                let owned = replace_with_caller_file(&target);
+                fault.release();
+                let result = publication
+                    .join()
+                    .expect("manifest publication thread does not panic");
+                assert!(
+                    result.is_err(),
+                    "a target replaced at {point:?} must not be acknowledged"
+                );
+                assert_eq!(fs::read(&target).unwrap(), b"caller replacement");
+                assert!(owned.is_file());
+            });
+        }
+    }
+
+    #[test]
+    fn ready_publication_rejects_target_replacement_after_link() {
+        for point in [
+            FaultPoint::OperationsDirectorySync,
+            FaultPoint::OperationLostAcknowledgement,
+            FaultPoint::ReadyCleanup,
+        ] {
+            let directory = TestDirectory::new();
+            let store = initialized_store(&directory);
+            let stage = sealed(&store);
+            let target = store.ready_path(stage.operation());
+            let fault = test_fault::Guard::install(
+                directory.path(),
+                point,
+                test_fault::Action::PauseThenContinue,
+            );
+            std::thread::scope(|scope| {
+                let publication = scope.spawn(|| store.publish_ready(&stage, || Ok(())));
+                fault.wait_until_hit();
+                let owned = replace_with_caller_file(&target);
+                fault.release();
+                let result = publication
+                    .join()
+                    .expect("ready publication thread does not panic");
+                assert!(
+                    result.is_err(),
+                    "a target replaced at {point:?} must not be acknowledged"
+                );
+                assert_eq!(fs::read(&target).unwrap(), b"caller replacement");
+                assert!(owned.is_file());
+            });
+        }
+    }
+
+    #[test]
+    fn revision_publication_rejects_target_replacement_after_link() {
+        for point in [
+            FaultPoint::RevisionDirectorySync,
+            FaultPoint::RevisionLostAcknowledgement,
+        ] {
+            let directory = TestDirectory::new();
+            let store = initialized_store(&directory);
+            let stage = sealed(&store);
+            let ready = store
+                .publish_ready(&stage, || Ok(()))
+                .expect("publish ready source");
+            let target = store.revision_path(ready.sequence(), ready.revision());
+            let fault = test_fault::Guard::install(
+                directory.path(),
+                point,
+                test_fault::Action::PauseThenContinue,
+            );
+            std::thread::scope(|scope| {
+                let publication = scope.spawn(|| store.publish_revision(&ready, || Ok(()), || {}));
+                fault.wait_until_hit();
+                let owned = replace_with_caller_file(&target);
+                fault.release();
+                let result = publication
+                    .join()
+                    .expect("Revision publication thread does not panic");
+                assert!(
+                    result.is_err(),
+                    "a target replaced at {point:?} must not be acknowledged"
+                );
+                assert_eq!(fs::read(&target).unwrap(), b"caller replacement");
+                assert!(owned.is_file());
+            });
+        }
+    }
+
+    #[test]
+    fn rejection_publication_rejects_target_replacement_after_link() {
+        for point in [
+            FaultPoint::RejectionDirectorySync,
+            FaultPoint::RejectionLostAcknowledgement,
+            FaultPoint::RejectionCleanup,
+        ] {
+            let directory = TestDirectory::new();
+            let store = initialized_store(&directory);
+            let rejection = RejectionFacts {
+                workspace: manifest().workspace,
+                operation: candidate().operation,
+                request_digest: candidate().request_digest,
+                reason_code: 3,
+                expected_head: [0; REVISION_ID_BYTES],
+                actual_head: [0; REVISION_ID_BYTES],
+            };
+            let target = store.rejection_path(rejection.operation);
+            let fault = test_fault::Guard::install(
+                directory.path(),
+                point,
+                test_fault::Action::PauseThenContinue,
+            );
+            std::thread::scope(|scope| {
+                let publication = scope.spawn(|| store.publish_rejection(rejection, || Ok(())));
+                fault.wait_until_hit();
+                let owned = replace_with_caller_file(&target);
+                fault.release();
+                let result = publication
+                    .join()
+                    .expect("rejection publication thread does not panic");
+                assert!(
+                    result.is_err(),
+                    "a target replaced at {point:?} must not be acknowledged"
+                );
+                assert_eq!(fs::read(&target).unwrap(), b"caller replacement");
+                assert!(owned.is_file());
+            });
+        }
+    }
+
+    #[test]
+    fn dropping_incomplete_store_preserves_a_root_path_replacement() {
+        let directory = TestDirectory::new();
+        let store = Store::create(directory.path()).expect("create incomplete Store");
+        let owned = directory.path().with_extension("owned-pcw");
+        fs::rename(directory.path(), &owned)
+            .expect("move the owned root away from its captured name");
+        fs::create_dir(directory.path()).expect("install caller replacement root");
+        let sentinel = directory.path().join("caller-data");
+        fs::write(&sentinel, b"caller replacement").expect("write replacement sentinel");
+
+        drop(store);
+
+        assert_eq!(fs::read(&sentinel).unwrap(), b"caller replacement");
+        assert!(owned.is_dir());
+        fs::remove_dir_all(owned).expect("remove test-owned original root");
     }
 
     #[test]
@@ -4190,9 +4871,9 @@ mod tests {
         assert!(directory.path().join("revisions").is_dir());
         assert_eq!(
             fs::read_dir(directory.path().join("scratch"))
-                .expect("cleaned scratch")
+                .expect("validated scratch")
                 .count(),
-            0
+            1
         );
         store
             .publish_manifest(&manifest())
@@ -4216,7 +4897,7 @@ mod tests {
     }
 
     #[test]
-    fn create_parent_sync_failure_remains_precommit_and_cleans_owned_root() {
+    fn create_parent_sync_failure_remains_precommit_and_retains_owned_root() {
         let directory = TestDirectory::new();
         let mut store = Store::create(directory.path()).expect("create premanifest Store");
         let fault = test_fault::Guard::install(
@@ -4227,7 +4908,8 @@ mod tests {
         assert!(store.publish_manifest(&manifest()).is_err());
         drop(fault);
         drop(store);
-        assert!(!directory.path().exists());
+        assert!(directory.path().exists());
+        assert!(directory.path().join("manifest.pwm").is_file());
     }
 
     #[test]
@@ -4322,7 +5004,7 @@ mod tests {
     }
 
     #[test]
-    fn candidate_stage_faults_publish_nothing_and_recovery_cleans_scratch() {
+    fn candidate_stage_faults_publish_nothing_and_recovery_retains_scratch() {
         let points = [
             FaultPoint::CandidateStage,
             FaultPoint::CandidateFileSync,
@@ -4350,11 +5032,19 @@ mod tests {
             let catalog = reopen(&directory);
             assert!(catalog.revisions.is_empty());
             assert!(catalog.operations.is_empty());
-            assert_eq!(
+            assert!(
                 fs::read_dir(directory.path().join("scratch"))
                     .expect("read scratch")
-                    .count(),
-                0
+                    .count()
+                    >= 2
+            );
+            let candidate_stage = scratch_with_prefix(directory.path(), "revision-");
+            assert_eq!(
+                fs::metadata(candidate_stage)
+                    .expect("inspect retained candidate stage")
+                    .len(),
+                0,
+                "an unpublished candidate releases its payload through the owned handle"
             );
         }
     }

@@ -39,7 +39,7 @@ use crate::{
     report::{self, LimitFact, ReportError, ReportFacts, ReportLimits, SurfaceChangeEnvelope},
 };
 
-const PATH_BINDING_BYTES: u64 = 4 * 1024;
+pub(crate) const PATH_BINDING_BYTES: u64 = 4 * 1024;
 const ENVELOPE_HASH_DOMAIN: &[u8] = b"punctra-terrain-workflow-face-change-v1";
 const QA_HASH_DOMAIN: &[u8] = b"punctra-terrain-workflow-qa-result-v1";
 const SEMANTIC_HASH_DOMAIN: &[u8] = b"punctra-terrain-workflow-semantic-results-v1";
@@ -2399,7 +2399,7 @@ fn index_failure(
             error,
             RecoveryAction::StopAndPreserve,
         ),
-        error @ IndexError::Io { .. } => WorkflowFailure::new(
+        error @ (IndexError::Io { .. } | IndexError::SharedPathIo { .. }) => WorkflowFailure::new(
             FailureCode::Io,
             stage,
             Certainty::Indeterminate(PublicationPhase::IndexTarget),
@@ -2710,6 +2710,12 @@ struct RunLock {
     identity: fs::Metadata,
 }
 
+#[derive(Clone, Copy)]
+enum RunLockMode {
+    Exclusive,
+    Shared,
+}
+
 impl RunLock {
     fn acquire(path: &Path) -> io::Result<Self> {
         let initial = match fs::symlink_metadata(path) {
@@ -2731,21 +2737,44 @@ impl RunLock {
             .create(true)
             .truncate(false)
             .open(path)?;
+        Self::lock_opened(path, file, initial.as_ref(), RunLockMode::Exclusive)
+    }
+
+    fn acquire_existing(path: &Path) -> io::Result<Self> {
+        let initial = fs::symlink_metadata(path)?;
+        if !is_empty_regular_lock(&initial) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "run.lock must be an empty regular non-symlink file",
+            ));
+        }
+        let file = File::open(path)?;
+        Self::lock_opened(path, file, Some(&initial), RunLockMode::Shared)
+    }
+
+    fn lock_opened(
+        path: &Path,
+        file: File,
+        initial: Option<&fs::Metadata>,
+        mode: RunLockMode,
+    ) -> io::Result<Self> {
         let opened = file.metadata()?;
         let current = fs::symlink_metadata(path)?;
         if !is_empty_regular_lock(&opened)
             || !is_empty_regular_lock(&current)
             || !same_file_identity(&opened, &current)
-            || initial
-                .as_ref()
-                .is_some_and(|value| !same_file_identity(value, &opened))
+            || initial.is_some_and(|value| !same_file_identity(value, &opened))
         {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "run.lock changed identity while it was opened",
             ));
         }
-        file.try_lock().map_err(io::Error::from)?;
+        match mode {
+            RunLockMode::Exclusive => file.try_lock(),
+            RunLockMode::Shared => File::try_lock_shared(&file),
+        }
+        .map_err(io::Error::from)?;
         let locked_path = fs::symlink_metadata(path)?;
         if !is_empty_regular_lock(&locked_path) || !same_file_identity(&opened, &locked_path) {
             return Err(io::Error::new(
@@ -2775,6 +2804,46 @@ impl RunLock {
                 "run.lock path no longer names the locked file",
             ))
         }
+    }
+}
+
+/// Holds an existing Run lock and directory identity without creating or writing either.
+pub(crate) struct ReadOnlyRunGuard {
+    lock: RunLock,
+    witness: DirectoryWitness,
+    requested_root: PathBuf,
+    canonical_root: PathBuf,
+}
+
+impl ReadOnlyRunGuard {
+    pub(crate) fn acquire(run_root: &Path) -> io::Result<Self> {
+        let canonical_root = fs::canonicalize(run_root)?;
+        let witness = DirectoryWitness::capture(&canonical_root)?;
+        let lock = RunLock::acquire_existing(&canonical_root.join("run.lock"))?;
+        let guard = Self {
+            lock,
+            witness,
+            requested_root: run_root.to_path_buf(),
+            canonical_root,
+        };
+        guard.verify()?;
+        Ok(guard)
+    }
+
+    pub(crate) fn verify(&self) -> io::Result<()> {
+        verify_run_binding(&self.lock, &self.witness)?;
+        if fs::canonicalize(&self.requested_root)? == self.canonical_root {
+            Ok(())
+        } else {
+            Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "requested Run root no longer resolves to the locked directory",
+            ))
+        }
+    }
+
+    pub(crate) fn canonical_root(&self) -> &Path {
+        &self.canonical_root
     }
 }
 
@@ -3120,6 +3189,25 @@ mod tests {
         fs::remove_file(&path).expect("remove replacement lock");
         fs::rename(&moved, &path).expect("restore original lock path");
         assert!(lock.verify().is_ok());
+    }
+
+    #[test]
+    fn read_only_run_guard_requires_an_existing_lock_without_creating_it() {
+        let directory = TestDirectory::new("read-only-run-lock").expect("create test directory");
+        let run_root = directory.path().join("run-root");
+        let lock_path = run_root.join("run.lock");
+        fs::create_dir(&run_root).expect("create Run root");
+
+        let missing = ReadOnlyRunGuard::acquire(&run_root)
+            .err()
+            .expect("qualification cannot create a missing Run lock");
+        assert_eq!(missing.kind(), io::ErrorKind::NotFound);
+        assert!(!lock_path.exists());
+
+        File::create(&lock_path).expect("create existing empty Run lock fixture");
+        let guard = ReadOnlyRunGuard::acquire(&run_root).expect("lock existing Run read-only");
+        guard.verify().expect("Run binding remains stable");
+        assert_eq!(fs::metadata(lock_path).unwrap().len(), 0);
     }
 
     #[test]

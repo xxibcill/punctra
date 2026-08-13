@@ -18,10 +18,15 @@ use point_source::{
     AttributeSelection, MAX_ADAPTER_NAME_BYTES, MAX_ADAPTER_VERSION_BYTES, MAX_FAST_TOKEN_BYTES,
     MAX_INPUT_ATTRIBUTE_IDS, MAX_INPUT_SOURCE_SPANS, MAX_LOGICAL_ORDER_BYTES,
     MAX_SOURCE_DIAGNOSTIC_BYTES, OpenOptions, ReadBudget, ReadLimit, ReadRequest, SourceCandidate,
-    SourceDiagnostic, SourceError, SourcePreview, SourceSpan, VerificationPolicy,
+    SourceDiagnostic, SourceError, SourcePreview, SourceReadSummary, SourceSpan,
+    VerificationPolicy,
 };
 
 const FAST_TOKEN: &[u8] = b"stable-fast-token";
+
+const fn summary_source_in_const_context(summary: &SourceReadSummary) -> SourceId {
+    summary.source()
+}
 
 #[derive(Clone, Copy)]
 enum FastBehavior {
@@ -272,6 +277,9 @@ fn identify_forces_full_and_recorded_fast_open_matches() {
         .open(OpenOptions::identify());
     let open_handle = open.handle();
     let source = open.blocking_wait().unwrap();
+    let provenance = source.provenance_handle();
+    let cloned_provenance = provenance.clone();
+    assert!(std::ptr::eq(provenance.get(), cloned_provenance.get()));
     assert_eq!(first.calls.full.load(Ordering::Relaxed), 1);
     assert_eq!(first.calls.fast.load(Ordering::Relaxed), 0);
     assert_eq!(*first.calls.full_expectations.lock().unwrap(), [None]);
@@ -461,7 +469,7 @@ fn overlap_is_normalized_and_success_has_one_exact_summary() {
     assert!(points.next().unwrap().is_none());
     assert!(points.next().unwrap().is_none());
     let summary = points.summary().unwrap();
-    assert_eq!(summary.source(), source.identity());
+    assert_eq!(summary_source_in_const_context(summary), source.identity());
     assert_eq!(summary.exact_count(), 5);
     assert_eq!(summary.spans(), &[SourceSpan::new(0, 5).unwrap()]);
     assert_eq!(
@@ -925,6 +933,55 @@ fn source_record_deserialization_enforces_all_adapter_owned_bounds() {
         ),
     );
     assert!(serde_json::from_value::<point_source::SourceRecord>(oversized_token).is_err());
+}
+
+#[test]
+fn source_record_v1_matches_the_checked_in_compatibility_fixture() {
+    let fixture = fixture();
+    let source = fixture
+        .candidate(61, FastBehavior::Match)
+        .open(OpenOptions::identify())
+        .blocking_wait()
+        .unwrap();
+    let expected = include_bytes!("fixtures/source-record-v1.json");
+    let mut encoded = serde_json::to_vec(source.record()).unwrap();
+    encoded.push(b'\n');
+
+    assert_eq!(expected.len(), 739);
+    assert_eq!(
+        blake3::hash(expected).to_string(),
+        "d30e27c1a6806d62a454aeabb6dba372d7e7081eef7ef70b01cfdf3e9af75b1d"
+    );
+    assert_eq!(encoded, expected, "canonical SourceRecord v1 bytes changed");
+    let decoded: point_source::SourceRecord = serde_json::from_slice(expected).unwrap();
+    assert_eq!(&decoded, source.record());
+    assert_eq!(decoded.version(), 1);
+    assert_eq!(decoded.adapter_name(), "fake");
+    assert_eq!(decoded.adapter_version(), "1");
+    assert_eq!(decoded.logical_order(), "input row order");
+    assert_eq!(decoded.fast_token(), FAST_TOKEN);
+
+    let mut future: serde_json::Value = serde_json::from_slice(expected).unwrap();
+    future["version"] = serde_json::Value::from(2);
+    let future: point_source::SourceRecord = serde_json::from_value(future).unwrap();
+    let failure = fixture
+        .candidate(61, FastBehavior::Match)
+        .open(OpenOptions::match_record(
+            future,
+            VerificationPolicy::FastOnly,
+        ))
+        .blocking_wait()
+        .unwrap_err();
+    assert!(matches!(
+        failure,
+        SourceError::UnsupportedRecordVersion { version: 2 }
+    ));
+
+    assert!(
+        serde_json::from_slice::<point_source::SourceRecord>(&expected[..expected.len() - 2])
+            .is_err(),
+        "a truncated fixture must fail rather than publish a partial record"
+    );
 }
 
 #[test]

@@ -23,6 +23,7 @@ criterion.workspace = true
 las.workspace = true
 source-las.workspace = true
 source-memory = { workspace = true, features = ["test-support"] }
+serde_json.workspace = true
 
 [[bench]]
 name = "document"

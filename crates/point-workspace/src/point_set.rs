@@ -140,7 +140,7 @@ struct PointSetInner {
 impl Drop for PointSetInner {
     fn drop(&mut self) {
         if let PointSetStorage::Spill(spill) = &self.storage {
-            let _ = fs::remove_file(&spill.path);
+            clear_owned_spill(&spill.file);
         }
     }
 }
@@ -152,6 +152,7 @@ enum PointSetStorage {
 
 struct SpillDescriptor {
     path: PathBuf,
+    file: File,
     file_bytes: u64,
     modified: SystemTime,
     max_frame_records: usize,
@@ -639,7 +640,7 @@ impl SpillWriter {
         self.write_hashed(&metadata.exact_count().to_le_bytes())?;
         self.write_hashed(metadata.point_id_hash().as_bytes())?;
         self.write_hashed(metadata.content_hash().as_bytes())?;
-        let file_checksum = *self.file_hasher.finalize().as_bytes();
+        let file_checksum = *self.file_hasher.clone().finalize().as_bytes();
         self.write_raw(&file_checksum)?;
         self.file.flush().map_err(|error| {
             WorkspaceError::io("flush Point Set spill", self.path.display(), error)
@@ -660,9 +661,13 @@ impl SpillWriter {
                 error,
             )
         })?;
+        let file = self.file.try_clone().map_err(|error| {
+            WorkspaceError::io("retain owned Point Set spill", self.path.display(), error)
+        })?;
         self.keep = true;
         Ok(SpillDescriptor {
             path: self.path.clone(),
+            file,
             file_bytes,
             modified,
             max_frame_records: self.max_frame_records_written,
@@ -729,9 +734,14 @@ impl SpillWriter {
 impl Drop for SpillWriter {
     fn drop(&mut self) {
         if !self.keep {
-            let _ = fs::remove_file(&self.path);
+            clear_owned_spill(&self.file);
         }
     }
+}
+
+fn clear_owned_spill(file: &File) {
+    let _ = file.set_len(0);
+    let _ = file.sync_all();
 }
 
 struct SpillReader {
@@ -1327,6 +1337,22 @@ mod tests {
 
         assert!(growths <= 8, "resident growth count was {growths}");
         assert!(resident_record_bytes(records.capacity()) <= AVAILABLE_BYTES);
+    }
+
+    #[test]
+    fn aborted_spill_writer_preserves_a_path_replacement() {
+        let writer = SpillWriter::create(&std::env::temp_dir(), 4_096, 4_096).unwrap();
+        let path = writer.path.clone();
+        let owned = path.with_extension("owned-pset");
+        fs::rename(&path, &owned).expect("move the owned spill away from its captured name");
+        fs::write(&path, b"caller replacement").expect("install caller replacement");
+
+        drop(writer);
+
+        assert_eq!(fs::read(&path).unwrap(), b"caller replacement");
+        assert_eq!(fs::metadata(&owned).unwrap().len(), 0);
+        fs::remove_file(path).unwrap();
+        fs::remove_file(owned).unwrap();
     }
 
     #[test]

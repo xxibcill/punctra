@@ -6,8 +6,10 @@
 mod bounded_diagnostic;
 mod cli;
 mod diagnostic;
+mod evidence;
 mod journal;
 mod publication;
+mod qualification;
 mod report;
 mod roundtrip;
 mod workflow;

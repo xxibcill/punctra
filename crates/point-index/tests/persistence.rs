@@ -11,17 +11,203 @@ use std::{
 
 use foundation_runtime::RuntimeError;
 use point_index::{
-    IndexError, IndexLimit, NodeReadBudget, PrepareDisposition, PrepareLimits, prepare,
+    IndexError, IndexLimit, IndexRecipe, InspectionAttributeIds, NodeReadBudget,
+    PrepareDisposition, PrepareLimits, prepare, prepare_with_recipe,
 };
 use point_source::ReadLimit;
 
 use support::{
-    BLOCK_POINTS, TemporaryTarget, clustered_ticks, open_controlled_source, open_source, read_node,
-    samples,
+    BLOCK_POINTS, CLASSIFICATION_ID, INTENSITY_ID, RGB_IDS, TemporaryTarget, clustered_ticks,
+    open_attributed_source, open_controlled_attributed_source, open_controlled_source, open_source,
+    read_node, samples,
 };
 
 const V1_ARTIFACT: &[u8] = include_bytes!("fixtures/v1/one-point.pidx");
 const V1_WORK: &[u8] = include_bytes!("fixtures/v1/one-point.pidx.work");
+const V2_ARTIFACT: &[u8] = include_bytes!("fixtures/v2/one-point.pidx");
+const V2_WORK: &[u8] = include_bytes!("fixtures/v2/one-point.pidx.work");
+
+fn inspection_recipe() -> IndexRecipe {
+    IndexRecipe::InspectionV1(
+        InspectionAttributeIds::new(INTENSITY_ID, CLASSIFICATION_ID, RGB_IDS).unwrap(),
+    )
+}
+
+#[test]
+fn golden_fixture_lengths_and_blake3_are_pinned() {
+    for (name, bytes, expected_length, expected_hash) in [
+        (
+            "v1 artifact",
+            V1_ARTIFACT,
+            408,
+            "d9e0769b00bfe5f35845f94fab5b67107b85d94feb54175e7b56ee3e6bf48954",
+        ),
+        (
+            "v1 work",
+            V1_WORK,
+            344,
+            "e81496a3e1f42526599394d12fd9234a13d1da9c88233c0b7fee83536c010810",
+        ),
+        (
+            "v2 artifact",
+            V2_ARTIFACT,
+            440,
+            "df525242a625203610b3b03988bd1af5c02532d7e713c4e722cb8c383f202648",
+        ),
+        (
+            "v2 work",
+            V2_WORK,
+            386,
+            "dd8e8177a7d89d091e4dcab7c3b90b2534ecc977558e17a350c33dc9ac1a3775",
+        ),
+    ] {
+        assert_eq!(bytes.len(), expected_length, "{name} length");
+        assert_eq!(
+            blake3::hash(bytes).to_hex().as_str(),
+            expected_hash,
+            "{name} BLAKE3"
+        );
+    }
+}
+
+#[test]
+fn prepare_report_observes_exact_temporary_disk_peak_for_v1_v2_and_warm_open() {
+    let v1_target = TemporaryTarget::new("v1-temporary-peak");
+    let v1_source = open_source(clustered_ticks(1));
+    let v1 = prepare(
+        v1_source.clone(),
+        v1_target.path(),
+        PrepareLimits::default(),
+    )
+    .blocking_wait()
+    .unwrap();
+    assert_eq!(v1.prepare_report().peak_temporary_disk_bytes(), 752);
+    let v1_opened = prepare(v1_source, v1_target.path(), PrepareLimits::default())
+        .blocking_wait()
+        .unwrap();
+    assert_eq!(v1_opened.prepare_report().peak_temporary_disk_bytes(), 0);
+
+    let v2_target = TemporaryTarget::new("v2-temporary-peak");
+    let v2_source = open_attributed_source(clustered_ticks(1), true);
+    let v2 = prepare_with_recipe(
+        v2_source.clone(),
+        v2_target.path(),
+        inspection_recipe(),
+        PrepareLimits::default(),
+    )
+    .blocking_wait()
+    .unwrap();
+    assert_eq!(v2.prepare_report().peak_temporary_disk_bytes(), 826);
+    let v2_opened = prepare_with_recipe(
+        v2_source,
+        v2_target.path(),
+        inspection_recipe(),
+        PrepareLimits::default(),
+    )
+    .blocking_wait()
+    .unwrap();
+    assert_eq!(v2_opened.prepare_report().peak_temporary_disk_bytes(), 0);
+}
+
+#[test]
+fn v1_and_v2_targets_are_preserved_when_requested_through_the_other_recipe() {
+    let attributed = open_attributed_source(clustered_ticks(1), true);
+
+    let v1_target = TemporaryTarget::new("v1-requested-as-v2");
+    prepare(
+        attributed.clone(),
+        v1_target.path(),
+        PrepareLimits::default(),
+    )
+    .blocking_wait()
+    .unwrap();
+    let v1_bytes = fs::read(v1_target.path()).unwrap();
+    assert!(matches!(
+        prepare_with_recipe(
+            attributed.clone(),
+            v1_target.path(),
+            inspection_recipe(),
+            PrepareLimits::default(),
+        )
+        .blocking_wait(),
+        Err(IndexError::IncompatibleArtifact { .. })
+    ));
+    assert_eq!(fs::read(v1_target.path()).unwrap(), v1_bytes);
+
+    let v2_target = TemporaryTarget::new("v2-requested-as-v1");
+    prepare_with_recipe(
+        attributed.clone(),
+        v2_target.path(),
+        inspection_recipe(),
+        PrepareLimits::default(),
+    )
+    .blocking_wait()
+    .unwrap();
+    let v2_bytes = fs::read(v2_target.path()).unwrap();
+    assert!(matches!(
+        prepare(attributed, v2_target.path(), PrepareLimits::default()).blocking_wait(),
+        Err(IndexError::IncompatibleArtifact { .. })
+    ));
+    assert_eq!(fs::read(v2_target.path()).unwrap(), v2_bytes);
+}
+
+#[test]
+fn inspection_v2_resumes_durable_frames_and_rejects_checksum_valid_header_corruption() {
+    let point_count = BLOCK_POINTS + 64;
+    let (source, faults) = open_controlled_attributed_source(clustered_ticks(point_count), true);
+    let target = TemporaryTarget::new("v2-resume");
+    faults.fail_at_ordinal(u64::try_from(BLOCK_POINTS + 3).unwrap());
+    assert!(matches!(
+        prepare_with_recipe(
+            source.clone(),
+            target.path(),
+            inspection_recipe(),
+            PrepareLimits::default(),
+        )
+        .blocking_wait(),
+        Err(IndexError::Source(
+            point_source::SourceError::CorruptSource { .. }
+        ))
+    ));
+    assert!(fs::metadata(target.work_path()).unwrap().len() > 232);
+    faults.clear_read_fault();
+    let resumed = prepare_with_recipe(
+        source.clone(),
+        target.path(),
+        inspection_recipe(),
+        PrepareLimits::default(),
+    )
+    .blocking_wait()
+    .unwrap();
+    assert_eq!(
+        resumed.prepare_report().disposition(),
+        PrepareDisposition::Resumed
+    );
+    assert_eq!(
+        resumed.prepare_report().durable_points_reused(),
+        u64::try_from(BLOCK_POINTS).unwrap()
+    );
+    assert_eq!(resumed.descriptor().disk_version(), 2);
+
+    let mut corrupt = fs::read(target.path()).unwrap();
+    corrupt[212] |= 0x80;
+    let checksum_offset = corrupt.len() - 32;
+    let checksum = blake3::hash(&corrupt[..checksum_offset]);
+    corrupt[checksum_offset..].copy_from_slice(checksum.as_bytes());
+    let corrupt_target = target.copied_target("v2-corrupt-extension.pidx");
+    fs::write(&corrupt_target, &corrupt).unwrap();
+    assert!(matches!(
+        prepare_with_recipe(
+            source,
+            &corrupt_target,
+            inspection_recipe(),
+            PrepareLimits::default(),
+        )
+        .blocking_wait(),
+        Err(IndexError::CorruptArtifact { .. })
+    ));
+    assert_eq!(fs::read(corrupt_target).unwrap(), corrupt);
+}
 
 #[test]
 fn cold_build_preserves_preexisting_adjacent_files() {
@@ -43,6 +229,24 @@ fn cold_build_preserves_preexisting_adjacent_files() {
 
     assert_eq!(fs::read(temporary).unwrap(), temporary_sentinel);
     assert_eq!(fs::read(samples).unwrap(), samples_sentinel);
+}
+
+#[test]
+fn cold_build_preserves_an_unowned_empty_work_path() {
+    let target = TemporaryTarget::new("unowned-empty-work");
+    fs::write(target.work_path(), []).unwrap();
+
+    assert!(matches!(
+        prepare(
+            open_source(clustered_ticks(1)),
+            target.path(),
+            PrepareLimits::default(),
+        )
+        .blocking_wait(),
+        Err(IndexError::CorruptWork { .. })
+    ));
+    assert!(!target.path().exists());
+    assert_eq!(fs::metadata(target.work_path()).unwrap().len(), 0);
 }
 
 #[test]
@@ -80,6 +284,52 @@ fn disk_v1_golden_fixtures_open_and_resume_without_reencoding_the_input() {
     assert_eq!(resumed.prepare_report().durable_points_reused(), 1);
     assert_eq!(resumed.prepare_report().source_points_read(), 0);
     assert_eq!(fs::read(work_target.path()).unwrap(), V1_ARTIFACT);
+}
+
+#[test]
+fn disk_v2_golden_fixtures_open_and_resume_without_reencoding_the_input() {
+    let source = open_attributed_source(clustered_ticks(1), true);
+
+    let complete_target = TemporaryTarget::new("v2-golden-complete");
+    fs::write(complete_target.path(), V2_ARTIFACT).unwrap();
+    let opened = prepare_with_recipe(
+        source.clone(),
+        complete_target.path(),
+        inspection_recipe(),
+        PrepareLimits::default(),
+    )
+    .blocking_wait()
+    .unwrap();
+    assert_eq!(
+        opened.prepare_report().disposition(),
+        PrepareDisposition::Opened
+    );
+    assert_eq!(opened.prepare_report().peak_temporary_disk_bytes(), 0);
+    assert_eq!(fs::read(complete_target.path()).unwrap(), V2_ARTIFACT);
+    let root = opened.hierarchy().root().unwrap();
+    let read = read_node(&opened, root.id(), NodeReadBudget::default());
+    assert_eq!(
+        read.batches[0].display_attributes().unwrap()[0].intensity(),
+        0
+    );
+
+    let work_target = TemporaryTarget::new("v2-golden-work");
+    fs::write(work_target.work_path(), V2_WORK).unwrap();
+    let resumed = prepare_with_recipe(
+        source,
+        work_target.path(),
+        inspection_recipe(),
+        PrepareLimits::default(),
+    )
+    .blocking_wait()
+    .unwrap();
+    assert_eq!(
+        resumed.prepare_report().disposition(),
+        PrepareDisposition::Resumed
+    );
+    assert_eq!(resumed.prepare_report().durable_points_reused(), 1);
+    assert_eq!(resumed.prepare_report().source_points_read(), 0);
+    assert_eq!(fs::read(work_target.path()).unwrap(), V2_ARTIFACT);
 }
 
 #[test]
@@ -311,7 +561,7 @@ fn cold_build_limits_fail_without_a_partial_target_and_preserve_only_valid_work(
 
     let late_source = open_source(clustered_ticks(BLOCK_POINTS + 1));
     let late_build = TemporaryTarget::new("limit-build-memory-late");
-    let limit = PrepareLimits::default().with_max_build_working_bytes(350_000);
+    let limit = PrepareLimits::default().with_max_build_working_bytes(450_000);
     assert_resource_error(&prepare(late_source.clone(), late_build.path(), limit).blocking_wait());
     assert!(!late_build.path().exists());
     assert!(fs::metadata(late_build.work_path()).unwrap().len() > 200);
@@ -450,7 +700,7 @@ fn faulted_build_recovers_valid_frames_discards_bad_suffix_and_matches_clean_byt
         u64::try_from(BLOCK_POINTS).unwrap()
     );
     assert_eq!(resumed.prepare_report().source_points_read(), 64);
-    assert!(!resumed_target.work_path().exists());
+    assert!(resumed_target.work_path().exists());
 
     let clean_target = TemporaryTarget::new("fault-resume-clean");
     let clean_limits = PrepareLimits::new(251, 251 * 24).unwrap();
@@ -504,7 +754,7 @@ fn cancelled_prepare_leaves_only_resumable_work_and_never_a_partial_target() {
     );
     assert!(resumed.prepare_report().durable_points_reused() >= BLOCK_POINTS as u64);
     assert!(resumed.prepare_report().durable_points_reused() < u64::try_from(point_count).unwrap());
-    assert!(!target.work_path().exists());
+    assert!(target.work_path().exists());
 
     let clean_target = TemporaryTarget::new("cancel-resume-clean");
     let clean = prepare(source, clean_target.path(), PrepareLimits::default())

@@ -4,7 +4,7 @@ use glam::{
 };
 use thiserror::Error;
 
-/// Canonical orthonormal world-space basis of a validated perspective camera.
+/// Canonical orthonormal world-space basis of a validated camera.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CameraBasis {
     forward: [f64; 3],
@@ -32,14 +32,29 @@ impl CameraBasis {
     }
 }
 
-/// A validated perspective camera expressed in 64-bit world coordinates.
+/// The projection model owned by a [`Camera`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum CameraProjection {
+    /// Perspective projection with a vertical angular field of view.
+    Perspective {
+        /// Vertical field of view in radians inside `(0, pi)`.
+        vertical_field_of_view_radians: f32,
+    },
+    /// Orthographic projection with a vertical extent in world units.
+    Orthographic {
+        /// Positive finite world height visible before aspect-ratio scaling.
+        vertical_world_height: f64,
+    },
+}
+
+/// A validated perspective or orthographic camera in 64-bit world coordinates.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Camera {
     eye: [f64; 3],
     target: [f64; 3],
     up: [f64; 3],
     world_basis: CameraBasis,
-    vertical_field_of_view_radians: f32,
+    projection: CameraProjection,
     near_distance: f32,
     far_distance: f32,
 }
@@ -60,61 +75,67 @@ impl Camera {
         near_distance: f32,
         far_distance: f32,
     ) -> Result<Self, CameraError> {
-        validate_finite_vector("eye", eye)?;
-        validate_finite_vector("target", target)?;
-        validate_finite_vector("up", up)?;
-
-        let forward = DVec3::from_array(target) - DVec3::from_array(eye);
-        let up_vector = DVec3::from_array(up);
-        if forward == DVec3::ZERO {
-            return Err(CameraError::CoincidentEyeAndTarget);
-        }
-        if up_vector == DVec3::ZERO {
-            return Err(CameraError::ZeroUpVector);
-        }
-        let world_forward =
-            normalize_world_direction(forward).ok_or(CameraError::NonFiniteViewDirection)?;
-        let world_requested_up =
-            normalize_world_direction(up_vector).ok_or(CameraError::ZeroUpVector)?;
-        let narrowed_forward = world_forward.as_vec3();
-        let narrowed_requested_up = world_requested_up.as_vec3();
-        let narrowed_right = narrowed_forward
-            .cross(narrowed_requested_up)
-            .try_normalize()
-            .ok_or(CameraError::ParallelUpVector)?;
-        if !narrowed_right.cross(narrowed_forward).is_finite() {
-            return Err(CameraError::ParallelUpVector);
-        }
-        let world_right = normalize_world_direction(world_forward.cross(world_requested_up))
-            .ok_or(CameraError::ParallelUpVector)?;
-        let world_up = world_right.cross(world_forward);
-        if !vertical_field_of_view_radians.is_finite()
-            || !(0.0..std::f32::consts::PI).contains(&vertical_field_of_view_radians)
-        {
-            return Err(CameraError::InvalidFieldOfView(
+        Self::new(
+            eye,
+            target,
+            up,
+            CameraProjection::Perspective {
                 vertical_field_of_view_radians,
-            ));
-        }
-        if !near_distance.is_finite() || near_distance <= 0.0 {
-            return Err(CameraError::InvalidNearDistance(near_distance));
-        }
-        if !far_distance.is_finite() || far_distance <= near_distance {
-            return Err(CameraError::InvalidFarDistance {
-                near: near_distance,
-                far: far_distance,
-            });
-        }
+            },
+            near_distance,
+            far_distance,
+        )
+    }
+
+    /// Constructs an orthographic camera after validating its numeric model.
+    ///
+    /// `vertical_world_height` is the world-space height visible in the
+    /// viewport. The horizontal extent is that height multiplied by the
+    /// viewport aspect ratio.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CameraError`] when a vector is non-finite or degenerate, the
+    /// vertical world height is not positive and finite, the clipping range is
+    /// invalid, or the parameters cannot produce a finite projection.
+    pub fn orthographic(
+        eye: [f64; 3],
+        target: [f64; 3],
+        up: [f64; 3],
+        vertical_world_height: f64,
+        near_distance: f32,
+        far_distance: f32,
+    ) -> Result<Self, CameraError> {
+        Self::new(
+            eye,
+            target,
+            up,
+            CameraProjection::Orthographic {
+                vertical_world_height,
+            },
+            near_distance,
+            far_distance,
+        )
+    }
+
+    fn new(
+        eye: [f64; 3],
+        target: [f64; 3],
+        up: [f64; 3],
+        projection: CameraProjection,
+        near_distance: f32,
+        far_distance: f32,
+    ) -> Result<Self, CameraError> {
+        let world_basis = validated_world_basis(eye, target, up)?;
+        validate_projection(projection)?;
+        validate_clipping_distances(near_distance, far_distance)?;
 
         let camera = Self {
             eye,
             target,
             up,
-            world_basis: CameraBasis {
-                forward: world_forward.to_array(),
-                right: world_right.to_array(),
-                up: world_up.to_array(),
-            },
-            vertical_field_of_view_radians,
+            world_basis,
+            projection,
             near_distance,
             far_distance,
         };
@@ -146,10 +167,10 @@ impl Camera {
         self.world_basis
     }
 
-    /// Returns the vertical field of view in radians.
+    /// Returns the explicit perspective or orthographic projection model.
     #[must_use]
-    pub const fn vertical_field_of_view_radians(&self) -> f32 {
-        self.vertical_field_of_view_radians
+    pub const fn projection(&self) -> CameraProjection {
+        self.projection
     }
 
     /// Returns the near clipping distance.
@@ -177,17 +198,40 @@ impl Camera {
         let forward = DVec3::from_array(self.world_basis.forward).as_vec3();
         let up = DVec3::from_array(self.world_basis.up).as_vec3();
         let view = view::look_at_mat4(Vec3::ZERO, forward, up);
-        let projection = directx::perspective(
-            self.vertical_field_of_view_radians,
-            aspect_ratio,
-            self.near_distance,
-            self.far_distance,
-        );
+        let projection = self.projection_matrix(aspect_ratio);
         let view_projection = projection * view;
         if view_projection.is_finite() {
             Ok(view_projection.to_cols_array())
         } else {
             Err(CameraError::NonFiniteProjection)
+        }
+    }
+
+    fn projection_matrix(&self, aspect_ratio: f32) -> glam::Mat4 {
+        match self.projection {
+            CameraProjection::Perspective {
+                vertical_field_of_view_radians,
+            } => directx::perspective(
+                vertical_field_of_view_radians,
+                aspect_ratio,
+                self.near_distance,
+                self.far_distance,
+            ),
+            CameraProjection::Orthographic {
+                vertical_world_height,
+            } => {
+                #[allow(clippy::cast_possible_truncation)]
+                let half_vertical = (vertical_world_height * 0.5) as f32;
+                let half_horizontal = half_vertical * aspect_ratio;
+                directx::orthographic(
+                    -half_horizontal,
+                    half_horizontal,
+                    -half_vertical,
+                    half_vertical,
+                    self.near_distance,
+                    self.far_distance,
+                )
+            }
         }
     }
 }
@@ -216,6 +260,9 @@ pub enum CameraError {
     /// The vertical field of view is outside `(0, pi)`.
     #[error("camera field of view must be finite and inside (0, pi), got {0}")]
     InvalidFieldOfView(f32),
+    /// The orthographic vertical world height is not positive and finite.
+    #[error("camera orthographic world height must be positive and finite, got {0}")]
+    InvalidOrthographicWorldHeight(f64),
     /// The near clipping distance is not positive and finite.
     #[error("camera near distance must be positive and finite, got {0}")]
     InvalidNearDistance(f32),
@@ -238,6 +285,81 @@ fn validate_finite_vector(name: &'static str, vector: [f64; 3]) -> Result<(), Ca
     } else {
         Err(CameraError::NonFiniteVector { name })
     }
+}
+
+fn validated_world_basis(
+    eye: [f64; 3],
+    target: [f64; 3],
+    up: [f64; 3],
+) -> Result<CameraBasis, CameraError> {
+    validate_finite_vector("eye", eye)?;
+    validate_finite_vector("target", target)?;
+    validate_finite_vector("up", up)?;
+
+    let forward = DVec3::from_array(target) - DVec3::from_array(eye);
+    let requested_up = DVec3::from_array(up);
+    if forward == DVec3::ZERO {
+        return Err(CameraError::CoincidentEyeAndTarget);
+    }
+    if requested_up == DVec3::ZERO {
+        return Err(CameraError::ZeroUpVector);
+    }
+
+    let forward = normalize_world_direction(forward).ok_or(CameraError::NonFiniteViewDirection)?;
+    let requested_up = normalize_world_direction(requested_up).ok_or(CameraError::ZeroUpVector)?;
+    validate_narrowed_basis(forward, requested_up)?;
+    let right = normalize_world_direction(forward.cross(requested_up))
+        .ok_or(CameraError::ParallelUpVector)?;
+    let up = right.cross(forward);
+    Ok(CameraBasis {
+        forward: forward.to_array(),
+        right: right.to_array(),
+        up: up.to_array(),
+    })
+}
+
+fn validate_narrowed_basis(forward: DVec3, requested_up: DVec3) -> Result<(), CameraError> {
+    let narrowed_forward = forward.as_vec3();
+    let narrowed_up = requested_up.as_vec3();
+    let narrowed_right = narrowed_forward
+        .cross(narrowed_up)
+        .try_normalize()
+        .ok_or(CameraError::ParallelUpVector)?;
+    if narrowed_right.cross(narrowed_forward).is_finite() {
+        Ok(())
+    } else {
+        Err(CameraError::ParallelUpVector)
+    }
+}
+
+fn validate_projection(projection: CameraProjection) -> Result<(), CameraError> {
+    match projection {
+        CameraProjection::Perspective {
+            vertical_field_of_view_radians,
+        } if !vertical_field_of_view_radians.is_finite()
+            || !(0.0..std::f32::consts::PI).contains(&vertical_field_of_view_radians) =>
+        {
+            Err(CameraError::InvalidFieldOfView(
+                vertical_field_of_view_radians,
+            ))
+        }
+        CameraProjection::Orthographic {
+            vertical_world_height,
+        } if !vertical_world_height.is_finite() || vertical_world_height <= 0.0 => Err(
+            CameraError::InvalidOrthographicWorldHeight(vertical_world_height),
+        ),
+        _ => Ok(()),
+    }
+}
+
+fn validate_clipping_distances(near: f32, far: f32) -> Result<(), CameraError> {
+    if !near.is_finite() || near <= 0.0 {
+        return Err(CameraError::InvalidNearDistance(near));
+    }
+    if !far.is_finite() || far <= near {
+        return Err(CameraError::InvalidFarDistance { near, far });
+    }
+    Ok(())
 }
 
 fn normalize_world_direction(vector: DVec3) -> Option<DVec3> {
@@ -297,6 +419,46 @@ mod tests {
             .expect("the validated camera should produce a finite projection");
 
         assert!(matrix.into_iter().all(f32::is_finite));
+    }
+
+    #[test]
+    fn orthographic_projection_validates_its_world_height() {
+        for invalid in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+            let result = Camera::orthographic(
+                [0.0, 0.0, 10.0],
+                [0.0; 3],
+                [0.0, 1.0, 0.0],
+                invalid,
+                0.1,
+                100.0,
+            );
+
+            assert!(matches!(
+                result,
+                Err(CameraError::InvalidOrthographicWorldHeight(actual))
+                    if actual.to_bits() == invalid.to_bits()
+            ));
+        }
+    }
+
+    #[test]
+    fn orthographic_projection_maps_world_extents_and_depth() {
+        let camera =
+            Camera::orthographic([0.0, 0.0, 10.0], [0.0; 3], [0.0, 1.0, 0.0], 10.0, 1.0, 21.0)
+                .unwrap();
+        let matrix = glam::Mat4::from_cols_array(&camera.view_projection_matrix(2.0).unwrap());
+
+        let right_edge = matrix * glam::Vec4::new(10.0, 0.0, -1.0, 1.0);
+        let top_edge = matrix * glam::Vec4::new(0.0, 5.0, -1.0, 1.0);
+        let near = matrix * glam::Vec4::new(0.0, 0.0, -1.0, 1.0);
+        let far = matrix * glam::Vec4::new(0.0, 0.0, -21.0, 1.0);
+
+        assert!((right_edge.x - 1.0).abs() < f32::EPSILON * 4.0);
+        assert!((top_edge.y - 1.0).abs() < f32::EPSILON * 4.0);
+        assert!(near.z.abs() < f32::EPSILON * 4.0);
+        assert!((far.z - 1.0).abs() < f32::EPSILON * 4.0);
+        assert!((right_edge.w - 1.0).abs() < f32::EPSILON * 4.0);
+        assert!((top_edge.w - 1.0).abs() < f32::EPSILON * 4.0);
     }
 
     #[test]
@@ -365,7 +527,13 @@ mod tests {
         let forward = DVec3::from_array(basis.forward());
         let right = DVec3::from_array(basis.right());
         let depth = forward.dot(point);
-        let half_field_of_view = 0.5 * f64::from(camera.vertical_field_of_view_radians());
+        let CameraProjection::Perspective {
+            vertical_field_of_view_radians,
+        } = camera.projection()
+        else {
+            panic!("the fixture camera should be perspective");
+        };
+        let half_field_of_view = 0.5 * f64::from(vertical_field_of_view_radians);
         let horizontal_limit = depth * half_field_of_view.tan();
         assert!(right.dot(point).abs() > horizontal_limit);
 
