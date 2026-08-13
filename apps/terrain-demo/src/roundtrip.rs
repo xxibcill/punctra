@@ -578,10 +578,91 @@ impl RoundTripMismatch {
 }
 
 impl RoundTripEvaluation {
+    pub(crate) const fn is_passed(&self) -> bool {
+        matches!(self, Self::Passed(_))
+    }
+
     pub(crate) fn reason(&self) -> Option<RoundTripReason> {
         match self {
             Self::Passed(_) => None,
             Self::Failed(mismatch) => Some(mismatch.reason()),
+        }
+    }
+
+    pub(crate) fn declaration(&self) -> &RoundTripDeclaration {
+        match self {
+            Self::Passed(report) => report.declaration(),
+            Self::Failed(mismatch) => mismatch.declaration(),
+        }
+    }
+
+    pub(crate) fn tolerances(&self) -> RoundTripTolerances {
+        match self {
+            Self::Passed(report) => report.tolerances(),
+            Self::Failed(mismatch) => mismatch.tolerances(),
+        }
+    }
+
+    pub(crate) fn reference_content_hash(&self) -> [u8; 32] {
+        match self {
+            Self::Passed(report) => report.reference_content_hash(),
+            Self::Failed(mismatch) => mismatch.reference_content_hash(),
+        }
+    }
+
+    pub(crate) fn returned_content_hash(&self) -> [u8; 32] {
+        match self {
+            Self::Passed(report) => report.returned_content_hash(),
+            Self::Failed(mismatch) => mismatch.returned_content_hash(),
+        }
+    }
+
+    pub(crate) fn reference_bytes(&self) -> u64 {
+        match self {
+            Self::Passed(report) => report.reference_bytes(),
+            Self::Failed(mismatch) => mismatch.reference_bytes(),
+        }
+    }
+
+    pub(crate) fn returned_bytes(&self) -> u64 {
+        match self {
+            Self::Passed(report) => report.returned_bytes(),
+            Self::Failed(mismatch) => mismatch.returned_bytes(),
+        }
+    }
+
+    pub(crate) fn returned_was_parsed(&self) -> bool {
+        match self {
+            Self::Passed(_) => true,
+            Self::Failed(mismatch) => mismatch.returned_was_parsed(),
+        }
+    }
+
+    pub(crate) fn returned_surface_name(&self) -> Option<&str> {
+        match self {
+            Self::Passed(report) => report.returned_surface_name(),
+            Self::Failed(mismatch) => mismatch.returned_surface_name(),
+        }
+    }
+
+    pub(crate) fn returned_ignored_sections(&self) -> &[Box<str>] {
+        match self {
+            Self::Passed(report) => report.returned_ignored_sections(),
+            Self::Failed(mismatch) => mismatch.returned_ignored_sections(),
+        }
+    }
+
+    pub(crate) fn returned_point_count(&self) -> Option<u64> {
+        match self {
+            Self::Passed(report) => Some(report.vertex_count()),
+            Self::Failed(mismatch) => mismatch.returned_point_count(),
+        }
+    }
+
+    pub(crate) fn returned_face_count(&self) -> Option<u64> {
+        match self {
+            Self::Passed(report) => Some(report.face_count()),
+            Self::Failed(mismatch) => mismatch.returned_face_count(),
         }
     }
 }
