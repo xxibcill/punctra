@@ -26,6 +26,7 @@ use point_workspace::{
 };
 
 use crate::{
+    canonical_output::{CanonicalOutputError, CanonicalOutputLimits},
     diagnostic::{
         Certainty, FailureCode, FailureContext, PublicationPhase, RecoveryAction, WorkflowFailure,
         WorkflowStage,
@@ -36,10 +37,7 @@ use crate::{
         WorkflowIntent as DurableIntent, WorkflowRunId,
     },
     publication::same_file_identity,
-    report::{
-        self, CanonicalOutputError, CanonicalOutputLimits, LimitFact, ReportFacts,
-        SurfaceChangeEnvelope,
-    },
+    report::{self, LimitFact, ReportFacts, SurfaceChangeEnvelope},
 };
 
 const PATH_BINDING_BYTES: u64 = 4 * 1024;

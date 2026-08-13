@@ -4,6 +4,7 @@
 #![warn(missing_docs)]
 
 mod bounded_diagnostic;
+mod canonical_output;
 mod cli;
 mod diagnostic;
 mod journal;

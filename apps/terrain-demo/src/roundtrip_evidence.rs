@@ -10,12 +10,13 @@ use std::{
 use foundation_runtime::OperationControl;
 
 use crate::{
+    canonical_output::{
+        CanonicalOutputError, CanonicalOutputLimits, CanonicalOutputReceipt, CanonicalOutputSpec,
+        ensure_output,
+    },
     journal::{Complete, CompleteRunSnapshot, JournalLimits, WorkflowRunId, read_complete_run},
     publication::DirectoryWitness,
-    report::{
-        CanonicalOutputError, CanonicalOutputLimits, CanonicalOutputReceipt, REPORT_HASH_DOMAIN,
-        REPORT_SCHEMA, ensure_evidence,
-    },
+    report::{REPORT_HASH_DOMAIN, REPORT_SCHEMA},
     roundtrip::{
         RoundTripDeclaration, RoundTripEvaluation, RoundTripFailure, RoundTripLimits,
         RoundTripTolerances,
@@ -26,6 +27,8 @@ use crate::{
 
 const EVIDENCE_SCHEMA: &str = "punctra.terrain-demo.landxml-round-trip-evidence.v1";
 const MATCHER_VERSION: &str = "punctra-landxml-semantic-match-v1";
+const EVIDENCE_OUTPUT: CanonicalOutputSpec =
+    CanonicalOutputSpec::new("Round-Trip Evidence", "round-trip-evidence", b"");
 const DEFAULT_MAX_EVIDENCE_BYTES: u64 = 1024 * 1024;
 const DEFAULT_MAX_EVIDENCE_WRITE_BUFFER_BYTES: u64 = 8 * 1024;
 const DEFAULT_MAX_EVIDENCE_WORKING_BYTES: u64 =
@@ -181,8 +184,9 @@ fn verify_round_trip_with_control(
         streaming.verify_inputs().map_err(io::Error::other)?;
         evidence_parent_witness.verify()
     };
-    let publication = ensure_evidence(
+    let publication = ensure_output(
         evidence_target,
+        EVIDENCE_OUTPUT,
         CanonicalOutputLimits {
             max_output_bytes: DEFAULT_MAX_EVIDENCE_BYTES,
             max_staging_bytes: DEFAULT_MAX_EVIDENCE_BYTES,

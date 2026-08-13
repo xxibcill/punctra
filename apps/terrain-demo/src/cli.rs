@@ -731,7 +731,7 @@ fn round_trip_evidence_failure(error: RoundTripEvidenceError) -> WorkflowFailure
     match error {
         RoundTripEvidenceError::Comparison(error) => round_trip_failure(&error),
         RoundTripEvidenceError::Publication(error) => {
-            use crate::report::CanonicalOutputError;
+            use crate::canonical_output::CanonicalOutputError;
             match error {
                 error @ (CanonicalOutputError::Conflict { .. }
                 | CanonicalOutputError::TargetConflict { .. }) => WorkflowFailure::new(
