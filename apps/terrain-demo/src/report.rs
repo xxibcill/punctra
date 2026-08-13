@@ -191,66 +191,17 @@ pub(crate) fn ensure_evidence(
     encode: impl FnOnce(&mut dyn Write) -> io::Result<()>,
     validate_inputs: impl Fn() -> io::Result<()>,
 ) -> Result<ReportReceipt, ReportError> {
-    check_cancelled(control)?;
-    validate_inputs()
-        .map_err(|source| ReportError::io("validate Round-Trip Evidence inputs", target, source))?;
-    validate_limits(limits)?;
-    if target.file_name().is_none() {
-        return Err(ReportError::Invalid("evidence target must name a file"));
-    }
-    let parent = target.parent().unwrap_or_else(|| Path::new("."));
-    let parent_witness = DirectoryWitness::capture(parent)
-        .map_err(|source| ReportError::io("witness evidence parent", parent, source))?;
-    let (mut guard, stage_file) = create_stage(parent, "round-trip-evidence", control)?;
-    let mut writer = HashingWriter::new(
-        stage_file,
-        limits.max_output_bytes.min(limits.max_staging_bytes),
-        control,
-        b"",
-    );
-    encode(&mut writer).map_err(|source| map_write_error(source, &writer, limits))?;
-    let (mut stage, expected_hash, byte_length) = writer.finish(guard.path())?;
-    stage
-        .sync_all()
-        .map_err(|source| ReportError::io("sync evidence stage", guard.path(), source))?;
-    let expected = FileFacts {
-        hash: expected_hash,
-        bytes: byte_length,
-    };
-    stage.seek(SeekFrom::Start(0)).map_err(|source| {
-        ReportError::io("seek evidence stage for read-back", guard.path(), source)
-    })?;
-    let readback = verify_open_file(&mut stage, guard.path(), limits, control, b"")?;
-    guard
-        .verify()
-        .map_err(|source| ReportError::io("revalidate evidence stage", guard.path(), source))?;
-    if readback != expected {
-        return Err(ReportError::Invalid(
-            "evidence stage changed during read-back",
-        ));
-    }
-    parent_witness
-        .verify()
-        .map_err(|source| ReportError::io("revalidate evidence parent", parent, source))?;
-    validate_inputs().map_err(|source| {
-        ReportError::io("revalidate Round-Trip Evidence inputs", target, source)
-    })?;
-    check_cancelled(control)?;
-    let receipt = publish_or_reconcile(
-        PublicationContext {
+    ensure_encoded_output(
+        EncodedOutputRequest {
             target,
-            parent,
-            parent_witness: &parent_witness,
-            expected,
+            kind: EncodedOutputKind::Evidence,
             limits,
-            hash_domain: b"",
-            terminal_validation: &validate_inputs,
         },
-        &mut guard,
         control,
         &ProductionPublicationHook,
-    )?;
-    Ok(receipt)
+        |writer| encode(writer),
+        &validate_inputs,
+    )
 }
 
 fn ensure_report_with_hook<H: PublicationHook>(
@@ -260,54 +211,140 @@ fn ensure_report_with_hook<H: PublicationHook>(
     control: &OperationControl,
     hook: &H,
 ) -> Result<ReportReceipt, ReportError> {
+    let validate_inputs = || Ok(());
+    ensure_encoded_output(
+        EncodedOutputRequest {
+            target,
+            kind: EncodedOutputKind::Report,
+            limits,
+        },
+        control,
+        hook,
+        |writer| write_report(writer, facts),
+        &validate_inputs,
+    )
+}
+
+#[derive(Clone, Copy)]
+struct EncodedOutputRequest<'a> {
+    target: &'a Path,
+    kind: EncodedOutputKind,
+    limits: ReportLimits,
+}
+
+#[derive(Clone, Copy)]
+enum EncodedOutputKind {
+    Report,
+    Evidence,
+}
+
+struct EncodedOutputLabels {
+    namespace: &'static str,
+    hash_domain: &'static [u8],
+    target_requirement: &'static str,
+    validate_inputs: &'static str,
+    witness_parent: &'static str,
+    sync_stage: &'static str,
+    seek_stage: &'static str,
+    revalidate_stage: &'static str,
+    changed_stage: &'static str,
+    revalidate_parent: &'static str,
+    revalidate_inputs: &'static str,
+}
+
+impl EncodedOutputKind {
+    const fn labels(self) -> EncodedOutputLabels {
+        match self {
+            Self::Report => EncodedOutputLabels {
+                namespace: "report",
+                hash_domain: REPORT_HASH_DOMAIN,
+                target_requirement: "report target must name a file",
+                validate_inputs: "validate report inputs",
+                witness_parent: "witness report parent",
+                sync_stage: "sync report stage",
+                seek_stage: "seek report stage for read-back",
+                revalidate_stage: "revalidate report stage",
+                changed_stage: "report stage changed during read-back",
+                revalidate_parent: "revalidate report parent",
+                revalidate_inputs: "revalidate report inputs",
+            },
+            Self::Evidence => EncodedOutputLabels {
+                namespace: "round-trip-evidence",
+                hash_domain: b"",
+                target_requirement: "evidence target must name a file",
+                validate_inputs: "validate Round-Trip Evidence inputs",
+                witness_parent: "witness evidence parent",
+                sync_stage: "sync evidence stage",
+                seek_stage: "seek evidence stage for read-back",
+                revalidate_stage: "revalidate evidence stage",
+                changed_stage: "evidence stage changed during read-back",
+                revalidate_parent: "revalidate evidence parent",
+                revalidate_inputs: "revalidate Round-Trip Evidence inputs",
+            },
+        }
+    }
+}
+
+fn ensure_encoded_output(
+    request: EncodedOutputRequest<'_>,
+    control: &OperationControl,
+    hook: &impl PublicationHook,
+    encode: impl FnOnce(&mut HashingWriter<'_>) -> io::Result<()>,
+    validate_inputs: &dyn Fn() -> io::Result<()>,
+) -> Result<ReportReceipt, ReportError> {
+    let EncodedOutputRequest {
+        target,
+        kind,
+        limits,
+    } = request;
+    let labels = kind.labels();
     check_cancelled(control)?;
+    validate_inputs().map_err(|source| ReportError::io(labels.validate_inputs, target, source))?;
     validate_limits(limits)?;
     if target.file_name().is_none() {
-        return Err(ReportError::Invalid("report target must name a file"));
+        return Err(ReportError::Invalid(labels.target_requirement));
     }
     let parent = target.parent().unwrap_or_else(|| Path::new("."));
     let parent_witness = DirectoryWitness::capture(parent)
-        .map_err(|source| ReportError::io("witness report parent", parent, source))?;
-    let (mut guard, stage_file) = create_stage(parent, "report", control)?;
+        .map_err(|source| ReportError::io(labels.witness_parent, parent, source))?;
+    let (mut guard, stage_file) = create_stage(parent, labels.namespace, control)?;
     let mut writer = HashingWriter::new(
         stage_file,
         limits.max_output_bytes.min(limits.max_staging_bytes),
         control,
-        REPORT_HASH_DOMAIN,
+        labels.hash_domain,
     );
-    write_report(&mut writer, facts).map_err(|source| map_write_error(source, &writer, limits))?;
+    encode(&mut writer).map_err(|source| map_write_error(source, &writer, limits))?;
     let (mut stage, expected_hash, byte_length) = writer.finish(guard.path())?;
     stage
         .sync_all()
-        .map_err(|source| ReportError::io("sync report stage", guard.path(), source))?;
+        .map_err(|source| ReportError::io(labels.sync_stage, guard.path(), source))?;
     let expected = FileFacts {
         hash: expected_hash,
         bytes: byte_length,
     };
-    stage.seek(SeekFrom::Start(0)).map_err(|source| {
-        ReportError::io("seek report stage for read-back", guard.path(), source)
-    })?;
+    stage
+        .seek(SeekFrom::Start(0))
+        .map_err(|source| ReportError::io(labels.seek_stage, guard.path(), source))?;
     let readback = verify_open_file(
         &mut stage,
         guard.path(),
         limits,
         control,
-        REPORT_HASH_DOMAIN,
+        labels.hash_domain,
     )?;
     guard
         .verify()
-        .map_err(|source| ReportError::io("revalidate report stage", guard.path(), source))?;
+        .map_err(|source| ReportError::io(labels.revalidate_stage, guard.path(), source))?;
     if readback != expected {
-        return Err(ReportError::Invalid(
-            "report stage changed during read-back",
-        ));
+        return Err(ReportError::Invalid(labels.changed_stage));
     }
     parent_witness
         .verify()
-        .map_err(|source| ReportError::io("revalidate report parent", parent, source))?;
+        .map_err(|source| ReportError::io(labels.revalidate_parent, parent, source))?;
+    validate_inputs()
+        .map_err(|source| ReportError::io(labels.revalidate_inputs, target, source))?;
     check_cancelled(control)?;
-
-    let terminal_validation = || Ok(());
     publish_or_reconcile(
         PublicationContext {
             target,
@@ -315,8 +352,8 @@ fn ensure_report_with_hook<H: PublicationHook>(
             parent_witness: &parent_witness,
             expected,
             limits,
-            hash_domain: REPORT_HASH_DOMAIN,
-            terminal_validation: &terminal_validation,
+            hash_domain: labels.hash_domain,
+            terminal_validation: validate_inputs,
         },
         &mut guard,
         control,
