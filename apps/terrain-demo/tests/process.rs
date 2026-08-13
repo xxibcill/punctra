@@ -150,6 +150,40 @@ fn verify_round_trip_binds_complete_run_and_reconciles_canonical_evidence() {
 }
 
 #[test]
+fn verify_round_trip_preserves_small_and_subnormal_tolerances() {
+    let fixture = ProcessFixture::new("round-trip-small-tolerances");
+    assert_success(&fixture.run("start"));
+    let returned = fixture.directory.path().join("returned.xml");
+    fs::copy(fixture.run_root.join("terrain.xml"), &returned).unwrap();
+
+    for (name, horizontal, vertical) in [("small", "1e-18", "0"), ("subnormal", "5e-324", "5e-324")]
+    {
+        let evidence = fixture.directory.path().join(format!("{name}.json"));
+        let verified =
+            fixture.verify_round_trip_with_tolerances(&returned, &evidence, horizontal, vertical);
+        assert_success(&verified);
+
+        let document: serde_json::Value =
+            serde_json::from_slice(&fs::read(evidence).unwrap()).unwrap();
+        let policy = &document["comparison_policy"];
+        assert_eq!(
+            policy["horizontal_tolerance_metres"]
+                .as_f64()
+                .unwrap()
+                .to_bits(),
+            horizontal.parse::<f64>().unwrap().to_bits()
+        );
+        assert_eq!(
+            policy["vertical_tolerance_metres"]
+                .as_f64()
+                .unwrap()
+                .to_bits(),
+            vertical.parse::<f64>().unwrap().to_bits()
+        );
+    }
+}
+
+#[test]
 fn verify_round_trip_publishes_failed_evidence_but_not_operational_failures() {
     let fixture = ProcessFixture::new("round-trip-failed-evidence");
     assert_success(&fixture.run("start"));
@@ -461,13 +495,23 @@ impl ProcessFixture {
     }
 
     fn verify_round_trip(&self, returned: &PathBuf, evidence: &PathBuf) -> Output {
+        self.verify_round_trip_with_tolerances(returned, evidence, "0", "0")
+    }
+
+    fn verify_round_trip_with_tolerances(
+        &self,
+        returned: &PathBuf,
+        evidence: &PathBuf,
+        horizontal_tolerance: &str,
+        vertical_tolerance: &str,
+    ) -> Output {
         Command::new(env!("CARGO_BIN_EXE_terrain-demo"))
             .arg("verify-round-trip")
             .args(["--downstream-app", "generated-fixture"])
             .args(["--downstream-version", "test-only"])
             .args(["--downstream-setting", "metric-tin-v1"])
-            .args(["--horizontal-tolerance-metres", "0"])
-            .args(["--vertical-tolerance-metres", "0"])
+            .args(["--horizontal-tolerance-metres", horizontal_tolerance])
+            .args(["--vertical-tolerance-metres", vertical_tolerance])
             .arg(&self.run_root)
             .arg(returned)
             .arg(evidence)

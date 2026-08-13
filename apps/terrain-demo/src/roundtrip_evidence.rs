@@ -792,7 +792,8 @@ fn domain_hash(domain: &[u8], bytes: &[u8]) -> [u8; 32] {
 }
 
 fn number(output: &mut String, value: f64) -> Result<(), fmt::Error> {
-    write!(output, "{value:.17}")
+    let number = serde_json::Number::from_f64(value).ok_or(fmt::Error)?;
+    write!(output, "{number}")
 }
 
 fn hex(output: &mut String, bytes: &[u8]) -> Result<(), fmt::Error> {
