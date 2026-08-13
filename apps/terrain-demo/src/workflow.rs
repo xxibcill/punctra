@@ -3427,6 +3427,32 @@ mod tests {
             io.recovery_action(),
             "restore disk capacity or permissions, then resume the same Run"
         );
+
+        let indeterminate = report_failure(
+            WorkflowStage::Report,
+            CanonicalOutputError::Indeterminate {
+                path: PathBuf::from("audit.json"),
+                expected_hash: [1; 32],
+                source: io::Error::other(CanonicalOutputError::Io {
+                    operation: "sync created report target".to_owned(),
+                    path: PathBuf::from("audit.json"),
+                    source: io::Error::other("disk unavailable after publication"),
+                }),
+            },
+            context,
+        );
+        assert_eq!(indeterminate.code(), "PWF_PUBLICATION_INDETERMINATE");
+        assert_eq!(indeterminate.certainty(), "indeterminate");
+        assert!(
+            indeterminate
+                .diagnostic()
+                .contains("sync created report target")
+        );
+        assert!(
+            indeterminate
+                .diagnostic()
+                .contains("disk unavailable after publication")
+        );
     }
 
     #[test]

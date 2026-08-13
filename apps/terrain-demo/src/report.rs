@@ -149,7 +149,7 @@ pub(crate) enum CanonicalOutputError {
     TargetConflict { path: PathBuf, reason: &'static str },
     #[error("canonical output target changed during verification: {path}")]
     TargetChanged { path: PathBuf },
-    #[error("canonical output publication is indeterminate for {path}")]
+    #[error("canonical output publication is indeterminate for {path}: {source}")]
     Indeterminate {
         path: PathBuf,
         expected_hash: Digest,
