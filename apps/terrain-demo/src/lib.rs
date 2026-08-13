@@ -11,7 +11,9 @@ mod publication;
 mod report;
 mod roundtrip;
 mod roundtrip_evidence;
+mod roundtrip_file;
 mod roundtrip_stream;
+mod roundtrip_surface;
 mod stable_file;
 mod workflow;
 

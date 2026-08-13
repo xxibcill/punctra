@@ -16,11 +16,12 @@ use quick_xml::{
 
 use crate::{
     roundtrip::{
-        InputSide, ParsedRoundTrip, ParsedSurface, Position, RoundTripDeclaration,
-        RoundTripEvaluation, RoundTripFailure, RoundTripFileFacts, RoundTripLimits,
-        RoundTripReason, RoundTripTolerances, SemanticSurfaceBuilder, evaluate_parsed_round_trip,
-        require_file_bytes, semantic_evaluation_failure, validate_utf8_declaration,
+        InputSide, ParsedRoundTrip, RoundTripDeclaration, RoundTripEvaluation, RoundTripFailure,
+        RoundTripFileFacts, RoundTripLimits, RoundTripReason, RoundTripTolerances,
+        evaluate_parsed_round_trip, semantic_evaluation_failure, validate_utf8_declaration,
     },
+    roundtrip_file::require_file_bytes,
+    roundtrip_surface::{ParsedSurface, Position, SemanticSurfaceBuilder},
     stable_file::StableFile,
 };
 

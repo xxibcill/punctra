@@ -18,8 +18,9 @@ use crate::{
     report::{REPORT_HASH_DOMAIN, REPORT_SCHEMA},
     roundtrip::{
         RoundTripDeclaration, RoundTripEvaluation, RoundTripFailure, RoundTripLimits,
-        RoundTripTolerances, capture_round_trip_file,
+        RoundTripTolerances,
     },
+    roundtrip_file::{CapturedRoundTripFile, capture_round_trip_file},
     roundtrip_stream::evaluate_streaming_round_trip_with_control,
 };
 
@@ -384,7 +385,7 @@ fn receipt(
 fn encode_evidence(
     journal: &SealedJournal,
     complete: Complete,
-    audit: &crate::roundtrip::CapturedRoundTripFile,
+    audit: &CapturedRoundTripFile,
     evaluation: &RoundTripEvaluation,
     limits: RoundTripLimits,
 ) -> Result<String, RoundTripEvidenceError> {
