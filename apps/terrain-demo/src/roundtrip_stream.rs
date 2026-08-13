@@ -82,8 +82,9 @@ pub(crate) fn evaluate_streaming_round_trip_with_control(
     control: &OperationControl,
 ) -> Result<StreamingRoundTripEvaluation, RoundTripFailure> {
     check_cancelled(control)?;
-    let reference = parse_streaming_file(InputSide::Reference, reference_path, limits, control)?;
-    let returned = parse_streaming_file(InputSide::Returned, returned_path, limits, control)?;
+    let (reference, returned) = capture_streaming_pair(reference_path, returned_path, limits)?;
+    let reference = parse_streaming_file(InputSide::Reference, reference, limits, control)?;
+    let returned = parse_streaming_file(InputSide::Returned, returned, limits, control)?;
     let exact_bytes = reference.facts == returned.facts;
     let evaluation = match (reference.surface, returned.surface) {
         (Ok(reference_surface), Ok(returned_surface)) => evaluate_parsed_round_trip(
@@ -129,18 +130,36 @@ struct StreamingParse {
     witness: StableFile,
 }
 
-fn parse_streaming_file(
+fn capture_streaming_pair(
+    reference_path: &Path,
+    returned_path: &Path,
+    limits: RoundTripLimits,
+) -> Result<(StableFile, StableFile), RoundTripFailure> {
+    let reference = capture_streaming_file(InputSide::Reference, reference_path, limits)?;
+    let returned = capture_streaming_file(InputSide::Returned, returned_path, limits)?;
+    Ok((reference, returned))
+}
+
+fn capture_streaming_file(
     side: InputSide,
     path: &Path,
+    limits: RoundTripLimits,
+) -> Result<StableFile, RoundTripFailure> {
+    let witness = StableFile::capture(path).map_err(|error| {
+        RoundTripFailure::invalid(format_args!("{side} cannot be captured: {error}"))
+    })?;
+    require_file_bytes(side, witness.byte_length(), limits.file_bytes())?;
+    Ok(witness)
+}
+
+fn parse_streaming_file(
+    side: InputSide,
+    mut witness: StableFile,
     limits: RoundTripLimits,
     control: &OperationControl,
 ) -> Result<StreamingParse, RoundTripFailure> {
     check_cancelled(control)?;
-    let mut witness = StableFile::capture(path).map_err(|error| {
-        RoundTripFailure::invalid(format_args!("{side} cannot be captured: {error}"))
-    })?;
     let expected_bytes = witness.byte_length();
-    require_file_bytes(side, expected_bytes, limits.file_bytes())?;
     let hashing = HashingReader::new(witness.file_mut(), limits.file_bytes());
     let mut reader = NsReader::from_reader(BufReader::with_capacity(STREAM_BUFFER_BYTES, hashing));
     reader.config_mut().expand_empty_elements = true;
@@ -943,7 +962,8 @@ mod tests {
     };
 
     use super::{
-        Utf8Validator, evaluate_streaming_round_trip, evaluate_streaming_round_trip_with_control,
+        Utf8Validator, capture_streaming_pair, evaluate_streaming_round_trip,
+        evaluate_streaming_round_trip_with_control,
     };
 
     static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -1042,6 +1062,27 @@ mod tests {
         evaluation
             .verify_inputs()
             .expect_err("same-length post-capture mutation must be rejected");
+    }
+
+    #[test]
+    fn streaming_pair_witnesses_both_inputs_before_consumption() {
+        let directory = Directory::new();
+        let reference = directory.path.join("reference.xml");
+        let returned = directory.path.join("returned.xml");
+        let original = xml("1", "2", "3", "1 2 3");
+        fs::write(&reference, &original).unwrap();
+        fs::write(&returned, &original).unwrap();
+
+        let (_reference_witness, returned_witness) =
+            capture_streaming_pair(&reference, &returned, RoundTripLimits::full_v07_export())
+                .expect("both inputs are witnessed together");
+        let changed = original.replacen("0 0 0", "0 0 1", 1);
+        assert_eq!(changed.len(), original.len());
+        fs::write(&returned, changed).unwrap();
+
+        returned_witness
+            .verify()
+            .expect_err("returned input mutation after pair capture must be rejected");
     }
 
     #[test]
