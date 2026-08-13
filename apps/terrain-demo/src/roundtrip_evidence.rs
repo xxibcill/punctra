@@ -398,6 +398,139 @@ fn require_audit_false(
     }
 }
 
+#[cfg(test)]
+fn validate_checked_evidence(
+    journal: &CompleteRunSnapshot,
+    audit_bytes: u64,
+    evaluation: &RoundTripEvaluation,
+    bytes: &[u8],
+) -> Result<(), RoundTripEvidenceError> {
+    let document: serde_json::Value = serde_json::from_slice(bytes).map_err(|error| {
+        RoundTripEvidenceError::Invalid(format!("evidence is not valid JSON: {error}"))
+    })?;
+    let expected_result = if evaluation.is_passed() {
+        "passed"
+    } else {
+        "failed"
+    };
+    require_evidence_string(&document, "/schema", EVIDENCE_SCHEMA, "schema")?;
+    require_evidence_string(&document, "/result", expected_result, "result")?;
+    require_evidence_string(
+        &document,
+        "/run/run_id",
+        &hex_string(&journal.run.into_bytes()),
+        "Run Identity",
+    )?;
+    require_evidence_string(
+        &document,
+        "/run/request_hash",
+        &hex_string(&journal.intent.request_hash),
+        "request hash",
+    )?;
+    require_evidence_string(
+        &document,
+        "/run/complete_journal_hash",
+        &hex_string(&journal.journal_hash),
+        "Complete Run hash",
+    )?;
+    require_evidence_u64(
+        &document,
+        "/run/complete_journal_bytes",
+        journal.journal_bytes,
+        "Complete Run byte length",
+    )?;
+    require_evidence_string(
+        &document,
+        "/run/original_landxml_hash",
+        &hex_string(&journal.complete.landxml_hash),
+        "original LandXML hash",
+    )?;
+    require_evidence_string(
+        &document,
+        "/run/audit_json_hash",
+        &hex_string(&journal.complete.report_hash),
+        "audit report hash",
+    )?;
+    require_evidence_u64(
+        &document,
+        "/run/audit_json_bytes",
+        audit_bytes,
+        "audit report byte length",
+    )?;
+    require_evidence_string(
+        &document,
+        "/comparison_policy/matcher_version",
+        MATCHER_VERSION,
+        "matcher version",
+    )?;
+    require_evidence_string(
+        &document,
+        "/returned_landxml/content_hash",
+        &hex_string(&evaluation.returned_content_hash()),
+        "returned LandXML hash",
+    )?;
+    require_evidence_u64(
+        &document,
+        "/returned_landxml/bytes",
+        evaluation.returned_bytes(),
+        "returned LandXML byte length",
+    )?;
+    match evaluation.reason() {
+        Some(reason) => require_evidence_string(
+            &document,
+            "/checks/tolerance/reason_code",
+            reason.as_str(),
+            "semantic failure reason",
+        ),
+        None => require_evidence_string(
+            &document,
+            "/checks/tolerance/status",
+            "passed",
+            "passing tolerance status",
+        ),
+    }
+}
+
+#[cfg(test)]
+fn require_evidence_string(
+    document: &serde_json::Value,
+    pointer: &str,
+    expected: &str,
+    label: &str,
+) -> Result<(), RoundTripEvidenceError> {
+    if document
+        .pointer(pointer)
+        .and_then(serde_json::Value::as_str)
+        == Some(expected)
+    {
+        Ok(())
+    } else {
+        Err(RoundTripEvidenceError::Invalid(format!(
+            "evidence {label} does not match its owning Run and comparison"
+        )))
+    }
+}
+
+#[cfg(test)]
+fn require_evidence_u64(
+    document: &serde_json::Value,
+    pointer: &str,
+    expected: u64,
+    label: &str,
+) -> Result<(), RoundTripEvidenceError> {
+    if document
+        .pointer(pointer)
+        .and_then(serde_json::Value::as_u64)
+        == Some(expected)
+    {
+        Ok(())
+    } else {
+        Err(RoundTripEvidenceError::Invalid(format!(
+            "evidence {label} does not match its owning Run and comparison"
+        )))
+    }
+}
+
 fn require_external_target(
     run_root: &Path,
     evidence_target: &Path,
@@ -808,21 +941,90 @@ impl From<fmt::Error> for RoundTripEvidenceError {
 #[cfg(test)]
 mod tests {
     use std::{
+        fs,
         path::Path,
         sync::atomic::{AtomicU64, Ordering},
     };
 
     use foundation_runtime::OperationControl;
 
-    use crate::roundtrip::{
-        RoundTripDeclaration, RoundTripFailureKind, RoundTripReason, RoundTripTolerances,
+    use crate::{
+        journal::{JournalLimits, read_complete_run},
+        roundtrip::{
+            RoundTripDeclaration, RoundTripFailureKind, RoundTripLimits, RoundTripReason,
+            RoundTripTolerances,
+        },
+        roundtrip_file::capture_round_trip_file,
+        roundtrip_stream::evaluate_streaming_round_trip_with_control,
     };
 
     use super::{
-        CheckStatus, RoundTripEvidenceError, check_statuses, number, verify_round_trip_with_control,
+        CheckStatus, RoundTripEvidenceError, check_statuses, number, validate_audit_bindings,
+        validate_checked_evidence, verify_round_trip_with_control,
     };
 
     static NEXT_TARGET: AtomicU64 = AtomicU64::new(0);
+
+    #[test]
+    fn checked_in_corpus_is_consumed_through_strict_owners() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/qualification-v1");
+        let journal = read_complete_run(&root.join("run-complete.pwf"), JournalLimits::default())
+            .expect("the journal owner must read the frozen Complete Run");
+        let audit = capture_round_trip_file(&root.join("audit.json"), 1024 * 1024)
+            .expect("the report owner must capture the frozen audit report");
+        validate_audit_bindings(&journal, &audit.bytes)
+            .expect("the report owner must bind the frozen report to the Complete Run");
+
+        let declaration =
+            RoundTripDeclaration::new("generated-fixture", "test-only", "metric-tin-v1").unwrap();
+        let tolerances = RoundTripTolerances::new(0.0, 0.0).unwrap();
+        let limits =
+            RoundTripLimits::new(1024 * 1024, 10_000, 1024 * 1024, 1_000, 2_000, 1_000_000);
+        let control = OperationControl::new();
+        let passing = evaluate_streaming_round_trip_with_control(
+            &root.join("terrain.xml"),
+            &root.join("returned-pass.xml"),
+            declaration.clone(),
+            tolerances,
+            limits,
+            &control,
+        )
+        .expect("the LandXML owner must parse the frozen passing pair");
+        assert!(passing.evaluation.is_passed());
+        passing.verify_inputs().unwrap();
+        validate_checked_evidence(
+            &journal,
+            audit.bytes.len() as u64,
+            &passing.evaluation,
+            &fs::read(root.join("evidence-pass.json")).unwrap(),
+        )
+        .expect("the evidence owner must read the frozen passing evidence");
+
+        let failing = evaluate_streaming_round_trip_with_control(
+            &root.join("terrain.xml"),
+            &root.join("returned-fail.xml"),
+            declaration,
+            tolerances,
+            limits,
+            &control,
+        )
+        .expect("the LandXML owner must parse the frozen failing pair");
+        assert_eq!(
+            failing.evaluation.reason(),
+            Some(RoundTripReason::ToleranceDrift)
+        );
+        failing.verify_inputs().unwrap();
+        validate_checked_evidence(
+            &journal,
+            audit.bytes.len() as u64,
+            &failing.evaluation,
+            &fs::read(root.join("evidence-fail.json")).unwrap(),
+        )
+        .expect("the evidence owner must read the frozen failing evidence");
+
+        journal.verify_unchanged().unwrap();
+        audit.verify().unwrap();
+    }
 
     #[test]
     fn canonical_numbers_preserve_exact_f64_values() {
