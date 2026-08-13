@@ -956,7 +956,7 @@ fn capture_regular_file(
     let witness = StableFile::capture(path).map_err(|error| {
         RoundTripFailure::invalid(format_args!("{side} cannot be captured: {error}"))
     })?;
-    check_file_bytes(side, witness.byte_length(), max_file_bytes)?;
+    require_file_bytes(side, witness.byte_length(), max_file_bytes)?;
     Ok(witness)
 }
 
@@ -967,7 +967,7 @@ fn capture_inspected_regular_file(
     path_metadata: &std::fs::Metadata,
     max_file_bytes: u64,
 ) -> Result<StableFile, RoundTripFailure> {
-    check_file_bytes(side, path_metadata.len(), max_file_bytes)?;
+    require_file_bytes(side, path_metadata.len(), max_file_bytes)?;
     StableFile::capture_from_metadata(path, path_metadata).map_err(|error| {
         RoundTripFailure::invalid(format_args!("{side} cannot be captured: {error}"))
     })
@@ -1001,7 +1001,11 @@ fn read_regular_file_retained(
     Ok((FileSnapshot { bytes }, witness))
 }
 
-fn check_file_bytes(side: InputSide, actual: u64, allowed: u64) -> Result<(), RoundTripFailure> {
+pub(crate) fn require_file_bytes(
+    side: InputSide,
+    actual: u64,
+    allowed: u64,
+) -> Result<(), RoundTripFailure> {
     if actual > allowed {
         return Err(RoundTripFailure::resource(format_args!(
             "{side} file bytes required {actual}; limit is {allowed}"
@@ -1035,7 +1039,7 @@ fn read_bounded_bytes(
         .map_err(|error| {
             RoundTripFailure::invalid(format_args!("{side} cannot be read: {error}"))
         })?;
-    check_file_bytes(side, bytes.len() as u64, max_file_bytes)?;
+    require_file_bytes(side, bytes.len() as u64, max_file_bytes)?;
     Ok(bytes)
 }
 
@@ -1047,6 +1051,28 @@ pub(crate) struct Position {
 }
 
 impl Position {
+    pub(crate) fn from_landxml(
+        side: InputSide,
+        northing: f64,
+        easting: f64,
+        elevation: f64,
+    ) -> Result<Self, RoundTripFailure> {
+        if [northing, easting, elevation]
+            .iter()
+            .any(|value| !value.is_finite())
+        {
+            return Err(RoundTripFailure::semantic(
+                RoundTripReason::XmlInvalid,
+                format_args!("{side} P coordinates must be finite"),
+            ));
+        }
+        Ok(Self {
+            easting: canonical_zero(easting),
+            northing: canonical_zero(northing),
+            elevation: canonical_zero(elevation),
+        })
+    }
+
     fn key(self) -> [u64; 3] {
         [
             self.easting.to_bits(),
@@ -1101,6 +1127,119 @@ pub(crate) struct ParsedSurface {
     pub(crate) faces: Vec<Triangle>,
     pub(crate) surface_name: Option<Box<str>>,
     pub(crate) ignored_top_level_sections: Box<[Box<str>]>,
+}
+
+pub(crate) struct SemanticSurfaceBuilder {
+    limits: RoundTripLimits,
+    points: Vec<Position>,
+    point_ids: BTreeMap<u64, usize>,
+    faces: Vec<Triangle>,
+}
+
+impl SemanticSurfaceBuilder {
+    pub(crate) const fn new(limits: RoundTripLimits) -> Self {
+        Self {
+            limits,
+            points: Vec::new(),
+            point_ids: BTreeMap::new(),
+            faces: Vec::new(),
+        }
+    }
+
+    fn reserve_points(
+        &mut self,
+        side: InputSide,
+        point_count: usize,
+    ) -> Result<(), RoundTripFailure> {
+        check_item_limit(side, "points", point_count, self.limits.points)?;
+        self.points.try_reserve_exact(point_count).map_err(|_| {
+            RoundTripFailure::resource(format_args!(
+                "{side} point storage cannot reserve {point_count} entries"
+            ))
+        })
+    }
+
+    fn reserve_faces(
+        &mut self,
+        side: InputSide,
+        face_count: usize,
+    ) -> Result<(), RoundTripFailure> {
+        check_item_limit(side, "faces", face_count, self.limits.faces)?;
+        self.faces.try_reserve_exact(face_count).map_err(|_| {
+            RoundTripFailure::resource(format_args!(
+                "{side} face storage cannot reserve {face_count} entries"
+            ))
+        })
+    }
+
+    pub(crate) fn add_point(
+        &mut self,
+        side: InputSide,
+        id: u64,
+        position: Position,
+    ) -> Result<(), RoundTripFailure> {
+        if self.points.len() as u64 >= self.limits.points {
+            return Err(RoundTripFailure::resource(format_args!(
+                "{side} points exceed the {} point limit",
+                self.limits.points
+            )));
+        }
+        if id == 0 {
+            return Err(RoundTripFailure::semantic(
+                RoundTripReason::XmlInvalid,
+                format_args!("{side} point ID must be positive"),
+            ));
+        }
+        let index = self.points.len();
+        if self.point_ids.insert(id, index).is_some() {
+            return Err(RoundTripFailure::semantic(
+                RoundTripReason::XmlInvalid,
+                format_args!("{side} contains duplicate point ID {id}"),
+            ));
+        }
+        self.points.push(position);
+        Ok(())
+    }
+
+    pub(crate) fn add_face(
+        &mut self,
+        side: InputSide,
+        point_ids: [u64; 3],
+    ) -> Result<(), RoundTripFailure> {
+        if self.faces.len() as u64 >= self.limits.faces {
+            return Err(RoundTripFailure::resource(format_args!(
+                "{side} faces exceed the {} face limit",
+                self.limits.faces
+            )));
+        }
+        let resolve = |id| {
+            self.point_ids.get(&id).copied().ok_or_else(|| {
+                RoundTripFailure::semantic(
+                    RoundTripReason::XmlInvalid,
+                    format_args!("{side} face has dangling point reference {id}"),
+                )
+            })
+        };
+        let [first, second, third] = point_ids;
+        let face = Triangle::new(resolve(first)?, resolve(second)?, resolve(third)?);
+        validate_face(side, face, &self.points)?;
+        self.faces.push(face);
+        Ok(())
+    }
+
+    pub(crate) fn finish(
+        mut self,
+        side: InputSide,
+    ) -> Result<(Vec<Position>, Vec<Triangle>), RoundTripFailure> {
+        if self.points.len() < 3 || self.faces.is_empty() {
+            return Err(schema_error(
+                side,
+                "TIN requires at least three points and one face",
+            ));
+        }
+        reject_duplicate_faces(side, &mut self.faces)?;
+        Ok((self.points, self.faces))
+    }
 }
 
 fn parse_surface(
@@ -1340,14 +1479,10 @@ fn validate_surface(
     validate_allowed_children(side, definition, &["Pnts", "Faces"])?;
     let pnts = unique_child(side, definition, "Pnts")?;
     let faces = unique_child(side, definition, "Faces")?;
-    let (points, point_ids) = parse_points(side, pnts, limits.points)?;
-    let faces = parse_faces(side, faces, &points, &point_ids, limits.faces)?;
-    if points.len() < 3 || faces.is_empty() {
-        return Err(schema_error(
-            side,
-            "TIN requires at least three points and one face",
-        ));
-    }
+    let mut builder = SemanticSurfaceBuilder::new(limits);
+    parse_points(side, pnts, &mut builder)?;
+    parse_faces(side, faces, &mut builder)?;
+    let (points, faces) = builder.finish(side)?;
     Ok(ParsedSurface {
         points,
         faces,
@@ -1361,30 +1496,16 @@ fn validate_surface(
 fn parse_points(
     side: InputSide,
     pnts: Node<'_, '_>,
-    max_points: u64,
-) -> Result<(Vec<Position>, BTreeMap<u64, usize>), RoundTripFailure> {
+    builder: &mut SemanticSurfaceBuilder,
+) -> Result<(), RoundTripFailure> {
     validate_allowed_children(side, pnts, &["P"])?;
     let point_count = element_children(pnts).count();
-    check_item_limit(side, "points", point_count, max_points)?;
-    let mut points = Vec::new();
-    let mut point_ids = BTreeMap::new();
-    points.try_reserve_exact(point_count).map_err(|_| {
-        RoundTripFailure::resource(format_args!(
-            "{side} point storage cannot reserve {point_count} entries"
-        ))
-    })?;
+    builder.reserve_points(side, point_count)?;
     for node in element_children(pnts) {
         let id = parse_point_id(side, node)?;
-        let index = points.len();
-        if point_ids.insert(id, index).is_some() {
-            return Err(RoundTripFailure::semantic(
-                RoundTripReason::XmlInvalid,
-                format_args!("{side} contains duplicate point ID {id}"),
-            ));
-        }
-        points.push(parse_position(side, node)?);
+        builder.add_point(side, id, parse_position(side, node)?)?;
     }
-    Ok((points, point_ids))
+    Ok(())
 }
 
 fn parse_point_id(side: InputSide, node: Node<'_, '_>) -> Result<u64, RoundTripFailure> {
@@ -1396,12 +1517,6 @@ fn parse_point_id(side: InputSide, node: Node<'_, '_>) -> Result<u64, RoundTripF
             format_args!("{side} point ID must be a positive integer"),
         )
     })?;
-    if id == 0 {
-        return Err(RoundTripFailure::semantic(
-            RoundTripReason::XmlInvalid,
-            format_args!("{side} point ID must be positive"),
-        ));
-    }
     Ok(id)
 }
 
@@ -1417,20 +1532,7 @@ fn parse_position(side: InputSide, node: Node<'_, '_>) -> Result<Position, Round
             "P must contain exactly northing easting elevation",
         ));
     }
-    if [northing, easting, elevation]
-        .iter()
-        .any(|value| !value.is_finite())
-    {
-        return Err(RoundTripFailure::semantic(
-            RoundTripReason::XmlInvalid,
-            format_args!("{side} P coordinates must be finite"),
-        ));
-    }
-    Ok(Position {
-        easting: canonical_zero(easting),
-        northing: canonical_zero(northing),
-        elevation: canonical_zero(elevation),
-    })
+    Position::from_landxml(side, northing, easting, elevation)
 }
 
 fn parse_coordinate(side: InputSide, value: Option<&str>) -> Result<f64, RoundTripFailure> {
@@ -1448,33 +1550,18 @@ fn parse_coordinate(side: InputSide, value: Option<&str>) -> Result<f64, RoundTr
 fn parse_faces(
     side: InputSide,
     faces: Node<'_, '_>,
-    points: &[Position],
-    point_ids: &BTreeMap<u64, usize>,
-    max_faces: u64,
-) -> Result<Vec<Triangle>, RoundTripFailure> {
+    builder: &mut SemanticSurfaceBuilder,
+) -> Result<(), RoundTripFailure> {
     validate_allowed_children(side, faces, &["F"])?;
     let face_count = element_children(faces).count();
-    check_item_limit(side, "faces", face_count, max_faces)?;
-    let mut parsed_faces = Vec::new();
-    parsed_faces.try_reserve_exact(face_count).map_err(|_| {
-        RoundTripFailure::resource(format_args!(
-            "{side} face storage cannot reserve {face_count} entries"
-        ))
-    })?;
+    builder.reserve_faces(side, face_count)?;
     for node in element_children(faces) {
-        let face = parse_face(side, node, point_ids)?;
-        validate_face(side, face, points)?;
-        parsed_faces.push(face);
+        builder.add_face(side, parse_face_ids(side, node)?)?;
     }
-    reject_duplicate_faces(side, &mut parsed_faces)?;
-    Ok(parsed_faces)
+    Ok(())
 }
 
-fn parse_face(
-    side: InputSide,
-    node: Node<'_, '_>,
-    point_ids: &BTreeMap<u64, usize>,
-) -> Result<Triangle, RoundTripFailure> {
+fn parse_face_ids(side: InputSide, node: Node<'_, '_>) -> Result<[u64; 3], RoundTripFailure> {
     let text = simple_text(side, node, "F")?;
     let mut ids = text.split_whitespace();
     let a = parse_face_id(side, ids.next())?;
@@ -1483,15 +1570,7 @@ fn parse_face(
     if ids.next().is_some() {
         return Err(schema_error(side, "F must contain exactly three point IDs"));
     }
-    let resolve = |id| {
-        point_ids.get(&id).copied().ok_or_else(|| {
-            RoundTripFailure::semantic(
-                RoundTripReason::XmlInvalid,
-                format_args!("{side} face has dangling point reference {id}"),
-            )
-        })
-    };
-    Ok(Triangle::new(resolve(a)?, resolve(b)?, resolve(c)?))
+    Ok([a, b, c])
 }
 
 fn parse_face_id(side: InputSide, value: Option<&str>) -> Result<u64, RoundTripFailure> {

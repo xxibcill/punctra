@@ -1,7 +1,6 @@
 //! Streaming `LandXML` subset reader for the full v0.7 export-byte ceiling.
 
 use std::{
-    collections::BTreeMap,
     fs::File,
     io::{self, BufReader},
     path::Path,
@@ -19,9 +18,8 @@ use crate::{
     roundtrip::{
         InputSide, ParsedRoundTrip, ParsedSurface, Position, RoundTripDeclaration,
         RoundTripEvaluation, RoundTripFailure, RoundTripFileFacts, RoundTripLimits,
-        RoundTripReason, RoundTripTolerances, Triangle, evaluate_parsed_round_trip,
-        reject_duplicate_faces, semantic_evaluation_failure, validate_face,
-        validate_utf8_declaration,
+        RoundTripReason, RoundTripTolerances, SemanticSurfaceBuilder, evaluate_parsed_round_trip,
+        require_file_bytes, semantic_evaluation_failure, validate_utf8_declaration,
     },
     stable_file::StableFile,
 };
@@ -359,9 +357,8 @@ struct StreamParser<'a> {
     metadata_depth: usize,
     ignored_sections: Vec<Box<str>>,
     surface_name: Option<Box<str>>,
-    points: Vec<Position>,
-    point_ids: BTreeMap<u64, usize>,
-    faces: Vec<Triangle>,
+    surface: SemanticSurfaceBuilder,
+    pending_point_id: Option<u64>,
     simple_text: String,
     control: &'a OperationControl,
 }
@@ -387,9 +384,8 @@ impl<'a> StreamParser<'a> {
             metadata_depth: 0,
             ignored_sections: Vec::new(),
             surface_name: None,
-            points: Vec::new(),
-            point_ids: BTreeMap::new(),
-            faces: Vec::new(),
+            surface: SemanticSurfaceBuilder::new(limits),
+            pending_point_id: None,
             simple_text: String::new(),
             control,
         }
@@ -704,10 +700,7 @@ impl<'a> StreamParser<'a> {
                     let id = value
                         .parse::<u64>()
                         .map_err(|_| self.xml_invalid("Point id must be a positive integer"))?;
-                    if id == 0 || self.point_ids.contains_key(&id) {
-                        return Err(self.xml_invalid("Point id is zero or duplicated"));
-                    }
-                    self.point_ids.insert(id, self.points.len());
+                    self.pending_point_id = Some(id);
                 }
                 _ if value != expected => {
                     return Err(self.unsupported("required attribute value differs"));
@@ -719,13 +712,6 @@ impl<'a> StreamParser<'a> {
     }
 
     fn finish_point(&mut self) -> Result<(), RoundTripFailure> {
-        if self.points.len() as u64 >= self.limits.points() {
-            return Err(RoundTripFailure::resource(format_args!(
-                "{} points exceed the {} point limit",
-                self.side,
-                self.limits.points()
-            )));
-        }
         let mut values = self.simple_text.split_whitespace();
         let northing = parse_number(self.side, values.next())?;
         let easting = parse_number(self.side, values.next())?;
@@ -733,22 +719,15 @@ impl<'a> StreamParser<'a> {
         if values.next().is_some() {
             return Err(self.xml_invalid("Point must contain exactly three coordinates"));
         }
-        self.points.push(Position {
-            easting: canonical_zero(easting),
-            northing: canonical_zero(northing),
-            elevation: canonical_zero(elevation),
-        });
-        Ok(())
+        let id = self
+            .pending_point_id
+            .take()
+            .ok_or_else(|| self.xml_invalid("Point id is absent"))?;
+        let position = Position::from_landxml(self.side, northing, easting, elevation)?;
+        self.surface.add_point(self.side, id, position)
     }
 
     fn finish_face(&mut self) -> Result<(), RoundTripFailure> {
-        if self.faces.len() as u64 >= self.limits.faces() {
-            return Err(RoundTripFailure::resource(format_args!(
-                "{} faces exceed the {} face limit",
-                self.side,
-                self.limits.faces()
-            )));
-        }
         let mut values = self.simple_text.split_whitespace();
         let a = parse_id(self.side, values.next())?;
         let b = parse_id(self.side, values.next())?;
@@ -756,19 +735,10 @@ impl<'a> StreamParser<'a> {
         if values.next().is_some() {
             return Err(self.xml_invalid("Face must contain exactly three Point ids"));
         }
-        let resolve = |id| {
-            self.point_ids
-                .get(&id)
-                .copied()
-                .ok_or_else(|| self.xml_invalid("Face has a dangling Point reference"))
-        };
-        let face = Triangle::new(resolve(a)?, resolve(b)?, resolve(c)?);
-        validate_face(self.side, face, &self.points)?;
-        self.faces.push(face);
-        Ok(())
+        self.surface.add_face(self.side, [a, b, c])
     }
 
-    fn finish(mut self) -> Result<ParsedSurface, RoundTripFailure> {
+    fn finish(self) -> Result<ParsedSurface, RoundTripFailure> {
         if self.units_count != 1 || self.metric_count != 1 {
             return Err(self.unit_drift());
         }
@@ -779,15 +749,13 @@ impl<'a> StreamParser<'a> {
             || self.definition_count != 1
             || self.points_count != 1
             || self.faces_count != 1
-            || self.points.len() < 3
-            || self.faces.is_empty()
         {
             return Err(self.unsupported("LandXML TIN subset is incomplete"));
         }
-        reject_duplicate_faces(self.side, &mut self.faces)?;
+        let (points, faces) = self.surface.finish(self.side)?;
         Ok(ParsedSurface {
-            points: self.points,
-            faces: self.faces,
+            points,
+            faces,
             surface_name: self.surface_name,
             ignored_top_level_sections: self.ignored_sections.into_boxed_slice(),
         })
@@ -935,20 +903,6 @@ fn parse_id(side: InputSide, value: Option<&str>) -> Result<u64, RoundTripFailur
                 format_args!("{side} Face id is invalid"),
             )
         })
-}
-
-fn require_file_bytes(side: InputSide, actual: u64, allowed: u64) -> Result<(), RoundTripFailure> {
-    if actual <= allowed {
-        Ok(())
-    } else {
-        Err(RoundTripFailure::resource(format_args!(
-            "{side} file bytes required {actual}; limit is {allowed}"
-        )))
-    }
-}
-
-const fn canonical_zero(value: f64) -> f64 {
-    if value == 0.0 { 0.0 } else { value }
 }
 
 #[cfg(test)]
