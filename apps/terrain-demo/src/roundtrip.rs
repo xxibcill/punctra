@@ -552,14 +552,28 @@ impl RoundTripMismatch {
     }
 
     pub(crate) const fn completed_mapping_point_count(&self) -> Option<u64> {
-        if self.comparison.is_some() {
-            self.returned_point_count
-        } else {
-            None
+        match self.comparison {
+            Some(comparison)
+                if comparison.unmatched_point_count == 0
+                    && comparison.ambiguous_point_count == 0 =>
+            {
+                Some(comparison.mapped_point_count)
+            }
+            Some(_) | None => None,
         }
     }
 
-    pub(crate) fn completed_mapping_maximum_deltas(&self) -> Option<(f64, f64)> {
+    pub(crate) fn mapping_counts(&self) -> Option<(u64, u64, u64)> {
+        self.comparison.map(|comparison| {
+            (
+                comparison.mapped_point_count,
+                comparison.unmatched_point_count,
+                comparison.ambiguous_point_count,
+            )
+        })
+    }
+
+    pub(crate) fn mapping_maximum_deltas(&self) -> Option<(f64, f64)> {
         self.comparison.map(|comparison| {
             (
                 comparison.max_horizontal_drift_metres,
@@ -1395,6 +1409,9 @@ fn schema_error(side: InputSide, message: &'static str) -> RoundTripFailure {
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 struct ComparisonFacts {
     comparison_count: u64,
+    mapped_point_count: u64,
+    unmatched_point_count: u64,
+    ambiguous_point_count: u64,
     max_easting_drift_metres: f64,
     max_northing_drift_metres: f64,
     max_horizontal_drift_metres: f64,
@@ -1484,26 +1501,77 @@ fn match_points(
         returned[*left].easting.total_cmp(&returned[*right].easting)
     });
     let mut returned_to_reference = vec![usize::MAX; returned.len()];
+    let mut reference_candidates = vec![usize::MAX; reference.len()];
+    let mut returned_candidate_counts = vec![0_u8; returned.len()];
     let mut facts = ComparisonFacts::default();
     for (reference_index, reference_point) in reference.iter().enumerate() {
         check_round_trip_cancelled(control)?;
-        let (returned_index, drift) = unique_point_match(
-            *reference_point,
-            returned,
-            &returned_by_easting,
-            tolerances,
-            max_comparisons,
-            &mut facts,
-            control,
-        )?;
-        if returned_to_reference[returned_index] != usize::MAX {
-            return Err(RoundTripFailure::semantic(
-                RoundTripReason::VertexAmbiguous,
-                "vertex matching is ambiguous under the declared tolerances",
-            ));
+        let reference_easting = reference_point.easting;
+        let horizontal_tolerance = tolerances.horizontal_metres();
+        let start = returned_by_easting.partition_point(|index| {
+            easting_is_below_window(
+                returned[*index].easting,
+                reference_easting,
+                horizontal_tolerance,
+            )
+        });
+        let end = returned_by_easting.partition_point(|index| {
+            !easting_is_above_window(
+                returned[*index].easting,
+                reference_easting,
+                horizontal_tolerance,
+            )
+        });
+        for returned_index in &returned_by_easting[start..end] {
+            if facts.comparison_count.is_multiple_of(4096) {
+                check_round_trip_cancelled(control)?;
+            }
+            facts.comparison_count = facts.comparison_count.saturating_add(1);
+            if facts.comparison_count > max_comparisons {
+                return Err(RoundTripFailure::resource(format_args!(
+                    "vertex comparisons exceed the {max_comparisons} comparison limit"
+                )));
+            }
+            let drift = CoordinateDrift::between(*reference_point, returned[*returned_index]);
+            if drift.is_within(tolerances) {
+                returned_candidate_counts[*returned_index] =
+                    returned_candidate_counts[*returned_index].saturating_add(1);
+                reference_candidates[reference_index] = match reference_candidates[reference_index]
+                {
+                    usize::MAX => *returned_index,
+                    _ => usize::MAX - 1,
+                };
+            }
         }
-        returned_to_reference[returned_index] = reference_index;
-        update_drift_facts(&mut facts, drift);
+    }
+    for (reference_index, returned_index) in reference_candidates.into_iter().enumerate() {
+        if returned_index == usize::MAX {
+            facts.unmatched_point_count = facts.unmatched_point_count.saturating_add(1);
+        } else if returned_index == usize::MAX - 1 || returned_candidate_counts[returned_index] != 1
+        {
+            facts.ambiguous_point_count = facts.ambiguous_point_count.saturating_add(1);
+        } else {
+            returned_to_reference[returned_index] = reference_index;
+            facts.mapped_point_count = facts.mapped_point_count.saturating_add(1);
+            update_drift_facts(
+                &mut facts,
+                CoordinateDrift::between(reference[reference_index], returned[returned_index]),
+            );
+        }
+    }
+    if facts.ambiguous_point_count != 0 {
+        return Err(mapping_failure(
+            RoundTripReason::VertexAmbiguous,
+            "vertex matching is ambiguous under the declared tolerances",
+            facts,
+        ));
+    }
+    if facts.unmatched_point_count != 0 {
+        return Err(mapping_failure(
+            RoundTripReason::VertexUnmatched,
+            "a REFERENCE vertex has no RETURNED match within the declared tolerances",
+            facts,
+        ));
     }
     Ok((returned_to_reference, facts))
 }
@@ -1520,99 +1588,68 @@ fn match_exact_points(
             "vertex comparisons require {comparison_count}; limit is {max_comparisons}"
         )));
     }
-    let mut returned_positions = BTreeMap::new();
+    let mut returned_positions = BTreeMap::<_, (usize, u8)>::new();
     for (index, point) in returned.iter().enumerate() {
         if index.is_multiple_of(4096) {
             check_round_trip_cancelled(control)?;
         }
-        if returned_positions.insert(point.key(), index).is_some() {
-            return Err(RoundTripFailure::semantic(
-                RoundTripReason::VertexAmbiguous,
-                "RETURNED contains duplicate coordinates, so vertex matching is ambiguous",
-            ));
-        }
+        returned_positions
+            .entry(point.key())
+            .and_modify(|(_, count)| *count = count.saturating_add(1))
+            .or_insert((index, 1));
     }
     let mut returned_to_reference = vec![usize::MAX; returned.len()];
+    let mut facts = ComparisonFacts {
+        comparison_count,
+        ..ComparisonFacts::default()
+    };
     for (reference_index, point) in reference.iter().enumerate() {
         if reference_index.is_multiple_of(4096) {
             check_round_trip_cancelled(control)?;
         }
-        let returned_index = returned_positions
-            .get(&point.key())
-            .copied()
-            .ok_or_else(|| {
-                RoundTripFailure::semantic(
-                    RoundTripReason::ToleranceDrift,
-                    "a REFERENCE vertex has no exact RETURNED coordinate match",
-                )
-            })?;
-        if returned_to_reference[returned_index] != usize::MAX {
-            return Err(RoundTripFailure::semantic(
-                RoundTripReason::VertexAmbiguous,
-                "REFERENCE contains duplicate coordinates, so vertex matching is ambiguous",
-            ));
+        let Some(&(returned_index, returned_count)) = returned_positions.get(&point.key()) else {
+            facts.unmatched_point_count = facts.unmatched_point_count.saturating_add(1);
+            continue;
+        };
+        if returned_count != 1 {
+            facts.ambiguous_point_count = facts.ambiguous_point_count.saturating_add(1);
+        } else if returned_to_reference[returned_index] == usize::MAX {
+            returned_to_reference[returned_index] = reference_index;
+            facts.mapped_point_count = facts.mapped_point_count.saturating_add(1);
+        } else {
+            if returned_to_reference[returned_index] != usize::MAX - 1 {
+                returned_to_reference[returned_index] = usize::MAX - 1;
+                facts.mapped_point_count = facts.mapped_point_count.saturating_sub(1);
+                facts.ambiguous_point_count = facts.ambiguous_point_count.saturating_add(1);
+            }
+            facts.ambiguous_point_count = facts.ambiguous_point_count.saturating_add(1);
         }
-        returned_to_reference[returned_index] = reference_index;
     }
-    Ok((
-        returned_to_reference,
-        ComparisonFacts {
-            comparison_count,
-            ..ComparisonFacts::default()
-        },
-    ))
+    if facts.ambiguous_point_count != 0 {
+        return Err(mapping_failure(
+            RoundTripReason::VertexAmbiguous,
+            "exact vertex matching is ambiguous",
+            facts,
+        ));
+    }
+    if facts.unmatched_point_count != 0 {
+        return Err(mapping_failure(
+            RoundTripReason::ToleranceDrift,
+            "a REFERENCE vertex has no exact RETURNED coordinate match",
+            facts,
+        ));
+    }
+    Ok((returned_to_reference, facts))
 }
 
-fn unique_point_match(
-    reference: Position,
-    returned: &[Position],
-    returned_by_easting: &[usize],
-    tolerances: RoundTripTolerances,
-    max_comparisons: u64,
-    facts: &mut ComparisonFacts,
-    control: Option<&OperationControl>,
-) -> Result<(usize, CoordinateDrift), RoundTripFailure> {
-    let reference_easting = reference.easting;
-    let horizontal_tolerance = tolerances.horizontal_metres();
-    let start = returned_by_easting.partition_point(|index| {
-        easting_is_below_window(
-            returned[*index].easting,
-            reference_easting,
-            horizontal_tolerance,
-        )
-    });
-    let end = returned_by_easting.partition_point(|index| {
-        !easting_is_above_window(
-            returned[*index].easting,
-            reference_easting,
-            horizontal_tolerance,
-        )
-    });
-    let mut matched = None;
-    for returned_index in &returned_by_easting[start..end] {
-        if facts.comparison_count.is_multiple_of(4096) {
-            check_round_trip_cancelled(control)?;
-        }
-        facts.comparison_count = facts.comparison_count.saturating_add(1);
-        if facts.comparison_count > max_comparisons {
-            return Err(RoundTripFailure::resource(format_args!(
-                "vertex comparisons exceed the {max_comparisons} comparison limit"
-            )));
-        }
-        let drift = CoordinateDrift::between(reference, returned[*returned_index]);
-        if drift.is_within(tolerances) && matched.replace((*returned_index, drift)).is_some() {
-            return Err(RoundTripFailure::semantic(
-                RoundTripReason::VertexAmbiguous,
-                "vertex matching is ambiguous under the declared tolerances",
-            ));
-        }
-    }
-    matched.ok_or_else(|| {
-        RoundTripFailure::semantic(
-            RoundTripReason::VertexUnmatched,
-            "a REFERENCE vertex has no RETURNED match within the declared tolerances",
-        )
-    })
+fn mapping_failure(
+    reason: RoundTripReason,
+    diagnostic: &'static str,
+    facts: ComparisonFacts,
+) -> RoundTripFailure {
+    let mut failure = RoundTripFailure::semantic(reason, diagnostic);
+    failure.comparison = Some(facts);
+    failure
 }
 
 fn easting_is_below_window(candidate: f64, reference: f64, tolerance: f64) -> bool {
@@ -1796,8 +1833,9 @@ mod tests {
     };
 
     use super::{
-        RoundTripDeclaration, RoundTripFailureKind, RoundTripLimits, RoundTripReason,
-        RoundTripTolerances, verify_landxml_round_trip,
+        RoundTripDeclaration, RoundTripEvaluation, RoundTripFailureKind, RoundTripLimits,
+        RoundTripReason, RoundTripTolerances, evaluate_landxml_round_trip,
+        verify_landxml_round_trip,
     };
 
     static NEXT_DIRECTORY: AtomicU64 = AtomicU64::new(1);
@@ -2072,15 +2110,19 @@ mod tests {
         let returned_xml = landxml(returned_points, REFERENCE_FACES, false);
         let (reference, returned) = fixture.write_pair(&reference_xml, &returned_xml);
 
-        assert_kind(
-            verify(
-                &reference,
-                &returned,
-                tolerances(0.1, 0.0),
-                default_limits(),
-            ),
-            RoundTripFailureKind::SemanticMismatch,
-        );
+        let evaluation = evaluate_landxml_round_trip(
+            &reference,
+            &returned,
+            declaration(),
+            tolerances(0.1, 0.0),
+            default_limits(),
+        )
+        .expect("bounded ambiguous matching produces failed evidence");
+        let RoundTripEvaluation::Failed(mismatch) = evaluation else {
+            panic!("an ambiguous mapping cannot pass");
+        };
+        assert_eq!(mismatch.reason(), RoundTripReason::VertexAmbiguous);
+        assert_eq!(mismatch.mapping_counts(), Some((2, 1, 1)));
     }
 
     #[test]
@@ -2488,14 +2530,12 @@ mod tests {
         tolerances: RoundTripTolerances,
         limits: RoundTripLimits,
     ) -> Result<super::RoundTripReport, super::RoundTripFailure> {
-        verify_landxml_round_trip(
-            reference,
-            returned,
-            RoundTripDeclaration::new("generated-fixture", "test-only", "metric-tin-v1")
-                .expect("valid declaration"),
-            tolerances,
-            limits,
-        )
+        verify_landxml_round_trip(reference, returned, declaration(), tolerances, limits)
+    }
+
+    fn declaration() -> RoundTripDeclaration {
+        RoundTripDeclaration::new("generated-fixture", "test-only", "metric-tin-v1")
+            .expect("valid declaration")
     }
 
     fn tolerances(horizontal: f64, vertical: f64) -> RoundTripTolerances {

@@ -207,6 +207,11 @@ fn verify_round_trip_publishes_failed_evidence_but_not_operational_failures() {
     assert_eq!(document["checks"]["tolerance"]["status"], "failed");
     assert_eq!(document["returned_landxml"]["namespace"], LANDXML_NAMESPACE);
     assert!(document["returned_landxml"]["point_count"].is_number());
+    assert_eq!(document["comparison"]["mapped_point_count"], 61);
+    assert_eq!(document["comparison"]["unmatched_point_count"], 1);
+    assert_eq!(document["comparison"]["ambiguous_point_count"], 0);
+
+    assert_ambiguous_mapping_evidence(&fixture, &original);
 
     let malformed_returned = fixture.directory.path().join("malformed-returned.xml");
     let malformed_evidence = fixture.directory.path().join("malformed-round-trip.json");
@@ -258,6 +263,37 @@ fn verify_round_trip_publishes_failed_evidence_but_not_operational_failures() {
         "non-Complete Run must publish no evidence"
     );
     assert_eq!(fs::read(&journal_path).unwrap(), &complete[..ends[6]]);
+}
+
+fn assert_ambiguous_mapping_evidence(fixture: &ProcessFixture, original: &str) {
+    let parsed_original = Document::parse(original).unwrap();
+    let mut point_text = parsed_original
+        .descendants()
+        .filter(|node| node.has_tag_name((LANDXML_NAMESPACE, "P")))
+        .filter_map(|node| node.text());
+    let first_point = point_text.next().unwrap();
+    let second_point = point_text.next().unwrap();
+    let mut first_coordinates = first_point.split_whitespace();
+    let northing = first_coordinates.next().unwrap().parse::<f64>().unwrap();
+    let easting = first_coordinates.next().unwrap().parse::<f64>().unwrap();
+    let elevation = first_coordinates.next().unwrap();
+    let near_first_point = format!("{} {} {elevation}", northing + 0.04, easting + 0.04);
+    let returned = fixture.directory.path().join("ambiguous-returned.xml");
+    let evidence = fixture.directory.path().join("ambiguous-round-trip.json");
+    let changed = original.replacen(
+        &format!(">{second_point}<"),
+        &format!(">{near_first_point}<"),
+        1,
+    );
+    fs::write(&returned, changed).unwrap();
+
+    let output = fixture.verify_round_trip_with_tolerances(&returned, &evidence, "0.1", "0");
+    assert!(!output.status.success());
+    let document: serde_json::Value =
+        serde_json::from_slice(&fs::read(&evidence).unwrap()).unwrap();
+    assert_eq!(document["comparison"]["mapped_point_count"], 60);
+    assert_eq!(document["comparison"]["unmatched_point_count"], 1);
+    assert_eq!(document["comparison"]["ambiguous_point_count"], 1);
 }
 
 #[test]

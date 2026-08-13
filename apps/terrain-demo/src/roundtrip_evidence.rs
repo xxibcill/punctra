@@ -600,34 +600,21 @@ fn write_comparison(json: &mut String, evaluation: &RoundTripEvaluation) -> Resu
             )
         }
         RoundTripEvaluation::Failed(mismatch) => {
-            let completed_mapping = mismatch.completed_mapping_point_count();
+            let mapping_counts = mismatch.mapping_counts();
             write!(json, "{{\"mapped_point_count\":")?;
-            if let Some(count) = completed_mapping {
-                write!(json, "{count}")?;
-            } else {
-                json.push_str("null");
-            }
-            write!(
-                json,
-                ",\"unmatched_point_count\":{},\"ambiguous_point_count\":{},\"maximum_horizontal_delta_metres\":",
-                if completed_mapping.is_some() {
-                    "0"
-                } else {
-                    "null"
-                },
-                if completed_mapping.is_some() {
-                    "0"
-                } else {
-                    "null"
-                }
-            )?;
-            if let Some((horizontal, _)) = mismatch.completed_mapping_maximum_deltas() {
+            optional_count(json, mapping_counts.map(|(mapped, _, _)| mapped))?;
+            write!(json, ",\"unmatched_point_count\":")?;
+            optional_count(json, mapping_counts.map(|(_, unmatched, _)| unmatched))?;
+            write!(json, ",\"ambiguous_point_count\":")?;
+            optional_count(json, mapping_counts.map(|(_, _, ambiguous)| ambiguous))?;
+            write!(json, ",\"maximum_horizontal_delta_metres\":")?;
+            if let Some((horizontal, _)) = mismatch.mapping_maximum_deltas() {
                 number(json, horizontal)?;
             } else {
                 json.push_str("null");
             }
             write!(json, ",\"maximum_vertical_delta_metres\":")?;
-            if let Some((_, vertical)) = mismatch.completed_mapping_maximum_deltas() {
+            if let Some((_, vertical)) = mismatch.mapping_maximum_deltas() {
                 number(json, vertical)?;
             } else {
                 json.push_str("null");
