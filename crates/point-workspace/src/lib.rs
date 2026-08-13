@@ -40,7 +40,9 @@ pub use model::{
     RevisionKind, SnapshotProvenance, WorkspaceId, WorkspaceSchema,
 };
 pub use point_rows::{SnapshotPointBatch, SnapshotPointBatches, SnapshotPointSummary};
-pub use point_set::{PointIdBatch, PointIdBatches, PointSet};
+pub use point_set::{
+    PointIdBatch, PointIdBatches, PointSet, PointSetEntry, PointSetEntryBatch, PointSetEntryBatches,
+};
 pub use revision_audit::RevisionAuditJob;
 pub use selection::PointSetJob;
 pub use workspace::{CommitJob, Snapshot, Workspace, WorkspaceJob, create, open};

@@ -1,0 +1,29 @@
+[package]
+name = "point-review"
+description = "Exact CPU review composition for Punctra point-cloud Views"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+foundation-runtime.workspace = true
+point-contracts.workspace = true
+point-workspace.workspace = true
+render-protocol.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+point-index.workspace = true
+point-source.workspace = true
+source-memory = { workspace = true, features = ["test-support"] }
+tempfile.workspace = true
+
+[[bench]]
+name = "review"
+harness = false
+
+[lints]
+workspace = true

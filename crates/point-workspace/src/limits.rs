@@ -526,7 +526,13 @@ impl Default for RevisionAuditLimits {
     }
 }
 
-/// Hard ceilings for streaming exact Point Identities from a completed Point Set.
+/// Shared hard ceilings for streaming exact values from a completed Point Set.
+///
+/// [`crate::PointSet::ids`] emits [`point_contracts::PointId`] elements, while
+/// [`crate::PointSet::entries`] emits [`crate::PointSetEntry`] elements.
+/// Point ceilings count the selected output elements in either stream. Batch
+/// and working-byte ceilings charge the in-memory size of the chosen output
+/// element, not the Point Set's canonical spill encoding.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[allow(clippy::struct_field_names)]
 pub struct PointIdReadLimits {
@@ -540,8 +546,9 @@ pub struct PointIdReadLimits {
 impl PointIdReadLimits {
     /// Creates explicit read ceilings.
     ///
-    /// Zero `max_points` permits only an empty Point Set. Zero batch or working
-    /// capacity likewise permits only a read that emits no batch.
+    /// Zero `max_points` permits only an empty Point Set. Zero batch-element,
+    /// batch-byte, or working capacity likewise permits only a read that emits
+    /// no batch.
     #[must_use]
     pub const fn new(
         max_points: u64,
@@ -559,19 +566,23 @@ impl PointIdReadLimits {
         }
     }
 
-    /// Returns the total exact Point Identity ceiling.
+    /// Returns the total exact Point Set output-element ceiling.
     #[must_use]
     pub const fn max_points(self) -> u64 {
         self.max_points
     }
 
-    /// Returns the maximum identities in one emitted batch.
+    /// Returns the maximum output elements in one emitted batch.
     #[must_use]
     pub const fn max_batch_points(self) -> u64 {
         self.max_batch_points
     }
 
-    /// Returns the maximum canonical payload bytes in one emitted batch.
+    /// Returns the maximum in-memory output allocation in one emitted batch.
+    ///
+    /// The charge is `size_of::<PointId>()` per element for
+    /// [`crate::PointSet::ids`] and `size_of::<PointSetEntry>()` per element for
+    /// [`crate::PointSet::entries`]. It is not a canonical spill-payload limit.
     #[must_use]
     pub const fn max_batch_bytes(self) -> u64 {
         self.max_batch_bytes
@@ -583,7 +594,7 @@ impl PointIdReadLimits {
         self.max_read_buffer_bytes
     }
 
-    /// Returns the peak stream working-memory ceiling.
+    /// Returns the peak output-allocation plus read-buffer ceiling.
     #[must_use]
     pub const fn max_working_bytes(self) -> u64 {
         self.max_working_bytes

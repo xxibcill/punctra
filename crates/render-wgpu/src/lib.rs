@@ -4,6 +4,75 @@
 //! submission schedule. The renderer owns generation-safe point residency and
 //! records draw and pick commands into the host's encoder.
 //!
+//! # Host ownership
+//!
+//! A host creates and retains the [`wgpu::Instance`], [`wgpu::Device`], and
+//! [`wgpu::Queue`]. It also creates every command encoder and render target,
+//! chooses when command buffers are submitted, drives device polling, and owns
+//! device-loss policy. [`WgpuRenderer`] accepts the device by reference, retains
+//! a device handle, and records work into host-provided encoders; it never
+//! submits the queue.
+//!
+//! The caller also selects hard logical residency limits through
+//! [`render_protocol::RenderLimits`]. Those limits cover resident point vertex
+//! bytes, points, batches, and complete highlight-update input. Render targets,
+//! command encoders, staging owned by the host, allocator padding, and other
+//! wgpu resources are outside that accounting and require separate host policy.
+//!
+//! # Provisional picking and exact confirmation
+//!
+//! [`WgpuRenderer::pick`] identifies a resident display sample from one
+//! [`RecordedFrame`]. A [`PickHit`] preserves the producing View generation,
+//! batch, batch version, and canonical Point identity, but remains a GPU hint.
+//! It does not prove that the Point still belongs to a current selection or
+//! report its effective classification. A miss is likewise not proof that an
+//! exact Query would find no Point because progressive display Coverage may be
+//! incomplete.
+//!
+//! A Workspace host must track View generation and Workspace Revision as
+//! separate freshness dimensions. At interaction capture it pins the intended
+//! `point_workspace::Snapshot` and records both identities. Before inspection
+//! or Edit it rejects a hit when the active View generation, host interaction
+//! generation, or Workspace head Revision changed. It then passes only
+//! `PickHit::point()` to `point_review::confirm_pick` under caller-selected
+//! `point_review::ScreenReviewLimits`. Renderer position, depth, color, and
+//! classification remain non-authoritative. This renderer crate intentionally
+//! has no Workspace/review dependency; the compiled `no_run` example in the
+//! `point-review` crate documents the exact composition. In pseudocode:
+//!
+//! ```text
+//! capture = (active_view_generation, workspace.head())
+//! hit = render_wgpu_pick(captured_frame)
+//! require(hit.view_generation == capture.view_generation)
+//! require(active_view_generation and workspace.head_revision still match capture)
+//! confirmed = point_review.confirm_pick(capture.snapshot, hit.point, review_limits)
+//! require(confirmed.provenance == capture.snapshot.provenance)
+//! ```
+//!
+//! Exact multi-Point highlights require another complete-only handoff. Iterate
+//! the terminal `point_workspace::PointSet` with explicit
+//! `point_workspace::PointIdReadLimits`, retain the complete identity vector
+//! under a host byte ceiling, and apply one [`render_protocol::RenderUpdate::SetHighlights`]
+//! only after the iterator returns terminal success. A read or limit failure
+//! must leave the previous renderer state untouched. The
+//! [`render_protocol::RenderLimits`] highlight ceiling bounds accepted input
+//! count; host vector bytes and Point-Set read/working bytes are separate
+//! caller policy.
+//!
+//! For mutation recovery, retain the caller-owned Operation identity. A
+//! rejected commit is terminal, an indeterminate commit requires explicit
+//! close/reopen plus resolution of that same Operation, and a committed receipt
+//! remains committed even if later audit reporting fails. A host may choose the
+//! stricter policy of withholding dependent mutation until its audit is
+//! available; it must not retry the committed Operation as if it had failed.
+//!
+//! The standalone `third_party_host` example demonstrates the renderer
+//! lifecycle without depending on private `renderer-demo` state:
+//!
+//! ```text
+//! cargo run -p render-wgpu --example third_party_host
+//! ```
+//!
 //! # Interface classification
 //!
 //! The documented renderer configuration, frame, update, picking, report, and

@@ -62,6 +62,88 @@ pub struct PointIdBatches {
     reader: PointSetBatchReader,
 }
 
+/// One exact member of an immutable Point Set.
+///
+/// The effective classification is the value observed at the Point Set's
+/// pinned [`SnapshotProvenance`]. It is not refreshed when a later Revision is
+/// committed.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PointSetEntry {
+    point_id: PointId,
+    effective_classification: u8,
+}
+
+impl PointSetEntry {
+    /// Returns the canonical Source-aware Point Identity.
+    #[must_use]
+    pub const fn point_id(self) -> PointId {
+        self.point_id
+    }
+
+    /// Returns the exact effective classification at Point Set creation.
+    #[must_use]
+    pub const fn effective_classification(self) -> u8 {
+        self.effective_classification
+    }
+}
+
+/// One nonempty bounded batch of exact Point Set entries.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PointSetEntryBatch {
+    entries: Vec<PointSetEntry>,
+}
+
+impl PointSetEntryBatch {
+    /// Returns ordered unique entries.
+    #[must_use]
+    pub fn entries(&self) -> &[PointSetEntry] {
+        &self.entries
+    }
+
+    /// Returns the exact number of entries in this nonempty batch.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// Reports whether this batch is empty.
+    ///
+    /// A successfully constructed batch always returns `false`.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+}
+
+/// Repeatable, bounded exact entries from one immutable Point Set.
+pub struct PointSetEntryBatches {
+    source: SourceId,
+    reader: PointSetBatchReader,
+}
+
+impl PointSetEntryBatches {
+    /// Returns the next nonempty entry batch, or terminal `None`.
+    ///
+    /// A corruption or resource error is returned once; later calls are fused
+    /// to `None`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when spill storage is missing, changed, corrupt, or
+    /// cannot be read within the declared element, output-allocation,
+    /// read-buffer, and working-memory limits.
+    #[allow(clippy::should_implement_trait)]
+    pub fn next(&mut self) -> Result<Option<PointSetEntryBatch>, WorkspaceError> {
+        let source = self.source;
+        self.reader
+            .next_mapped(|record| PointSetEntry {
+                point_id: PointId::new(source, record.ordinal),
+                effective_classification: record.effective_classification,
+            })
+            .map(|batch| batch.map(|entries| PointSetEntryBatch { entries }))
+    }
+}
+
 impl PointIdBatches {
     /// Returns the next nonempty identity batch, or terminal `None`.
     ///
@@ -71,7 +153,8 @@ impl PointIdBatches {
     /// # Errors
     ///
     /// Returns an error when spill storage is missing, changed, corrupt, or
-    /// cannot be read within the declared limits.
+    /// cannot be read within the declared element, output-allocation,
+    /// read-buffer, and working-memory limits.
     #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> Result<Option<PointIdBatch>, WorkspaceError> {
         let source = self.source;
@@ -98,15 +181,37 @@ impl PointSet {
     ///
     /// # Errors
     ///
-    /// Returns an error when one identity cannot fit in a requested batch, or
-    /// when checked spill storage is missing, changed, or corrupt.
+    /// Returns an error when one `PointId` output element cannot fit in a
+    /// requested batch or working-memory ceiling, or when checked spill storage
+    /// is missing, changed, or corrupt.
     pub fn ids(&self, limits: PointIdReadLimits) -> Result<PointIdBatches, WorkspaceError> {
         let exact_count = self.inner.metadata.exact_count();
         require_read_count(exact_count, limits)?;
         let cursor = PointSetRecordCursor::new(self.clone(), limits)?;
         Ok(PointIdBatches {
             source: self.inner.metadata.provenance().source(),
-            reader: PointSetBatchReader::new(cursor, exact_count, limits)?,
+            reader: PointSetBatchReader::new::<PointId>(cursor, exact_count, limits)?,
+        })
+    }
+
+    /// Starts a repeatable bounded read of Point Identities and their exact
+    /// effective classifications at this Point Set's pinned Revision.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when one `PointSetEntry` output element cannot fit in a
+    /// requested batch or working-memory ceiling, or when checked spill storage
+    /// is missing, changed, or corrupt.
+    pub fn entries(
+        &self,
+        limits: PointIdReadLimits,
+    ) -> Result<PointSetEntryBatches, WorkspaceError> {
+        let exact_count = self.inner.metadata.exact_count();
+        require_read_count(exact_count, limits)?;
+        let cursor = PointSetRecordCursor::new(self.clone(), limits)?;
+        Ok(PointSetEntryBatches {
+            source: self.inner.metadata.provenance().source(),
+            reader: PointSetBatchReader::new::<PointSetEntry>(cursor, exact_count, limits)?,
         })
     }
 
@@ -174,7 +279,7 @@ impl PointSetRecordBatches {
         require_read_count(exact_count, limits)?;
         let cursor = PointSetRecordCursor::new(owner, limits)?;
         Ok(Self {
-            reader: PointSetBatchReader::new(cursor, exact_count, limits)?,
+            reader: PointSetBatchReader::new::<PointId>(cursor, exact_count, limits)?,
         })
     }
 
@@ -193,13 +298,13 @@ struct PointSetBatchReader {
 }
 
 impl PointSetBatchReader {
-    fn new(
+    fn new<T>(
         cursor: PointSetRecordCursor,
         exact_count: u64,
         limits: PointIdReadLimits,
     ) -> Result<Self, WorkspaceError> {
         let max_batch_records =
-            bounded_batch_records(limits, exact_count, cursor.read_buffer_bytes())?;
+            bounded_batch_records::<T>(limits, exact_count, cursor.read_buffer_bytes())?;
         Ok(Self {
             cursor,
             max_batch_records,
@@ -1036,7 +1141,7 @@ impl SpillReader {
 fn require_read_count(exact_count: u64, limits: PointIdReadLimits) -> Result<(), WorkspaceError> {
     if exact_count > limits.max_points() {
         return Err(WorkspaceError::ResourceLimit {
-            limit: "Point Set identity read Points",
+            limit: "Point Set read output elements",
             required: exact_count,
             allowed: limits.max_points(),
         });
@@ -1044,7 +1149,7 @@ fn require_read_count(exact_count: u64, limits: PointIdReadLimits) -> Result<(),
     Ok(())
 }
 
-fn bounded_batch_records(
+fn bounded_batch_records<T>(
     limits: PointIdReadLimits,
     exact_count: u64,
     required_read_buffer_bytes: u64,
@@ -1061,30 +1166,30 @@ fn bounded_batch_records(
     }
     if required_read_buffer_bytes >= limits.max_working_bytes() {
         return Err(WorkspaceError::ResourceLimit {
-            limit: "Point Set identity read working bytes",
-            required: required_read_buffer_bytes.saturating_add(allocation_bytes::<PointId>(1)),
+            limit: "Point Set read working bytes",
+            required: required_read_buffer_bytes.saturating_add(allocation_bytes::<T>(1)),
             allowed: limits.max_working_bytes(),
         });
     }
-    let point_bytes = allocation_bytes::<PointId>(1);
-    let by_payload = limits.max_batch_bytes() / point_bytes;
+    let output_element_bytes = allocation_bytes::<T>(1);
+    let by_output_bytes = limits.max_batch_bytes() / output_element_bytes;
     let by_working = limits
         .max_working_bytes()
         .saturating_sub(required_read_buffer_bytes)
-        / point_bytes;
+        / output_element_bytes;
     let records = exact_count
         .min(limits.max_batch_points())
-        .min(by_payload)
+        .min(by_output_bytes)
         .min(by_working);
     if records == 0 {
         return Err(WorkspaceError::ResourceLimit {
-            limit: "Point Set identity batch capacity",
-            required: point_bytes,
+            limit: "Point Set output-element batch capacity",
+            required: output_element_bytes,
             allowed: limits.max_batch_bytes().min(limits.max_working_bytes()),
         });
     }
     usize::try_from(records).map_err(|_| WorkspaceError::ResourceLimit {
-        limit: "Point Set identity read batch records",
+        limit: "Point Set read batch elements",
         required: records,
         allowed: u64::try_from(usize::MAX).unwrap_or(u64::MAX),
     })
@@ -1093,7 +1198,7 @@ fn bounded_batch_records(
 fn batch_target(max_batch_records: usize, remaining: u64) -> Result<usize, WorkspaceError> {
     let batch_limit = u64::try_from(max_batch_records).unwrap_or(u64::MAX);
     usize::try_from(remaining.min(batch_limit)).map_err(|_| WorkspaceError::ResourceLimit {
-        limit: "Point Set identity read batch records",
+        limit: "Point Set read batch elements",
         required: remaining,
         allowed: u64::try_from(usize::MAX).unwrap_or(u64::MAX),
     })
@@ -1111,14 +1216,14 @@ fn allocate_batch<T>(
     values
         .try_reserve_exact(target)
         .map_err(|_| WorkspaceError::ResourceLimit {
-            limit: "Point Set identity batch allocation",
+            limit: "Point Set output batch allocation",
             required: allocation_bytes::<T>(target),
             allowed: limits.max_batch_bytes(),
         })?;
     let actual = allocation_bytes::<T>(values.capacity());
     if actual > limits.max_batch_bytes() {
         return Err(WorkspaceError::ResourceLimit {
-            limit: "Point Set identity batch bytes",
+            limit: "Point Set output batch bytes",
             required: actual,
             allowed: limits.max_batch_bytes(),
         });
@@ -1142,7 +1247,7 @@ fn require_working(
     let required = output_bytes.saturating_add(read_buffer_bytes);
     if required > limits.max_working_bytes() {
         return Err(WorkspaceError::ResourceLimit {
-            limit: "Point Set identity read working bytes",
+            limit: "Point Set read working bytes",
             required,
             allowed: limits.max_working_bytes(),
         });

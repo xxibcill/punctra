@@ -3,6 +3,43 @@
 All notable changes to Punctra are documented here. The project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased - 0.11.0-alpha.1
+
+- Completed and locally repository-verified the evidence-honest v0.11 Exact
+  Interactive Review and Ground Correction technical design from canonical
+  v0.10 commit `30ea9ff`. Repository verification does not satisfy the
+  outstanding field gate or claim professional time savings, independent
+  adoption, partner acceptance, or production support.
+- Added the headless `point-review` composition for exact CPU confirmation of
+  provisional display identities and inclusive perspective/orthographic
+  screen-through rectangle selection at one pinned Workspace Revision.
+  Selection evaluates authoritative Snapshot rows, supports an optional exact
+  effective-classification filter, and publishes only a complete spillable
+  Point Set under cumulative hard limits.
+- Added bounded Point Set entry reads so exact review can expose the effective
+  classification captured with each selected identity without consulting
+  sampled display Attributes or changing Point Set persistence.
+- Bounded complete renderer highlight input independently from resident Point,
+  batch, and byte limits. Oversized highlight updates now fail atomically
+  before duplicate removal and preserve prior renderer state.
+- Added a minimal public-only offscreen `render-wgpu` host example. It owns the
+  wgpu instance, device, queue, target, encoder, submission, and polling;
+  records and resolves a provisional pick; and documents pinned CPU
+  confirmation and resource ownership without importing `renderer-demo`
+  private state.
+- Connected the professional inspection demo to explicit existing Workspace
+  state for exact review, exact Point Set-derived overlays, caller-owned
+  classification Operations, Revision Audit/Edit Footprint reporting,
+  immediate-head Revert, and same-identity reconciliation. The path neither
+  creates a Workspace nor treats a GPU miss or resident LOD sample as exact.
+- Added public-interface projection/oracle/cancellation/spill coverage, a
+  generated LAS exact-review process plus inherited generated LAS/LAZ
+  identity/persistence regressions, stale-state and complete highlight-handoff
+  tests, the full commit/Audit/Revert/reopen identity chain, compiled rustdoc,
+  resource-fact benchmarks, and required local GPU coverage. No new persisted
+  Workspace, Spatial Index, Run, Point Set spill, or LandXML version was
+  introduced.
+
 ## Unreleased - 0.10.0-alpha.1
 
 - Implemented the repository track of the accepted v0.10 Field Qualification

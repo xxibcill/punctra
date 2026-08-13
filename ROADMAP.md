@@ -16,13 +16,18 @@ safe initial index-work publication, full-ceiling streaming, persisted-v1
 fixture corpus, and representative recovery/support matrix. Independent
 Standards/Spec review is complete with no P0–P3 findings. The complete
 one-commit local candidate record and every external product gate remain
-outstanding. Those gates are prerequisites of the Active
+outstanding. Those gates remain prerequisites carried by the accepted
 [v0.10 Field Qualification and
 Professional Inspection View design](docs/design/field-inspection-view-v0.10.md),
 not retroactive Complete labels. The v0.10 repository implementation is
 complete without claiming that its field or adoption-publication gates are
-satisfied. v0.11 through v0.20 remain uncommitted Candidate themes; each needs
-evidence and an accepted design before implementation.
+satisfied. The [v0.11 Exact Interactive Review and Ground Correction
+design](docs/design/exact-interactive-review-v0.11.md) is complete and
+repository-verified for its bounded technical slice. The user activated that
+work, but external field-activation and independent-adoption evidence remains
+outstanding. No later repository release is Active. v0.12 through v0.20 remain
+uncommitted Candidate themes; each needs evidence and an accepted design before
+implementation.
 
 ## Working direction
 
@@ -80,9 +85,9 @@ release can be Complete while every product gate remains outstanding.
 
 ## Scope and evidence checkpoint
 
-Status: **v0.10 professional inspection View Active; repository implementation
-present; field/adoption publication and inherited v0.9 support qualification
-outstanding**
+Status: **v0.11 exact interactive review Complete and repository-verified;
+field activation, independent adoption, and inherited v0.9 support
+qualification outstanding**
 
 The [implemented v0.5 design](docs/design/durable-document-core-v0.5.md) places
 exact classification selection, temporary Point Sets, sparse Revisions, and
@@ -134,6 +139,23 @@ export contracts are unchanged. This implementation is not evidence of a
 permitted production corpus or an observed workflow; those field gates remain
 outstanding and are reported separately.
 
+The accepted v0.11 design connects that disposable View to a separate exact CPU
+review path without promoting renderer samples to authority. The public
+`point-review` crate confirms one provisional Point Identity against a pinned
+Snapshot and performs one inclusive screen-through rectangle scan with an
+optional effective-classification filter. Exact Point Set iteration supplies
+bounded renderer highlights. Durable correction reuses caller-owned Operation
+Identities and existing Workspace commit, immediate-head Revert, Revision
+Audit/Edit Footprint, and recovery contracts. A public `render-wgpu` example
+demonstrates host ownership without `renderer-demo` private state. Polygon,
+brush, visible-only, and occlusion selection, arbitrary Attribute or position
+editing, general UI, and automatic recovery remain outside scope.
+
+Repository activation was an explicit implementation decision, not field
+evidence. No observed correction workflow, permitted production correction
+corpus, independent adopter, time saving, reduced rework, partner acceptance,
+or product efficacy is recorded.
+
 Useful evidence for proceeding includes:
 
 - screen-shared workflows with current users that identify the actual expensive
@@ -150,16 +172,17 @@ If the evidence points elsewhere, revise this roadmap before building the next
 module. The detailed discovery signals and pivot criteria live in the
 [market-validation research](docs/research/saas-point-cloud-market-validation.md#customer-tests-and-kill-criteria).
 Production-data access, downstream observations, and paid-pilot evidence are
-long-lead work. Collection may proceed during v0.10 without silently expanding
+long-lead work. Collection may proceed during v0.11 without silently expanding
 any later repository release.
 
 ## Release sequence
 
-There is one Active repository track after the completed v0.7 and incomplete
-v0.8/v0.9 alphas. Ten provisional Candidate themes, v0.11 through v0.20,
-extend the path after v0.10. This is a planning sequence, not a requirement to
-publish every number or to publish v1 after v0.20. Candidates may be narrowed,
-split, merged, reordered, or stopped before becoming Active.
+There is no Active repository implementation track after the completed v0.7,
+incomplete v0.8/v0.9 alphas, repository-implemented v0.10 View, and completed
+v0.11 technical slice. Nine provisional Candidate themes, v0.12 through v0.20,
+follow it. This is a planning sequence, not a requirement to publish every
+number or to publish v1 after v0.20. Candidates may be narrowed, split,
+merged, reordered, or stopped before becoming Active.
 
 ### v0.1 — Renderer foundation
 
@@ -617,33 +640,67 @@ benchmark.
 
 ### v0.11 — Exact interactive review and ground correction
 
-Status: **Candidate**
+Status: **Complete — repository-verified technical slice only; external
+activation/adoption evidence outstanding**
 
-Candidate outcome: connect the progressive View to exact inspection and
-reversible ground-classification correction in one narrow desktop workflow.
+Accepted outcome: connect the progressive View to exact CPU inspection and the
+existing reversible ground-classification correction seams without treating
+GPU samples as Query authority.
 
 Activation gate:
 
 - v0.10 evidence identifies interactive inspection or classification
   correction as a material source of attended time or rework.
 
-Likely scope:
+The user explicitly activated the bounded repository implementation on
+2026-08-13. That decision does not satisfy the field activation gate above;
+the gate remains outstanding and no product-efficacy conclusion is inferred.
 
-- CPU-confirmed inspection after provisional GPU picking;
-- an evidence-selected subset of screen-through, polygon, and brush selection;
-- exact effective-classification filtering at a pinned Revision;
-- visible Point Set, Revision, changed-region, Revert, and recovery state; and
-- ground-classification painting without general Attribute or position edits.
+Accepted repository scope:
 
-Candidate exit evidence:
+- one public `point-review` crate that confirms a provisional renderer Point
+  Identity against a pinned Workspace Snapshot;
+- one exact full-CPU-scan, inclusive screen-through rectangle using public
+  `Camera` and `Viewport` values, with optional effective-classification
+  equality at that pinned Revision;
+- renderer highlights derived only by complete bounded exact Point Set
+  identity iteration, plus a caller-selected complete highlight-input limit;
+- caller-owned Operation Identities and existing durable classification
+  commit, immediate-head Revert, Revision Audit/Edit Footprint, and Operation
+  reconciliation interfaces;
+- one public `render-wgpu` `third_party_host` example and focused rustdoc that
+  explain host ownership and provisional-pick confirmation; and
+- version, documentation, public-interface tests, a generated exact-review
+  benchmark, and required local GPU qualification.
 
-- every accepted selection matches a sequential CPU oracle, including boundary
-  and stale-Revision cases;
+Explicit exclusions:
+
+- polygon, lasso, brush, visible-only, front-most, splat-coverage, or
+  occlusion-aware selection;
+- arbitrary Attribute or position Edit, Source rewriting, named persistent
+  Point Sets, selection algebra, or general undo;
+- a general desktop UI, automatic retry/Revert/recovery, or a new persisted
+  workflow or format; and
+- production, professional-preference, independent-adoption, partner, paid-use,
+  reduced-rework, or support claims from repository fixtures and examples.
+
+Repository exit gates:
+
+- every accepted rectangle matches a sequential full-Source CPU oracle,
+  including projection boundaries, classification filters, and stale-Revision
+  cases;
 - Point Identity survives display hint, exact Query, spill, Edit, Revert, and
   reopen;
-- overlays are traceable to exact Point Sets rather than resident LOD samples;
-  and
-- interruption and recovery reopen into one documented, unambiguous state.
+- highlight vectors are exactly traceable to bounded Point Set iteration rather
+  than resident LOD samples or Pick tokens;
+- commit, Revert, Audit/Edit Footprint, and every Operation-resolution state
+  retain the existing durable semantics; and
+- the complete local format, lint, test, rustdoc, fuzz, benchmark, example, and
+  required-GPU sequence passes from one exact commit.
+
+External exits remain separate: observe a permitted field workflow that
+establishes material correction cost, and record independent adoption of the
+public integration path. Neither is supplied by repository completion.
 
 ### v0.12 — Explicit spatial-reference contract
 
@@ -952,12 +1009,12 @@ v0.20 theme is by itself a reason to publish v1.
 | Renderer and planning foundations | v0.1–v0.2 | Complete; repository-verified | Reusable bounded display engine and adaptive View planner. |
 | Source, document, terrain, and workflow baseline | v0.3–v0.7 | Complete; repository-verified only | Headless technical path from verified LAS/LAZ to one narrow resumable terrain deliverable; field and product evidence remains separate. |
 | Qualifier and trust baseline | v0.8–v0.9 | Repository verifier/fixture/recovery matrix independently reviewed; complete local candidate record outstanding | Close inherited qualification gates and harden only the existing narrow repository compatibility surface. |
-| Field inspection and exact correction | v0.10–v0.11 | v0.10 repository implementation complete but field/adoption exits outstanding; v0.11 Candidate | Qualify representative Sources and connect a professional View to CPU-authoritative review and reversible correction. |
+| Field inspection and exact correction | v0.10–v0.11 | v0.10 repository implementation complete; v0.11 repository-verified; field/adoption exits outstanding | Qualify representative Sources and connect a professional View to CPU-authoritative review and reversible correction. |
 | Spatial contract and production terrain | v0.12–v0.13 | Candidate | Make reference semantics explicit before persisting a bounded production-scale Surface. |
 | Terrain acceptance tooling | v0.14–v0.15 | Candidate | Add exact QA and only the constraints earned by field evidence. |
 | Downstream and partner product | v0.16–v0.18 | Candidate | Qualify one named downstream profile, then package and validate one narrow partner workflow. |
 | Product v1 qualification | v0.19–v1.0 | Candidate | Freeze, support-qualify, soak, and explicitly decide whether the maintained scope deserves v1. |
-| Open-source library adoption | v0.10–v0.20 | Active with v0.10, cross-cutting | Progress from an accurate public story and first-file quickstart to independent adoption, contributor readiness, stable integration guidance, and an evidence-backed funding path. |
+| Open-source library adoption | v0.10–v0.20 | v0.11 public example repository-verified; independent adoption outstanding; later work remains Candidate | Progress from an accurate public story and first-file quickstart to independent adoption, contributor readiness, stable integration guidance, and an evidence-backed funding path. |
 
 ## Deferred until evidence changes
 

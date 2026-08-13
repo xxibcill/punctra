@@ -6,7 +6,9 @@ and strict Run-bound evidence plus full-ceiling streaming implemented; v0.9 is
 an incomplete trust-qualification alpha with independent review complete and a
 complete local candidate record outstanding; the v0.10 professional inspection
 View repository implementation is complete with field/adoption publication
-outstanding; broader terrain, export, and product layers remain deferred
+outstanding; the v0.11 exact-review technical slice is repository-verified
+with its field-activation evidence outstanding; broader terrain, export, and
+product layers remain deferred
 
 The accepted versioned designs are authoritative:
 
@@ -20,6 +22,7 @@ The accepted versioned designs are authoritative:
 - [v0.8 Repository interoperability qualification](../design/design-partner-mvp-v0.8.md)
 - [v0.9 Trust and v1 Candidate](../design/trust-v1-candidate-v0.9.md)
 - [v0.10 Field Qualification and Professional Inspection View](../design/field-inspection-view-v0.10.md)
+- [v0.11 Exact Interactive Review and Ground Correction](../design/exact-interactive-review-v0.11.md)
 
 The current foundation is headless and embeddable. It reads immutable Sources,
 prepares a complete rebuildable Spatial Index, resolves progressive display,
@@ -38,6 +41,7 @@ An arrow means “may depend on.” Cycles are forbidden.
 ~~~mermaid
 flowchart TD
     APP["Host applications"] --> WS["point-workspace"]
+    APP --> REV["point-review"]
     APP --> TER["point-terrain"]
     APP --> VIEW["point-view"]
     APP --> RW["render-wgpu"]
@@ -46,6 +50,7 @@ flowchart TD
 
     RDEMO["renderer-demo"] --> VIEW
     RDEMO --> RW
+    RDEMO --> REV
     RDEMO --> IDX
     RDEMO --> LAS
     RDEMO --> SRC
@@ -54,6 +59,9 @@ flowchart TD
     WS --> SRC
     WS --> CT["point-contracts"]
     WS --> RT["foundation-runtime"]
+
+    REV --> WS
+    REV --> RP["render-protocol"]
 
     TER --> WS
     TER --> CT
@@ -111,6 +119,9 @@ buffers, Workspace journal frames, spill files, or GPU buffers.
 - `point-workspace` owns its manifest, Point Set spills, effective
   classification overlays, immutable Revisions, Operation records, and exact
   rebuildable Revision Audits.
+- `point-review` owns CPU-authoritative projection of exact Snapshot rows for
+  inclusive screen-through rectangles and exact one-Point confirmation. It
+  owns no GPU, window, Workspace persistence, or mutation policy.
 - `point-terrain` owns Ground Input normalization, robust triangulation,
   canonical `SurfaceVertex`/`SurfaceFace` values, detached Check Point QA, and
   the private LandXML encoder and exact-target reconciliation.
@@ -127,12 +138,13 @@ buffers, Workspace journal frames, spill files, or GPU buffers.
 ### Exact work and display work stay distinct
 
 Exact Workspace selection and `Snapshot::point_rows` read CPU-authoritative
-Source values and apply Revision overlays. Terrain Derivation consumes that
-complete Point-row stream; it never consumes display samples. A View may be
-partial and may use display samples and origin-relative `f32` coordinates. A
-GPU pick is only a Pick Hint; the Workspace can confirm explicit Point
-Identities but does not implement complete screen, brush, visible-only, or
-occlusion selection.
+Source values and apply Revision overlays. Terrain Derivation and
+`point-review` consume that complete Point-row stream; neither consumes display
+samples. A View may be partial and may use display samples and origin-relative
+`f32` coordinates. A GPU pick is only a Pick Hint. `point-review` confirms one
+identity or evaluates one complete inclusive screen-through rectangle against
+a pinned Snapshot; brush, polygon, visible-only, and occlusion selection remain
+unimplemented.
 
 ### Durable and rebuildable state stay distinct
 
@@ -154,11 +166,14 @@ value.
 
 The Source seam is proven by memory, LAS, and LAZ implementations. The
 `point-workspace` seam is proven by its direct example, generated LAS/LAZ
-integration, and public interface tests. The `point-terrain` seam is proven by
+integration, and public interface tests. The `point-review` seam is proven by
+public interface tests and the private renderer host that composes it with an
+existing Workspace. The `point-terrain` seam is proven by
 its public example, package benchmark, interface/resource/topology/QA/LandXML
 tests, and `terrain-demo` process caller. COPC, constrained or persisted
-terrain, general LandXML, remote reads, screen selection, general Edits, and
-application UI remain deferred until an accepted design and caller earn them.
+terrain, general LandXML, remote reads, polygon/brush/visible-only selection,
+general Edits, and application UI remain deferred until an accepted design and
+caller earn them.
 
 ## Typical headless composition
 
@@ -227,7 +242,10 @@ Implemented document and terrain behavior is deliberately narrow:
 - bounded detached Check Point residual QA;
 - one private metric-metre LandXML 1.2 points/faces subset with create-new and
   exact-existing reconciliation;
-- exact immutable Revision Audits and Edit Footprints; and
+- exact immutable Revision Audits and Edit Footprints;
+- one exact CPU screen-through rectangle and one provisional-pick confirmation
+  path, each pinned to an immutable Snapshot and returning a spillable Point
+  Set; and
 - one private eight-frame `terrain-demo` Workflow Run with canonical report,
   exclusive lock, linked cancellation, and structured recovery actions.
 

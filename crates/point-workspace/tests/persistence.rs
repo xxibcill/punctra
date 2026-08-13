@@ -205,6 +205,187 @@ fn mixed_classification_commit_revert_and_reopen_preserve_every_snapshot() {
 }
 
 #[test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "one linear public flow proves both stale mutation paths create no Revision"
+)]
+fn stale_point_set_and_revert_rejections_leave_the_linear_history_unchanged() {
+    let (_temporary, _index, workspace, _ticks, _classifications) =
+        create_fixture_workspace("stale-mutations", 129);
+    let source = workspace.source();
+    let root = workspace.head();
+    let root_revision = root.provenance().revision();
+    let root_info = workspace
+        .revision_info(root_revision)
+        .expect("root Revision remains addressable");
+    assert_eq!(root_info.sequence(), 0);
+
+    let stale_root_points = root
+        .select_point_ids([PointId::new(source, 1)], selection_limits(1, 8 * MIB))
+        .blocking_wait()
+        .expect("root-pinned stale target materializes");
+    let advance_points = root
+        .select_point_ids([PointId::new(source, 2)], selection_limits(1, 8 * MIB))
+        .blocking_wait()
+        .expect("independent root target materializes");
+    let advance_operation = operation(61);
+    let advance_receipt = committed(
+        workspace
+            .commit(
+                CommitRequest::set_classification(advance_operation, advance_points, 40),
+                CommitLimits::default(),
+            )
+            .blocking_wait()
+            .expect("independent classification advances the head"),
+    );
+    let advanced = advance_receipt.revision();
+    let advanced_info = advance_receipt.revision_info();
+    assert_eq!(advance_receipt.operation(), advance_operation);
+    assert_eq!(advanced_info.parent(), Some(root_revision));
+    assert_eq!(advanced_info.sequence(), 1);
+
+    let stale_point_operation = operation(62);
+    let stale_point_rejection = CommitRejection::StaleHead {
+        expected: root_revision,
+        actual: advanced,
+    };
+    assert_eq!(
+        workspace
+            .commit(
+                CommitRequest::set_classification(stale_point_operation, stale_root_points, 41),
+                CommitLimits::default(),
+            )
+            .blocking_wait()
+            .expect("stale Point Set has a definitive outcome"),
+        CommitOutcome::Rejected(stale_point_rejection)
+    );
+    assert_eq!(workspace.head().provenance().revision(), advanced);
+    assert_eq!(
+        workspace
+            .revision_info(advanced)
+            .expect("advanced Revision remains unchanged"),
+        advanced_info
+    );
+    match workspace
+        .resolve_operation(stale_point_operation)
+        .expect("stale Point Set operation resolves")
+    {
+        OperationResolution::Rejected(recorded) => {
+            assert_eq!(recorded.operation(), stale_point_operation);
+            assert_eq!(recorded.reason(), stale_point_rejection);
+        }
+        other => panic!("expected durable stale-Point-Set rejection, got {other:?}"),
+    }
+
+    let revert_target_points = workspace
+        .head()
+        .select_point_ids([PointId::new(source, 3)], selection_limits(1, 8 * MIB))
+        .blocking_wait()
+        .expect("Revert target points materialize");
+    let revert_target_operation = operation(63);
+    let revert_target_receipt = committed(
+        workspace
+            .commit(
+                CommitRequest::set_classification(
+                    revert_target_operation,
+                    revert_target_points,
+                    42,
+                ),
+                CommitLimits::default(),
+            )
+            .blocking_wait()
+            .expect("Revert target commits"),
+    );
+    let revert_target = revert_target_receipt.revision();
+    assert_eq!(revert_target_receipt.operation(), revert_target_operation);
+    assert_eq!(
+        revert_target_receipt.revision_info().parent(),
+        Some(advanced)
+    );
+    assert_eq!(revert_target_receipt.revision_info().sequence(), 2);
+
+    let past_target_points = workspace
+        .head()
+        .select_point_ids([PointId::new(source, 4)], selection_limits(1, 8 * MIB))
+        .blocking_wait()
+        .expect("post-target points materialize");
+    let past_target_operation = operation(64);
+    let past_target_receipt = committed(
+        workspace
+            .commit(
+                CommitRequest::set_classification(past_target_operation, past_target_points, 43),
+                CommitLimits::default(),
+            )
+            .blocking_wait()
+            .expect("head advances past the Revert target"),
+    );
+    let past_target = past_target_receipt.revision();
+    let past_target_info = past_target_receipt.revision_info();
+    assert_eq!(past_target_receipt.operation(), past_target_operation);
+    assert_eq!(past_target_info.parent(), Some(revert_target));
+    assert_eq!(past_target_info.sequence(), 3);
+
+    let stale_revert_operation = operation(65);
+    let stale_revert_rejection = CommitRejection::StaleHead {
+        expected: revert_target,
+        actual: past_target,
+    };
+    assert_eq!(
+        workspace
+            .commit(
+                CommitRequest::revert_head(stale_revert_operation, revert_target),
+                CommitLimits::default(),
+            )
+            .blocking_wait()
+            .expect("stale Revert has a definitive outcome"),
+        CommitOutcome::Rejected(stale_revert_rejection)
+    );
+    assert_eq!(workspace.head().provenance().revision(), past_target);
+    assert_eq!(
+        workspace
+            .revision_info(past_target)
+            .expect("post-target Revision remains unchanged"),
+        past_target_info
+    );
+    match workspace
+        .resolve_operation(stale_revert_operation)
+        .expect("stale Revert operation resolves")
+    {
+        OperationResolution::Rejected(recorded) => {
+            assert_eq!(recorded.operation(), stale_revert_operation);
+            assert_eq!(recorded.reason(), stale_revert_rejection);
+        }
+        other => panic!("expected durable stale-Revert rejection, got {other:?}"),
+    }
+
+    let final_points = workspace
+        .head()
+        .select_point_ids([PointId::new(source, 5)], selection_limits(1, 8 * MIB))
+        .blocking_wait()
+        .expect("final sequence-witness points materialize");
+    let final_operation = operation(66);
+    let final_receipt = committed(
+        workspace
+            .commit(
+                CommitRequest::set_classification(final_operation, final_points, 44),
+                CommitLimits::default(),
+            )
+            .blocking_wait()
+            .expect("final sequence witness commits"),
+    );
+    assert_eq!(final_receipt.operation(), final_operation);
+    assert_eq!(final_receipt.revision_info().parent(), Some(past_target));
+    assert_eq!(final_receipt.revision_info().sequence(), 4);
+    assert_eq!(root.provenance().revision(), root_revision);
+    assert_eq!(
+        workspace
+            .revision_info(root_revision)
+            .expect("retained root remains immutable"),
+        root_info
+    );
+}
+
+#[test]
 fn operation_identity_is_idempotent_and_durable_rejections_remain_authoritative() {
     let (temporary, index, workspace, _ticks, _classifications) =
         create_fixture_workspace("operation-identity", 513);

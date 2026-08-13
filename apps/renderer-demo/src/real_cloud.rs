@@ -74,7 +74,28 @@ impl RealCloudScene {
         index: PreparedIndex,
         display_mode: DisplayMode,
     ) -> SceneResult<Self> {
-        validate_display_contract(display_mode, index.descriptor().display_sample_contract())?;
+        Self::new_with_contract(generation, index, display_mode, false)
+    }
+
+    pub(crate) fn new_for_review(
+        generation: ViewGenerationKey,
+        index: PreparedIndex,
+        display_mode: DisplayMode,
+    ) -> SceneResult<Self> {
+        Self::new_with_contract(generation, index, display_mode, true)
+    }
+
+    fn new_with_contract(
+        generation: ViewGenerationKey,
+        index: PreparedIndex,
+        display_mode: DisplayMode,
+        exact_review: bool,
+    ) -> SceneResult<Self> {
+        validate_display_contract(
+            display_mode,
+            index.descriptor().display_sample_contract(),
+            exact_review,
+        )?;
         let node_count = index.hierarchy().nodes().len();
         let preflight_hierarchy_bytes = hierarchy_charge(node_count)?;
         if preflight_hierarchy_bytes > HIERARCHY_BYTE_BUDGET {
@@ -425,7 +446,7 @@ impl RealCloudScene {
                 ));
             }
             let attributes = batch.display_attributes();
-            if self.colorizer.requires_attributes() != attributes.is_some() {
+            if self.colorizer.requires_attributes() && attributes.is_none() {
                 return Err(internal_failure(
                     ViewPhase::NodeRead,
                     "index display Attribute rows did not match the selected display mode",
@@ -847,6 +868,7 @@ fn validate_summary(
 fn validate_display_contract(
     mode: DisplayMode,
     contract: Option<DisplaySampleContract>,
+    exact_review: bool,
 ) -> SceneResult<()> {
     match (mode, contract) {
         (DisplayMode::Neutral | DisplayMode::Elevation, None)
@@ -860,6 +882,7 @@ fn validate_display_contract(
                 "the selected attributed display requires a v2 inspection index",
             )))
         }
+        (DisplayMode::Neutral | DisplayMode::Elevation, Some(_)) if exact_review => Ok(()),
         (DisplayMode::Neutral | DisplayMode::Elevation, Some(_)) => {
             Err(Box::new(ViewFailure::invalid_request(
                 "neutral and elevation displays require the position-only v1 index recipe",
@@ -1496,7 +1519,7 @@ mod tests {
         let index = point_index::prepare_with_recipe(
             source,
             directory.join("fixture.inspection.pidx"),
-            crate::display_index_recipe(display_mode)?,
+            crate::display_index_recipe(display_mode, false)?,
             PrepareLimits::default(),
         )
         .blocking_wait()?;

@@ -3,8 +3,9 @@
 Status: implemented verification through the v0.8 full-ceiling streaming,
 Run-bound verifier and the v0.9 fixture/recovery matrix; independent review is
 complete and a one-commit candidate record remains outstanding; v0.10
-professional inspection View repository verification complete; all gates run
-locally
+professional inspection View repository verification complete; v0.11 exact
+review interface, benchmark, host-example, process, and GPU gates are complete
+and repository-verified; all gates run locally
 
 Verification follows public contracts first. Private tests are used for fault
 injection and measured implementation boundaries that cannot be triggered
@@ -150,6 +151,26 @@ The selection unit gate measures worker-equivalent allocation around the same
 private worker function used by the Job. Its observed peak was 6,292,224 bytes
 under a 64 MiB ceiling, with zero retained measured allocations.
 
+### point-review
+
+Public interface fixtures independently exercise perspective and orthographic
+CPU projection, inclusive clip/rectangle edges, top-left screen coordinates,
+optional effective-classification filtering, normalized and invalid rectangle
+input, exact pick confirmation, foreign/out-of-range identities, Snapshot
+provenance, resident/forced-spill Point Sets, hard match/working limits, and
+cancellation without terminal publication. Confirmed values come from exact
+ticks and overlays rather than renderer payloads.
+
+The generated Criterion benchmark measures the complete screen-through scan at
+declared fixture sizes and reports resident versus forced-spill disposition,
+generated Source/match counts, and every configured review/Point Set resource
+ceiling. It additionally reports the terminal review's conservative
+algorithm-accounted working high-water and stable owned-fixture
+file-count/logical-file-length delta while each verified Point Set remains
+alive. Those are not measured heap, allocated filesystem blocks, or
+process-wide disk observations. It is repository microbenchmark evidence, not
+a production latency or attended-time claim.
+
 ### point-terrain and terrain-demo
 
 The `point-terrain` package and documentation suites cover:
@@ -257,6 +278,8 @@ an empty baseline-to-restored Surface Change Envelope.
 
 - generation reset and stale update rejection;
 - atomic Upsert and conditional Remove;
+- atomic complete-highlight rejection before duplicate removal under its
+  independent input ceiling;
 - frustum and screen-space-error selection;
 - deterministic priority and hierarchy-cut decisions;
 - point, byte, and batch reservation;
@@ -271,6 +294,8 @@ an empty baseline-to-restored Surface Change Envelope.
 - large-world origins and camera-stable multi-frame recording;
 - `RecordedFrame` resource and identity retention;
 - asynchronous provisional picking;
+- a public-only host example that owns wgpu setup, submission, polling, and a
+  bounded provisional pick without importing private demo state;
 - host-owned submission and polling;
 - planner-to-renderer parent Coverage retirement after replacements render;
 - exact neutral/elevation/RGB/intensity/classification CPU color mapping,
@@ -420,12 +445,14 @@ cargo bench -p source-memory --bench read
 cargo bench -p source-las --bench read
 cargo bench -p point-index --bench index
 cargo bench -p point-workspace --bench document
+cargo bench -p point-review --bench review
 cargo bench -p point-terrain --bench terrain
 cargo bench -p terrain-demo --bench journal
 cargo bench -p renderer-demo --bench viewing
 
 cargo run -p source-memory --example memory_source
 cargo run -p point-index --example direct_use
+PUNCTRA_REQUIRE_GPU=1 cargo run -p render-wgpu --example third_party_host
 cargo run --release -p point-workspace --example classify -- \
   survey.laz survey.laz.pidx survey.pcw 6
 cargo run -p point-terrain --example derive
@@ -441,7 +468,8 @@ PUNCTRA_REQUIRE_GPU=1 cargo test -p render-wgpu --test offscreen
 PUNCTRA_REQUIRE_GPU=1 cargo test -p renderer-demo --test planner
 PUNCTRA_REQUIRE_GPU=1 cargo test -p renderer-demo --test display_gpu
 test -f docs/guides/first-las-laz.md
-jq -e . docs/guides/field-corpus.example.json >/dev/null
+ruby -rjson -e 'JSON.parse(File.read(ARGV.fetch(0)))' \
+  docs/guides/field-corpus.example.json
 git diff --check
 ~~~
 
@@ -505,6 +533,47 @@ An independent two-axis review of `3dc4cb1` through this working tree completed
 on 2026-08-13 with zero P0–P3 findings on both Standards and Spec. That closes
 the review gate only; it does not turn the working-tree verification above into
 a release candidate or close any external evidence gate.
+
+### v0.11 exact-commit verification record
+
+On 2026-08-13, the complete authoritative sequence above passed from the exact
+`codex/exact-interactive-review-v0.11` commit containing this record, based
+directly on canonical v0.10 commit `30ea9ff`. The reference environment was an
+Apple M5 Pro (`Mac17,9`), 24 GiB, arm64, macOS 26.5.2, APFS, Rust 1.90.0, and
+Cargo 1.90.0. Required GPU acceptance used the built-in 16-core Apple M5 Pro
+through Metal 4 with `PUNCTRA_REQUIRE_GPU=1`; renderer offscreen, planner,
+display, corpus, and the public `third_party_host` pick example all passed.
+
+Formatting, workspace Clippy with warnings denied, all-feature workspace tests,
+rustdoc with warnings denied, fuzz formatting/check/tests, every documented
+example and focused package/process/golden lane, guide and JSON validation, and
+`git diff --check` passed. All nine default benchmark commands exited
+successfully. The exact-review benchmark retained and fully traversed both
+resident and forced-spill Point Sets before timing. Its final local generated
+facts were:
+
+| Exact-review evidence | Resident | Forced spill |
+|---|---:|---:|
+| 20,000-Point scan Criterion interval | 1.5851–1.6603 ms | 10.569–11.828 ms |
+| Exact matches | 5,151 | 5,151 |
+| Algorithm-accounted working high-water | 134,709,248 B | 134,709,248 B |
+| Composition ceiling | 268,435,456 B | 268,435,456 B |
+| Point Set resident ceiling | 67,108,864 B | 0 B |
+| Point Set temporary ceiling | 4,294,967,296 B | 4,294,967,296 B |
+| Stable owned-fixture file delta while retained | 0 files / 0 B logical length | 1 file / 46,550 B logical length |
+
+The working high-water is conservative algorithm accounting, not measured
+heap. File evidence is a stable recursive count and sum of logical file lengths
+inside the benchmark-owned temporary root, not allocated filesystem blocks or
+process-wide disk use. Criterion intervals are local generated-fixture
+microbenchmarks, not production latency or interactive-response promises.
+
+Independent Standards/Spec review after the final cancellation, boundary,
+highlight, durability, and benchmark-evidence fixes found no remaining P0–P2
+blocker. This closes only v0.11's repository technical slice. Field activation,
+licensed workflow observation, professional time/rework evidence, independent
+adoption, partner validation, v0.9's inherited candidate record, and broader
+support qualification remain outstanding.
 
 ### Release qualification
 
