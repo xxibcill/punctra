@@ -2481,8 +2481,12 @@ fn workspace_failure(
     context: FailureContext,
 ) -> WorkflowFailure {
     let error_is_io = workspace_error_is_io(&error);
+    let error_is_indeterminate = matches!(
+        &error,
+        WorkspaceError::Poisoned | WorkspaceError::RecoveryIndeterminate { .. }
+    );
     if matches!(&error, WorkspaceError::Cancelled)
-        || (control.check_cancelled().is_err() && !error_is_io)
+        || (control.check_cancelled().is_err() && !error_is_io && !error_is_indeterminate)
     {
         return cancelled_failure(stage, context);
     }
@@ -3278,6 +3282,48 @@ mod tests {
                 .diagnostic()
                 .contains("injected terrain nested Index I/O")
         );
+    }
+
+    #[test]
+    fn workspace_uncertainty_wins_over_concurrent_ambient_cancellation() {
+        let control = OperationControl::new();
+        control.cancel();
+        let failure = workspace_failure(
+            WorkflowStage::Commit,
+            WorkspaceError::RecoveryIndeterminate {
+                operation: None,
+                reason: point_workspace::WorkspaceDiagnostic::new(
+                    "injected directory-sync uncertainty",
+                ),
+            },
+            &control,
+            FailureContext::default(),
+        );
+
+        assert_eq!(failure.code(), "PWF_OPERATION_INDETERMINATE");
+        assert_eq!(failure.certainty(), "indeterminate");
+        assert_eq!(
+            failure.publication_phase(),
+            Some("workspace-directory-sync")
+        );
+        assert_eq!(
+            failure.recovery_action(),
+            "resume to resolve the recorded Operation Identity"
+        );
+        assert!(
+            failure
+                .diagnostic()
+                .contains("injected directory-sync uncertainty")
+        );
+
+        let poisoned = workspace_failure(
+            WorkflowStage::Commit,
+            WorkspaceError::Poisoned,
+            &control,
+            FailureContext::default(),
+        );
+        assert_eq!(poisoned.code(), "PWF_OPERATION_INDETERMINATE");
+        assert_eq!(poisoned.certainty(), "indeterminate");
     }
 
     #[test]
