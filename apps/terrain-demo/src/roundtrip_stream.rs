@@ -9,7 +9,7 @@ use std::{
 use foundation_runtime::OperationControl;
 use quick_xml::{
     XmlVersion,
-    events::{BytesStart, Event},
+    events::{BytesCData, BytesRef, BytesStart, Event},
     name::ResolveResult,
     reader::NsReader,
 };
@@ -445,10 +445,18 @@ impl<'a> StreamParser<'a> {
                     validate_utf8_declaration(self.side, &declaration),
                 )?,
                 Event::PI(_) => {}
-                Event::DocType(_) | Event::GeneralRef(_) | Event::CData(_) => {
+                Event::GeneralRef(reference) => {
+                    let result = self.reference(&reference, semantic_failure.is_none());
+                    retain_semantic_failure(&mut semantic_failure, result)?;
+                }
+                Event::CData(cdata) => {
+                    let result = self.cdata(&cdata, semantic_failure.is_none());
+                    retain_semantic_failure(&mut semantic_failure, result)?;
+                }
+                Event::DocType(_) => {
                     retain_semantic_failure(
                         &mut semantic_failure,
-                        Err(self.xml_invalid("DTD, entity, or CDATA input is unsupported")),
+                        Err(self.xml_invalid("DTD input is unsupported")),
                     )?;
                 }
                 Event::Empty(_) => unreachable!("empty elements are expanded"),
@@ -498,24 +506,82 @@ impl<'a> StreamParser<'a> {
         parse_semantics: bool,
     ) -> Result<(), RoundTripFailure> {
         self.add_text_bytes(text.as_ref().len())?;
+        let decoded = text.decode().map_err(|error| {
+            RoundTripFailure::semantic(
+                RoundTripReason::XmlInvalid,
+                format_args!("{} XML text is invalid: {error}", self.side),
+            )
+        })?;
+        self.decoded_text(&decoded, parse_semantics)
+    }
+
+    fn cdata(
+        &mut self,
+        cdata: &BytesCData<'_>,
+        parse_semantics: bool,
+    ) -> Result<(), RoundTripFailure> {
+        self.add_text_bytes(cdata.as_ref().len())?;
+        let decoded = cdata
+            .xml_content(XmlVersion::Implicit1_0)
+            .map_err(|error| {
+                RoundTripFailure::semantic(
+                    RoundTripReason::XmlInvalid,
+                    format_args!("{} XML CDATA is invalid: {error}", self.side),
+                )
+            })?;
+        self.decoded_text(&decoded, parse_semantics)
+    }
+
+    fn reference(
+        &mut self,
+        reference: &BytesRef<'_>,
+        parse_semantics: bool,
+    ) -> Result<(), RoundTripFailure> {
+        self.add_text_bytes(reference.as_ref().len())?;
+        let decoded = reference.decode().map_err(|error| {
+            RoundTripFailure::semantic(
+                RoundTripReason::XmlInvalid,
+                format_args!("{} XML reference is invalid: {error}", self.side),
+            )
+        })?;
+        let character = if let Some(character) = reference.resolve_char_ref().map_err(|error| {
+            RoundTripFailure::semantic(
+                RoundTripReason::XmlInvalid,
+                format_args!("{} XML character reference is invalid: {error}", self.side),
+            )
+        })? {
+            character
+        } else {
+            match decoded.as_ref() {
+                "lt" => '<',
+                "gt" => '>',
+                "amp" => '&',
+                "apos" => '\'',
+                "quot" => '"',
+                _ => {
+                    return Err(self.xml_invalid("undeclared XML entity is unsupported"));
+                }
+            }
+        };
+        if !is_xml_1_0_character(character) {
+            return Err(self.xml_invalid("XML character reference is not legal in XML 1.0"));
+        }
+        self.decoded_text(character.encode_utf8(&mut [0; 4]), parse_semantics)
+    }
+
+    fn decoded_text(
+        &mut self,
+        decoded: &str,
+        parse_semantics: bool,
+    ) -> Result<(), RoundTripFailure> {
         if !parse_semantics {
             return Ok(());
         }
         if matches!(self.stack.last(), Some(Tag::Point | Tag::Face)) {
-            return text.decode().map_or_else(
-                |error| {
-                    Err(RoundTripFailure::semantic(
-                        RoundTripReason::XmlInvalid,
-                        format_args!("{} XML text is invalid: {error}", self.side),
-                    ))
-                },
-                |decoded| {
-                    self.simple_text.push_str(&decoded);
-                    Ok(())
-                },
-            );
+            self.simple_text.push_str(decoded);
+            return Ok(());
         }
-        if self.metadata_depth == 0 && text.decode().is_ok_and(|value| !value.trim().is_empty()) {
+        if self.metadata_depth == 0 && !decoded.trim().is_empty() {
             return Err(self.unsupported("semantic container has unexpected text"));
         }
         Ok(())
@@ -904,6 +970,13 @@ fn parse_id(side: InputSide, value: Option<&str>) -> Result<u64, RoundTripFailur
         })
 }
 
+const fn is_xml_1_0_character(character: char) -> bool {
+    matches!(
+        character,
+        '\u{9}' | '\u{a}' | '\u{d}' | '\u{20}'..='\u{d7ff}' | '\u{e000}'..='\u{fffd}' | '\u{10000}'..='\u{10ffff}'
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use std::{
@@ -989,6 +1062,30 @@ mod tests {
             RoundTripLimits::full_v07_export(),
         )
         .expect("an absent surface name remains non-semantic");
+
+        assert!(matches!(evaluation, RoundTripEvaluation::Passed(_)));
+    }
+
+    #[test]
+    fn streaming_reader_accepts_standard_xml_text_forms() {
+        let directory = Directory::new();
+        let reference = directory.path.join("reference.xml");
+        let returned = directory.path.join("returned.xml");
+        let reference_xml = xml("1", "2", "3", "1 2 3");
+        let returned_xml = reference_xml
+            .replacen("<Units>", "<Project>A &amp; B</Project><Units>", 1)
+            .replacen(">0 0 0</P>", "><![CDATA[0]]>&#32;0&#x20;0</P>", 1);
+        fs::write(&reference, reference_xml).unwrap();
+        fs::write(&returned, returned_xml).unwrap();
+
+        let evaluation = evaluate_streaming_round_trip(
+            &reference,
+            &returned,
+            RoundTripDeclaration::new("generated", "test", "metric").unwrap(),
+            RoundTripTolerances::new(0.0, 0.0).unwrap(),
+            RoundTripLimits::full_v07_export(),
+        )
+        .expect("standard XML references and CDATA evaluate normally");
 
         assert!(matches!(evaluation, RoundTripEvaluation::Passed(_)));
     }
