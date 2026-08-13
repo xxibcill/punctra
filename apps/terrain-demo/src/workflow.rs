@@ -2461,9 +2461,15 @@ fn terrain_failure(
 fn terrain_error_is_io(error: &point_terrain::TerrainError) -> bool {
     match error {
         point_terrain::TerrainError::Io { .. } => true,
-        point_terrain::TerrainError::Workspace { source, .. } => {
-            matches!(source.as_ref(), WorkspaceError::Io { .. })
-        }
+        point_terrain::TerrainError::Workspace { source, .. } => workspace_error_is_io(source),
+        _ => false,
+    }
+}
+
+fn workspace_error_is_io(error: &WorkspaceError) -> bool {
+    match error {
+        WorkspaceError::Io { .. } => true,
+        WorkspaceError::Index { source, .. } => matches!(source, IndexError::Io { .. }),
         _ => false,
     }
 }
@@ -2474,8 +2480,9 @@ fn workspace_failure(
     control: &OperationControl,
     context: FailureContext,
 ) -> WorkflowFailure {
+    let error_is_io = workspace_error_is_io(&error);
     if matches!(&error, WorkspaceError::Cancelled)
-        || (control.check_cancelled().is_err() && !matches!(&error, WorkspaceError::Io { .. }))
+        || (control.check_cancelled().is_err() && !error_is_io)
     {
         return cancelled_failure(stage, context);
     }
@@ -2515,7 +2522,7 @@ fn workspace_failure(
             Certainty::PrePublication,
             RecoveryAction::ResumeSameRun,
         ),
-        WorkspaceError::Io { .. } => (
+        _ if error_is_io => (
             FailureCode::Io,
             Certainty::PrePublication,
             RecoveryAction::RetryAfterRestoringDisk,
@@ -3229,6 +3236,47 @@ mod tests {
             nested
                 .diagnostic()
                 .contains("injected nested Workspace I/O")
+        );
+
+        let nested_index = workspace_failure(
+            WorkflowStage::Selection,
+            WorkspaceError::from(IndexError::Io {
+                operation: "read Workspace index",
+                path: PathBuf::from("workspace.pidx"),
+                source: io::Error::other("injected nested Index I/O"),
+            }),
+            &control,
+            FailureContext::default(),
+        );
+        assert_eq!(nested_index.code(), "PWF_IO");
+        assert_eq!(nested_index.certainty(), "pre_publication");
+        assert!(nested_index.diagnostic().contains("workspace.pidx"));
+        assert!(
+            nested_index
+                .diagnostic()
+                .contains("injected nested Index I/O")
+        );
+
+        let terrain_nested_index = terrain_failure(
+            WorkflowStage::Terrain,
+            point_terrain::TerrainError::from(WorkspaceError::from(IndexError::Io {
+                operation: "read terrain Workspace index",
+                path: PathBuf::from("terrain-workspace.pidx"),
+                source: io::Error::other("injected terrain nested Index I/O"),
+            })),
+            &control,
+            FailureContext::default(),
+        );
+        assert_eq!(terrain_nested_index.code(), "PWF_IO");
+        assert!(
+            terrain_nested_index
+                .diagnostic()
+                .contains("terrain-workspace.pidx")
+        );
+        assert!(
+            terrain_nested_index
+                .diagnostic()
+                .contains("injected terrain nested Index I/O")
         );
     }
 
