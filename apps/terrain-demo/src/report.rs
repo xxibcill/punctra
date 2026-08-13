@@ -23,7 +23,7 @@ use crate::{
     journal::{Digest, WorkflowRunId},
     publication::{
         DirectoryWitness, StageCreationError, StageGuard, create_stage as create_publication_stage,
-        same_file_identity, sync_directory,
+        same_file_identity, same_file_state, sync_directory,
     },
 };
 
@@ -972,14 +972,6 @@ fn changed_target_error(path: &Path) -> ReportError {
     ReportError::TargetChanged {
         path: path.to_path_buf(),
     }
-}
-
-fn same_file_state(left: &fs::Metadata, right: &fs::Metadata) -> bool {
-    left.len() == right.len()
-        && matches!(
-            (left.modified(), right.modified()),
-            (Ok(left_modified), Ok(right_modified)) if left_modified == right_modified
-        )
 }
 
 fn validate_limits(limits: ReportLimits) -> Result<(), ReportError> {

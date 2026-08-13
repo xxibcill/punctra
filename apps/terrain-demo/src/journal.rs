@@ -21,7 +21,7 @@ use thiserror::Error;
 
 use crate::publication::{
     DirectoryWitness, StageCreationError, StageGuard, create_stage as create_publication_stage,
-    same_file_identity, sync_directory,
+    same_file_identity, same_file_state, sync_directory,
 };
 
 const HEADER_MAGIC: &[u8; 8] = b"PTWFJ001";
@@ -2414,14 +2414,6 @@ fn verify_recognized_journal(file: &File, path: &Path, identity: &fs::Metadata) 
             "recognized journal target identity changed",
         ))
     }
-}
-
-fn same_file_state(left: &fs::Metadata, right: &fs::Metadata) -> bool {
-    left.len() == right.len()
-        && matches!(
-            (left.modified(), right.modified()),
-            (Ok(left_modified), Ok(right_modified)) if left_modified == right_modified
-        )
 }
 
 fn create_stage(parent: &Path) -> Result<(StageGuard, File), JournalError> {

@@ -659,7 +659,7 @@ fn verify_canonical_file(
     let final_metadata = fs::symlink_metadata(path)
         .map_err(|source| CanonicalFileError::io("reinspect canonical target", path, source))?;
     require_canonical_stable(path, &opened, &verified, &final_metadata)?;
-    if !same_canonical_file_state(&opened, &verified) || byte_length != final_metadata.len() {
+    if !same_file_state(&opened, &verified) || byte_length != final_metadata.len() {
         return Err(changed_canonical_target(path));
     }
     Ok(CanonicalFileFacts {
@@ -692,8 +692,8 @@ fn require_canonical_stable(
     require_canonical_regular_file(path, current)?;
     if same_file_identity(initial, opened)
         && same_file_identity(opened, current)
-        && same_canonical_file_state(initial, opened)
-        && same_canonical_file_state(opened, current)
+        && same_file_state(initial, opened)
+        && same_file_state(opened, current)
     {
         Ok(())
     } else {
@@ -701,7 +701,7 @@ fn require_canonical_stable(
     }
 }
 
-fn same_canonical_file_state(left: &fs::Metadata, right: &fs::Metadata) -> bool {
+pub(crate) fn same_file_state(left: &fs::Metadata, right: &fs::Metadata) -> bool {
     left.len() == right.len()
         && matches!(
             (left.modified(), right.modified()),
