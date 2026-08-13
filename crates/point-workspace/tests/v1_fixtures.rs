@@ -525,6 +525,7 @@ fn copy_tree(source: &Path, target: &Path) {
 
 fn copy_workspace_fixture(source: &Path, target: &Path) {
     copy_tree(source, target);
+    fs::create_dir_all(target.join("scratch")).unwrap();
     let ready = target.join("operations/01010101010101010101010101010101.ready");
     let revision = target.join(format!(
         "revisions/00000000000000000001-{COMMITTED_REVISION}.pwr"
