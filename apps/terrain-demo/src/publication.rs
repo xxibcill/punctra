@@ -517,10 +517,8 @@ fn reconcile_canonical_target(
         .parent_witness
         .verify()
         .map_err(|_| changed_canonical_target(context.target))?;
-    hook.reach(CanonicalBoundary::TerminalAcknowledgement)
-        .map_err(|source| {
-            CanonicalFileError::io("acknowledge canonical target", context.target, source)
-        })?;
+    require_canonical_boundary(hook, CanonicalBoundary::TerminalAcknowledgement, context)?;
+    revalidate_canonical_receipt(context, initial_metadata)?;
     Ok(canonical_receipt(
         context.expected,
         CanonicalFileDisposition::ReconciledExisting,
@@ -584,10 +582,40 @@ fn finish_canonical_publication(
         canonical_indeterminate(context.target, context.expected.content_hash, source)
     })?;
     require_canonical_boundary(hook, CanonicalBoundary::TerminalAcknowledgement, context)?;
+    revalidate_canonical_receipt(context, &target_metadata)?;
     Ok(canonical_receipt(
         context.expected,
         CanonicalFileDisposition::Created,
     ))
+}
+
+fn revalidate_canonical_receipt(
+    context: CanonicalPublicationContext<'_>,
+    initial_metadata: &fs::Metadata,
+) -> Result<(), CanonicalFileError> {
+    context.parent_witness.verify().map_err(|source| {
+        canonical_indeterminate(context.target, context.expected.content_hash, source)
+    })?;
+    let actual = verify_canonical_file(context.target, initial_metadata, context.limits).map_err(
+        |error| {
+            canonical_indeterminate(
+                context.target,
+                context.expected.content_hash,
+                io::Error::other(error),
+            )
+        },
+    )?;
+    if actual != context.expected {
+        return Err(canonical_indeterminate(
+            context.target,
+            context.expected.content_hash,
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "canonical target changed before acknowledgement",
+            ),
+        ));
+    }
+    Ok(())
 }
 
 fn require_canonical_boundary(
@@ -798,6 +826,29 @@ mod canonical_tests {
         assert_eq!(fs::read(&target).unwrap(), b"caller-owned conflict");
     }
 
+    #[test]
+    fn terminal_replacement_of_reconciled_target_is_indeterminate() {
+        let directory = Directory::new("terminal-replacement");
+        let target = directory.path.join("evidence.json");
+        let expected = b"canonical evidence\n";
+        let replacement = b"same-path replacement\n";
+        fs::write(&target, expected).unwrap();
+
+        let error = publish_canonical_bytes_with_hook(
+            &target,
+            expected,
+            limits(),
+            &ReplaceAtTerminal {
+                target: &target,
+                replacement,
+            },
+        )
+        .expect_err("a terminal same-path replacement cannot receive a success receipt");
+
+        assert!(matches!(error, CanonicalFileError::Indeterminate { .. }));
+        assert_eq!(fs::read(&target).unwrap(), replacement);
+    }
+
     fn limits() -> CanonicalFileLimits {
         CanonicalFileLimits {
             output_bytes: 1024,
@@ -816,6 +867,21 @@ mod canonical_tests {
             } else {
                 Ok(())
             }
+        }
+    }
+
+    struct ReplaceAtTerminal<'a> {
+        target: &'a std::path::Path,
+        replacement: &'a [u8],
+    }
+
+    impl CanonicalPublicationHook for ReplaceAtTerminal<'_> {
+        fn reach(&self, boundary: CanonicalBoundary) -> io::Result<()> {
+            if boundary == CanonicalBoundary::TerminalAcknowledgement {
+                fs::remove_file(self.target)?;
+                fs::write(self.target, self.replacement)?;
+            }
+            Ok(())
         }
     }
 
