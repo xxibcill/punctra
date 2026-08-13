@@ -680,6 +680,10 @@ fn reconcile_existing(
             actual_hash: actual.facts().hash,
         });
     }
+    require_reconciliation_boundary(hook, PublicationBoundary::TargetSync, control, target)?;
+    actual.sync_file().map_err(|error| {
+        TerrainError::io("sync reconciled LandXML target", target.display(), error)
+    })?;
     require_reconciliation_boundary(hook, PublicationBoundary::ParentSync, control, target)?;
     prepared.stage.sync_parent().map_err(|error| {
         TerrainError::io(
@@ -2804,6 +2808,7 @@ mod tests {
 
         for boundary in [
             PublicationBoundary::TargetVerification,
+            PublicationBoundary::TargetSync,
             PublicationBoundary::ParentSync,
             PublicationBoundary::TerminalProgress,
         ] {
