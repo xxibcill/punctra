@@ -360,98 +360,74 @@ fn parse_verify_round_trip<I>(
 where
     I: Iterator<Item = OsString>,
 {
-    let mut application = None;
-    let mut version = None;
-    let mut settings_profile = None;
-    let mut horizontal_tolerance = None;
-    let mut vertical_tolerance = None;
-    let mut paths = Vec::new();
-    reserve(&mut paths, 3, "round-trip evidence path storage")?;
-    while let Some(argument) = arguments.next()? {
-        match argument.to_str() {
-            Some("--downstream-app") => set_once(
-                &mut application,
-                arguments.require_value("--downstream-app")?,
-                "--downstream-app",
-            )?,
-            Some("--downstream-version") => set_once(
-                &mut version,
-                arguments.require_value("--downstream-version")?,
-                "--downstream-version",
-            )?,
-            Some("--downstream-setting") => set_once(
-                &mut settings_profile,
-                arguments.require_value("--downstream-setting")?,
-                "--downstream-setting",
-            )?,
-            Some("--horizontal-tolerance-metres") => set_once(
-                &mut horizontal_tolerance,
-                parse_f64(
-                    &arguments.require_value("--horizontal-tolerance-metres")?,
-                    "horizontal tolerance",
-                )?,
-                "--horizontal-tolerance-metres",
-            )?,
-            Some("--vertical-tolerance-metres") => set_once(
-                &mut vertical_tolerance,
-                parse_f64(
-                    &arguments.require_value("--vertical-tolerance-metres")?,
-                    "vertical tolerance",
-                )?,
-                "--vertical-tolerance-metres",
-            )?,
-            Some(value) if value.starts_with('-') => {
-                return Err(invalid(
-                    "unknown verify-round-trip option; use --help for usage",
-                ));
-            }
-            _ => push_bounded(
-                &mut paths,
-                PathBuf::from(argument),
-                3,
-                "round-trip evidence positional path count",
-            )?,
-        }
-    }
-    let [run_root, returned, evidence_target]: [PathBuf; 3] = paths.try_into().map_err(|_| {
-        invalid("verify-round-trip requires RUN_ROOT, RETURNED, and EVIDENCE_TARGET paths")
-    })?;
-    let declaration = RoundTripDeclaration::new(
-        unicode(
-            application
-                .as_ref()
-                .ok_or_else(|| invalid("missing --downstream-app"))?,
-            "--downstream-app",
-        )?,
-        unicode(
-            version
-                .as_ref()
-                .ok_or_else(|| invalid("missing --downstream-version"))?,
-            "--downstream-version",
-        )?,
-        unicode(
-            settings_profile
-                .as_ref()
-                .ok_or_else(|| invalid("missing --downstream-setting"))?,
-            "--downstream-setting",
-        )?,
-    )
-    .map_err(|error| round_trip_failure(&error))?;
-    let tolerances = RoundTripTolerances::new(
-        horizontal_tolerance.ok_or_else(|| invalid("missing --horizontal-tolerance-metres"))?,
-        vertical_tolerance.ok_or_else(|| invalid("missing --vertical-tolerance-metres"))?,
-    )
-    .map_err(|error| round_trip_failure(&error))?;
+    let parsed = parse_round_trip_arguments(
+        arguments,
+        RoundTripCliGrammar {
+            application: "--downstream-app",
+            version: "--downstream-version",
+            settings_profile: "--downstream-setting",
+            path_storage_limit: "round-trip evidence path storage",
+            positional_limit: "round-trip evidence positional path count",
+            positional_error: "verify-round-trip requires RUN_ROOT, RETURNED, and EVIDENCE_TARGET paths",
+            unknown_option_error: "unknown verify-round-trip option; use --help for usage",
+        },
+    )?;
+    let [run_root, returned, evidence_target] = parsed.paths;
     Ok(Command::VerifyRoundTrip {
         run_root,
         returned,
         evidence_target,
-        declaration,
-        tolerances,
+        declaration: parsed.declaration,
+        tolerances: parsed.tolerances,
     })
 }
 
 fn parse_compare_landxml<I>(arguments: &mut BoundedArguments<I>) -> Result<Command, WorkflowFailure>
+where
+    I: Iterator<Item = OsString>,
+{
+    let parsed = parse_round_trip_arguments(
+        arguments,
+        RoundTripCliGrammar {
+            application: "--application",
+            version: "--application-version",
+            settings_profile: "--settings-profile",
+            path_storage_limit: "round-trip path storage",
+            positional_limit: "round-trip positional path count",
+            positional_error: "compare-landxml requires REFERENCE and RETURNED paths",
+            unknown_option_error: "unknown compare-landxml option; use --help for usage",
+        },
+    )?;
+    let [reference, returned] = parsed.paths;
+    Ok(Command::CompareLandXml {
+        reference,
+        returned,
+        declaration: parsed.declaration,
+        tolerances: parsed.tolerances,
+    })
+}
+
+#[derive(Clone, Copy)]
+struct RoundTripCliGrammar {
+    application: &'static str,
+    version: &'static str,
+    settings_profile: &'static str,
+    path_storage_limit: &'static str,
+    positional_limit: &'static str,
+    positional_error: &'static str,
+    unknown_option_error: &'static str,
+}
+
+struct ParsedRoundTripArguments<const PATHS: usize> {
+    paths: [PathBuf; PATHS],
+    declaration: RoundTripDeclaration,
+    tolerances: RoundTripTolerances,
+}
+
+fn parse_round_trip_arguments<I, const PATHS: usize>(
+    arguments: &mut BoundedArguments<I>,
+    grammar: RoundTripCliGrammar,
+) -> Result<ParsedRoundTripArguments<PATHS>, WorkflowFailure>
 where
     I: Iterator<Item = OsString>,
 {
@@ -461,23 +437,23 @@ where
     let mut horizontal_tolerance = None;
     let mut vertical_tolerance = None;
     let mut paths = Vec::new();
-    reserve(&mut paths, 2, "round-trip path storage")?;
+    reserve(&mut paths, PATHS, grammar.path_storage_limit)?;
     while let Some(argument) = arguments.next()? {
         match argument.to_str() {
-            Some("--application") => set_once(
+            Some(option) if option == grammar.application => set_once(
                 &mut application,
-                arguments.require_value("--application")?,
-                "--application",
+                arguments.require_value(grammar.application)?,
+                grammar.application,
             )?,
-            Some("--application-version") => set_once(
+            Some(option) if option == grammar.version => set_once(
                 &mut version,
-                arguments.require_value("--application-version")?,
-                "--application-version",
+                arguments.require_value(grammar.version)?,
+                grammar.version,
             )?,
-            Some("--settings-profile") => set_once(
+            Some(option) if option == grammar.settings_profile => set_once(
                 &mut settings_profile,
-                arguments.require_value("--settings-profile")?,
-                "--settings-profile",
+                arguments.require_value(grammar.settings_profile)?,
+                grammar.settings_profile,
             )?,
             Some("--horizontal-tolerance-metres") => set_once(
                 &mut horizontal_tolerance,
@@ -496,39 +472,37 @@ where
                 "--vertical-tolerance-metres",
             )?,
             Some(value) if value.starts_with('-') => {
-                return Err(invalid(
-                    "unknown compare-landxml option; use --help for usage",
-                ));
+                return Err(invalid(grammar.unknown_option_error));
             }
             _ => push_bounded(
                 &mut paths,
                 PathBuf::from(argument),
-                2,
-                "round-trip positional path count",
+                PATHS,
+                grammar.positional_limit,
             )?,
         }
     }
-    let [reference, returned]: [PathBuf; 2] = paths
+    let paths = paths
         .try_into()
-        .map_err(|_| invalid("compare-landxml requires REFERENCE and RETURNED paths"))?;
+        .map_err(|_| invalid(grammar.positional_error))?;
     let declaration = RoundTripDeclaration::new(
         unicode(
             application
                 .as_ref()
-                .ok_or_else(|| invalid("missing --application"))?,
-            "--application",
+                .ok_or_else(|| invalid(format_args!("missing {}", grammar.application)))?,
+            grammar.application,
         )?,
         unicode(
             version
                 .as_ref()
-                .ok_or_else(|| invalid("missing --application-version"))?,
-            "--application-version",
+                .ok_or_else(|| invalid(format_args!("missing {}", grammar.version)))?,
+            grammar.version,
         )?,
         unicode(
             settings_profile
                 .as_ref()
-                .ok_or_else(|| invalid("missing --settings-profile"))?,
-            "--settings-profile",
+                .ok_or_else(|| invalid(format_args!("missing {}", grammar.settings_profile)))?,
+            grammar.settings_profile,
         )?,
     )
     .map_err(|error| round_trip_failure(&error))?;
@@ -537,9 +511,8 @@ where
         vertical_tolerance.ok_or_else(|| invalid("missing --vertical-tolerance-metres"))?,
     )
     .map_err(|error| round_trip_failure(&error))?;
-    Ok(Command::CompareLandXml {
-        reference,
-        returned,
+    Ok(ParsedRoundTripArguments {
+        paths,
         declaration,
         tolerances,
     })

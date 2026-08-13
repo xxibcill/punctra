@@ -152,6 +152,40 @@ fn verify_round_trip_binds_complete_run_and_reconciles_canonical_evidence() {
 }
 
 #[test]
+fn verify_round_trip_preserves_small_and_subnormal_tolerances() {
+    let fixture = ProcessFixture::new("round-trip-small-tolerances");
+    assert_success(&fixture.run("start"));
+    let returned = fixture.directory.path().join("returned.xml");
+    fs::copy(fixture.run_root.join("terrain.xml"), &returned).unwrap();
+
+    for (name, horizontal, vertical) in [("small", "1e-18", "0"), ("subnormal", "5e-324", "5e-324")]
+    {
+        let evidence = fixture.directory.path().join(format!("{name}.json"));
+        let verified =
+            fixture.verify_round_trip_with_tolerances(&returned, &evidence, horizontal, vertical);
+        assert_success(&verified);
+
+        let document: serde_json::Value =
+            serde_json::from_slice(&fs::read(evidence).unwrap()).unwrap();
+        let policy = &document["comparison_policy"];
+        assert_eq!(
+            policy["horizontal_tolerance_metres"]
+                .as_f64()
+                .unwrap()
+                .to_bits(),
+            horizontal.parse::<f64>().unwrap().to_bits()
+        );
+        assert_eq!(
+            policy["vertical_tolerance_metres"]
+                .as_f64()
+                .unwrap()
+                .to_bits(),
+            vertical.parse::<f64>().unwrap().to_bits()
+        );
+    }
+}
+
+#[test]
 fn verify_round_trip_publishes_failed_evidence_but_not_operational_failures() {
     let fixture = ProcessFixture::new("round-trip-failed-evidence");
     assert_success(&fixture.run("start"));
@@ -175,6 +209,11 @@ fn verify_round_trip_publishes_failed_evidence_but_not_operational_failures() {
     assert_eq!(document["checks"]["tolerance"]["status"], "failed");
     assert_eq!(document["returned_landxml"]["namespace"], LANDXML_NAMESPACE);
     assert!(document["returned_landxml"]["point_count"].is_number());
+    assert_eq!(document["comparison"]["mapped_point_count"], 61);
+    assert_eq!(document["comparison"]["unmatched_point_count"], 1);
+    assert_eq!(document["comparison"]["ambiguous_point_count"], 0);
+
+    assert_ambiguous_mapping_evidence(&fixture, &original);
 
     let malformed_returned = fixture.directory.path().join("malformed-returned.xml");
     let malformed_evidence = fixture.directory.path().join("malformed-round-trip.json");
@@ -226,6 +265,37 @@ fn verify_round_trip_publishes_failed_evidence_but_not_operational_failures() {
         "non-Complete Run must publish no evidence"
     );
     assert_eq!(fs::read(&journal_path).unwrap(), &complete[..ends[6]]);
+}
+
+fn assert_ambiguous_mapping_evidence(fixture: &ProcessFixture, original: &str) {
+    let parsed_original = Document::parse(original).unwrap();
+    let mut point_text = parsed_original
+        .descendants()
+        .filter(|node| node.has_tag_name((LANDXML_NAMESPACE, "P")))
+        .filter_map(|node| node.text());
+    let first_point = point_text.next().unwrap();
+    let second_point = point_text.next().unwrap();
+    let mut first_coordinates = first_point.split_whitespace();
+    let northing = first_coordinates.next().unwrap().parse::<f64>().unwrap();
+    let easting = first_coordinates.next().unwrap().parse::<f64>().unwrap();
+    let elevation = first_coordinates.next().unwrap();
+    let near_first_point = format!("{} {} {elevation}", northing + 0.04, easting + 0.04);
+    let returned = fixture.directory.path().join("ambiguous-returned.xml");
+    let evidence = fixture.directory.path().join("ambiguous-round-trip.json");
+    let changed = original.replacen(
+        &format!(">{second_point}<"),
+        &format!(">{near_first_point}<"),
+        1,
+    );
+    fs::write(&returned, changed).unwrap();
+
+    let output = fixture.verify_round_trip_with_tolerances(&returned, &evidence, "0.1", "0");
+    assert!(!output.status.success());
+    let document: serde_json::Value =
+        serde_json::from_slice(&fs::read(&evidence).unwrap()).unwrap();
+    assert_eq!(document["comparison"]["mapped_point_count"], 60);
+    assert_eq!(document["comparison"]["unmatched_point_count"], 1);
+    assert_eq!(document["comparison"]["ambiguous_point_count"], 1);
 }
 
 #[test]
@@ -548,7 +618,23 @@ impl ProcessFixture {
     }
 
     fn verify_round_trip(&self, returned: &std::path::Path, evidence: &std::path::Path) -> Output {
-        Self::verify_round_trip_at(&self.run_root, returned, evidence)
+        self.verify_round_trip_with_tolerances(returned, evidence, "0", "0")
+    }
+
+    fn verify_round_trip_with_tolerances(
+        &self,
+        returned: &std::path::Path,
+        evidence: &std::path::Path,
+        horizontal_tolerance: &str,
+        vertical_tolerance: &str,
+    ) -> Output {
+        Self::verify_round_trip_at_with_tolerances(
+            &self.run_root,
+            returned,
+            evidence,
+            horizontal_tolerance,
+            vertical_tolerance,
+        )
     }
 
     fn verify_round_trip_at(
@@ -556,13 +642,23 @@ impl ProcessFixture {
         returned: &std::path::Path,
         evidence: &std::path::Path,
     ) -> Output {
+        Self::verify_round_trip_at_with_tolerances(run_root, returned, evidence, "0", "0")
+    }
+
+    fn verify_round_trip_at_with_tolerances(
+        run_root: &std::path::Path,
+        returned: &std::path::Path,
+        evidence: &std::path::Path,
+        horizontal_tolerance: &str,
+        vertical_tolerance: &str,
+    ) -> Output {
         Command::new(env!("CARGO_BIN_EXE_terrain-demo"))
             .arg("verify-round-trip")
             .args(["--downstream-app", "generated-fixture"])
             .args(["--downstream-version", "test-only"])
             .args(["--downstream-setting", "metric-tin-v1"])
-            .args(["--horizontal-tolerance-metres", "0"])
-            .args(["--vertical-tolerance-metres", "0"])
+            .args(["--horizontal-tolerance-metres", horizontal_tolerance])
+            .args(["--vertical-tolerance-metres", vertical_tolerance])
             .arg(run_root)
             .arg(returned)
             .arg(evidence)

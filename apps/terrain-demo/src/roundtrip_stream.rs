@@ -1,28 +1,29 @@
 //! Streaming `LandXML` subset reader for the full v0.7 export-byte ceiling.
 
 use std::{
-    fs::{self, File, Metadata},
-    io::{self, BufReader, Read as _, Seek as _, SeekFrom},
+    fs::File,
+    io::{self, BufReader},
     mem::size_of,
-    path::{Path, PathBuf},
+    path::Path,
 };
 
 use foundation_runtime::OperationControl;
 use quick_xml::{
     XmlVersion,
-    events::{BytesStart, Event},
+    events::{BytesCData, BytesRef, BytesStart, Event},
     name::ResolveResult,
     reader::NsReader,
 };
 
 use crate::{
-    publication::same_file_identity,
     roundtrip::{
-        ParsedRoundTrip, ParsedSurface, Position, RoundTripDeclaration, RoundTripEvaluation,
-        RoundTripFailure, RoundTripFileFacts, RoundTripLimits, RoundTripReason,
-        RoundTripTolerances, Triangle, evaluate_parsed_round_trip, semantic_evaluation_failure,
-        validate_face, validate_utf8_declaration,
+        InputSide, ParsedRoundTrip, RoundTripDeclaration, RoundTripEvaluation, RoundTripFailure,
+        RoundTripFileFacts, RoundTripLimits, RoundTripReason, RoundTripTolerances,
+        evaluate_parsed_round_trip, semantic_evaluation_failure, validate_utf8_declaration,
     },
+    roundtrip_file::require_file_bytes,
+    roundtrip_surface::{ParsedSurface, Position, SemanticSurfaceBuilder},
+    stable_file::StableFile,
 };
 
 const LANDXML_NAMESPACE: &[u8] = b"http://www.landxml.org/schema/LandXML-1.2";
@@ -51,14 +52,24 @@ pub(crate) fn evaluate_streaming_round_trip(
 #[derive(Debug)]
 pub(crate) struct StreamingRoundTripEvaluation {
     pub(crate) evaluation: RoundTripEvaluation,
-    reference: StableInputWitness,
-    returned: StableInputWitness,
+    reference: StableFile,
+    returned: StableFile,
 }
 
 impl StreamingRoundTripEvaluation {
     pub(crate) fn verify_inputs(&self) -> Result<(), RoundTripFailure> {
-        self.reference.verify()?;
-        self.returned.verify()
+        self.reference.verify().map_err(|error| {
+            RoundTripFailure::invalid(format_args!(
+                "{} changed after streaming comparison: {error}",
+                InputSide::Reference
+            ))
+        })?;
+        self.returned.verify().map_err(|error| {
+            RoundTripFailure::invalid(format_args!(
+                "{} changed after streaming comparison: {error}",
+                InputSide::Returned
+            ))
+        })
     }
 }
 
@@ -71,18 +82,10 @@ pub(crate) fn evaluate_streaming_round_trip_with_control(
     control: &OperationControl,
 ) -> Result<StreamingRoundTripEvaluation, RoundTripFailure> {
     check_cancelled(control)?;
-    // Capture both descriptors and path identities before consuming either
-    // stream. This closes the otherwise-open window in which RETURNED could
-    // be replaced while REFERENCE was being parsed.
-    let reference_input = capture_streaming_input("REFERENCE", reference_path, limits)?;
-    let returned_input = capture_streaming_input("RETURNED", returned_path, limits)?;
-    if same_file_identity(&reference_input.identity, &returned_input.identity) {
-        return Err(RoundTripFailure::invalid(
-            "REFERENCE and RETURNED must be distinct regular files",
-        ));
-    }
-    let reference = parse_streaming_file(reference_input, limits, control)?;
-    let returned = parse_streaming_file(returned_input, limits, control)?;
+    validate_retained_model_limit("round-trip", limits)?;
+    let (reference, returned) = capture_streaming_pair(reference_path, returned_path, limits)?;
+    let reference = parse_streaming_file(InputSide::Reference, reference, limits, control)?;
+    let returned = parse_streaming_file(InputSide::Returned, returned, limits, control)?;
     let exact_bytes = reference.facts == returned.facts;
     let evaluation = match (reference.surface, returned.surface) {
         (Ok(reference_surface), Ok(returned_surface)) => evaluate_parsed_round_trip(
@@ -125,160 +128,61 @@ pub(crate) fn evaluate_streaming_round_trip_with_control(
 struct StreamingParse {
     facts: RoundTripFileFacts,
     surface: Result<ParsedSurface, RoundTripFailure>,
-    witness: StableInputWitness,
+    witness: StableFile,
 }
 
-#[derive(Debug)]
-struct StableInputWitness {
-    side: &'static str,
-    path: PathBuf,
-    file: File,
-    identity: Metadata,
-    facts: RoundTripFileFacts,
-}
-
-impl StableInputWitness {
-    fn verify(&self) -> Result<(), RoundTripFailure> {
-        let opened = self.file.metadata().map_err(|error| {
-            RoundTripFailure::invalid(format_args!(
-                "{} metadata cannot be rechecked: {error}",
-                self.side
-            ))
-        })?;
-        let current = fs::symlink_metadata(&self.path).map_err(|error| {
-            RoundTripFailure::invalid(format_args!(
-                "{} path cannot be rechecked: {error}",
-                self.side
-            ))
-        })?;
-        require_same_file(self.side, &self.identity, &opened, &current)?;
-        let mut reader = self.file.try_clone().map_err(|error| {
-            RoundTripFailure::invalid(format_args!(
-                "{} descriptor cannot be cloned for terminal verification: {error}",
-                self.side
-            ))
-        })?;
-        reader.seek(SeekFrom::Start(0)).map_err(|error| {
-            RoundTripFailure::invalid(format_args!(
-                "{} descriptor cannot be rewound for terminal verification: {error}",
-                self.side
-            ))
-        })?;
-        let mut hasher = blake3::Hasher::new();
-        let mut remaining = self.facts.byte_length;
-        let mut buffer = vec![0_u8; STREAM_BUFFER_BYTES].into_boxed_slice();
-        while remaining != 0 {
-            let requested = usize::try_from(remaining.min(buffer.len() as u64))
-                .expect("bounded witness read fits usize");
-            let read = reader.read(&mut buffer[..requested]).map_err(|error| {
-                RoundTripFailure::invalid(format_args!(
-                    "{} descriptor cannot be rehashed: {error}",
-                    self.side
-                ))
-            })?;
-            if read == 0 {
-                return Err(RoundTripFailure::invalid(format_args!(
-                    "{} was truncated after capture",
-                    self.side
-                )));
-            }
-            hasher.update(&buffer[..read]);
-            remaining -= read as u64;
-        }
-        let mut sentinel = [0_u8; 1];
-        if reader.read(&mut sentinel).map_err(|error| {
-            RoundTripFailure::invalid(format_args!(
-                "{} descriptor cannot be checked for growth: {error}",
-                self.side
-            ))
-        })? != 0
-            || hasher.finalize().as_bytes() != &self.facts.content_hash
-        {
-            return Err(RoundTripFailure::invalid(format_args!(
-                "{} content changed after capture",
-                self.side
-            )));
-        }
-        let opened_after = self.file.metadata().map_err(|error| {
-            RoundTripFailure::invalid(format_args!(
-                "{} metadata cannot be terminally rechecked: {error}",
-                self.side
-            ))
-        })?;
-        let current_after = fs::symlink_metadata(&self.path).map_err(|error| {
-            RoundTripFailure::invalid(format_args!(
-                "{} path cannot be terminally rechecked: {error}",
-                self.side
-            ))
-        })?;
-        require_same_file(self.side, &self.identity, &opened_after, &current_after)
+fn capture_streaming_pair(
+    reference_path: &Path,
+    returned_path: &Path,
+    limits: RoundTripLimits,
+) -> Result<(StableFile, StableFile), RoundTripFailure> {
+    let reference = capture_streaming_file(InputSide::Reference, reference_path, limits)?;
+    let returned = capture_streaming_file(InputSide::Returned, returned_path, limits)?;
+    if reference.same_identity(&returned) {
+        return Err(RoundTripFailure::invalid(
+            "REFERENCE and RETURNED must be distinct regular files",
+        ));
     }
+    Ok((reference, returned))
 }
 
-struct CapturedStreamingInput {
-    side: &'static str,
-    path: PathBuf,
-    file: File,
-    identity: Metadata,
-}
-
-fn capture_streaming_input(
-    side: &'static str,
+fn capture_streaming_file(
+    side: InputSide,
     path: &Path,
     limits: RoundTripLimits,
-) -> Result<CapturedStreamingInput, RoundTripFailure> {
-    let initial = fs::symlink_metadata(path).map_err(|error| {
-        RoundTripFailure::invalid(format_args!("{side} cannot be inspected: {error}"))
+) -> Result<StableFile, RoundTripFailure> {
+    let witness = StableFile::capture(path).map_err(|error| {
+        RoundTripFailure::invalid(format_args!("{side} cannot be captured: {error}"))
     })?;
-    require_regular(side, &initial)?;
-    require_file_bytes(side, initial.len(), limits.file_bytes())?;
-    let file = open_input_file(path).map_err(|error| {
-        RoundTripFailure::invalid(format_args!("{side} cannot be opened: {error}"))
-    })?;
-    let opened = file.metadata().map_err(|error| {
-        RoundTripFailure::invalid(format_args!("{side} metadata cannot be read: {error}"))
-    })?;
-    let current = fs::symlink_metadata(path).map_err(|error| {
-        RoundTripFailure::invalid(format_args!("{side} path cannot be rechecked: {error}"))
-    })?;
-    require_same_file(side, &initial, &opened, &current)?;
-    Ok(CapturedStreamingInput {
-        side,
-        path: path.to_path_buf(),
-        file,
-        identity: opened,
-    })
+    require_file_bytes(side, witness.byte_length(), limits.file_bytes())?;
+    Ok(witness)
 }
 
 fn parse_streaming_file(
-    input: CapturedStreamingInput,
+    side: InputSide,
+    mut witness: StableFile,
     limits: RoundTripLimits,
     control: &OperationControl,
 ) -> Result<StreamingParse, RoundTripFailure> {
     check_cancelled(control)?;
-    let CapturedStreamingInput {
-        side,
-        path,
-        file,
-        identity,
-    } = input;
+    let expected_bytes = witness.byte_length();
     let hashing = HashingReader::new(
-        file,
-        identity.len(),
+        witness.file_mut(),
+        expected_bytes,
         limits.file_bytes(),
         STREAM_BUFFER_BYTES as u64,
     );
     let mut reader = NsReader::from_reader(BufReader::with_capacity(STREAM_BUFFER_BYTES, hashing));
     reader.config_mut().expand_empty_elements = true;
     reader.config_mut().check_end_names = true;
-    let surface = StreamParser::new(side, limits, control)?.parse(&mut reader);
+    let surface = StreamParser::new(side, limits, control).parse(&mut reader);
     if let Err(error) = &surface
         && error.reason().is_none()
     {
         return Err(error.clone());
     }
     let hashing = reader.into_inner().into_inner();
-    let (file, facts, utf8_valid) = hashing.finish(side)?;
+    let (facts, utf8_valid) = hashing.finish(side)?;
     let surface = if utf8_valid {
         surface
     } else {
@@ -287,33 +191,32 @@ fn parse_streaming_file(
             format_args!("{side} is not UTF-8 XML"),
         ))
     };
-    let final_opened = file.metadata().map_err(|error| {
-        RoundTripFailure::invalid(format_args!("{side} metadata cannot be rechecked: {error}"))
+    witness.verify().map_err(|error| {
+        RoundTripFailure::invalid(format_args!(
+            "{side} changed while it was being read: {error}"
+        ))
     })?;
-    let final_path = fs::symlink_metadata(&path).map_err(|error| {
-        RoundTripFailure::invalid(format_args!("{side} path cannot be rechecked: {error}"))
-    })?;
-    require_same_file(side, &identity, &final_opened, &final_path)?;
-    if facts.byte_length != identity.len() {
+    if facts.byte_length != expected_bytes {
         return Err(RoundTripFailure::invalid(format_args!(
             "{side} changed while it was being read"
         )));
     }
+    witness
+        .seal_content(facts.content_hash, facts.byte_length)
+        .map_err(|error| {
+            RoundTripFailure::invalid(format_args!(
+                "{side} content cannot be sealed after streaming capture: {error}"
+            ))
+        })?;
     Ok(StreamingParse {
         facts,
         surface,
-        witness: StableInputWitness {
-            side,
-            path,
-            file,
-            identity: final_opened,
-            facts,
-        },
+        witness,
     })
 }
 
 fn drain_after_terminal_xml_error<R: io::BufRead>(
-    side: &str,
+    side: InputSide,
     reader: &mut NsReader<R>,
     control: &OperationControl,
 ) -> Result<(), RoundTripFailure> {
@@ -335,8 +238,8 @@ fn drain_after_terminal_xml_error<R: io::BufRead>(
     }
 }
 
-struct HashingReader {
-    file: File,
+struct HashingReader<'a> {
+    file: &'a mut File,
     hasher: blake3::Hasher,
     bytes: u64,
     max_bytes: u64,
@@ -347,8 +250,8 @@ struct HashingReader {
     lexical_state: XmlLexicalState,
 }
 
-impl HashingReader {
-    fn new(file: File, expected_bytes: u64, max_bytes: u64, token_limit: u64) -> Self {
+impl<'a> HashingReader<'a> {
+    fn new(file: &'a mut File, expected_bytes: u64, max_bytes: u64, token_limit: u64) -> Self {
         Self {
             file,
             hasher: blake3::Hasher::new(),
@@ -565,7 +468,7 @@ impl HashingReader {
         }
     }
 
-    fn finish(self, side: &str) -> Result<(File, RoundTripFileFacts, bool), RoundTripFailure> {
+    fn finish(self, side: InputSide) -> Result<(RoundTripFileFacts, bool), RoundTripFailure> {
         if self.remaining != 0 {
             return Err(RoundTripFailure::resource(format_args!(
                 "{side} was truncated with {} witnessed bytes unread",
@@ -573,7 +476,6 @@ impl HashingReader {
             )));
         }
         Ok((
-            self.file,
             RoundTripFileFacts {
                 content_hash: *self.hasher.finalize().as_bytes(),
                 byte_length: self.bytes,
@@ -583,7 +485,7 @@ impl HashingReader {
     }
 }
 
-impl io::Read for HashingReader {
+impl io::Read for HashingReader<'_> {
     fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
         if self.remaining == 0 || buffer.is_empty() {
             return Ok(0);
@@ -710,7 +612,7 @@ enum Tag {
 }
 
 struct StreamParser<'a> {
-    side: &'static str,
+    side: InputSide,
     limits: RoundTripLimits,
     stack: Vec<Tag>,
     nodes: u64,
@@ -728,42 +630,18 @@ struct StreamParser<'a> {
     metadata_depth: usize,
     ignored_sections: Vec<Box<str>>,
     surface_name: Option<Box<str>>,
-    points: Vec<Position>,
-    point_ids: Vec<(u64, usize)>,
-    faces: Vec<Triangle>,
+    surface: SemanticSurfaceBuilder,
+    pending_point_id: Option<u64>,
     simple_text: String,
     control: &'a OperationControl,
 }
 
 impl<'a> StreamParser<'a> {
-    fn new(
-        side: &'static str,
-        limits: RoundTripLimits,
-        control: &'a OperationControl,
-    ) -> Result<Self, RoundTripFailure> {
-        validate_retained_model_limit(side, limits)?;
-        let points = Vec::new();
-        let faces = Vec::new();
-        let point_ids = Vec::new();
-        let stack = reserve_exact_model::<Tag>(side, 32, limits)?;
-        let mut simple_text = String::new();
-        simple_text
-            .try_reserve_exact(STREAM_BUFFER_BYTES)
-            .map_err(|_| {
-                RoundTripFailure::resource(format_args!(
-                    "{side} simple XML text buffer cannot reserve {STREAM_BUFFER_BYTES} bytes"
-                ))
-            })?;
-        if simple_text.capacity() != STREAM_BUFFER_BYTES {
-            return Err(RoundTripFailure::resource(format_args!(
-                "{side} simple XML text buffer retained {} bytes; exact limit is {STREAM_BUFFER_BYTES}",
-                simple_text.capacity()
-            )));
-        }
-        Ok(Self {
+    fn new(side: InputSide, limits: RoundTripLimits, control: &'a OperationControl) -> Self {
+        Self {
             side,
             limits,
-            stack,
+            stack: Vec::new(),
             nodes: 0,
             text_attribute_bytes: 0,
             root_count: 0,
@@ -779,12 +657,11 @@ impl<'a> StreamParser<'a> {
             metadata_depth: 0,
             ignored_sections: Vec::new(),
             surface_name: None,
-            points,
-            point_ids,
-            faces,
-            simple_text,
+            surface: SemanticSurfaceBuilder::new(limits),
+            pending_point_id: None,
+            simple_text: String::new(),
             control,
-        })
+        }
     }
 
     fn parse<R: io::BufRead>(
@@ -797,18 +674,6 @@ impl<'a> StreamParser<'a> {
         loop {
             let (namespace, event) = match reader.read_resolved_event_into(&mut buffer) {
                 Ok(event) => event,
-                Err(error)
-                    if matches!(
-                        &error,
-                        quick_xml::Error::Io(source)
-                            if source.kind() == io::ErrorKind::FileTooLarge
-                    ) =>
-                {
-                    return Err(RoundTripFailure::resource(format_args!(
-                        "{} XML token exceeds the hard {} byte limit",
-                        self.side, STREAM_BUFFER_BYTES
-                    )));
-                }
                 Err(error) => {
                     let failure =
                         self.xml_invalid_message(format_args!("XML is malformed: {error}"));
@@ -849,20 +714,21 @@ impl<'a> StreamParser<'a> {
                 Event::Comment(comment) => self.add_text_bytes(comment.as_ref().len())?,
                 Event::Decl(declaration) => retain_semantic_failure(
                     &mut semantic_failure,
-                    validate_utf8_declaration(
-                        if self.side == "REFERENCE" {
-                            crate::roundtrip::InputSide::Reference
-                        } else {
-                            crate::roundtrip::InputSide::Returned
-                        },
-                        &declaration,
-                    ),
+                    validate_utf8_declaration(self.side, &declaration),
                 )?,
                 Event::PI(_) => {}
-                Event::DocType(_) | Event::GeneralRef(_) | Event::CData(_) => {
+                Event::GeneralRef(reference) => {
+                    let result = self.reference(&reference, semantic_failure.is_none());
+                    retain_semantic_failure(&mut semantic_failure, result)?;
+                }
+                Event::CData(cdata) => {
+                    let result = self.cdata(&cdata, semantic_failure.is_none());
+                    retain_semantic_failure(&mut semantic_failure, result)?;
+                }
+                Event::DocType(_) => {
                     retain_semantic_failure(
                         &mut semantic_failure,
-                        Err(self.xml_invalid("DTD, entity, or CDATA input is unsupported")),
+                        Err(self.xml_invalid("DTD input is unsupported")),
                     )?;
                 }
                 Event::Empty(_) => unreachable!("empty elements are expanded"),
@@ -912,24 +778,82 @@ impl<'a> StreamParser<'a> {
         parse_semantics: bool,
     ) -> Result<(), RoundTripFailure> {
         self.add_text_bytes(text.as_ref().len())?;
+        let decoded = text.decode().map_err(|error| {
+            RoundTripFailure::semantic(
+                RoundTripReason::XmlInvalid,
+                format_args!("{} XML text is invalid: {error}", self.side),
+            )
+        })?;
+        self.decoded_text(&decoded, parse_semantics)
+    }
+
+    fn cdata(
+        &mut self,
+        cdata: &BytesCData<'_>,
+        parse_semantics: bool,
+    ) -> Result<(), RoundTripFailure> {
+        self.add_text_bytes(cdata.as_ref().len())?;
+        let decoded = cdata
+            .xml_content(XmlVersion::Implicit1_0)
+            .map_err(|error| {
+                RoundTripFailure::semantic(
+                    RoundTripReason::XmlInvalid,
+                    format_args!("{} XML CDATA is invalid: {error}", self.side),
+                )
+            })?;
+        self.decoded_text(&decoded, parse_semantics)
+    }
+
+    fn reference(
+        &mut self,
+        reference: &BytesRef<'_>,
+        parse_semantics: bool,
+    ) -> Result<(), RoundTripFailure> {
+        self.add_text_bytes(reference.as_ref().len())?;
+        let decoded = reference.decode().map_err(|error| {
+            RoundTripFailure::semantic(
+                RoundTripReason::XmlInvalid,
+                format_args!("{} XML reference is invalid: {error}", self.side),
+            )
+        })?;
+        let character = if let Some(character) = reference.resolve_char_ref().map_err(|error| {
+            RoundTripFailure::semantic(
+                RoundTripReason::XmlInvalid,
+                format_args!("{} XML character reference is invalid: {error}", self.side),
+            )
+        })? {
+            character
+        } else {
+            match decoded.as_ref() {
+                "lt" => '<',
+                "gt" => '>',
+                "amp" => '&',
+                "apos" => '\'',
+                "quot" => '"',
+                _ => {
+                    return Err(self.xml_invalid("undeclared XML entity is unsupported"));
+                }
+            }
+        };
+        if !is_xml_1_0_character(character) {
+            return Err(self.xml_invalid("XML character reference is not legal in XML 1.0"));
+        }
+        self.decoded_text(character.encode_utf8(&mut [0; 4]), parse_semantics)
+    }
+
+    fn decoded_text(
+        &mut self,
+        decoded: &str,
+        parse_semantics: bool,
+    ) -> Result<(), RoundTripFailure> {
         if !parse_semantics {
             return Ok(());
         }
         if matches!(self.stack.last(), Some(Tag::Point | Tag::Face)) {
-            return text.decode().map_or_else(
-                |error| {
-                    Err(RoundTripFailure::semantic(
-                        RoundTripReason::XmlInvalid,
-                        format_args!("{} XML text is invalid: {error}", self.side),
-                    ))
-                },
-                |decoded| {
-                    self.simple_text.push_str(&decoded);
-                    Ok(())
-                },
-            );
+            self.simple_text.push_str(decoded);
+            return Ok(());
         }
-        if self.metadata_depth == 0 && text.decode().is_ok_and(|value| !value.trim().is_empty()) {
+        if self.metadata_depth == 0 && !decoded.trim().is_empty() {
             return Err(self.unsupported("semantic container has unexpected text"));
         }
         Ok(())
@@ -954,6 +878,9 @@ impl<'a> StreamParser<'a> {
             return Ok(());
         }
         if namespace != LANDXML_NAMESPACE {
+            if matches!(self.stack.last(), Some(Tag::Units | Tag::Metric)) {
+                return Err(self.unit_drift());
+            }
             return Err(self.unsupported("foreign semantic element is unsupported"));
         }
         if start.local_name().as_ref() == b"CoordinateSystem" {
@@ -962,8 +889,13 @@ impl<'a> StreamParser<'a> {
                 format_args!("{} CoordinateSystem semantics are unsupported", self.side),
             ));
         }
-        let tag = tag(start.local_name().as_ref())
-            .ok_or_else(|| self.unsupported("unknown LandXML semantic element"))?;
+        let tag = tag(start.local_name().as_ref()).ok_or_else(|| {
+            if matches!(self.stack.last(), Some(Tag::Units | Tag::Metric)) {
+                self.unit_drift()
+            } else {
+                self.unsupported("unknown LandXML semantic element")
+            }
+        })?;
         self.require_parent(tag)?;
         self.validate_attributes(tag, start)?;
         if matches!(tag, Tag::Project | Tag::Application) {
@@ -995,7 +927,6 @@ impl<'a> StreamParser<'a> {
         match tag {
             Tag::Point => self.finish_point(),
             Tag::Face => self.finish_face(),
-            Tag::Points => self.finish_point_ids(),
             _ => Ok(()),
         }
     }
@@ -1017,6 +948,11 @@ impl<'a> StreamParser<'a> {
                 | (Some(Tag::Faces), Tag::Face)
         );
         if !valid {
+            if matches!(parent, Some(Tag::Units | Tag::Metric))
+                || matches!(tag, Tag::Units | Tag::Metric)
+            {
+                return Err(self.unit_drift());
+            }
             return Err(self.unsupported("LandXML element is in an unsupported container"));
         }
         let counter = match tag {
@@ -1034,6 +970,9 @@ impl<'a> StreamParser<'a> {
         };
         *counter = counter.saturating_add(1);
         if *counter > 1 {
+            if matches!(tag, Tag::Units | Tag::Metric) {
+                return Err(self.unit_drift());
+            }
             return Err(self.unsupported("semantic element appears more than once"));
         }
         Ok(())
@@ -1047,68 +986,58 @@ impl<'a> StreamParser<'a> {
         let required = match tag {
             Tag::LandXml => Some((b"version".as_slice(), "1.2")),
             Tag::Metric => Some((b"linearUnit".as_slice(), "meter")),
-            Tag::Surface => Some((b"name".as_slice(), "")),
             Tag::Definition => Some((b"surfType".as_slice(), "TIN")),
             Tag::Point => Some((b"id".as_slice(), "")),
             _ => None,
         };
+        let optional = (tag == Tag::Surface).then_some(b"name".as_slice());
         let mut found = None;
         for attribute in start.attributes() {
             let attribute = attribute.map_err(|error| {
                 self.xml_invalid_message(format_args!("XML attribute is invalid: {error}"))
             })?;
+            let value = attribute
+                .normalized_value(XmlVersion::Implicit1_0)
+                .map_err(|error| {
+                    self.xml_invalid_message(format_args!(
+                        "XML attribute value is invalid: {error}"
+                    ))
+                })?;
             if attribute.key.as_ref() == b"xmlns"
                 || attribute.key.as_ref().starts_with(b"xmlns:")
                 || attribute.key.as_ref().contains(&b':')
             {
                 continue;
             }
-            if required.is_some_and(|(name, _)| attribute.key.as_ref() == name) {
-                let value = attribute
-                    .normalized_value(XmlVersion::Implicit1_0)
-                    .map_err(|error| {
-                        self.xml_invalid_message(format_args!(
-                            "XML attribute value is invalid: {error}"
-                        ))
-                    })?;
-                if found.replace(value.into_owned()).is_some() {
-                    return Err(self.xml_invalid("required attribute is duplicated"));
-                }
+            let is_semantic = required.is_some_and(|(name, _)| attribute.key.as_ref() == name)
+                || optional.is_some_and(|name| attribute.key.as_ref() == name);
+            if is_semantic && found.replace(value.into_owned()).is_some() {
+                return Err(self.xml_invalid("required attribute is duplicated"));
             }
         }
+        if tag == Tag::Surface {
+            self.surface_name = found
+                .filter(|value| !value.is_empty())
+                .map(|value| value.into_boxed_str());
+            return Ok(());
+        }
         if let Some((_name, expected)) = required {
-            let value = found.ok_or_else(|| self.unsupported("required attribute is absent"))?;
+            let value = found.ok_or_else(|| {
+                if tag == Tag::Metric {
+                    self.unit_drift()
+                } else {
+                    self.unsupported("required attribute is absent")
+                }
+            })?;
             match tag {
                 Tag::Metric if value != expected => {
-                    return Err(RoundTripFailure::semantic(
-                        RoundTripReason::UnitDrift,
-                        format_args!("{} units are not metric metres", self.side),
-                    ));
-                }
-                Tag::Surface => {
-                    self.surface_name = (!value.is_empty()).then(|| value.into_boxed_str());
+                    return Err(self.unit_drift());
                 }
                 Tag::Point => {
-                    if self.point_ids.len() as u64 >= self.limits.points() {
-                        return Err(RoundTripFailure::resource(format_args!(
-                            "{} Point identifiers exceed the {} point limit",
-                            self.side,
-                            self.limits.points()
-                        )));
-                    }
-                    ensure_model_slot(
-                        &mut self.point_ids,
-                        self.limits.points(),
-                        self.side,
-                        "Point identifier index",
-                    )?;
                     let id = value
                         .parse::<u64>()
                         .map_err(|_| self.xml_invalid("Point id must be a positive integer"))?;
-                    if id == 0 {
-                        return Err(self.xml_invalid("Point id is zero"));
-                    }
-                    self.point_ids.push((id, self.points.len()));
+                    self.pending_point_id = Some(id);
                 }
                 _ if value != expected => {
                     return Err(self.unsupported("required attribute value differs"));
@@ -1120,13 +1049,6 @@ impl<'a> StreamParser<'a> {
     }
 
     fn finish_point(&mut self) -> Result<(), RoundTripFailure> {
-        if self.points.len() as u64 >= self.limits.points() {
-            return Err(RoundTripFailure::resource(format_args!(
-                "{} points exceed the {} point limit",
-                self.side,
-                self.limits.points()
-            )));
-        }
         let mut values = self.simple_text.split_whitespace();
         let northing = parse_number(self.side, values.next())?;
         let easting = parse_number(self.side, values.next())?;
@@ -1134,28 +1056,15 @@ impl<'a> StreamParser<'a> {
         if values.next().is_some() {
             return Err(self.xml_invalid("Point must contain exactly three coordinates"));
         }
-        ensure_model_slot(
-            &mut self.points,
-            self.limits.points(),
-            self.side,
-            "Point storage",
-        )?;
-        self.points.push(Position {
-            easting: canonical_zero(easting),
-            northing: canonical_zero(northing),
-            elevation: canonical_zero(elevation),
-        });
-        Ok(())
+        let id = self
+            .pending_point_id
+            .take()
+            .ok_or_else(|| self.xml_invalid("Point id is absent"))?;
+        let position = Position::from_landxml(self.side, northing, easting, elevation)?;
+        self.surface.add_point(self.side, id, position)
     }
 
     fn finish_face(&mut self) -> Result<(), RoundTripFailure> {
-        if self.faces.len() as u64 >= self.limits.faces() {
-            return Err(RoundTripFailure::resource(format_args!(
-                "{} faces exceed the {} face limit",
-                self.side,
-                self.limits.faces()
-            )));
-        }
         let mut values = self.simple_text.split_whitespace();
         let a = parse_id(self.side, values.next())?;
         let b = parse_id(self.side, values.next())?;
@@ -1163,56 +1072,27 @@ impl<'a> StreamParser<'a> {
         if values.next().is_some() {
             return Err(self.xml_invalid("Face must contain exactly three Point ids"));
         }
-        let resolve = |id| {
-            self.point_ids
-                .binary_search_by_key(&id, |entry| entry.0)
-                .ok()
-                .map(|index| self.point_ids[index].1)
-                .ok_or_else(|| self.xml_invalid("Face has a dangling Point reference"))
-        };
-        let face = Triangle::new(resolve(a)?, resolve(b)?, resolve(c)?);
-        validate_face(crate::roundtrip::InputSide::Returned, face, &self.points)?;
-        ensure_model_slot(
-            &mut self.faces,
-            self.limits.faces(),
-            self.side,
-            "Face storage",
-        )?;
-        self.faces.push(face);
-        Ok(())
-    }
-
-    fn finish_point_ids(&mut self) -> Result<(), RoundTripFailure> {
-        self.point_ids.sort_unstable_by_key(|entry| entry.0);
-        if self
-            .point_ids
-            .windows(2)
-            .any(|entries| entries[0].0 == entries[1].0)
-        {
-            Err(self.xml_invalid("Point id is duplicated"))
-        } else {
-            Ok(())
-        }
+        self.surface.add_face(self.side, [a, b, c])
     }
 
     fn finish(self) -> Result<ParsedSurface, RoundTripFailure> {
+        if self.units_count != 1 || self.metric_count != 1 {
+            return Err(self.unit_drift());
+        }
         if !self.stack.is_empty()
             || self.root_count != 1
-            || self.units_count != 1
-            || self.metric_count != 1
             || self.surfaces_count != 1
             || self.surface_count != 1
             || self.definition_count != 1
             || self.points_count != 1
             || self.faces_count != 1
-            || self.points.len() < 3
-            || self.faces.is_empty()
         {
             return Err(self.unsupported("LandXML TIN subset is incomplete"));
         }
+        let (points, faces) = self.surface.finish(self.side)?;
         Ok(ParsedSurface {
-            points: self.points,
-            faces: self.faces,
+            points,
+            faces,
             surface_name: self.surface_name,
             ignored_top_level_sections: self.ignored_sections.into_boxed_slice(),
         })
@@ -1264,6 +1144,16 @@ impl<'a> StreamParser<'a> {
             format_args!("{} subset is unsupported: {message}", self.side),
         )
     }
+
+    fn unit_drift(&self) -> RoundTripFailure {
+        RoundTripFailure::semantic(
+            RoundTripReason::UnitDrift,
+            format_args!(
+                "{} units do not declare exactly one metric metre unit",
+                self.side
+            ),
+        )
+    }
 }
 
 fn retain_semantic_failure(
@@ -1290,11 +1180,6 @@ fn validate_retained_model_limit(
     side: &str,
     limits: RoundTripLimits,
 ) -> Result<(), RoundTripFailure> {
-    // Peak model overlap includes both parsed surfaces, the exact/tolerant
-    // point matcher indices and mapping, both sorted topology projections,
-    // the parser Point-id index, and fixed parser/token buffers. BTreeMap node
-    // layout is implementation-private, so charge a conservative four-word
-    // node/link surcharge in addition to its key/value payload.
     let required = required_retained_model_bytes(limits);
     if required > limits.retained_model_bytes() {
         Err(RoundTripFailure::resource(format_args!(
@@ -1307,10 +1192,13 @@ fn validate_retained_model_limit(
 }
 
 fn required_retained_model_bytes(limits: RoundTripLimits) -> u64 {
+    // Peak overlap includes both parsed surfaces, point-matcher indexes and
+    // mappings, topology projections, the point-id index, and parser buffers.
+    // BTreeMap node layout is private, so charge four words beyond its payload.
     let point_peak = limits.points().saturating_mul(
         (2 * size_of::<Position>()
             + size_of::<([u64; 3], usize)>()
-            + size_of::<usize>()
+            + 3 * size_of::<usize>()
             + size_of::<(u64, usize)>()
             + 4 * size_of::<usize>()) as u64,
     );
@@ -1322,69 +1210,6 @@ fn required_retained_model_bytes(limits: RoundTripLimits) -> u64 {
         + 2 * 16 * size_of::<[usize; 3]>()
         + 4 * size_of::<Box<str>>()) as u64;
     point_peak.saturating_add(face_peak).saturating_add(fixed)
-}
-
-fn reserve_exact_model<T>(
-    side: &str,
-    count: u64,
-    limits: RoundTripLimits,
-) -> Result<Vec<T>, RoundTripFailure> {
-    let count = usize::try_from(count).map_err(|_| {
-        RoundTripFailure::resource(format_args!(
-            "{side} model element count exceeds addressable memory"
-        ))
-    })?;
-    let mut values = Vec::new();
-    values.try_reserve_exact(count).map_err(|_| {
-        RoundTripFailure::resource(format_args!(
-            "{side} model allocation exceeds the {} byte retained-model limit",
-            limits.retained_model_bytes()
-        ))
-    })?;
-    let retained = (values.capacity() as u64).saturating_mul(size_of::<T>() as u64);
-    let requested = (count as u64).saturating_mul(size_of::<T>() as u64);
-    if retained > requested {
-        return Err(RoundTripFailure::resource(format_args!(
-            "{side} allocator retained {retained} bytes for a {requested} byte model request"
-        )));
-    }
-    Ok(values)
-}
-
-fn ensure_model_slot<T>(
-    values: &mut Vec<T>,
-    max_items: u64,
-    side: &str,
-    label: &str,
-) -> Result<(), RoundTripFailure> {
-    if values.len() < values.capacity() {
-        return Ok(());
-    }
-    let maximum = usize::try_from(max_items).map_err(|_| {
-        RoundTripFailure::resource(format_args!(
-            "{side} {label} limit exceeds addressable memory"
-        ))
-    })?;
-    let current = values.len();
-    let target = current.saturating_mul(2).max(1_024).min(maximum);
-    if target <= current {
-        return Err(RoundTripFailure::resource(format_args!(
-            "{side} {label} exceeds the {max_items} item limit"
-        )));
-    }
-    values.try_reserve_exact(target - current).map_err(|_| {
-        RoundTripFailure::resource(format_args!(
-            "{side} {label} cannot reserve {} bytes",
-            (target as u64).saturating_mul(size_of::<T>() as u64)
-        ))
-    })?;
-    if values.capacity() > maximum {
-        return Err(RoundTripFailure::resource(format_args!(
-            "{side} {label} allocator capacity {} exceeds the {max_items} item limit",
-            values.capacity()
-        )));
-    }
-    Ok(())
 }
 
 fn check_cancelled(control: &OperationControl) -> Result<(), RoundTripFailure> {
@@ -1419,7 +1244,7 @@ const fn tag_name(tag: Tag) -> &'static str {
     }
 }
 
-fn parse_number(side: &str, value: Option<&str>) -> Result<f64, RoundTripFailure> {
+fn parse_number(side: InputSide, value: Option<&str>) -> Result<f64, RoundTripFailure> {
     let value = value
         .ok_or_else(|| {
             RoundTripFailure::semantic(RoundTripReason::XmlInvalid, "coordinate absent")
@@ -1441,7 +1266,7 @@ fn parse_number(side: &str, value: Option<&str>) -> Result<f64, RoundTripFailure
     }
 }
 
-fn parse_id(side: &str, value: Option<&str>) -> Result<u64, RoundTripFailure> {
+fn parse_id(side: InputSide, value: Option<&str>) -> Result<u64, RoundTripFailure> {
     value
         .ok_or_else(|| RoundTripFailure::semantic(RoundTripReason::XmlInvalid, "Face id absent"))?
         .parse()
@@ -1453,102 +1278,11 @@ fn parse_id(side: &str, value: Option<&str>) -> Result<u64, RoundTripFailure> {
         })
 }
 
-fn require_regular(side: &str, metadata: &Metadata) -> Result<(), RoundTripFailure> {
-    if metadata.file_type().is_file() {
-        Ok(())
-    } else {
-        Err(RoundTripFailure::invalid(format_args!(
-            "{side} must be a regular non-symlink file"
-        )))
-    }
-}
-
-fn require_file_bytes(side: &str, actual: u64, allowed: u64) -> Result<(), RoundTripFailure> {
-    if actual <= allowed {
-        Ok(())
-    } else {
-        Err(RoundTripFailure::resource(format_args!(
-            "{side} file bytes required {actual}; limit is {allowed}"
-        )))
-    }
-}
-
-fn require_same_file(
-    side: &str,
-    initial: &Metadata,
-    opened: &Metadata,
-    current: &Metadata,
-) -> Result<(), RoundTripFailure> {
-    require_regular(side, opened)?;
-    require_regular(side, current)?;
-    if same_file_identity(initial, opened)
-        && same_file_identity(opened, current)
-        && same_state(initial, opened)
-        && same_state(opened, current)
-    {
-        Ok(())
-    } else {
-        Err(RoundTripFailure::invalid(format_args!(
-            "{side} changed during streaming capture"
-        )))
-    }
-}
-
-#[cfg(unix)]
-fn same_state(left: &Metadata, right: &Metadata) -> bool {
-    use std::os::unix::fs::MetadataExt as _;
-
-    left.len() == right.len()
-        && left.mtime() == right.mtime()
-        && left.mtime_nsec() == right.mtime_nsec()
-        && left.ctime() == right.ctime()
-        && left.ctime_nsec() == right.ctime_nsec()
-}
-
-#[cfg(windows)]
-fn same_state(left: &Metadata, right: &Metadata) -> bool {
-    use std::os::windows::fs::MetadataExt as _;
-
-    left.len() == right.len()
-        && left.creation_time() == right.creation_time()
-        && left.last_write_time() == right.last_write_time()
-}
-
-#[cfg(not(any(unix, windows)))]
-fn same_state(_left: &Metadata, _right: &Metadata) -> bool {
-    false
-}
-
-#[cfg(unix)]
-fn open_input_file(path: &Path) -> io::Result<File> {
-    use std::os::unix::fs::OpenOptionsExt as _;
-
-    fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
-        .open(path)
-}
-
-#[cfg(windows)]
-fn open_input_file(path: &Path) -> io::Result<File> {
-    use std::os::windows::fs::OpenOptionsExt as _;
-
-    fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT)
-        .open(path)
-}
-
-#[cfg(not(any(unix, windows)))]
-fn open_input_file(_path: &Path) -> io::Result<File> {
-    Err(io::Error::new(
-        io::ErrorKind::Unsupported,
-        "stable no-follow input capture is unavailable on this platform",
-    ))
-}
-
-const fn canonical_zero(value: f64) -> f64 {
-    if value == 0.0 { 0.0 } else { value }
+const fn is_xml_1_0_character(character: char) -> bool {
+    matches!(
+        character,
+        '\u{9}' | '\u{a}' | '\u{d}' | '\u{20}'..='\u{d7ff}' | '\u{e000}'..='\u{fffd}' | '\u{10000}'..='\u{10ffff}'
+    )
 }
 
 #[cfg(test)]
@@ -1567,9 +1301,9 @@ mod tests {
     };
 
     use super::{
-        HashingReader, STREAM_BUFFER_BYTES, Utf8Validator, evaluate_streaming_round_trip,
-        evaluate_streaming_round_trip_with_control, required_retained_model_bytes,
-        validate_retained_model_limit,
+        HashingReader, STREAM_BUFFER_BYTES, Utf8Validator, capture_streaming_pair,
+        evaluate_streaming_round_trip, evaluate_streaming_round_trip_with_control,
+        required_retained_model_bytes, validate_retained_model_limit,
     };
 
     static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -1617,6 +1351,52 @@ mod tests {
         assert_eq!(report.vertex_count(), 3);
         assert_eq!(report.face_count(), 1);
         assert!(!report.exact_bytes());
+    }
+
+    #[test]
+    fn streaming_reader_accepts_an_absent_surface_name() {
+        let directory = Directory::new();
+        let reference = directory.path.join("reference.xml");
+        let returned = directory.path.join("returned.xml");
+        let reference_xml = xml("1", "2", "3", "1 2 3");
+        let returned_xml = reference_xml.replacen("<Surface name=\"Generated\">", "<Surface>", 1);
+        fs::write(&reference, reference_xml).unwrap();
+        fs::write(&returned, returned_xml).unwrap();
+
+        let evaluation = evaluate_streaming_round_trip(
+            &reference,
+            &returned,
+            RoundTripDeclaration::new("generated", "test", "metric").unwrap(),
+            RoundTripTolerances::new(0.0, 0.0).unwrap(),
+            RoundTripLimits::full_v07_export(),
+        )
+        .expect("an absent surface name remains non-semantic");
+
+        assert!(matches!(evaluation, RoundTripEvaluation::Passed(_)));
+    }
+
+    #[test]
+    fn streaming_reader_accepts_standard_xml_text_forms() {
+        let directory = Directory::new();
+        let reference = directory.path.join("reference.xml");
+        let returned = directory.path.join("returned.xml");
+        let reference_xml = xml("1", "2", "3", "1 2 3");
+        let returned_xml = reference_xml
+            .replacen("<Units>", "<Project>A &amp; B</Project><Units>", 1)
+            .replacen(">0 0 0</P>", "><![CDATA[0]]>&#32;0&#x20;0</P>", 1);
+        fs::write(&reference, reference_xml).unwrap();
+        fs::write(&returned, returned_xml).unwrap();
+
+        let evaluation = evaluate_streaming_round_trip(
+            &reference,
+            &returned,
+            RoundTripDeclaration::new("generated", "test", "metric").unwrap(),
+            RoundTripTolerances::new(0.0, 0.0).unwrap(),
+            RoundTripLimits::full_v07_export(),
+        )
+        .expect("standard XML references and CDATA evaluate normally");
+
+        assert!(matches!(evaluation, RoundTripEvaluation::Passed(_)));
     }
 
     #[test]
@@ -1671,6 +1451,27 @@ mod tests {
     }
 
     #[test]
+    fn streaming_pair_witnesses_both_inputs_before_consumption() {
+        let directory = Directory::new();
+        let reference = directory.path.join("reference.xml");
+        let returned = directory.path.join("returned.xml");
+        let original = xml("1", "2", "3", "1 2 3");
+        fs::write(&reference, &original).unwrap();
+        fs::write(&returned, &original).unwrap();
+
+        let (_reference_witness, returned_witness) =
+            capture_streaming_pair(&reference, &returned, RoundTripLimits::full_v07_export())
+                .expect("both inputs are witnessed together");
+        let changed = original.replacen("0 0 0", "0 0 1", 1);
+        assert_eq!(changed.len(), original.len());
+        fs::write(&returned, changed).unwrap();
+
+        returned_witness
+            .verify()
+            .expect_err("returned input mutation after pair capture must be rejected");
+    }
+
+    #[test]
     fn streaming_reader_rejects_non_utf8_bytes_and_declarations() {
         let directory = Directory::new();
         let reference = directory.path.join("reference.xml");
@@ -1691,6 +1492,27 @@ mod tests {
             .expect("inserted metadata text exists");
         invalid_metadata[metadata] = 0xff;
         fs::write(&returned, invalid_metadata).unwrap();
+        assert_failed_reason(&reference, &returned, RoundTripReason::XmlInvalid);
+    }
+
+    #[test]
+    fn streaming_reader_rejects_malformed_declarations_and_ignored_attributes() {
+        let directory = Directory::new();
+        let reference = directory.path.join("reference.xml");
+        let returned = directory.path.join("returned.xml");
+        let valid = xml("1", "2", "3", "1 2 3");
+        fs::write(&reference, &valid).unwrap();
+
+        let missing_version =
+            valid.replacen("<?xml version=\"1.0\" encoding=\"UTF-8\"?>", "<?xml?>", 1);
+        fs::write(&returned, missing_version).unwrap();
+        assert_failed_reason(&reference, &returned, RoundTripReason::XmlInvalid);
+
+        let malformed_ignored_attribute = valid.replace(
+            "<Units>",
+            "<Project ignored=\"&bogus;\">metadata</Project><Units>",
+        );
+        fs::write(&returned, malformed_ignored_attribute).unwrap();
         assert_failed_reason(&reference, &returned, RoundTripReason::XmlInvalid);
     }
 
@@ -1718,6 +1540,43 @@ mod tests {
         )
         .expect_err("a later XML node excess must remain an operational failure");
         assert_eq!(error.kind(), RoundTripFailureKind::ResourceLimit);
+    }
+
+    #[test]
+    fn streaming_unit_matrix_uses_unit_drift_reason() {
+        let directory = Directory::new();
+        let reference = directory.path.join("reference.xml");
+        let returned = directory.path.join("returned.xml");
+        let valid = xml("1", "2", "3", "1 2 3");
+        fs::write(&reference, &valid).unwrap();
+        let units = "<Units><Metric linearUnit=\"meter\"/></Units>";
+        let variants = [
+            valid.replace(units, ""),
+            valid.replace(
+                "<Metric linearUnit=\"meter\"/>",
+                "<Imperial linearUnit=\"foot\"/>",
+            ),
+            valid.replace(units, &format!("{units}{units}")),
+            valid.replace("linearUnit=\"meter\"", "linearUnit=\"foot\""),
+        ];
+
+        for returned_xml in variants {
+            fs::write(&returned, returned_xml).unwrap();
+            assert_failed_reason(&reference, &returned, RoundTripReason::UnitDrift);
+        }
+    }
+
+    #[test]
+    fn streaming_identical_duplicate_faces_fail_qualification() {
+        let directory = Directory::new();
+        let reference = directory.path.join("reference.xml");
+        let returned = directory.path.join("returned.xml");
+        let duplicate =
+            xml("1", "2", "3", "1 2 3").replace("<F>1 2 3</F>", "<F>1 2 3</F><F>3 2 1</F>");
+        fs::write(&reference, &duplicate).unwrap();
+        fs::write(&returned, duplicate).unwrap();
+
+        assert_failed_reason(&reference, &returned, RoundTripReason::TopologyDrift);
     }
 
     #[test]
@@ -1770,9 +1629,9 @@ mod tests {
             let directory = Directory::new();
             let path = directory.path.join(format!("{label}.xml"));
             fs::write(&path, &token).unwrap();
-            let file = fs::File::open(&path).unwrap();
+            let mut file = fs::File::open(&path).unwrap();
             let hashing = HashingReader::new(
-                file,
+                &mut file,
                 token.len() as u64,
                 token.len() as u64,
                 STREAM_BUFFER_BYTES as u64,

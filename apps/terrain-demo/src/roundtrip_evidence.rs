@@ -18,8 +18,9 @@ use crate::{
     },
     roundtrip::{
         RoundTripDeclaration, RoundTripEvaluation, RoundTripFailure, RoundTripLimits,
-        RoundTripTolerances, capture_round_trip_file,
+        RoundTripTolerances,
     },
+    roundtrip_file::{CapturedRoundTripFile, capture_round_trip_file},
     roundtrip_stream::evaluate_streaming_round_trip_with_control,
 };
 
@@ -150,12 +151,12 @@ fn verify_round_trip_with_control(
         control,
     )?;
     let evaluation = &streaming.evaluation;
-    if evaluation_reference_hash(evaluation) != complete.landxml_hash {
+    if evaluation.reference_content_hash() != complete.landxml_hash {
         return Err(RoundTripEvidenceError::Invalid(
             "terrain.xml does not match the Complete checkpoint".to_owned(),
         ));
     }
-    if evaluation_reference_bytes(evaluation) != journal.export.byte_length {
+    if evaluation.reference_bytes() != journal.export.byte_length {
         return Err(RoundTripEvidenceError::Invalid(
             "terrain.xml byte length does not match the ExportEnsured checkpoint".to_owned(),
         ));
@@ -427,9 +428,10 @@ fn receipt(
 ) -> RoundTripEvidenceReceipt {
     RoundTripEvidenceReceipt {
         run,
-        result: match evaluation {
-            RoundTripEvaluation::Passed(_) => QualificationResult::Passed,
-            RoundTripEvaluation::Failed(_) => QualificationResult::Failed,
+        result: if evaluation.is_passed() {
+            QualificationResult::Passed
+        } else {
+            QualificationResult::Failed
         },
         evidence_hash: publication.content_hash,
         evidence_bytes: publication.byte_length,
@@ -437,17 +439,10 @@ fn receipt(
     }
 }
 
-fn evaluation_reference_hash(evaluation: &RoundTripEvaluation) -> [u8; 32] {
-    match evaluation {
-        RoundTripEvaluation::Passed(report) => report.reference_content_hash(),
-        RoundTripEvaluation::Failed(mismatch) => mismatch.reference_content_hash(),
-    }
-}
-
 fn encode_evidence(
     journal: &CompleteRunSnapshot,
     complete: Complete,
-    audit: &crate::roundtrip::CapturedRoundTripFile,
+    audit: &CapturedRoundTripFile,
     evaluation: &RoundTripEvaluation,
     limits: RoundTripLimits,
 ) -> Result<String, RoundTripEvidenceError> {
@@ -457,9 +452,10 @@ fn encode_evidence(
     write!(json, ",\"result\":")?;
     string(
         &mut json,
-        match evaluation {
-            RoundTripEvaluation::Passed(_) => "passed",
-            RoundTripEvaluation::Failed(_) => "failed",
+        if evaluation.is_passed() {
+            "passed"
+        } else {
+            "failed"
         },
     )?;
     write!(json, ",\"run\":{{\"run_id\":")?;
@@ -478,19 +474,19 @@ fn encode_evidence(
     write!(
         json,
         ",\"original_landxml_bytes\":{}",
-        evaluation_reference_bytes(evaluation)
+        evaluation.reference_bytes()
     )?;
     write!(json, ",\"audit_json_hash\":")?;
     hex(&mut json, &complete.report_hash)?;
     write!(json, ",\"audit_json_bytes\":{}}}", audit.bytes.len())?;
     write!(json, ",\"downstream_declaration\":{{\"application\":")?;
-    let declaration = evaluation_declaration(evaluation);
+    let declaration = evaluation.declaration();
     string(&mut json, declaration.declared_application())?;
     write!(json, ",\"version\":")?;
     string(&mut json, declaration.declared_version())?;
     write!(json, ",\"settings_profile\":")?;
     string(&mut json, declaration.declared_settings_profile())?;
-    let tolerances = evaluation_tolerances(evaluation);
+    let tolerances = evaluation.tolerances();
     write!(
         json,
         "}},\"comparison_policy\":{{\"horizontal_tolerance_metres\":"
@@ -501,37 +497,34 @@ fn encode_evidence(
     write!(json, ",\"matcher_version\":")?;
     string(&mut json, MATCHER_VERSION)?;
     write!(json, "}},\"returned_landxml\":{{\"content_hash\":")?;
-    hex(&mut json, &evaluation_returned_hash(evaluation))?;
+    hex(&mut json, &evaluation.returned_content_hash())?;
     write!(
         json,
         ",\"bytes\":{},\"namespace\":",
-        evaluation_returned_bytes(evaluation)
+        evaluation.returned_bytes()
     )?;
-    if evaluation_returned_was_parsed(evaluation) {
+    if evaluation.returned_was_parsed() {
         string(&mut json, "http://www.landxml.org/schema/LandXML-1.2")?;
     } else {
         json.push_str("null");
     }
     write!(json, ",\"declared_units\":")?;
-    if evaluation_returned_was_parsed(evaluation) {
+    if evaluation.returned_was_parsed() {
         string(&mut json, "meter")?;
     } else {
         json.push_str("null");
     }
     write!(json, ",\"surface_name\":")?;
-    match evaluation_returned_surface_name(evaluation) {
+    match evaluation.returned_surface_name() {
         Some(name) => string(&mut json, name)?,
         None => json.push_str("null"),
     }
     write!(json, ",\"point_count\":")?;
-    optional_count(&mut json, evaluation, true)?;
+    optional_count(&mut json, evaluation.returned_point_count())?;
     write!(json, ",\"face_count\":")?;
-    optional_count(&mut json, evaluation, false)?;
+    optional_count(&mut json, evaluation.returned_face_count())?;
     write!(json, ",\"ignored_top_level_section_names\":[")?;
-    for (index, section) in evaluation_returned_ignored_sections(evaluation)
-        .iter()
-        .enumerate()
-    {
+    for (index, section) in evaluation.returned_ignored_sections().iter().enumerate() {
         if index != 0 {
             json.push(',');
         }
@@ -563,7 +556,12 @@ fn encode_evidence(
 }
 
 fn write_checks(json: &mut String, evaluation: &RoundTripEvaluation) -> Result<(), fmt::Error> {
-    let [parse, units, unique_mapping, tolerance, topology] = check_statuses(evaluation.reason());
+    let mapping_completed = match evaluation {
+        RoundTripEvaluation::Passed(_) => true,
+        RoundTripEvaluation::Failed(mismatch) => mismatch.completed_mapping_point_count().is_some(),
+    };
+    let [parse, units, unique_mapping, tolerance, topology] =
+        check_statuses(evaluation.reason(), mapping_completed);
     write!(
         json,
         ",\"checks\":{{\"provenance\":{{\"status\":\"passed\"}},\"parse\":{{\"status\":"
@@ -580,59 +578,47 @@ fn write_checks(json: &mut String, evaluation: &RoundTripEvaluation) -> Result<(
     write!(json, "}}}}")
 }
 
-fn check_statuses(reason: Option<crate::roundtrip::RoundTripReason>) -> [CheckStatus; 5] {
+fn check_statuses(
+    reason: Option<crate::roundtrip::RoundTripReason>,
+    mapping_completed: bool,
+) -> [CheckStatus; 5] {
     use crate::roundtrip::RoundTripReason as Reason;
 
-    let parse = match reason {
+    use CheckStatus::{Failed, NotEvaluated, Passed};
+
+    match reason {
+        None => [Passed; 5],
         Some(
-            value @ (Reason::XmlInvalid
+            reason @ (Reason::XmlInvalid
             | Reason::SubsetUnsupported
             | Reason::CoordinateReferenceUnsupported),
-        ) => CheckStatus::Failed(value),
-        _ => CheckStatus::Passed,
-    };
-    let units = match reason {
-        Some(
-            Reason::XmlInvalid | Reason::SubsetUnsupported | Reason::CoordinateReferenceUnsupported,
-        ) => CheckStatus::NotEvaluated,
-        Some(value @ Reason::UnitDrift) => CheckStatus::Failed(value),
-        _ => CheckStatus::Passed,
-    };
-    let unique_mapping = match reason {
-        Some(
-            Reason::XmlInvalid
-            | Reason::SubsetUnsupported
-            | Reason::CoordinateReferenceUnsupported
-            | Reason::UnitDrift,
-        ) => CheckStatus::NotEvaluated,
-        Some(
-            value @ (Reason::PointCountDrift
-            | Reason::VertexUnmatched
-            | Reason::VertexAmbiguous
-            | Reason::ToleranceDrift),
-        ) => CheckStatus::Failed(value),
-        _ => CheckStatus::Passed,
-    };
-    let tolerance = match reason {
-        Some(
-            Reason::XmlInvalid
-            | Reason::SubsetUnsupported
-            | Reason::CoordinateReferenceUnsupported
-            | Reason::UnitDrift
-            | Reason::PointCountDrift
-            | Reason::VertexAmbiguous,
-        ) => CheckStatus::NotEvaluated,
-        Some(value @ (Reason::VertexUnmatched | Reason::ToleranceDrift)) => {
-            CheckStatus::Failed(value)
+        ) => [
+            Failed(reason),
+            NotEvaluated,
+            NotEvaluated,
+            NotEvaluated,
+            NotEvaluated,
+        ],
+        Some(reason @ Reason::UnitDrift) => [
+            Passed,
+            Failed(reason),
+            NotEvaluated,
+            NotEvaluated,
+            NotEvaluated,
+        ],
+        Some(reason @ (Reason::PointCountDrift | Reason::VertexAmbiguous)) => {
+            [Passed, Passed, Failed(reason), NotEvaluated, NotEvaluated]
         }
-        _ => CheckStatus::Passed,
-    };
-    let topology = match reason {
-        None => CheckStatus::Passed,
-        Some(value @ Reason::TopologyDrift) => CheckStatus::Failed(value),
-        Some(_) => CheckStatus::NotEvaluated,
-    };
-    [parse, units, unique_mapping, tolerance, topology]
+        Some(reason @ (Reason::VertexUnmatched | Reason::ToleranceDrift)) => {
+            [Passed, Passed, Failed(reason), Failed(reason), NotEvaluated]
+        }
+        Some(reason @ Reason::TopologyDrift) if mapping_completed => {
+            [Passed, Passed, Passed, Passed, Failed(reason)]
+        }
+        Some(reason @ Reason::TopologyDrift) => {
+            [Passed, Passed, NotEvaluated, NotEvaluated, Failed(reason)]
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -671,34 +657,21 @@ fn write_comparison(json: &mut String, evaluation: &RoundTripEvaluation) -> Resu
             )
         }
         RoundTripEvaluation::Failed(mismatch) => {
-            let completed_mapping = mismatch.completed_mapping_point_count();
+            let mapping_counts = mismatch.mapping_counts();
             write!(json, "{{\"mapped_point_count\":")?;
-            if let Some(count) = completed_mapping {
-                write!(json, "{count}")?;
-            } else {
-                json.push_str("null");
-            }
-            write!(
-                json,
-                ",\"unmatched_point_count\":{},\"ambiguous_point_count\":{},\"maximum_horizontal_delta_metres\":",
-                if completed_mapping.is_some() {
-                    "0"
-                } else {
-                    "null"
-                },
-                if completed_mapping.is_some() {
-                    "0"
-                } else {
-                    "null"
-                }
-            )?;
-            if let Some((horizontal, _)) = mismatch.completed_mapping_maximum_deltas() {
+            optional_count(json, mapping_counts.map(|(mapped, _, _)| mapped))?;
+            write!(json, ",\"unmatched_point_count\":")?;
+            optional_count(json, mapping_counts.map(|(_, unmatched, _)| unmatched))?;
+            write!(json, ",\"ambiguous_point_count\":")?;
+            optional_count(json, mapping_counts.map(|(_, _, ambiguous)| ambiguous))?;
+            write!(json, ",\"maximum_horizontal_delta_metres\":")?;
+            if let Some((horizontal, _)) = mismatch.mapping_maximum_deltas() {
                 number(json, horizontal)?;
             } else {
                 json.push_str("null");
             }
             write!(json, ",\"maximum_vertical_delta_metres\":")?;
-            if let Some((_, vertical)) = mismatch.completed_mapping_maximum_deltas() {
+            if let Some((_, vertical)) = mismatch.mapping_maximum_deltas() {
                 number(json, vertical)?;
             } else {
                 json.push_str("null");
@@ -760,84 +733,10 @@ fn write_face_sample(json: &mut String, sample: Option<&[[usize; 3]]>) -> Result
     Ok(())
 }
 
-fn evaluation_declaration(evaluation: &RoundTripEvaluation) -> &RoundTripDeclaration {
-    match evaluation {
-        RoundTripEvaluation::Passed(report) => report.declaration(),
-        RoundTripEvaluation::Failed(mismatch) => mismatch.declaration(),
-    }
-}
-
-fn evaluation_tolerances(evaluation: &RoundTripEvaluation) -> RoundTripTolerances {
-    match evaluation {
-        RoundTripEvaluation::Passed(report) => report.tolerances(),
-        RoundTripEvaluation::Failed(mismatch) => mismatch.tolerances(),
-    }
-}
-
-fn evaluation_reference_bytes(evaluation: &RoundTripEvaluation) -> u64 {
-    match evaluation {
-        RoundTripEvaluation::Passed(report) => report.reference_bytes(),
-        RoundTripEvaluation::Failed(mismatch) => mismatch.reference_bytes(),
-    }
-}
-
-fn evaluation_returned_hash(evaluation: &RoundTripEvaluation) -> [u8; 32] {
-    match evaluation {
-        RoundTripEvaluation::Passed(report) => report.returned_content_hash(),
-        RoundTripEvaluation::Failed(mismatch) => mismatch.returned_content_hash(),
-    }
-}
-
-fn evaluation_returned_bytes(evaluation: &RoundTripEvaluation) -> u64 {
-    match evaluation {
-        RoundTripEvaluation::Passed(report) => report.returned_bytes(),
-        RoundTripEvaluation::Failed(mismatch) => mismatch.returned_bytes(),
-    }
-}
-
-fn optional_count(
-    json: &mut String,
-    evaluation: &RoundTripEvaluation,
-    points: bool,
-) -> Result<(), fmt::Error> {
-    let count = match evaluation {
-        RoundTripEvaluation::Passed(report) => Some(if points {
-            report.vertex_count()
-        } else {
-            report.face_count()
-        }),
-        RoundTripEvaluation::Failed(mismatch) => {
-            if points {
-                mismatch.returned_point_count()
-            } else {
-                mismatch.returned_face_count()
-            }
-        }
-    };
+fn optional_count(json: &mut String, count: Option<u64>) -> Result<(), fmt::Error> {
     match count {
         Some(count) => write!(json, "{count}"),
         None => json.write_str("null"),
-    }
-}
-
-fn evaluation_returned_was_parsed(evaluation: &RoundTripEvaluation) -> bool {
-    match evaluation {
-        RoundTripEvaluation::Passed(_) => true,
-        RoundTripEvaluation::Failed(mismatch) => mismatch.returned_was_parsed(),
-    }
-}
-
-fn evaluation_returned_surface_name(evaluation: &RoundTripEvaluation) -> Option<&str> {
-    match evaluation {
-        RoundTripEvaluation::Passed(report) => report.returned_surface_name(),
-        RoundTripEvaluation::Failed(mismatch) => mismatch.returned_surface_name(),
-    }
-}
-
-fn evaluation_returned_ignored_sections(evaluation: &RoundTripEvaluation) -> &[Box<str>] {
-    match evaluation {
-        RoundTripEvaluation::Passed(report) => report.returned_ignored_sections(),
-        RoundTripEvaluation::Failed(mismatch) => mismatch.returned_ignored_sections(),
     }
 }
 
@@ -944,7 +843,7 @@ mod tests {
     #[test]
     fn ambiguous_mapping_leaves_dependent_checks_not_evaluated() {
         let [parse, units, mapping, tolerance, topology] =
-            check_statuses(Some(RoundTripReason::VertexAmbiguous));
+            check_statuses(Some(RoundTripReason::VertexAmbiguous), false);
 
         assert_eq!(parse, CheckStatus::Passed);
         assert_eq!(units, CheckStatus::Passed);
@@ -954,6 +853,36 @@ mod tests {
         );
         assert_eq!(tolerance, CheckStatus::NotEvaluated);
         assert_eq!(topology, CheckStatus::NotEvaluated);
+    }
+
+    #[test]
+    fn topology_rejection_before_mapping_keeps_unrun_checks_not_evaluated() {
+        let [parse, units, mapping, tolerance, topology] =
+            check_statuses(Some(RoundTripReason::TopologyDrift), false);
+
+        assert_eq!(parse, CheckStatus::Passed);
+        assert_eq!(units, CheckStatus::Passed);
+        assert_eq!(mapping, CheckStatus::NotEvaluated);
+        assert_eq!(tolerance, CheckStatus::NotEvaluated);
+        assert_eq!(
+            topology,
+            CheckStatus::Failed(RoundTripReason::TopologyDrift)
+        );
+    }
+
+    #[test]
+    fn topology_comparison_after_mapping_preserves_completed_checks() {
+        let [parse, units, mapping, tolerance, topology] =
+            check_statuses(Some(RoundTripReason::TopologyDrift), true);
+
+        assert_eq!(parse, CheckStatus::Passed);
+        assert_eq!(units, CheckStatus::Passed);
+        assert_eq!(mapping, CheckStatus::Passed);
+        assert_eq!(tolerance, CheckStatus::Passed);
+        assert_eq!(
+            topology,
+            CheckStatus::Failed(RoundTripReason::TopologyDrift)
+        );
     }
 
     #[test]

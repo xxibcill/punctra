@@ -284,6 +284,14 @@ pub(crate) fn same_file_identity(_left: &fs::Metadata, _right: &fs::Metadata) ->
     false
 }
 
+pub(crate) fn same_file_state(left: &fs::Metadata, right: &fs::Metadata) -> bool {
+    left.len() == right.len()
+        && matches!(
+            (left.modified(), right.modified()),
+            (Ok(left_modified), Ok(right_modified)) if left_modified == right_modified
+        )
+}
+
 pub(crate) fn sync_directory(path: &Path) -> io::Result<()> {
     File::open(path)?.sync_all()
 }
