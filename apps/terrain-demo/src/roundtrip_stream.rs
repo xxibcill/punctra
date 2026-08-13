@@ -18,10 +18,11 @@ use quick_xml::{
 use crate::{
     publication::same_file_identity,
     roundtrip::{
-        ParsedRoundTrip, ParsedSurface, Position, RoundTripDeclaration, RoundTripEvaluation,
-        RoundTripFailure, RoundTripFileFacts, RoundTripLimits, RoundTripReason,
-        RoundTripTolerances, Triangle, evaluate_parsed_round_trip, reject_duplicate_faces,
-        semantic_evaluation_failure, validate_face, validate_utf8_declaration,
+        InputSide, ParsedRoundTrip, ParsedSurface, Position, RoundTripDeclaration,
+        RoundTripEvaluation, RoundTripFailure, RoundTripFileFacts, RoundTripLimits,
+        RoundTripReason, RoundTripTolerances, Triangle, evaluate_parsed_round_trip,
+        reject_duplicate_faces, semantic_evaluation_failure, validate_face,
+        validate_utf8_declaration,
     },
 };
 
@@ -71,8 +72,8 @@ pub(crate) fn evaluate_streaming_round_trip_with_control(
     control: &OperationControl,
 ) -> Result<StreamingRoundTripEvaluation, RoundTripFailure> {
     check_cancelled(control)?;
-    let reference = parse_streaming_file("REFERENCE", reference_path, limits, control)?;
-    let returned = parse_streaming_file("RETURNED", returned_path, limits, control)?;
+    let reference = parse_streaming_file(InputSide::Reference, reference_path, limits, control)?;
+    let returned = parse_streaming_file(InputSide::Returned, returned_path, limits, control)?;
     let exact_bytes = reference.facts == returned.facts;
     let evaluation = match (reference.surface, returned.surface) {
         (Ok(reference_surface), Ok(returned_surface)) => evaluate_parsed_round_trip(
@@ -120,7 +121,7 @@ struct StreamingParse {
 
 #[derive(Debug)]
 struct StableInputWitness {
-    side: &'static str,
+    side: InputSide,
     path: PathBuf,
     file: File,
     identity: Metadata,
@@ -145,7 +146,7 @@ impl StableInputWitness {
 }
 
 fn parse_streaming_file(
-    side: &'static str,
+    side: InputSide,
     path: &Path,
     limits: RoundTripLimits,
     control: &OperationControl,
@@ -211,7 +212,7 @@ fn parse_streaming_file(
 }
 
 fn drain_after_terminal_xml_error<R: io::BufRead>(
-    side: &str,
+    side: InputSide,
     reader: &mut NsReader<R>,
     control: &OperationControl,
 ) -> Result<(), RoundTripFailure> {
@@ -254,7 +255,7 @@ impl HashingReader {
         }
     }
 
-    fn finish(self, side: &str) -> Result<(File, RoundTripFileFacts, bool), RoundTripFailure> {
+    fn finish(self, side: InputSide) -> Result<(File, RoundTripFileFacts, bool), RoundTripFailure> {
         if self.over_limit {
             return Err(RoundTripFailure::resource(format_args!(
                 "{side} file bytes exceed the {} byte limit",
@@ -355,7 +356,7 @@ enum Tag {
 }
 
 struct StreamParser<'a> {
-    side: &'static str,
+    side: InputSide,
     limits: RoundTripLimits,
     stack: Vec<Tag>,
     nodes: u64,
@@ -381,7 +382,7 @@ struct StreamParser<'a> {
 }
 
 impl<'a> StreamParser<'a> {
-    fn new(side: &'static str, limits: RoundTripLimits, control: &'a OperationControl) -> Self {
+    fn new(side: InputSide, limits: RoundTripLimits, control: &'a OperationControl) -> Self {
         Self {
             side,
             limits,
@@ -459,14 +460,7 @@ impl<'a> StreamParser<'a> {
                 Event::Comment(comment) => self.add_text_bytes(comment.as_ref().len())?,
                 Event::Decl(declaration) => retain_semantic_failure(
                     &mut semantic_failure,
-                    validate_utf8_declaration(
-                        if self.side == "REFERENCE" {
-                            crate::roundtrip::InputSide::Reference
-                        } else {
-                            crate::roundtrip::InputSide::Returned
-                        },
-                        &declaration,
-                    ),
+                    validate_utf8_declaration(self.side, &declaration),
                 )?,
                 Event::PI(_) => {}
                 Event::DocType(_) | Event::GeneralRef(_) | Event::CData(_) => {
@@ -779,7 +773,7 @@ impl<'a> StreamParser<'a> {
                 .ok_or_else(|| self.xml_invalid("Face has a dangling Point reference"))
         };
         let face = Triangle::new(resolve(a)?, resolve(b)?, resolve(c)?);
-        validate_face(crate::roundtrip::InputSide::Returned, face, &self.points)?;
+        validate_face(self.side, face, &self.points)?;
         self.faces.push(face);
         Ok(())
     }
@@ -800,12 +794,7 @@ impl<'a> StreamParser<'a> {
         {
             return Err(self.unsupported("LandXML TIN subset is incomplete"));
         }
-        let side = if self.side == "REFERENCE" {
-            crate::roundtrip::InputSide::Reference
-        } else {
-            crate::roundtrip::InputSide::Returned
-        };
-        reject_duplicate_faces(side, &mut self.faces)?;
+        reject_duplicate_faces(self.side, &mut self.faces)?;
         Ok(ParsedSurface {
             points: self.points,
             faces: self.faces,
@@ -924,7 +913,7 @@ const fn tag_name(tag: Tag) -> &'static str {
     }
 }
 
-fn parse_number(side: &str, value: Option<&str>) -> Result<f64, RoundTripFailure> {
+fn parse_number(side: InputSide, value: Option<&str>) -> Result<f64, RoundTripFailure> {
     let value = value
         .ok_or_else(|| {
             RoundTripFailure::semantic(RoundTripReason::XmlInvalid, "coordinate absent")
@@ -946,7 +935,7 @@ fn parse_number(side: &str, value: Option<&str>) -> Result<f64, RoundTripFailure
     }
 }
 
-fn parse_id(side: &str, value: Option<&str>) -> Result<u64, RoundTripFailure> {
+fn parse_id(side: InputSide, value: Option<&str>) -> Result<u64, RoundTripFailure> {
     value
         .ok_or_else(|| RoundTripFailure::semantic(RoundTripReason::XmlInvalid, "Face id absent"))?
         .parse()
@@ -958,7 +947,7 @@ fn parse_id(side: &str, value: Option<&str>) -> Result<u64, RoundTripFailure> {
         })
 }
 
-fn require_regular(side: &str, metadata: &Metadata) -> Result<(), RoundTripFailure> {
+fn require_regular(side: InputSide, metadata: &Metadata) -> Result<(), RoundTripFailure> {
     if metadata.file_type().is_file() {
         Ok(())
     } else {
@@ -968,7 +957,7 @@ fn require_regular(side: &str, metadata: &Metadata) -> Result<(), RoundTripFailu
     }
 }
 
-fn require_file_bytes(side: &str, actual: u64, allowed: u64) -> Result<(), RoundTripFailure> {
+fn require_file_bytes(side: InputSide, actual: u64, allowed: u64) -> Result<(), RoundTripFailure> {
     if actual <= allowed {
         Ok(())
     } else {
@@ -979,7 +968,7 @@ fn require_file_bytes(side: &str, actual: u64, allowed: u64) -> Result<(), Round
 }
 
 fn require_same_file(
-    side: &str,
+    side: InputSide,
     initial: &Metadata,
     opened: &Metadata,
     current: &Metadata,
