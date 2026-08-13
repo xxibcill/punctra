@@ -450,6 +450,103 @@ impl FileIdentity {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum LockBindingKind {
+    Directory,
+    RegularFile,
+}
+
+#[derive(Debug)]
+struct LockBinding {
+    path: PathBuf,
+    file: File,
+    identity: FileIdentity,
+    kind: LockBindingKind,
+}
+
+impl LockBinding {
+    fn capture(path: &Path, file: File, kind: LockBindingKind) -> Result<Self, PersistenceError> {
+        let path_metadata = fs::symlink_metadata(path)
+            .map_err(|source| io_error("inspect Workspace lock binding", path, source))?;
+        let file_metadata = file
+            .metadata()
+            .map_err(|source| io_error("inspect open Workspace lock", path, source))?;
+        require_lock_binding_kind(path, &path_metadata, kind)?;
+        require_lock_binding_kind(path, &file_metadata, kind)?;
+        let identity = FileIdentity::read(&file_metadata, path)?;
+        if FileIdentity::read(&path_metadata, path)? != identity {
+            return corrupt(path, "Workspace lock changed while it was opened");
+        }
+        Ok(Self {
+            path: path.to_path_buf(),
+            file,
+            identity,
+            kind,
+        })
+    }
+
+    fn try_lock(&self, action: &'static str) -> Result<(), PersistenceError> {
+        self.file.try_lock().map_err(|error| {
+            let source: io::Error = error.into();
+            if source.kind() == io::ErrorKind::WouldBlock {
+                PersistenceError::Locked
+            } else {
+                io_error(action, &self.path, source)
+            }
+        })
+    }
+
+    fn verify(&self) -> Result<(), PersistenceError> {
+        let path_metadata = fs::symlink_metadata(&self.path)
+            .map_err(|source| io_error("reinspect Workspace lock binding", &self.path, source))?;
+        let file_metadata = self
+            .file
+            .metadata()
+            .map_err(|source| io_error("reinspect open Workspace lock", &self.path, source))?;
+        require_lock_binding_kind(&self.path, &path_metadata, self.kind)?;
+        require_lock_binding_kind(&self.path, &file_metadata, self.kind)?;
+        if FileIdentity::read(&path_metadata, &self.path)? != self.identity
+            || FileIdentity::read(&file_metadata, &self.path)? != self.identity
+        {
+            return corrupt(&self.path, "Workspace lock no longer names the held file");
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+struct WorkspaceLock {
+    root: Option<LockBinding>,
+    leaf: LockBinding,
+}
+
+impl WorkspaceLock {
+    fn verify(&self) -> Result<(), PersistenceError> {
+        if let Some(root) = &self.root {
+            root.verify()?;
+        }
+        self.leaf.verify()
+    }
+}
+
+fn require_lock_binding_kind(
+    path: &Path,
+    metadata: &fs::Metadata,
+    kind: LockBindingKind,
+) -> Result<(), PersistenceError> {
+    let valid = match kind {
+        LockBindingKind::Directory => metadata.is_dir() && !metadata.file_type().is_symlink(),
+        LockBindingKind::RegularFile => {
+            metadata.file_type().is_file() && !metadata.file_type().is_symlink()
+        }
+    };
+    if valid {
+        Ok(())
+    } else {
+        corrupt(path, "Workspace lock binding has an unexpected file type")
+    }
+}
+
 #[derive(Debug)]
 struct ScratchStage {
     path: PathBuf,
@@ -1287,7 +1384,7 @@ pub(crate) struct Store {
     operations: PathBuf,
     revisions: PathBuf,
     scratch: PathBuf,
-    _lock: File,
+    lock: WorkspaceLock,
 }
 
 impl Store {
@@ -1308,12 +1405,13 @@ impl Store {
             Ok(())
         })();
         setup?;
+        lock.verify()?;
         Ok(Self {
             root: root.to_path_buf(),
             operations,
             revisions,
             scratch,
-            _lock: lock,
+            lock,
         })
     }
 
@@ -1323,12 +1421,13 @@ impl Store {
         let operations = required_directory(root.join("operations"))?;
         let revisions = required_directory(root.join("revisions"))?;
         let scratch = required_directory(root.join("scratch"))?;
+        lock.verify()?;
         Ok(Self {
             root: root.to_path_buf(),
             operations,
             revisions,
             scratch,
-            _lock: lock,
+            lock,
         })
     }
 
@@ -1336,7 +1435,12 @@ impl Store {
         &self.scratch
     }
 
+    fn verify_lock(&self) -> Result<(), PersistenceError> {
+        self.lock.verify()
+    }
+
     pub(crate) fn durable_payload_bytes(&self) -> Result<u64, PersistenceError> {
+        self.verify_lock()?;
         let mut total = file_length(&self.root.join("manifest.pwm"))?;
         for entry in read_directory(&self.operations)? {
             let entry = entry
@@ -1355,6 +1459,7 @@ impl Store {
         &mut self,
         facts: &ManifestFacts,
     ) -> Result<(), PersistenceError> {
+        self.verify_lock()?;
         let mut stage = create_temporary(&self.scratch, "manifest", "tmp")?;
         (|| {
             inject_fault(&self.root, FaultPoint::ManifestStage)?;
@@ -1382,6 +1487,7 @@ impl Store {
                 return corrupt(&manifest_path, "published manifest facts changed");
             }
             published.verify_exact_bytes(&bytes)?;
+            self.verify_lock()?;
             Ok(())
         })()
     }
@@ -1390,6 +1496,7 @@ impl Store {
         &self,
         facts: &ManifestFacts,
     ) -> Result<bool, PersistenceError> {
+        self.verify_lock()?;
         let path = self.root.join("manifest.pwm");
         match fs::symlink_metadata(&path) {
             Ok(_) => self.read_manifest().map(|actual| actual == *facts),
@@ -1399,6 +1506,7 @@ impl Store {
     }
 
     pub(crate) fn read_manifest(&self) -> Result<ManifestFacts, PersistenceError> {
+        self.verify_lock()?;
         let path = self.root.join("manifest.pwm");
         let mut file = open_read(&path)?;
         ensure_exact_file_length(&file, MANIFEST_BYTES as u64, &path)?;
@@ -1417,6 +1525,7 @@ impl Store {
     where
         I: IntoIterator<Item = Result<RevisionRow, PersistenceError>>,
     {
+        self.verify_lock()?;
         let stage = create_temporary(&self.scratch, "revision", "tmp")?;
         write_candidate_file(stage, facts, rows, limits, control)
     }
@@ -1426,6 +1535,7 @@ impl Store {
         sealed: &SealedRevision,
         max_path_bytes: u64,
     ) -> Result<Arc<ValidatedRevision>, PersistenceError> {
+        self.verify_lock()?;
         let path_budget = max_path_bytes
             .checked_sub(arc_revision_fixed_bytes())
             .ok_or_else(|| {
@@ -1478,6 +1588,7 @@ impl Store {
     where
         F: FnOnce() -> Result<(), PersistenceError>,
     {
+        self.verify_lock()?;
         mark_publication_attempted()?;
         inject_fault(&self.root, FaultPoint::ReadyLink)?;
         sealed.stage.verify_revision(&sealed.file)?;
@@ -1495,6 +1606,7 @@ impl Store {
         published.verify_copy_of(&sealed.stage, PublicationSemantics::IndependentCopy)?;
         published.verify_revision(&prepared)?;
         sealed.stage.verify_revision(&sealed.file)?;
+        self.verify_lock()?;
         Ok(prepared)
     }
 
@@ -1503,6 +1615,7 @@ impl Store {
         ready: &ValidatedRevision,
         max_path_bytes: u64,
     ) -> Result<Arc<ValidatedRevision>, PersistenceError> {
+        self.verify_lock()?;
         let path_budget = max_path_bytes
             .checked_sub(arc_revision_fixed_bytes())
             .ok_or_else(|| {
@@ -1563,6 +1676,7 @@ impl Store {
         F: FnOnce() -> Result<(), PersistenceError>,
         G: FnOnce(),
     {
+        self.verify_lock()?;
         mark_publication_attempted()?;
         inject_fault(&self.root, FaultPoint::RevisionLink)?;
         let source = OpenFileWitness::open(ready.path.clone())?;
@@ -1577,25 +1691,30 @@ impl Store {
         published.verify_copy_of(&source, PublicationSemantics::AuthoritativeAlias)?;
         source.verify_revision(ready)?;
         published.verify_revision(&prepared)?;
+        self.verify_lock()?;
         Ok(prepared)
     }
 
     pub(crate) fn sync_revisions(&self) -> Result<(), PersistenceError> {
+        self.verify_lock()?;
         inject_fault(&self.root, FaultPoint::RecoveryRevisionsSync)?;
         sync_directory(&self.revisions)
     }
 
     pub(crate) fn sync_operations(&self) -> Result<(), PersistenceError> {
+        self.verify_lock()?;
         inject_fault(&self.root, FaultPoint::RecoveryOperationsSync)?;
         sync_directory(&self.operations)
     }
 
     pub(crate) fn sync_root(&self) -> Result<(), PersistenceError> {
+        self.verify_lock()?;
         inject_fault(&self.root, FaultPoint::RecoveryRootSync)?;
         sync_directory(&self.root)
     }
 
     pub(crate) fn sync_parent(&self) -> Result<(), PersistenceError> {
+        self.verify_lock()?;
         inject_fault(&self.root, FaultPoint::RecoveryParentSync)?;
         sync_directory(workspace_parent(&self.root))
     }
@@ -1605,6 +1724,7 @@ impl Store {
         facts: RejectionFacts,
         max_working_bytes: u64,
     ) -> Result<PreparedRejection, PersistenceError> {
+        self.verify_lock()?;
         let required = (REJECTION_BYTES as u64)
             .saturating_add(child_path_bytes(
                 &self.scratch,
@@ -1655,6 +1775,7 @@ impl Store {
     where
         F: FnOnce() -> Result<(), PersistenceError>,
     {
+        self.verify_lock()?;
         let mut stage = prepared
             .stage
             .take()
@@ -1687,6 +1808,7 @@ impl Store {
                 return corrupt(&prepared.target_path, "published rejection facts changed");
             }
             published.verify_exact_bytes(&prepared.bytes)?;
+            self.verify_lock()?;
             Ok(())
         })()
     }
@@ -1697,6 +1819,7 @@ impl Store {
         limits: CatalogLimits,
         control: &OperationControl,
     ) -> Result<Catalog, PersistenceError> {
+        self.verify_lock()?;
         let mut ledger = RecoveryLedger::default();
         let revisions = self.read_revisions(manifest, limits, &mut ledger, control)?;
         let operations =
@@ -1709,11 +1832,13 @@ impl Store {
             &mut ledger,
             control,
         )?;
-        Ok(Catalog {
+        let catalog = Catalog {
             root_revision: manifest.root_revision,
             revisions,
             operations,
-        })
+        };
+        self.verify_lock()?;
+        Ok(catalog)
     }
 
     fn ready_path(&self, operation: OperationBytes) -> PathBuf {
@@ -3520,31 +3645,87 @@ fn is_recognized_scratch(name: &str) -> bool {
     })
 }
 
-fn acquire_lock(root: &Path) -> Result<File, PersistenceError> {
+fn acquire_lock(root: &Path) -> Result<WorkspaceLock, PersistenceError> {
+    let root_binding = open_workspace_root_lock(root)?;
+    if let Some(root_binding) = &root_binding {
+        root_binding.try_lock("acquire Workspace root lock")?;
+    }
     let path = root.join("workspace.lock");
     match fs::symlink_metadata(&path) {
         Ok(_) => require_regular_file(&path)?,
         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
         Err(source) => return Err(io_error("inspect Workspace lock", &path, source)),
     }
-    let file = OpenOptions::new()
+    let file = open_workspace_lock_leaf(&path)
+        .map_err(|source| io_error("open Workspace lock", &path, source))?;
+    let leaf = LockBinding::capture(&path, file, LockBindingKind::RegularFile)?;
+    leaf.try_lock("acquire Workspace lock")?;
+    let lock = WorkspaceLock {
+        root: root_binding,
+        leaf,
+    };
+    lock.verify()?;
+    Ok(lock)
+}
+
+#[cfg(unix)]
+fn open_workspace_root_lock(root: &Path) -> Result<Option<LockBinding>, PersistenceError> {
+    use rustix::fs::{Mode, OFlags, open};
+
+    let file: File = open(
+        root,
+        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+        Mode::empty(),
+    )
+    .map_err(io::Error::from)
+    .map_err(|source| io_error("open Workspace root lock", root, source))?
+    .into();
+    LockBinding::capture(root, file, LockBindingKind::Directory).map(Some)
+}
+
+#[cfg(not(unix))]
+fn open_workspace_root_lock(_root: &Path) -> Result<Option<LockBinding>, PersistenceError> {
+    Ok(None)
+}
+
+#[cfg(unix)]
+fn open_workspace_lock_leaf(path: &Path) -> io::Result<File> {
+    use rustix::fs::{Mode, OFlags, open};
+
+    open(
+        path,
+        OFlags::RDWR | OFlags::CREATE | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+        Mode::RUSR | Mode::WUSR,
+    )
+    .map(Into::into)
+    .map_err(Into::into)
+}
+
+#[cfg(windows)]
+fn open_workspace_lock_leaf(path: &Path) -> io::Result<File> {
+    use std::os::windows::fs::OpenOptionsExt;
+
+    const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+    const FILE_SHARE_READ: u32 = 0x0000_0001;
+    const FILE_SHARE_WRITE: u32 = 0x0000_0002;
+    OpenOptions::new()
         .read(true)
         .write(true)
         .create(true)
         .truncate(false)
-        .open(&path)
-        .map_err(|source| io_error("open Workspace lock", &path, source))?;
-    match file.try_lock() {
-        Ok(()) => Ok(file),
-        Err(error) => {
-            let source: io::Error = error.into();
-            if source.kind() == io::ErrorKind::WouldBlock {
-                Err(PersistenceError::Locked)
-            } else {
-                Err(io_error("acquire Workspace lock", &path, source))
-            }
-        }
-    }
+        .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+        .open(path)
+}
+
+#[cfg(not(any(unix, windows)))]
+fn open_workspace_lock_leaf(path: &Path) -> io::Result<File> {
+    OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(path)
 }
 
 #[cfg(target_os = "macos")]
@@ -5054,6 +5235,28 @@ mod tests {
                 Err(PersistenceError::Corrupt { .. })
             ));
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn replaced_lock_leaf_cannot_admit_a_second_writer() {
+        let directory = TestDirectory::new();
+        let store = initialized_store(&directory);
+        let lock_path = directory.path().join("workspace.lock");
+        let displaced = directory.path().join("workspace.lock.displaced");
+        fs::rename(&lock_path, &displaced).expect("displace held lock leaf");
+        File::create(&lock_path).expect("create racing replacement lock leaf");
+
+        assert!(matches!(
+            Store::open(directory.path()),
+            Err(PersistenceError::Locked)
+        ));
+        assert!(matches!(
+            store.read_manifest(),
+            Err(PersistenceError::Corrupt { .. })
+        ));
+        assert!(lock_path.is_file());
+        assert!(displaced.is_file());
     }
 
     #[test]
