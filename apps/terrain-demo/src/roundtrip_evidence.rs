@@ -849,7 +849,17 @@ fn domain_hash(domain: &[u8], bytes: &[u8]) -> [u8; 32] {
 }
 
 fn number(output: &mut String, value: f64) -> Result<(), fmt::Error> {
-    write!(output, "{value:.17}")
+    let fixed = format!("{value:.17}");
+    if fixed
+        .parse::<f64>()
+        .is_ok_and(|parsed| parsed.to_bits() == value.to_bits())
+    {
+        output.push_str(&fixed);
+        return Ok(());
+    }
+
+    let exact = serde_json::Number::from_f64(value).ok_or(fmt::Error)?;
+    write!(output, "{exact}")
 }
 
 fn hex(output: &mut String, bytes: &[u8]) -> Result<(), fmt::Error> {
@@ -906,10 +916,30 @@ mod tests {
     };
 
     use super::{
-        CheckStatus, RoundTripEvidenceError, check_statuses, verify_round_trip_with_control,
+        CheckStatus, RoundTripEvidenceError, check_statuses, number, verify_round_trip_with_control,
     };
 
     static NEXT_TARGET: AtomicU64 = AtomicU64::new(0);
+
+    #[test]
+    fn canonical_numbers_preserve_exact_f64_values() {
+        for value in [1.0e-18, f64::MIN_POSITIVE, f64::from_bits(1)] {
+            let mut encoded = String::new();
+            number(&mut encoded, value).expect("writing to a String must succeed");
+            let decoded: f64 =
+                serde_json::from_str(&encoded).expect("canonical number must be valid JSON");
+
+            assert_eq!(decoded.to_bits(), value.to_bits(), "encoded as {encoded}");
+        }
+    }
+
+    #[test]
+    fn canonical_numbers_retain_existing_exact_fixed_point_bytes() {
+        let mut encoded = String::new();
+        number(&mut encoded, 0.001).expect("writing to a String must succeed");
+
+        assert_eq!(encoded, "0.00100000000000000");
+    }
 
     #[test]
     fn ambiguous_mapping_leaves_dependent_checks_not_evaluated() {
