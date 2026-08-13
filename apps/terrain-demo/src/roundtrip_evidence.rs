@@ -498,7 +498,12 @@ fn encode_evidence(
 }
 
 fn write_checks(json: &mut String, evaluation: &RoundTripEvaluation) -> Result<(), fmt::Error> {
-    let [parse, units, unique_mapping, tolerance, topology] = check_statuses(evaluation.reason());
+    let mapping_completed = match evaluation {
+        RoundTripEvaluation::Passed(_) => true,
+        RoundTripEvaluation::Failed(mismatch) => mismatch.completed_mapping_point_count().is_some(),
+    };
+    let [parse, units, unique_mapping, tolerance, topology] =
+        check_statuses(evaluation.reason(), mapping_completed);
     write!(
         json,
         ",\"checks\":{{\"provenance\":{{\"status\":\"passed\"}},\"parse\":{{\"status\":"
@@ -515,7 +520,10 @@ fn write_checks(json: &mut String, evaluation: &RoundTripEvaluation) -> Result<(
     write!(json, "}}}}")
 }
 
-fn check_statuses(reason: Option<crate::roundtrip::RoundTripReason>) -> [CheckStatus; 5] {
+fn check_statuses(
+    reason: Option<crate::roundtrip::RoundTripReason>,
+    mapping_completed: bool,
+) -> [CheckStatus; 5] {
     use crate::roundtrip::RoundTripReason as Reason;
 
     use CheckStatus::{Failed, NotEvaluated, Passed};
@@ -546,7 +554,12 @@ fn check_statuses(reason: Option<crate::roundtrip::RoundTripReason>) -> [CheckSt
         Some(reason @ (Reason::VertexUnmatched | Reason::ToleranceDrift)) => {
             [Passed, Passed, Failed(reason), Failed(reason), NotEvaluated]
         }
-        Some(reason @ Reason::TopologyDrift) => [Passed, Passed, Passed, Passed, Failed(reason)],
+        Some(reason @ Reason::TopologyDrift) if mapping_completed => {
+            [Passed, Passed, Passed, Passed, Failed(reason)]
+        }
+        Some(reason @ Reason::TopologyDrift) => {
+            [Passed, Passed, NotEvaluated, NotEvaluated, Failed(reason)]
+        }
     }
 }
 
@@ -756,7 +769,7 @@ mod tests {
     #[test]
     fn ambiguous_mapping_leaves_dependent_checks_not_evaluated() {
         let [parse, units, mapping, tolerance, topology] =
-            check_statuses(Some(RoundTripReason::VertexAmbiguous));
+            check_statuses(Some(RoundTripReason::VertexAmbiguous), false);
 
         assert_eq!(parse, CheckStatus::Passed);
         assert_eq!(units, CheckStatus::Passed);
@@ -766,6 +779,36 @@ mod tests {
         );
         assert_eq!(tolerance, CheckStatus::NotEvaluated);
         assert_eq!(topology, CheckStatus::NotEvaluated);
+    }
+
+    #[test]
+    fn topology_rejection_before_mapping_keeps_unrun_checks_not_evaluated() {
+        let [parse, units, mapping, tolerance, topology] =
+            check_statuses(Some(RoundTripReason::TopologyDrift), false);
+
+        assert_eq!(parse, CheckStatus::Passed);
+        assert_eq!(units, CheckStatus::Passed);
+        assert_eq!(mapping, CheckStatus::NotEvaluated);
+        assert_eq!(tolerance, CheckStatus::NotEvaluated);
+        assert_eq!(
+            topology,
+            CheckStatus::Failed(RoundTripReason::TopologyDrift)
+        );
+    }
+
+    #[test]
+    fn topology_comparison_after_mapping_preserves_completed_checks() {
+        let [parse, units, mapping, tolerance, topology] =
+            check_statuses(Some(RoundTripReason::TopologyDrift), true);
+
+        assert_eq!(parse, CheckStatus::Passed);
+        assert_eq!(units, CheckStatus::Passed);
+        assert_eq!(mapping, CheckStatus::Passed);
+        assert_eq!(tolerance, CheckStatus::Passed);
+        assert_eq!(
+            topology,
+            CheckStatus::Failed(RoundTripReason::TopologyDrift)
+        );
     }
 
     #[test]
