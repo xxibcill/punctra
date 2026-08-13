@@ -2565,10 +2565,10 @@ fn terrain_output_failure(
         error @ point_terrain::TerrainError::Io { .. } => WorkflowFailure::new(
             FailureCode::Io,
             stage,
-            Certainty::Indeterminate(PublicationPhase::LandXmlTarget),
+            Certainty::PrePublication,
             context,
             error,
-            RecoveryAction::ResumeSameRun,
+            RecoveryAction::RetryAfterRestoringDisk,
         ),
         error => terrain_failure(stage, error, control, context),
     }
@@ -3361,24 +3361,24 @@ mod tests {
     }
 
     #[test]
-    fn undifferentiated_landxml_io_requires_target_reconciliation() {
+    fn landxml_io_before_publication_preserves_prepublication_taxonomy() {
         let failure = terrain_output_failure(
             WorkflowStage::LandXml,
             point_terrain::TerrainError::Io {
-                operation: "publish LandXML target",
-                path: point_terrain::TerrainDiagnostic::new("terrain.xml"),
-                source: io::Error::other("publication outcome is not phase-witnessed"),
+                operation: "create LandXML stage",
+                path: point_terrain::TerrainDiagnostic::new(".punctra-landxml.stage"),
+                source: io::Error::other("disk is full"),
             },
             &OperationControl::new(),
             FailureContext::default(),
         );
 
         assert_eq!(failure.code(), "PWF_IO");
-        assert_eq!(failure.certainty(), "indeterminate");
-        assert_eq!(failure.publication_phase(), Some("landxml-target"));
+        assert_eq!(failure.certainty(), "pre_publication");
+        assert_eq!(failure.publication_phase(), None);
         assert_eq!(
             failure.recovery_action(),
-            "resume the same Run with the same identities and paths"
+            "restore disk capacity or permissions, then resume the same Run"
         );
     }
 
