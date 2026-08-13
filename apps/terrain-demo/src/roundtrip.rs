@@ -1339,9 +1339,7 @@ fn validate_surface(
     surface: Node<'_, '_>,
     limits: RoundTripLimits,
 ) -> Result<ParsedSurface, RoundTripFailure> {
-    let Some(surface_name) = unqualified_attribute(surface, "name") else {
-        return Err(schema_error(side, "Surface requires a name attribute"));
-    };
+    let surface_name = unqualified_attribute(surface, "name");
     validate_allowed_children(side, surface, &["Definition"])?;
     let definition = unique_child(side, surface, "Definition")?;
     if unqualified_attribute(definition, "surfType") != Some("TIN") {
@@ -1361,7 +1359,9 @@ fn validate_surface(
     Ok(ParsedSurface {
         points,
         faces,
-        surface_name: (!surface_name.is_empty()).then(|| surface_name.to_owned().into_boxed_str()),
+        surface_name: surface_name
+            .filter(|name| !name.is_empty())
+            .map(|name| name.to_owned().into_boxed_str()),
         ignored_top_level_sections: Box::new([]),
     })
 }
@@ -2309,6 +2309,25 @@ mod tests {
     }
 
     #[test]
+    fn absent_surface_name_is_ignored_semantic_metadata() {
+        let fixture = Fixture::new("absent-surface-name");
+        let reference_xml = landxml(REFERENCE_POINTS, REFERENCE_FACES, false);
+        let returned_xml = reference_xml.replacen("<Surface name=\"Ground\">", "<Surface>", 1);
+        let (reference, returned) = fixture.write_pair(&reference_xml, &returned_xml);
+
+        let report = verify(
+            &reference,
+            &returned,
+            tolerances(0.0, 0.0),
+            default_limits(),
+        )
+        .expect("an absent surface name does not change terrain semantics");
+
+        assert!(!report.exact_bytes());
+        assert!(report.topology_matches());
+    }
+
+    #[test]
     fn comments_containing_declaration_tokens_are_ignored() {
         let fixture = Fixture::new("declaration-token-comments");
         let reference_xml = landxml(REFERENCE_POINTS, REFERENCE_FACES, false);
@@ -2575,14 +2594,6 @@ mod tests {
                 reference_xml.replacen(
                     "linearUnit=\"meter\"",
                     "xmlns:meta=\"urn:generated:metadata\" meta:linearUnit=\"meter\"",
-                    1,
-                ),
-                RoundTripFailureKind::SemanticMismatch,
-            ),
-            (
-                reference_xml.replacen(
-                    "name=\"Ground\"",
-                    "xmlns:meta=\"urn:generated:metadata\" meta:name=\"Ground\"",
                     1,
                 ),
                 RoundTripFailureKind::SemanticMismatch,

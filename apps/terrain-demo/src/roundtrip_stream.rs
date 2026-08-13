@@ -651,11 +651,11 @@ impl<'a> StreamParser<'a> {
         let required = match tag {
             Tag::LandXml => Some((b"version".as_slice(), "1.2")),
             Tag::Metric => Some((b"linearUnit".as_slice(), "meter")),
-            Tag::Surface => Some((b"name".as_slice(), "")),
             Tag::Definition => Some((b"surfType".as_slice(), "TIN")),
             Tag::Point => Some((b"id".as_slice(), "")),
             _ => None,
         };
+        let optional = (tag == Tag::Surface).then_some(b"name".as_slice());
         let mut found = None;
         for attribute in start.attributes() {
             let attribute = attribute.map_err(|error| {
@@ -667,7 +667,9 @@ impl<'a> StreamParser<'a> {
             {
                 continue;
             }
-            if required.is_some_and(|(name, _)| attribute.key.as_ref() == name) {
+            if required.is_some_and(|(name, _)| attribute.key.as_ref() == name)
+                || optional.is_some_and(|name| attribute.key.as_ref() == name)
+            {
                 let value = attribute
                     .normalized_value(XmlVersion::Implicit1_0)
                     .map_err(|error| {
@@ -680,6 +682,12 @@ impl<'a> StreamParser<'a> {
                 }
             }
         }
+        if tag == Tag::Surface {
+            self.surface_name = found
+                .filter(|value| !value.is_empty())
+                .map(|value| value.into_boxed_str());
+            return Ok(());
+        }
         if let Some((_name, expected)) = required {
             let value = found.ok_or_else(|| {
                 if tag == Tag::Metric {
@@ -691,9 +699,6 @@ impl<'a> StreamParser<'a> {
             match tag {
                 Tag::Metric if value != expected => {
                     return Err(self.unit_drift());
-                }
-                Tag::Surface => {
-                    self.surface_name = (!value.is_empty()).then(|| value.into_boxed_str());
                 }
                 Tag::Point => {
                     let id = value
@@ -1011,6 +1016,28 @@ mod tests {
         assert_eq!(report.vertex_count(), 3);
         assert_eq!(report.face_count(), 1);
         assert!(!report.exact_bytes());
+    }
+
+    #[test]
+    fn streaming_reader_accepts_an_absent_surface_name() {
+        let directory = Directory::new();
+        let reference = directory.path.join("reference.xml");
+        let returned = directory.path.join("returned.xml");
+        let reference_xml = xml("1", "2", "3", "1 2 3");
+        let returned_xml = reference_xml.replacen("<Surface name=\"Generated\">", "<Surface>", 1);
+        fs::write(&reference, reference_xml).unwrap();
+        fs::write(&returned, returned_xml).unwrap();
+
+        let evaluation = evaluate_streaming_round_trip(
+            &reference,
+            &returned,
+            RoundTripDeclaration::new("generated", "test", "metric").unwrap(),
+            RoundTripTolerances::new(0.0, 0.0).unwrap(),
+            RoundTripLimits::full_v07_export(),
+        )
+        .expect("an absent surface name remains non-semantic");
+
+        assert!(matches!(evaluation, RoundTripEvaluation::Passed(_)));
     }
 
     #[test]
