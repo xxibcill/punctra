@@ -3295,6 +3295,12 @@ mod tests {
                 reason: point_workspace::WorkspaceDiagnostic::new(
                     "injected directory-sync uncertainty",
                 ),
+                source: Box::new(WorkspaceError::Io {
+                    operation: "sync Workspace directory",
+                    path: point_workspace::WorkspaceDiagnostic::new("workspace"),
+                    source: io::Error::other("injected directory-sync failure"),
+                }),
+                reconciliation: None,
             },
             &control,
             FailureContext::default(),

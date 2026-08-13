@@ -1878,24 +1878,29 @@ fn classify_manifest_publication_failure(
     error: PersistenceError,
 ) -> WorkspaceError {
     let publication_error = map_persistence(error);
-    let diagnostic = publication_error.to_string();
     match store.manifest_is_published_as(manifest) {
         Ok(true) => WorkspaceError::RecoveryIndeterminate {
             operation: None,
-            reason: WorkspaceDiagnostic::new(format!(
-                "Workspace creation may already be complete; reopen this exact root: {diagnostic}"
-            )),
+            reason: WorkspaceDiagnostic::new(
+                "Workspace creation may already be complete; reopen this exact root",
+            ),
+            source: Box::new(publication_error),
+            reconciliation: None,
         },
         // No durable manifest exists, so the original structured failure and
         // its filesystem operation, path, and OS error remain definitive.
         Ok(false) => publication_error,
-        Err(reconcile) => WorkspaceError::RecoveryIndeterminate {
-            operation: None,
-            reason: WorkspaceDiagnostic::new(format!(
-                "Workspace creation could not be reconciled; reopen this exact root: {diagnostic}; {}",
-                map_persistence(reconcile)
-            )),
-        },
+        Err(reconcile) => {
+            let reconciliation = map_persistence(reconcile);
+            WorkspaceError::RecoveryIndeterminate {
+                operation: None,
+                reason: WorkspaceDiagnostic::new(format!(
+                    "Workspace creation could not be reconciled; reopen this exact root; reconciliation failure: {reconciliation}"
+                )),
+                source: Box::new(publication_error),
+                reconciliation: Some(Box::new(reconciliation)),
+            }
+        }
     }
 }
 
@@ -1942,9 +1947,16 @@ fn sync_recovered_directories(store: &Store) -> Result<(), WorkspaceError> {
         .and_then(|()| store.sync_root())
         .and_then(|()| store.sync_operations())
         .and_then(|()| store.sync_revisions())
-        .map_err(|error| WorkspaceError::RecoveryIndeterminate {
-            operation: None,
-            reason: WorkspaceDiagnostic::new(map_persistence(error).to_string()),
+        .map_err(|error| {
+            let source = map_persistence(error);
+            WorkspaceError::RecoveryIndeterminate {
+                operation: None,
+                reason: WorkspaceDiagnostic::new(
+                    "recovered Workspace directories could not be durably synchronized",
+                ),
+                source: Box::new(source),
+                reconciliation: None,
+            }
         })
 }
 
@@ -2219,7 +2231,9 @@ mod tests {
     #[test]
     fn absent_manifest_preserves_the_original_publication_io_failure() {
         let directory = TestDirectory::new();
-        let store = Store::create(&directory.0).expect("create premanifest Store");
+        let mut store = Store::create(&directory.0).expect("create premanifest Store");
+        let mut classification_name = [0; MAX_ATTRIBUTE_NAME_BYTES];
+        classification_name[.."classification".len()].copy_from_slice(b"classification");
         let manifest = ManifestFacts {
             workspace: [1; 16],
             source: [2; 32],
@@ -2227,8 +2241,8 @@ mod tests {
             position_transform_bits: [0; 6],
             classification: PersistedAttributeDefinition {
                 id: 7,
-                name_len: 0,
-                name: [0; MAX_ATTRIBUTE_NAME_BYTES],
+                name_len: u32::try_from("classification".len()).unwrap(),
+                name: classification_name,
                 data_type: ATTRIBUTE_DATA_TYPE_U8,
             },
             root_revision: [3; 32],
@@ -2257,6 +2271,43 @@ mod tests {
         assert_eq!(operation, "flush Workspace manifest stage");
         assert_eq!(path.as_str(), original_path.display().to_string());
         assert_eq!(source.kind(), std::io::ErrorKind::PermissionDenied);
+
+        store
+            .publish_manifest(&manifest)
+            .expect("publish the complete manifest");
+        let uncertain_path = directory.0.join("manifest.pwm");
+        let uncertain = classify_manifest_publication_failure(
+            &store,
+            &manifest,
+            PersistenceError::Io {
+                action: "sync Workspace manifest parent",
+                path: uncertain_path.clone(),
+                source: std::io::Error::new(
+                    std::io::ErrorKind::StorageFull,
+                    "injected post-publication failure",
+                ),
+            },
+        );
+        let WorkspaceError::RecoveryIndeterminate {
+            source,
+            reconciliation,
+            ..
+        } = uncertain
+        else {
+            panic!("a published manifest must retain indeterminate I/O");
+        };
+        assert!(reconciliation.is_none());
+        let WorkspaceError::Io {
+            operation,
+            path,
+            source,
+        } = *source
+        else {
+            panic!("indeterminate creation must retain the typed I/O source");
+        };
+        assert_eq!(operation, "sync Workspace manifest parent");
+        assert_eq!(path.as_str(), uncertain_path.display().to_string());
+        assert_eq!(source.kind(), std::io::ErrorKind::StorageFull);
     }
 
     #[test]
@@ -2347,10 +2398,18 @@ mod tests {
             let directory = TestDirectory::new();
             let store = Store::create(&directory.0).expect("create test Store");
             let fault = test_fault::Guard::install(&directory.0, point, test_fault::Action::Error);
-            assert!(matches!(
-                sync_recovered_directories(&store),
-                Err(WorkspaceError::RecoveryIndeterminate { .. })
-            ));
+            let error = sync_recovered_directories(&store)
+                .expect_err("an injected sync failure must remain indeterminate");
+            let WorkspaceError::RecoveryIndeterminate {
+                source,
+                reconciliation,
+                ..
+            } = error
+            else {
+                panic!("recovered-directory sync must retain uncertainty");
+            };
+            assert!(reconciliation.is_none());
+            assert!(matches!(source.as_ref(), WorkspaceError::Io { .. }));
             drop(fault);
             drop(store);
         }
