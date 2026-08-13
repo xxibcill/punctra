@@ -411,7 +411,7 @@ Coverage remains until the planner emits its exact conditional retirement.
 | Source read | Between decoder blocks or Point Batches | None | No partial Source result |
 | Index prepare | After synced checksummed work frame; before artifact publication | Verified work prefix and recognized sidecars | Existing target or one complete new target |
 | Workspace create/open | Before manifest/session publication; recovery becomes noncancellable once durable create is visible | Recognized scratch/partial pre-manifest directory | No Workspace, or one complete reopenable Workspace |
-| Exact selection | Between candidate/Source/overlay/Point Set blocks | Live disposable spill owned by Job | No Point Set, or one sealed complete Point Set |
+| Exact selection | Between candidate/Source/overlay/Point Set blocks | Bounded private spill retained after completion or cancellation; ignored by recovery and removable only during offline maintenance | No Point Set, or one sealed complete Point Set |
 | Snapshot Point rows | Between candidate/Source/overlay/output blocks | Private in-memory partial batch only | No summary, or one complete terminal summary |
 | Revision commit | Before publication; afterward certainty is conservative | Complete ready/rejection/Revision links and recognized scratch | Rejected old head, Committed new head, or Indeterminate until reopen |
 | Terrain Derivation | Between rows, sort/predicate/topology blocks, and before final seal | Private in-memory working allocations | No Surface, or one complete immutable Surface |
