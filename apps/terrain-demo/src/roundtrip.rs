@@ -4,7 +4,7 @@ use std::{
     collections::BTreeMap,
     error::Error,
     fmt,
-    fs::{self, File, Metadata},
+    fs::File,
     io::{Read as _, Seek as _, SeekFrom},
     path::Path,
 };
@@ -18,6 +18,7 @@ use roxmltree::{Document, Node, ParsingOptions};
 use crate::{
     bounded_diagnostic::BoundedDiagnostic,
     diagnostic::{FailureCode, RecoveryAction},
+    stable_file::StableFile,
 };
 
 const LANDXML_NAMESPACE: &str = "http://www.landxml.org/schema/LandXML-1.2";
@@ -837,12 +838,17 @@ struct FileSnapshot {
 
 pub(crate) struct CapturedRoundTripFile {
     pub(crate) bytes: Vec<u8>,
-    witness: RetainedFileWitness,
+    witness: StableFile,
 }
 
 impl CapturedRoundTripFile {
     pub(crate) fn verify(&self) -> Result<(), RoundTripFailure> {
-        self.witness.verify()
+        self.witness.verify().map_err(|error| {
+            RoundTripFailure::invalid(format_args!(
+                "{} changed after it was captured: {error}",
+                InputSide::Returned
+            ))
+        })
     }
 }
 
@@ -859,52 +865,11 @@ pub(crate) fn capture_round_trip_file(
     })
 }
 
-struct RetainedFileWitness {
-    side: InputSide,
-    path: std::path::PathBuf,
-    file: File,
-    identity: Metadata,
-}
-
-impl RetainedFileWitness {
-    fn verify(&self) -> Result<(), RoundTripFailure> {
-        let opened = self.file.metadata().map_err(|error| {
-            RoundTripFailure::invalid(format_args!(
-                "{} metadata cannot be rechecked: {error}",
-                self.side
-            ))
-        })?;
-        let current = fs::symlink_metadata(&self.path).map_err(|error| {
-            RoundTripFailure::invalid(format_args!(
-                "{} path cannot be rechecked: {error}",
-                self.side
-            ))
-        })?;
-        if !same_file_state(&self.identity, &opened)
-            || current.file_type().is_symlink()
-            || !current.is_file()
-            || !same_file_state(&self.identity, &current)
-        {
-            return Err(RoundTripFailure::invalid(format_args!(
-                "{} changed after it was captured",
-                self.side
-            )));
-        }
-        Ok(())
-    }
-}
-
-struct FileWitness<'a> {
-    path: &'a Path,
-    file: File,
-    metadata: Metadata,
-}
-
-fn capture_file_pair<'a>(
-    reference_path: &'a Path,
-    returned_path: &'a Path,
+fn capture_file_pair(
+    reference_path: &Path,
+    returned_path: &Path,
     max_file_bytes: u64,
-) -> Result<(FileWitness<'a>, FileWitness<'a>), RoundTripFailure> {
+) -> Result<(StableFile, StableFile), RoundTripFailure> {
     let reference = capture_regular_file(InputSide::Reference, reference_path, max_file_bytes)?;
     let returned = capture_regular_file(InputSide::Returned, returned_path, max_file_bytes)?;
     Ok((reference, returned))
@@ -914,95 +879,30 @@ fn capture_regular_file(
     side: InputSide,
     path: &Path,
     max_file_bytes: u64,
-) -> Result<FileWitness<'_>, RoundTripFailure> {
-    let path_metadata = fs::symlink_metadata(path).map_err(|error| {
-        RoundTripFailure::invalid(format_args!("{side} cannot be inspected: {error}"))
+) -> Result<StableFile, RoundTripFailure> {
+    let witness = StableFile::capture(path).map_err(|error| {
+        RoundTripFailure::invalid(format_args!("{side} cannot be captured: {error}"))
     })?;
-    capture_inspected_regular_file(side, path, &path_metadata, max_file_bytes)
+    check_file_bytes(side, witness.byte_length(), max_file_bytes)?;
+    Ok(witness)
 }
 
-fn capture_inspected_regular_file<'a>(
+#[cfg(test)]
+fn capture_inspected_regular_file(
     side: InputSide,
-    path: &'a Path,
-    path_metadata: &Metadata,
+    path: &Path,
+    path_metadata: &std::fs::Metadata,
     max_file_bytes: u64,
-) -> Result<FileWitness<'a>, RoundTripFailure> {
-    if path_metadata.file_type().is_symlink() || !path_metadata.is_file() {
-        return Err(RoundTripFailure::invalid(format_args!(
-            "{side} must be a regular file and not a symbolic link"
-        )));
-    }
-    let path_identity = require_file_identity(side, path_metadata)?;
+) -> Result<StableFile, RoundTripFailure> {
     check_file_bytes(side, path_metadata.len(), max_file_bytes)?;
-
-    let file = open_input_file(path).map_err(|error| {
-        RoundTripFailure::invalid(format_args!("{side} cannot be opened: {error}"))
-    })?;
-    #[cfg(windows)]
-    require_disk_file(side, &file)?;
-    let open_metadata = file.metadata().map_err(|error| {
-        RoundTripFailure::invalid(format_args!("{side} metadata cannot be read: {error}"))
-    })?;
-    let open_identity = require_file_identity(side, &open_metadata)?;
-    if !open_metadata.is_file()
-        || path_identity != open_identity
-        || !same_file_state(path_metadata, &open_metadata)
-    {
-        return Err(RoundTripFailure::invalid(format_args!(
-            "{side} changed while it was being opened"
-        )));
-    }
-    Ok(FileWitness {
-        path,
-        file,
-        metadata: open_metadata,
+    StableFile::capture_from_metadata(path, path_metadata).map_err(|error| {
+        RoundTripFailure::invalid(format_args!("{side} cannot be captured: {error}"))
     })
-}
-
-#[cfg(unix)]
-fn open_input_file(path: &Path) -> std::io::Result<File> {
-    use std::os::unix::fs::OpenOptionsExt as _;
-
-    fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
-        .open(path)
-}
-
-#[cfg(windows)]
-fn open_input_file(path: &Path) -> std::io::Result<File> {
-    use std::os::windows::fs::OpenOptionsExt as _;
-
-    fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT)
-        .open(path)
-}
-
-#[cfg(not(any(unix, windows)))]
-fn open_input_file(_path: &Path) -> std::io::Result<File> {
-    Err(std::io::Error::new(
-        std::io::ErrorKind::Unsupported,
-        "stable no-follow input capture is unavailable on this platform",
-    ))
-}
-
-#[cfg(windows)]
-fn require_disk_file(side: InputSide, file: &File) -> Result<(), RoundTripFailure> {
-    let file_type = winapi_util::file::typ(file).map_err(|error| {
-        RoundTripFailure::invalid(format_args!("{side} handle type cannot be read: {error}"))
-    })?;
-    if !file_type.is_disk() {
-        return Err(RoundTripFailure::invalid(format_args!(
-            "{side} must use a disk-backed regular file"
-        )));
-    }
-    Ok(())
 }
 
 fn read_regular_file(
     side: InputSide,
-    witness: FileWitness<'_>,
+    witness: StableFile,
     max_file_bytes: u64,
 ) -> Result<FileSnapshot, RoundTripFailure> {
     read_regular_file_retained(side, witness, max_file_bytes).map(|(snapshot, _)| snapshot)
@@ -1010,74 +910,22 @@ fn read_regular_file(
 
 fn read_regular_file_retained(
     side: InputSide,
-    witness: FileWitness<'_>,
+    mut witness: StableFile,
     max_file_bytes: u64,
-) -> Result<(FileSnapshot, RetainedFileWitness), RoundTripFailure> {
-    let FileWitness {
-        path,
-        mut file,
-        metadata: open_metadata,
-    } = witness;
-    let bytes = read_bounded_bytes(side, &mut file, open_metadata.len(), max_file_bytes)?;
-    let final_metadata = file.metadata().map_err(|error| {
-        RoundTripFailure::invalid(format_args!("{side} metadata cannot be rechecked: {error}"))
+) -> Result<(FileSnapshot, StableFile), RoundTripFailure> {
+    let expected_bytes = witness.byte_length();
+    let bytes = read_bounded_bytes(side, witness.file_mut(), expected_bytes, max_file_bytes)?;
+    witness.verify().map_err(|error| {
+        RoundTripFailure::invalid(format_args!(
+            "{side} changed while it was being read: {error}"
+        ))
     })?;
-    let final_path_metadata = fs::symlink_metadata(path).map_err(|error| {
-        RoundTripFailure::invalid(format_args!("{side} path cannot be rechecked: {error}"))
-    })?;
-    let expected_bytes = open_metadata.len();
-    if bytes.len() as u64 != expected_bytes
-        || !same_file_state(&open_metadata, &final_metadata)
-        || final_path_metadata.file_type().is_symlink()
-        || !final_path_metadata.is_file()
-        || !same_file_state(&open_metadata, &final_path_metadata)
-    {
+    if bytes.len() as u64 != expected_bytes {
         return Err(RoundTripFailure::invalid(format_args!(
             "{side} changed while it was being read"
         )));
     }
-    Ok((
-        FileSnapshot { bytes },
-        RetainedFileWitness {
-            side,
-            path: path.to_path_buf(),
-            file,
-            identity: final_metadata,
-        },
-    ))
-}
-
-#[cfg(unix)]
-// The shared caller is fallible because Windows can omit stable identity fields
-// and unsupported platforms fail closed; Unix always supplies device/inode.
-#[allow(clippy::unnecessary_wraps)]
-fn require_file_identity(
-    _side: InputSide,
-    metadata: &Metadata,
-) -> Result<FileIdentity, RoundTripFailure> {
-    Ok(FileIdentity::from_metadata(metadata))
-}
-
-#[cfg(windows)]
-fn require_file_identity(
-    side: InputSide,
-    metadata: &Metadata,
-) -> Result<FileIdentity, RoundTripFailure> {
-    FileIdentity::from_metadata(metadata).ok_or_else(|| {
-        RoundTripFailure::invalid(format_args!(
-            "{side} filesystem does not expose a stable file identity"
-        ))
-    })
-}
-
-#[cfg(not(any(unix, windows)))]
-fn require_file_identity(
-    side: InputSide,
-    _metadata: &Metadata,
-) -> Result<FileIdentity, RoundTripFailure> {
-    Err(RoundTripFailure::invalid(format_args!(
-        "{side} filesystem does not expose a stable file identity"
-    )))
+    Ok((FileSnapshot { bytes }, witness))
 }
 
 fn check_file_bytes(side: InputSide, actual: u64, allowed: u64) -> Result<(), RoundTripFailure> {
@@ -1116,86 +964,6 @@ fn read_bounded_bytes(
         })?;
     check_file_bytes(side, bytes.len() as u64, max_file_bytes)?;
     Ok(bytes)
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct FileIdentity {
-    #[cfg(unix)]
-    device: u64,
-    #[cfg(unix)]
-    inode: u64,
-    #[cfg(windows)]
-    volume_serial_number: u32,
-    #[cfg(windows)]
-    file_index: u64,
-}
-
-impl FileIdentity {
-    #[cfg(unix)]
-    fn from_metadata(metadata: &Metadata) -> Self {
-        use std::os::unix::fs::MetadataExt as _;
-        Self {
-            device: metadata.dev(),
-            inode: metadata.ino(),
-        }
-    }
-
-    #[cfg(windows)]
-    fn from_metadata(metadata: &Metadata) -> Option<Self> {
-        use std::os::windows::fs::MetadataExt as _;
-        Some(Self {
-            volume_serial_number: metadata.volume_serial_number()?,
-            file_index: metadata.file_index()?,
-        })
-    }
-}
-
-#[cfg(unix)]
-fn same_file_identity(left: &Metadata, right: &Metadata) -> bool {
-    FileIdentity::from_metadata(left) == FileIdentity::from_metadata(right)
-}
-
-#[cfg(windows)]
-fn same_file_identity(left: &Metadata, right: &Metadata) -> bool {
-    matches!(
-        (
-            FileIdentity::from_metadata(left),
-            FileIdentity::from_metadata(right)
-        ),
-        (Some(left), Some(right)) if left == right
-    )
-}
-
-#[cfg(not(any(unix, windows)))]
-fn same_file_identity(_left: &Metadata, _right: &Metadata) -> bool {
-    false
-}
-
-#[cfg(unix)]
-fn same_file_state(left: &Metadata, right: &Metadata) -> bool {
-    use std::os::unix::fs::MetadataExt as _;
-
-    same_file_identity(left, right)
-        && left.len() == right.len()
-        && left.mtime() == right.mtime()
-        && left.mtime_nsec() == right.mtime_nsec()
-        && left.ctime() == right.ctime()
-        && left.ctime_nsec() == right.ctime_nsec()
-}
-
-#[cfg(windows)]
-fn same_file_state(left: &Metadata, right: &Metadata) -> bool {
-    use std::os::windows::fs::MetadataExt as _;
-
-    same_file_identity(left, right)
-        && left.len() == right.len()
-        && left.creation_time() == right.creation_time()
-        && left.last_write_time() == right.last_write_time()
-}
-
-#[cfg(not(any(unix, windows)))]
-fn same_file_state(_left: &Metadata, _right: &Metadata) -> bool {
-    false
 }
 
 #[derive(Clone, Copy, Debug)]

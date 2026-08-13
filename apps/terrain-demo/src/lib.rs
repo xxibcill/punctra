@@ -12,6 +12,7 @@ mod report;
 mod roundtrip;
 mod roundtrip_evidence;
 mod roundtrip_stream;
+mod stable_file;
 mod workflow;
 
 pub use cli::run_cli;

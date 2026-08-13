@@ -2,9 +2,9 @@
 
 use std::{
     collections::BTreeMap,
-    fs::{self, File, Metadata},
+    fs::File,
     io::{self, BufReader},
-    path::{Path, PathBuf},
+    path::Path,
 };
 
 use foundation_runtime::OperationControl;
@@ -16,7 +16,6 @@ use quick_xml::{
 };
 
 use crate::{
-    publication::same_file_identity,
     roundtrip::{
         InputSide, ParsedRoundTrip, ParsedSurface, Position, RoundTripDeclaration,
         RoundTripEvaluation, RoundTripFailure, RoundTripFileFacts, RoundTripLimits,
@@ -24,6 +23,7 @@ use crate::{
         reject_duplicate_faces, semantic_evaluation_failure, validate_face,
         validate_utf8_declaration,
     },
+    stable_file::StableFile,
 };
 
 const LANDXML_NAMESPACE: &[u8] = b"http://www.landxml.org/schema/LandXML-1.2";
@@ -52,14 +52,24 @@ pub(crate) fn evaluate_streaming_round_trip(
 #[derive(Debug)]
 pub(crate) struct StreamingRoundTripEvaluation {
     pub(crate) evaluation: RoundTripEvaluation,
-    reference: StableInputWitness,
-    returned: StableInputWitness,
+    reference: StableFile,
+    returned: StableFile,
 }
 
 impl StreamingRoundTripEvaluation {
     pub(crate) fn verify_inputs(&self) -> Result<(), RoundTripFailure> {
-        self.reference.verify()?;
-        self.returned.verify()
+        self.reference.verify().map_err(|error| {
+            RoundTripFailure::invalid(format_args!(
+                "{} changed after streaming comparison: {error}",
+                InputSide::Reference
+            ))
+        })?;
+        self.returned.verify().map_err(|error| {
+            RoundTripFailure::invalid(format_args!(
+                "{} changed after streaming comparison: {error}",
+                InputSide::Returned
+            ))
+        })
     }
 }
 
@@ -116,33 +126,7 @@ pub(crate) fn evaluate_streaming_round_trip_with_control(
 struct StreamingParse {
     facts: RoundTripFileFacts,
     surface: Result<ParsedSurface, RoundTripFailure>,
-    witness: StableInputWitness,
-}
-
-#[derive(Debug)]
-struct StableInputWitness {
-    side: InputSide,
-    path: PathBuf,
-    file: File,
-    identity: Metadata,
-}
-
-impl StableInputWitness {
-    fn verify(&self) -> Result<(), RoundTripFailure> {
-        let opened = self.file.metadata().map_err(|error| {
-            RoundTripFailure::invalid(format_args!(
-                "{} metadata cannot be rechecked: {error}",
-                self.side
-            ))
-        })?;
-        let current = fs::symlink_metadata(&self.path).map_err(|error| {
-            RoundTripFailure::invalid(format_args!(
-                "{} path cannot be rechecked: {error}",
-                self.side
-            ))
-        })?;
-        require_same_file(self.side, &self.identity, &opened, &current)
-    }
+    witness: StableFile,
 }
 
 fn parse_streaming_file(
@@ -152,22 +136,12 @@ fn parse_streaming_file(
     control: &OperationControl,
 ) -> Result<StreamingParse, RoundTripFailure> {
     check_cancelled(control)?;
-    let initial = fs::symlink_metadata(path).map_err(|error| {
-        RoundTripFailure::invalid(format_args!("{side} cannot be inspected: {error}"))
+    let mut witness = StableFile::capture(path).map_err(|error| {
+        RoundTripFailure::invalid(format_args!("{side} cannot be captured: {error}"))
     })?;
-    require_regular(side, &initial)?;
-    require_file_bytes(side, initial.len(), limits.file_bytes())?;
-    let file = open_input_file(path).map_err(|error| {
-        RoundTripFailure::invalid(format_args!("{side} cannot be opened: {error}"))
-    })?;
-    let opened = file.metadata().map_err(|error| {
-        RoundTripFailure::invalid(format_args!("{side} metadata cannot be read: {error}"))
-    })?;
-    let current = fs::symlink_metadata(path).map_err(|error| {
-        RoundTripFailure::invalid(format_args!("{side} path cannot be rechecked: {error}"))
-    })?;
-    require_same_file(side, &initial, &opened, &current)?;
-    let hashing = HashingReader::new(file, limits.file_bytes());
+    let expected_bytes = witness.byte_length();
+    require_file_bytes(side, expected_bytes, limits.file_bytes())?;
+    let hashing = HashingReader::new(witness.file_mut(), limits.file_bytes());
     let mut reader = NsReader::from_reader(BufReader::with_capacity(STREAM_BUFFER_BYTES, hashing));
     reader.config_mut().expand_empty_elements = true;
     reader.config_mut().check_end_names = true;
@@ -178,7 +152,7 @@ fn parse_streaming_file(
         return Err(error.clone());
     }
     let hashing = reader.into_inner().into_inner();
-    let (file, facts, utf8_valid) = hashing.finish(side)?;
+    let (facts, utf8_valid) = hashing.finish(side)?;
     let surface = if utf8_valid {
         surface
     } else {
@@ -187,14 +161,12 @@ fn parse_streaming_file(
             format_args!("{side} is not UTF-8 XML"),
         ))
     };
-    let final_opened = file.metadata().map_err(|error| {
-        RoundTripFailure::invalid(format_args!("{side} metadata cannot be rechecked: {error}"))
+    witness.verify().map_err(|error| {
+        RoundTripFailure::invalid(format_args!(
+            "{side} changed while it was being read: {error}"
+        ))
     })?;
-    let final_path = fs::symlink_metadata(path).map_err(|error| {
-        RoundTripFailure::invalid(format_args!("{side} path cannot be rechecked: {error}"))
-    })?;
-    require_same_file(side, &opened, &final_opened, &final_path)?;
-    if facts.byte_length != initial.len() {
+    if facts.byte_length != expected_bytes {
         return Err(RoundTripFailure::invalid(format_args!(
             "{side} changed while it was being read"
         )));
@@ -202,12 +174,7 @@ fn parse_streaming_file(
     Ok(StreamingParse {
         facts,
         surface,
-        witness: StableInputWitness {
-            side,
-            path: path.to_path_buf(),
-            file,
-            identity: final_opened,
-        },
+        witness,
     })
 }
 
@@ -234,8 +201,8 @@ fn drain_after_terminal_xml_error<R: io::BufRead>(
     }
 }
 
-struct HashingReader {
-    file: File,
+struct HashingReader<'a> {
+    file: &'a mut File,
     hasher: blake3::Hasher,
     bytes: u64,
     max_bytes: u64,
@@ -243,8 +210,8 @@ struct HashingReader {
     utf8: Utf8Validator,
 }
 
-impl HashingReader {
-    fn new(file: File, max_bytes: u64) -> Self {
+impl<'a> HashingReader<'a> {
+    fn new(file: &'a mut File, max_bytes: u64) -> Self {
         Self {
             file,
             hasher: blake3::Hasher::new(),
@@ -255,7 +222,7 @@ impl HashingReader {
         }
     }
 
-    fn finish(self, side: InputSide) -> Result<(File, RoundTripFileFacts, bool), RoundTripFailure> {
+    fn finish(self, side: InputSide) -> Result<(RoundTripFileFacts, bool), RoundTripFailure> {
         if self.over_limit {
             return Err(RoundTripFailure::resource(format_args!(
                 "{side} file bytes exceed the {} byte limit",
@@ -263,7 +230,6 @@ impl HashingReader {
             )));
         }
         Ok((
-            self.file,
             RoundTripFileFacts {
                 content_hash: *self.hasher.finalize().as_bytes(),
                 byte_length: self.bytes,
@@ -273,7 +239,7 @@ impl HashingReader {
     }
 }
 
-impl io::Read for HashingReader {
+impl io::Read for HashingReader<'_> {
     fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
         let read = self.file.read(buffer)?;
         self.bytes = self.bytes.saturating_add(read as u64);
@@ -947,16 +913,6 @@ fn parse_id(side: InputSide, value: Option<&str>) -> Result<u64, RoundTripFailur
         })
 }
 
-fn require_regular(side: InputSide, metadata: &Metadata) -> Result<(), RoundTripFailure> {
-    if metadata.file_type().is_file() {
-        Ok(())
-    } else {
-        Err(RoundTripFailure::invalid(format_args!(
-            "{side} must be a regular non-symlink file"
-        )))
-    }
-}
-
 fn require_file_bytes(side: InputSide, actual: u64, allowed: u64) -> Result<(), RoundTripFailure> {
     if actual <= allowed {
         Ok(())
@@ -965,80 +921,6 @@ fn require_file_bytes(side: InputSide, actual: u64, allowed: u64) -> Result<(), 
             "{side} file bytes required {actual}; limit is {allowed}"
         )))
     }
-}
-
-fn require_same_file(
-    side: InputSide,
-    initial: &Metadata,
-    opened: &Metadata,
-    current: &Metadata,
-) -> Result<(), RoundTripFailure> {
-    require_regular(side, opened)?;
-    require_regular(side, current)?;
-    if same_file_identity(initial, opened)
-        && same_file_identity(opened, current)
-        && same_state(initial, opened)
-        && same_state(opened, current)
-    {
-        Ok(())
-    } else {
-        Err(RoundTripFailure::invalid(format_args!(
-            "{side} changed during streaming capture"
-        )))
-    }
-}
-
-#[cfg(unix)]
-fn same_state(left: &Metadata, right: &Metadata) -> bool {
-    use std::os::unix::fs::MetadataExt as _;
-
-    left.len() == right.len()
-        && left.mtime() == right.mtime()
-        && left.mtime_nsec() == right.mtime_nsec()
-        && left.ctime() == right.ctime()
-        && left.ctime_nsec() == right.ctime_nsec()
-}
-
-#[cfg(windows)]
-fn same_state(left: &Metadata, right: &Metadata) -> bool {
-    use std::os::windows::fs::MetadataExt as _;
-
-    left.len() == right.len()
-        && left.creation_time() == right.creation_time()
-        && left.last_write_time() == right.last_write_time()
-}
-
-#[cfg(not(any(unix, windows)))]
-fn same_state(_left: &Metadata, _right: &Metadata) -> bool {
-    false
-}
-
-#[cfg(unix)]
-fn open_input_file(path: &Path) -> io::Result<File> {
-    use std::os::unix::fs::OpenOptionsExt as _;
-
-    fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
-        .open(path)
-}
-
-#[cfg(windows)]
-fn open_input_file(path: &Path) -> io::Result<File> {
-    use std::os::windows::fs::OpenOptionsExt as _;
-
-    fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT)
-        .open(path)
-}
-
-#[cfg(not(any(unix, windows)))]
-fn open_input_file(_path: &Path) -> io::Result<File> {
-    Err(io::Error::new(
-        io::ErrorKind::Unsupported,
-        "stable no-follow input capture is unavailable on this platform",
-    ))
 }
 
 const fn canonical_zero(value: f64) -> f64 {
