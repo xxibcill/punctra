@@ -176,12 +176,6 @@ fn parse_streaming_file(
     {
         return Err(error.clone());
     }
-    if surface
-        .as_ref()
-        .is_err_and(|error| error.reason().is_some())
-    {
-        drain_after_semantic_failure(side, &mut reader, control)?;
-    }
     let hashing = reader.into_inner().into_inner();
     let (file, facts, utf8_valid) = hashing.finish(side)?;
     let surface = if utf8_valid {
@@ -216,7 +210,7 @@ fn parse_streaming_file(
     })
 }
 
-fn drain_after_semantic_failure<R: io::BufRead>(
+fn drain_after_terminal_xml_error<R: io::BufRead>(
     side: &str,
     reader: &mut NsReader<R>,
     control: &OperationControl,
@@ -229,7 +223,7 @@ fn drain_after_semantic_failure<R: io::BufRead>(
                 RoundTripFailure::resource(format_args!("{side} file exceeded its byte limit"))
             } else {
                 RoundTripFailure::invalid(format_args!(
-                    "{side} cannot be drained after semantic failure: {error}"
+                    "{side} cannot be drained after terminal XML failure: {error}"
                 ))
             }
         })?;
@@ -420,53 +414,77 @@ impl<'a> StreamParser<'a> {
         reader: &mut NsReader<R>,
     ) -> Result<ParsedSurface, RoundTripFailure> {
         let mut buffer = Vec::with_capacity(STREAM_BUFFER_BYTES);
+        let mut semantic_failure = None;
+        let mut xml_depth = 0_usize;
         loop {
-            let (namespace, event) =
-                reader
-                    .read_resolved_event_into(&mut buffer)
-                    .map_err(|error| {
-                        RoundTripFailure::semantic(
-                            RoundTripReason::XmlInvalid,
-                            format_args!("{} XML is malformed: {error}", self.side),
-                        )
-                    })?;
+            let (namespace, event) = match reader.read_resolved_event_into(&mut buffer) {
+                Ok(event) => event,
+                Err(error) => {
+                    let failure =
+                        self.xml_invalid_message(format_args!("XML is malformed: {error}"));
+                    drain_after_terminal_xml_error(self.side, reader, self.control)?;
+                    return Err(failure);
+                }
+            };
             if !matches!(event, Event::End(_) | Event::Eof) {
                 self.count_node()?;
             }
             match event {
-                Event::Start(start) => self.start(&namespace, &start)?,
-                Event::End(_) => self.end()?,
-                Event::Text(text) => {
-                    self.add_text_bytes(text.as_ref().len())?;
-                    if matches!(self.stack.last(), Some(Tag::Point | Tag::Face)) {
-                        let decoded = text.decode().map_err(|error| {
-                            RoundTripFailure::semantic(
-                                RoundTripReason::XmlInvalid,
-                                format_args!("{} XML text is invalid: {error}", self.side),
-                            )
-                        })?;
-                        self.simple_text.push_str(&decoded);
-                    } else if self.metadata_depth == 0
-                        && text.decode().is_ok_and(|value| !value.trim().is_empty())
-                    {
-                        return Err(self.unsupported("semantic container has unexpected text"));
+                Event::Start(start) => {
+                    xml_depth = xml_depth.saturating_add(1);
+                    let result = if semantic_failure.is_none() {
+                        self.start(&namespace, &start)
+                    } else {
+                        self.validate_start_after_semantic_failure(&namespace, &start)
+                    };
+                    retain_semantic_failure(&mut semantic_failure, result)?;
+                }
+                Event::End(_) => {
+                    if xml_depth == 0 {
+                        retain_semantic_failure(
+                            &mut semantic_failure,
+                            Err(self.xml_invalid("unexpected closing element")),
+                        )?;
+                    } else {
+                        xml_depth -= 1;
+                    }
+                    if semantic_failure.is_none() {
+                        retain_semantic_failure(&mut semantic_failure, self.end())?;
                     }
                 }
+                Event::Text(text) => {
+                    let result = self.text(&text, semantic_failure.is_none());
+                    retain_semantic_failure(&mut semantic_failure, result)?;
+                }
                 Event::Comment(comment) => self.add_text_bytes(comment.as_ref().len())?,
-                Event::Decl(declaration) => validate_utf8_declaration(
-                    if self.side == "REFERENCE" {
-                        crate::roundtrip::InputSide::Reference
-                    } else {
-                        crate::roundtrip::InputSide::Returned
-                    },
-                    &declaration,
+                Event::Decl(declaration) => retain_semantic_failure(
+                    &mut semantic_failure,
+                    validate_utf8_declaration(
+                        if self.side == "REFERENCE" {
+                            crate::roundtrip::InputSide::Reference
+                        } else {
+                            crate::roundtrip::InputSide::Returned
+                        },
+                        &declaration,
+                    ),
                 )?,
                 Event::PI(_) => {}
                 Event::DocType(_) | Event::GeneralRef(_) | Event::CData(_) => {
-                    return Err(self.xml_invalid("DTD, entity, or CDATA input is unsupported"));
+                    retain_semantic_failure(
+                        &mut semantic_failure,
+                        Err(self.xml_invalid("DTD, entity, or CDATA input is unsupported")),
+                    )?;
                 }
                 Event::Empty(_) => unreachable!("empty elements are expanded"),
-                Event::Eof => break,
+                Event::Eof => {
+                    if xml_depth != 0 {
+                        retain_semantic_failure(
+                            &mut semantic_failure,
+                            Err(self.xml_invalid("document has unclosed elements")),
+                        )?;
+                    }
+                    break;
+                }
             }
             if buffer.capacity() as u64 > self.limits.xml_text_bytes() {
                 return Err(RoundTripFailure::resource(format_args!(
@@ -477,7 +495,54 @@ impl<'a> StreamParser<'a> {
             }
             buffer.clear();
         }
-        self.finish()
+        match semantic_failure {
+            Some(error) => Err(error),
+            None => self.finish(),
+        }
+    }
+
+    fn validate_start_after_semantic_failure(
+        &mut self,
+        namespace: &ResolveResult<'_>,
+        start: &BytesStart<'_>,
+    ) -> Result<(), RoundTripFailure> {
+        self.add_text_bytes(start.attributes_raw().len())?;
+        match namespace {
+            ResolveResult::Unknown(_) => Err(self.xml_invalid("unknown XML prefix")),
+            ResolveResult::Bound(namespace) if namespace.into_inner() == XINCLUDE_NAMESPACE => {
+                Err(self.unsupported("XInclude is unsupported"))
+            }
+            ResolveResult::Bound(_) | ResolveResult::Unbound => Ok(()),
+        }
+    }
+
+    fn text(
+        &mut self,
+        text: &quick_xml::events::BytesText<'_>,
+        parse_semantics: bool,
+    ) -> Result<(), RoundTripFailure> {
+        self.add_text_bytes(text.as_ref().len())?;
+        if !parse_semantics {
+            return Ok(());
+        }
+        if matches!(self.stack.last(), Some(Tag::Point | Tag::Face)) {
+            return text.decode().map_or_else(
+                |error| {
+                    Err(RoundTripFailure::semantic(
+                        RoundTripReason::XmlInvalid,
+                        format_args!("{} XML text is invalid: {error}", self.side),
+                    ))
+                },
+                |decoded| {
+                    self.simple_text.push_str(&decoded);
+                    Ok(())
+                },
+            );
+        }
+        if self.metadata_depth == 0 && text.decode().is_ok_and(|value| !value.trim().is_empty()) {
+            return Err(self.unsupported("semantic container has unexpected text"));
+        }
+        Ok(())
     }
 
     fn start(
@@ -769,6 +834,26 @@ impl<'a> StreamParser<'a> {
             format_args!("{} subset is unsupported: {message}", self.side),
         )
     }
+}
+
+fn retain_semantic_failure(
+    retained: &mut Option<RoundTripFailure>,
+    result: Result<(), RoundTripFailure>,
+) -> Result<(), RoundTripFailure> {
+    let Err(error) = result else {
+        return Ok(());
+    };
+    let Some(reason) = error.reason() else {
+        return Err(error);
+    };
+    let should_replace = retained.as_ref().is_none_or(|current| {
+        reason == RoundTripReason::XmlInvalid
+            && current.reason() != Some(RoundTripReason::XmlInvalid)
+    });
+    if should_replace {
+        *retained = Some(error);
+    }
+    Ok(())
 }
 
 fn check_cancelled(control: &OperationControl) -> Result<(), RoundTripFailure> {
@@ -1074,6 +1159,32 @@ mod tests {
         invalid_metadata[metadata] = 0xff;
         fs::write(&returned, invalid_metadata).unwrap();
         assert_failed_reason(&reference, &returned, RoundTripReason::XmlInvalid);
+    }
+
+    #[test]
+    fn streaming_semantic_failure_does_not_hide_later_invalid_or_limits() {
+        let directory = Directory::new();
+        let reference = directory.path.join("reference.xml");
+        let returned = directory.path.join("returned.xml");
+        let valid = xml("1", "2", "3", "1 2 3");
+        fs::write(&reference, &valid).unwrap();
+
+        let unit_drift = valid.replace("linearUnit=\"meter\"", "linearUnit=\"foot\"");
+        fs::write(&returned, format!("{unit_drift}<")).unwrap();
+        assert_failed_reason(&reference, &returned, RoundTripReason::XmlInvalid);
+
+        let comments = "<!-- generated -->".repeat(64);
+        let over_nodes = unit_drift.replace("</LandXML>", &format!("{comments}</LandXML>"));
+        fs::write(&returned, over_nodes).unwrap();
+        let error = evaluate_streaming_round_trip(
+            &reference,
+            &returned,
+            RoundTripDeclaration::new("generated", "test", "metric").unwrap(),
+            RoundTripTolerances::new(0.0, 0.0).unwrap(),
+            RoundTripLimits::new(10_000, 40, 10_000, 10, 10, 100),
+        )
+        .expect_err("a later XML node excess must remain an operational failure");
+        assert_eq!(error.kind(), RoundTripFailureKind::ResourceLimit);
     }
 
     #[test]
