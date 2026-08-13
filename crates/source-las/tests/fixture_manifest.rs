@@ -3,6 +3,11 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+#[path = "../../../tests/support/fixture_manifest.rs"]
+mod fixture_manifest_support;
+
+use fixture_manifest_support::assert_manifest_files;
+
 #[test]
 fn v1_manifest_paths_lengths_and_hashes_are_exact() {
     let path = manifest_path();
@@ -31,19 +36,7 @@ fn v1_manifest_paths_lengths_and_hashes_are_exact() {
     let base = path.parent().unwrap();
     let files = manifest["files"].as_array().expect("files array");
     assert_eq!(files.len(), 2);
-    for file in files {
-        let file_path = base.join(file["path"].as_str().expect("relative fixture path"));
-        let bytes = fs::read(&file_path)
-            .unwrap_or_else(|error| panic!("read {}: {error}", file_path.display()));
-        assert_eq!(
-            u64::try_from(bytes.len()).unwrap(),
-            file["byte_length"].as_u64().unwrap()
-        );
-        assert_eq!(
-            blake3::hash(&bytes).to_hex().as_str(),
-            file["blake3"].as_str().unwrap()
-        );
-    }
+    assert_manifest_files(base, files);
 }
 
 fn manifest_path() -> PathBuf {

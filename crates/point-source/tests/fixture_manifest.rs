@@ -3,6 +3,11 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+#[path = "../../../tests/support/fixture_manifest.rs"]
+mod fixture_manifest_support;
+
+use fixture_manifest_support::{assert_manifest_file, assert_manifest_files};
+
 #[test]
 fn v1_manifest_paths_lengths_and_hashes_are_exact() {
     validate_manifest(&manifest_path());
@@ -35,29 +40,10 @@ fn validate_manifest(path: &Path) {
     let base = path.parent().unwrap();
     let files = manifest["files"].as_array().expect("files array");
     assert_eq!(files.len(), 1);
-    for file in files {
-        assert_file(base, file);
-    }
+    assert_manifest_files(base, files);
     assert_eq!(
         manifest["source_bytes"]["path"],
         "../../../../source-memory/tests/fixtures/v1/memory-source.json"
     );
-    assert_file(base, &manifest["source_bytes"]);
-}
-
-fn assert_file(base: &Path, file: &serde_json::Value) {
-    let path = base.join(file["path"].as_str().expect("relative fixture path"));
-    let bytes = fs::read(&path).unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
-    assert_eq!(
-        u64::try_from(bytes.len()).unwrap(),
-        file["byte_length"].as_u64().unwrap(),
-        "{} byte length",
-        path.display()
-    );
-    assert_eq!(
-        blake3::hash(&bytes).to_hex().as_str(),
-        file["blake3"].as_str().unwrap(),
-        "{} BLAKE3",
-        path.display()
-    );
+    assert_manifest_file(base, &manifest["source_bytes"]);
 }
