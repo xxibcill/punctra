@@ -564,6 +564,9 @@ impl<'a> StreamParser<'a> {
             return Ok(());
         }
         if namespace != LANDXML_NAMESPACE {
+            if matches!(self.stack.last(), Some(Tag::Units | Tag::Metric)) {
+                return Err(self.unit_drift());
+            }
             return Err(self.unsupported("foreign semantic element is unsupported"));
         }
         if start.local_name().as_ref() == b"CoordinateSystem" {
@@ -572,8 +575,13 @@ impl<'a> StreamParser<'a> {
                 format_args!("{} CoordinateSystem semantics are unsupported", self.side),
             ));
         }
-        let tag = tag(start.local_name().as_ref())
-            .ok_or_else(|| self.unsupported("unknown LandXML semantic element"))?;
+        let tag = tag(start.local_name().as_ref()).ok_or_else(|| {
+            if matches!(self.stack.last(), Some(Tag::Units | Tag::Metric)) {
+                self.unit_drift()
+            } else {
+                self.unsupported("unknown LandXML semantic element")
+            }
+        })?;
         self.require_parent(tag)?;
         self.validate_attributes(tag, start)?;
         if matches!(tag, Tag::Project | Tag::Application) {
@@ -626,6 +634,11 @@ impl<'a> StreamParser<'a> {
                 | (Some(Tag::Faces), Tag::Face)
         );
         if !valid {
+            if matches!(parent, Some(Tag::Units | Tag::Metric))
+                || matches!(tag, Tag::Units | Tag::Metric)
+            {
+                return Err(self.unit_drift());
+            }
             return Err(self.unsupported("LandXML element is in an unsupported container"));
         }
         let counter = match tag {
@@ -643,6 +656,9 @@ impl<'a> StreamParser<'a> {
         };
         *counter = counter.saturating_add(1);
         if *counter > 1 {
+            if matches!(tag, Tag::Units | Tag::Metric) {
+                return Err(self.unit_drift());
+            }
             return Err(self.unsupported("semantic element appears more than once"));
         }
         Ok(())
@@ -686,13 +702,16 @@ impl<'a> StreamParser<'a> {
             }
         }
         if let Some((_name, expected)) = required {
-            let value = found.ok_or_else(|| self.unsupported("required attribute is absent"))?;
+            let value = found.ok_or_else(|| {
+                if tag == Tag::Metric {
+                    self.unit_drift()
+                } else {
+                    self.unsupported("required attribute is absent")
+                }
+            })?;
             match tag {
                 Tag::Metric if value != expected => {
-                    return Err(RoundTripFailure::semantic(
-                        RoundTripReason::UnitDrift,
-                        format_args!("{} units are not metric metres", self.side),
-                    ));
+                    return Err(self.unit_drift());
                 }
                 Tag::Surface => {
                     self.surface_name = (!value.is_empty()).then(|| value.into_boxed_str());
@@ -766,10 +785,11 @@ impl<'a> StreamParser<'a> {
     }
 
     fn finish(self) -> Result<ParsedSurface, RoundTripFailure> {
+        if self.units_count != 1 || self.metric_count != 1 {
+            return Err(self.unit_drift());
+        }
         if !self.stack.is_empty()
             || self.root_count != 1
-            || self.units_count != 1
-            || self.metric_count != 1
             || self.surfaces_count != 1
             || self.surface_count != 1
             || self.definition_count != 1
@@ -832,6 +852,16 @@ impl<'a> StreamParser<'a> {
         RoundTripFailure::semantic(
             RoundTripReason::SubsetUnsupported,
             format_args!("{} subset is unsupported: {message}", self.side),
+        )
+    }
+
+    fn unit_drift(&self) -> RoundTripFailure {
+        RoundTripFailure::semantic(
+            RoundTripReason::UnitDrift,
+            format_args!(
+                "{} units do not declare exactly one metric metre unit",
+                self.side
+            ),
         )
     }
 }
@@ -1185,6 +1215,30 @@ mod tests {
         )
         .expect_err("a later XML node excess must remain an operational failure");
         assert_eq!(error.kind(), RoundTripFailureKind::ResourceLimit);
+    }
+
+    #[test]
+    fn streaming_unit_matrix_uses_unit_drift_reason() {
+        let directory = Directory::new();
+        let reference = directory.path.join("reference.xml");
+        let returned = directory.path.join("returned.xml");
+        let valid = xml("1", "2", "3", "1 2 3");
+        fs::write(&reference, &valid).unwrap();
+        let units = "<Units><Metric linearUnit=\"meter\"/></Units>";
+        let variants = [
+            valid.replace(units, ""),
+            valid.replace(
+                "<Metric linearUnit=\"meter\"/>",
+                "<Imperial linearUnit=\"foot\"/>",
+            ),
+            valid.replace(units, &format!("{units}{units}")),
+            valid.replace("linearUnit=\"meter\"", "linearUnit=\"foot\""),
+        ];
+
+        for returned_xml in variants {
+            fs::write(&returned, returned_xml).unwrap();
+            assert_failed_reason(&reference, &returned, RoundTripReason::UnitDrift);
+        }
     }
 
     #[test]
