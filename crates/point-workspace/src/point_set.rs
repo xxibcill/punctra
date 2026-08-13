@@ -30,8 +30,8 @@ const RANDOM_NAME_ATTEMPTS: usize = 32;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct SpillIdentity {
-    first: u64,
-    second: u64,
+    volume_id: u64,
+    file_id: u64,
 }
 
 /// One bounded batch from repeatable Point Set identity iteration.
@@ -1219,8 +1219,8 @@ fn spill_identity(metadata: &fs::Metadata, _path: &Path) -> Result<SpillIdentity
     use std::os::unix::fs::MetadataExt;
 
     Ok(SpillIdentity {
-        first: metadata.dev(),
-        second: metadata.ino(),
+        volume_id: metadata.dev(),
+        file_id: metadata.ino(),
     })
 }
 
@@ -1228,7 +1228,7 @@ fn spill_identity(metadata: &fs::Metadata, _path: &Path) -> Result<SpillIdentity
 fn spill_identity(metadata: &fs::Metadata, path: &Path) -> Result<SpillIdentity, WorkspaceError> {
     use std::os::windows::fs::MetadataExt;
 
-    let first = u64::from(metadata.volume_serial_number().ok_or_else(|| {
+    let volume_id = u64::from(metadata.volume_serial_number().ok_or_else(|| {
         WorkspaceError::io(
             "establish Point Set spill identity",
             path.display(),
@@ -1238,14 +1238,14 @@ fn spill_identity(metadata: &fs::Metadata, path: &Path) -> Result<SpillIdentity,
             ),
         )
     })?);
-    let second = metadata.file_index().ok_or_else(|| {
+    let file_id = metadata.file_index().ok_or_else(|| {
         WorkspaceError::io(
             "establish Point Set spill identity",
             path.display(),
             io::Error::new(io::ErrorKind::Unsupported, "file index is unavailable"),
         )
     })?;
-    Ok(SpillIdentity { first, second })
+    Ok(SpillIdentity { volume_id, file_id })
 }
 
 #[cfg(not(any(unix, windows)))]

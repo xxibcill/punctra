@@ -431,8 +431,8 @@ pub(crate) enum PersistenceError {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct FileIdentity {
-    first: u64,
-    second: u64,
+    volume_id: u64,
+    file_id: u64,
 }
 
 impl FileIdentity {
@@ -3658,8 +3658,8 @@ fn platform_file_identity(metadata: &fs::Metadata) -> Option<FileIdentity> {
     use std::os::unix::fs::MetadataExt;
 
     Some(FileIdentity {
-        first: metadata.dev(),
-        second: metadata.ino(),
+        volume_id: metadata.dev(),
+        file_id: metadata.ino(),
     })
 }
 
@@ -3668,8 +3668,8 @@ fn platform_file_identity(metadata: &fs::Metadata) -> Option<FileIdentity> {
     use std::os::windows::fs::MetadataExt;
 
     Some(FileIdentity {
-        first: u64::from(metadata.volume_serial_number()?),
-        second: metadata.file_index()?,
+        volume_id: u64::from(metadata.volume_serial_number()?),
+        file_id: metadata.file_index()?,
     })
 }
 
