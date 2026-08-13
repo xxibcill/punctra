@@ -3,7 +3,7 @@
 use std::{collections::BTreeMap, error::Error, fmt, path::Path};
 
 use foundation_runtime::OperationControl;
-use quick_xml::events::{BytesDecl, Event};
+use quick_xml::events::{BytesDecl, BytesStart, Event};
 use roxmltree::{Document, Node, ParsingOptions};
 
 #[cfg(test)]
@@ -945,23 +945,66 @@ pub(crate) fn validate_utf8_declaration(
     side: InputSide,
     declaration: &BytesDecl<'_>,
 ) -> Result<(), RoundTripFailure> {
-    let Some(encoding) = declaration.encoding() else {
-        return Ok(());
-    };
-    let encoding = encoding.map_err(|error| {
+    let declaration = std::str::from_utf8(declaration).map_err(|error| {
         RoundTripFailure::semantic(
             RoundTripReason::XmlInvalid,
             format_args!("{side} XML declaration is invalid: {error}"),
         )
     })?;
-    if encoding.eq_ignore_ascii_case(b"UTF-8") {
-        Ok(())
-    } else {
-        Err(RoundTripFailure::semantic(
+    let declaration = BytesStart::from_content(declaration, 3);
+    let mut attributes = declaration.attributes();
+    let mut next_attribute = || {
+        attributes.next().transpose().map_err(|error| {
+            RoundTripFailure::semantic(
+                RoundTripReason::XmlInvalid,
+                format_args!("{side} XML declaration is invalid: {error}"),
+            )
+        })
+    };
+
+    let version = next_attribute()?.ok_or_else(|| {
+        RoundTripFailure::semantic(
             RoundTripReason::XmlInvalid,
-            format_args!("{side} XML declaration does not specify UTF-8"),
-        ))
+            format_args!("{side} XML declaration is missing its version"),
+        )
+    })?;
+    if version.key.as_ref() != b"version" || version.value.as_ref() != b"1.0" {
+        return Err(RoundTripFailure::semantic(
+            RoundTripReason::XmlInvalid,
+            format_args!("{side} XML declaration must start with version 1.0"),
+        ));
     }
+
+    let Some(second) = next_attribute()? else {
+        return Ok(());
+    };
+    let standalone = if second.key.as_ref() == b"encoding" {
+        if !second.value.eq_ignore_ascii_case(b"UTF-8") {
+            return Err(RoundTripFailure::semantic(
+                RoundTripReason::XmlInvalid,
+                format_args!("{side} XML declaration does not specify UTF-8"),
+            ));
+        }
+        next_attribute()?
+    } else {
+        Some(second)
+    };
+    if let Some(standalone) = standalone
+        && (standalone.key.as_ref() != b"standalone"
+            || !matches!(standalone.value.as_ref(), b"yes" | b"no"))
+    {
+        return Err(RoundTripFailure::semantic(
+            RoundTripReason::XmlInvalid,
+            format_args!("{side} XML declaration has an invalid standalone value or order"),
+        ));
+    }
+    if next_attribute()?.is_some() {
+        return Err(RoundTripFailure::semantic(
+            RoundTripReason::XmlInvalid,
+            format_args!("{side} XML declaration has unsupported or duplicate attributes"),
+        ));
+    }
+    Ok(())
 }
 
 fn reject_xinclude(side: InputSide, document: &Document<'_>) -> Result<(), RoundTripFailure> {

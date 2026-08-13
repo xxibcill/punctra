@@ -658,25 +658,23 @@ impl<'a> StreamParser<'a> {
             let attribute = attribute.map_err(|error| {
                 self.xml_invalid_message(format_args!("XML attribute is invalid: {error}"))
             })?;
+            let value = attribute
+                .normalized_value(XmlVersion::Implicit1_0)
+                .map_err(|error| {
+                    self.xml_invalid_message(format_args!(
+                        "XML attribute value is invalid: {error}"
+                    ))
+                })?;
             if attribute.key.as_ref() == b"xmlns"
                 || attribute.key.as_ref().starts_with(b"xmlns:")
                 || attribute.key.as_ref().contains(&b':')
             {
                 continue;
             }
-            if required.is_some_and(|(name, _)| attribute.key.as_ref() == name)
-                || optional.is_some_and(|name| attribute.key.as_ref() == name)
-            {
-                let value = attribute
-                    .normalized_value(XmlVersion::Implicit1_0)
-                    .map_err(|error| {
-                        self.xml_invalid_message(format_args!(
-                            "XML attribute value is invalid: {error}"
-                        ))
-                    })?;
-                if found.replace(value.into_owned()).is_some() {
-                    return Err(self.xml_invalid("required attribute is duplicated"));
-                }
+            let is_semantic = required.is_some_and(|(name, _)| attribute.key.as_ref() == name)
+                || optional.is_some_and(|name| attribute.key.as_ref() == name);
+            if is_semantic && found.replace(value.into_owned()).is_some() {
+                return Err(self.xml_invalid("required attribute is duplicated"));
             }
         }
         if tag == Tag::Surface {
@@ -1088,6 +1086,27 @@ mod tests {
             .expect("inserted metadata text exists");
         invalid_metadata[metadata] = 0xff;
         fs::write(&returned, invalid_metadata).unwrap();
+        assert_failed_reason(&reference, &returned, RoundTripReason::XmlInvalid);
+    }
+
+    #[test]
+    fn streaming_reader_rejects_malformed_declarations_and_ignored_attributes() {
+        let directory = Directory::new();
+        let reference = directory.path.join("reference.xml");
+        let returned = directory.path.join("returned.xml");
+        let valid = xml("1", "2", "3", "1 2 3");
+        fs::write(&reference, &valid).unwrap();
+
+        let missing_version =
+            valid.replacen("<?xml version=\"1.0\" encoding=\"UTF-8\"?>", "<?xml?>", 1);
+        fs::write(&returned, missing_version).unwrap();
+        assert_failed_reason(&reference, &returned, RoundTripReason::XmlInvalid);
+
+        let malformed_ignored_attribute = valid.replace(
+            "<Units>",
+            "<Project ignored=\"&bogus;\">metadata</Project><Units>",
+        );
+        fs::write(&returned, malformed_ignored_attribute).unwrap();
         assert_failed_reason(&reference, &returned, RoundTripReason::XmlInvalid);
     }
 
