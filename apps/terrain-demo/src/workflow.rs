@@ -36,7 +36,10 @@ use crate::{
         WorkflowIntent as DurableIntent, WorkflowRunId,
     },
     publication::same_file_identity,
-    report::{self, LimitFact, ReportError, ReportFacts, ReportLimits, SurfaceChangeEnvelope},
+    report::{
+        self, CanonicalOutputError, CanonicalOutputLimits, LimitFact, ReportFacts,
+        SurfaceChangeEnvelope,
+    },
 };
 
 const PATH_BINDING_BYTES: u64 = 4 * 1024;
@@ -243,7 +246,7 @@ pub struct WorkflowLimits {
     qa: CheckPointLimits,
     landxml: LandXmlLimits,
     journal: JournalLimits,
-    report: ReportLimits,
+    report: CanonicalOutputLimits,
     max_envelope_faces: u64,
     max_envelope_working_bytes: u64,
     max_aggregate_working_bytes: u64,
@@ -262,7 +265,7 @@ impl Default for WorkflowLimits {
             qa: CheckPointLimits::default(),
             landxml: LandXmlLimits::default(),
             journal: JournalLimits::default(),
-            report: ReportLimits::default(),
+            report: CanonicalOutputLimits::default(),
             max_envelope_faces: 20_000_000,
             max_envelope_working_bytes: 1024 * 1024 * 1024,
             max_aggregate_working_bytes: 8 * 1024 * 1024 * 1024,
@@ -2573,19 +2576,21 @@ fn terrain_output_failure(
 
 fn report_failure(
     stage: WorkflowStage,
-    error: ReportError,
+    error: CanonicalOutputError,
     context: FailureContext,
 ) -> WorkflowFailure {
     match error {
-        ReportError::Conflict { .. } | ReportError::TargetConflict { .. } => WorkflowFailure::new(
-            FailureCode::OutputConflict,
-            stage,
-            Certainty::DurableFact,
-            context,
-            error,
-            RecoveryAction::RemoveOrRenameConflictingTarget,
-        ),
-        ReportError::TargetChanged { .. } => WorkflowFailure::new(
+        CanonicalOutputError::Conflict { .. } | CanonicalOutputError::TargetConflict { .. } => {
+            WorkflowFailure::new(
+                FailureCode::OutputConflict,
+                stage,
+                Certainty::DurableFact,
+                context,
+                error,
+                RecoveryAction::RemoveOrRenameConflictingTarget,
+            )
+        }
+        CanonicalOutputError::TargetChanged { .. } => WorkflowFailure::new(
             FailureCode::PublicationIndeterminate,
             stage,
             Certainty::Indeterminate(PublicationPhase::ReportTarget),
@@ -2593,7 +2598,7 @@ fn report_failure(
             error,
             RecoveryAction::StopAndPreserve,
         ),
-        ReportError::Indeterminate { .. } => WorkflowFailure::new(
+        CanonicalOutputError::Indeterminate { .. } => WorkflowFailure::new(
             FailureCode::PublicationIndeterminate,
             stage,
             Certainty::Indeterminate(PublicationPhase::ReportTarget),
@@ -2601,7 +2606,7 @@ fn report_failure(
             error,
             RecoveryAction::ResumeSameRun,
         ),
-        ReportError::Resource { .. } => WorkflowFailure::new(
+        CanonicalOutputError::Resource { .. } => WorkflowFailure::new(
             FailureCode::ResourceLimit,
             stage,
             Certainty::PrePublication,
@@ -2609,8 +2614,8 @@ fn report_failure(
             error,
             RecoveryAction::RaiseLimitOrNarrow,
         ),
-        ReportError::Cancelled => cancelled_failure(stage, context),
-        error @ ReportError::Invalid(_) => WorkflowFailure::new(
+        CanonicalOutputError::Cancelled => cancelled_failure(stage, context),
+        error @ CanonicalOutputError::Invalid(_) => WorkflowFailure::new(
             FailureCode::InvalidRequest,
             stage,
             Certainty::PrePublication,
@@ -2618,7 +2623,7 @@ fn report_failure(
             error,
             RecoveryAction::CorrectInvalidRequest,
         ),
-        error @ ReportError::Io { .. } => WorkflowFailure::new(
+        error @ CanonicalOutputError::Io { .. } => WorkflowFailure::new(
             FailureCode::Io,
             stage,
             Certainty::PrePublication,
@@ -3401,7 +3406,7 @@ mod tests {
         let context = FailureContext::default();
         let invalid = report_failure(
             WorkflowStage::Report,
-            ReportError::Invalid("invalid request"),
+            CanonicalOutputError::Invalid("invalid request".to_owned()),
             context,
         );
         assert_eq!(invalid.code(), "PWF_INVALID_REQUEST");
@@ -3409,8 +3414,8 @@ mod tests {
 
         let io = report_failure(
             WorkflowStage::Report,
-            ReportError::Io {
-                operation: "sync report",
+            CanonicalOutputError::Io {
+                operation: "sync report".to_owned(),
                 path: PathBuf::from("audit.json"),
                 source: io::Error::other("disk unavailable"),
             },

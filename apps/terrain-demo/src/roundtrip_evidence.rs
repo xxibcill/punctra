@@ -13,8 +13,8 @@ use crate::{
     journal::{Complete, CompleteRunSnapshot, JournalLimits, WorkflowRunId, read_complete_run},
     publication::DirectoryWitness,
     report::{
-        REPORT_HASH_DOMAIN, REPORT_SCHEMA, ReportError, ReportLimits, ReportReceipt,
-        ensure_evidence,
+        CanonicalOutputError, CanonicalOutputLimits, CanonicalOutputReceipt, REPORT_HASH_DOMAIN,
+        REPORT_SCHEMA, ensure_evidence,
     },
     roundtrip::{
         RoundTripDeclaration, RoundTripEvaluation, RoundTripFailure, RoundTripLimits,
@@ -60,7 +60,7 @@ pub(crate) enum RoundTripEvidenceError {
     Invalid(String),
     Journal(crate::journal::JournalError),
     Comparison(RoundTripFailure),
-    Publication(ReportError),
+    Publication(CanonicalOutputError),
 }
 
 impl fmt::Display for RoundTripEvidenceError {
@@ -88,8 +88,8 @@ impl From<RoundTripFailure> for RoundTripEvidenceError {
     }
 }
 
-impl From<ReportError> for RoundTripEvidenceError {
-    fn from(error: ReportError) -> Self {
+impl From<CanonicalOutputError> for RoundTripEvidenceError {
+    fn from(error: CanonicalOutputError) -> Self {
         Self::Publication(error)
     }
 }
@@ -182,7 +182,7 @@ fn verify_round_trip_with_control(
     };
     let publication = ensure_evidence(
         evidence_target,
-        ReportLimits {
+        CanonicalOutputLimits {
             max_output_bytes: DEFAULT_MAX_EVIDENCE_BYTES,
             max_staging_bytes: DEFAULT_MAX_EVIDENCE_BYTES,
             max_write_buffer_bytes: DEFAULT_MAX_EVIDENCE_WRITE_BUFFER_BYTES,
@@ -423,7 +423,7 @@ fn require_external_target(
 fn receipt(
     run: WorkflowRunId,
     evaluation: &RoundTripEvaluation,
-    publication: ReportReceipt,
+    publication: CanonicalOutputReceipt,
 ) -> RoundTripEvidenceReceipt {
     RoundTripEvidenceReceipt {
         run,

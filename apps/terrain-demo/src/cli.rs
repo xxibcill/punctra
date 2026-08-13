@@ -758,31 +758,29 @@ fn round_trip_evidence_failure(error: RoundTripEvidenceError) -> WorkflowFailure
     match error {
         RoundTripEvidenceError::Comparison(error) => round_trip_failure(&error),
         RoundTripEvidenceError::Publication(error) => {
-            use crate::report::ReportError;
+            use crate::report::CanonicalOutputError;
             match error {
-                error @ (ReportError::Conflict { .. } | ReportError::TargetConflict { .. }) => {
-                    WorkflowFailure::new(
-                        FailureCode::OutputConflict,
-                        WorkflowStage::RoundTrip,
-                        Certainty::DurableFact,
-                        FailureContext::default(),
-                        error,
-                        RecoveryAction::RemoveOrRenameConflictingTarget,
-                    )
-                }
-                error @ (ReportError::Indeterminate { .. } | ReportError::TargetChanged { .. }) => {
-                    WorkflowFailure::new(
-                        FailureCode::PublicationIndeterminate,
-                        WorkflowStage::RoundTrip,
-                        Certainty::Indeterminate(
-                            crate::diagnostic::PublicationPhase::RoundTripEvidenceTarget,
-                        ),
-                        FailureContext::default(),
-                        error,
-                        RecoveryAction::StopAndPreserve,
-                    )
-                }
-                error @ ReportError::Resource { .. } => WorkflowFailure::new(
+                error @ (CanonicalOutputError::Conflict { .. }
+                | CanonicalOutputError::TargetConflict { .. }) => WorkflowFailure::new(
+                    FailureCode::OutputConflict,
+                    WorkflowStage::RoundTrip,
+                    Certainty::DurableFact,
+                    FailureContext::default(),
+                    error,
+                    RecoveryAction::RemoveOrRenameConflictingTarget,
+                ),
+                error @ (CanonicalOutputError::Indeterminate { .. }
+                | CanonicalOutputError::TargetChanged { .. }) => WorkflowFailure::new(
+                    FailureCode::PublicationIndeterminate,
+                    WorkflowStage::RoundTrip,
+                    Certainty::Indeterminate(
+                        crate::diagnostic::PublicationPhase::RoundTripEvidenceTarget,
+                    ),
+                    FailureContext::default(),
+                    error,
+                    RecoveryAction::StopAndPreserve,
+                ),
+                error @ CanonicalOutputError::Resource { .. } => WorkflowFailure::new(
                     FailureCode::RoundTripResourceLimit,
                     WorkflowStage::RoundTrip,
                     Certainty::PrePublication,
@@ -790,7 +788,7 @@ fn round_trip_evidence_failure(error: RoundTripEvidenceError) -> WorkflowFailure
                     error,
                     RecoveryAction::UseSupportedRoundTripSize,
                 ),
-                error @ ReportError::Cancelled => WorkflowFailure::new(
+                error @ CanonicalOutputError::Cancelled => WorkflowFailure::new(
                     FailureCode::Cancelled,
                     WorkflowStage::RoundTrip,
                     Certainty::PrePublication,
@@ -798,7 +796,7 @@ fn round_trip_evidence_failure(error: RoundTripEvidenceError) -> WorkflowFailure
                     error,
                     RecoveryAction::ResumeSameRun,
                 ),
-                error @ ReportError::Io { .. } => WorkflowFailure::new(
+                error @ CanonicalOutputError::Io { .. } => WorkflowFailure::new(
                     FailureCode::Io,
                     WorkflowStage::RoundTrip,
                     Certainty::PrePublication,
@@ -806,7 +804,7 @@ fn round_trip_evidence_failure(error: RoundTripEvidenceError) -> WorkflowFailure
                     error,
                     RecoveryAction::RetryAfterRestoringDisk,
                 ),
-                error @ ReportError::Invalid(_) => WorkflowFailure::new(
+                error @ CanonicalOutputError::Invalid(_) => WorkflowFailure::new(
                     FailureCode::RoundTripInvalidInput,
                     WorkflowStage::RoundTrip,
                     Certainty::PrePublication,

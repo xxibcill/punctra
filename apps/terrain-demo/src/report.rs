@@ -55,14 +55,14 @@ impl PublicationHook for ProductionPublicationHook {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct ReportLimits {
+pub(crate) struct CanonicalOutputLimits {
     pub(crate) max_output_bytes: u64,
     pub(crate) max_staging_bytes: u64,
     pub(crate) max_write_buffer_bytes: u64,
     pub(crate) max_working_bytes: u64,
 }
 
-impl Default for ReportLimits {
+impl Default for CanonicalOutputLimits {
     fn default() -> Self {
         Self {
             max_output_bytes: 1024 * 1024,
@@ -115,41 +115,41 @@ pub(crate) struct ReportFacts<'a> {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum ReportDisposition {
+pub(crate) enum CanonicalOutputDisposition {
     Created,
     ReconciledExisting,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct ReportReceipt {
-    pub(crate) disposition: ReportDisposition,
+pub(crate) struct CanonicalOutputReceipt {
+    pub(crate) disposition: CanonicalOutputDisposition,
     pub(crate) content_hash: Digest,
     pub(crate) byte_length: u64,
 }
 
 #[derive(Debug, Error)]
-pub(crate) enum ReportError {
-    #[error("invalid report request: {0}")]
-    Invalid(&'static str),
-    #[error("report exceeded {limit}: required {required}, limit {allowed}")]
+pub(crate) enum CanonicalOutputError {
+    #[error("invalid canonical output request: {0}")]
+    Invalid(String),
+    #[error("canonical output exceeded {limit}: required {required}, limit {allowed}")]
     Resource {
-        limit: &'static str,
+        limit: String,
         required: u64,
         allowed: u64,
     },
-    #[error("report operation was cancelled")]
+    #[error("canonical output operation was cancelled")]
     Cancelled,
-    #[error("report target conflicts with canonical bytes: {path}")]
+    #[error("canonical output target conflicts with expected bytes: {path}")]
     Conflict {
         path: PathBuf,
         expected_hash: Digest,
         actual_hash: Digest,
     },
-    #[error("report target is conflicting at {path}: {reason}")]
+    #[error("canonical output target is conflicting at {path}: {reason}")]
     TargetConflict { path: PathBuf, reason: &'static str },
-    #[error("report target changed during verification: {path}")]
+    #[error("canonical output target changed during verification: {path}")]
     TargetChanged { path: PathBuf },
-    #[error("report publication is indeterminate for {path}")]
+    #[error("canonical output publication is indeterminate for {path}")]
     Indeterminate {
         path: PathBuf,
         expected_hash: Digest,
@@ -158,17 +158,17 @@ pub(crate) enum ReportError {
     },
     #[error("failed to {operation} {path}: {source}")]
     Io {
-        operation: &'static str,
+        operation: String,
         path: PathBuf,
         #[source]
         source: io::Error,
     },
 }
 
-impl ReportError {
-    fn io(operation: &'static str, path: &Path, source: io::Error) -> Self {
+impl CanonicalOutputError {
+    fn io(operation: impl Into<String>, path: &Path, source: io::Error) -> Self {
         Self::Io {
-            operation,
+            operation: operation.into(),
             path: path.to_path_buf(),
             source,
         }
@@ -178,19 +178,19 @@ impl ReportError {
 pub(crate) fn ensure_report(
     target: &Path,
     facts: &ReportFacts<'_>,
-    limits: ReportLimits,
+    limits: CanonicalOutputLimits,
     control: &OperationControl,
-) -> Result<ReportReceipt, ReportError> {
+) -> Result<CanonicalOutputReceipt, CanonicalOutputError> {
     ensure_report_with_hook(target, facts, limits, control, &ProductionPublicationHook)
 }
 
 pub(crate) fn ensure_evidence(
     target: &Path,
-    limits: ReportLimits,
+    limits: CanonicalOutputLimits,
     control: &OperationControl,
     encode: impl FnOnce(&mut dyn Write) -> io::Result<()>,
     validate_inputs: impl Fn() -> io::Result<()>,
-) -> Result<ReportReceipt, ReportError> {
+) -> Result<CanonicalOutputReceipt, CanonicalOutputError> {
     ensure_encoded_output(
         EncodedOutputRequest {
             target,
@@ -207,10 +207,10 @@ pub(crate) fn ensure_evidence(
 fn ensure_report_with_hook<H: PublicationHook>(
     target: &Path,
     facts: &ReportFacts<'_>,
-    limits: ReportLimits,
+    limits: CanonicalOutputLimits,
     control: &OperationControl,
     hook: &H,
-) -> Result<ReportReceipt, ReportError> {
+) -> Result<CanonicalOutputReceipt, CanonicalOutputError> {
     let validate_inputs = || Ok(());
     ensure_encoded_output(
         EncodedOutputRequest {
@@ -229,7 +229,7 @@ fn ensure_report_with_hook<H: PublicationHook>(
 struct EncodedOutputRequest<'a> {
     target: &'a Path,
     kind: EncodedOutputKind,
-    limits: ReportLimits,
+    limits: CanonicalOutputLimits,
 }
 
 #[derive(Clone, Copy)]
@@ -238,50 +238,42 @@ enum EncodedOutputKind {
     Evidence,
 }
 
-struct EncodedOutputLabels {
-    namespace: &'static str,
-    hash_domain: &'static [u8],
-    target_requirement: &'static str,
-    validate_inputs: &'static str,
-    witness_parent: &'static str,
-    sync_stage: &'static str,
-    seek_stage: &'static str,
-    revalidate_stage: &'static str,
-    changed_stage: &'static str,
-    revalidate_parent: &'static str,
-    revalidate_inputs: &'static str,
-}
-
 impl EncodedOutputKind {
-    const fn labels(self) -> EncodedOutputLabels {
+    const fn name(self) -> &'static str {
         match self {
-            Self::Report => EncodedOutputLabels {
-                namespace: "report",
-                hash_domain: REPORT_HASH_DOMAIN,
-                target_requirement: "report target must name a file",
-                validate_inputs: "validate report inputs",
-                witness_parent: "witness report parent",
-                sync_stage: "sync report stage",
-                seek_stage: "seek report stage for read-back",
-                revalidate_stage: "revalidate report stage",
-                changed_stage: "report stage changed during read-back",
-                revalidate_parent: "revalidate report parent",
-                revalidate_inputs: "revalidate report inputs",
-            },
-            Self::Evidence => EncodedOutputLabels {
-                namespace: "round-trip-evidence",
-                hash_domain: b"",
-                target_requirement: "evidence target must name a file",
-                validate_inputs: "validate Round-Trip Evidence inputs",
-                witness_parent: "witness evidence parent",
-                sync_stage: "sync evidence stage",
-                seek_stage: "seek evidence stage for read-back",
-                revalidate_stage: "revalidate evidence stage",
-                changed_stage: "evidence stage changed during read-back",
-                revalidate_parent: "revalidate evidence parent",
-                revalidate_inputs: "revalidate Round-Trip Evidence inputs",
-            },
+            Self::Report => "report",
+            Self::Evidence => "Round-Trip Evidence",
         }
+    }
+
+    const fn namespace(self) -> &'static str {
+        match self {
+            Self::Report => "report",
+            Self::Evidence => "round-trip-evidence",
+        }
+    }
+
+    const fn hash_domain(self) -> &'static [u8] {
+        match self {
+            Self::Report => REPORT_HASH_DOMAIN,
+            Self::Evidence => b"",
+        }
+    }
+
+    fn operation(self, action: &str) -> String {
+        format!("{action} for {}", self.name())
+    }
+
+    fn limit(self, resource: &str) -> String {
+        format!("{} {resource}", self.name())
+    }
+
+    fn invalid(self, reason: &str) -> CanonicalOutputError {
+        CanonicalOutputError::Invalid(format!("{} {reason}", self.name()))
+    }
+
+    fn io(self, action: &str, path: &Path, source: io::Error) -> CanonicalOutputError {
+        CanonicalOutputError::io(self.operation(action), path, source)
     }
 }
 
@@ -291,59 +283,52 @@ fn ensure_encoded_output(
     hook: &impl PublicationHook,
     encode: impl FnOnce(&mut HashingWriter<'_>) -> io::Result<()>,
     validate_inputs: &dyn Fn() -> io::Result<()>,
-) -> Result<ReportReceipt, ReportError> {
+) -> Result<CanonicalOutputReceipt, CanonicalOutputError> {
     let EncodedOutputRequest {
         target,
         kind,
         limits,
     } = request;
-    let labels = kind.labels();
     check_cancelled(control)?;
-    validate_inputs().map_err(|source| ReportError::io(labels.validate_inputs, target, source))?;
-    validate_limits(limits)?;
+    validate_inputs().map_err(|source| kind.io("validate inputs", target, source))?;
+    validate_limits(limits, kind)?;
     if target.file_name().is_none() {
-        return Err(ReportError::Invalid(labels.target_requirement));
+        return Err(kind.invalid("target must name a file"));
     }
     let parent = target.parent().unwrap_or_else(|| Path::new("."));
     let parent_witness = DirectoryWitness::capture(parent)
-        .map_err(|source| ReportError::io(labels.witness_parent, parent, source))?;
-    let (mut guard, stage_file) = create_stage(parent, labels.namespace, control)?;
+        .map_err(|source| kind.io("witness parent", parent, source))?;
+    let (mut guard, stage_file) = create_stage(parent, kind, control)?;
     let mut writer = HashingWriter::new(
         stage_file,
         limits.max_output_bytes.min(limits.max_staging_bytes),
         control,
-        labels.hash_domain,
+        kind.hash_domain(),
     );
-    encode(&mut writer).map_err(|source| map_write_error(source, &writer, limits))?;
-    let (mut stage, expected_hash, byte_length) = writer.finish(guard.path())?;
+    encode(&mut writer)
+        .map_err(|source| map_write_error(source, &writer, limits, kind, guard.path()))?;
+    let (mut stage, expected_hash, byte_length) = writer.finish(guard.path(), kind)?;
     stage
         .sync_all()
-        .map_err(|source| ReportError::io(labels.sync_stage, guard.path(), source))?;
+        .map_err(|source| kind.io("sync stage", guard.path(), source))?;
     let expected = FileFacts {
         hash: expected_hash,
         bytes: byte_length,
     };
     stage
         .seek(SeekFrom::Start(0))
-        .map_err(|source| ReportError::io(labels.seek_stage, guard.path(), source))?;
-    let readback = verify_open_file(
-        &mut stage,
-        guard.path(),
-        limits,
-        control,
-        labels.hash_domain,
-    )?;
+        .map_err(|source| kind.io("seek stage for read-back", guard.path(), source))?;
+    let readback = verify_open_file(&mut stage, guard.path(), limits, control, kind)?;
     guard
         .verify()
-        .map_err(|source| ReportError::io(labels.revalidate_stage, guard.path(), source))?;
+        .map_err(|source| kind.io("revalidate stage", guard.path(), source))?;
     if readback != expected {
-        return Err(ReportError::Invalid(labels.changed_stage));
+        return Err(kind.invalid("stage changed during read-back"));
     }
     parent_witness
         .verify()
-        .map_err(|source| ReportError::io(labels.revalidate_parent, parent, source))?;
-    validate_inputs()
-        .map_err(|source| ReportError::io(labels.revalidate_inputs, target, source))?;
+        .map_err(|source| kind.io("revalidate parent", parent, source))?;
+    validate_inputs().map_err(|source| kind.io("revalidate inputs", target, source))?;
     check_cancelled(control)?;
     publish_or_reconcile(
         PublicationContext {
@@ -352,7 +337,7 @@ fn ensure_encoded_output(
             parent_witness: &parent_witness,
             expected,
             limits,
-            hash_domain: labels.hash_domain,
+            kind,
             terminal_validation: validate_inputs,
         },
         &mut guard,
@@ -367,8 +352,8 @@ struct PublicationContext<'a> {
     parent: &'a Path,
     parent_witness: &'a DirectoryWitness,
     expected: FileFacts,
-    limits: ReportLimits,
-    hash_domain: &'static [u8],
+    limits: CanonicalOutputLimits,
+    kind: EncodedOutputKind,
     terminal_validation: &'a dyn Fn() -> io::Result<()>,
 }
 
@@ -377,62 +362,54 @@ fn publish_or_reconcile(
     guard: &mut StageGuard,
     control: &OperationControl,
     hook: &impl PublicationHook,
-) -> Result<ReportReceipt, ReportError> {
+) -> Result<CanonicalOutputReceipt, CanonicalOutputError> {
     let target = context.target;
     let parent = context.parent;
     let parent_witness = context.parent_witness;
+    let kind = context.kind;
     match fs::symlink_metadata(target) {
         Err(source) if source.kind() == io::ErrorKind::NotFound => {
             hook.reach(PublicationBoundary::BeforeLink, control)
-                .map_err(|source| {
-                    ReportError::io("run report pre-link boundary", target, source)
-                })?;
+                .map_err(|source| kind.io("run pre-link boundary", target, source))?;
             check_cancelled(control)?;
             guard
                 .verify()
-                .map_err(|source| ReportError::io("verify report stage", guard.path(), source))?;
+                .map_err(|source| kind.io("verify stage", guard.path(), source))?;
             parent_witness
                 .verify()
-                .map_err(|source| ReportError::io("revalidate report parent", parent, source))?;
+                .map_err(|source| kind.io("revalidate parent", parent, source))?;
             match guard.publish_no_replace(target) {
                 Ok(()) => {
-                    parent_witness
-                        .verify()
-                        .map_err(|source| ReportError::Indeterminate {
+                    parent_witness.verify().map_err(|source| {
+                        CanonicalOutputError::Indeterminate {
                             path: target.to_path_buf(),
                             expected_hash: context.expected.hash,
                             source,
-                        })?;
-                    let mut target_witness = capture_published_target(
-                        guard,
-                        target,
-                        context.limits,
-                        control,
-                        context.hash_domain,
-                    )
-                    .and_then(|witness| {
-                        if witness.facts == context.expected {
-                            Ok(witness)
-                        } else {
-                            Err(ReportError::Invalid(
-                                "published report bytes differ from the staged report",
-                            ))
                         }
-                    })
-                    .map_err(|error| indeterminate(target, context.expected.hash, error))?;
+                    })?;
+                    let mut target_witness =
+                        capture_published_target(guard, target, context.limits, control, kind)
+                            .and_then(|witness| {
+                                if witness.facts == context.expected {
+                                    Ok(witness)
+                                } else {
+                                    Err(kind
+                                        .invalid("published bytes differ from the staged output"))
+                                }
+                            })
+                            .map_err(|error| indeterminate(target, context.expected.hash, error))?;
                     finish_publication(context, guard, &mut target_witness, control, hook)
                 }
                 Err(source) if source.kind() == io::ErrorKind::AlreadyExists => {
-                    let metadata = fs::symlink_metadata(target).map_err(|source| {
-                        ReportError::io("inspect raced report target", target, source)
-                    })?;
+                    let metadata = fs::symlink_metadata(target)
+                        .map_err(|source| kind.io("inspect raced target", target, source))?;
                     reconcile_existing(context, &metadata, guard, control, hook)
                 }
-                Err(source) => Err(ReportError::io("publish report", target, source)),
+                Err(source) => Err(kind.io("publish target", target, source)),
             }
         }
         Ok(metadata) => reconcile_existing(context, &metadata, guard, control, hook),
-        Err(source) => Err(ReportError::io("inspect report target", target, source)),
+        Err(source) => Err(kind.io("inspect target", target, source)),
     }
 }
 
@@ -442,63 +419,61 @@ fn reconcile_existing(
     stage: &mut StageGuard,
     control: &OperationControl,
     hook: &impl PublicationHook,
-) -> Result<ReportReceipt, ReportError> {
+) -> Result<CanonicalOutputReceipt, CanonicalOutputError> {
     let PublicationContext {
         target,
         parent,
         parent_witness,
         expected,
         limits,
-        hash_domain,
+        kind,
         terminal_validation,
     } = context;
     check_cancelled(control)?;
     let mut target_witness =
-        OpenTargetWitness::capture(target, initial_metadata, limits, control, hash_domain)?;
+        OpenTargetWitness::capture(target, initial_metadata, limits, control, kind)?;
     if target_witness.facts != expected {
-        return Err(ReportError::Conflict {
+        return Err(CanonicalOutputError::Conflict {
             path: target.to_path_buf(),
             expected_hash: expected.hash,
             actual_hash: target_witness.facts.hash,
         });
     }
     hook.reach(PublicationBoundary::TargetVerification, control)
-        .map_err(|source| ReportError::io("verify reconciled report boundary", target, source))?;
+        .map_err(|source| kind.io("verify reconciled boundary", target, source))?;
     parent_witness
         .verify()
         .map_err(|_| changed_target_error(target))?;
-    target_witness.verify(target, limits, control, hash_domain)?;
+    target_witness.verify(target, limits, control, kind)?;
     check_cancelled(control)?;
     parent_witness
         .verify()
         .map_err(|_| changed_target_error(target))?;
     hook.reach(PublicationBoundary::ParentSync, control)
-        .map_err(|source| ReportError::io("sync reconciled report boundary", target, source))?;
-    sync_directory(parent)
-        .map_err(|source| ReportError::io("sync reconciled report parent", parent, source))?;
-    target_witness.verify(target, limits, control, hash_domain)?;
+        .map_err(|source| kind.io("sync reconciled boundary", target, source))?;
+    sync_directory(parent).map_err(|source| kind.io("sync reconciled parent", parent, source))?;
+    target_witness.verify(target, limits, control, kind)?;
     check_cancelled(control)?;
     hook.reach(PublicationBoundary::StageRetention, control)
-        .map_err(|source| ReportError::io("retain reconciled report stage", target, source))?;
+        .map_err(|source| kind.io("retain reconciled stage", target, source))?;
     stage.retain_private_stage();
     hook.reach(PublicationBoundary::RetentionSync, control)
-        .map_err(|source| ReportError::io("sync retained report stage", target, source))?;
+        .map_err(|source| kind.io("sync retained stage", target, source))?;
     sync_directory(parent)
-        .map_err(|source| ReportError::io("sync reconciled report cleanup", parent, source))?;
+        .map_err(|source| kind.io("sync reconciled stage retention", parent, source))?;
     parent_witness
         .verify()
         .map_err(|_| changed_target_error(target))?;
-    target_witness.verify(target, limits, control, hash_domain)?;
+    target_witness.verify(target, limits, control, kind)?;
     hook.reach(PublicationBoundary::TerminalAcknowledgement, control)
-        .map_err(|source| ReportError::io("acknowledge reconciled report", target, source))?;
+        .map_err(|source| kind.io("acknowledge reconciled target", target, source))?;
     check_cancelled(control)?;
-    target_witness.verify(target, limits, control, hash_domain)?;
-    terminal_validation().map_err(|source| {
-        ReportError::io("perform terminal publication validation", target, source)
-    })?;
-    target_witness.verify(target, limits, control, hash_domain)?;
-    Ok(ReportReceipt {
-        disposition: ReportDisposition::ReconciledExisting,
+    target_witness.verify(target, limits, control, kind)?;
+    terminal_validation()
+        .map_err(|source| kind.io("perform terminal input validation", target, source))?;
+    target_witness.verify(target, limits, control, kind)?;
+    Ok(CanonicalOutputReceipt {
+        disposition: CanonicalOutputDisposition::ReconciledExisting,
         content_hash: expected.hash,
         byte_length: expected.bytes,
     })
@@ -510,14 +485,14 @@ fn finish_publication(
     target_witness: &mut OpenTargetWitness,
     control: &OperationControl,
     hook: &impl PublicationHook,
-) -> Result<ReportReceipt, ReportError> {
+) -> Result<CanonicalOutputReceipt, CanonicalOutputError> {
     let PublicationContext {
         target,
         parent,
         parent_witness,
         expected,
         limits,
-        hash_domain,
+        kind,
         terminal_validation,
     } = context;
     // A complete target may be observable once the hard link succeeds. Every
@@ -530,10 +505,10 @@ fn finish_publication(
         expected.hash,
     )?;
     target_witness
-        .sync()
+        .sync(kind)
         .map_err(|error| indeterminate(target, expected.hash, error))?;
     target_witness
-        .verify(target, limits, control, hash_domain)
+        .verify(target, limits, control, kind)
         .map_err(|error| indeterminate(target, expected.hash, error))?;
     require_post_link_boundary(
         hook,
@@ -544,13 +519,13 @@ fn finish_publication(
     )?;
     parent_witness
         .verify()
-        .map_err(|source| ReportError::Indeterminate {
+        .map_err(|source| CanonicalOutputError::Indeterminate {
             path: target.to_path_buf(),
             expected_hash: expected.hash,
             source,
         })?;
     target_witness
-        .verify(target, limits, control, hash_domain)
+        .verify(target, limits, control, kind)
         .map_err(|error| indeterminate(target, expected.hash, error))?;
     require_post_link_boundary(
         hook,
@@ -559,13 +534,13 @@ fn finish_publication(
         target,
         expected.hash,
     )?;
-    sync_directory(parent).map_err(|source| ReportError::Indeterminate {
+    sync_directory(parent).map_err(|source| CanonicalOutputError::Indeterminate {
         path: target.to_path_buf(),
         expected_hash: expected.hash,
         source,
     })?;
     target_witness
-        .verify(target, limits, control, hash_domain)
+        .verify(target, limits, control, kind)
         .map_err(|error| indeterminate(target, expected.hash, error))?;
     require_post_link_boundary(
         hook,
@@ -582,20 +557,20 @@ fn finish_publication(
         target,
         expected.hash,
     )?;
-    sync_directory(parent).map_err(|source| ReportError::Indeterminate {
+    sync_directory(parent).map_err(|source| CanonicalOutputError::Indeterminate {
         path: target.to_path_buf(),
         expected_hash: expected.hash,
         source,
     })?;
     parent_witness
         .verify()
-        .map_err(|source| ReportError::Indeterminate {
+        .map_err(|source| CanonicalOutputError::Indeterminate {
             path: target.to_path_buf(),
             expected_hash: expected.hash,
             source,
         })?;
     target_witness
-        .verify(target, limits, control, hash_domain)
+        .verify(target, limits, control, kind)
         .map_err(|error| indeterminate(target, expected.hash, error))?;
     require_post_link_boundary(
         hook,
@@ -605,18 +580,18 @@ fn finish_publication(
         expected.hash,
     )?;
     target_witness
-        .verify(target, limits, control, hash_domain)
+        .verify(target, limits, control, kind)
         .map_err(|error| indeterminate(target, expected.hash, error))?;
-    terminal_validation().map_err(|source| ReportError::Indeterminate {
+    terminal_validation().map_err(|source| CanonicalOutputError::Indeterminate {
         path: target.to_path_buf(),
         expected_hash: expected.hash,
         source,
     })?;
     target_witness
-        .verify(target, limits, control, hash_domain)
+        .verify(target, limits, control, kind)
         .map_err(|error| indeterminate(target, expected.hash, error))?;
-    Ok(ReportReceipt {
-        disposition: ReportDisposition::Created,
+    Ok(CanonicalOutputReceipt {
+        disposition: CanonicalOutputDisposition::Created,
         content_hash: expected.hash,
         byte_length: expected.bytes,
     })
@@ -628,9 +603,9 @@ fn require_post_link_boundary(
     control: &OperationControl,
     target: &Path,
     expected_hash: Digest,
-) -> Result<(), ReportError> {
+) -> Result<(), CanonicalOutputError> {
     hook.reach(boundary, control)
-        .map_err(|source| ReportError::Indeterminate {
+        .map_err(|source| CanonicalOutputError::Indeterminate {
             path: target.to_path_buf(),
             expected_hash,
             source,
@@ -638,8 +613,12 @@ fn require_post_link_boundary(
     check_cancelled(control).map_err(|error| indeterminate(target, expected_hash, error))
 }
 
-fn indeterminate(target: &Path, expected_hash: Digest, error: ReportError) -> ReportError {
-    ReportError::Indeterminate {
+fn indeterminate(
+    target: &Path,
+    expected_hash: Digest,
+    error: CanonicalOutputError,
+) -> CanonicalOutputError {
+    CanonicalOutputError::Indeterminate {
         path: target.to_path_buf(),
         expected_hash,
         source: io::Error::other(error),
@@ -940,10 +919,14 @@ impl<'a> HashingWriter<'a> {
         }
     }
 
-    fn finish(mut self, path: &Path) -> Result<(File, Digest, u64), ReportError> {
+    fn finish(
+        mut self,
+        path: &Path,
+        kind: EncodedOutputKind,
+    ) -> Result<(File, Digest, u64), CanonicalOutputError> {
         self.file
             .flush()
-            .map_err(|source| ReportError::io("flush report stage", path, source))?;
+            .map_err(|source| kind.io("flush stage", path, source))?;
         Ok((self.file, *self.hasher.finalize().as_bytes(), self.bytes))
     }
 }
@@ -960,7 +943,7 @@ impl Write for HashingWriter<'_> {
         if requested > self.max_bytes {
             return Err(io::Error::new(
                 io::ErrorKind::FileTooLarge,
-                "report byte limit",
+                "canonical output byte limit",
             ));
         }
         let written = self.file.write(bytes)?;
@@ -979,23 +962,25 @@ impl Write for HashingWriter<'_> {
 fn map_write_error(
     source: io::Error,
     writer: &HashingWriter<'_>,
-    limits: ReportLimits,
-) -> ReportError {
+    limits: CanonicalOutputLimits,
+    kind: EncodedOutputKind,
+    stage_path: &Path,
+) -> CanonicalOutputError {
     if source.kind() == io::ErrorKind::FileTooLarge {
         let (limit, allowed) = if writer.required > limits.max_output_bytes {
-            ("report output bytes", limits.max_output_bytes)
+            (kind.limit("output bytes"), limits.max_output_bytes)
         } else {
-            ("report staging bytes", limits.max_staging_bytes)
+            (kind.limit("staging bytes"), limits.max_staging_bytes)
         };
-        ReportError::Resource {
+        CanonicalOutputError::Resource {
             limit,
             required: writer.required,
             allowed,
         }
     } else if source.kind() == io::ErrorKind::Interrupted {
-        ReportError::Cancelled
+        CanonicalOutputError::Cancelled
     } else {
-        ReportError::io("encode report", Path::new("report stage"), source)
+        kind.io("encode stage", stage_path, source)
     }
 }
 
@@ -1015,18 +1000,18 @@ impl OpenTargetWitness {
     fn capture(
         path: &Path,
         initial_metadata: &fs::Metadata,
-        limits: ReportLimits,
+        limits: CanonicalOutputLimits,
         control: &OperationControl,
-        hash_domain: &[u8],
-    ) -> Result<Self, ReportError> {
+        kind: EncodedOutputKind,
+    ) -> Result<Self, CanonicalOutputError> {
         require_regular_target(path, initial_metadata)?;
-        let file = File::open(path)
-            .map_err(|source| ReportError::io("open publication target witness", path, source))?;
-        let identity = file.metadata().map_err(|source| {
-            ReportError::io("inspect publication target witness", path, source)
-        })?;
+        let file =
+            File::open(path).map_err(|source| kind.io("open target witness", path, source))?;
+        let identity = file
+            .metadata()
+            .map_err(|source| kind.io("inspect target witness", path, source))?;
         let current = fs::symlink_metadata(path)
-            .map_err(|source| ReportError::io("reinspect publication target", path, source))?;
+            .map_err(|source| kind.io("reinspect target", path, source))?;
         require_stable_target(path, initial_metadata, &identity, &current)?;
         let mut witness = Self {
             file,
@@ -1039,39 +1024,39 @@ impl OpenTargetWitness {
         witness
             .file
             .seek(SeekFrom::Start(0))
-            .map_err(|source| ReportError::io("seek publication target witness", path, source))?;
-        witness.facts = verify_open_file(&mut witness.file, path, limits, control, hash_domain)?;
-        witness.verify(path, limits, control, hash_domain)?;
+            .map_err(|source| kind.io("seek target witness", path, source))?;
+        witness.facts = verify_open_file(&mut witness.file, path, limits, control, kind)?;
+        witness.verify(path, limits, control, kind)?;
         Ok(witness)
     }
 
     fn verify(
         &mut self,
         path: &Path,
-        limits: ReportLimits,
+        limits: CanonicalOutputLimits,
         control: &OperationControl,
-        hash_domain: &[u8],
-    ) -> Result<(), ReportError> {
+        kind: EncodedOutputKind,
+    ) -> Result<(), CanonicalOutputError> {
         let opened_before = self
             .file
             .metadata()
-            .map_err(|source| ReportError::io("inspect open publication target", path, source))?;
+            .map_err(|source| kind.io("inspect open target", path, source))?;
         let path_before = fs::symlink_metadata(path)
-            .map_err(|source| ReportError::io("inspect publication target path", path, source))?;
+            .map_err(|source| kind.io("inspect target path", path, source))?;
         require_stable_target(path, &self.identity, &opened_before, &path_before)?;
         if !same_file_state(&self.identity, &opened_before) {
             return Err(changed_target_error(path));
         }
         self.file
             .seek(SeekFrom::Start(0))
-            .map_err(|source| ReportError::io("seek open publication target", path, source))?;
-        let facts = verify_open_file(&mut self.file, path, limits, control, hash_domain)?;
+            .map_err(|source| kind.io("seek open target", path, source))?;
+        let facts = verify_open_file(&mut self.file, path, limits, control, kind)?;
         let opened_after = self
             .file
             .metadata()
-            .map_err(|source| ReportError::io("reinspect open publication target", path, source))?;
+            .map_err(|source| kind.io("reinspect open target", path, source))?;
         let path_after = fs::symlink_metadata(path)
-            .map_err(|source| ReportError::io("reinspect publication target path", path, source))?;
+            .map_err(|source| kind.io("reinspect target path", path, source))?;
         require_stable_target(path, &self.identity, &opened_after, &path_after)?;
         if !same_file_state(&self.identity, &opened_after) || facts != self.facts {
             return Err(changed_target_error(path));
@@ -1079,10 +1064,10 @@ impl OpenTargetWitness {
         Ok(())
     }
 
-    fn sync(&self) -> Result<(), ReportError> {
+    fn sync(&self, kind: EncodedOutputKind) -> Result<(), CanonicalOutputError> {
         self.file.sync_all().map_err(|source| {
-            ReportError::io(
-                "sync created publication target",
+            kind.io(
+                "sync created target",
                 Path::new("publication target"),
                 source,
             )
@@ -1094,42 +1079,42 @@ impl OpenTargetWitness {
 fn verify_existing_regular_file(
     path: &Path,
     initial_metadata: &fs::Metadata,
-    limits: ReportLimits,
+    limits: CanonicalOutputLimits,
     control: &OperationControl,
-    hash_domain: &[u8],
-) -> Result<FileFacts, ReportError> {
-    Ok(OpenTargetWitness::capture(path, initial_metadata, limits, control, hash_domain)?.facts)
+    kind: EncodedOutputKind,
+) -> Result<FileFacts, CanonicalOutputError> {
+    Ok(OpenTargetWitness::capture(path, initial_metadata, limits, control, kind)?.facts)
 }
 
 fn capture_published_target(
     stage: &StageGuard,
     target: &Path,
-    limits: ReportLimits,
+    limits: CanonicalOutputLimits,
     control: &OperationControl,
-    hash_domain: &[u8],
-) -> Result<OpenTargetWitness, ReportError> {
+    kind: EncodedOutputKind,
+) -> Result<OpenTargetWitness, CanonicalOutputError> {
     stage
         .verify()
-        .map_err(|source| ReportError::io("inspect publication stage", stage.path(), source))?;
+        .map_err(|source| kind.io("inspect publication stage", stage.path(), source))?;
     let stage_before = stage
         .source_metadata()
-        .map_err(|source| ReportError::io("inspect publication stage", stage.path(), source))?;
+        .map_err(|source| kind.io("inspect publication stage", stage.path(), source))?;
     let target_before = fs::symlink_metadata(target)
-        .map_err(|source| ReportError::io("inspect linked report target", target, source))?;
+        .map_err(|source| kind.io("inspect linked target", target, source))?;
     require_regular_target(stage.path(), &stage_before)?;
     require_regular_target(target, &target_before)?;
     if stage.has_named_stage() && same_file_identity(&stage_before, &target_before) {
         return Err(changed_target_error(target));
     }
-    let witness = OpenTargetWitness::capture(target, &target_before, limits, control, hash_domain)?;
+    let witness = OpenTargetWitness::capture(target, &target_before, limits, control, kind)?;
     stage
         .verify()
-        .map_err(|source| ReportError::io("reinspect publication stage", stage.path(), source))?;
+        .map_err(|source| kind.io("reinspect publication stage", stage.path(), source))?;
     let stage_after = stage
         .source_metadata()
-        .map_err(|source| ReportError::io("reinspect publication stage", stage.path(), source))?;
+        .map_err(|source| kind.io("reinspect publication stage", stage.path(), source))?;
     let target_after = fs::symlink_metadata(target)
-        .map_err(|source| ReportError::io("reinspect linked report target", target, source))?;
+        .map_err(|source| kind.io("reinspect linked target", target, source))?;
     require_stable_target(target, &target_before, &target_before, &target_after)?;
     if !same_file_identity(&stage_before, &stage_after)
         || !same_file_state(&stage_before, &stage_after)
@@ -1143,15 +1128,15 @@ fn capture_published_target(
 fn verify_open_file(
     file: &mut File,
     path: &Path,
-    limits: ReportLimits,
+    limits: CanonicalOutputLimits,
     control: &OperationControl,
-    hash_domain: &[u8],
-) -> Result<FileFacts, ReportError> {
+    kind: EncodedOutputKind,
+) -> Result<FileFacts, CanonicalOutputError> {
     let buffer_bytes =
         HASH_BUFFER_BYTES.min(usize::try_from(limits.max_write_buffer_bytes).unwrap_or(0));
     if buffer_bytes == 0 {
-        return Err(ReportError::Resource {
-            limit: "report write buffer bytes",
+        return Err(CanonicalOutputError::Resource {
+            limit: kind.limit("write buffer bytes"),
             required: 1,
             allowed: limits.max_write_buffer_bytes,
         });
@@ -1159,36 +1144,36 @@ fn verify_open_file(
     require(
         u64::try_from(buffer_bytes).unwrap_or(u64::MAX),
         limits.max_working_bytes,
-        "report working bytes",
+        kind.limit("working bytes"),
     )?;
     let mut buffer = Vec::new();
     buffer
         .try_reserve_exact(buffer_bytes)
-        .map_err(|_| ReportError::Resource {
-            limit: "report verification buffer allocation",
+        .map_err(|_| CanonicalOutputError::Resource {
+            limit: kind.limit("verification buffer allocation"),
             required: u64::try_from(buffer_bytes).unwrap_or(u64::MAX),
             allowed: limits.max_working_bytes,
         })?;
     require(
         u64::try_from(buffer.capacity()).unwrap_or(u64::MAX),
         limits.max_working_bytes,
-        "report working bytes",
+        kind.limit("working bytes"),
     )?;
     buffer.resize(buffer_bytes, 0);
     let mut hasher = Hasher::new();
-    hasher.update(hash_domain);
+    hasher.update(kind.hash_domain());
     let mut bytes = 0_u64;
     loop {
         check_cancelled(control)?;
         let read = file
             .read(&mut buffer)
-            .map_err(|source| ReportError::io("hash report", path, source))?;
+            .map_err(|source| kind.io("hash target", path, source))?;
         if read == 0 {
             break;
         }
         bytes = bytes.saturating_add(u64::try_from(read).unwrap_or(u64::MAX));
-        require(bytes, limits.max_output_bytes, "report output bytes")?;
-        require(bytes, limits.max_staging_bytes, "report staging bytes")?;
+        require(bytes, limits.max_output_bytes, kind.limit("output bytes"))?;
+        require(bytes, limits.max_staging_bytes, kind.limit("staging bytes"))?;
         hasher.update(&buffer[..read]);
     }
     Ok(FileFacts {
@@ -1197,11 +1182,14 @@ fn verify_open_file(
     })
 }
 
-fn require_regular_target(path: &Path, metadata: &fs::Metadata) -> Result<(), ReportError> {
+fn require_regular_target(
+    path: &Path,
+    metadata: &fs::Metadata,
+) -> Result<(), CanonicalOutputError> {
     if metadata.file_type().is_file() {
         Ok(())
     } else {
-        Err(ReportError::TargetConflict {
+        Err(CanonicalOutputError::TargetConflict {
             path: path.to_path_buf(),
             reason: "an existing target must be a regular non-symlink file",
         })
@@ -1213,7 +1201,7 @@ fn require_stable_target(
     initial: &fs::Metadata,
     opened: &fs::Metadata,
     current: &fs::Metadata,
-) -> Result<(), ReportError> {
+) -> Result<(), CanonicalOutputError> {
     require_regular_target(path, current)?;
     if same_file_identity(initial, opened) && same_file_identity(opened, current) {
         Ok(())
@@ -1222,8 +1210,8 @@ fn require_stable_target(
     }
 }
 
-fn changed_target_error(path: &Path) -> ReportError {
-    ReportError::TargetChanged {
+fn changed_target_error(path: &Path) -> CanonicalOutputError {
+    CanonicalOutputError::TargetChanged {
         path: path.to_path_buf(),
     }
 }
@@ -1236,24 +1224,27 @@ fn same_file_state(left: &fs::Metadata, right: &fs::Metadata) -> bool {
         )
 }
 
-fn validate_limits(limits: ReportLimits) -> Result<(), ReportError> {
-    require(1, limits.max_output_bytes, "report output bytes")?;
-    require(1, limits.max_staging_bytes, "report staging bytes")?;
+fn validate_limits(
+    limits: CanonicalOutputLimits,
+    kind: EncodedOutputKind,
+) -> Result<(), CanonicalOutputError> {
+    require(1, limits.max_output_bytes, kind.limit("output bytes"))?;
+    require(1, limits.max_staging_bytes, kind.limit("staging bytes"))?;
     require(
         1,
         limits.max_write_buffer_bytes,
-        "report write buffer bytes",
+        kind.limit("write buffer bytes"),
     )?;
     require(
         limits.max_write_buffer_bytes.min(HASH_BUFFER_BYTES as u64),
         limits.max_working_bytes,
-        "report working bytes",
+        kind.limit("working bytes"),
     )
 }
 
-fn require(required: u64, allowed: u64, limit: &'static str) -> Result<(), ReportError> {
+fn require(required: u64, allowed: u64, limit: String) -> Result<(), CanonicalOutputError> {
     if required > allowed {
-        Err(ReportError::Resource {
+        Err(CanonicalOutputError::Resource {
             limit,
             required,
             allowed,
@@ -1263,31 +1254,27 @@ fn require(required: u64, allowed: u64, limit: &'static str) -> Result<(), Repor
     }
 }
 
-fn check_cancelled(control: &OperationControl) -> Result<(), ReportError> {
+fn check_cancelled(control: &OperationControl) -> Result<(), CanonicalOutputError> {
     control
         .check_cancelled()
-        .map_err(|_| ReportError::Cancelled)
+        .map_err(|_| CanonicalOutputError::Cancelled)
 }
 
 fn create_stage(
     parent: &Path,
-    namespace: &'static str,
+    kind: EncodedOutputKind,
     control: &OperationControl,
-) -> Result<(StageGuard, File), ReportError> {
+) -> Result<(StageGuard, File), CanonicalOutputError> {
     create_publication_stage(
         parent,
-        namespace,
+        kind.namespace(),
         || check_cancelled(control),
         |error| match error {
             StageCreationError::NamespaceExhausted => {
-                ReportError::Invalid("report staging name space is exhausted")
+                kind.invalid("staging name space is exhausted")
             }
-            StageCreationError::Inspect { path, source } => {
-                ReportError::io("inspect report stage", &path, source)
-            }
-            StageCreationError::Create { path, source } => {
-                ReportError::io("create report stage", &path, source)
-            }
+            StageCreationError::Inspect { path, source } => kind.io("inspect stage", &path, source),
+            StageCreationError::Create { path, source } => kind.io("create stage", &path, source),
         },
     )
 }
@@ -1382,12 +1369,38 @@ mod tests {
                     .expect_err("a pre-link stop cannot return a receipt");
             assert!(matches!(
                 failure,
-                ReportError::Io { .. } | ReportError::Cancelled
+                CanonicalOutputError::Io { .. } | CanonicalOutputError::Cancelled
             ));
             assert!(!target.exists());
             drop(stage);
             directory.assert_safe_stages();
         }
+    }
+
+    #[test]
+    fn evidence_publication_failures_name_the_evidence_artifact() {
+        let directory = Directory::new("evidence-diagnostic");
+        let target = directory.path.join("evidence.json");
+        let validate_inputs = || Ok(());
+        let failure = ensure_encoded_output(
+            EncodedOutputRequest {
+                target: &target,
+                kind: EncodedOutputKind::Evidence,
+                limits: CanonicalOutputLimits::default(),
+            },
+            &OperationControl::new(),
+            &TestHook(TestAction::Failure(PublicationBoundary::BeforeLink)),
+            |writer| writer.write_all(b"canonical evidence\n"),
+            &validate_inputs,
+        )
+        .expect_err("an injected evidence failure cannot return a receipt");
+
+        assert!(matches!(
+            failure,
+            CanonicalOutputError::Io { operation, .. }
+                if operation == "run pre-link boundary for Round-Trip Evidence"
+        ));
+        assert!(!target.exists());
     }
 
     #[test]
@@ -1414,7 +1427,7 @@ mod tests {
             .expect_err("post-link failure cannot acknowledge publication");
             assert!(matches!(
                 failure,
-                ReportError::Indeterminate {
+                CanonicalOutputError::Indeterminate {
                     expected_hash,
                     ..
                 } if expected_hash == expected.hash
@@ -1441,7 +1454,10 @@ mod tests {
             )),
         )
         .expect_err("lost acknowledgement has no receipt");
-        assert!(matches!(failure, ReportError::Indeterminate { .. }));
+        assert!(matches!(
+            failure,
+            CanonicalOutputError::Indeterminate { .. }
+        ));
         drop(stage);
 
         let (mut retry_stage, retry_expected) = directory.prepared(canonical);
@@ -1453,7 +1469,10 @@ mod tests {
             &ProductionPublicationHook,
         )
         .expect("retry reconciles exact durable bytes");
-        assert_eq!(receipt.disposition, ReportDisposition::ReconciledExisting);
+        assert_eq!(
+            receipt.disposition,
+            CanonicalOutputDisposition::ReconciledExisting
+        );
         assert_eq!(receipt.content_hash, expected.hash);
         directory.assert_safe_stages();
     }
@@ -1479,7 +1498,7 @@ mod tests {
         .expect("an exact create race reconciles");
         assert_eq!(
             exact_receipt.disposition,
-            ReportDisposition::ReconciledExisting
+            CanonicalOutputDisposition::ReconciledExisting
         );
 
         let conflict_target = directory.path.join("conflict.json");
@@ -1500,7 +1519,7 @@ mod tests {
         .expect_err("a conflicting create race fails closed");
         assert!(matches!(
             failure,
-            ReportError::Conflict {
+            CanonicalOutputError::Conflict {
                 expected_hash,
                 actual_hash,
                 ..
@@ -1533,7 +1552,10 @@ mod tests {
             }),
         )
         .expect_err("a replaced post-link target has no receipt");
-        assert!(matches!(failure, ReportError::Indeterminate { .. }));
+        assert!(matches!(
+            failure,
+            CanonicalOutputError::Indeterminate { .. }
+        ));
         assert_eq!(fs::read(&target).unwrap(), replacement);
         drop(stage);
         directory.assert_safe_stages();
@@ -1558,7 +1580,10 @@ mod tests {
             }),
         )
         .expect_err("a final-window replacement has no receipt");
-        assert!(matches!(failure, ReportError::Indeterminate { .. }));
+        assert!(matches!(
+            failure,
+            CanonicalOutputError::Indeterminate { .. }
+        ));
         assert_eq!(fs::read(&target).unwrap(), replacement);
         drop(stage);
         directory.assert_safe_stages();
@@ -1583,7 +1608,10 @@ mod tests {
             &validation,
         )
         .expect_err("target replacement during input validation has no receipt");
-        assert!(matches!(failure, ReportError::Indeterminate { .. }));
+        assert!(matches!(
+            failure,
+            CanonicalOutputError::Indeterminate { .. }
+        ));
         assert_eq!(fs::read(&target).unwrap(), replacement);
     }
 
@@ -1608,7 +1636,10 @@ mod tests {
             }),
         )
         .expect_err("create replacement during parent sync has no receipt");
-        assert!(matches!(created_failure, ReportError::Indeterminate { .. }));
+        assert!(matches!(
+            created_failure,
+            CanonicalOutputError::Indeterminate { .. }
+        ));
         assert_eq!(fs::read(&created_target).unwrap(), replacement);
 
         let reconciled_target = directory.path.join("reconciled.json");
@@ -1629,7 +1660,7 @@ mod tests {
         .expect_err("reconciliation replacement during parent sync has no receipt");
         assert!(!matches!(
             reconciled_failure,
-            ReportError::Indeterminate { .. }
+            CanonicalOutputError::Indeterminate { .. }
         ));
         assert_eq!(fs::read(&reconciled_target).unwrap(), replacement);
     }
@@ -1684,7 +1715,10 @@ mod tests {
             }),
         )
         .expect_err("a modified post-link target has no receipt");
-        assert!(matches!(failure, ReportError::Indeterminate { .. }));
+        assert!(matches!(
+            failure,
+            CanonicalOutputError::Indeterminate { .. }
+        ));
         assert_eq!(fs::read(&target).unwrap(), concurrent_bytes);
         drop(stage);
         assert_eq!(fs::read(&target).unwrap(), concurrent_bytes);
@@ -1718,7 +1752,10 @@ mod tests {
             &ProductionPublicationHook,
         )
         .expect_err("a directory target fails closed");
-        assert!(matches!(failure, ReportError::TargetConflict { .. }));
+        assert!(matches!(
+            failure,
+            CanonicalOutputError::TargetConflict { .. }
+        ));
         assert!(target.is_dir());
         drop(stage);
         directory.assert_safe_stages();
@@ -1732,26 +1769,32 @@ mod tests {
         let control = OperationControl::new();
         let mut writer = HashingWriter::new(file, 3, &control, REPORT_HASH_DOMAIN);
         let write_error = writer.write_all(b"four").unwrap_err();
-        let limits = ReportLimits {
+        let limits = CanonicalOutputLimits {
             max_output_bytes: 10,
             max_staging_bytes: 3,
             max_write_buffer_bytes: 8,
             max_working_bytes: 8,
         };
         assert!(matches!(
-            map_write_error(write_error, &writer, limits),
-            ReportError::Resource {
-                limit: "report staging bytes",
+            map_write_error(
+                write_error,
+                &writer,
+                limits,
+                EncodedOutputKind::Report,
+                &stage_path
+            ),
+            CanonicalOutputError::Resource {
+                limit,
                 required: 4,
                 allowed: 3
-            }
+            } if limit == "report staging bytes"
         ));
         drop(writer);
 
         fs::remove_file(&stage_path).unwrap();
         write_synced(&stage_path, b"bounded").unwrap();
         let metadata = fs::symlink_metadata(&stage_path).unwrap();
-        let verification_limits = ReportLimits {
+        let verification_limits = CanonicalOutputLimits {
             max_output_bytes: 10,
             max_staging_bytes: 10,
             max_write_buffer_bytes: 8,
@@ -1763,13 +1806,13 @@ mod tests {
                 &metadata,
                 verification_limits,
                 &OperationControl::new(),
-                REPORT_HASH_DOMAIN
+                EncodedOutputKind::Report
             ),
-            Err(ReportError::Resource {
-                limit: "report working bytes",
+            Err(CanonicalOutputError::Resource {
+                limit,
                 required: 8,
                 allowed: 7
-            })
+            }) if limit == "report working bytes"
         ));
     }
 
@@ -1789,7 +1832,7 @@ mod tests {
         expected: FileFacts,
         control: &OperationControl,
         hook: &impl PublicationHook,
-    ) -> Result<ReportReceipt, ReportError> {
+    ) -> Result<CanonicalOutputReceipt, CanonicalOutputError> {
         let terminal_validation = || Ok(());
         publish_prepared_validating(target, stage, expected, control, hook, &terminal_validation)
     }
@@ -1801,7 +1844,7 @@ mod tests {
         control: &OperationControl,
         hook: &impl PublicationHook,
         terminal_validation: &dyn Fn() -> io::Result<()>,
-    ) -> Result<ReportReceipt, ReportError> {
+    ) -> Result<CanonicalOutputReceipt, CanonicalOutputError> {
         let parent = target.parent().unwrap();
         let parent_witness = DirectoryWitness::capture(parent).unwrap();
         publish_or_reconcile(
@@ -1810,8 +1853,8 @@ mod tests {
                 parent,
                 parent_witness: &parent_witness,
                 expected,
-                limits: ReportLimits::default(),
-                hash_domain: REPORT_HASH_DOMAIN,
+                limits: CanonicalOutputLimits::default(),
+                kind: EncodedOutputKind::Report,
                 terminal_validation,
             },
             stage,
@@ -1870,8 +1913,12 @@ mod tests {
         }
 
         fn prepared(&self, bytes: &[u8]) -> (StageGuard, FileFacts) {
-            let (stage, mut file) =
-                create_stage(&self.path, "report", &OperationControl::new()).unwrap();
+            let (stage, mut file) = create_stage(
+                &self.path,
+                EncodedOutputKind::Report,
+                &OperationControl::new(),
+            )
+            .unwrap();
             file.write_all(bytes).unwrap();
             file.sync_all().unwrap();
             drop(file);
@@ -1895,7 +1942,7 @@ mod tests {
                 let metadata = stage.metadata().unwrap();
                 assert!(metadata.is_file(), "private stage must remain regular");
                 assert!(
-                    metadata.len() <= ReportLimits::default().max_staging_bytes,
+                    metadata.len() <= CanonicalOutputLimits::default().max_staging_bytes,
                     "private stage must remain bounded"
                 );
             }
