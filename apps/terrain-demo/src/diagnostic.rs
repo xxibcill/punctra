@@ -1,13 +1,12 @@
-use std::fmt::{self, Write as _};
+use std::fmt;
 
 use foundation_runtime::RuntimeError;
 use point_contracts::SourceId;
 use point_workspace::{OperationId, RevisionId, WorkspaceId};
 
-use crate::journal::WorkflowRunId;
-
-const MAX_DIAGNOSTIC_BYTES: usize = 1_024;
-const ELLIPSIS: &str = "...";
+#[cfg(test)]
+use crate::bounded_diagnostic::MAX_DIAGNOSTIC_BYTES;
+use crate::{bounded_diagnostic::BoundedDiagnostic, journal::WorkflowRunId};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum FailureCode {
@@ -22,6 +21,18 @@ pub(crate) enum FailureCode {
     JournalConflict,
     JournalCorrupt,
     OutputConflict,
+    RoundTripInvalidInput,
+    RoundTripResourceLimit,
+    RoundTripSemanticMismatch,
+    RoundTripXmlInvalid,
+    RoundTripSubsetUnsupported,
+    RoundTripCoordinateReferenceUnsupported,
+    RoundTripUnitDrift,
+    RoundTripPointCountDrift,
+    RoundTripVertexUnmatched,
+    RoundTripVertexAmbiguous,
+    RoundTripToleranceDrift,
+    RoundTripTopologyDrift,
     PublicationIndeterminate,
     Io,
     Internal,
@@ -41,6 +52,18 @@ impl FailureCode {
             Self::JournalConflict => "PWF_JOURNAL_CONFLICT",
             Self::JournalCorrupt => "PWF_JOURNAL_CORRUPT",
             Self::OutputConflict => "PWF_OUTPUT_CONFLICT",
+            Self::RoundTripInvalidInput => "PRT_INVALID_INPUT",
+            Self::RoundTripResourceLimit => "PRT_RESOURCE_LIMIT",
+            Self::RoundTripSemanticMismatch => "PRT_SEMANTIC_MISMATCH",
+            Self::RoundTripXmlInvalid => "PRT_XML_INVALID",
+            Self::RoundTripSubsetUnsupported => "PRT_SUBSET_UNSUPPORTED",
+            Self::RoundTripCoordinateReferenceUnsupported => "PRT_COORDINATE_REFERENCE_UNSUPPORTED",
+            Self::RoundTripUnitDrift => "PRT_UNIT_DRIFT",
+            Self::RoundTripPointCountDrift => "PRT_POINT_COUNT_DRIFT",
+            Self::RoundTripVertexUnmatched => "PRT_VERTEX_UNMATCHED",
+            Self::RoundTripVertexAmbiguous => "PRT_VERTEX_AMBIGUOUS",
+            Self::RoundTripToleranceDrift => "PRT_TOLERANCE_DRIFT",
+            Self::RoundTripTopologyDrift => "PRT_TOPOLOGY_DRIFT",
             Self::PublicationIndeterminate => "PWF_PUBLICATION_INDETERMINATE",
             Self::Io => "PWF_IO",
             Self::Internal => "PWF_INTERNAL",
@@ -67,6 +90,7 @@ pub(crate) enum WorkflowStage {
     Report,
     Complete,
     Inspect,
+    RoundTrip,
 }
 
 impl WorkflowStage {
@@ -89,6 +113,7 @@ impl WorkflowStage {
             Self::Report => "report-ensure",
             Self::Complete => "complete-checkpoint",
             Self::Inspect => "inspect",
+            Self::RoundTrip => "landxml-round-trip-comparison",
         }
     }
 }
@@ -102,6 +127,7 @@ pub(crate) enum PublicationPhase {
     JournalCheckpoint,
     LandXmlTarget,
     ReportTarget,
+    RoundTripEvidenceTarget,
     CompleteCheckpoint,
 }
 
@@ -115,6 +141,7 @@ impl PublicationPhase {
             Self::JournalCheckpoint => "journal-checkpoint",
             Self::LandXmlTarget => "landxml-target",
             Self::ReportTarget => "report-target",
+            Self::RoundTripEvidenceTarget => "round-trip-evidence-target",
             Self::CompleteCheckpoint => "complete-checkpoint",
         }
     }
@@ -157,6 +184,9 @@ pub(crate) enum RecoveryAction {
     ResolveRecordedOperationByResuming,
     RemoveOrRenameConflictingTarget,
     RestoreExpectedSource,
+    CorrectRoundTripInput,
+    UseSupportedRoundTripSize,
+    ReviewReturnedLandXml,
     StopAndPreserve,
 }
 
@@ -176,60 +206,15 @@ impl RecoveryAction {
                 "remove or rename the conflicting caller-owned target, then resume"
             }
             Self::RestoreExpectedSource => "restore the expected immutable Source, then resume",
+            Self::CorrectRoundTripInput => {
+                "correct the declaration or LandXML input, then retry the comparison"
+            }
+            Self::UseSupportedRoundTripSize => "use inputs within the named round-trip limits",
+            Self::ReviewReturnedLandXml => {
+                "review the downstream export settings or reject the returned deliverable"
+            }
             Self::StopAndPreserve => "stop and preserve all Run and Workspace files",
         }
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct BoundedDiagnostic(Box<str>);
-
-impl BoundedDiagnostic {
-    fn new(message: impl fmt::Display) -> Self {
-        let mut output = CappedFormatter::new();
-        let _ = write!(&mut output, "{message}");
-        Self(output.text.into_boxed_str())
-    }
-}
-
-struct CappedFormatter {
-    text: String,
-    truncated: bool,
-}
-
-impl CappedFormatter {
-    fn new() -> Self {
-        let mut text = String::new();
-        let _ = text.try_reserve_exact(MAX_DIAGNOSTIC_BYTES);
-        Self {
-            text,
-            truncated: false,
-        }
-    }
-}
-
-impl fmt::Write for CappedFormatter {
-    fn write_str(&mut self, value: &str) -> fmt::Result {
-        if self.truncated {
-            return Ok(());
-        }
-        let remaining = MAX_DIAGNOSTIC_BYTES.saturating_sub(self.text.len());
-        if value.len() <= remaining {
-            self.text.push_str(value);
-            return Ok(());
-        }
-        let mut end = remaining;
-        while !value.is_char_boundary(end) {
-            end -= 1;
-        }
-        self.text.push_str(&value[..end]);
-        let target = MAX_DIAGNOSTIC_BYTES - ELLIPSIS.len();
-        while self.text.len() > target {
-            self.text.pop();
-        }
-        self.text.push_str(ELLIPSIS);
-        self.truncated = true;
-        Ok(())
     }
 }
 
@@ -280,6 +265,10 @@ impl WorkflowFailure {
             error,
             RecoveryAction::CorrectInvalidRequest,
         )
+    }
+
+    pub(crate) fn diagnostic(&self) -> &str {
+        self.diagnostic.as_str()
     }
 
     /// Returns the stable machine-readable failure code.
@@ -381,12 +370,6 @@ impl fmt::Display for WorkflowFailure {
             self.diagnostic,
             self.action.as_str()
         )
-    }
-}
-
-impl fmt::Display for BoundedDiagnostic {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&self.0)
     }
 }
 

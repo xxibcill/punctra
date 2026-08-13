@@ -23,12 +23,12 @@ use crate::{
     journal::{Digest, WorkflowRunId},
     publication::{
         DirectoryWitness, StageCreationError, StageGuard, create_stage as create_publication_stage,
-        same_file_identity, sync_directory,
+        same_file_identity, same_file_state, sync_directory,
     },
 };
 
-const REPORT_SCHEMA: &str = "punctra.terrain-workflow.audit.v1";
-const REPORT_HASH_DOMAIN: &[u8] = b"punctra-terrain-workflow-report-bytes-v1";
+pub(crate) const REPORT_SCHEMA: &str = "punctra.terrain-workflow.audit.v1";
+pub(crate) const REPORT_HASH_DOMAIN: &[u8] = b"punctra-terrain-workflow-report-bytes-v1";
 const HASH_BUFFER_BYTES: usize = 8 * 1024;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -972,14 +972,6 @@ fn changed_target_error(path: &Path) -> ReportError {
     ReportError::TargetChanged {
         path: path.to_path_buf(),
     }
-}
-
-fn same_file_state(left: &fs::Metadata, right: &fs::Metadata) -> bool {
-    left.len() == right.len()
-        && matches!(
-            (left.modified(), right.modified()),
-            (Ok(left_modified), Ok(right_modified)) if left_modified == right_modified
-        )
 }
 
 fn validate_limits(limits: ReportLimits) -> Result<(), ReportError> {

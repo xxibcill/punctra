@@ -12,6 +12,7 @@ use std::{
     fmt,
     fs::{self, File, OpenOptions},
     io::{self, Read, Seek, SeekFrom, Write},
+    ops::{Deref, DerefMut},
     path::{Path, PathBuf},
 };
 
@@ -20,7 +21,7 @@ use thiserror::Error;
 
 use crate::publication::{
     DirectoryWitness, StageCreationError, StageGuard, create_stage as create_publication_stage,
-    same_file_identity, sync_directory,
+    same_file_identity, same_file_state, sync_directory,
 };
 
 const HEADER_MAGIC: &[u8; 8] = b"PTWFJ001";
@@ -673,7 +674,7 @@ impl FrameKind {
 #[derive(Debug)]
 pub(crate) struct Journal {
     path: PathBuf,
-    file: File,
+    file: LockedFile,
     identity: fs::Metadata,
     limits: JournalLimits,
     run: WorkflowRunId,
@@ -681,6 +682,55 @@ pub(crate) struct Journal {
     previous_hash: Digest,
     end: u64,
     poisoned: bool,
+}
+
+pub(crate) struct SealedJournal {
+    path: PathBuf,
+    file: LockedFile,
+    identity: fs::Metadata,
+    run: WorkflowRunId,
+    checkpoints: Vec<Checkpoint>,
+    content_hash: Digest,
+    byte_length: u64,
+}
+
+struct DecodedJournal {
+    run: WorkflowRunId,
+    checkpoints: Vec<Checkpoint>,
+    previous_hash: Digest,
+    end: u64,
+    file_bytes: u64,
+}
+
+#[derive(Debug)]
+struct LockedFile(File);
+
+impl LockedFile {
+    fn acquire(file: File, path: &Path) -> Result<Self, JournalError> {
+        file.try_lock()
+            .map_err(|error| map_lock_error(path, error))?;
+        Ok(Self(file))
+    }
+}
+
+impl Deref for LockedFile {
+    type Target = File;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for LockedFile {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl Drop for LockedFile {
+    fn drop(&mut self) {
+        let _ = File::unlock(&self.0);
+    }
 }
 
 impl Journal {
@@ -707,8 +757,8 @@ impl Journal {
         let parent = target_parent(path);
         let parent_witness = DirectoryWitness::capture(parent)
             .map_err(|source| JournalError::io("witness journal parent", parent, source))?;
-        let (mut guard, mut stage) = create_stage(parent)?;
-        stage.try_lock().map_err(map_lock_error)?;
+        let (mut guard, stage) = create_stage(parent)?;
+        let mut stage = LockedFile::acquire(stage, guard.path())?;
         let header = encode_header(intent.run);
         let header_hash = copy_digest(&header[HEADER_HASH_OFFSET..]);
         let checkpoint = Checkpoint::Intent(Box::new(intent.clone()));
@@ -757,32 +807,20 @@ impl Journal {
     pub(crate) fn open(path: &Path, limits: JournalLimits) -> Result<Self, JournalError> {
         validate_limits(limits)?;
         let target_identity = require_regular_file(path)?;
-        let mut file = OpenOptions::new()
+        let file = OpenOptions::new()
             .read(true)
             .write(true)
             .open(path)
             .map_err(|source| JournalError::io("open journal", path, source))?;
-        file.try_lock().map_err(map_lock_error)?;
+        let mut file = LockedFile::acquire(file, path)?;
         let identity = file
             .metadata()
             .map_err(|source| JournalError::io("inspect journal", path, source))?;
         verify_recognized_journal(&file, path, &target_identity)
             .map_err(|source| JournalError::io("verify opened journal target", path, source))?;
-        let file_bytes = identity.len();
-        require(file_bytes, limits.max_journal_bytes, "journal bytes")?;
-        let (run, header_hash) = read_header(&mut file, path)?;
-        let mut scan = scan_frames(&mut file, path, limits, file_bytes, header_hash, run)?;
-        let Some(Checkpoint::Intent(intent)) = scan.checkpoints.first_mut() else {
-            return Err(JournalError::Corrupt("journal does not begin with Intent"));
-        };
-        intent.run = run;
-        intent.validate(limits)?;
-        if request_hash(intent) != intent.request_hash {
-            return Err(JournalError::Corrupt("Intent request hash differs"));
-        }
-        validate_semantic_chain(&scan.checkpoints)?;
-        if scan.end != file_bytes {
-            file.set_len(scan.end)
+        let decoded = decode_journal(&mut file, path, limits, identity.len())?;
+        if decoded.end != decoded.file_bytes {
+            file.set_len(decoded.end)
                 .map_err(|source| JournalError::io("truncate torn journal tail", path, source))?;
             file.sync_data()
                 .map_err(|source| JournalError::io("sync repaired journal", path, source))?;
@@ -794,10 +832,10 @@ impl Journal {
             file,
             identity,
             limits,
-            run,
-            checkpoints: scan.checkpoints,
-            previous_hash: scan.previous_hash,
-            end: scan.end,
+            run: decoded.run,
+            checkpoints: decoded.checkpoints,
+            previous_hash: decoded.previous_hash,
+            end: decoded.end,
             poisoned: false,
         })
     }
@@ -952,6 +990,172 @@ impl Journal {
     }
 }
 
+impl SealedJournal {
+    pub(crate) fn open(path: &Path, limits: JournalLimits) -> Result<Self, JournalError> {
+        validate_limits(limits)?;
+        let target_identity = require_regular_file(path)?;
+        let file = File::open(path)
+            .map_err(|source| JournalError::io("open sealed journal", path, source))?;
+        let mut file = LockedFile::acquire(file, path)?;
+        let identity = file
+            .metadata()
+            .map_err(|source| JournalError::io("inspect sealed journal", path, source))?;
+        verify_recognized_journal(&file, path, &target_identity).map_err(|source| {
+            JournalError::io("verify opened sealed journal target", path, source)
+        })?;
+        let decoded = decode_journal(&mut file, path, limits, identity.len())?;
+        if decoded.end != decoded.file_bytes {
+            return Err(JournalError::Corrupt(
+                "sealed journal has a torn trailing frame",
+            ));
+        }
+        if !matches!(decoded.checkpoints.last(), Some(Checkpoint::Complete(_))) {
+            return Err(JournalError::Invalid("workflow Run is not Complete"));
+        }
+        let content_hash = hash_open_journal(&mut file, path, decoded.file_bytes, limits)?;
+        verify_recognized_journal(&file, path, &identity)
+            .map_err(|source| JournalError::io("revalidate sealed journal target", path, source))?;
+        Ok(Self {
+            path: path.to_path_buf(),
+            file,
+            identity,
+            run: decoded.run,
+            checkpoints: decoded.checkpoints,
+            content_hash,
+            byte_length: decoded.file_bytes,
+        })
+    }
+
+    pub(crate) const fn run(&self) -> WorkflowRunId {
+        self.run
+    }
+
+    pub(crate) fn intent(&self) -> &WorkflowIntent {
+        match &self.checkpoints[0] {
+            Checkpoint::Intent(intent) => intent,
+            _ => unreachable!("sealed open validates Intent"),
+        }
+    }
+
+    pub(crate) fn complete(&self) -> Complete {
+        match self.checkpoints.last() {
+            Some(Checkpoint::Complete(complete)) => *complete,
+            _ => unreachable!("sealed open requires Complete"),
+        }
+    }
+
+    pub(crate) fn export(&self) -> ExportEnsured {
+        match self.checkpoints.get(5) {
+            Some(Checkpoint::ExportEnsured(export)) => *export,
+            _ => unreachable!("sealed open validates the eight-frame chain"),
+        }
+    }
+
+    pub(crate) fn report(&self) -> ReportEnsured {
+        match self.checkpoints.get(6) {
+            Some(Checkpoint::ReportEnsured(report)) => *report,
+            _ => unreachable!("sealed open validates the eight-frame chain"),
+        }
+    }
+
+    pub(crate) const fn content_hash(&self) -> Digest {
+        self.content_hash
+    }
+
+    pub(crate) const fn byte_length(&self) -> u64 {
+        self.byte_length
+    }
+
+    pub(crate) fn verify(&self) -> Result<(), JournalError> {
+        verify_recognized_journal(&self.file, &self.path, &self.identity).map_err(|source| {
+            JournalError::io("revalidate sealed journal target", &self.path, source)
+        })?;
+        let current = self
+            .file
+            .metadata()
+            .map_err(|source| JournalError::io("reinspect sealed journal", &self.path, source))?;
+        if current.len() != self.byte_length || !same_file_state(&self.identity, &current) {
+            return Err(JournalError::Corrupt(
+                "sealed journal changed during qualification",
+            ));
+        }
+        Ok(())
+    }
+}
+
+fn decode_journal(
+    file: &mut File,
+    path: &Path,
+    limits: JournalLimits,
+    file_bytes: u64,
+) -> Result<DecodedJournal, JournalError> {
+    require(file_bytes, limits.max_journal_bytes, "journal bytes")?;
+    let (run, header_hash) = read_header(file, path)?;
+    let mut scan = scan_frames(file, path, limits, file_bytes, header_hash, run)?;
+    let Some(Checkpoint::Intent(intent)) = scan.checkpoints.first_mut() else {
+        return Err(JournalError::Corrupt("journal does not begin with Intent"));
+    };
+    intent.run = run;
+    intent.validate(limits)?;
+    if request_hash(intent) != intent.request_hash {
+        return Err(JournalError::Corrupt("Intent request hash differs"));
+    }
+    validate_semantic_chain(&scan.checkpoints)?;
+    Ok(DecodedJournal {
+        run,
+        checkpoints: scan.checkpoints,
+        previous_hash: scan.previous_hash,
+        end: scan.end,
+        file_bytes,
+    })
+}
+
+fn hash_open_journal(
+    file: &mut File,
+    path: &Path,
+    expected_bytes: u64,
+    limits: JournalLimits,
+) -> Result<Digest, JournalError> {
+    let buffer_bytes = usize::try_from(limits.max_working_bytes.min(64 * 1024)).unwrap_or(0);
+    if buffer_bytes == 0 {
+        return Err(JournalError::Resource {
+            limit: "journal hashing working bytes",
+            required: 1,
+            allowed: limits.max_working_bytes,
+        });
+    }
+    let mut buffer = Vec::new();
+    buffer
+        .try_reserve_exact(buffer_bytes)
+        .map_err(|_| JournalError::Resource {
+            limit: "journal hashing working bytes",
+            required: buffer_bytes as u64,
+            allowed: limits.max_working_bytes,
+        })?;
+    buffer.resize(buffer_bytes, 0);
+    file.seek(SeekFrom::Start(0))
+        .map_err(|source| JournalError::io("rewind sealed journal", path, source))?;
+    let mut hasher = Hasher::new();
+    let mut bytes = 0_u64;
+    loop {
+        let read = file
+            .read(&mut buffer)
+            .map_err(|source| JournalError::io("hash sealed journal", path, source))?;
+        if read == 0 {
+            break;
+        }
+        bytes = bytes.saturating_add(read as u64);
+        require(bytes, limits.max_journal_bytes, "journal bytes")?;
+        hasher.update(&buffer[..read]);
+    }
+    if bytes != expected_bytes {
+        return Err(JournalError::Corrupt(
+            "sealed journal length changed while hashing",
+        ));
+    }
+    Ok(*hasher.finalize().as_bytes())
+}
+
 #[derive(Debug, Error)]
 pub(crate) enum JournalError {
     #[error("invalid workflow journal: {0}")]
@@ -968,8 +1172,8 @@ pub(crate) enum JournalError {
     },
     #[error("workflow journal already exists: {0}")]
     Exists(PathBuf),
-    #[error("workflow journal is locked by another process")]
-    Locked,
+    #[error("workflow journal is locked by another process: {0}")]
+    Locked(PathBuf),
     #[error("workflow journal checkpoint conflicts: {0}")]
     Conflict(&'static str),
     #[error("system randomness is unavailable")]
@@ -2231,12 +2435,12 @@ fn create_stage(parent: &Path) -> Result<(StageGuard, File), JournalError> {
     )
 }
 
-fn map_lock_error(error: std::fs::TryLockError) -> JournalError {
+fn map_lock_error(path: &Path, error: std::fs::TryLockError) -> JournalError {
     let source: io::Error = error.into();
     if source.kind() == io::ErrorKind::WouldBlock {
-        JournalError::Locked
+        JournalError::Locked(path.to_path_buf())
     } else {
-        JournalError::io("lock journal", Path::new("journal"), source)
+        JournalError::io("lock journal", path, source)
     }
 }
 
