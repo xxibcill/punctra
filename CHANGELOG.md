@@ -3,6 +3,73 @@
 All notable changes to Punctra are documented here. The project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased - 0.10.0-alpha.1
+
+- Implemented the repository track of the accepted v0.10 Field Qualification
+  and Professional Inspection View design from the v0.9 repository candidate.
+  The v0.8 and v0.9 repository slices are complete, but repository work does
+  not turn generated tests or declared labels into field, partner, downstream,
+  or support evidence.
+- Reconciled the six post-base v0.8 comparator correctness and regression
+  commits before broadening the View: process-level CLI failure coverage,
+  shared coordinate-drift facts, named round-trip geometry, same-window input
+  capture, captured-content comparison, and bounded complete XML attributes.
+- Added strict read-only `terrain-demo verify-round-trip` qualification over an
+  exact Complete Run, with shared locking, artifact revalidation, canonical
+  no-replace evidence, stable `PRT_*` outcomes, and explicit caller-declaration
+  and acceptance nonclaims.
+- Replaced the inherited whole-file DOM comparator with an exact-byte bounded
+  local XML stream/parser, using borrowed `quick-xml` token views, at the 4-GiB,
+  10-million-Point, and 20-million-face export ceilings. Added lexical token and
+  namespace-stack guarding, changed/extended
+  input detection on every pass, fallible prechecked parser/retained/comparison
+  growth, deterministic accounted peaks, inclusive/over-limit coverage, and
+  generated pass/topology evidence goldens. Accounted peaks are algorithm
+  charges, not allocator metadata/slack, process RSS, or observed heap.
+- Made the first Spatial Index work header ownership-safe and retryable: the
+  complete synced header is now published from a uniquely owned temporary by a
+  no-replace link, while empty, racing, or caller-owned `.work` paths are
+  preserved and fail closed instead of being claimed or deleted.
+- Retained byte-identical Spatial Index disk v1 for position-only samples and
+  added disk v2 for bounded raw `U16` intensity, `U8` classification, and
+  optional all-or-none `U16` RGB display samples. Explicit recipes, frozen v1
+  and v2 complete/work fixtures, exact 32/42-byte accounting, cold/resumed/warm
+  reads, incompatible-target preservation, and observed temporary-disk facts
+  cover the new cache contract.
+- Added private deterministic neutral, elevation, RGB, intensity, and
+  classification mappings to `renderer-demo`. Mode changes preserve Point
+  Identity, geometry, and Coverage; attributed modes require the v2 inspection
+  recipe and RGB fails explicitly when all channels are unavailable.
+- Added perspective and target-plane-scale-preserving orthographic projection,
+  middle-drag pan, projection toggle/reset behavior, matching frustum/SSE
+  planning, large-world depth/picking coverage, and a planner benchmark case.
+- Breaking alpha API migration: `Camera::vertical_field_of_view_radians()` was
+  replaced by `Camera::projection()`. Callers now match
+  `CameraProjection::Perspective { vertical_field_of_view_radians }` or
+  `CameraProjection::Orthographic { vertical_world_height }`; an orthographic
+  camera deliberately has no nominal field of view. Exhaustive `CameraError`
+  matches must also handle the new `InvalidOrthographicWorldHeight` variant
+  (or use a wildcard arm). Spatial Index persistence
+  facts are recipe-specific in v0.10, so callers inspect
+  `IndexDescriptor::{recipe_version,disk_version}` instead of assuming one
+  process-global version pair. `SourceReadSummary::provenance` and
+  `IndexReadSummary::provenance` remain ordinary accessors but are no longer
+  callable in const evaluation; this lets summaries share detached provenance
+  without copying bounded text. Their `source` accessors remain const.
+- Split View truth into demanded/candidate/issued/retained/retired work,
+  queue/staging/residency facts, and Sampled versus Complete Coverage. Added
+  bounded stable `PVIEW_*` diagnostics with owning phases and exactly one safe
+  recovery action.
+- Added the permission-gated local `renderer-demo corpus` runner, bounded
+  manifest/navigation trace, GPU viewing measurements, canonical no-replace
+  report, recorded effective limits, and explicit false nonclaims. Private
+  paths and opaque project/firm identifiers are not copied into the report.
+- Added CPU, process, persistence, planner, and local GPU regression coverage,
+  plus a five-minute first-LAS/LAZ guide and a non-sensitive corpus-manifest
+  template. No benchmark number, production-corpus completion, observed
+  professional preference, approved screenshot, repository topic/homepage
+  publication, or partner acceptance is claimed.
+
 ## 0.9.0 - 2026-08-13
 
 - Completed the narrow Trust and v1 Candidate repository design from the exact
@@ -42,21 +109,21 @@ All notable changes to Punctra are documented here. The project follows
 - Fixed the caller declaration, bounded fail-closed parsing, explicit metric-
   metre unit checks, unique tolerance mapping, ambiguity rejection, exact face-
   topology comparison, no-overwrite evidence publication, and external-
-  evidence boundaries.
-- Implemented the file-comparison delivery slices: bounded regular-file and
+  evidence boundaries before the pending Run-bound publication slice.
+- Implemented the first two private delivery slices: bounded regular-file and
   DOM-backed LandXML subset parsing, unique tolerance matching, normalized TIN
   topology comparison, focused portability and semantic regressions, and an
   explicitly non-Run-bound `compare-landxml` CLI/process path. Its output
   states that canonical evidence was not published and external application
-  execution was not verified.
+  execution was not verified. This historical v0.8 implementation was
+  superseded by the bounded streaming reader in the v0.10 entry above.
 - Added strict read-only Complete-Run binding, streaming LandXML coverage for
   the full v0.7 export ceiling, stable semantic reason codes, canonical pass and
   fail evidence, exact-existing reconciliation, no-replace publication, and
   publication-fault/process regressions through `verify-round-trip`.
-- Bumped workspace version metadata to `0.8.0-alpha.1`. This repository slice
-  does not alter the v0.7 eight-frame journal or `audit.json`, complete the
-  product MVP, or claim actual Civil 3D, Bentley, partner, paid-pilot,
-  conversion, or labor-savings evidence.
+- This repository slice does not alter the v0.7 eight-frame journal or
+  `audit.json`, complete the product MVP, or claim actual Civil 3D, Bentley,
+  partner, paid-pilot, conversion, or labor-savings evidence.
 
 ## 0.7.0-alpha.1 - 2026-08-11
 

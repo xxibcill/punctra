@@ -3,6 +3,13 @@
 //! The crate owns no GPU resources. It defines validated, owned values that a
 //! producer can send to a renderer without exposing renderer implementation
 //! details.
+//!
+//! # Interface classification
+//!
+//! The documented camera, viewport, update, residency, and error contracts are
+//! a **v1-candidate foundation surface**. GPU implementation details and host
+//! scheduling policy are outside this interface. This records v0.9 review
+//! intent, not a `1.0.0` or production-support claim.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
@@ -15,7 +22,7 @@ use std::collections::{BTreeMap, BTreeSet};
 pub use point_contracts::{PointId, SourceId};
 use thiserror::Error;
 
-pub use camera::{Camera, CameraBasis, CameraError};
+pub use camera::{Camera, CameraBasis, CameraError, CameraProjection};
 pub use viewport::{Viewport, ViewportError};
 
 /// Estimated GPU bytes for one point in the protocol's residency model.

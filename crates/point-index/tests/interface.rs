@@ -5,18 +5,401 @@ mod support;
 use std::fs;
 
 use foundation_runtime::{ProgressPhase, RuntimeError};
-use point_contracts::WorldBounds;
+use point_contracts::{
+    AttributeColumn, AttributeColumns, AttributeDataType, AttributeDefinition, AttributeValues,
+    SourceId, WorldBounds,
+};
 use point_index::{
-    CandidateLimits, DisplayCoverage, IndexError, IndexNode, IndexNodeId, NodeReadBudget,
-    PrepareDisposition, PrepareLimits, PreparedIndex, prepare,
+    CandidateLimits, DisplayCoverage, IndexError, IndexNode, IndexNodeId, IndexPointBatch,
+    IndexReadSummary, IndexRecipe, InspectionAttributeIds, NodeReadBudget, PrepareDisposition,
+    PrepareLimits, PreparedIndex, prepare, prepare_fresh_with_recipe, prepare_with_recipe,
 };
 use point_source::{ReadLimit, Source};
 
 use support::{
-    BLOCK_POINTS, ObservedNodeRead, TemporaryTarget, clustered_ticks, open_budgeted_source,
-    open_controlled_source, open_source, open_source_with_transform, read_node, samples,
-    ticks_for_ordinal, transform,
+    BLOCK_POINTS, CLASSIFICATION_ID, INTENSITY_ID, ObservedNodeRead, RGB_IDS, TemporaryTarget,
+    attributed_values, clustered_ticks, open_attributed_source, open_budgeted_source,
+    open_controlled_source, open_source, open_source_with_columns, open_source_with_transform,
+    read_node, samples, ticks_for_ordinal, transform,
 };
+
+fn inspection_recipe() -> IndexRecipe {
+    IndexRecipe::InspectionV1(
+        InspectionAttributeIds::new(INTENSITY_ID, CLASSIFICATION_ID, RGB_IDS).unwrap(),
+    )
+}
+
+const fn read_summary_source_in_const_context(summary: &IndexReadSummary) -> SourceId {
+    summary.source()
+}
+
+const fn point_batch_source_in_const_context(batch: &IndexPointBatch) -> SourceId {
+    batch.source()
+}
+
+#[test]
+fn fresh_preparation_preserves_existing_target_and_work_paths() {
+    let source = open_source(clustered_ticks(8));
+    let target = TemporaryTarget::new("fresh-preserves-existing");
+    let caller_work = b"caller-owned resumable-or-unknown bytes";
+    fs::write(target.work_path(), caller_work).unwrap();
+
+    assert!(matches!(
+        prepare_fresh_with_recipe(
+            source.clone(),
+            target.path(),
+            IndexRecipe::PositionOnlyV1,
+            PrepareLimits::default(),
+        )
+        .blocking_wait(),
+        Err(IndexError::IncompatibleWork {
+            reason: "fresh preparation work path already exists"
+        })
+    ));
+    assert!(!target.path().exists());
+    assert_eq!(fs::read(target.work_path()).unwrap(), caller_work);
+
+    fs::remove_file(target.work_path()).unwrap();
+    let built = prepare_fresh_with_recipe(
+        source.clone(),
+        target.path(),
+        IndexRecipe::PositionOnlyV1,
+        PrepareLimits::default(),
+    )
+    .blocking_wait()
+    .unwrap();
+    assert_eq!(
+        built.prepare_report().disposition(),
+        PrepareDisposition::Built
+    );
+    let complete_bytes = fs::read(target.path()).unwrap();
+
+    assert!(matches!(
+        prepare_fresh_with_recipe(
+            source,
+            target.path(),
+            IndexRecipe::PositionOnlyV1,
+            PrepareLimits::default(),
+        )
+        .blocking_wait(),
+        Err(IndexError::IncompatibleArtifact {
+            reason: "fresh preparation target already exists"
+        })
+    ));
+    assert_eq!(fs::read(target.path()).unwrap(), complete_bytes);
+    assert!(target.work_path().exists());
+
+    #[cfg(unix)]
+    {
+        let target = TemporaryTarget::new("fresh-preserves-dangling-target-symlink");
+        let missing_destination = target.copied_target("missing-target");
+        std::os::unix::fs::symlink(&missing_destination, target.path()).unwrap();
+
+        assert!(matches!(
+            prepare_fresh_with_recipe(
+                open_source(clustered_ticks(8)),
+                target.path(),
+                IndexRecipe::PositionOnlyV1,
+                PrepareLimits::default(),
+            )
+            .blocking_wait(),
+            Err(IndexError::IncompatibleArtifact {
+                reason: "fresh preparation target already exists"
+            })
+        ));
+        assert!(
+            fs::symlink_metadata(target.path())
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        assert!(!target.work_path().exists());
+    }
+}
+
+#[test]
+#[allow(clippy::too_many_lines)]
+fn inspection_v2_retains_exact_row_aligned_attributes_across_internal_leaf_and_warm_reads() {
+    let point_count = BLOCK_POINTS + 17;
+    let ticks = clustered_ticks(point_count);
+    let source = open_attributed_source(ticks, true);
+    let target = TemporaryTarget::new("inspection-v2");
+    let built = prepare_with_recipe(
+        source.clone(),
+        target.path(),
+        inspection_recipe(),
+        PrepareLimits::default(),
+    )
+    .blocking_wait()
+    .unwrap();
+
+    assert_eq!(built.descriptor().disk_version(), 2);
+    assert_eq!(built.descriptor().recipe_version(), 2);
+    assert_eq!(built.prepare_report().peak_temporary_disk_bytes(), 518_042);
+    let contract = built.descriptor().display_sample_contract().unwrap();
+    assert_eq!(contract.intensity(), INTENSITY_ID);
+    assert_eq!(contract.classification(), CLASSIFICATION_ID);
+    assert_eq!(contract.rgb(), Some(RGB_IDS));
+
+    for node in built.hierarchy().nodes() {
+        let observed = read_node(&built, node.id(), NodeReadBudget::default());
+        assert_eq!(observed.summary.display_sample_contract(), Some(contract));
+        for batch in &observed.batches {
+            assert_eq!(batch.estimated_payload_bytes(), batch.len() as u64 * 42);
+            let attributes = batch.display_attributes().unwrap();
+            for (sample, attributes) in batch.samples().iter().zip(attributes) {
+                let expected = attributed_values(usize::try_from(sample.ordinal()).unwrap());
+                assert_eq!(attributes.intensity(), expected.0);
+                assert_eq!(attributes.classification(), expected.1);
+                assert_eq!(attributes.rgb(), expected.2);
+            }
+        }
+    }
+
+    let partitioned_target = TemporaryTarget::new("inspection-v2-partitioned");
+    let partitioned = prepare_with_recipe(
+        source.clone(),
+        partitioned_target.path(),
+        inspection_recipe(),
+        PrepareLimits::new(257, 257 * 33).unwrap(),
+    )
+    .blocking_wait()
+    .unwrap();
+    assert_eq!(partitioned.descriptor(), built.descriptor());
+    assert_eq!(partitioned.hierarchy(), built.hierarchy());
+    assert_eq!(
+        fs::read(partitioned_target.path()).unwrap(),
+        fs::read(target.path()).unwrap()
+    );
+
+    drop(built);
+    let opened = prepare_with_recipe(
+        source,
+        target.path(),
+        inspection_recipe(),
+        PrepareLimits::default(),
+    )
+    .blocking_wait()
+    .unwrap();
+    assert_eq!(
+        opened.prepare_report().disposition(),
+        PrepareDisposition::Opened
+    );
+    assert_eq!(opened.prepare_report().peak_temporary_disk_bytes(), 0);
+    let root = opened.hierarchy().root().unwrap();
+    let warm = read_node(&opened, root.id(), NodeReadBudget::default());
+    assert!(
+        warm.batches
+            .iter()
+            .all(|batch| batch.display_attributes().is_some())
+    );
+    assert_resource_error(&opened.read_node(
+        root.id(),
+        NodeReadBudget::new(root.display_point_count(), 41).unwrap(),
+    ));
+    assert_resource_error(
+        &opened.read_node(
+            root.id(),
+            NodeReadBudget::new(root.display_point_count(), 42)
+                .unwrap()
+                .with_max_index_buffer_bytes(root.display_point_count().saturating_mul(42) - 1),
+        ),
+    );
+    let tight_internal = read_node(
+        &opened,
+        root.id(),
+        NodeReadBudget::new(root.display_point_count(), 42)
+            .unwrap()
+            .with_max_index_buffer_bytes(root.display_point_count().saturating_mul(42)),
+    );
+    assert!(tight_internal.batches.iter().all(|batch| {
+        batch.len() == 1
+            && batch.estimated_payload_bytes() == 42
+            && batch
+                .display_attributes()
+                .is_some_and(|rows| rows.len() == 1)
+    }));
+    let rgb_leaf = opened
+        .hierarchy()
+        .nodes()
+        .iter()
+        .filter(|node| node.coverage_complete())
+        .min_by_key(|node| node.display_point_count())
+        .unwrap();
+    assert_resource_error(
+        &opened.read_node(
+            rgb_leaf.id(),
+            NodeReadBudget::new(rgb_leaf.display_point_count(), 42)
+                .unwrap()
+                .with_max_source_batch_payload_bytes(32),
+        ),
+    );
+    let tight_leaf = read_node(
+        &opened,
+        rgb_leaf.id(),
+        NodeReadBudget::new(rgb_leaf.display_point_count(), 42).unwrap(),
+    );
+    assert!(tight_leaf.batches.iter().all(|batch| {
+        batch.len() == 1
+            && batch.estimated_payload_bytes() == 42
+            && batch
+                .display_attributes()
+                .is_some_and(|rows| rows.len() == 1)
+    }));
+
+    let v1_target = TemporaryTarget::new("inspection-selection-v1");
+    let v1 = prepare(
+        opened.source().clone(),
+        v1_target.path(),
+        PrepareLimits::default(),
+    )
+    .blocking_wait()
+    .unwrap();
+    for (v1_node, v2_node) in v1
+        .hierarchy()
+        .nodes()
+        .iter()
+        .zip(opened.hierarchy().nodes())
+    {
+        assert_eq!(
+            samples(&read_node(&v1, v1_node.id(), NodeReadBudget::default())),
+            samples(&read_node(&opened, v2_node.id(), NodeReadBudget::default()))
+        );
+    }
+}
+
+#[test]
+#[allow(clippy::too_many_lines)]
+fn inspection_profile_rejects_missing_required_attributes_and_encodes_absent_rgb_as_unavailable() {
+    let invalid_target = TemporaryTarget::new("inspection-missing-required");
+    assert!(matches!(
+        prepare_with_recipe(
+            open_source(clustered_ticks(1)),
+            invalid_target.path(),
+            inspection_recipe(),
+            PrepareLimits::default(),
+        )
+        .blocking_wait(),
+        Err(IndexError::InvalidAttributeProfile { .. })
+    ));
+    assert!(!invalid_target.path().exists());
+    assert!(!invalid_target.work_path().exists());
+
+    let wrong_intensity = AttributeColumns::new(
+        vec![
+            AttributeColumn::new(
+                AttributeDefinition::new(INTENSITY_ID, "intensity", AttributeDataType::U8).unwrap(),
+                AttributeValues::u8(vec![1]),
+            )
+            .unwrap(),
+            AttributeColumn::new(
+                AttributeDefinition::new(
+                    CLASSIFICATION_ID,
+                    "classification",
+                    AttributeDataType::U8,
+                )
+                .unwrap(),
+                AttributeValues::u8(vec![2]),
+            )
+            .unwrap(),
+        ],
+        1,
+    )
+    .unwrap();
+    let wrong_target = TemporaryTarget::new("inspection-wrong-intensity");
+    assert!(matches!(
+        prepare_with_recipe(
+            open_source_with_columns(clustered_ticks(1), wrong_intensity),
+            wrong_target.path(),
+            inspection_recipe(),
+            PrepareLimits::default(),
+        )
+        .blocking_wait(),
+        Err(IndexError::InvalidAttributeProfile { .. })
+    ));
+
+    let partial_rgb = AttributeColumns::new(
+        vec![
+            AttributeColumn::new(
+                AttributeDefinition::new(INTENSITY_ID, "intensity", AttributeDataType::U16)
+                    .unwrap(),
+                AttributeValues::u16(vec![1]),
+            )
+            .unwrap(),
+            AttributeColumn::new(
+                AttributeDefinition::new(
+                    CLASSIFICATION_ID,
+                    "classification",
+                    AttributeDataType::U8,
+                )
+                .unwrap(),
+                AttributeValues::u8(vec![2]),
+            )
+            .unwrap(),
+            AttributeColumn::new(
+                AttributeDefinition::new(RGB_IDS[0], "red", AttributeDataType::U16).unwrap(),
+                AttributeValues::u16(vec![3]),
+            )
+            .unwrap(),
+        ],
+        1,
+    )
+    .unwrap();
+    let partial_target = TemporaryTarget::new("inspection-partial-rgb");
+    assert!(matches!(
+        prepare_with_recipe(
+            open_source_with_columns(clustered_ticks(1), partial_rgb),
+            partial_target.path(),
+            inspection_recipe(),
+            PrepareLimits::default(),
+        )
+        .blocking_wait(),
+        Err(IndexError::InvalidAttributeProfile { .. })
+    ));
+
+    let source = open_attributed_source(clustered_ticks(BLOCK_POINTS + 1), false);
+    let target = TemporaryTarget::new("inspection-no-rgb");
+    let index = prepare_with_recipe(
+        source,
+        target.path(),
+        inspection_recipe(),
+        PrepareLimits::default(),
+    )
+    .blocking_wait()
+    .unwrap();
+    assert_eq!(
+        index.descriptor().display_sample_contract().unwrap().rgb(),
+        None
+    );
+    let root = index.hierarchy().root().unwrap();
+    let observed = read_node(&index, root.id(), NodeReadBudget::default());
+    assert!(observed.batches.iter().all(|batch| {
+        batch
+            .display_attributes()
+            .unwrap()
+            .iter()
+            .all(|attributes| attributes.rgb() == [0; 3])
+    }));
+
+    assert_resource_error(&index.read_node(
+        root.id(),
+        NodeReadBudget::new(root.display_point_count(), 41).unwrap(),
+    ));
+    let leaf = index
+        .hierarchy()
+        .nodes()
+        .iter()
+        .find(|node| node.coverage_complete())
+        .unwrap();
+    assert_resource_error(
+        &index.read_node(
+            leaf.id(),
+            NodeReadBudget::new(leaf.display_point_count(), 42)
+                .unwrap()
+                .with_max_source_batch_payload_bytes(26),
+        ),
+    );
+}
 
 #[test]
 fn empty_build_and_warm_open_publish_complete_zero_facts() {
@@ -44,7 +427,8 @@ fn empty_build_and_warm_open_publish_complete_zero_facts() {
         fs::metadata(target.path()).unwrap().len(),
         built.prepare_report().artifact_bytes()
     );
-    assert_eq!(fs::metadata(target.work_path()).unwrap().len(), 200);
+    assert!(built.prepare_report().peak_temporary_disk_bytes() >= 200);
+    assert!(target.work_path().exists());
 
     let arbitrary = WorldBounds::new([-1.0; 3], [1.0; 3]).unwrap();
     let plan = built
@@ -63,6 +447,7 @@ fn empty_build_and_warm_open_publish_complete_zero_facts() {
     );
     assert_eq!(opened.prepare_report().source_points_read(), 0);
     assert_eq!(opened.prepare_report().durable_points_reused(), 0);
+    assert_eq!(opened.prepare_report().peak_temporary_disk_bytes(), 0);
     assert_eq!(opened.descriptor(), built.descriptor());
     assert_eq!(opened.hierarchy(), built.hierarchy());
 }
@@ -396,7 +781,10 @@ fn assert_node_read_facts(
     let maximum_batch = if node.coverage_complete() { 113 } else { 137 };
     let observed = read_node(index, node.id(), budget);
     assert_eq!(observed.summary.node(), node.id());
-    assert_eq!(observed.summary.source(), source.identity());
+    assert_eq!(
+        read_summary_source_in_const_context(&observed.summary),
+        source.identity()
+    );
     assert_eq!(observed.summary.provenance(), source.provenance());
     assert_eq!(
         observed.summary.emitted_point_count(),
@@ -414,7 +802,10 @@ fn assert_node_read_facts(
 
     let mut previous = None;
     for batch in &observed.batches {
-        assert_eq!(batch.source(), source.identity());
+        assert_eq!(
+            point_batch_source_in_const_context(batch),
+            source.identity()
+        );
         assert_eq!(batch.transform(), transform());
         assert_eq!(batch.node(), node.id());
         assert!(!batch.is_empty());

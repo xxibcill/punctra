@@ -266,6 +266,124 @@ fn perspective_frustum_culls_all_six_planes_and_keeps_intersections() {
 }
 
 #[test]
+fn orthographic_frustum_culls_all_six_planes_and_keeps_intersections() {
+    let generation = generation(2, 30);
+    let nodes = [
+        node(
+            1,
+            None,
+            box_at(0.0, 0.0, -5.0),
+            1.0,
+            1,
+            10,
+            1,
+            NodeStatus::Missing,
+        ),
+        node(2, None, box_at(6.0, 0.0, -5.0), 1.0, 1, 10, 2, resident(2)),
+        node(3, None, box_at(-6.0, 0.0, -5.0), 1.0, 1, 10, 3, resident(3)),
+        node(4, None, box_at(0.0, 6.0, -5.0), 1.0, 1, 10, 4, resident(4)),
+        node(5, None, box_at(0.0, -6.0, -5.0), 1.0, 1, 10, 5, resident(5)),
+        node(6, None, box_at(0.0, 0.0, 0.0), 1.0, 1, 10, 6, resident(6)),
+        node(
+            7,
+            None,
+            box_at(0.0, 0.0, -101.0),
+            1.0,
+            1,
+            10,
+            7,
+            resident(7),
+        ),
+        node(
+            8,
+            None,
+            bounds([5.0, 0.0, -5.0], [5.0, 0.0, -5.0]),
+            1.0,
+            1,
+            10,
+            8,
+            NodeStatus::Missing,
+        ),
+    ];
+
+    let plan = planner(100.0, 1.0)
+        .plan(
+            &orthographic_camera(10.0),
+            viewport(100, 100),
+            AvailableNodes::new(generation, &nodes),
+            GENEROUS_BUDGET,
+        )
+        .unwrap();
+
+    assert_eq!(request_keys(&plan), vec![node_key(1), node_key(8)]);
+    assert_eq!(
+        retirement_batches(&plan),
+        vec![2, 3, 4, 5, 6, 7]
+            .into_iter()
+            .map(BatchKey::new)
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn orthographic_screen_error_is_depth_independent_and_scales_with_viewport() {
+    let nodes = [
+        node(
+            1,
+            None,
+            box_at(0.0, 0.0, -5.0),
+            2.0,
+            1,
+            1,
+            1,
+            NodeStatus::Missing,
+        ),
+        node(
+            2,
+            None,
+            box_at(0.0, 0.0, -50.0),
+            2.0,
+            1,
+            1,
+            2,
+            NodeStatus::Missing,
+        ),
+    ];
+    let generation = generation(3, 30);
+    let camera = orthographic_camera(10.0);
+
+    let short_viewport = planner(100.0, 1.0)
+        .plan(
+            &camera,
+            viewport(100, 100),
+            AvailableNodes::new(generation, &nodes),
+            GENEROUS_BUDGET,
+        )
+        .unwrap();
+    let tall_viewport = planner(100.0, 1.0)
+        .plan(
+            &camera,
+            viewport(100, 200),
+            AvailableNodes::new(generation, &nodes),
+            GENEROUS_BUDGET,
+        )
+        .unwrap();
+
+    let short_errors = short_viewport
+        .requests()
+        .iter()
+        .map(|request| request.screen_space_error_pixels())
+        .collect::<Vec<_>>();
+    let tall_errors = tall_viewport
+        .requests()
+        .iter()
+        .map(|request| request.screen_space_error_pixels())
+        .collect::<Vec<_>>();
+    assert_eq!(short_errors, vec![20.0, 20.0]);
+    assert_eq!(tall_errors, vec![40.0, 40.0]);
+}
+
+#[test]
 fn frustum_keeps_zero_volume_bounds_touching_a_side_plane() {
     let depth = 5.990_738_311_191_579;
     let half_field_of_view = f64::from(std::f32::consts::FRAC_PI_2) * 0.5;
@@ -1515,6 +1633,18 @@ fn camera() -> Camera {
         [0.0, 0.0, -1.0],
         [0.0, 1.0, 0.0],
         std::f32::consts::FRAC_PI_2,
+        1.0,
+        100.0,
+    )
+    .unwrap()
+}
+
+fn orthographic_camera(vertical_world_height: f64) -> Camera {
+    Camera::orthographic(
+        [0.0, 0.0, 0.0],
+        [0.0, 0.0, -1.0],
+        [0.0, 1.0, 0.0],
+        vertical_world_height,
         1.0,
         100.0,
     )

@@ -27,14 +27,27 @@ impl PlanningNodes<'_> {
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(crate) struct SceneMetrics {
     pub(crate) logical_points: u64,
+    pub(crate) hierarchy_nodes: u64,
+    pub(crate) missing_nodes: u64,
+    pub(crate) requested_nodes: u64,
     pub(crate) resident_batches: u64,
+    pub(crate) resident_points: u64,
+    pub(crate) sampled_resident_batches: u64,
+    pub(crate) sampled_resident_points: u64,
+    pub(crate) complete_resident_batches: u64,
+    pub(crate) complete_resident_points: u64,
+    pub(crate) authored_resident_batches: u64,
+    pub(crate) authored_resident_points: u64,
     pub(crate) queued_batches: u64,
     pub(crate) staged_points: u64,
     pub(crate) staged_bytes: u64,
     pub(crate) peak_queued_batches: u64,
+    pub(crate) peak_queued_host_bytes: u64,
     pub(crate) peak_staged_points: u64,
     pub(crate) peak_staged_bytes: u64,
     pub(crate) cancelled_requests: u64,
+    pub(crate) retired_batches: u64,
+    pub(crate) rejected_batches: u64,
 }
 
 trait SceneBackend: std::fmt::Debug {
@@ -43,7 +56,7 @@ trait SceneBackend: std::fmt::Debug {
         &mut self,
         demanded_nodes: &[NodeKey],
         requests: &[NodeRequest],
-    ) -> SceneResult<()>;
+    ) -> SceneResult<u64>;
     fn next_batch(&mut self) -> SceneResult<Option<PointBatch>>;
     fn mark_resident(&mut self, key: BatchKey, version: BatchVersion);
     fn mark_retired(&mut self, key: BatchKey, version: BatchVersion);
@@ -64,9 +77,12 @@ impl SceneBackend for SyntheticScene {
         &mut self,
         demanded_nodes: &[NodeKey],
         requests: &[NodeRequest],
-    ) -> SceneResult<()> {
-        SyntheticScene::reconcile_requests(self, demanded_nodes, requests);
-        Ok(())
+    ) -> SceneResult<u64> {
+        Ok(SyntheticScene::reconcile_requests(
+            self,
+            demanded_nodes,
+            requests,
+        ))
     }
 
     fn next_batch(&mut self) -> SceneResult<Option<PointBatch>> {
@@ -98,10 +114,20 @@ impl SceneBackend for SyntheticScene {
     }
 
     fn metrics(&self) -> SceneMetrics {
+        let status = SyntheticScene::status_facts(self);
         SceneMetrics {
             logical_points: LOGICAL_POINT_COUNT,
-            resident_batches: SyntheticScene::resident_batches(self),
+            hierarchy_nodes: status.hierarchy_nodes,
+            missing_nodes: status.missing_nodes,
+            requested_nodes: status.requested_nodes,
+            resident_batches: status.resident_batches,
+            resident_points: status.resident_points,
+            authored_resident_batches: status.resident_batches,
+            authored_resident_points: status.resident_points,
             queued_batches: SyntheticScene::pending_batches(self),
+            cancelled_requests: SyntheticScene::cancelled_requests(self),
+            retired_batches: SyntheticScene::retired_batches(self),
+            rejected_batches: SyntheticScene::rejected_batches(self),
             ..SceneMetrics::default()
         }
     }
@@ -120,7 +146,7 @@ impl SceneBackend for RealCloudScene {
         &mut self,
         demanded_nodes: &[NodeKey],
         requests: &[NodeRequest],
-    ) -> SceneResult<()> {
+    ) -> SceneResult<u64> {
         RealCloudScene::reconcile_requests(self, demanded_nodes, requests)
     }
 
@@ -149,7 +175,7 @@ impl SceneBackend for RealCloudScene {
     }
 
     fn highlight_ids(&self) -> Vec<PointId> {
-        Vec::new()
+        RealCloudScene::highlight_ids(self)
     }
 
     fn metrics(&self) -> SceneMetrics {
@@ -182,7 +208,7 @@ impl Scene {
         &mut self,
         demanded_nodes: &[NodeKey],
         requests: &[NodeRequest],
-    ) -> SceneResult<()> {
+    ) -> SceneResult<u64> {
         self.0.reconcile_requests(demanded_nodes, requests)
     }
 

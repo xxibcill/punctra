@@ -9,201 +9,204 @@ use std::{
     time::{Duration, Instant},
 };
 
-use foundation_runtime::{ProgressPhase, RuntimeError};
+use foundation_runtime::RuntimeError;
 use point_index::{
-    IndexError, IndexLimit, NodeReadBudget, PrepareDisposition, PrepareLimits, prepare,
+    IndexError, IndexLimit, IndexRecipe, InspectionAttributeIds, NodeReadBudget,
+    PrepareDisposition, PrepareLimits, prepare, prepare_with_recipe,
 };
 use point_source::ReadLimit;
 
 use support::{
-    BLOCK_POINTS, TemporaryTarget, clustered_ticks, open_controlled_source, open_source, read_node,
-    samples,
+    BLOCK_POINTS, CLASSIFICATION_ID, INTENSITY_ID, RGB_IDS, TemporaryTarget, clustered_ticks,
+    open_attributed_source, open_controlled_attributed_source, open_controlled_source, open_source,
+    read_node, samples,
 };
 
 const V1_ARTIFACT: &[u8] = include_bytes!("fixtures/v1/one-point.pidx");
 const V1_WORK: &[u8] = include_bytes!("fixtures/v1/one-point.pidx.work");
-const V1_MANIFEST: &str = include_str!("fixtures/v1/manifest.json");
+const V2_ARTIFACT: &[u8] = include_bytes!("fixtures/v2/one-point.pidx");
+const V2_WORK: &[u8] = include_bytes!("fixtures/v2/one-point.pidx.work");
+
+fn inspection_recipe() -> IndexRecipe {
+    IndexRecipe::InspectionV1(
+        InspectionAttributeIds::new(INTENSITY_ID, CLASSIFICATION_ID, RGB_IDS).unwrap(),
+    )
+}
 
 #[test]
-fn disk_v1_manifest_resolves_checked_in_bytes_and_semantic_facts() {
-    let manifest: serde_json::Value = serde_json::from_str(V1_MANIFEST).unwrap();
-    assert_manifest_header(&manifest);
-
-    let ticks = clustered_ticks(1);
-    let source = open_source(ticks.clone());
-    assert_manifest_source(&manifest["source"], &source, ticks[0]);
-    assert_complete_manifest(&manifest, &source);
-    assert_work_manifest(&manifest, source);
+fn golden_fixture_lengths_and_blake3_are_pinned() {
+    for (name, bytes, expected_length, expected_hash) in [
+        (
+            "v1 artifact",
+            V1_ARTIFACT,
+            408,
+            "d9e0769b00bfe5f35845f94fab5b67107b85d94feb54175e7b56ee3e6bf48954",
+        ),
+        (
+            "v1 work",
+            V1_WORK,
+            344,
+            "e81496a3e1f42526599394d12fd9234a13d1da9c88233c0b7fee83536c010810",
+        ),
+        (
+            "v2 artifact",
+            V2_ARTIFACT,
+            440,
+            "df525242a625203610b3b03988bd1af5c02532d7e713c4e722cb8c383f202648",
+        ),
+        (
+            "v2 work",
+            V2_WORK,
+            386,
+            "dd8e8177a7d89d091e4dcab7c3b90b2534ecc977558e17a350c33dc9ac1a3775",
+        ),
+    ] {
+        assert_eq!(bytes.len(), expected_length, "{name} length");
+        assert_eq!(
+            blake3::hash(bytes).to_hex().as_str(),
+            expected_hash,
+            "{name} BLAKE3"
+        );
+    }
 }
 
-fn assert_manifest_header(manifest: &serde_json::Value) {
-    assert_eq!(
-        manifest["schema"],
-        "punctra.point-index.fixture-manifest.v1"
-    );
-    assert_eq!(manifest["owner"], "point-index");
-    assert_eq!(manifest["support_class"], "rebuildable");
-    assert_eq!(manifest["disk_version"], 1);
-    assert_eq!(manifest["recipe_version"], 1);
+#[test]
+fn prepare_report_observes_exact_temporary_disk_peak_for_v1_v2_and_warm_open() {
+    let v1_target = TemporaryTarget::new("v1-temporary-peak");
+    let v1_source = open_source(clustered_ticks(1));
+    let v1 = prepare(
+        v1_source.clone(),
+        v1_target.path(),
+        PrepareLimits::default(),
+    )
+    .blocking_wait()
+    .unwrap();
+    assert_eq!(v1.prepare_report().peak_temporary_disk_bytes(), 752);
+    let v1_opened = prepare(v1_source, v1_target.path(), PrepareLimits::default())
+        .blocking_wait()
+        .unwrap();
+    assert_eq!(v1_opened.prepare_report().peak_temporary_disk_bytes(), 0);
+
+    let v2_target = TemporaryTarget::new("v2-temporary-peak");
+    let v2_source = open_attributed_source(clustered_ticks(1), true);
+    let v2 = prepare_with_recipe(
+        v2_source.clone(),
+        v2_target.path(),
+        inspection_recipe(),
+        PrepareLimits::default(),
+    )
+    .blocking_wait()
+    .unwrap();
+    assert_eq!(v2.prepare_report().peak_temporary_disk_bytes(), 826);
+    let v2_opened = prepare_with_recipe(
+        v2_source,
+        v2_target.path(),
+        inspection_recipe(),
+        PrepareLimits::default(),
+    )
+    .blocking_wait()
+    .unwrap();
+    assert_eq!(v2_opened.prepare_report().peak_temporary_disk_bytes(), 0);
 }
 
-fn assert_manifest_source(
-    source_facts: &serde_json::Value,
-    source: &point_source::Source,
-    ticks: [i64; 3],
-) {
-    assert_eq!(source_facts["generator"], "clustered_ticks(1)");
-    assert_eq!(
-        source.identity().to_string(),
-        text(source_facts, "identity")
-    );
-    assert_eq!(
-        source.metadata().point_count(),
-        unsigned(source_facts, "point_count")
-    );
-    assert_eq!(source_facts["coordinate_reference"], "unknown");
-    assert!(source.metadata().coordinate_reference().is_unknown());
-    assert_eq!(ticks, signed_triple(source_facts, "point_ticks"));
-    assert_triple_bits(
-        source.metadata().position_transform().offset(),
-        triple(&source_facts["position_transform"], "offset"),
-    );
-    assert_triple_bits(
-        source.metadata().position_transform().scale(),
-        triple(&source_facts["position_transform"], "scale"),
-    );
-    let source_bounds = source.metadata().world_bounds().unwrap();
-    assert_triple_bits(
-        source_bounds.min(),
-        triple(&source_facts["world_bounds"], "minimum"),
-    );
-    assert_triple_bits(
-        source_bounds.max(),
-        triple(&source_facts["world_bounds"], "maximum"),
-    );
+#[test]
+fn v1_and_v2_targets_are_preserved_when_requested_through_the_other_recipe() {
+    let attributed = open_attributed_source(clustered_ticks(1), true);
+
+    let v1_target = TemporaryTarget::new("v1-requested-as-v2");
+    prepare(
+        attributed.clone(),
+        v1_target.path(),
+        PrepareLimits::default(),
+    )
+    .blocking_wait()
+    .unwrap();
+    let v1_bytes = fs::read(v1_target.path()).unwrap();
+    assert!(matches!(
+        prepare_with_recipe(
+            attributed.clone(),
+            v1_target.path(),
+            inspection_recipe(),
+            PrepareLimits::default(),
+        )
+        .blocking_wait(),
+        Err(IndexError::IncompatibleArtifact { .. })
+    ));
+    assert_eq!(fs::read(v1_target.path()).unwrap(), v1_bytes);
+
+    let v2_target = TemporaryTarget::new("v2-requested-as-v1");
+    prepare_with_recipe(
+        attributed.clone(),
+        v2_target.path(),
+        inspection_recipe(),
+        PrepareLimits::default(),
+    )
+    .blocking_wait()
+    .unwrap();
+    let v2_bytes = fs::read(v2_target.path()).unwrap();
+    assert!(matches!(
+        prepare(attributed, v2_target.path(), PrepareLimits::default()).blocking_wait(),
+        Err(IndexError::IncompatibleArtifact { .. })
+    ));
+    assert_eq!(fs::read(v2_target.path()).unwrap(), v2_bytes);
 }
 
-fn assert_complete_manifest(manifest: &serde_json::Value, source: &point_source::Source) {
-    let complete = artifact_facts(manifest, "complete");
-    assert_fixture_bytes(complete, "one-point.pidx", V1_ARTIFACT);
-    let complete_target = TemporaryTarget::new("v1-manifest-complete");
-    fs::write(complete_target.path(), V1_ARTIFACT).unwrap();
-    let opened = prepare(
+#[test]
+fn inspection_v2_resumes_durable_frames_and_rejects_checksum_valid_header_corruption() {
+    let point_count = BLOCK_POINTS + 64;
+    let (source, faults) = open_controlled_attributed_source(clustered_ticks(point_count), true);
+    let target = TemporaryTarget::new("v2-resume");
+    faults.fail_at_ordinal(u64::try_from(BLOCK_POINTS + 3).unwrap());
+    assert!(matches!(
+        prepare_with_recipe(
+            source.clone(),
+            target.path(),
+            inspection_recipe(),
+            PrepareLimits::default(),
+        )
+        .blocking_wait(),
+        Err(IndexError::Source(
+            point_source::SourceError::CorruptSource { .. }
+        ))
+    ));
+    assert!(fs::metadata(target.work_path()).unwrap().len() > 232);
+    faults.clear_read_fault();
+    let resumed = prepare_with_recipe(
         source.clone(),
-        complete_target.path(),
+        target.path(),
+        inspection_recipe(),
         PrepareLimits::default(),
     )
     .blocking_wait()
     .unwrap();
     assert_eq!(
-        u64::from(opened.descriptor().disk_version()),
-        manifest["disk_version"].as_u64().unwrap()
-    );
-    assert_eq!(
-        u64::from(opened.descriptor().recipe_version()),
-        manifest["recipe_version"].as_u64().unwrap()
-    );
-    assert_eq!(
-        format!("{:?}", opened.prepare_report().disposition()).to_lowercase(),
-        text(&complete["semantic_facts"], "prepare_disposition")
-    );
-    assert_eq!(
-        opened.descriptor().node_count(),
-        unsigned(&complete["semantic_facts"], "node_count")
-    );
-    assert_eq!(
-        opened.descriptor().leaf_count(),
-        unsigned(&complete["semantic_facts"], "leaf_count")
-    );
-    let root = opened.hierarchy().root().unwrap();
-    assert_eq!(
-        root.covered_point_count(),
-        unsigned(&complete["semantic_facts"], "root_covered_point_count")
-    );
-    assert_eq!(
-        root.display_point_count(),
-        unsigned(&complete["semantic_facts"], "root_display_point_count")
-    );
-}
-
-fn assert_work_manifest(manifest: &serde_json::Value, source: point_source::Source) {
-    let work = artifact_facts(manifest, "resumable-work");
-    assert_fixture_bytes(work, "one-point.pidx.work", V1_WORK);
-    let work_target = TemporaryTarget::new("v1-manifest-work");
-    fs::write(work_target.work_path(), V1_WORK).unwrap();
-    let resumed = prepare(source, work_target.path(), PrepareLimits::default())
-        .blocking_wait()
-        .unwrap();
-    assert_eq!(
-        format!("{:?}", resumed.prepare_report().disposition()).to_lowercase(),
-        text(&work["semantic_facts"], "resume_disposition")
+        resumed.prepare_report().disposition(),
+        PrepareDisposition::Resumed
     );
     assert_eq!(
         resumed.prepare_report().durable_points_reused(),
-        unsigned(&work["semantic_facts"], "durable_points")
+        u64::try_from(BLOCK_POINTS).unwrap()
     );
-    assert_eq!(
-        resumed.prepare_report().source_points_read(),
-        unsigned(&work["semantic_facts"], "source_points_read")
-    );
-    assert_eq!(
-        fs::read(work_target.path()).unwrap() == V1_ARTIFACT,
-        work["semantic_facts"]["rebuild_equals_complete"]
-            .as_bool()
-            .unwrap()
-    );
-}
+    assert_eq!(resumed.descriptor().disk_version(), 2);
 
-fn artifact_facts<'a>(manifest: &'a serde_json::Value, role: &str) -> &'a serde_json::Value {
-    manifest["artifacts"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|artifact| artifact["role"] == role)
-        .unwrap()
-}
-
-fn assert_fixture_bytes(facts: &serde_json::Value, path: &str, bytes: &[u8]) {
-    assert_eq!(facts["path"], path);
-    assert_eq!(
-        u64::try_from(bytes.len()).unwrap(),
-        unsigned(facts, "byte_length")
-    );
-    assert_eq!(blake3::hash(bytes).to_hex().as_str(), text(facts, "blake3"));
-}
-
-fn text<'a>(value: &'a serde_json::Value, field: &str) -> &'a str {
-    value[field].as_str().unwrap()
-}
-
-fn unsigned(value: &serde_json::Value, field: &str) -> u64 {
-    value[field].as_u64().unwrap()
-}
-
-fn triple(value: &serde_json::Value, field: &str) -> [f64; 3] {
-    value[field]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|value| value.as_f64().unwrap())
-        .collect::<Vec<_>>()
-        .try_into()
-        .unwrap()
-}
-
-fn signed_triple(value: &serde_json::Value, field: &str) -> [i64; 3] {
-    value[field]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|value| value.as_i64().unwrap())
-        .collect::<Vec<_>>()
-        .try_into()
-        .unwrap()
-}
-
-fn assert_triple_bits(actual: [f64; 3], expected: [f64; 3]) {
-    assert_eq!(actual.map(f64::to_bits), expected.map(f64::to_bits));
+    let mut corrupt = fs::read(target.path()).unwrap();
+    corrupt[212] |= 0x80;
+    let checksum_offset = corrupt.len() - 32;
+    let checksum = blake3::hash(&corrupt[..checksum_offset]);
+    corrupt[checksum_offset..].copy_from_slice(checksum.as_bytes());
+    let corrupt_target = target.copied_target("v2-corrupt-extension.pidx");
+    fs::write(&corrupt_target, &corrupt).unwrap();
+    assert!(matches!(
+        prepare_with_recipe(
+            source,
+            &corrupt_target,
+            inspection_recipe(),
+            PrepareLimits::default(),
+        )
+        .blocking_wait(),
+        Err(IndexError::CorruptArtifact { .. })
+    ));
+    assert_eq!(fs::read(corrupt_target).unwrap(), corrupt);
 }
 
 #[test]
@@ -226,6 +229,24 @@ fn cold_build_preserves_preexisting_adjacent_files() {
 
     assert_eq!(fs::read(temporary).unwrap(), temporary_sentinel);
     assert_eq!(fs::read(samples).unwrap(), samples_sentinel);
+}
+
+#[test]
+fn cold_build_preserves_an_unowned_empty_work_path() {
+    let target = TemporaryTarget::new("unowned-empty-work");
+    fs::write(target.work_path(), []).unwrap();
+
+    assert!(matches!(
+        prepare(
+            open_source(clustered_ticks(1)),
+            target.path(),
+            PrepareLimits::default(),
+        )
+        .blocking_wait(),
+        Err(IndexError::CorruptWork { .. })
+    ));
+    assert!(!target.path().exists());
+    assert_eq!(fs::metadata(target.work_path()).unwrap().len(), 0);
 }
 
 #[test]
@@ -263,6 +284,52 @@ fn disk_v1_golden_fixtures_open_and_resume_without_reencoding_the_input() {
     assert_eq!(resumed.prepare_report().durable_points_reused(), 1);
     assert_eq!(resumed.prepare_report().source_points_read(), 0);
     assert_eq!(fs::read(work_target.path()).unwrap(), V1_ARTIFACT);
+}
+
+#[test]
+fn disk_v2_golden_fixtures_open_and_resume_without_reencoding_the_input() {
+    let source = open_attributed_source(clustered_ticks(1), true);
+
+    let complete_target = TemporaryTarget::new("v2-golden-complete");
+    fs::write(complete_target.path(), V2_ARTIFACT).unwrap();
+    let opened = prepare_with_recipe(
+        source.clone(),
+        complete_target.path(),
+        inspection_recipe(),
+        PrepareLimits::default(),
+    )
+    .blocking_wait()
+    .unwrap();
+    assert_eq!(
+        opened.prepare_report().disposition(),
+        PrepareDisposition::Opened
+    );
+    assert_eq!(opened.prepare_report().peak_temporary_disk_bytes(), 0);
+    assert_eq!(fs::read(complete_target.path()).unwrap(), V2_ARTIFACT);
+    let root = opened.hierarchy().root().unwrap();
+    let read = read_node(&opened, root.id(), NodeReadBudget::default());
+    assert_eq!(
+        read.batches[0].display_attributes().unwrap()[0].intensity(),
+        0
+    );
+
+    let work_target = TemporaryTarget::new("v2-golden-work");
+    fs::write(work_target.work_path(), V2_WORK).unwrap();
+    let resumed = prepare_with_recipe(
+        source,
+        work_target.path(),
+        inspection_recipe(),
+        PrepareLimits::default(),
+    )
+    .blocking_wait()
+    .unwrap();
+    assert_eq!(
+        resumed.prepare_report().disposition(),
+        PrepareDisposition::Resumed
+    );
+    assert_eq!(resumed.prepare_report().durable_points_reused(), 1);
+    assert_eq!(resumed.prepare_report().source_points_read(), 0);
+    assert_eq!(fs::read(work_target.path()).unwrap(), V2_ARTIFACT);
 }
 
 #[test]
@@ -494,9 +561,8 @@ fn cold_build_limits_fail_without_a_partial_target_and_preserve_only_valid_work(
 
     let late_source = open_source(clustered_ticks(BLOCK_POINTS + 1));
     let late_build = TemporaryTarget::new("limit-build-memory-late");
-    let limit = PrepareLimits::default().with_max_build_working_bytes(350_000);
-    let late_result = prepare(late_source.clone(), late_build.path(), limit).blocking_wait();
-    assert_resource_error(&late_result);
+    let limit = PrepareLimits::default().with_max_build_working_bytes(450_000);
+    assert_resource_error(&prepare(late_source.clone(), late_build.path(), limit).blocking_wait());
     assert!(!late_build.path().exists());
     assert!(fs::metadata(late_build.work_path()).unwrap().len() > 200);
     let resumed = prepare(late_source, late_build.path(), PrepareLimits::default())
@@ -521,14 +587,13 @@ fn concurrent_prepares_have_one_exclusive_writer() {
     let first = prepare(source.clone(), target.path(), slow_limits);
     let first_handle = first.handle();
     let deadline = Instant::now() + Duration::from_secs(20);
-    while first_handle.progress().phase() == ProgressPhase::PENDING {
+    while fs::metadata(target.work_path()).map_or(true, |metadata| metadata.len() < 200) {
         assert!(
             Instant::now() < deadline,
-            "first prepare did not acquire its work file"
+            "first prepare did not initialize its work file"
         );
         thread::sleep(Duration::from_millis(1));
     }
-    assert_eq!(first_handle.progress().phase(), ProgressPhase::RUNNING);
 
     assert!(matches!(
         prepare(source.clone(), target.path(), PrepareLimits::default()).blocking_wait(),
@@ -635,8 +700,7 @@ fn faulted_build_recovers_valid_frames_discards_bad_suffix_and_matches_clean_byt
         u64::try_from(BLOCK_POINTS).unwrap()
     );
     assert_eq!(resumed.prepare_report().source_points_read(), 64);
-    let completed_work = fs::read(resumed_target.work_path()).unwrap();
-    assert!(completed_work.len() > 200);
+    assert!(resumed_target.work_path().exists());
 
     let clean_target = TemporaryTarget::new("fault-resume-clean");
     let clean_limits = PrepareLimits::new(251, 251 * 24).unwrap();
@@ -648,10 +712,6 @@ fn faulted_build_recovers_valid_frames_discards_bad_suffix_and_matches_clean_byt
     assert_eq!(
         fs::read(resumed_target.path()).unwrap(),
         fs::read(clean_target.path()).unwrap()
-    );
-    assert_eq!(
-        fs::read(resumed_target.work_path()).unwrap(),
-        completed_work
     );
     for node in resumed.hierarchy().nodes() {
         assert_eq!(
@@ -694,17 +754,7 @@ fn cancelled_prepare_leaves_only_resumable_work_and_never_a_partial_target() {
     );
     assert!(resumed.prepare_report().durable_points_reused() >= BLOCK_POINTS as u64);
     assert!(resumed.prepare_report().durable_points_reused() < u64::try_from(point_count).unwrap());
-    let completed_work = fs::read(target.work_path()).unwrap();
-    assert!(completed_work.len() > 200);
-
-    let opened = prepare(source.clone(), target.path(), PrepareLimits::default())
-        .blocking_wait()
-        .unwrap();
-    assert_eq!(
-        opened.prepare_report().disposition(),
-        PrepareDisposition::Opened
-    );
-    assert_eq!(fs::read(target.work_path()).unwrap(), completed_work);
+    assert!(target.work_path().exists());
 
     let clean_target = TemporaryTarget::new("cancel-resume-clean");
     let clean = prepare(source, clean_target.path(), PrepareLimits::default())

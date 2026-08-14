@@ -18,7 +18,9 @@ sequenceDiagram
 
     HOST->>LAS: open(path)
     LAS-->>HOST: verified Source Job result
-    HOST->>IDX: prepare(Source, target, PrepareLimits)
+    HOST->>IDX: prepare(Source, v1 target, limits)
+    Note over HOST,IDX: or prepare_with_recipe(Source, v2 target, InspectionV1, limits)
+    Note over HOST,IDX: cold measurement uses prepare_fresh_with_recipe and absent paths
 
     alt compatible complete target exists
         IDX->>IDX: validate binding, versions, topology, and checksums
@@ -39,10 +41,17 @@ sequenceDiagram
     end
 ~~~
 
-Cancellation leaves only a verified work prefix and recognized disposable
-sidecars. Existing incompatible, corrupt, or racing targets fail without
-replacement. `PreparedIndex` retains the exact verified Source capability used
-to build or open it.
+Cancellation leaves only a verified work prefix and recognized owned
+disposable temporaries. Existing incompatible, corrupt, or racing targets fail
+without replacement. A v1 target cannot be opened as v2 or vice versa; the
+caller moves/deletes the rebuildable family or chooses a new target to migrate.
+`PreparedIndex` retains the exact verified Source capability used to build or
+open it.
+
+For a claimed cold-build measurement, `prepare_fresh_with_recipe` rejects and
+preserves any existing complete/work family before it can be opened or resumed;
+the point-index and viewing benchmarks and corpus runner use this stricter
+operation. A later ordinary prepare proves the distinct warm-open path.
 
 Standalone callers may stop here:
 
@@ -391,8 +400,8 @@ sequenceDiagram
         HOST->>GPU: apply safe conditional Removes
         opt one requested node fits staging limits
             HOST->>IDX: read_node(node, budget)
-            IDX-->>HOST: display batches + exact terminal summary
-            HOST->>HOST: pack exact ticks into origin-relative display points
+            IDX-->>HOST: display batches + raw sample values + exact terminal summary
+            HOST->>HOST: map display mode and pack origin-relative display points
             HOST->>GPU: apply one complete atomic Upsert
         end
         HOST->>GPU: render(encoder, target, frame)
@@ -421,6 +430,7 @@ Coverage remains until the planner emits its exact conditional retirement.
 | Run-bound qualification | Before evidence publication; afterward certainty is conservative | No Run mutation; retained private evidence stage and possibly one complete target | No evidence for unevaluated operational failure; otherwise one exact canonical pass/fail record, conflict, or publication-indeterminate result |
 | View planning | Before returning a plan | None | Old planner history or one complete new plan |
 | GPU frame | Host-controlled frame/device boundary | Disposable GPU allocations | Workspace unchanged |
+| Viewing Report | Before no-replace link of a synced, read-back-verified owned stage | Recognized identity-checked owned stage, or one complete target | No report, exact-existing reconciliation, one complete new report, or conflict without replacement |
 
 ## 13. Staleness
 

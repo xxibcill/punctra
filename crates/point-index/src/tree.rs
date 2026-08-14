@@ -8,7 +8,6 @@ use crate::{IndexError, IndexLimit, PrepareLimits, limits::require};
 
 pub(crate) const BLOCK_POINTS: u64 = 65_536;
 pub(crate) const MAX_NODE_SAMPLES: u64 = 4_096;
-pub(crate) const SAMPLE_BYTES: u64 = 32;
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct LeafRecord {
@@ -44,8 +43,11 @@ struct TemporaryNode {
     leaf: Option<LeafRecord>,
 }
 
+#[allow(clippy::too_many_lines)]
 pub(crate) fn plan(
     leaves: &[LeafRecord],
+    leaf_capacity: usize,
+    sample_bytes: u64,
     limits: PrepareLimits,
     control: &OperationControl,
 ) -> Result<TreePlan, IndexError> {
@@ -66,20 +68,38 @@ pub(crate) fn plan(
         limits.max_hierarchy_nodes(),
         IndexLimit::HierarchyNodes,
     )?;
-    preflight_memory(leaf_count, node_count, limits.max_build_working_bytes())?;
+    let mut retained_bytes = preflight_memory(
+        u64::try_from(leaf_capacity).unwrap_or(u64::MAX),
+        leaf_count,
+        node_count,
+        sample_bytes,
+        limits.max_build_working_bytes(),
+    )?;
 
     let node_capacity = usize::try_from(node_count).map_err(|_| IndexError::ResourceLimit {
         limit: IndexLimit::AddressableHierarchyNodes,
         required: node_count,
         allowed: usize::MAX as u64,
     })?;
-    let mut leaf_order = reserved_vec(leaves.len(), limits.max_build_working_bytes())?;
+    let mut leaf_order = reserved_vec(
+        leaves.len(),
+        &mut retained_bytes,
+        limits.max_build_working_bytes(),
+    )?;
     leaf_order.extend(0..leaves.len());
-    let mut temporary = reserved_vec(node_capacity, limits.max_build_working_bytes())?;
+    let mut temporary = reserved_vec(
+        node_capacity,
+        &mut retained_bytes,
+        limits.max_build_working_bytes(),
+    )?;
     let root = build_range(&mut leaf_order, leaves, &mut temporary, control)?;
     debug_assert_eq!(temporary.len(), node_capacity);
 
-    let mut breadth_first = reserved_vec(node_capacity, limits.max_build_working_bytes())?;
+    let mut breadth_first = reserved_vec(
+        node_capacity,
+        &mut retained_bytes,
+        limits.max_build_working_bytes(),
+    )?;
     breadth_first.push(root);
     let mut cursor = 0;
     while cursor < breadth_first.len() {
@@ -94,8 +114,11 @@ pub(crate) fn plan(
         cursor += 1;
     }
 
-    let mut stable_index_by_temporary =
-        reserved_vec(node_capacity, limits.max_build_working_bytes())?;
+    let mut stable_index_by_temporary = reserved_vec(
+        node_capacity,
+        &mut retained_bytes,
+        limits.max_build_working_bytes(),
+    )?;
     stable_index_by_temporary.resize(node_capacity, usize::MAX);
     for (stable, &temporary_index) in breadth_first.iter().enumerate() {
         if stable % 4_096 == 0 {
@@ -104,7 +127,11 @@ pub(crate) fn plan(
         stable_index_by_temporary[temporary_index] = stable;
     }
 
-    let mut parent_by_stable = reserved_vec(node_capacity, limits.max_build_working_bytes())?;
+    let mut parent_by_stable = reserved_vec(
+        node_capacity,
+        &mut retained_bytes,
+        limits.max_build_working_bytes(),
+    )?;
     parent_by_stable.resize(node_capacity, None);
     for (position, &temporary_index) in breadth_first.iter().enumerate() {
         if position % 4_096 == 0 {
@@ -118,7 +145,11 @@ pub(crate) fn plan(
         }
     }
 
-    let mut nodes = reserved_vec(node_capacity, limits.max_build_working_bytes())?;
+    let mut nodes = reserved_vec(
+        node_capacity,
+        &mut retained_bytes,
+        limits.max_build_working_bytes(),
+    )?;
     for (position, &temporary_index) in breadth_first.iter().enumerate() {
         if position % 4_096 == 0 {
             control.check_cancelled()?;
@@ -278,10 +309,17 @@ fn finite_diagonal(bounds: WorldBounds) -> f64 {
     }
 }
 
-fn preflight_memory(leaf_count: u64, node_count: u64, allowed: u64) -> Result<(), IndexError> {
+fn preflight_memory(
+    leaf_capacity: u64,
+    leaf_count: u64,
+    node_count: u64,
+    sample_bytes: u64,
+    allowed: u64,
+) -> Result<u64, IndexError> {
     let bytes =
         |count: u64, item: usize| count.saturating_mul(u64::try_from(item).unwrap_or(u64::MAX));
-    let required = bytes(leaf_count, mem::size_of::<LeafRecord>())
+    let retained = bytes(leaf_capacity, mem::size_of::<LeafRecord>());
+    let required = retained
         .saturating_add(bytes(leaf_count, mem::size_of::<usize>()))
         .saturating_add(bytes(node_count, mem::size_of::<TemporaryNode>()))
         .saturating_add(bytes(node_count, mem::size_of::<usize>()).saturating_mul(3))
@@ -289,24 +327,42 @@ fn preflight_memory(leaf_count: u64, node_count: u64, allowed: u64) -> Result<()
         .saturating_add(bytes(node_count, mem::size_of::<PlannedNode>()))
         .saturating_add(
             MAX_NODE_SAMPLES
-                .saturating_mul(SAMPLE_BYTES)
+                .saturating_mul(sample_bytes)
                 .saturating_mul(3),
         );
-    require(required, allowed, IndexLimit::BuildWorkingBytes)
+    require(required, allowed, IndexLimit::BuildWorkingBytes)?;
+    Ok(retained)
 }
 
-fn reserved_vec<T>(capacity: usize, allowed: u64) -> Result<Vec<T>, IndexError> {
+fn reserved_vec<T>(
+    capacity: usize,
+    retained: &mut u64,
+    allowed: u64,
+) -> Result<Vec<T>, IndexError> {
     let required = u64::try_from(capacity)
         .unwrap_or(u64::MAX)
         .saturating_mul(u64::try_from(mem::size_of::<T>()).unwrap_or(u64::MAX));
-    require(required, allowed, IndexLimit::BuildWorkingBytes)?;
+    require(
+        retained.saturating_add(required),
+        allowed,
+        IndexLimit::BuildWorkingBytes,
+    )?;
     let mut values = Vec::new();
     values
         .try_reserve_exact(capacity)
         .map_err(|_| IndexError::ResourceLimit {
             limit: IndexLimit::BuildWorkingBytes,
-            required,
+            required: retained.saturating_add(required),
             allowed,
         })?;
+    let actual = u64::try_from(values.capacity())
+        .unwrap_or(u64::MAX)
+        .saturating_mul(u64::try_from(mem::size_of::<T>()).unwrap_or(u64::MAX));
+    require(
+        retained.saturating_add(actual),
+        allowed,
+        IndexLimit::BuildWorkingBytes,
+    )?;
+    *retained = retained.saturating_add(actual);
     Ok(values)
 }

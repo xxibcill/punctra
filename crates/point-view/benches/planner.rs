@@ -19,11 +19,20 @@ const LOGICAL_LEAF_POINTS: u64 = 16_777_216;
 
 fn planner_benchmark(criterion: &mut Criterion) {
     let nodes = quadtree();
-    let camera = Camera::perspective(
+    let perspective_camera = Camera::perspective(
         [0.0, 0.0, 0.0],
         [0.0, 0.0, -200.0],
         [0.0, 1.0, 0.0],
         std::f32::consts::FRAC_PI_2,
+        1.0,
+        1_000.0,
+    )
+    .unwrap();
+    let orthographic_camera = Camera::orthographic(
+        [0.0, 0.0, 0.0],
+        [0.0, 0.0, -200.0],
+        [0.0, 1.0, 0.0],
+        128.0,
         1.0,
         1_000.0,
     )
@@ -35,13 +44,14 @@ fn planner_benchmark(criterion: &mut Criterion) {
         LOGICAL_LEAF_POINTS * ESTIMATED_GPU_BYTES_PER_POINT,
         u64::from(4_u32.pow(LEAF_LEVEL)),
     );
-    let mut planner = ViewPlanner::new(PlannerConfig::new(2.0, 0.25).unwrap());
+    let mut perspective_planner = ViewPlanner::new(PlannerConfig::new(2.0, 0.25).unwrap());
+    let mut orthographic_planner = ViewPlanner::new(PlannerConfig::new(2.0, 0.25).unwrap());
 
     criterion.bench_function("plan_5461_node_quadtree_16m_logical_points", |bencher| {
         bencher.iter(|| {
-            planner
+            perspective_planner
                 .plan(
-                    &camera,
+                    &perspective_camera,
                     viewport,
                     AvailableNodes::new(generation, &nodes),
                     budget,
@@ -49,6 +59,21 @@ fn planner_benchmark(criterion: &mut Criterion) {
                 .unwrap()
         });
     });
+    criterion.bench_function(
+        "plan_5461_node_quadtree_16m_logical_points_orthographic",
+        |bencher| {
+            bencher.iter(|| {
+                orthographic_planner
+                    .plan(
+                        &orthographic_camera,
+                        viewport,
+                        AvailableNodes::new(generation, &nodes),
+                        budget,
+                    )
+                    .unwrap()
+            });
+        },
+    );
 }
 
 fn quadtree() -> Vec<AvailableNode> {

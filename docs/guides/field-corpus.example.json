@@ -1,0 +1,42 @@
+{
+  "schema": "punctra.renderer-demo.field-corpus.v1",
+  "corpus_id": "opaque-local-corpus-001",
+  "machine": {
+    "label": "replace-with-a-non-sensitive-local-label",
+    "operating_system": "replace-with-the-local-operating-system",
+    "filesystem": "replace-with-the-index-filesystem",
+    "gpu_expectation": "replace-with-the-expected-local-wgpu-adapter"
+  },
+  "entries": [
+    {
+      "id": "opaque-source-001",
+      "project_id": "opaque-project-001",
+      "firm_id": "opaque-firm-001",
+      "source_path": "/absolute/path/to/permitted/source.laz",
+      "index_path": "/absolute/path/to/private/cache/source.position-v1.pidx",
+      "inspect_permission": true,
+      "measure_permission": true,
+      "display": "elevation",
+      "projection": "perspective",
+      "initial_frame_count": 3,
+      "trace": [
+        {
+          "orbit_horizontal_pixels": 120.0,
+          "orbit_vertical_pixels": -30.0,
+          "pan_horizontal_pixels": 0.0,
+          "pan_vertical_pixels": 0.0,
+          "zoom_lines": 2.0,
+          "frame_count": 2
+        },
+        {
+          "orbit_horizontal_pixels": 0.0,
+          "orbit_vertical_pixels": 0.0,
+          "pan_horizontal_pixels": 80.0,
+          "pan_vertical_pixels": -20.0,
+          "zoom_lines": 0.0,
+          "frame_count": 2
+        }
+      ]
+    }
+  ]
+}

@@ -404,7 +404,8 @@ canonical hashes, not complete Terrain, Point, XML, QA, or report payloads.
 
 Start atomically publishes the header plus Intent through a synced sibling
 stage, read-back validation, a no-replace hard link, parent-directory sync,
-stage removal, and cleanup sync. Any failure after the journal link is an
+retained-alias finalization, and cleanup sync. Any failure after the journal
+link is an
 indeterminate journal publication that resume resolves by validating the
 recognized file.
 

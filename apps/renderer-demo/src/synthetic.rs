@@ -56,6 +56,18 @@ pub(crate) struct SyntheticScene {
     view_generation: ViewGenerationKey,
     nodes: Vec<SyntheticNode>,
     pending: VecDeque<NodeKey>,
+    cancelled_requests: u64,
+    retired_batches: u64,
+    rejected_batches: u64,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) struct SyntheticStatusFacts {
+    pub(crate) hierarchy_nodes: u64,
+    pub(crate) missing_nodes: u64,
+    pub(crate) requested_nodes: u64,
+    pub(crate) resident_batches: u64,
+    pub(crate) resident_points: u64,
 }
 
 impl SyntheticScene {
@@ -82,6 +94,9 @@ impl SyntheticScene {
             view_generation,
             nodes,
             pending: VecDeque::new(),
+            cancelled_requests: 0,
+            retired_batches: 0,
+            rejected_batches: 0,
         })
     }
 
@@ -93,13 +108,14 @@ impl SyntheticScene {
         &mut self,
         demanded_nodes: &[NodeKey],
         requests: &[NodeRequest],
-    ) {
+    ) -> u64 {
         let previously_queued = self.pending.drain(..).collect::<BTreeSet<_>>();
         let newly_requested = requests
             .iter()
             .map(|request| request.node())
             .collect::<BTreeSet<_>>();
         let mut retained_requests = BTreeSet::new();
+        let mut issued = 0_u64;
         for key in demanded_nodes.iter().copied() {
             let was_queued = previously_queued.contains(&key);
             let was_requested_now = newly_requested.contains(&key);
@@ -112,6 +128,7 @@ impl SyntheticScene {
             let node = &mut self.nodes[node_index(key)].node;
             if node.status() == NodeStatus::Missing && was_requested_now {
                 *node = node.with_status(NodeStatus::Requested);
+                issued = issued.saturating_add(1);
             }
             if node.status() == NodeStatus::Requested && (was_queued || was_requested_now) {
                 self.pending.push_back(key);
@@ -121,8 +138,10 @@ impl SyntheticScene {
             let node = &mut self.nodes[node_index(key)].node;
             if node.status() == NodeStatus::Requested {
                 *node = node.with_status(NodeStatus::Missing);
+                self.cancelled_requests = self.cancelled_requests.saturating_add(1);
             }
         }
+        issued
     }
 
     pub(crate) fn next_batch(&mut self) -> Result<Option<PointBatch>, ProtocolError> {
@@ -157,6 +176,7 @@ impl SyntheticScene {
             }
         );
         *node = node.with_status(NodeStatus::Missing);
+        self.retired_batches = self.retired_batches.saturating_add(1);
     }
 
     pub(crate) fn mark_rejected(&mut self, batch_key: BatchKey, version: BatchVersion) {
@@ -164,6 +184,7 @@ impl SyntheticScene {
         debug_assert_eq!(node.node.status(), NodeStatus::Requested);
         debug_assert_eq!(node.latest_version, version);
         node.node = node.node.with_status(NodeStatus::Missing);
+        self.rejected_batches = self.rejected_batches.saturating_add(1);
     }
 
     fn node_for_batch_mut(&mut self, batch_key: BatchKey) -> &mut SyntheticNode {
@@ -173,17 +194,42 @@ impl SyntheticScene {
         &mut self.nodes[index]
     }
 
-    pub(crate) fn resident_batches(&self) -> u64 {
-        let count = self
-            .nodes
-            .iter()
-            .filter(|node| matches!(node.node.status(), NodeStatus::Resident { .. }))
-            .count();
-        u64::try_from(count).expect("the resident node count fits in u64")
+    pub(crate) fn status_facts(&self) -> SyntheticStatusFacts {
+        let mut facts = SyntheticStatusFacts {
+            hierarchy_nodes: u64::try_from(self.nodes.len()).unwrap_or(u64::MAX),
+            ..SyntheticStatusFacts::default()
+        };
+        for node in &self.nodes {
+            match node.node.status() {
+                NodeStatus::Missing => facts.missing_nodes = facts.missing_nodes.saturating_add(1),
+                NodeStatus::Requested => {
+                    facts.requested_nodes = facts.requested_nodes.saturating_add(1);
+                }
+                NodeStatus::Resident { .. } => {
+                    facts.resident_batches = facts.resident_batches.saturating_add(1);
+                    facts.resident_points = facts
+                        .resident_points
+                        .saturating_add(node.node.point_count());
+                }
+            }
+        }
+        facts
     }
 
     pub(crate) fn pending_batches(&self) -> u64 {
         u64::try_from(self.pending.len()).expect("the pending node count fits in u64")
+    }
+
+    pub(crate) const fn cancelled_requests(&self) -> u64 {
+        self.cancelled_requests
+    }
+
+    pub(crate) const fn retired_batches(&self) -> u64 {
+        self.retired_batches
+    }
+
+    pub(crate) const fn rejected_batches(&self) -> u64 {
+        self.rejected_batches
     }
 
     pub(crate) fn highlight_ids() -> Vec<PointId> {
@@ -433,7 +479,7 @@ mod tests {
         );
         assert_eq!(first.version(), BatchVersion::new(1));
         assert_eq!(second.version(), BatchVersion::new(2));
-        assert_eq!(scene.resident_batches(), 1);
+        assert_eq!(scene.status_facts().resident_batches, 1);
         assert_eq!(scene.pending_batches(), 0);
     }
 

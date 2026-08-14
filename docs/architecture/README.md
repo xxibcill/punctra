@@ -45,6 +45,12 @@ flowchart TD
     APP --> IDX["point-index"]
     APP --> SRC["point-source"]
 
+    RDEMO["renderer-demo"] --> VIEW
+    RDEMO --> RW
+    RDEMO --> IDX
+    RDEMO --> LAS
+    RDEMO --> SRC
+
     WS --> IDX
     WS --> SRC
     WS --> CT["point-contracts"]
@@ -116,6 +122,9 @@ buffers, Workspace journal frames, spill files, or GPU buffers.
 - `point-view` owns deterministic culling, LOD demand, retention, and safe
   retirement decisions.
 - `render-wgpu` owns GPU resources and command recording.
+- `renderer-demo` owns private display mapping, camera controls, real-cloud
+  scheduling/state presentation, `PVIEW_*` diagnostics, and local corpus
+  measurement/report policy.
 
 ### Exact work and display work stay distinct
 
@@ -253,3 +262,4 @@ external product-readiness claim.
 - [Repository and dependency layout](repository-layout.md)
 - [Verification strategy](testing.md)
 - [Architectural decisions](../adr/README.md)
+- [First LAS/LAZ guide](../guides/first-las-laz.md)

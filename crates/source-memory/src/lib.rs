@@ -6,6 +6,13 @@
 //! control for conformance tests without adding faults to the production
 //! Source interface.
 //!
+//! # Interface classification
+//!
+//! `MemorySource` and its open functions are a **v1-candidate official-adapter
+//! surface**. `MemoryFaultControl` under `test-support` is **test support**,
+//! not a production or compatibility interface. This records v0.9 review
+//! intent, not a stable third-party adapter ABI, `1.0.0`, or support claim.
+//!
 //! ```
 //! use point_contracts::{
 //!     AttributeColumns, CoordinateReference, PositionTransform,

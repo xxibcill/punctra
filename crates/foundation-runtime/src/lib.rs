@@ -4,6 +4,13 @@
 //! background jobs, and a pull-based batch-stream contract. It depends only on
 //! the standard library for execution and does not select an async runtime.
 //!
+//! # Interface classification
+//!
+//! The documented public items are a **v1-candidate foundation surface**.
+//! This records the v0.9 compatibility-review intent; it is not a `1.0.0` or
+//! production-support claim. Runtime choice, executors, and persistence remain
+//! caller or downstream-module concerns.
+//!
 //! # Example
 //!
 //! ```

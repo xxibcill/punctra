@@ -14,7 +14,8 @@ use std::{
 
 use foundation_runtime::OperationReporter;
 use point_contracts::{
-    AttributeColumns, ContentHash, CoordinateReference, PointBatch, PositionTransform,
+    AttributeColumn, AttributeColumns, AttributeDataType, AttributeDefinition, AttributeId,
+    AttributeValues, ContentHash, CoordinateReference, PointBatch, PositionTransform,
     QuantizedPositions, SourceId, SourceMetadata, WorldBounds,
 };
 use point_index::{IndexNodeId, IndexPointBatch, IndexReadSummary, NodeReadBudget, PreparedIndex};
@@ -28,6 +29,16 @@ use point_source::{
 use source_memory::{MemoryFaultControl, MemorySource};
 
 pub const BLOCK_POINTS: usize = 65_536;
+const fn attribute_id(value: u32) -> AttributeId {
+    match AttributeId::new(value) {
+        Ok(id) => id,
+        Err(_) => panic!("fixture Attribute identity is nonzero"),
+    }
+}
+
+pub const INTENSITY_ID: AttributeId = attribute_id(1);
+pub const CLASSIFICATION_ID: AttributeId = attribute_id(6);
+pub const RGB_IDS: [AttributeId; 3] = [attribute_id(16), attribute_id(17), attribute_id(18)];
 
 static NEXT_TEMPORARY: AtomicU64 = AtomicU64::new(1);
 
@@ -93,6 +104,110 @@ pub fn ticks_for_ordinal(ordinal: usize) -> [i64; 3] {
 
 pub fn open_source(ticks: Vec<[i64; 3]>) -> Source {
     open_source_with_transform(ticks, transform())
+}
+
+pub fn open_source_with_columns(ticks: Vec<[i64; 3]>, columns: AttributeColumns) -> Source {
+    let input =
+        MemorySource::from_columns(transform(), CoordinateReference::Unknown, ticks, columns)
+            .expect("fixture Attribute columns are valid");
+    source_memory::open(input)
+        .blocking_wait()
+        .expect("fixture attributed Source opens")
+}
+
+pub fn open_attributed_source(ticks: Vec<[i64; 3]>, with_rgb: bool) -> Source {
+    let point_count = ticks.len();
+    let columns = attributed_columns(point_count, with_rgb);
+    let input =
+        MemorySource::from_columns(transform(), CoordinateReference::Unknown, ticks, columns)
+            .expect("attributed fixture memory Source is valid");
+    source_memory::open(input)
+        .blocking_wait()
+        .expect("attributed fixture Source opens")
+}
+
+pub fn open_controlled_attributed_source(
+    ticks: Vec<[i64; 3]>,
+    with_rgb: bool,
+) -> (Source, MemoryFaultControl) {
+    let columns = attributed_columns(ticks.len(), with_rgb);
+    let initial = MemorySource::from_columns(
+        transform(),
+        CoordinateReference::Unknown,
+        ticks.clone(),
+        columns.clone(),
+    )
+    .expect("attributed fixture memory Source is valid");
+    let initial = source_memory::open(initial)
+        .blocking_wait()
+        .expect("attributed fixture Source opens");
+    let (controlled, faults) =
+        MemorySource::with_fault_control(initial.metadata().clone(), ticks, columns)
+            .expect("controlled attributed fixture matches inferred metadata");
+    let source = source_memory::open(controlled)
+        .blocking_wait()
+        .expect("controlled attributed fixture opens");
+    assert_eq!(source.identity(), initial.identity());
+    (source, faults)
+}
+
+fn attributed_columns(point_count: usize, with_rgb: bool) -> AttributeColumns {
+    let mut columns = vec![
+        AttributeColumn::new(
+            AttributeDefinition::new(INTENSITY_ID, "intensity", AttributeDataType::U16).unwrap(),
+            AttributeValues::u16(
+                (0..point_count)
+                    .map(|ordinal| attributed_values(ordinal).0)
+                    .collect(),
+            ),
+        )
+        .unwrap(),
+        AttributeColumn::new(
+            AttributeDefinition::new(CLASSIFICATION_ID, "classification", AttributeDataType::U8)
+                .unwrap(),
+            AttributeValues::u8(
+                (0..point_count)
+                    .map(|ordinal| attributed_values(ordinal).1)
+                    .collect(),
+            ),
+        )
+        .unwrap(),
+    ];
+    if with_rgb {
+        for (channel, (id, name)) in RGB_IDS
+            .into_iter()
+            .zip(["red", "green", "blue"])
+            .enumerate()
+        {
+            columns.push(
+                AttributeColumn::new(
+                    AttributeDefinition::new(id, name, AttributeDataType::U16).unwrap(),
+                    AttributeValues::u16(
+                        (0..point_count)
+                            .map(|ordinal| attributed_values(ordinal).2[channel])
+                            .collect(),
+                    ),
+                )
+                .unwrap(),
+            );
+        }
+    }
+    AttributeColumns::new(columns, point_count).unwrap()
+}
+
+pub fn attributed_values(ordinal: usize) -> (u16, u8, [u16; 3]) {
+    let value = u64::try_from(ordinal).unwrap();
+    let low_u16 = |value: u64| u16::try_from(value & u64::from(u16::MAX)).unwrap();
+    let low_u8 = |value: u64| u8::try_from(value & u64::from(u8::MAX)).unwrap();
+    (
+        low_u16(value.wrapping_mul(257)),
+        low_u8(value.wrapping_mul(17)),
+        [
+            low_u16(value.wrapping_mul(3)),
+            low_u16(value.wrapping_mul(5).wrapping_add(7)),
+            low_u16(value.wrapping_mul(11).wrapping_add(13)),
+        ],
+    )
 }
 
 pub fn open_source_with_transform(

@@ -101,6 +101,9 @@ closed without modifying the committed fixture.
 - incompatible, corrupt, truncated, over-limit, racing, and checksum-valid
   non-recipe-sample targets fail without replacement;
 - display samples and exact leaves preserve Source-aware identities/ticks;
+- v2 cold, resumed, and warm reads preserve row-aligned raw inspection values,
+  enforce Attribute availability/types and 42-byte accounting, and leave v1
+  fixtures byte-identical;
 - LAZ fixed-chunk seeks cross chunk boundaries exactly; and
 - process smoke covers Full verification, Built then Opened index paths, and
   one complete CPU-model renderer Upsert.
@@ -135,7 +138,7 @@ Audit coverage. They prove:
 - committed, rejected, retryable, not-recorded, conflict, and indeterminate
   Operation reconciliation;
 - idempotent retry with at most one Revision;
-- fail-closed corruption plus recoverable recognized scratch;
+- fail-closed corruption plus validated, conservatively retained recognized scratch;
 - exact ordered `Snapshot::point_rows` values at root, edited, historical, and
   Revert Snapshots;
 - partition-independent row membership/content hashes matching Point Set
@@ -225,6 +228,32 @@ suites cover:
 - strict immutable input witnesses, no Run repair or mutation, exact evidence
   reconciliation, conflicting targets, and post-publication uncertainty.
 
+The v0.8 fold-forward coverage additionally proves a strictly read-only
+Complete-Run snapshot under an existing shared Run lock; rejection of missing
+locks, non-Complete/torn journals without repair, and changed bound artifacts;
+canonical Run-bound pass and semantic-failure evidence; exact reconciliation
+and caller-owned conflict preservation; nonzero stable semantic diagnostics;
+and no evidence for malformed or operational failures. Private evidence tests
+also exhaust every application-defined post-link acknowledgement boundary,
+prove exact/conflicting no-replace create races, preserve post-link replacement,
+and reconcile an exact retry. Checked-in v1 pass and topology-failure evidence
+fixtures pin exact lengths, BLAKE3 hashes, semantic reason facts, and canonical
+bytes. The bounded local XML verifier streams the exact captured bytes under the v0.7
+exporter's 4-GiB, 10-million-vertex, and 20-million-face ceilings. Focused
+tests cover inclusive and just-over file/node/text/token/parser/Point/face/
+comparison/retained limits; comments, CDATA, processing instructions, and DTD
+rejection; partial `BufRead` consumption; deep namespace nesting; same-inode
+token mutation; append past the captured length; and measured small-allocation
+oversized-token rejection.
+
+The evidence `accounted_*_peak_bytes` values are deterministic algorithm
+charges: fixed read/scanner buffers, exact requested token/event/stack/text
+payloads, semantic collections, comparison mappings/topology samples, and the
+concurrent exact-compare buffers. They deliberately exclude allocator
+metadata/slack, process RSS, and measured heap. Every modeled growth is checked
+before its fallible reserve; the bounded reader prevents more than one lexical
+token or bytes past the captured length from reaching semantic parsing.
+
 The retained v0.6 process/regression coverage also proves deterministic
 generated LAS and LAZ Terrain semantics, exact changed Ground Input,
 byte-identical Source data, exact immediate-head Revert restoration of
@@ -265,8 +294,30 @@ an empty baseline-to-restored Surface Change Envelope.
 - large-world origins and camera-stable multi-frame recording;
 - `RecordedFrame` resource and identity retention;
 - asynchronous provisional picking;
-- host-owned submission and polling; and
-- planner-to-renderer parent Coverage retirement after replacements render.
+- host-owned submission and polling;
+- planner-to-renderer parent Coverage retirement after replacements render;
+- exact neutral/elevation/RGB/intensity/classification CPU color mapping,
+  Source-bound normalization, all 256 raw classification values, and identity/
+  geometry invariance across modes;
+- disk-v1 position-only versus disk-v2 attributed recipe validation and
+  generated LAS/LAZ build/open process paths;
+- perspective/orthographic camera grammar, target-plane-scale toggle, pan,
+  reset, matching View frustum/SSE behavior, and large-world depth/picking;
+- truthful demanded/candidate/issued/retained/retired and
+  Sampled/Complete/paused state presentation;
+- bounded stable View diagnostic rendering and phase/action mappings;
+- bounded permission-gated corpus manifests, deterministic no-private-path
+  report encoding/nonclaims, and no-replace create/reconcile/conflict; and
+- tolerant local offscreen GPU checks for every accepted display mapping.
+
+The mapping oracle fixes neutral at `[190,205,220,255]`; elevation at the five
+accepted palette stops with clamping, midpoint for zero extent, interpolation,
+and nearest-byte rounding; and RGB/intensity `U16` scaling at
+`(v * 255 + 32767) / 65535`. Classification exhausts all 256 inputs: 0–18 use
+the fixed table in the [v0.10
+design](../design/field-inspection-view-v0.10.md#implemented-display-mappings-and-cli),
+while 19–255 use wrapping `u8` `(73c+41, 151c+97, 199c+17)`. All outputs are
+opaque. Identity/geometry tests compare modes before the tolerant GPU readback.
 
 Required GPU tests set `PUNCTRA_REQUIRE_GPU=1`; a missing adapter is then a
 failure rather than a skip.
@@ -396,6 +447,7 @@ cargo bench -p point-index --bench index
 cargo bench -p point-workspace --bench document
 cargo bench -p point-terrain --bench terrain
 cargo bench -p terrain-demo --bench journal
+cargo bench -p renderer-demo --bench viewing
 
 cargo run -p source-memory --example memory_source
 cargo run -p point-index --example direct_use
@@ -405,8 +457,14 @@ cargo test -p point-terrain --all-features
 cargo test -p terrain-demo --test workflow
 cargo test -p terrain-demo --test process
 cargo test -p renderer-demo --test headless_smoke
+PUNCTRA_REQUIRE_GPU=1 cargo test -p renderer-demo --test headless_smoke \
+  corpus_success_binds_trace_inputs_and_separate_resource_measurements -- --exact
 PUNCTRA_REQUIRE_GPU=1 cargo test -p render-wgpu --test offscreen
 PUNCTRA_REQUIRE_GPU=1 cargo test -p renderer-demo --test planner
+PUNCTRA_REQUIRE_GPU=1 cargo test -p renderer-demo --test display_gpu
+test -f docs/guides/first-las-laz.md
+jq -e . docs/guides/field-corpus.example.json >/dev/null
+git diff --check
 ~~~
 
 Opt-in larger generated Workspace runs use:
@@ -418,7 +476,57 @@ PUNCTRA_TERRAIN_BENCH_POINTS=100000 \
   cargo bench -p point-terrain --bench terrain
 PUNCTRA_TERRAIN_WORKFLOW_BENCH_POINTS=100000 \
   cargo bench -p terrain-demo --bench journal
+PUNCTRA_RENDERER_VIEW_BENCH_POINTS=1000000 \
+  cargo bench -p renderer-demo --bench viewing
 ~~~
+
+The renderer viewing benchmark defaults to 100,000 generated Points and
+accepts a positive value through ten million. It measures warm verified
+position-only index open and the first bounded root display batch and prints
+generated Point/node counts, artifact bytes, and observed index-temporary
+bytes. It does not exercise a GPU, production corpus, or human workflow.
+
+### v0.10 working-tree verification record
+
+On 2026-08-13, the complete local sequence above ran from the `codex/v0.10`
+working tree based on `3dc4cb1`, immediately before that exact implementation
+tree was committed for review. The reference environment was an Apple M5 Pro
+(`Mac17,9`), 24 GiB, arm64, macOS 26.5.2, APFS, Rust 1.90.0, and Cargo 1.90.0.
+Required GPU acceptance used the built-in 16-core Apple M5 Pro through Metal 4
+with `PUNCTRA_REQUIRE_GPU=1`; the corpus, planner, display, headless, and
+`render-wgpu` offscreen paths all passed.
+
+Formatting, workspace Clippy with `-D warnings`, workspace tests, rustdoc with
+`-D warnings`, fuzz formatting/check/tests, documented examples, focused
+package/process/golden tests, guide/JSON checks, and `git diff --check` passed.
+All eight default benchmark commands exited successfully and all declared
+heap/resource thresholds passed. Criterion's saved-baseline comparison was not
+performance-neutral: it classified 14 cases as statistically regressed.
+
+| Benchmark | Final local observation |
+|---|---|
+| `point-view` planner | Perspective 34.882–37.250 ms, +13.470–22.945%; orthographic 31.984–32.753 ms, +4.7042–7.2225% |
+| `source-memory` read | 468.95–482.84 us, +3.1392–5.0059% |
+| `source-las` read | LAS Points 20.802–21.289 ms within noise; five other cases +13.499–94.755%; heap facts 372,406 B LAS / 2,588,206 B LAZ under 33,554,432 B |
+| `point-index` | Cold 428.96–530.05 ms, +23.264–54.250%; warm 49.854–64.286 ms, +109.85–170.05%; candidates/root regressed; leaf unchanged; heap 262,616 B under 33,554,432 B |
+| `point-workspace` | Zero regressions; three resident cases improved; 0% and forced spill unchanged; resource evidence passed |
+| `point-terrain` | Derivation and LandXML unchanged; QA improved; resource ceilings passed |
+| `terrain-demo` | Retryable-intent 136.82–168.89 ms, +2.6833–30.264%; four other modes unchanged |
+| `renderer-demo` | Warm open 1.9206–1.9972 ms, +6.0963–9.5577%; first batch unchanged |
+
+Those percentages are Criterion comparisons against the pre-existing local
+saved baseline, not a universal latency promise or a design pass/fail
+threshold. They are recorded rather than hidden. This pre-commit working-tree
+sweep did not by itself satisfy v0.9's stricter **one-commit** candidate-record
+gate. That gate was closed later by the
+[v0.9 release verification](../releases/v0.9.0.md); the historical v0.10 sweep
+likewise contains no licensed production-corpus, downstream, partner,
+usability, support, or publication evidence.
+
+An independent two-axis review of `3dc4cb1` through this working tree completed
+on 2026-08-13 with zero P0–P3 findings on both Standards and Spec. That closes
+the review gate only; it does not turn the working-tree verification above into
+a release candidate or close any external evidence gate.
 
 ### Release qualification
 
@@ -427,6 +535,8 @@ In addition to the full local sequence:
 - run generated LAS and LAZ process paths;
 - retain the named machine/toolchain with benchmark output;
 - inspect every public doc link and example signature;
+- validate `docs/guides/field-corpus.example.json` as JSON without treating its
+  placeholders as measured evidence;
 - review persisted-format and fault-injection coverage;
 - set `PUNCTRA_REQUIRE_GPU=1` on the expected local adapter; and
 - record external evidence as outstanding unless it was actually obtained.

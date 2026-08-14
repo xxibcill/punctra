@@ -4,6 +4,13 @@
 //! parsing, file witnesses, compression, and canonical Attribute mapping stay
 //! private to this adapter.
 //!
+//! # Interface classification
+//!
+//! The path-based open functions are a **v1-candidate official-adapter
+//! surface** over `point-source`. Decoder integration remains version-coupled
+//! and private. This records v0.9 review intent, not a stable third-party
+//! adapter ABI, `1.0.0`, or production-support claim.
+//!
 //! Uncompressed LAS point formats 0–10 and `LASzip` LAZ point formats 0–8 are
 //! supported. Compressed point formats 9 and 10 are rejected explicitly: the
 //! codec boundary cannot currently guarantee exact layered `WavePacket14`

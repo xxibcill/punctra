@@ -4,6 +4,13 @@
 //! callers. It performs no input/output, decoding, scheduling, Workspace, View,
 //! or GPU work.
 //!
+//! # Interface classification
+//!
+//! The documented public values and validation errors are a **v1-candidate
+//! foundation surface**. This classification records the v0.9 compatibility
+//! review; it does not promote the current alpha to `1.0.0` or promise product
+//! support.
+//!
 //! # Example
 //!
 //! ```

@@ -3,6 +3,13 @@
 //! The planner borrows host-owned node metadata, selects a visible level of
 //! detail, and returns requests and generation-safe renderer retirements. It
 //! performs no input/output and owns no renderer or GPU resources.
+//!
+//! # Interface classification
+//!
+//! The documented planner inputs, outputs, limits, and errors are a
+//! **v1-candidate foundation surface**. Host loading policy and private planner
+//! data structures are not interfaces. This records v0.9 review intent, not a
+//! `1.0.0` or production-support claim.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]

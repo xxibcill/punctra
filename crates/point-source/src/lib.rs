@@ -4,6 +4,14 @@
 //! candidate returns a runtime-neutral [`Job`] and publishes [`Source`] only
 //! after identity, metadata, and adapter verification succeed.
 //!
+//! # Interface classification
+//!
+//! The documented Source, request, record, and error APIs are a
+//! **v1-candidate foundation surface**. The traits in [`adapter`] are a
+//! **version-coupled official-adapter seam**, not a stable third-party plugin
+//! interface. These classifications record v0.9 review intent, not `1.0.0` or
+//! production-support status.
+//!
 //! ```
 //! use point_source::{ReadBudget, ReadRequest, SourceSpan};
 //!
@@ -440,9 +448,25 @@ pub struct Source {
     inner: Arc<SourceInner>,
 }
 
+/// Cheap detached ownership of immutable Source provenance.
+///
+/// This handle carries no adapter, metadata, or read capability. It lets
+/// downstream terminal summaries retain provenance without copying its bounded
+/// logical-order text or extending a Source adapter's lifetime.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SourceProvenanceHandle(Arc<SourceProvenance>);
+
+impl SourceProvenanceHandle {
+    /// Returns the detached immutable provenance facts.
+    #[must_use]
+    pub fn get(&self) -> &SourceProvenance {
+        self.0.as_ref()
+    }
+}
+
 struct SourceInner {
     identity: SourceId,
-    provenance: SourceProvenance,
+    provenance: Arc<SourceProvenance>,
     record: SourceRecord,
     reader: Arc<dyn ReadAdapter>,
 }
@@ -463,7 +487,13 @@ impl Source {
     /// Returns detached immutable Source provenance.
     #[must_use]
     pub fn provenance(&self) -> &SourceProvenance {
-        &self.inner.provenance
+        self.inner.provenance.as_ref()
+    }
+
+    /// Returns a cheap detached handle to immutable Source provenance.
+    #[must_use]
+    pub fn provenance_handle(&self) -> SourceProvenanceHandle {
+        SourceProvenanceHandle(Arc::clone(&self.inner.provenance))
     }
 
     /// Returns serializable verification evidence for a later reopen.
@@ -490,7 +520,7 @@ impl Source {
         PointBatches::start(
             self.inner.identity,
             Arc::clone(&self.inner.record.metadata),
-            self.inner.provenance.clone(),
+            Arc::clone(&self.inner.provenance),
             self.inner.reader.as_ref(),
             request,
         )
@@ -982,7 +1012,7 @@ fn publish_source(source: SourceId, verified: AdapterVerified) -> Result<Source,
     Ok(Source {
         inner: Arc::new(SourceInner {
             identity: source,
-            provenance,
+            provenance: Arc::new(provenance),
             record,
             reader: parts.reader,
         }),

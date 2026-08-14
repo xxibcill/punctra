@@ -4,8 +4,13 @@
 
 use std::{fs, sync::OnceLock};
 
-use point_contracts::{AttributeColumns, CoordinateReference, PositionTransform};
-use point_index::{PrepareLimits, prepare};
+use point_contracts::{
+    AttributeColumn, AttributeColumns, AttributeDataType, AttributeDefinition, AttributeId,
+    AttributeValues, CoordinateReference, PositionTransform,
+};
+use point_index::{
+    IndexRecipe, InspectionAttributeIds, PrepareLimits, prepare, prepare_with_recipe,
+};
 use point_source::Source;
 use source_memory::MemorySource;
 
@@ -19,6 +24,8 @@ const MAX_RETAINED_BYTES: u64 = 4 * MAX_INPUT_BYTES as u64;
 struct Seeds {
     artifact: Vec<u8>,
     work: Vec<u8>,
+    attributed_artifact: Vec<u8>,
+    attributed_work: Vec<u8>,
 }
 
 /// Exercises complete-artifact and resumable-work decoding through `prepare`.
@@ -33,26 +40,45 @@ pub fn exercise_persisted_bytes(input: &[u8]) {
     let (selector, payload) = input
         .split_first()
         .map_or((0_u8, &[][..]), |(&selector, payload)| (selector, payload));
-    let mode = selector & 7;
+    let mode = selector % 14;
     let persisted = match mode {
         0 | 1 => payload.to_vec(),
         2 => mutated(&seeds().artifact, payload),
         3 => mutated(&seeds().work, payload),
         4 => checksum_valid_artifact_mutation(&seeds().artifact, payload),
         5 => checksum_valid_work_header_mutation(&seeds().work, payload),
-        _ => checksum_valid_work_frame_mutation(&seeds().work, payload),
+        6 => checksum_valid_work_frame_mutation(&seeds().work, payload),
+        7 => mutated(&seeds().attributed_artifact, payload),
+        8 => mutated(&seeds().attributed_work, payload),
+        9 => checksum_valid_artifact_mutation(&seeds().attributed_artifact, payload),
+        10 => checksum_valid_work_header_mutation(&seeds().attributed_work, payload),
+        11 => checksum_valid_work_frame_mutation(&seeds().attributed_work, payload),
+        12 => seeds().attributed_artifact.clone(),
+        _ => seeds().attributed_work.clone(),
     };
 
     let directory = tempfile::tempdir().expect("create isolated fuzz directory");
     let target = directory.path().join("fixture.pidx");
-    let persisted_path = if matches!(mode, 0 | 2 | 4) {
+    let artifact_mode = matches!(mode, 0 | 2 | 4 | 7 | 9 | 12);
+    let attributed_mode = mode >= 7;
+    let persisted_path = if artifact_mode {
         target.clone()
     } else {
         directory.path().join("fixture.pidx.work")
     };
     fs::write(&persisted_path, persisted).expect("write bounded persisted fuzz input");
 
-    let _ = prepare(fixture_source(), &target, fuzz_limits()).blocking_wait();
+    if attributed_mode {
+        let _ = prepare_with_recipe(
+            attributed_fixture_source(),
+            &target,
+            inspection_recipe(),
+            fuzz_limits(33),
+        )
+        .blocking_wait();
+    } else {
+        let _ = prepare(fixture_source(), &target, fuzz_limits(24)).blocking_wait();
+    }
     assert_retained_state_is_bounded(directory.path());
 }
 
@@ -76,25 +102,27 @@ fn checksum_valid_artifact_mutation(seed: &[u8], mutations: &[u8]) -> Vec<u8> {
 }
 
 fn checksum_valid_work_header_mutation(seed: &[u8], mutations: &[u8]) -> Vec<u8> {
-    const HEADER_BODY_BYTES: usize = 168;
-    const HEADER_BYTES: usize = 200;
-
     let mut bytes = seed.to_vec();
-    if bytes.len() < HEADER_BYTES {
+    let Some((header_body_bytes, header_bytes)) = work_header_layout(&bytes) else {
+        return bytes;
+    };
+    if bytes.len() < header_bytes {
         return bytes;
     }
-    mutate_region(&mut bytes, mutations, 0, HEADER_BODY_BYTES);
-    let checksum = blake3::hash(&bytes[..HEADER_BODY_BYTES]);
-    bytes[HEADER_BODY_BYTES..HEADER_BYTES].copy_from_slice(checksum.as_bytes());
+    mutate_region(&mut bytes, mutations, 0, header_body_bytes);
+    let checksum = blake3::hash(&bytes[..header_body_bytes]);
+    bytes[header_body_bytes..header_bytes].copy_from_slice(checksum.as_bytes());
     bytes
 }
 
 fn checksum_valid_work_frame_mutation(seed: &[u8], mutations: &[u8]) -> Vec<u8> {
-    const HEADER_BYTES: usize = 200;
     const FRAME_PREFIX_BYTES: usize = 40;
 
     let mut bytes = seed.to_vec();
-    let mut frame_offset = HEADER_BYTES;
+    let Some((_, header_bytes)) = work_header_layout(&bytes) else {
+        return bytes;
+    };
+    let mut frame_offset = header_bytes;
     let mut mutation_index = 0;
     while frame_offset
         .checked_add(FRAME_PREFIX_BYTES)
@@ -138,6 +166,15 @@ fn checksum_valid_work_frame_mutation(seed: &[u8], mutations: &[u8]) -> Vec<u8> 
     bytes
 }
 
+fn work_header_layout(bytes: &[u8]) -> Option<(usize, usize)> {
+    let disk = u32::from_le_bytes(bytes.get(8..12)?.try_into().ok()?);
+    match disk {
+        1 => Some((168, 200)),
+        2 => Some((200, 232)),
+        _ => None,
+    }
+}
+
 fn mutate_region(bytes: &mut [u8], mutations: &[u8], start: usize, end: usize) {
     let Some(region_len) = end.checked_sub(start).filter(|length| *length != 0) else {
         return;
@@ -171,8 +208,108 @@ fn seeds() -> &'static Seeds {
         let work = fs::read(directory.path().join("work.pidx.work"))
             .expect("read valid resumable-work seed");
 
-        Seeds { artifact, work }
+        let attributed_artifact_path = directory.path().join("attributed-artifact.pidx");
+        prepare_with_recipe(
+            attributed_fixture_source(),
+            &attributed_artifact_path,
+            inspection_recipe(),
+            PrepareLimits::default(),
+        )
+        .blocking_wait()
+        .expect("build valid attributed artifact seed");
+        let attributed_artifact =
+            fs::read(&attributed_artifact_path).expect("read valid attributed artifact seed");
+
+        let attributed_work_target = directory.path().join("attributed-work.pidx");
+        let result = prepare_with_recipe(
+            attributed_fixture_source(),
+            &attributed_work_target,
+            inspection_recipe(),
+            PrepareLimits::default().with_max_artifact_bytes(400),
+        )
+        .blocking_wait();
+        assert!(
+            result.is_err(),
+            "attributed seed build must stop before finalization"
+        );
+        let attributed_work = fs::read(directory.path().join("attributed-work.pidx.work"))
+            .expect("read valid attributed resumable-work seed");
+
+        Seeds {
+            artifact,
+            work,
+            attributed_artifact,
+            attributed_work,
+        }
     })
+}
+
+fn attributed_fixture_source() -> Source {
+    let definitions = [
+        (
+            1,
+            "intensity",
+            AttributeDataType::U16,
+            AttributeValues::u16(vec![321]),
+        ),
+        (
+            6,
+            "classification",
+            AttributeDataType::U8,
+            AttributeValues::u8(vec![7]),
+        ),
+        (
+            16,
+            "red",
+            AttributeDataType::U16,
+            AttributeValues::u16(vec![1_000]),
+        ),
+        (
+            17,
+            "green",
+            AttributeDataType::U16,
+            AttributeValues::u16(vec![2_000]),
+        ),
+        (
+            18,
+            "blue",
+            AttributeDataType::U16,
+            AttributeValues::u16(vec![3_000]),
+        ),
+    ];
+    let columns = definitions
+        .into_iter()
+        .map(|(id, name, data_type, values)| {
+            AttributeColumn::new(
+                AttributeDefinition::new(AttributeId::new(id).unwrap(), name, data_type).unwrap(),
+                values,
+            )
+            .unwrap()
+        })
+        .collect();
+    let input = MemorySource::from_columns(
+        PositionTransform::new([1_000_000.0, -2_000_000.0, 50.0], [0.01; 3]).unwrap(),
+        CoordinateReference::Unknown,
+        vec![[1, 2, 3]],
+        AttributeColumns::new(columns, 1).unwrap(),
+    )
+    .unwrap();
+    source_memory::open(input).blocking_wait().unwrap()
+}
+
+fn inspection_recipe() -> IndexRecipe {
+    IndexRecipe::InspectionV1(
+        InspectionAttributeIds::new(
+            AttributeId::new(1).unwrap(),
+            AttributeId::new(6).unwrap(),
+            [
+                AttributeId::new(16).unwrap(),
+                AttributeId::new(17).unwrap(),
+                AttributeId::new(18).unwrap(),
+            ],
+        )
+        .unwrap(),
+    )
 }
 
 fn fixture_source() -> Source {
@@ -189,8 +326,8 @@ fn fixture_source() -> Source {
         .expect("fixture memory Source opens")
 }
 
-fn fuzz_limits() -> PrepareLimits {
-    PrepareLimits::new(1, 24)
+fn fuzz_limits(source_point_bytes: u64) -> PrepareLimits {
+    PrepareLimits::new(1, source_point_bytes)
         .expect("nonzero fuzz Source batch limits")
         .with_max_adapter_working_bytes(64 * 1_024)
         .with_max_build_working_bytes(512 * 1_024)
@@ -261,6 +398,23 @@ mod tests {
         assert_eq!(
             blake3::hash(&work_frame[240..payload_end]).as_bytes(),
             &work_frame[208..240]
+        );
+
+        let attributed_header =
+            checksum_valid_work_header_mutation(&seeds().attributed_work, &[0, 0, 1]);
+        assert_eq!(
+            blake3::hash(&attributed_header[..200]).as_bytes(),
+            &attributed_header[200..232]
+        );
+
+        let attributed_frame =
+            checksum_valid_work_frame_mutation(&seeds().attributed_work, &[0, 0, 1]);
+        let payload_length =
+            u32::from_le_bytes(attributed_frame[236..240].try_into().unwrap()) as usize;
+        let payload_end = 272 + payload_length;
+        assert_eq!(
+            blake3::hash(&attributed_frame[272..payload_end]).as_bytes(),
+            &attributed_frame[240..272]
         );
     }
 }

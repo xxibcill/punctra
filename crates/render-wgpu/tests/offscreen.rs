@@ -52,6 +52,16 @@ fn millimeter_separation_survives_a_billion_unit_world_origin() {
 }
 
 #[test]
+fn orthographic_screen_position_is_independent_of_depth() {
+    with_gpu(assert_orthographic_depth_independent_position);
+}
+
+#[test]
+fn orthographic_depth_and_pick_identity_survive_a_billion_unit_origin() {
+    with_gpu(assert_orthographic_depth_and_pick);
+}
+
+#[test]
 fn asynchronous_pick_tickets_survive_reset_and_resize() {
     with_gpu(assert_async_ticket_stability);
 }
@@ -318,6 +328,78 @@ fn assert_large_world_precision(gpu: &GpuContext) {
         .expect("the cyan precision point should be pickable");
     assert_eq!(red_hit.point(), red_id);
     assert_eq!(cyan_hit.point(), cyan_id);
+}
+
+fn assert_orthographic_depth_independent_position(gpu: &GpuContext) {
+    let mut subject = OffscreenRenderer::new(gpu, roomy_limits());
+    let view_generation = ViewGenerationKey::new(ViewId::new(9), 1);
+    subject.apply(&RenderUpdate::Reset { view_generation });
+    subject.apply(&RenderUpdate::Upsert {
+        batch: batch(
+            view_generation,
+            1,
+            1,
+            WORLD_ORIGIN,
+            vec![point([1.0, -1.0, 0.0], RED, 901)],
+        ),
+    });
+    let frame = orthographic_frame(view_generation, 8.0);
+    let near = subject.render(&frame);
+    let near_pixel = near
+        .image
+        .find_pixel(is_red)
+        .expect("the near orthographic point should render");
+
+    subject.apply(&RenderUpdate::Upsert {
+        batch: batch(
+            view_generation,
+            1,
+            2,
+            WORLD_ORIGIN,
+            vec![point([1.0, 1.0, 0.0], CYAN, 902)],
+        ),
+    });
+    let far = subject.render(&frame);
+    let far_pixel = far
+        .image
+        .find_pixel(is_cyan)
+        .expect("the far orthographic point should render");
+
+    assert_eq!(near_pixel, far_pixel);
+}
+
+fn assert_orthographic_depth_and_pick(gpu: &GpuContext) {
+    let mut subject = OffscreenRenderer::new(gpu, roomy_limits());
+    let view_generation = ViewGenerationKey::new(ViewId::new(10), 1);
+    let near_id = point_id(1_001);
+    let far_id = point_id(1_002);
+    subject.apply(&RenderUpdate::Reset { view_generation });
+    subject.apply(&RenderUpdate::Upsert {
+        batch: batch(
+            view_generation,
+            1,
+            1,
+            WORLD_ORIGIN,
+            vec![point([0.0, -1.0, 0.0], RED, near_id.ordinal())],
+        ),
+    });
+    subject.apply(&RenderUpdate::Upsert {
+        batch: batch(
+            view_generation,
+            2,
+            1,
+            WORLD_ORIGIN,
+            vec![point([0.0, 1.0, 0.0], BLUE, far_id.ordinal())],
+        ),
+    });
+
+    let frame = orthographic_frame(view_generation, 18.0);
+    let rendered = subject.render(&frame);
+    assert_pixel(rendered.image.pixel(CENTER), RED);
+    let hit = subject
+        .pick_and_wait(&rendered.recorded_frame, CENTER)
+        .expect("the nearer orthographic point should be picked");
+    assert_hit(hit, view_generation, 1, 1, near_id);
 }
 
 fn assert_async_ticket_stability(gpu: &GpuContext) {
@@ -806,6 +888,27 @@ fn precision_frame(view_generation: ViewGenerationKey) -> Frame {
     Frame::new(view_generation, camera, Viewport::new(128, 128).unwrap())
         .expect("the precision frame should be valid")
         .with_style(style)
+}
+
+fn orthographic_frame(view_generation: ViewGenerationKey, point_size: f32) -> Frame {
+    let camera = Camera::orthographic(
+        [WORLD_ORIGIN[0], WORLD_ORIGIN[1] - 5.0, WORLD_ORIGIN[2]],
+        WORLD_ORIGIN,
+        [0.0, 0.0, 1.0],
+        4.0,
+        0.1,
+        100.0,
+    )
+    .expect("the orthographic acceptance camera should be valid");
+    let style = PointStyle::new(point_size, [1.0; 3], [0.0, 0.0, 0.0, 1.0])
+        .expect("the orthographic point style should be valid");
+    Frame::new(
+        view_generation,
+        camera,
+        Viewport::new(VIEWPORT[0], VIEWPORT[1]).unwrap(),
+    )
+    .expect("the orthographic acceptance frame should be valid")
+    .with_style(style)
 }
 
 fn translated_frame(view_generation: ViewGenerationKey, horizontal_offset: f64) -> Frame {

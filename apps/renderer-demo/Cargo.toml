@@ -9,19 +9,30 @@ repository.workspace = true
 publish = false
 
 [dependencies]
+foundation-runtime.workspace = true
 pollster.workspace = true
 point-contracts.workspace = true
 point-index.workspace = true
+point-source.workspace = true
 point-view.workspace = true
 render-protocol.workspace = true
 render-wgpu.workspace = true
+serde.workspace = true
+serde_json = { workspace = true, features = ["raw_value"] }
 source-las.workspace = true
-wgpu.workspace = true
+wgpu = { workspace = true, features = ["noop"] }
 winit.workspace = true
 
 [dev-dependencies]
+allocation-counter.workspace = true
+criterion.workspace = true
 las.workspace = true
 source-memory.workspace = true
+tempfile.workspace = true
+
+[[bench]]
+name = "viewing"
+harness = false
 
 [lints]
 workspace = true

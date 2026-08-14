@@ -31,7 +31,8 @@ limits, and recovery modes are frozen in the
 
 `source-copc`, constrained or persisted terrain, general LandXML, general
 application UI, bindings, and remote storage are not implemented modules in
-v0.9.
+v0.10. Display policy remains private to `renderer-demo`; v0.10 does not add a
+public display-policy crate.
 
 ## 1. point-contracts
 
@@ -99,16 +100,38 @@ let index = point_index::prepare(
     PrepareLimits::default(),
 ).blocking_wait()?;
 
+let inspection_index = point_index::prepare_with_recipe(
+    attributed_source,
+    inspection_target,
+    IndexRecipe::InspectionV1(attribute_ids),
+    PrepareLimits::default(),
+).blocking_wait()?;
+
+let measured_cold_index = point_index::prepare_fresh_with_recipe(
+    measured_source,
+    absent_target,
+    IndexRecipe::PositionOnlyV1,
+    PrepareLimits::default(),
+).blocking_wait()?;
+
 let source = index.source();
 let candidates = index.candidates(bounds, CandidateLimits::default())?;
 ~~~
 
-It does not own exact classification predicates, Revision overlays, camera LOD,
-renderer updates, or Workspace persistence.
+`prepare` is the unchanged position-only disk-v1 path.
+`prepare_with_recipe` can select the disk-v2 inspection profile for raw
+intensity, classification, and optional all-or-none RGB display samples. It
+does not own color mapping, exact classification predicates, Revision overlays,
+camera LOD, renderer updates, or Workspace persistence.
+`prepare_fresh_with_recipe` is the ownership-safe cold-build variant used by
+the index and viewing benchmarks and the field-corpus runner. It never consumes
+an existing resumable work family merely to discover that a measurement was
+not cold.
 
-**Independent proof:** memory-source oracles, persistence/resume tests, generated
-LAS/LAZ process smoke, a direct-use example, and the index benchmark run without
-a Workspace or GPU.
+**Independent proof:** memory-source oracles, frozen v1/v2 complete/work
+fixtures, cold/resumed/warm persistence reads, corruption/limit/incompatible-
+target tests, generated LAS/LAZ process smoke, a direct-use example, and the
+index benchmark run without a Workspace or GPU.
 
 ## 5. point-workspace
 
@@ -283,9 +306,25 @@ policy into foundation interfaces.
 The demo can use generated hierarchy data or Full-verify a supported LAS/LAZ,
 build/open its index, materialize demanded nodes, and apply atomic renderer
 updates. Its `--smoke` mode accepts one complete CPU-model Upsert without a GPU.
+The v0.10 private display policy preserves neutral color by default and can map
+exact sampled world Z or raw inspection Attributes deterministically without
+changing Point Identity, geometry, or Coverage. Point-index owns only the
+versioned bounded raw samples; renderer-demo owns presentation mapping.
+
+The host also owns perspective/orthographic orbit-pan-zoom controls, truthful
+demand/issued/resident and Sampled/Complete Coverage presentation, stable
+`PVIEW_*` diagnostics, and the permission-gated bounded corpus manifest and
+canonical no-replace Viewing Report. Its report does not claim production
+corpus completion, professional preference, terrain capacity, partner
+acceptance, or human-time savings.
 
 The bridge is private because a second application has not proven a reusable
 materialization seam.
+
+**Independent proof:** CPU mapping/grammar/state tests, generated LAS/LAZ
+process smoke, corpus manifest/report/publication fixtures, renderer-neutral
+planner tests/benchmark, and required local offscreen GPU tests cover the
+private composition without turning it into a public framework.
 
 ## 11. terrain-demo
 

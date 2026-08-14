@@ -8,17 +8,17 @@ dates. Candidate releases may be split, merged, reordered, renamed, or skipped
 as technical and customer evidence changes. Milestone outcomes and dependency
 order matter more than version numbers.
 
-There is currently no **Active** repository release. Punctra v0.1 through v0.9
-are Complete repository technical slices. The repository-only qualification
-defined by v0.8 is Complete: its bounded streaming LandXML 1.2 comparison,
-Complete-Run binding, canonical pass/fail evidence publication, and local
-verification are implemented, with the final inherited gates closed under
-v0.9. v0.9 is Complete and repository-verified only for the existing narrow
-[Trust and v1 Candidate
-design](docs/design/trust-v1-candidate-v0.9.md). Neither release status
-publishes v1 or satisfies external product evidence. v0.10 through v0.20
-remain uncommitted Candidate themes; each needs evidence and an accepted
-design before implementation.
+Among incomplete releases, only an **Active** release has accepted
+implementation scope. Punctra v0.1 through v0.9 are Complete repository
+technical slices. The v0.8 interoperability qualification and v0.9 trust
+candidate are repository-verified, while every external product gate remains
+outstanding. The Active
+[v0.10 Field Qualification and
+Professional Inspection View design](docs/design/field-inspection-view-v0.10.md),
+has a complete repository implementation without claiming that its field or
+adoption-publication gates are satisfied. v0.11 through v0.20 remain
+uncommitted Candidate themes; each needs evidence and an accepted design before
+implementation.
 
 ## Working direction
 
@@ -76,9 +76,9 @@ release can be Complete while every product gate remains outstanding.
 
 ## Scope and evidence checkpoint
 
-Status: **v0.8 repository interoperability qualification Complete; v0.9 Trust
-and v1 Candidate repository slice Complete and repository-verified; all
-external product evidence outstanding**
+Status: **v0.8 and v0.9 repository slices Complete; v0.10 professional
+inspection View Active with repository implementation present; field and
+adoption-publication evidence outstanding**
 
 The [implemented v0.5 design](docs/design/durable-document-core-v0.5.md) places
 exact classification selection, temporary Point Sets, sparse Revisions, and
@@ -98,26 +98,35 @@ Footprint, and exact LandXML/report targets reconcile without overwrite. Its
 generated tests and benchmark establish only those technical guarantees; they
 do not satisfy any external evidence item below.
 
-The repository-only v0.8 qualification is Complete and does not broaden that
-workflow. Its private verifier compares the exact v0.7 metric-metre LandXML
-TIN with a caller-returned LandXML 1.2 file under declared tolerances. The
-inherited Complete-Run binding, bounded streaming input-witness, and canonical
-evidence-publication gates were closed and verified under v0.9. Caller-
-declared application/version/settings labels are not proof that the
-application ran. The v0.7 journal and `audit.json` remain unchanged.
+The completed v0.8 slice did not broaden that workflow. Its private verifier
+compares the exact v0.7 metric-metre LandXML TIN with a caller-returned LandXML
+1.2 file under declared tolerances, with strict read-only Complete-Run binding,
+canonical no-replace evidence publication, and full-ceiling exact-byte
+streaming outside the Run root. Caller-declared application/version/settings
+labels are still not proof that the application ran. The v0.7 journal and
+`audit.json` remain unchanged.
 
-The implemented v0.9 slice adds no new feature family. It extends the inherited
+The completed v0.9 slice adds no new feature family. It extends the inherited
 Spatial Index v1 goldens across the remaining persisted-v1 compatibility
 surface, distinguishes authoritative, rebuildable, and temporary artifacts,
 hardens recovery and filesystem failure behavior, publishes the exact support
 matrix, reviews only exercised public interfaces, and reproduces local
-resource/performance gates. Index filesystem failures remain recoverable,
-bounded I/O diagnostics through the private Workflow seam. Ownership-safe
-initial work publication writes and syncs the complete header through an owned
-descriptor, publishes no-replace, verifies the bound file before append or
-resume, and retains valid owned incomplete work. It does not use
-check-then-unlink cleanup or delete racing replacements. The inherited
-partial-header gate is closed.
+resource/performance gates. Implemented hardening preserves Index filesystem
+failures as recoverable I/O diagnostics through the private Workflow seam and
+publishes a complete synced initial `.work` header from an owned temporary by
+a no-replace link. Unknown, racing, and caller-owned targets remain untouched.
+The repository fixture/recovery/support matrix, complete local candidate record,
+and independent review are recorded in the v0.9 release evidence.
+
+The accepted v0.10 design adds a separate repository View track. The private
+host now owns five deterministic display modes, perspective/orthographic
+navigation, truthful loading/Coverage state, structured diagnostics, and a
+permission-gated corpus runner. `point-index` retains position-only disk v1 and
+adds one bounded attributed disk-v2 recipe with immutable fixtures and explicit
+rebuild migration. CPU-authoritative Source, Query, Edit, terrain, QA, and
+export contracts are unchanged. This implementation is not evidence of a
+permitted production corpus or an observed workflow; those field gates remain
+outstanding and are reported separately.
 
 Useful evidence for proceeding includes:
 
@@ -135,16 +144,16 @@ If the evidence points elsewhere, revise this roadmap before building the next
 module. The detailed discovery signals and pivot criteria live in the
 [market-validation research](docs/research/saas-point-cloud-market-validation.md#customer-tests-and-kill-criteria).
 Production-data access, downstream observations, and paid-pilot evidence are
-long-lead work. Collection may begin during v0.9 without activating or silently
-expanding any later repository release.
+long-lead work. Collection may proceed during v0.10 without silently expanding
+any later repository release.
 
 ## Release sequence
 
-There is no Active repository release after the completed v0.9. Eleven
-provisional Candidate themes, v0.10 through v0.20, extend the path after v0.9.
-This is a planning sequence, not a
-requirement to publish every number or to publish v1 after v0.20. Candidates
-may be narrowed, split, merged, reordered, or stopped before becoming Active.
+There is one Active repository track after the completed v0.9. Ten provisional
+Candidate themes, v0.11 through v0.20,
+extend the path after v0.10. This is a planning sequence, not a requirement to
+publish every number or to publish v1 after v0.20. Candidates may be narrowed,
+split, merged, reordered, or stopped before becoming Active.
 
 ### v0.1 — Renderer foundation
 
@@ -413,27 +422,27 @@ tests are intentionally not relabeled as those facts.
 
 ### v0.8 — Design-partner MVP
 
-Status: **Complete — repository interoperability-qualification slice only;
-final repository gates delivered under v0.9; product MVP remains outstanding**
+Status: **Incomplete product alpha — bounded repository verifier/evidence path
+implemented by fold-forward work; external MVP evidence outstanding**
 
-The repository-only outcome fixed by the
-[v0.8 design](docs/design/design-partner-mvp-v0.8.md) is Complete. The private
-bounded semantic comparison core and explicitly non-evidence
-`compare-landxml` command remain available. The qualifying private
-`terrain-demo verify-round-trip` path:
+The accepted repository outcome was the exact bounded post-Run verifier and
+evidence contract in the [v0.8 design](docs/design/design-partner-mvp-v0.8.md).
+The implementation provides the private bounded semantic comparison core,
+explicitly non-evidence `compare-landxml` command, and the strict read-only
+`verify-round-trip` path. The latter:
 
-- requires a Complete, unchanged v0.7 Run and leaves its eight-frame journal,
+- require a Complete, unchanged v0.7 Run and leave its eight-frame journal,
   `terrain.xml`, and `audit.json` untouched;
-- accepts a caller-returned LandXML 1.2 file plus caller-declared downstream
+- accept a caller-returned LandXML 1.2 file plus caller-declared downstream
   application, version, settings, and horizontal/vertical metre tolerances;
-- parses the original and returned TINs under cumulative hard limits, rejecting
+- parse the original and returned TINs under cumulative hard limits, rejecting
   malformed, unsupported, partial, ambiguous, or raced input without recovery;
-- fails closed on unit drift, unmatched or multiply matched vertices, tolerance
+- fail closed on unit drift, unmatched or multiply matched vertices, tolerance
   drift, and any added, removed, duplicated, or changed face topology; and
-- creates or exactly reconciles a bounded canonical Round-Trip Evidence record
+- create or exactly reconcile a bounded canonical Round-Trip Evidence record
   outside the Run root without overwriting different data.
 
-This implemented scope does not automate or claim a run through Civil 3D, Bentley
+This inherited scope does not automate or claim a run through Civil 3D, Bentley
 software, or another named application. Repository-generated XML variants can
 complete technical tests only.
 
@@ -456,36 +465,40 @@ correctness tests.
 
 ### v0.9 — Trust and v1 candidate
 
-Status: **Complete — repository-verified trust/v1-candidate slice only;
-external product evidence outstanding**
+Status: **Incomplete alpha — repository compatibility, recovery, support
+matrix, and independent review complete; local candidate record carried
+forward**
 
-Implemented outcome: qualify the proven repository scope for a v1 compatibility and support
+Accepted outcome: qualify the proven scope for a v1 compatibility and support
 promise without adding another major feature family, as fixed by the
 [v0.9 design](docs/design/trust-v1-candidate-v0.9.md).
 
-Delivered scope:
+Committed scope:
 
-- closed the inherited v0.8 Complete-Run binding and canonical-evidence gates;
-- published a tested CRS, vertical-reference, unit, precision, format, platform,
+- close the inherited v0.8 Complete-Run binding and canonical-evidence gates
+  before making any v0.9 readiness claim;
+- publish a tested CRS, vertical-reference, unit, precision, format, platform,
   and device support matrix for the existing workflow;
-- retained the inherited Spatial Index v1 goldens and completed owner-local
+- retain the inherited Spatial Index v1 goldens and complete owner-local
   persisted-v1 compatibility/recovery fixtures without inventing a second
-  schema;
-- covered disk exhaustion, corrupt input, cancellation, device loss, and GPU-
-  unavailable behavior where the supported module or host seam owns it;
-- reproduced performance and resource ceilings on the declared local
-  workstation; and
-- reviewed exercised public interfaces, documentation, examples, upgrade notes,
+  schema or migration;
+- cover disk exhaustion, corrupt input, cancellation, device loss, and GPU-
+  unavailable behavior only where the supported module or host seam owns it;
+- reproduce performance and resource ceilings on declared local workstation
+  classes; and
+- review exercised public interfaces, documentation, examples, upgrade notes,
   and support playbooks.
 
-Index filesystem failures remain bounded `PWF_IO` diagnostics with
-conservative publication certainty and reconciliation through resume. Initial
-work publication writes and syncs the complete header through an owned
-descriptor, publishes no-replace, and verifies the bound file before append or
-resume. Valid owned incomplete work is retained; cleanup does not delete a
-racing replacement. This closes the inherited partial-header gate.
+Implemented trust hardening makes `terrain-demo` report Index filesystem
+failures as `PWF_IO` with bounded rendering of the operation, path, and
+operating-system error. Because the index error does not expose its publication
+boundary, certainty is conservatively `indeterminate(index-target)` and
+resuming performs the required reconciliation. The first `.work` header is
+written and synced under unique ownership, locked, then no-replace linked into
+place; unknown or racing paths are preserved and rejected without check-then-
+unlink cleanup.
 
-Repository evidence of readiness:
+Evidence of readiness:
 
 - no known release-blocking correctness or data-loss failure remains in the
   supported workflow;
@@ -493,9 +506,6 @@ Repository evidence of readiness:
   plus upgrade coverage when a second version actually exists;
 - resource ceilings and performance claims are reproducible locally; and
 - unsupported formats, transformations, and device capabilities fail clearly.
-
-Acceptance and local command evidence are recorded in the
-[v0.9.0 release record](docs/releases/v0.9.0.md).
 
 ## Standing boundaries for v0.10–v0.20
 
@@ -515,7 +525,10 @@ Acceptance and local command evidence are recorded in the
   Tests, generated data, free evaluations, and declarations do not become
   partner, paid-use, or accepted-deliverable evidence.
 - Every Candidate needs an accepted design with one coherent outcome, explicit
-  non-goals, local verification, and an activation gate before implementation.
+  non-goals, local verification, and a repository-activation decision before
+  implementation. External evidence gates may remain outstanding only when
+  they are named separately and no field, partner, or support maturity is
+  claimed from repository work.
 
 ## Open-source library adoption track
 
@@ -546,30 +559,38 @@ metric, and no benchmark or customer dataset is published without permission.
 
 ### v0.10 — Field qualification and professional inspection View
 
-Status: **Candidate**
+Status: **Active — repository implementation complete; field qualification and
+adoption publication outstanding**
 
-Candidate outcome: qualify Source opening and viewing on representative field
+Accepted outcome: qualify Source opening and viewing on representative field
 data while making known survey features clear enough for professional
-inspection.
+inspection, as fixed by the [v0.10
+design](docs/design/field-inspection-view-v0.10.md).
 
-Activation gate:
+Field-qualification gate:
 
 - obtain permission to inspect at least one licensed or sanitized production
   dataset and observe the workflow, workstation, failure mode, and current time
   baseline it represents.
 
-Likely scope:
+Repository implementation was explicitly activated on 2026-08-12 and now
+contains the accepted code, fixtures, local runner, tests, and documentation
+path. That does not satisfy the field-qualification gate above; field
+qualification and its exit evidence remain outstanding.
+
+Accepted scope:
 
 - RGB, intensity, classification, and elevation display modes;
 - bounded versioned display samples carrying only the Attributes needed by the
   selected modes;
-- evidence-selected point appearance, contrast, depth enhancement,
-  perspective/orthographic navigation, and explicit loading/LOD status;
+- fixed initial point appearance, perspective/orthographic navigation, and
+  explicit loading/LOD/Coverage status whose professional suitability still
+  requires field observation;
 - actionable Source, index, GPU, and resource-limit diagnostics; and
 - a reproducible corpus runner for open, index, first-use, navigation,
   residency, memory, and disk measurements.
 
-Candidate exit evidence:
+Field exit evidence:
 
 - a permitted corpus contains five projects from at least three unrelated
   firms, including at least two Sources above 500 million Points, without
@@ -580,6 +601,13 @@ Candidate exit evidence:
   and
 - observed users can locate known features without mistaking sampled display
   values for exact results.
+
+Open-source adoption state is recorded separately. The repository now has an
+accurate public capability description, a reproducible local corpus runner,
+and a five-minute first-LAS/LAZ guide. Repository topics/homepage publication,
+an approved screenshot or demonstration, and a permitted published benchmark
+remain outstanding. A local generated report is not a published production
+benchmark.
 
 ### v0.11 — Exact interactive review and ground correction
 
@@ -759,7 +787,8 @@ Likely scope:
 - the exact LandXML subset needed by the selected product/version/settings;
 - deterministic points, faces, units, references, precision, and only the
   v0.15 constraints required by that profile;
-- strict Complete-Run binding and no-replace canonical round-trip evidence; and
+- the already-closed generic Complete-Run binding and no-replace canonical
+  round-trip evidence specialized to the named product/version/settings; and
 - bounded semantic comparison of the exported and caller-returned deliverable.
 
 Candidate exit evidence:
@@ -916,13 +945,13 @@ v0.20 theme is by itself a reason to publish v1.
 |---|---|---|---|
 | Renderer and planning foundations | v0.1–v0.2 | Complete; repository-verified | Reusable bounded display engine and adaptive View planner. |
 | Source, document, terrain, and workflow baseline | v0.3–v0.7 | Complete; repository-verified only | Headless technical path from verified LAS/LAZ to one narrow resumable terrain deliverable; field and product evidence remains separate. |
-| Qualifier and trust baseline | v0.8–v0.9 | Complete; repository-verified only | Inherited qualification gates closed and the existing narrow repository compatibility surface hardened; all external product evidence remains outstanding. |
-| Field inspection and exact correction | v0.10–v0.11 | Candidate | Qualify representative Sources and connect a professional View to CPU-authoritative review and reversible correction. |
+| Qualifier and trust baseline | v0.8–v0.9 | Complete; repository-verified only | Close inherited qualification gates and harden only the existing narrow repository compatibility surface. |
+| Field inspection and exact correction | v0.10–v0.11 | v0.10 repository implementation complete but field/adoption exits outstanding; v0.11 Candidate | Qualify representative Sources and connect a professional View to CPU-authoritative review and reversible correction. |
 | Spatial contract and production terrain | v0.12–v0.13 | Candidate | Make reference semantics explicit before persisting a bounded production-scale Surface. |
 | Terrain acceptance tooling | v0.14–v0.15 | Candidate | Add exact QA and only the constraints earned by field evidence. |
 | Downstream and partner product | v0.16–v0.18 | Candidate | Qualify one named downstream profile, then package and validate one narrow partner workflow. |
 | Product v1 qualification | v0.19–v1.0 | Candidate | Freeze, support-qualify, soak, and explicitly decide whether the maintained scope deserves v1. |
-| Open-source library adoption | v0.10–v0.20 | Candidate, cross-cutting | Progress from an accurate public story and first-file quickstart to independent adoption, contributor readiness, stable integration guidance, and an evidence-backed funding path. |
+| Open-source library adoption | v0.10–v0.20 | Active with v0.10, cross-cutting | Progress from an accurate public story and first-file quickstart to independent adoption, contributor readiness, stable integration guidance, and an evidence-backed funding path. |
 
 ## Deferred until evidence changes
 

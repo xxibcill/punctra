@@ -5,16 +5,59 @@ use point_contracts::{PositionTransform, WorldBounds};
 use point_source::{AttributeSelection, ReadBudget, ReadRequest, Source, SourceSpan};
 
 use crate::{
-    IndexError, IndexLimit, PrepareDisposition, PrepareLimits, PrepareReport, PreparedIndex,
+    DisplayAttributes, DisplaySampleContract, IndexError, IndexLimit, IndexRecipe,
+    PrepareDisposition, PrepareLimits, PrepareReport, PreparedIndex,
     persistence::{
         WorkFile, finalize, open_complete, open_or_create_work, ordinal_priority, target_exists,
     },
-    read::IndexSample,
-    tree::{self, BLOCK_POINTS, MAX_NODE_SAMPLES, SAMPLE_BYTES},
+    read::{StoredSample, attributes_at},
+    tree::{self, BLOCK_POINTS, MAX_NODE_SAMPLES},
 };
 
-pub(crate) fn start(source: Source, target: PathBuf, limits: PrepareLimits) -> crate::IndexJob {
-    Job::spawn(move |control| run_with_allocation_probe(|| run(source, &target, limits, &control)))
+pub(crate) fn start(
+    source: Source,
+    target: PathBuf,
+    recipe: IndexRecipe,
+    limits: PrepareLimits,
+) -> crate::IndexJob {
+    Job::spawn(move |control| {
+        run_with_allocation_probe(|| {
+            run(
+                source,
+                &target,
+                recipe,
+                limits,
+                PreparationPolicy::ResumeOrOpen,
+                &control,
+            )
+        })
+    })
+}
+
+pub(crate) fn start_fresh(
+    source: Source,
+    target: PathBuf,
+    recipe: IndexRecipe,
+    limits: PrepareLimits,
+) -> crate::IndexJob {
+    Job::spawn(move |control| {
+        run_with_allocation_probe(|| {
+            run(
+                source,
+                &target,
+                recipe,
+                limits,
+                PreparationPolicy::Fresh,
+                &control,
+            )
+        })
+    })
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum PreparationPolicy {
+    ResumeOrOpen,
+    Fresh,
 }
 
 #[cfg(not(test))]
@@ -34,14 +77,36 @@ fn run_with_allocation_probe(
 fn run(
     source: Source,
     target: &std::path::Path,
+    recipe: IndexRecipe,
     limits: PrepareLimits,
+    policy: PreparationPolicy,
     control: &OperationControl,
 ) -> Result<PreparedIndex, IndexError> {
+    run_with_completion_hook(source, target, recipe, limits, policy, control, |_| Ok(()))
+}
+
+fn run_with_completion_hook(
+    source: Source,
+    target: &std::path::Path,
+    recipe: IndexRecipe,
+    limits: PrepareLimits,
+    policy: PreparationPolicy,
+    control: &OperationControl,
+    mut before_terminal_binding: impl FnMut(&std::path::Path) -> Result<(), IndexError>,
+) -> Result<PreparedIndex, IndexError> {
     control.check_cancelled()?;
+    let contract = recipe.resolve_contract(source.metadata())?;
     if target_exists(target)? {
-        let opened = open_complete(&source, target, limits, control)?;
+        if policy == PreparationPolicy::Fresh {
+            return Err(IndexError::IncompatibleArtifact {
+                reason: "fresh preparation target already exists",
+            });
+        }
+        let opened = open_complete(&source, target, recipe, limits, control)?;
         let artifact_bytes = opened.artifact_bytes;
         control.complete_progress(source.metadata().point_count())?;
+        before_terminal_binding(target)?;
+        opened.verify_path_binding()?;
         return Ok(publish(
             source,
             opened,
@@ -50,21 +115,39 @@ fn run(
                 durable_points_reused: 0,
                 source_points_read: 0,
                 artifact_bytes,
+                peak_temporary_disk_bytes: 0,
             },
         ));
     }
 
-    let mut work = open_or_create_work(&source, target, limits, control)?;
-    let durable_points = work.verified_durable_points()?;
+    let mut work = open_or_create_work(
+        &source,
+        target,
+        recipe,
+        contract,
+        limits,
+        policy == PreparationPolicy::ResumeOrOpen,
+        control,
+    )?;
+    let durable_points = work.durable_points();
     report_progress(control, durable_points, source.metadata().point_count())?;
-    work.verified_durable_points()?;
-    build_missing_blocks(&source, &mut work, limits, control)?;
-    let plan = tree::plan(work.leaves(), limits, control)?;
+    build_missing_blocks(&source, &mut work, contract, limits, control)?;
+    let plan = tree::plan(
+        work.leaves(),
+        work.leaf_capacity(),
+        recipe.sample_bytes(),
+        limits,
+        control,
+    )?;
     finalize(&source, target, &mut work, &plan, limits, control)?;
+    let peak_temporary_disk_bytes = work.peak_temporary_disk_bytes();
     drop(plan);
-    drop(work);
-    let opened = open_complete(&source, target, limits, control)?;
+    let opened = open_complete(&source, target, recipe, limits, control)?;
     control.complete_progress(source.metadata().point_count())?;
+    before_terminal_binding(work.path())?;
+    opened.verify_path_binding()?;
+    work.verify_path_binding()?;
+    drop(work);
     let disposition = if durable_points == 0 {
         PrepareDisposition::Built
     } else {
@@ -78,6 +161,7 @@ fn run(
             .point_count()
             .saturating_sub(durable_points),
         artifact_bytes: opened.artifact_bytes,
+        peak_temporary_disk_bytes,
     };
     Ok(publish(source, opened, report))
 }
@@ -99,27 +183,27 @@ fn publish(
 fn build_missing_blocks(
     source: &Source,
     work: &mut WorkFile,
+    contract: Option<DisplaySampleContract>,
     limits: PrepareLimits,
     control: &OperationControl,
 ) -> Result<(), IndexError> {
     let point_count = source.metadata().point_count();
-    while work.verified_durable_points()? < point_count {
+    while work.durable_points() < point_count {
         control.check_cancelled()?;
-        let first = work.verified_durable_points()?;
+        let first = work.durable_points();
         let count = point_count.saturating_sub(first).min(BLOCK_POINTS);
         let span = SourceSpan::new(first, count)?;
         let (bounds, samples) = read_block(
             source,
             span,
+            contract,
             limits,
             work.retained_metadata_bytes(),
             control,
         )?;
         control.check_cancelled()?;
         work.append_block(span, bounds, &samples, limits)?;
-        let durable_points = work.verified_durable_points()?;
-        report_progress(control, durable_points, point_count)?;
-        work.verified_durable_points()?;
+        report_progress(control, work.durable_points(), point_count)?;
     }
     Ok(())
 }
@@ -127,10 +211,11 @@ fn build_missing_blocks(
 fn read_block(
     source: &Source,
     span: SourceSpan,
+    contract: Option<DisplaySampleContract>,
     limits: PrepareLimits,
     retained_build_bytes: u64,
     control: &OperationControl,
-) -> Result<(WorldBounds, Vec<IndexSample>), IndexError> {
+) -> Result<(WorldBounds, Vec<StoredSample>), IndexError> {
     let budget = ReadBudget::new(
         limits.max_source_batch_points(),
         limits.max_source_batch_payload_bytes(),
@@ -138,15 +223,20 @@ fn read_block(
     .with_max_spans(1)
     .with_max_points(span.point_count())
     .with_max_adapter_working_bytes(limits.max_adapter_working_bytes());
+    let attributes = match contract {
+        Some(contract) => AttributeSelection::only(contract.selected_ids()),
+        None => AttributeSelection::only([]),
+    };
     let request = ReadRequest::all()
         .spans([span])
-        .attributes(AttributeSelection::only([]))
+        .attributes(attributes)
         .budget(budget);
     let mut batches = source.read(request)?;
     let mut accumulator = BlockAccumulator::new(
         source.metadata().position_transform(),
         span.point_count(),
         retained_build_bytes,
+        contract.is_some(),
         limits,
     )?;
     loop {
@@ -166,8 +256,11 @@ fn read_block(
                     if row % 4_096 == 0 {
                         control.check_cancelled()?;
                     }
-                    let row = u64::try_from(row).expect("Source batch rows fit u64");
-                    accumulator.push(first + row, ticks)?;
+                    let attributes = contract
+                        .map(|contract| attributes_at(batch.attributes(), row, contract))
+                        .transpose()?;
+                    let ordinal_row = u64::try_from(row).expect("Source batch rows fit u64");
+                    accumulator.push(first + ordinal_row, ticks, attributes)?;
                 }
             }
             Ok(None) => break,
@@ -181,7 +274,7 @@ fn read_block(
         || summary.provenance() != source.provenance()
         || summary.exact_count() != span.point_count()
         || summary.spans() != [span]
-        || !summary.attributes().is_empty()
+        || !selected_attributes_match(contract, summary.attributes())
     {
         return Err(IndexError::CorruptWork {
             reason: "Source block summary differs from its index request",
@@ -190,16 +283,31 @@ fn read_block(
     accumulator.finish()
 }
 
+fn selected_attributes_match(
+    contract: Option<DisplaySampleContract>,
+    actual: &[point_contracts::AttributeId],
+) -> bool {
+    match contract {
+        Some(contract) => actual.iter().copied().eq(contract.selected_ids()),
+        None => actual.is_empty(),
+    }
+}
+
 struct BlockAccumulator {
     transform: PositionTransform,
     expected_points: u64,
     accepted_points: u64,
     minimum: [f64; 3],
     maximum: [f64; 3],
-    selected: BinaryHeap<(u64, u64, [i64; 3])>,
+    selected: SampleHeap,
     selection_limit: usize,
     retained_build_bytes: u64,
     max_build_working_bytes: u64,
+}
+
+enum SampleHeap {
+    Position(BinaryHeap<(u64, u64, [i64; 3])>),
+    Attributed(BinaryHeap<(u64, u64, [i64; 3], DisplayAttributes)>),
 }
 
 impl BlockAccumulator {
@@ -207,13 +315,19 @@ impl BlockAccumulator {
         transform: PositionTransform,
         expected_points: u64,
         retained_build_bytes: u64,
+        attributed: bool,
         limits: PrepareLimits,
     ) -> Result<Self, IndexError> {
         let retained = expected_points.min(MAX_NODE_SAMPLES);
-        let heap_bytes = retained.saturating_mul(
-            u64::try_from(mem::size_of::<(u64, u64, [i64; 3])>()).unwrap_or(u64::MAX),
-        );
-        let output_bytes = retained.saturating_mul(SAMPLE_BYTES);
+        let heap_item_bytes = if attributed {
+            mem::size_of::<(u64, u64, [i64; 3], DisplayAttributes)>()
+        } else {
+            mem::size_of::<(u64, u64, [i64; 3])>()
+        };
+        let heap_bytes =
+            retained.saturating_mul(u64::try_from(heap_item_bytes).unwrap_or(u64::MAX));
+        let output_bytes = retained
+            .saturating_mul(u64::try_from(mem::size_of::<StoredSample>()).unwrap_or(u64::MAX));
         let required = retained_build_bytes
             .saturating_add(heap_bytes)
             .saturating_add(output_bytes);
@@ -229,19 +343,29 @@ impl BlockAccumulator {
             required: retained,
             allowed: usize::MAX as u64,
         })?;
-        let mut selected = BinaryHeap::new();
-        selected
-            .try_reserve_exact(capacity)
-            .map_err(|_| IndexError::ResourceLimit {
-                limit: IndexLimit::BuildWorkingBytes,
-                required: heap_bytes,
-                allowed: limits.max_build_working_bytes(),
-            })?;
-        let actual_heap_bytes = u64::try_from(selected.capacity())
-            .unwrap_or(u64::MAX)
-            .saturating_mul(
-                u64::try_from(mem::size_of::<(u64, u64, [i64; 3])>()).unwrap_or(u64::MAX),
-            );
+        let selected = if attributed {
+            let mut heap = BinaryHeap::new();
+            heap.try_reserve_exact(capacity)
+                .map_err(|_| IndexError::ResourceLimit {
+                    limit: IndexLimit::BuildWorkingBytes,
+                    required: heap_bytes,
+                    allowed: limits.max_build_working_bytes(),
+                })?;
+            SampleHeap::Attributed(heap)
+        } else {
+            let mut heap = BinaryHeap::new();
+            heap.try_reserve_exact(capacity)
+                .map_err(|_| IndexError::ResourceLimit {
+                    limit: IndexLimit::BuildWorkingBytes,
+                    required: heap_bytes,
+                    allowed: limits.max_build_working_bytes(),
+                })?;
+            SampleHeap::Position(heap)
+        };
+        let actual_heap_bytes = match &selected {
+            SampleHeap::Position(heap) => heap_capacity_bytes(heap),
+            SampleHeap::Attributed(heap) => heap_capacity_bytes(heap),
+        };
         let actual_required = retained_build_bytes
             .saturating_add(actual_heap_bytes)
             .saturating_add(output_bytes);
@@ -265,7 +389,12 @@ impl BlockAccumulator {
         })
     }
 
-    fn push(&mut self, ordinal: u64, ticks: [i64; 3]) -> Result<(), IndexError> {
+    fn push(
+        &mut self,
+        ordinal: u64,
+        ticks: [i64; 3],
+        attributes: Option<DisplayAttributes>,
+    ) -> Result<(), IndexError> {
         self.accepted_points =
             self.accepted_points
                 .checked_add(1)
@@ -287,17 +416,53 @@ impl BlockAccumulator {
             self.minimum[axis] = self.minimum[axis].min(coordinate);
             self.maximum[axis] = self.maximum[axis].max(coordinate);
         }
-        let value = (ordinal_priority(ordinal), ordinal, ticks);
-        if self.selected.len() < self.selection_limit {
-            self.selected.push(value);
-        } else if self.selected.peek().is_some_and(|largest| &value < largest) {
-            let _ = self.selected.pop();
-            self.selected.push(value);
+        match (&mut self.selected, attributes) {
+            (SampleHeap::Position(heap), None) => retain_selected(
+                heap,
+                (ordinal_priority(ordinal), ordinal, ticks),
+                self.selection_limit,
+            ),
+            (SampleHeap::Attributed(heap), Some(attributes)) => retain_selected(
+                heap,
+                (ordinal_priority(ordinal), ordinal, ticks, attributes),
+                self.selection_limit,
+            ),
+            (SampleHeap::Position(heap), Some(attributes)) if heap.is_empty() => {
+                let capacity = heap.capacity();
+                let mut attributed_heap = BinaryHeap::new();
+                attributed_heap.try_reserve_exact(capacity).map_err(|_| {
+                    IndexError::ResourceLimit {
+                        limit: IndexLimit::BuildWorkingBytes,
+                        required:
+                            u64::try_from(capacity).unwrap_or(u64::MAX).saturating_mul(
+                                u64::try_from(mem::size_of::<(
+                                    u64,
+                                    u64,
+                                    [i64; 3],
+                                    DisplayAttributes,
+                                )>())
+                                .unwrap_or(u64::MAX),
+                            ),
+                        allowed: self.max_build_working_bytes,
+                    }
+                })?;
+                retain_selected(
+                    &mut attributed_heap,
+                    (ordinal_priority(ordinal), ordinal, ticks, attributes),
+                    self.selection_limit,
+                );
+                self.selected = SampleHeap::Attributed(attributed_heap);
+            }
+            _ => {
+                return Err(IndexError::CorruptWork {
+                    reason: "Source block mixed attributed and position-only rows",
+                });
+            }
         }
         Ok(())
     }
 
-    fn finish(self) -> Result<(WorldBounds, Vec<IndexSample>), IndexError> {
+    fn finish(self) -> Result<(WorldBounds, Vec<StoredSample>), IndexError> {
         if self.accepted_points != self.expected_points {
             return Err(IndexError::CorruptWork {
                 reason: "Source block ended before every Point was accepted",
@@ -315,17 +480,18 @@ impl BlockAccumulator {
                 limit: IndexLimit::BuildWorkingBytes,
                 required: u64::try_from(selection_limit)
                     .unwrap_or(u64::MAX)
-                    .saturating_mul(SAMPLE_BYTES),
+                    .saturating_mul(
+                        u64::try_from(mem::size_of::<StoredSample>()).unwrap_or(u64::MAX),
+                    ),
                 allowed: self.max_build_working_bytes,
             })?;
-        let heap_bytes = u64::try_from(self.selected.capacity())
-            .unwrap_or(u64::MAX)
-            .saturating_mul(
-                u64::try_from(mem::size_of::<(u64, u64, [i64; 3])>()).unwrap_or(u64::MAX),
-            );
+        let heap_bytes = match &self.selected {
+            SampleHeap::Position(heap) => heap_capacity_bytes(heap),
+            SampleHeap::Attributed(heap) => heap_capacity_bytes(heap),
+        };
         let output_bytes = u64::try_from(samples.capacity())
             .unwrap_or(u64::MAX)
-            .saturating_mul(SAMPLE_BYTES);
+            .saturating_mul(u64::try_from(mem::size_of::<StoredSample>()).unwrap_or(u64::MAX));
         let required = self
             .retained_build_bytes
             .saturating_add(heap_bytes)
@@ -337,14 +503,35 @@ impl BlockAccumulator {
                 allowed: self.max_build_working_bytes,
             });
         }
-        samples.extend(
-            self.selected
-                .into_iter()
-                .map(|(_, ordinal, ticks)| IndexSample::new(ordinal, ticks)),
-        );
+        match self.selected {
+            SampleHeap::Position(heap) => samples.extend(
+                heap.into_iter()
+                    .map(|(_, ordinal, ticks)| StoredSample::position_only(ordinal, ticks)),
+            ),
+            SampleHeap::Attributed(heap) => {
+                samples.extend(heap.into_iter().map(|(_, ordinal, ticks, attributes)| {
+                    StoredSample::attributed(ordinal, ticks, attributes)
+                }));
+            }
+        }
         samples.sort_unstable_by_key(|sample| sample.ordinal());
         Ok((bounds, samples))
     }
+}
+
+fn retain_selected<T: Ord>(heap: &mut BinaryHeap<T>, value: T, capacity: usize) {
+    if heap.len() < capacity {
+        heap.push(value);
+    } else if heap.peek().is_some_and(|largest| &value < largest) {
+        let _ = heap.pop();
+        heap.push(value);
+    }
+}
+
+fn heap_capacity_bytes<T>(heap: &BinaryHeap<T>) -> u64 {
+    u64::try_from(heap.capacity())
+        .unwrap_or(u64::MAX)
+        .saturating_mul(u64::try_from(mem::size_of::<T>()).unwrap_or(u64::MAX))
 }
 
 fn report_progress(
@@ -409,6 +596,111 @@ mod allocation_tests {
 
     const TEST_POINTS: usize = 131_073;
     const MAX_PREPARE_PEAK_HEAP_BYTES: u64 = 64 * 1024 * 1024;
+
+    #[test]
+    fn fresh_prepare_rejects_a_work_path_replaced_before_acknowledgement() {
+        let source = empty_source();
+        let directory = temporary_directory();
+        std::fs::create_dir(&directory).expect("create binding-test directory");
+        let target = directory.join("fresh.pidx");
+        let moved_work = directory.join("owned-work-moved-aside");
+        let sentinel = b"caller replacement installed before acknowledgement";
+        let control = OperationControl::new();
+
+        let result = run_with_completion_hook(
+            source,
+            &target,
+            IndexRecipe::PositionOnlyV1,
+            PrepareLimits::default(),
+            PreparationPolicy::Fresh,
+            &control,
+            |work_path| {
+                std::fs::rename(work_path, &moved_work)
+                    .expect("move the open owned work file aside");
+                std::fs::write(work_path, sentinel).expect("install caller replacement");
+                Ok(())
+            },
+        );
+        let Err(error) = result else {
+            panic!("fresh preparation must reject a replaced work path")
+        };
+
+        assert!(matches!(
+            error,
+            IndexError::IncompatibleWork {
+                reason: "work path changed before preparation acknowledgement"
+            }
+        ));
+        let work_path = target.with_extension("pidx.work");
+        assert_eq!(
+            std::fs::read(&work_path).expect("caller replacement remains"),
+            sentinel
+        );
+        assert_eq!(
+            std::fs::metadata(&moved_work)
+                .expect("owned work inode remains")
+                .len(),
+            200
+        );
+        std::fs::remove_dir_all(&directory).expect("remove binding-test directory");
+    }
+
+    #[test]
+    fn warm_prepare_rejects_an_artifact_replaced_before_acknowledgement() {
+        let source = empty_source();
+        let directory = temporary_directory();
+        std::fs::create_dir(&directory).expect("create binding-test directory");
+        let target = directory.join("warm.pidx");
+        let moved_target = directory.join("opened-artifact-moved-aside");
+        crate::prepare(source.clone(), &target, PrepareLimits::default())
+            .blocking_wait()
+            .expect("fixture index builds");
+        let artifact_bytes = std::fs::metadata(&target)
+            .expect("inspect fixture artifact")
+            .len();
+        let control = OperationControl::new();
+
+        let result = run_with_completion_hook(
+            source,
+            &target,
+            IndexRecipe::PositionOnlyV1,
+            PrepareLimits::default(),
+            PreparationPolicy::ResumeOrOpen,
+            &control,
+            |_| {
+                std::fs::rename(&target, &moved_target).expect("move the verified artifact aside");
+                let replacement =
+                    std::fs::File::create(&target).expect("create same-length caller replacement");
+                replacement
+                    .set_len(artifact_bytes)
+                    .expect("size caller replacement");
+                Ok(())
+            },
+        );
+        let Err(error) = result else {
+            panic!("warm preparation must reject a replaced artifact path")
+        };
+
+        assert!(matches!(
+            error,
+            IndexError::CorruptArtifact {
+                reason: "artifact path changed before preparation acknowledgement"
+            }
+        ));
+        assert_eq!(
+            std::fs::metadata(&target)
+                .expect("caller replacement remains")
+                .len(),
+            artifact_bytes
+        );
+        assert_eq!(
+            std::fs::metadata(&moved_target)
+                .expect("verified artifact remains")
+                .len(),
+            artifact_bytes
+        );
+        std::fs::remove_dir_all(&directory).expect("remove binding-test directory");
+    }
 
     #[test]
     fn cold_and_warm_public_prepare_respect_measured_worker_peak_heap() {
@@ -481,6 +773,19 @@ mod allocation_tests {
         source_memory::open(input)
             .blocking_wait()
             .expect("allocation-test Source opens")
+    }
+
+    fn empty_source() -> Source {
+        let input = MemorySource::from_columns(
+            PositionTransform::new([0.0; 3], [1.0; 3]).expect("identity transform is valid"),
+            CoordinateReference::Unknown,
+            Vec::new(),
+            AttributeColumns::empty(0),
+        )
+        .expect("empty Source fixture is valid");
+        source_memory::open(input)
+            .blocking_wait()
+            .expect("empty Source fixture opens")
     }
 
     fn temporary_directory() -> PathBuf {

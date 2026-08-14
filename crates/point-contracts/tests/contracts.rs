@@ -265,7 +265,6 @@ fn metadata_and_provenance_round_trip_without_guessing() {
     assert_eq!(metadata.world_bounds(), Some(bounds));
     assert_eq!(provenance.source(), SourceId::new([7; 32]));
     assert_eq!(provenance.content_hash(), ContentHash::new([8; 32]));
-
     let metadata_json = serde_json::to_string(&metadata).unwrap();
     let provenance_json = serde_json::to_string(&provenance).unwrap();
     assert_eq!(

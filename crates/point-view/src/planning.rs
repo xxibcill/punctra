@@ -2,7 +2,7 @@ use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, BinaryHeap};
 
 use glam::DVec3;
-use render_protocol::{Camera, Viewport};
+use render_protocol::{Camera, CameraProjection, Viewport};
 
 use crate::{
     AvailableNode, AvailableNodes, AxisAlignedBox, NodeKey, NodeRequest, NodeStatus, PlanError,
@@ -16,7 +16,7 @@ pub(super) fn plan(
     available_nodes: AvailableNodes<'_>,
     budget: PlanningBudget,
 ) -> Result<ViewPlan, PlanError> {
-    let projection = Projection::new(camera, viewport);
+    let projection = ProjectedCamera::new(camera, viewport);
     let hierarchy = ProjectedHierarchy::new(available_nodes.nodes, &projection)?;
     let previous_refinements = if planner.active_generation == Some(available_nodes.view_generation)
     {
@@ -63,7 +63,7 @@ struct ProjectedHierarchy {
 }
 
 impl ProjectedHierarchy {
-    fn new(input_nodes: &[AvailableNode], projection: &Projection) -> Result<Self, PlanError> {
+    fn new(input_nodes: &[AvailableNode], projection: &ProjectedCamera) -> Result<Self, PlanError> {
         let mut nodes = input_nodes.to_vec();
         nodes.sort_by_key(|node| node.key);
         validate_unique_keys(&nodes)?;
@@ -208,42 +208,59 @@ struct NodeProjection {
 }
 
 #[derive(Clone, Copy, Debug)]
-struct Projection {
+struct ProjectedCamera {
     eye: DVec3,
     forward: DVec3,
-    pixel_scale: f64,
-    near_distance: f64,
+    screen_error_projection: ScreenErrorProjection,
     frustum: Frustum,
 }
 
-impl Projection {
+impl ProjectedCamera {
     fn new(camera: &Camera, viewport: Viewport) -> Self {
-        let eye = DVec3::from_array(camera.eye());
-        let world_basis = camera.world_basis();
-        let forward = DVec3::from_array(world_basis.forward());
-        let right = DVec3::from_array(world_basis.right());
-        let up = DVec3::from_array(world_basis.up());
-        let half_vertical_tangent =
-            (f64::from(camera.vertical_field_of_view_radians()) * 0.5).tan();
+        let geometry = ViewGeometry::new(camera);
         let aspect_ratio = f64::from(viewport.aspect_ratio());
         let near_distance = f64::from(camera.near_distance());
         let far_distance = f64::from(camera.far_distance());
-        let pixel_scale = f64::from(viewport.height()) / (2.0 * half_vertical_tangent);
-        let frustum = Frustum::new(
-            eye,
-            forward,
-            right,
-            up,
-            half_vertical_tangent,
-            aspect_ratio,
-            near_distance,
-            far_distance,
-        );
+        let (screen_error_projection, frustum) = match camera.projection() {
+            CameraProjection::Perspective {
+                vertical_field_of_view_radians,
+            } => {
+                let half_vertical_tangent = (f64::from(vertical_field_of_view_radians) * 0.5).tan();
+                let pixel_scale = f64::from(viewport.height()) / (2.0 * half_vertical_tangent);
+                (
+                    ScreenErrorProjection::Perspective {
+                        pixel_scale,
+                        near_distance,
+                    },
+                    Frustum::perspective(
+                        geometry,
+                        half_vertical_tangent,
+                        aspect_ratio,
+                        near_distance,
+                        far_distance,
+                    ),
+                )
+            }
+            CameraProjection::Orthographic {
+                vertical_world_height,
+            } => (
+                ScreenErrorProjection::Orthographic {
+                    viewport_height: f64::from(viewport.height()),
+                    vertical_world_height,
+                },
+                Frustum::orthographic(
+                    geometry,
+                    vertical_world_height * 0.5,
+                    aspect_ratio,
+                    near_distance,
+                    far_distance,
+                ),
+            ),
+        };
         Self {
-            eye,
-            forward,
-            pixel_scale,
-            near_distance,
+            eye: geometry.eye,
+            forward: geometry.forward,
+            screen_error_projection,
             frustum,
         }
     }
@@ -256,6 +273,24 @@ impl Projection {
     }
 
     fn screen_error(&self, node: &AvailableNode) -> f64 {
+        match self.screen_error_projection {
+            ScreenErrorProjection::Perspective {
+                pixel_scale,
+                near_distance,
+            } => self.perspective_screen_error(node, pixel_scale, near_distance),
+            ScreenErrorProjection::Orthographic {
+                viewport_height,
+                vertical_world_height,
+            } => multiply_divide(node.geometric_error, viewport_height, vertical_world_height),
+        }
+    }
+
+    fn perspective_screen_error(
+        &self,
+        node: &AvailableNode,
+        pixel_scale: f64,
+        near_distance: f64,
+    ) -> f64 {
         let min = node.bounds.min;
         let max = node.bounds.max;
         let center = DVec3::new(
@@ -270,8 +305,40 @@ impl Projection {
         );
         let center_depth = self.forward.dot(center - self.eye);
         let depth_radius = self.forward.abs().dot(half_extent);
-        let nearest_depth = (center_depth - depth_radius).max(self.near_distance);
-        multiply_divide(node.geometric_error, self.pixel_scale, nearest_depth)
+        let nearest_depth = (center_depth - depth_radius).max(near_distance);
+        multiply_divide(node.geometric_error, pixel_scale, nearest_depth)
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+enum ScreenErrorProjection {
+    Perspective {
+        pixel_scale: f64,
+        near_distance: f64,
+    },
+    Orthographic {
+        viewport_height: f64,
+        vertical_world_height: f64,
+    },
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ViewGeometry {
+    eye: DVec3,
+    forward: DVec3,
+    right: DVec3,
+    up: DVec3,
+}
+
+impl ViewGeometry {
+    fn new(camera: &Camera) -> Self {
+        let basis = camera.world_basis();
+        Self {
+            eye: DVec3::from_array(camera.eye()),
+            forward: DVec3::from_array(basis.forward()),
+            right: DVec3::from_array(basis.right()),
+            up: DVec3::from_array(basis.up()),
+        }
     }
 }
 
@@ -357,12 +424,8 @@ struct Frustum {
 }
 
 impl Frustum {
-    #[allow(clippy::too_many_arguments)]
-    fn new(
-        eye: DVec3,
-        forward: DVec3,
-        right: DVec3,
-        up: DVec3,
+    fn perspective(
+        geometry: ViewGeometry,
         half_vertical_tangent: f64,
         aspect_ratio: f64,
         near_distance: f64,
@@ -371,12 +434,48 @@ impl Frustum {
         let half_horizontal_tangent = half_vertical_tangent * aspect_ratio;
         Self {
             planes: [
-                Plane::from_camera(forward, eye, -near_distance),
-                Plane::from_camera(-forward, eye, far_distance),
-                Plane::from_camera(forward * half_horizontal_tangent + right, eye, 0.0),
-                Plane::from_camera(forward * half_horizontal_tangent - right, eye, 0.0),
-                Plane::from_camera(forward * half_vertical_tangent + up, eye, 0.0),
-                Plane::from_camera(forward * half_vertical_tangent - up, eye, 0.0),
+                Plane::from_camera(geometry.forward, geometry.eye, -near_distance),
+                Plane::from_camera(-geometry.forward, geometry.eye, far_distance),
+                Plane::from_camera(
+                    geometry.forward * half_horizontal_tangent + geometry.right,
+                    geometry.eye,
+                    0.0,
+                ),
+                Plane::from_camera(
+                    geometry.forward * half_horizontal_tangent - geometry.right,
+                    geometry.eye,
+                    0.0,
+                ),
+                Plane::from_camera(
+                    geometry.forward * half_vertical_tangent + geometry.up,
+                    geometry.eye,
+                    0.0,
+                ),
+                Plane::from_camera(
+                    geometry.forward * half_vertical_tangent - geometry.up,
+                    geometry.eye,
+                    0.0,
+                ),
+            ],
+        }
+    }
+
+    fn orthographic(
+        geometry: ViewGeometry,
+        half_vertical_world_height: f64,
+        aspect_ratio: f64,
+        near_distance: f64,
+        far_distance: f64,
+    ) -> Self {
+        let half_horizontal_world_width = half_vertical_world_height * aspect_ratio;
+        Self {
+            planes: [
+                Plane::from_camera(geometry.forward, geometry.eye, -near_distance),
+                Plane::from_camera(-geometry.forward, geometry.eye, far_distance),
+                Plane::from_camera(geometry.right, geometry.eye, half_horizontal_world_width),
+                Plane::from_camera(-geometry.right, geometry.eye, half_horizontal_world_width),
+                Plane::from_camera(geometry.up, geometry.eye, half_vertical_world_height),
+                Plane::from_camera(-geometry.up, geometry.eye, half_vertical_world_height),
             ],
         }
     }

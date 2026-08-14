@@ -4,6 +4,13 @@
 //! submission schedule. The renderer owns generation-safe point residency and
 //! records draw and pick commands into the host's encoder.
 //!
+//! # Interface classification
+//!
+//! The documented renderer configuration, frame, update, picking, report, and
+//! error APIs are a **v1-candidate foundation surface**. Shader layout,
+//! allocation strategy, and submission policy are not interfaces. This records
+//! v0.9 review intent, not a `1.0.0` or production-support claim.
+//!
 //! # Example
 //!
 //! ```no_run
@@ -68,5 +75,7 @@ mod targets;
 
 pub use frame::{Frame, FrameError, PointStyle};
 pub use pick::{PickError, PickHit, PickPoll, PickRequest, PickTicket};
-pub use render_protocol::{Camera, CameraBasis, CameraError, Viewport, ViewportError};
+pub use render_protocol::{
+    Camera, CameraBasis, CameraError, CameraProjection, Viewport, ViewportError,
+};
 pub use renderer::{FrameReport, RecordedFrame, RendererConfig, RendererError, WgpuRenderer};

@@ -113,6 +113,15 @@ support. COPC and remote reads remain deferred.
 `PrepareLimits`. It returns a complete `PreparedIndex` by opening a compatible
 artifact or deterministically building/resuming one. A complete artifact is
 checksummed, Source-bound, synced, and published without replacement.
+`prepare_with_recipe` adds one explicit recipe choice. `PositionOnlyV1` is the
+unchanged v1 path. `InspectionV1` validates and retains only `U16` intensity,
+`U8` classification, and optional all-or-none `U16` RGB values.
+`prepare_fresh_with_recipe` applies the same recipe contract only when both
+the complete and work paths are absent. It rejects and preserves existing or
+racing paths instead of opening or resuming them, so corpus and benchmark cold
+build measurements cannot silently include warm-open or recovery work. A
+successful build retains its recognized rebuildable work cache rather than
+risk deleting a caller replacement through a non-atomic pathname cleanup.
 
 The v0.4 persisted recipe fixes Source blocks at no more than 65,536 Points,
 uses a longest-centroid-extent median-split binary BVH with nonzero root-first
@@ -121,19 +130,27 @@ ticks)` samples per internal node. Disk version 1 stores multibyte integers and
 persisted `f64` bit patterns little-endian; magic values, Source identities,
 and BLAKE3 checksums retain their declared byte order.
 
+Disk/recipe version 2 retains the hierarchy and bottom-k ordinals, adds a
+checksummed 32-byte Attribute-profile header extension, and stores exact
+42-byte inspection samples. Internal reads require no Source replay; leaf
+reads project the bound Attributes in one contiguous Source span. V1 and v2
+targets remain mutually incompatible and are never automatically replaced.
+
 `PreparedIndex` retains the verified Source and exposes it by shared reference.
 Its candidate plan is a complete, sorted, disjoint set of Source spans that may
 contain false positives but must not omit any exact world-box match.
 
-Internal-node samples provide bounded display Coverage only. Complete leaf
-reads come from the retained Source. Neither samples nor hierarchy membership
-define Point Identity or exact Workspace Query results.
+Internal-node samples and optional raw display Attributes provide bounded
+display Coverage only. Complete leaf reads come from the retained Source.
+Neither samples nor hierarchy membership define Point Identity or exact
+Workspace Query results.
 
 Opening verifies deterministic bottom-k sample ordinals against descendant
 Source spans without rereading Source Points. Complete index artifacts are
 trusted local rebuildable caches: their unkeyed BLAKE3 checksums detect
 accidental corruption and concurrent mutation, not adversarial rewriting.
-Untrusted artifacts are discarded and rebuilt from the verified Source.
+Incompatible or corrupt targets are preserved and rejected. The caller may
+move/delete the rebuildable cache family and rebuild from the verified Source.
 
 ## Workspace contract
 
@@ -381,7 +398,7 @@ only stable `ensured_exact` semantics.
 ~~~text
 run-root/
   run.pwf       # checksummed append-only journal
-  run.lock      # exclusive process lock
+  run.lock      # workflow-exclusive / qualification-shared process lock
   terrain.xml   # exactly ensured LandXML target
   audit.json    # exactly ensured canonical report
 ~~~
@@ -456,6 +473,29 @@ conditional safe retirements. It performs no I/O.
 submission or device polling. A `RecordedFrame` pins exactly the displayed
 resources used by asynchronous picking. Picks are provisional Point hints.
 
+`CameraProjection` is explicit. Perspective uses vertical field of view;
+orthographic uses vertical world height. Orthographic frustum and
+screen-space-error calculations are depth-independent, while both modes retain
+the same large-world origin, near/far, depth, and Point-identity contracts.
+
+The private `renderer-demo` maps exactly one host-selected mode. Neutral and
+elevation require a position-only disk-v1 index; RGB, intensity, and
+classification require the matching disk-v2 inspection contract. RGB absence
+is an explicit invalid request, not a fallback. Every mapping changes only
+RGBA8: identity, position, geometry, generation/version, and Coverage remain
+equal across modes.
+
+The host presents demanded nodes, load candidates, actually issued work,
+retention/retirement, queue/staging, requested/resident nodes, and Sampled
+versus Complete resident Coverage as separate facts. Pausing issues no new
+requests. No loading or resident state is called Query completion.
+
+The local corpus manifest is bounded, rejects unknown fields, and requires
+explicit inspection and measurement permission per entry. The no-replace
+Viewing Report records only observed viewing operations, effective limits, and
+explicit false nonclaims. It omits private paths and project/firm identifiers;
+Source identity and machine facts remain caller-controlled sensitive data.
+
 ## Jobs, cancellation, and progress
 
 Runtime-neutral `Job<T, E>` values implement both `Future` and
@@ -498,6 +538,8 @@ publication. Separate ledgers cover:
 - qualification XML input, node, text/attribute, semantic-model, comparison,
   evidence output/staging/buffer, and retained-witness bytes.
 
+Round-Trip qualification separately accounts parser file/nodes/text,
+Point/face/comparison, evidence output, and publication-buffer ceilings.
 Temporary and durable storage are distinct. Overlapping old/new allocations
 are charged together. An indivisible block that cannot fit fails explicitly.
 
@@ -516,9 +558,20 @@ Run/Source/Workspace/Operation/Revision identity, and exactly one recovery
 action. The CLI prints the same bounded structured information and does not
 automatically retry uncertain mutation or replace a conflicting target.
 
+The private LandXML comparator retains the `PRT_INVALID_INPUT`,
+`PRT_RESOURCE_LIMIT`, and `PRT_SEMANTIC_MISMATCH` families. Run-bound semantic
+evidence adds stable unit, Point-count, unmatched/ambiguous vertex, tolerance,
+and topology reason codes without treating caller declarations as observed
+application execution.
+
+`renderer-demo` failures expose one stable `PVIEW_*` code, one owning phase,
+bounded detail, and exactly one safe recovery action. Source, index,
+resource/cancellation, GPU, I/O, request, and internal failures remain distinct.
+
 ## Deferred contracts
 
 Breaklines, constrained or persisted terrain, general Attribute Point-row
-streams, general LandXML/import, persisted migration, multi-Source Workspaces,
-remote storage, and screen projection require later accepted designs. Their
-vocabulary in the roadmap is not a current public API promise.
+streams, general LandXML/import, migration beyond explicit index rebuild,
+multi-Source Workspaces, remote storage, and exact screen selection require
+later accepted designs. Their vocabulary in the roadmap is not a current
+public API promise.

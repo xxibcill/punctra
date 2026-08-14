@@ -19,12 +19,19 @@ ROADMAP.md
 apps/
   renderer-demo/
     src/
+      lib.rs
       main.rs
+      corpus.rs
+      diagnostic.rs
+      display.rs
       orbit_camera.rs
       real_cloud.rs
       scene.rs
       synthetic.rs
+    benches/
+      viewing.rs
     tests/
+      display_gpu.rs
       headless_smoke.rs
       planner.rs
 
@@ -35,6 +42,7 @@ apps/
       bounded_diagnostic.rs
       cli.rs
       diagnostic.rs
+      evidence.rs
       journal.rs
       publication.rs
       report.rs
@@ -111,9 +119,10 @@ crates/
     benches/index.rs
     tests/
       candidates.rs
+      fixtures/v1/
+      fixtures/v2/
       interface.rs
       persistence.rs
-      fixtures/v1/
       support/mod.rs
 
   point-workspace/
@@ -226,7 +235,7 @@ point-terrain -> point-workspace + point-contracts + foundation-runtime
 render-protocol -> point-contracts
 point-view -> render-protocol
 render-wgpu -> render-protocol + point-contracts
-renderer-demo -> source-las + point-index + point-view + render-protocol + render-wgpu
+renderer-demo -> source-las + point-source + point-index + point-view + render-protocol + render-wgpu + point-contracts + foundation-runtime
 terrain-demo -> source-las + point-source + point-index + point-workspace + point-terrain + point-contracts + foundation-runtime
 ~~~
 
@@ -272,11 +281,18 @@ cargo bench -p point-terrain --bench terrain
 cargo test -p terrain-demo --test workflow
 cargo test -p terrain-demo --test process
 cargo bench -p terrain-demo --bench journal
+cargo bench -p renderer-demo --bench viewing
 
 cargo bench -p point-view --bench planner
 cargo test -p renderer-demo --test headless_smoke
+PUNCTRA_REQUIRE_GPU=1 cargo test -p renderer-demo --test headless_smoke \
+  corpus_success_binds_trace_inputs_and_separate_resource_measurements -- --exact
 PUNCTRA_REQUIRE_GPU=1 cargo test -p render-wgpu --test offscreen
 PUNCTRA_REQUIRE_GPU=1 cargo test -p renderer-demo --test planner
+PUNCTRA_REQUIRE_GPU=1 cargo test -p renderer-demo --test display_gpu
+test -f docs/guides/first-las-laz.md
+jq -e . docs/guides/field-corpus.example.json >/dev/null
+git diff --check
 ~~~
 
 The Workspace direct example proves the one-deep-crate lifecycle without a GUI:
@@ -284,8 +300,10 @@ LAS/LAZ open, index prepare/open, Workspace create, exact classification
 selection, classification commit, immediate-head Revert, and reopen.
 The terrain example proves the public in-memory Source-to-LandXML composition.
 The `terrain-demo` workflow and process tests prove the generated LAS/LAZ
-durable start/resume/inspect composition; its journal benchmark measures five
-generated restart modes.
+durable start/resume/inspect composition plus strict post-Run
+`verify-round-trip` qualification. Owner-local pass and topology-failure
+fixtures pin canonical Round-Trip Evidence v1 bytes; the journal benchmark
+measures five generated restart modes.
 
 ## Private depth inside point-workspace
 
@@ -341,14 +359,20 @@ exporter registry is public.
 
 ## Persisted directories
 
-Index, Workspace, caller-owned Export storage, and the application Run root are
-separate:
+Position-only and attributed indexes, Workspace, caller-owned Export storage,
+and the application Run root are separate:
 
 ~~~text
 survey.laz                    # immutable Source, host-owned
-survey.laz.pidx               # complete rebuildable point-index artifact
-survey.laz.pidx.work          # disposable/resumable index sidecar when present
-survey.laz.pidx.samples       # disposable index construction sidecar when present
+survey.position-v1.pidx       # complete rebuildable position-only artifact
+survey.position-v1.pidx.work  # retained rebuildable/resumable v1 cache when present
+survey.position-v1.pidx.samples.<pid>.<sequence>
+                              # owned disposable v1 construction temporary
+
+survey.inspection-v2.pidx       # complete rebuildable attributed artifact
+survey.inspection-v2.pidx.work  # retained rebuildable/resumable v2 cache when present
+survey.inspection-v2.pidx.samples.<pid>.<sequence>
+                              # owned disposable v2 construction temporary
 
 survey.pcw/
   manifest.pwm               # point-workspace schema and lineage
