@@ -731,10 +731,9 @@ fn round_trip_evidence_failure(error: RoundTripEvidenceError) -> WorkflowFailure
     match error {
         RoundTripEvidenceError::Comparison(error) => round_trip_failure(&error),
         RoundTripEvidenceError::Publication(error) => {
-            use crate::canonical_output::CanonicalOutputError;
-            match error {
-                error @ (CanonicalOutputError::Conflict { .. }
-                | CanonicalOutputError::TargetConflict { .. }) => WorkflowFailure::new(
+            use crate::canonical_output::{CanonicalOutputErrorClass, CanonicalOutputRetry};
+            match error.classify() {
+                CanonicalOutputErrorClass::Conflict => WorkflowFailure::new(
                     FailureCode::OutputConflict,
                     WorkflowStage::RoundTrip,
                     Certainty::DurableFact,
@@ -742,7 +741,7 @@ fn round_trip_evidence_failure(error: RoundTripEvidenceError) -> WorkflowFailure
                     error,
                     RecoveryAction::RemoveOrRenameConflictingTarget,
                 ),
-                error @ CanonicalOutputError::Indeterminate { .. } => WorkflowFailure::new(
+                CanonicalOutputErrorClass::PublicationIndeterminate => WorkflowFailure::new(
                     FailureCode::PublicationIndeterminate,
                     WorkflowStage::RoundTrip,
                     Certainty::Indeterminate(
@@ -752,15 +751,20 @@ fn round_trip_evidence_failure(error: RoundTripEvidenceError) -> WorkflowFailure
                     error,
                     RecoveryAction::RetryRoundTripEvidence,
                 ),
-                error @ CanonicalOutputError::TargetChanged { .. } => WorkflowFailure::new(
+                CanonicalOutputErrorClass::PrePublicationIo(retry) => WorkflowFailure::new(
                     FailureCode::Io,
                     WorkflowStage::RoundTrip,
                     Certainty::PrePublication,
                     FailureContext::default(),
                     error,
-                    RecoveryAction::RetryRoundTripEvidence,
+                    match retry {
+                        CanonicalOutputRetry::SameIntent => RecoveryAction::RetryRoundTripEvidence,
+                        CanonicalOutputRetry::AfterRestoringDisk => {
+                            RecoveryAction::RetryAfterRestoringDisk
+                        }
+                    },
                 ),
-                error @ CanonicalOutputError::Resource { .. } => WorkflowFailure::new(
+                CanonicalOutputErrorClass::ResourceLimit => WorkflowFailure::new(
                     FailureCode::RoundTripResourceLimit,
                     WorkflowStage::RoundTrip,
                     Certainty::PrePublication,
@@ -768,7 +772,7 @@ fn round_trip_evidence_failure(error: RoundTripEvidenceError) -> WorkflowFailure
                     error,
                     RecoveryAction::UseSupportedRoundTripSize,
                 ),
-                error @ CanonicalOutputError::Cancelled => WorkflowFailure::new(
+                CanonicalOutputErrorClass::Cancelled => WorkflowFailure::new(
                     FailureCode::Cancelled,
                     WorkflowStage::RoundTrip,
                     Certainty::PrePublication,
@@ -776,15 +780,7 @@ fn round_trip_evidence_failure(error: RoundTripEvidenceError) -> WorkflowFailure
                     error,
                     RecoveryAction::ResumeSameRun,
                 ),
-                error @ CanonicalOutputError::Io { .. } => WorkflowFailure::new(
-                    FailureCode::Io,
-                    WorkflowStage::RoundTrip,
-                    Certainty::PrePublication,
-                    FailureContext::default(),
-                    error,
-                    RecoveryAction::RetryAfterRestoringDisk,
-                ),
-                error @ CanonicalOutputError::Invalid(_) => WorkflowFailure::new(
+                CanonicalOutputErrorClass::InvalidInput => WorkflowFailure::new(
                     FailureCode::RoundTripInvalidInput,
                     WorkflowStage::RoundTrip,
                     Certainty::PrePublication,

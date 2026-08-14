@@ -118,12 +118,46 @@ pub(crate) enum CanonicalOutputError {
     },
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum CanonicalOutputErrorClass {
+    Conflict,
+    PublicationIndeterminate,
+    PrePublicationIo(CanonicalOutputRetry),
+    ResourceLimit,
+    Cancelled,
+    InvalidInput,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum CanonicalOutputRetry {
+    SameIntent,
+    AfterRestoringDisk,
+}
+
 impl CanonicalOutputError {
     fn io(operation: impl Into<String>, path: &Path, source: io::Error) -> Self {
         Self::Io {
             operation: operation.into(),
             path: path.to_path_buf(),
             source,
+        }
+    }
+
+    pub(crate) const fn classify(&self) -> CanonicalOutputErrorClass {
+        match self {
+            Self::Conflict { .. } | Self::TargetConflict { .. } => {
+                CanonicalOutputErrorClass::Conflict
+            }
+            Self::Indeterminate { .. } => CanonicalOutputErrorClass::PublicationIndeterminate,
+            Self::TargetChanged { .. } => {
+                CanonicalOutputErrorClass::PrePublicationIo(CanonicalOutputRetry::SameIntent)
+            }
+            Self::Io { .. } => CanonicalOutputErrorClass::PrePublicationIo(
+                CanonicalOutputRetry::AfterRestoringDisk,
+            ),
+            Self::Resource { .. } => CanonicalOutputErrorClass::ResourceLimit,
+            Self::Cancelled => CanonicalOutputErrorClass::Cancelled,
+            Self::Invalid(_) => CanonicalOutputErrorClass::InvalidInput,
         }
     }
 }
@@ -1016,6 +1050,71 @@ mod tests {
                 } if boundary == expected => overwrite_synced(target, bytes),
                 _ => Ok(()),
             }
+        }
+    }
+
+    #[test]
+    fn error_classification_centralizes_certainty_and_retry_intent() {
+        let cases = [
+            (
+                CanonicalOutputError::Conflict {
+                    path: PathBuf::from("output.json"),
+                    expected_hash: [1; 32],
+                    actual_hash: [2; 32],
+                },
+                CanonicalOutputErrorClass::Conflict,
+            ),
+            (
+                CanonicalOutputError::TargetConflict {
+                    path: PathBuf::from("output.json"),
+                    reason: "not a regular file",
+                },
+                CanonicalOutputErrorClass::Conflict,
+            ),
+            (
+                CanonicalOutputError::Indeterminate {
+                    path: PathBuf::from("output.json"),
+                    expected_hash: [1; 32],
+                    source: io::Error::other("parent sync failed"),
+                },
+                CanonicalOutputErrorClass::PublicationIndeterminate,
+            ),
+            (
+                CanonicalOutputError::TargetChanged {
+                    path: PathBuf::from("output.json"),
+                },
+                CanonicalOutputErrorClass::PrePublicationIo(CanonicalOutputRetry::SameIntent),
+            ),
+            (
+                CanonicalOutputError::Io {
+                    operation: "create stage".to_owned(),
+                    path: PathBuf::from("output.json"),
+                    source: io::Error::other("disk unavailable"),
+                },
+                CanonicalOutputErrorClass::PrePublicationIo(
+                    CanonicalOutputRetry::AfterRestoringDisk,
+                ),
+            ),
+            (
+                CanonicalOutputError::Resource {
+                    limit: "output bytes".to_owned(),
+                    required: 2,
+                    allowed: 1,
+                },
+                CanonicalOutputErrorClass::ResourceLimit,
+            ),
+            (
+                CanonicalOutputError::Cancelled,
+                CanonicalOutputErrorClass::Cancelled,
+            ),
+            (
+                CanonicalOutputError::Invalid("bad request".to_owned()),
+                CanonicalOutputErrorClass::InvalidInput,
+            ),
+        ];
+
+        for (error, expected) in cases {
+            assert_eq!(error.classify(), expected);
         }
     }
 

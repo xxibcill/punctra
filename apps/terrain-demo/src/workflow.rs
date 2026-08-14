@@ -26,7 +26,10 @@ use point_workspace::{
 };
 
 use crate::{
-    canonical_output::{CanonicalOutputError, CanonicalOutputLimits},
+    canonical_output::{
+        CanonicalOutputError, CanonicalOutputErrorClass, CanonicalOutputLimits,
+        CanonicalOutputRetry,
+    },
     diagnostic::{
         Certainty, FailureCode, FailureContext, PublicationPhase, RecoveryAction, WorkflowFailure,
         WorkflowStage,
@@ -2600,26 +2603,27 @@ fn report_failure(
     error: CanonicalOutputError,
     context: FailureContext,
 ) -> WorkflowFailure {
-    match error {
-        CanonicalOutputError::Conflict { .. } | CanonicalOutputError::TargetConflict { .. } => {
-            WorkflowFailure::new(
-                FailureCode::OutputConflict,
-                stage,
-                Certainty::DurableFact,
-                context,
-                error,
-                RecoveryAction::RemoveOrRenameConflictingTarget,
-            )
-        }
-        CanonicalOutputError::TargetChanged { .. } => WorkflowFailure::new(
+    match error.classify() {
+        CanonicalOutputErrorClass::Conflict => WorkflowFailure::new(
+            FailureCode::OutputConflict,
+            stage,
+            Certainty::DurableFact,
+            context,
+            error,
+            RecoveryAction::RemoveOrRenameConflictingTarget,
+        ),
+        CanonicalOutputErrorClass::PrePublicationIo(retry) => WorkflowFailure::new(
             FailureCode::Io,
             stage,
             Certainty::PrePublication,
             context,
             error,
-            RecoveryAction::ResumeSameRun,
+            match retry {
+                CanonicalOutputRetry::SameIntent => RecoveryAction::ResumeSameRun,
+                CanonicalOutputRetry::AfterRestoringDisk => RecoveryAction::RetryAfterRestoringDisk,
+            },
         ),
-        CanonicalOutputError::Indeterminate { .. } => WorkflowFailure::new(
+        CanonicalOutputErrorClass::PublicationIndeterminate => WorkflowFailure::new(
             FailureCode::PublicationIndeterminate,
             stage,
             Certainty::Indeterminate(PublicationPhase::ReportTarget),
@@ -2627,7 +2631,7 @@ fn report_failure(
             error,
             RecoveryAction::ResumeSameRun,
         ),
-        CanonicalOutputError::Resource { .. } => WorkflowFailure::new(
+        CanonicalOutputErrorClass::ResourceLimit => WorkflowFailure::new(
             FailureCode::ResourceLimit,
             stage,
             Certainty::PrePublication,
@@ -2635,22 +2639,14 @@ fn report_failure(
             error,
             RecoveryAction::RaiseLimitOrNarrow,
         ),
-        CanonicalOutputError::Cancelled => cancelled_failure(stage, context),
-        error @ CanonicalOutputError::Invalid(_) => WorkflowFailure::new(
+        CanonicalOutputErrorClass::Cancelled => cancelled_failure(stage, context),
+        CanonicalOutputErrorClass::InvalidInput => WorkflowFailure::new(
             FailureCode::InvalidRequest,
             stage,
             Certainty::PrePublication,
             context,
             error,
             RecoveryAction::CorrectInvalidRequest,
-        ),
-        error @ CanonicalOutputError::Io { .. } => WorkflowFailure::new(
-            FailureCode::Io,
-            stage,
-            Certainty::PrePublication,
-            context,
-            error,
-            RecoveryAction::RetryAfterRestoringDisk,
         ),
     }
 }
