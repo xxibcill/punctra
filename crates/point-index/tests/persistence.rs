@@ -9,7 +9,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use foundation_runtime::RuntimeError;
+use foundation_runtime::{ProgressPhase, RuntimeError};
 use point_index::{
     IndexError, IndexLimit, NodeReadBudget, PrepareDisposition, PrepareLimits, prepare,
 };
@@ -22,6 +22,189 @@ use support::{
 
 const V1_ARTIFACT: &[u8] = include_bytes!("fixtures/v1/one-point.pidx");
 const V1_WORK: &[u8] = include_bytes!("fixtures/v1/one-point.pidx.work");
+const V1_MANIFEST: &str = include_str!("fixtures/v1/manifest.json");
+
+#[test]
+fn disk_v1_manifest_resolves_checked_in_bytes_and_semantic_facts() {
+    let manifest: serde_json::Value = serde_json::from_str(V1_MANIFEST).unwrap();
+    assert_manifest_header(&manifest);
+
+    let ticks = clustered_ticks(1);
+    let source = open_source(ticks.clone());
+    assert_manifest_source(&manifest["source"], &source, ticks[0]);
+    assert_complete_manifest(&manifest, &source);
+    assert_work_manifest(&manifest, source);
+}
+
+fn assert_manifest_header(manifest: &serde_json::Value) {
+    assert_eq!(
+        manifest["schema"],
+        "punctra.point-index.fixture-manifest.v1"
+    );
+    assert_eq!(manifest["owner"], "point-index");
+    assert_eq!(manifest["support_class"], "rebuildable");
+    assert_eq!(manifest["disk_version"], 1);
+    assert_eq!(manifest["recipe_version"], 1);
+}
+
+fn assert_manifest_source(
+    source_facts: &serde_json::Value,
+    source: &point_source::Source,
+    ticks: [i64; 3],
+) {
+    assert_eq!(source_facts["generator"], "clustered_ticks(1)");
+    assert_eq!(
+        source.identity().to_string(),
+        text(source_facts, "identity")
+    );
+    assert_eq!(
+        source.metadata().point_count(),
+        unsigned(source_facts, "point_count")
+    );
+    assert_eq!(source_facts["coordinate_reference"], "unknown");
+    assert!(source.metadata().coordinate_reference().is_unknown());
+    assert_eq!(ticks, signed_triple(source_facts, "point_ticks"));
+    assert_triple_bits(
+        source.metadata().position_transform().offset(),
+        triple(&source_facts["position_transform"], "offset"),
+    );
+    assert_triple_bits(
+        source.metadata().position_transform().scale(),
+        triple(&source_facts["position_transform"], "scale"),
+    );
+    let source_bounds = source.metadata().world_bounds().unwrap();
+    assert_triple_bits(
+        source_bounds.min(),
+        triple(&source_facts["world_bounds"], "minimum"),
+    );
+    assert_triple_bits(
+        source_bounds.max(),
+        triple(&source_facts["world_bounds"], "maximum"),
+    );
+}
+
+fn assert_complete_manifest(manifest: &serde_json::Value, source: &point_source::Source) {
+    let complete = artifact_facts(manifest, "complete");
+    assert_fixture_bytes(complete, "one-point.pidx", V1_ARTIFACT);
+    let complete_target = TemporaryTarget::new("v1-manifest-complete");
+    fs::write(complete_target.path(), V1_ARTIFACT).unwrap();
+    let opened = prepare(
+        source.clone(),
+        complete_target.path(),
+        PrepareLimits::default(),
+    )
+    .blocking_wait()
+    .unwrap();
+    assert_eq!(
+        u64::from(opened.descriptor().disk_version()),
+        manifest["disk_version"].as_u64().unwrap()
+    );
+    assert_eq!(
+        u64::from(opened.descriptor().recipe_version()),
+        manifest["recipe_version"].as_u64().unwrap()
+    );
+    assert_eq!(
+        format!("{:?}", opened.prepare_report().disposition()).to_lowercase(),
+        text(&complete["semantic_facts"], "prepare_disposition")
+    );
+    assert_eq!(
+        opened.descriptor().node_count(),
+        unsigned(&complete["semantic_facts"], "node_count")
+    );
+    assert_eq!(
+        opened.descriptor().leaf_count(),
+        unsigned(&complete["semantic_facts"], "leaf_count")
+    );
+    let root = opened.hierarchy().root().unwrap();
+    assert_eq!(
+        root.covered_point_count(),
+        unsigned(&complete["semantic_facts"], "root_covered_point_count")
+    );
+    assert_eq!(
+        root.display_point_count(),
+        unsigned(&complete["semantic_facts"], "root_display_point_count")
+    );
+}
+
+fn assert_work_manifest(manifest: &serde_json::Value, source: point_source::Source) {
+    let work = artifact_facts(manifest, "resumable-work");
+    assert_fixture_bytes(work, "one-point.pidx.work", V1_WORK);
+    let work_target = TemporaryTarget::new("v1-manifest-work");
+    fs::write(work_target.work_path(), V1_WORK).unwrap();
+    let resumed = prepare(source, work_target.path(), PrepareLimits::default())
+        .blocking_wait()
+        .unwrap();
+    assert_eq!(
+        format!("{:?}", resumed.prepare_report().disposition()).to_lowercase(),
+        text(&work["semantic_facts"], "resume_disposition")
+    );
+    assert_eq!(
+        resumed.prepare_report().durable_points_reused(),
+        unsigned(&work["semantic_facts"], "durable_points")
+    );
+    assert_eq!(
+        resumed.prepare_report().source_points_read(),
+        unsigned(&work["semantic_facts"], "source_points_read")
+    );
+    assert_eq!(
+        fs::read(work_target.path()).unwrap() == V1_ARTIFACT,
+        work["semantic_facts"]["rebuild_equals_complete"]
+            .as_bool()
+            .unwrap()
+    );
+}
+
+fn artifact_facts<'a>(manifest: &'a serde_json::Value, role: &str) -> &'a serde_json::Value {
+    manifest["artifacts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|artifact| artifact["role"] == role)
+        .unwrap()
+}
+
+fn assert_fixture_bytes(facts: &serde_json::Value, path: &str, bytes: &[u8]) {
+    assert_eq!(facts["path"], path);
+    assert_eq!(
+        u64::try_from(bytes.len()).unwrap(),
+        unsigned(facts, "byte_length")
+    );
+    assert_eq!(blake3::hash(bytes).to_hex().as_str(), text(facts, "blake3"));
+}
+
+fn text<'a>(value: &'a serde_json::Value, field: &str) -> &'a str {
+    value[field].as_str().unwrap()
+}
+
+fn unsigned(value: &serde_json::Value, field: &str) -> u64 {
+    value[field].as_u64().unwrap()
+}
+
+fn triple(value: &serde_json::Value, field: &str) -> [f64; 3] {
+    value[field]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|value| value.as_f64().unwrap())
+        .collect::<Vec<_>>()
+        .try_into()
+        .unwrap()
+}
+
+fn signed_triple(value: &serde_json::Value, field: &str) -> [i64; 3] {
+    value[field]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|value| value.as_i64().unwrap())
+        .collect::<Vec<_>>()
+        .try_into()
+        .unwrap()
+}
+
+fn assert_triple_bits(actual: [f64; 3], expected: [f64; 3]) {
+    assert_eq!(actual.map(f64::to_bits), expected.map(f64::to_bits));
+}
 
 #[test]
 fn cold_build_preserves_preexisting_adjacent_files() {
@@ -312,7 +495,8 @@ fn cold_build_limits_fail_without_a_partial_target_and_preserve_only_valid_work(
     let late_source = open_source(clustered_ticks(BLOCK_POINTS + 1));
     let late_build = TemporaryTarget::new("limit-build-memory-late");
     let limit = PrepareLimits::default().with_max_build_working_bytes(350_000);
-    assert_resource_error(&prepare(late_source.clone(), late_build.path(), limit).blocking_wait());
+    let late_result = prepare(late_source.clone(), late_build.path(), limit).blocking_wait();
+    assert_resource_error(&late_result);
     assert!(!late_build.path().exists());
     assert!(fs::metadata(late_build.work_path()).unwrap().len() > 200);
     let resumed = prepare(late_source, late_build.path(), PrepareLimits::default())
@@ -337,13 +521,14 @@ fn concurrent_prepares_have_one_exclusive_writer() {
     let first = prepare(source.clone(), target.path(), slow_limits);
     let first_handle = first.handle();
     let deadline = Instant::now() + Duration::from_secs(20);
-    while fs::metadata(target.work_path()).map_or(true, |metadata| metadata.len() < 200) {
+    while first_handle.progress().phase() == ProgressPhase::PENDING {
         assert!(
             Instant::now() < deadline,
-            "first prepare did not initialize its work file"
+            "first prepare did not acquire its work file"
         );
         thread::sleep(Duration::from_millis(1));
     }
+    assert_eq!(first_handle.progress().phase(), ProgressPhase::RUNNING);
 
     assert!(matches!(
         prepare(source.clone(), target.path(), PrepareLimits::default()).blocking_wait(),
@@ -450,7 +635,8 @@ fn faulted_build_recovers_valid_frames_discards_bad_suffix_and_matches_clean_byt
         u64::try_from(BLOCK_POINTS).unwrap()
     );
     assert_eq!(resumed.prepare_report().source_points_read(), 64);
-    assert!(!resumed_target.work_path().exists());
+    let completed_work = fs::read(resumed_target.work_path()).unwrap();
+    assert!(completed_work.len() > 200);
 
     let clean_target = TemporaryTarget::new("fault-resume-clean");
     let clean_limits = PrepareLimits::new(251, 251 * 24).unwrap();
@@ -462,6 +648,10 @@ fn faulted_build_recovers_valid_frames_discards_bad_suffix_and_matches_clean_byt
     assert_eq!(
         fs::read(resumed_target.path()).unwrap(),
         fs::read(clean_target.path()).unwrap()
+    );
+    assert_eq!(
+        fs::read(resumed_target.work_path()).unwrap(),
+        completed_work
     );
     for node in resumed.hierarchy().nodes() {
         assert_eq!(
@@ -504,7 +694,17 @@ fn cancelled_prepare_leaves_only_resumable_work_and_never_a_partial_target() {
     );
     assert!(resumed.prepare_report().durable_points_reused() >= BLOCK_POINTS as u64);
     assert!(resumed.prepare_report().durable_points_reused() < u64::try_from(point_count).unwrap());
-    assert!(!target.work_path().exists());
+    let completed_work = fs::read(target.work_path()).unwrap();
+    assert!(completed_work.len() > 200);
+
+    let opened = prepare(source.clone(), target.path(), PrepareLimits::default())
+        .blocking_wait()
+        .unwrap();
+    assert_eq!(
+        opened.prepare_report().disposition(),
+        PrepareDisposition::Opened
+    );
+    assert_eq!(fs::read(target.work_path()).unwrap(), completed_work);
 
     let clean_target = TemporaryTarget::new("cancel-resume-clean");
     let clean = prepare(source, clean_target.path(), PrepareLimits::default())

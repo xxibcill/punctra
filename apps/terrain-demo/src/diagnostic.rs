@@ -121,6 +121,7 @@ impl WorkflowStage {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum PublicationPhase {
     JournalIntent,
+    IndexTarget,
     WorkspaceOperation,
     WorkspaceRevision,
     WorkspaceDirectorySync,
@@ -135,6 +136,7 @@ impl PublicationPhase {
     const fn as_str(self) -> &'static str {
         match self {
             Self::JournalIntent => "journal-intent",
+            Self::IndexTarget => "index-target",
             Self::WorkspaceOperation => "workspace-operation",
             Self::WorkspaceRevision => "workspace-revision",
             Self::WorkspaceDirectorySync => "workspace-directory-sync",
@@ -187,6 +189,7 @@ pub(crate) enum RecoveryAction {
     CorrectRoundTripInput,
     UseSupportedRoundTripSize,
     ReviewReturnedLandXml,
+    RetryRoundTripEvidence,
     StopAndPreserve,
 }
 
@@ -212,6 +215,9 @@ impl RecoveryAction {
             Self::UseSupportedRoundTripSize => "use inputs within the named round-trip limits",
             Self::ReviewReturnedLandXml => {
                 "review the downstream export settings or reject the returned deliverable"
+            }
+            Self::RetryRoundTripEvidence => {
+                "retry verify-round-trip with the same Run, returned LandXML, and evidence target"
             }
             Self::StopAndPreserve => "stop and preserve all Run and Workspace files",
         }

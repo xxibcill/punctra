@@ -731,10 +731,9 @@ fn round_trip_evidence_failure(error: RoundTripEvidenceError) -> WorkflowFailure
     match error {
         RoundTripEvidenceError::Comparison(error) => round_trip_failure(&error),
         RoundTripEvidenceError::Publication(error) => {
-            use crate::publication::CanonicalFileError;
-            match error {
-                error @ (CanonicalFileError::Conflict { .. }
-                | CanonicalFileError::TargetConflict { .. }) => WorkflowFailure::new(
+            use crate::canonical_output::{CanonicalOutputErrorClass, CanonicalOutputRetry};
+            match error.classify() {
+                CanonicalOutputErrorClass::Conflict => WorkflowFailure::new(
                     FailureCode::OutputConflict,
                     WorkflowStage::RoundTrip,
                     Certainty::DurableFact,
@@ -742,7 +741,7 @@ fn round_trip_evidence_failure(error: RoundTripEvidenceError) -> WorkflowFailure
                     error,
                     RecoveryAction::RemoveOrRenameConflictingTarget,
                 ),
-                error @ CanonicalFileError::Indeterminate { .. } => WorkflowFailure::new(
+                CanonicalOutputErrorClass::PublicationIndeterminate => WorkflowFailure::new(
                     FailureCode::PublicationIndeterminate,
                     WorkflowStage::RoundTrip,
                     Certainty::Indeterminate(
@@ -750,9 +749,22 @@ fn round_trip_evidence_failure(error: RoundTripEvidenceError) -> WorkflowFailure
                     ),
                     FailureContext::default(),
                     error,
-                    RecoveryAction::StopAndPreserve,
+                    RecoveryAction::RetryRoundTripEvidence,
                 ),
-                error @ CanonicalFileError::Resource { .. } => WorkflowFailure::new(
+                CanonicalOutputErrorClass::PrePublicationIo(retry) => WorkflowFailure::new(
+                    FailureCode::Io,
+                    WorkflowStage::RoundTrip,
+                    Certainty::PrePublication,
+                    FailureContext::default(),
+                    error,
+                    match retry {
+                        CanonicalOutputRetry::SameIntent => RecoveryAction::RetryRoundTripEvidence,
+                        CanonicalOutputRetry::AfterRestoringDisk => {
+                            RecoveryAction::RetryAfterRestoringDisk
+                        }
+                    },
+                ),
+                CanonicalOutputErrorClass::ResourceLimit => WorkflowFailure::new(
                     FailureCode::RoundTripResourceLimit,
                     WorkflowStage::RoundTrip,
                     Certainty::PrePublication,
@@ -760,7 +772,7 @@ fn round_trip_evidence_failure(error: RoundTripEvidenceError) -> WorkflowFailure
                     error,
                     RecoveryAction::UseSupportedRoundTripSize,
                 ),
-                error if error.is_cancelled() => WorkflowFailure::new(
+                CanonicalOutputErrorClass::Cancelled => WorkflowFailure::new(
                     FailureCode::Cancelled,
                     WorkflowStage::RoundTrip,
                     Certainty::PrePublication,
@@ -768,7 +780,7 @@ fn round_trip_evidence_failure(error: RoundTripEvidenceError) -> WorkflowFailure
                     error,
                     RecoveryAction::ResumeSameRun,
                 ),
-                error => WorkflowFailure::new(
+                CanonicalOutputErrorClass::InvalidInput => WorkflowFailure::new(
                     FailureCode::RoundTripInvalidInput,
                     WorkflowStage::RoundTrip,
                     Certainty::PrePublication,
@@ -786,15 +798,58 @@ fn round_trip_evidence_failure(error: RoundTripEvidenceError) -> WorkflowFailure
             error,
             RecoveryAction::CorrectRoundTripInput,
         ),
-        RoundTripEvidenceError::Journal(error) => WorkflowFailure::new(
-            FailureCode::RoundTripInvalidInput,
-            WorkflowStage::RoundTrip,
+        RoundTripEvidenceError::Journal(error) => round_trip_journal_failure(error),
+    }
+}
+
+fn round_trip_journal_failure(error: crate::journal::JournalError) -> WorkflowFailure {
+    use crate::journal::JournalError;
+
+    let (code, certainty, action) = match &error {
+        JournalError::Resource { .. } => (
+            FailureCode::RoundTripResourceLimit,
+            Certainty::PrePublication,
+            RecoveryAction::UseSupportedRoundTripSize,
+        ),
+        JournalError::Corrupt(_) | JournalError::Incompatible(_) => (
+            FailureCode::JournalCorrupt,
             Certainty::DurableFact,
-            FailureContext::default(),
-            error,
             RecoveryAction::StopAndPreserve,
         ),
-    }
+        JournalError::Exists(_) | JournalError::Conflict(_) => (
+            FailureCode::JournalConflict,
+            Certainty::DurableFact,
+            RecoveryAction::StopAndPreserve,
+        ),
+        JournalError::Locked => (
+            FailureCode::Io,
+            Certainty::PrePublication,
+            RecoveryAction::ResumeSameRun,
+        ),
+        JournalError::Entropy | JournalError::Io { .. } => (
+            FailureCode::Io,
+            Certainty::PrePublication,
+            RecoveryAction::RetryAfterRestoringDisk,
+        ),
+        JournalError::Invalid(_) => (
+            FailureCode::RoundTripInvalidInput,
+            Certainty::PrePublication,
+            RecoveryAction::CorrectRoundTripInput,
+        ),
+        JournalError::Indeterminate { .. } | JournalError::CheckpointIndeterminate { .. } => (
+            FailureCode::PublicationIndeterminate,
+            Certainty::Indeterminate(crate::diagnostic::PublicationPhase::RoundTripEvidenceTarget),
+            RecoveryAction::StopAndPreserve,
+        ),
+    };
+    WorkflowFailure::new(
+        code,
+        WorkflowStage::RoundTrip,
+        certainty,
+        FailureContext::default(),
+        error,
+        action,
+    )
 }
 
 fn round_trip_cli_failure(error: WorkflowFailure) -> WorkflowFailure {
@@ -888,5 +943,52 @@ impl std::fmt::Display for Hex<'_> {
             write!(formatter, "{byte:02x}")?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        canonical_output::CanonicalOutputError, roundtrip_evidence::RoundTripEvidenceError,
+    };
+
+    #[test]
+    fn evidence_target_replacement_is_retryable_prepublication_io() {
+        let failure = round_trip_evidence_failure(RoundTripEvidenceError::Publication(
+            CanonicalOutputError::TargetChanged {
+                path: PathBuf::from("round-trip-evidence.json"),
+            },
+        ));
+
+        assert_eq!(failure.code(), "PWF_IO");
+        assert_eq!(failure.certainty(), "pre_publication");
+        assert_eq!(failure.publication_phase(), None);
+        assert_eq!(
+            failure.recovery_action(),
+            "retry verify-round-trip with the same Run, returned LandXML, and evidence target"
+        );
+    }
+
+    #[test]
+    fn indeterminate_evidence_publication_retries_through_the_owning_interface() {
+        let failure = round_trip_evidence_failure(RoundTripEvidenceError::Publication(
+            CanonicalOutputError::Indeterminate {
+                path: PathBuf::from("round-trip-evidence.json"),
+                expected_hash: [1; 32],
+                source: std::io::Error::other("parent sync failed after publication"),
+            },
+        ));
+
+        assert_eq!(failure.code(), "PWF_PUBLICATION_INDETERMINATE");
+        assert_eq!(failure.certainty(), "indeterminate");
+        assert_eq!(
+            failure.publication_phase(),
+            Some("round-trip-evidence-target")
+        );
+        assert_eq!(
+            failure.recovery_action(),
+            "retry verify-round-trip with the same Run, returned LandXML, and evidence target"
+        );
     }
 }

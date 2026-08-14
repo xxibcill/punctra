@@ -2,7 +2,7 @@
 
 use std::{
     fs::{self, File, Metadata},
-    io,
+    io::{self, Read as _, Seek as _, SeekFrom},
     path::{Path, PathBuf},
 };
 
@@ -13,6 +13,13 @@ pub(crate) struct StableFile {
     path: PathBuf,
     file: File,
     identity: Metadata,
+    content: Option<StableContent>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct StableContent {
+    hash: [u8; 32],
+    byte_length: u64,
 }
 
 impl StableFile {
@@ -29,10 +36,61 @@ impl StableFile {
         &mut self.file
     }
 
+    pub(crate) fn same_identity(&self, other: &Self) -> bool {
+        same_file_identity(&self.identity, &other.identity)
+    }
+
+    pub(crate) fn seal_content(&mut self, hash: [u8; 32], byte_length: u64) -> io::Result<()> {
+        if byte_length != self.identity.len() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "captured content length differs from the witnessed file length",
+            ));
+        }
+        self.content = Some(StableContent { hash, byte_length });
+        Ok(())
+    }
+
     pub(crate) fn verify(&self) -> io::Result<()> {
         let opened = self.file.metadata()?;
         let current = fs::symlink_metadata(&self.path)?;
-        require_same_file_state(&self.identity, &opened, &current, "captured input changed")
+        require_same_file_state(&self.identity, &opened, &current, "captured input changed")?;
+        let Some(content) = self.content else {
+            return Ok(());
+        };
+
+        let mut reader = self.file.try_clone()?;
+        reader.seek(SeekFrom::Start(0))?;
+        let mut remaining = content.byte_length;
+        let mut hasher = blake3::Hasher::new();
+        let mut buffer = [0_u8; 8 * 1024];
+        while remaining != 0 {
+            let requested = usize::try_from(remaining.min(buffer.len() as u64))
+                .expect("bounded retained-file read fits usize");
+            let read = reader.read(&mut buffer[..requested])?;
+            if read == 0 {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "captured input was truncated",
+                ));
+            }
+            hasher.update(&buffer[..read]);
+            remaining -= read as u64;
+        }
+        if reader.read(&mut [0_u8; 1])? != 0 || hasher.finalize().as_bytes() != &content.hash {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "captured input content changed",
+            ));
+        }
+        let opened_after = self.file.metadata()?;
+        let current_after = fs::symlink_metadata(&self.path)?;
+        require_same_file_state(
+            &self.identity,
+            &opened_after,
+            &current_after,
+            "captured input changed during content verification",
+        )
     }
 
     fn capture_inspected(path: &Path, inspected: &Metadata) -> io::Result<Self> {
@@ -53,6 +111,7 @@ impl StableFile {
             path: path.to_path_buf(),
             file,
             identity: opened,
+            content: None,
         })
     }
 

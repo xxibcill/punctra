@@ -3,6 +3,7 @@
 use std::{
     fs::File,
     io::{self, BufReader},
+    mem::size_of,
     path::Path,
 };
 
@@ -81,6 +82,7 @@ pub(crate) fn evaluate_streaming_round_trip_with_control(
     control: &OperationControl,
 ) -> Result<StreamingRoundTripEvaluation, RoundTripFailure> {
     check_cancelled(control)?;
+    validate_retained_model_limit("round-trip", limits)?;
     let (reference, returned) = capture_streaming_pair(reference_path, returned_path, limits)?;
     let reference = parse_streaming_file(InputSide::Reference, reference, limits, control)?;
     let returned = parse_streaming_file(InputSide::Returned, returned, limits, control)?;
@@ -136,6 +138,11 @@ fn capture_streaming_pair(
 ) -> Result<(StableFile, StableFile), RoundTripFailure> {
     let reference = capture_streaming_file(InputSide::Reference, reference_path, limits)?;
     let returned = capture_streaming_file(InputSide::Returned, returned_path, limits)?;
+    if reference.same_identity(&returned) {
+        return Err(RoundTripFailure::invalid(
+            "REFERENCE and RETURNED must be distinct regular files",
+        ));
+    }
     Ok((reference, returned))
 }
 
@@ -159,7 +166,12 @@ fn parse_streaming_file(
 ) -> Result<StreamingParse, RoundTripFailure> {
     check_cancelled(control)?;
     let expected_bytes = witness.byte_length();
-    let hashing = HashingReader::new(witness.file_mut(), limits.file_bytes());
+    let hashing = HashingReader::new(
+        witness.file_mut(),
+        expected_bytes,
+        limits.file_bytes(),
+        STREAM_BUFFER_BYTES as u64,
+    );
     let mut reader = NsReader::from_reader(BufReader::with_capacity(STREAM_BUFFER_BYTES, hashing));
     reader.config_mut().expand_empty_elements = true;
     reader.config_mut().check_end_names = true;
@@ -189,6 +201,13 @@ fn parse_streaming_file(
             "{side} changed while it was being read"
         )));
     }
+    witness
+        .seal_content(facts.content_hash, facts.byte_length)
+        .map_err(|error| {
+            RoundTripFailure::invalid(format_args!(
+                "{side} content cannot be sealed after streaming capture: {error}"
+            ))
+        })?;
     Ok(StreamingParse {
         facts,
         surface,
@@ -224,27 +243,236 @@ struct HashingReader<'a> {
     hasher: blake3::Hasher,
     bytes: u64,
     max_bytes: u64,
-    over_limit: bool,
+    remaining: u64,
     utf8: Utf8Validator,
+    token_limit: u64,
+    token_bytes: u64,
+    lexical_state: XmlLexicalState,
 }
 
 impl<'a> HashingReader<'a> {
-    fn new(file: &'a mut File, max_bytes: u64) -> Self {
+    fn new(file: &'a mut File, expected_bytes: u64, max_bytes: u64, token_limit: u64) -> Self {
         Self {
             file,
             hasher: blake3::Hasher::new(),
             bytes: 0,
             max_bytes,
-            over_limit: false,
+            remaining: expected_bytes,
             utf8: Utf8Validator::default(),
+            token_limit,
+            token_bytes: 0,
+            lexical_state: XmlLexicalState::Text,
+        }
+    }
+
+    #[allow(clippy::too_many_lines)]
+    fn check_tokens(&mut self, bytes: &[u8]) -> io::Result<()> {
+        const CDATA_PREFIX: &[u8] = b"CDATA[";
+
+        for &byte in bytes {
+            if matches!(self.lexical_state, XmlLexicalState::Text) && byte == b'<' {
+                self.token_bytes = 1;
+                self.ensure_token_limit()?;
+                self.lexical_state = XmlLexicalState::MarkupStart;
+                continue;
+            }
+            self.token_bytes = self.token_bytes.saturating_add(1);
+            self.ensure_token_limit()?;
+            let previous = self.lexical_state;
+            let next = match previous {
+                XmlLexicalState::Text => XmlLexicalState::Text,
+                XmlLexicalState::MarkupStart => match byte {
+                    b'?' => XmlLexicalState::ProcessingInstruction {
+                        trailing_question: false,
+                    },
+                    b'!' => XmlLexicalState::BangStart,
+                    _ => Self::tag_state(None, byte),
+                },
+                XmlLexicalState::Tag {
+                    quote: Some(expected),
+                } => XmlLexicalState::Tag {
+                    quote: (byte != expected).then_some(expected),
+                },
+                XmlLexicalState::Tag { quote: None } => Self::tag_state(None, byte),
+                XmlLexicalState::BangStart => match byte {
+                    b'-' => XmlLexicalState::BangDash,
+                    b'[' => XmlLexicalState::CdataPrefix { matched: 0 },
+                    _ => Self::declaration(),
+                },
+                XmlLexicalState::BangDash => {
+                    if byte == b'-' {
+                        XmlLexicalState::Comment {
+                            trailing_hyphens: 0,
+                        }
+                    } else {
+                        Self::declaration()
+                    }
+                }
+                XmlLexicalState::CdataPrefix { matched }
+                    if CDATA_PREFIX.get(matched) == Some(&byte) =>
+                {
+                    if matched + 1 == CDATA_PREFIX.len() {
+                        XmlLexicalState::Cdata {
+                            trailing_brackets: 0,
+                        }
+                    } else {
+                        XmlLexicalState::CdataPrefix {
+                            matched: matched + 1,
+                        }
+                    }
+                }
+                XmlLexicalState::CdataPrefix { .. } => Self::declaration(),
+                XmlLexicalState::Comment { trailing_hyphens } => {
+                    if byte == b'>' && trailing_hyphens >= 2 {
+                        XmlLexicalState::Text
+                    } else {
+                        XmlLexicalState::Comment {
+                            trailing_hyphens: if byte == b'-' {
+                                trailing_hyphens.saturating_add(1)
+                            } else {
+                                0
+                            },
+                        }
+                    }
+                }
+                XmlLexicalState::Cdata { trailing_brackets } => {
+                    if byte == b'>' && trailing_brackets >= 2 {
+                        XmlLexicalState::Text
+                    } else {
+                        XmlLexicalState::Cdata {
+                            trailing_brackets: if byte == b']' {
+                                trailing_brackets.saturating_add(1)
+                            } else {
+                                0
+                            },
+                        }
+                    }
+                }
+                XmlLexicalState::ProcessingInstruction { trailing_question } => {
+                    if byte == b'>' && trailing_question {
+                        XmlLexicalState::Text
+                    } else {
+                        XmlLexicalState::ProcessingInstruction {
+                            trailing_question: byte == b'?',
+                        }
+                    }
+                }
+                XmlLexicalState::Declaration {
+                    quote,
+                    internal_subset_depth,
+                    comment_prefix,
+                } => Self::declaration_state(quote, internal_subset_depth, comment_prefix, byte),
+                XmlLexicalState::DeclarationComment {
+                    internal_subset_depth,
+                    trailing_hyphens,
+                } => {
+                    if byte == b'>' && trailing_hyphens >= 2 {
+                        XmlLexicalState::Declaration {
+                            quote: None,
+                            internal_subset_depth,
+                            comment_prefix: 0,
+                        }
+                    } else {
+                        XmlLexicalState::DeclarationComment {
+                            internal_subset_depth,
+                            trailing_hyphens: if byte == b'-' {
+                                trailing_hyphens.saturating_add(1)
+                            } else {
+                                0
+                            },
+                        }
+                    }
+                }
+            };
+            if matches!(next, XmlLexicalState::Text) && !matches!(previous, XmlLexicalState::Text) {
+                self.token_bytes = 0;
+            }
+            self.lexical_state = next;
+        }
+        Ok(())
+    }
+
+    fn tag_state(quote: Option<u8>, byte: u8) -> XmlLexicalState {
+        if quote.is_none() && matches!(byte, b'\'' | b'"') {
+            XmlLexicalState::Tag { quote: Some(byte) }
+        } else if quote.is_none() && byte == b'>' {
+            XmlLexicalState::Text
+        } else {
+            XmlLexicalState::Tag { quote }
+        }
+    }
+
+    const fn declaration() -> XmlLexicalState {
+        XmlLexicalState::Declaration {
+            quote: None,
+            internal_subset_depth: 0,
+            comment_prefix: 0,
+        }
+    }
+
+    fn declaration_state(
+        quote: Option<u8>,
+        internal_subset_depth: u32,
+        comment_prefix: u8,
+        byte: u8,
+    ) -> XmlLexicalState {
+        if let Some(expected) = quote {
+            return XmlLexicalState::Declaration {
+                quote: (byte != expected).then_some(expected),
+                internal_subset_depth,
+                comment_prefix: 0,
+            };
+        }
+        if matches!(byte, b'\'' | b'"') {
+            return XmlLexicalState::Declaration {
+                quote: Some(byte),
+                internal_subset_depth,
+                comment_prefix: 0,
+            };
+        }
+        let internal_subset_depth = match byte {
+            b'[' => internal_subset_depth.saturating_add(1),
+            b']' => internal_subset_depth.saturating_sub(1),
+            _ => internal_subset_depth,
+        };
+        if byte == b'>' && internal_subset_depth == 0 {
+            return XmlLexicalState::Text;
+        }
+        let comment_prefix = match (comment_prefix, byte) {
+            (1, b'!') => 2,
+            (2, b'-') => 3,
+            (3, b'-') => {
+                return XmlLexicalState::DeclarationComment {
+                    internal_subset_depth,
+                    trailing_hyphens: 0,
+                };
+            }
+            (_, b'<') => 1,
+            _ => 0,
+        };
+        XmlLexicalState::Declaration {
+            quote: None,
+            internal_subset_depth,
+            comment_prefix,
+        }
+    }
+
+    fn ensure_token_limit(&self) -> io::Result<()> {
+        if self.token_bytes > self.token_limit {
+            Err(io::Error::new(
+                io::ErrorKind::FileTooLarge,
+                "LandXML XML token exceeded the hard byte ceiling",
+            ))
+        } else {
+            Ok(())
         }
     }
 
     fn finish(self, side: InputSide) -> Result<(RoundTripFileFacts, bool), RoundTripFailure> {
-        if self.over_limit {
+        if self.remaining != 0 {
             return Err(RoundTripFailure::resource(format_args!(
-                "{side} file bytes exceed the {} byte limit",
-                self.max_bytes
+                "{side} was truncated with {} witnessed bytes unread",
+                self.remaining
             )));
         }
         Ok((
@@ -259,19 +487,63 @@ impl<'a> HashingReader<'a> {
 
 impl io::Read for HashingReader<'_> {
     fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
-        let read = self.file.read(buffer)?;
+        if self.remaining == 0 || buffer.is_empty() {
+            return Ok(0);
+        }
+        let requested = usize::try_from(self.remaining.min(buffer.len() as u64))
+            .expect("bounded streaming read fits usize");
+        let read = self.file.read(&mut buffer[..requested])?;
+        if read == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "LandXML input was truncated during capture",
+            ));
+        }
         self.bytes = self.bytes.saturating_add(read as u64);
+        self.remaining -= read as u64;
         if self.bytes > self.max_bytes {
-            self.over_limit = true;
             return Err(io::Error::new(
                 io::ErrorKind::FileTooLarge,
                 "LandXML input exceeded its byte limit",
             ));
         }
+        self.check_tokens(&buffer[..read])?;
         self.hasher.update(&buffer[..read]);
         self.utf8.update(&buffer[..read]);
         Ok(read)
     }
+}
+
+#[derive(Clone, Copy)]
+enum XmlLexicalState {
+    Text,
+    MarkupStart,
+    Tag {
+        quote: Option<u8>,
+    },
+    BangStart,
+    BangDash,
+    CdataPrefix {
+        matched: usize,
+    },
+    Comment {
+        trailing_hyphens: u8,
+    },
+    Cdata {
+        trailing_brackets: u8,
+    },
+    ProcessingInstruction {
+        trailing_question: bool,
+    },
+    Declaration {
+        quote: Option<u8>,
+        internal_subset_depth: u32,
+        comment_prefix: u8,
+    },
+    DeclarationComment {
+        internal_subset_depth: u32,
+        trailing_hyphens: u8,
+    },
 }
 
 #[derive(Default)]
@@ -904,6 +1176,42 @@ fn retain_semantic_failure(
     Ok(())
 }
 
+fn validate_retained_model_limit(
+    side: &str,
+    limits: RoundTripLimits,
+) -> Result<(), RoundTripFailure> {
+    let required = required_retained_model_bytes(limits);
+    if required > limits.retained_model_bytes() {
+        Err(RoundTripFailure::resource(format_args!(
+            "{side} retained model requires {required} bytes; limit is {}",
+            limits.retained_model_bytes()
+        )))
+    } else {
+        Ok(())
+    }
+}
+
+fn required_retained_model_bytes(limits: RoundTripLimits) -> u64 {
+    // Peak overlap includes both parsed surfaces, point-matcher indexes and
+    // mappings, topology projections, the point-id index, and parser buffers.
+    // BTreeMap node layout is private, so charge four words beyond its payload.
+    let point_peak = limits.points().saturating_mul(
+        (2 * size_of::<Position>()
+            + size_of::<([u64; 3], usize)>()
+            + 3 * size_of::<usize>()
+            + size_of::<(u64, usize)>()
+            + 4 * size_of::<usize>()) as u64,
+    );
+    let face_peak = limits
+        .faces()
+        .saturating_mul((4 * size_of::<[usize; 3]>()) as u64);
+    let fixed = (3 * STREAM_BUFFER_BYTES
+        + 32 * size_of::<Tag>()
+        + 2 * 16 * size_of::<[usize; 3]>()
+        + 4 * size_of::<Box<str>>()) as u64;
+    point_peak.saturating_add(face_peak).saturating_add(fixed)
+}
+
 fn check_cancelled(control: &OperationControl) -> Result<(), RoundTripFailure> {
     control
         .check_cancelled()
@@ -993,8 +1301,9 @@ mod tests {
     };
 
     use super::{
-        Utf8Validator, capture_streaming_pair, evaluate_streaming_round_trip,
-        evaluate_streaming_round_trip_with_control,
+        HashingReader, STREAM_BUFFER_BYTES, Utf8Validator, capture_streaming_pair,
+        evaluate_streaming_round_trip, evaluate_streaming_round_trip_with_control,
+        required_retained_model_bytes, validate_retained_model_limit,
     };
 
     static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -1289,6 +1598,73 @@ mod tests {
         .expect_err("XML node ceiling is an operational resource failure");
 
         assert_eq!(error.kind(), RoundTripFailureKind::ResourceLimit);
+    }
+
+    #[test]
+    fn retained_model_accounting_has_an_exact_limit_boundary() {
+        let base = RoundTripLimits::new(10_000, 1_000, 10_000, 10, 10, 100);
+        let required = required_retained_model_bytes(base);
+        validate_retained_model_limit("TEST", base.with_retained_model_bytes(required))
+            .expect("the accounted peak fits its exact retained-model boundary");
+        let error =
+            validate_retained_model_limit("TEST", base.with_retained_model_bytes(required - 1))
+                .expect_err("one byte below the accounted peak must fail closed");
+        assert_eq!(error.kind(), RoundTripFailureKind::ResourceLimit);
+    }
+
+    #[test]
+    fn lexical_token_bound_covers_comment_cdata_pi_and_doctype_terminators() {
+        let repeated_angles = "<>".repeat(STREAM_BUFFER_BYTES);
+        let repeated_text = "x".repeat(STREAM_BUFFER_BYTES * 2);
+        for (label, token) in [
+            ("text", repeated_text),
+            ("comment", format!("<!--{repeated_angles}-->")),
+            ("cdata", format!("<![CDATA[{repeated_angles}]]>")),
+            ("pi", format!("<?probe {repeated_angles}?>")),
+            (
+                "doctype",
+                format!("<!DOCTYPE LandXML [{}]>", "<!ELEMENT A ANY>".repeat(8_192)),
+            ),
+        ] {
+            let directory = Directory::new();
+            let path = directory.path.join(format!("{label}.xml"));
+            fs::write(&path, &token).unwrap();
+            let mut file = fs::File::open(&path).unwrap();
+            let hashing = HashingReader::new(
+                &mut file,
+                token.len() as u64,
+                token.len() as u64,
+                STREAM_BUFFER_BYTES as u64,
+            );
+            let mut reader = quick_xml::Reader::from_reader(std::io::BufReader::with_capacity(
+                8 * 1024,
+                hashing,
+            ));
+            let mut buffer = Vec::new();
+            buffer.try_reserve_exact(STREAM_BUFFER_BYTES).unwrap();
+            loop {
+                buffer.clear();
+                match reader.read_event_into(&mut buffer) {
+                    Err(quick_xml::Error::Io(error))
+                        if error.kind() == std::io::ErrorKind::FileTooLarge =>
+                    {
+                        assert!(buffer.len() <= STREAM_BUFFER_BYTES, "{label}");
+                        assert!(buffer.capacity() <= STREAM_BUFFER_BYTES, "{label}");
+                        break;
+                    }
+                    Err(error) => panic!("{label} failed before hard token bound: {error}"),
+                    Ok(quick_xml::events::Event::Eof) => {
+                        panic!("{label} escaped the hard lexical token bound")
+                    }
+                    Ok(_) => assert!(
+                        buffer.len() <= STREAM_BUFFER_BYTES,
+                        "{label}: len={} capacity={}",
+                        buffer.len(),
+                        buffer.capacity()
+                    ),
+                }
+            }
+        }
     }
 
     fn assert_failed_reason(reference: &Path, returned: &Path, reason: RoundTripReason) {

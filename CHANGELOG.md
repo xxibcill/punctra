@@ -3,7 +3,37 @@
 All notable changes to Punctra are documented here. The project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased - 0.8.0-alpha.1
+## 0.9.0 - 2026-08-13
+
+- Completed the narrow Trust and v1 Candidate repository design from the exact
+  `9a8363a0d807990209f8252d93229c7f9464c923` v0.8 base. The completed v0.8
+  repository interoperability-qualification slice remains distinct from its
+  still-outstanding external product-MVP gates.
+- Froze owner-local version-1 Source Record, Spatial Index, Workspace, Workflow
+  Run, report, LandXML, and Round-Trip Evidence fixtures with exact manifests,
+  reopen/reconciliation coverage, and future-version, truncation, checksum,
+  lineage, binding, and semantic mutation cases appropriate to each artifact
+  class.
+- Hardened index, Workspace, journal, LandXML, report, and evidence persistence
+  around descriptor-bound no-replace publication, open target witnesses,
+  destination and parent-directory durability, late binding checks, retained
+  private stages, and conservative post-publication certainty without deleting
+  replaceable pathnames.
+- Preserved filesystem and publication failures through the private Workflow
+  taxonomy with bounded diagnostics and one safe recovery action. Recoverable
+  I/O remains distinct from invalid input, conflict, semantic failure, and
+  indeterminate publication.
+- Qualified the existing Complete-Run LandXML verifier with bounded streaming,
+  canonical pass/fail evidence, strict read-only Run/report/input binding, a
+  frozen generated corpus, exact-existing reconciliation, and adversarial
+  parser/resource/publication coverage.
+- Froze the version-1 support matrix and public-interface review, documented
+  upgrade/rebuild/recovery policy, and recorded the complete local formatting,
+  lint, test, rustdoc, fuzz, example, Criterion, and forced-GPU acceptance
+  sequence. No new format, Edit, terrain, UI, networking, transformation, or
+  product feature family was added.
+
+## 0.8.0-alpha.1 - 2026-08-13
 
 - Implemented the narrow v0.8 repository interoperability-qualification
   design. The private `terrain-demo` path compares a caller-returned semantic

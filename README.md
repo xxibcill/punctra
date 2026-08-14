@@ -70,6 +70,24 @@ and `audit.json` remain unchanged. No actual Civil 3D, Bentley, partner,
 paid-pilot, conversion, or labor-savings test is claimed, so the product MVP
 gates remain outstanding.
 
+Version 0.9.0 completes the repository trust and version-1 compatibility
+candidate described by the implemented [Trust and v1 Candidate
+design](docs/design/trust-v1-candidate-v0.9.md). It freezes owner-local
+version-1 fixtures for Source Records, Spatial Indexes, Workspaces, Workflow
+Runs, reports, LandXML, and Round-Trip Evidence; hardens descriptor-bound
+no-replace publication and conservative recovery; and records the reviewed
+interface and support boundaries for the existing narrow workflow. The exact
+local release results are recorded in the [v0.9 verification
+record](docs/releases/v0.9.0.md). This repository candidate is not `1.0.0`, a
+product-readiness claim, or evidence of external downstream execution or
+customer acceptance.
+
+The frozen format, coordinate, platform, device, upgrade, and recovery
+boundaries are collected in the [v0.9 support
+matrix](docs/architecture/v0.9-support-matrix.md). The reusable,
+adapter-author, test-support, and private application surfaces are classified
+in the [v0.9 interface review](docs/architecture/v0.9-interface-review.md).
+
 Later direction and the exact external product gates are described in the
 [living roadmap](ROADMAP.md). Its candidate themes do not expand accepted
 implementation scope by themselves.
@@ -239,12 +257,12 @@ caller-requested Revert restores the baseline after the correction, and Source
 bytes remain unchanged. A v0.7 Workflow does not automatically Revert a
 committed classification Revision when a later phase fails.
 
-The v0.8 comparison path can compare that exact export with a returned LandXML while
-ignoring Point/face order, Point renumbering, and triangle winding. The two
-operational paths may resolve to the same regular file or hard-linked content;
-semantic identity comes from the captured bytes rather than path identity.
-Symbolic links remain invalid, and platforms without stable file identity fail
-closed:
+The v0.8 comparison path can compare that exact export with a returned LandXML
+while ignoring Point/face order, Point renumbering, and triangle winding. The
+two operational paths may resolve to the same regular file or hard-linked
+content; semantic identity comes from the captured bytes rather than path
+identity. Symbolic links remain invalid, and platforms without stable file
+identity fail closed:
 
 ```bash
 cargo run --release -p terrain-demo -- compare-landxml \
@@ -345,13 +363,11 @@ design-partner runs remain explicitly outstanding.
 
 ## v0.5 benchmark evidence
 
-At v0.5, the `point-workspace` acceptance suite recorded 61 package tests: 19
-integration tests through the public interface and 42 unit, fault-injection,
-and allocation gates. The merged v0.7 suite now has 83 package tests—33
-integration and 50 unit/private—after adding exact row-stream and Revision
-Audit coverage. The retained tests include generated LAS and LAZ selection,
-commit, Revert, reopen, Source immutability, forced spill, hard limits,
-corruption, retry, and injected persistence-boundary cases.
+The retained `point-workspace` suites cover public lifecycle, selection,
+row-stream, Revision Audit, persistence, fault-injection, and allocation
+behavior. They include generated LAS and LAZ selection, commit, Revert, reopen,
+Source immutability, forced spill, hard limits, corruption, retry, frozen
+version-1 fixtures, and injected persistence-boundary cases.
 
 On the local Apple M5 Pro, 24 GiB, arm64, macOS 26.5.2 reference machine with
 Rust 1.90.0, the default generated one-million-Point benchmark completed its
@@ -363,8 +379,9 @@ benchmark does not claim worker heap: its public Point-ID iteration peaked at
 2,621,440 measured caller-thread bytes and retained zero, while selection
 memory is reported as sampled process RSS. Resident-selection RSS was
 62,668,800 bytes. Forced-spill RSS started at 62,685,184 bytes and sampled at
-62,832,640 bytes, a 147,456-byte delta; its sealed temporary file was 9,009,182
-bytes and was removed with the final Point Set handle.
+62,832,640 bytes, a 147,456-byte delta; its sealed temporary payload was
+9,009,182 bytes. The v0.9 ownership policy retains private spill names rather
+than unlinking a pathname that a concurrent actor could replace.
 
 A sparse 10,000-Point classification/Revert pair took approximately
 16.442/15.818 ms and added 20.100 logical bytes per changed Point. A dense
@@ -410,11 +427,11 @@ external gate remains outstanding.
 
 ## v0.7 benchmark evidence
 
-`terrain-demo` has 43 package tests: 25 unit/private fault and contract tests,
-15 public workflow-facade tests, and three process tests. The public suites
-cover every eight-frame resume prefix, 12 limit families, known-identity
-validation, and dropped-Workflow recovery; the private fault scope is
-documented precisely in the [verification strategy](docs/architecture/testing.md).
+The retained `terrain-demo` suites cover every eight-frame resume prefix, the
+documented limit families, known-identity validation, dropped-Workflow
+recovery, Complete-Run qualification, canonical pass/fail evidence, frozen
+version-1 fixtures, and representative persistence faults. The exact scope is
+documented in the [verification strategy](docs/architecture/testing.md).
 
 The checked-in `terrain-demo` Criterion benchmark exercises five restart modes
 through the public workflow facade with generated local LAS data. The local
@@ -438,16 +455,16 @@ acceptance remain unmeasured.
 
 ## v0.8 repository verification evidence
 
-`terrain-demo` now has 83 package tests: 61 unit/private tests, 15 public
-workflow-facade tests, and seven process tests. The v0.8 additions cover the
-bounded DOM and full-export-ceiling streaming readers, UTF-8 and LandXML subset
-rejection, unique tolerance mapping, topology-difference facts, Complete-Run
-and immutable-input witnesses, canonical pass/fail evidence, exact-existing
-reconciliation, conflicting targets, cancellation, and publication-boundary
-faults. The full local formatting, strict lint, workspace test, rustdoc, stable
-fuzz, example, benchmark, and forced-GPU sequence in `CONTRIBUTING.md` completed
-on the reference development machine. These generated repository checks do not
-satisfy any external product gate.
+The v0.8 package suites cover the bounded DOM and full-export-ceiling streaming
+readers, UTF-8 and LandXML-subset failure evidence, unique tolerance mapping,
+topology-difference facts, Complete-Run and immutable-input witnesses,
+canonical pass/fail evidence, exact-existing reconciliation, conflicting
+targets, cancellation, and publication-boundary faults. The later v0.9
+qualification retains that behavior and adds frozen compatibility fixtures and
+failure/recovery coverage. Exact current command results and benchmark
+observations live in the [v0.9 verification record](docs/releases/v0.9.0.md),
+not in a test-count claim here. Generated repository checks satisfy no external
+product gate.
 
 ## Development
 

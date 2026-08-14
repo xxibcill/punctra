@@ -22,10 +22,16 @@ canonical report, and structured recovery diagnostics. The completed
 scope](docs/design/design-partner-mvp-v0.8.md) additionally permits the private,
 bounded `terrain-demo` LandXML comparison reader, read-only Complete-Run
 binding, and separate canonical Round-Trip Evidence. Apart from that explicit
-exception, external format decoding belongs only in accepted Source adapter
-crates. Networking, screen selection, general editing, constrained or persistent
-terrain, general export, Source rewriting, and general host UI remain in callers
-or future projects unless the scope is explicitly revised.
+exception, the completed [v0.9 Trust and v1 Candidate
+scope](docs/design/trust-v1-candidate-v0.9.md) permits version-1 compatibility
+fixtures, ownership-safe persistence hardening, the frozen support matrix,
+interface review, and reproducible local qualification for the same narrow
+workflow. External format decoding otherwise belongs only in accepted Source
+adapter crates. Networking, screen selection, general editing, constrained or
+persistent terrain, general export, Source rewriting, and general host UI
+remain in callers or future projects unless the scope is explicitly revised.
+The exact v0.9 command outcomes and benchmark observations are recorded in the
+[repository verification record](docs/releases/v0.9.0.md).
 
 ## Local verification
 

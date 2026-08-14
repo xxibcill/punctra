@@ -1,0 +1,187 @@
+{
+  "version": 1,
+  "source": [
+    240,
+    20,
+    81,
+    45,
+    240,
+    127,
+    59,
+    240,
+    50,
+    69,
+    211,
+    55,
+    174,
+    219,
+    104,
+    129,
+    251,
+    147,
+    170,
+    204,
+    123,
+    220,
+    227,
+    201,
+    248,
+    40,
+    12,
+    144,
+    174,
+    230,
+    18,
+    243
+  ],
+  "content_hash": [
+    219,
+    251,
+    218,
+    126,
+    222,
+    187,
+    172,
+    64,
+    80,
+    205,
+    45,
+    229,
+    76,
+    215,
+    82,
+    184,
+    81,
+    247,
+    73,
+    146,
+    98,
+    161,
+    248,
+    70,
+    123,
+    123,
+    125,
+    157,
+    159,
+    103,
+    113,
+    33
+  ],
+  "adapter_name": "source-las",
+  "adapter_version": "1",
+  "logical_order": "LAS/LAZ point-record order v1",
+  "metadata": {
+    "point_count": 3,
+    "position_transform": {
+      "offset": [
+        100.0,
+        -50.0,
+        1000.0
+      ],
+      "scale": [
+        0.25,
+        0.5,
+        2.0
+      ]
+    },
+    "coordinate_reference": "Unknown",
+    "attributes": {
+      "definitions": [
+        {
+          "id": 1,
+          "name": "intensity",
+          "data_type": "U16"
+        },
+        {
+          "id": 2,
+          "name": "return_number",
+          "data_type": "U8"
+        },
+        {
+          "id": 3,
+          "name": "number_of_returns",
+          "data_type": "U8"
+        },
+        {
+          "id": 4,
+          "name": "scan_direction",
+          "data_type": "U8"
+        },
+        {
+          "id": 5,
+          "name": "edge_of_flight_line",
+          "data_type": "U8"
+        },
+        {
+          "id": 6,
+          "name": "classification",
+          "data_type": "U8"
+        },
+        {
+          "id": 7,
+          "name": "synthetic",
+          "data_type": "U8"
+        },
+        {
+          "id": 8,
+          "name": "key_point",
+          "data_type": "U8"
+        },
+        {
+          "id": 9,
+          "name": "withheld",
+          "data_type": "U8"
+        },
+        {
+          "id": 10,
+          "name": "overlap",
+          "data_type": "U8"
+        },
+        {
+          "id": 12,
+          "name": "scan_angle",
+          "data_type": "I8"
+        },
+        {
+          "id": 13,
+          "name": "user_data",
+          "data_type": "U8"
+        },
+        {
+          "id": 14,
+          "name": "point_source_id",
+          "data_type": "U16"
+        }
+      ]
+    },
+    "world_bounds": {
+      "min": [
+        99.5,
+        -51.5,
+        1018.0
+      ],
+      "max": [
+        101.75,
+        -47.5,
+        1022.0
+      ]
+    },
+    "format_name": "LAS",
+    "metadata_records": []
+  },
+  "fast_token": [
+    102,
+    117,
+    108,
+    108,
+    45,
+    111,
+    110,
+    108,
+    121,
+    45,
+    118,
+    49
+  ]
+}

@@ -1,11 +1,15 @@
 # Module Catalog
 
-Status: current through the narrow v0.7 technical-readiness slice; broader
-terrain and export modules deferred
+Status: frozen module ownership for the completed v0.9 repository trust and
+version-1 compatibility candidate; broader terrain and export modules deferred
 
 This is the ownership map for implemented crates. Each crate has one public
 job. Several private files may cooperate behind one deep interface; private
 file boundaries are not public module promises.
+
+The v0.9 compatibility classification, caller obligations, side effects,
+limits, and recovery modes are frozen in the
+[v0.9 public interface review](v0.9-interface-review.md).
 
 ## Catalog
 
@@ -23,11 +27,11 @@ file boundaries are not public module promises.
 | `point-view` | Plan one frozen View over a host-owned hierarchy without I/O. | Camera, viewport, hierarchy/residency, budget | Demand, requests, retention, retirements |
 | `render-wgpu` | Maintain and draw one wgpu representation of render-protocol state. | Render updates, frame, host target | Recorded commands, report, provisional picks |
 | `renderer-demo` | Exercise synthetic or indexed LAS/LAZ View-to-render composition. | CLI or generated inputs | Interactive demo or GPU-free process smoke |
-| `terrain-demo` | Own one recoverable headless LAS/LAZ-to-terrain Workflow Run. | Caller-owned paths, identities, baseline, correction/QA intent, limits | Eight-frame journal, Revision, Terrain/QA evidence, LandXML, canonical report |
+| `terrain-demo` | Own one recoverable headless LAS/LAZ-to-terrain Workflow Run and its read-only post-Run qualifier. | Caller-owned paths, identities, baseline, correction/QA intent, returned LandXML, declaration, tolerances, limits | Eight-frame journal, Revision, Terrain/QA evidence, LandXML, canonical report, separate Round-Trip Evidence |
 
 `source-copc`, constrained or persisted terrain, general LandXML, general
 application UI, bindings, and remote storage are not implemented modules in
-v0.7.
+v0.9.
 
 ## 1. point-contracts
 
@@ -285,14 +289,16 @@ materialization seam.
 
 ## 11. terrain-demo
 
-**Job:** own one recoverable GPU-free LAS/LAZ-to-Terrain Workflow Run without
-turning application policy into another foundation crate.
+**Job:** own one recoverable GPU-free LAS/LAZ-to-Terrain Workflow Run and its
+read-only post-Run qualifier without turning application policy into another
+foundation crate.
 
 The package exposes a small application facade: `WorkflowPaths`,
 `WorkflowRunIntent`, `WorkflowLimits`, `WorkflowPhase`, `WorkflowReceipt`,
 `WorkflowStatus`, `WorkflowFailure`, `start_run`, `resume_run`, and
 `inspect_and_repair_run`. The binary is a thin bounded grammar and presentation layer with
-`start`, `resume`, and `inspect` commands. Start/resume require the same
+`start`, `resume`, `inspect`, `compare-landxml`, and `verify-round-trip`
+commands. Start/resume require the same
 caller-owned Run/Operation identities, expected baseline Revision, nonempty
 exact Ground-ordinal set, normalized Terrain Recipe, detached Check Points,
 LandXML options, four paths, and limits.
@@ -310,22 +316,30 @@ uses Source Attribute 6 (`source-las` classification) as the selected `U8`
 Attribute, and provides an already existing Run-root directory. An absent
 Workspace is an invalid request before Run creation or Workspace mutation.
 
-Private `journal`, `workflow`, `report`, and `diagnostic` modules own the
+Private journal, workflow, report, publication, comparison, streaming, evidence,
+qualification, and diagnostic modules own the
 exclusive Run lock, exact path bindings, eight-frame journal, Operation
 resolution, Revision Audit, baseline/changed Derivation, conservative Surface
 Change Envelope, QA, LandXML/report reconciliation, and one-action structured
 failures. The fixed Run root contains `run.pwf`, `run.lock`, `terrain.xml`, and
 `audit.json`. No Terrain Surface or audit cache is persisted.
 
-**Independent proof:** 43 package tests—25 unit/private, 15 through the public
-workflow facade, and three through the process boundary—cover every
-eight-frame restart prefix, one-Revision idempotence, exact report/XML conflict
-and recovery, 12 public limit families, LAS/LAZ semantic projection, Source
-immutability, stale/mismatched state, Retryable intent, cancellation,
-identity-bearing Run-root validation, dropped-Workflow recovery, and CLI
-diagnostics. The generated 10k/100k/1M-capable Criterion benchmark has five
-cold/restart/reconciliation modes. Its evidence is generated-only and does not
-claim worker heap or external acceptance.
+Qualification strictly reads a Complete Run, original and returned LandXML,
+and canonical report without repair or Run-root mutation. It streams the full
+supported export ceiling, evaluates the narrow semantic model, and creates or
+exactly reconciles separate canonical pass/fail evidence outside the Run root.
+The caller declaration is recorded but never treated as observed external
+execution.
+
+**Independent proof:** package, frozen-fixture, workflow-facade, and process
+tests cover every eight-frame restart prefix, one-Revision idempotence, exact
+report/XML/evidence conflict and recovery, public limit families, LAS/LAZ
+semantic projection, Complete-Run and immutable-input binding, streaming XML
+and semantic reason families, Source immutability, stale/mismatched state,
+Retryable intent, cancellation, dropped-Workflow recovery, and CLI diagnostics.
+The generated 10k/100k/1M-capable Criterion benchmark has five
+cold/restart/reconciliation modes. Exact current results belong to the release
+record; generated evidence claims neither worker heap nor external acceptance.
 
 Private journal faults exhaust the application-defined Intent-publication and
 `Complete` append-before-write, before-sync, and after-sync lost-

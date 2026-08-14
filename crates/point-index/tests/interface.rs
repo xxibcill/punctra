@@ -44,7 +44,7 @@ fn empty_build_and_warm_open_publish_complete_zero_facts() {
         fs::metadata(target.path()).unwrap().len(),
         built.prepare_report().artifact_bytes()
     );
-    assert!(!target.work_path().exists());
+    assert_eq!(fs::metadata(target.work_path()).unwrap().len(), 200);
 
     let arbitrary = WorldBounds::new([-1.0; 3], [1.0; 3]).unwrap();
     let plan = built

@@ -1,0 +1,78 @@
+{
+  "disk_version": 1,
+  "expected": {
+    "committed_audit_content_hash": "1bd5af535b21866e4563829455c698805a301d2f8a1e7275e9b822f5c3a483d4",
+    "committed_audit_point_id_hash": "b1d6972fa0e1a9dee2ba5d920b9a1c1a171235805c89c88a07defdf94c8d83fa",
+    "committed_changed_ordinals": [
+      1,
+      4,
+      7
+    ],
+    "committed_operation": "01010101010101010101010101010101",
+    "committed_revision": "4cf1a675aa841c6e804d10917eea98a9f908f31885e1b379788923e7c2dfeb68",
+    "committed_revision_sequence": 1,
+    "committed_value": 42,
+    "rejected_operation": "03030303030303030303030303030303",
+    "rejection": "NoChanges",
+    "retryable_changed_ordinals": [
+      2,
+      5
+    ],
+    "retryable_operation": "02020202020202020202020202020202",
+    "retryable_revision": "47723f465e92756cbbcdbe75044f28e2b466e2e8c616741eca501ed9d9ced122",
+    "retryable_revision_sequence": 2,
+    "retryable_value": 43,
+    "root_revision": "f0acf1bbbd2186bbe2441a1c6400362510dae1630347fb1e42befe4298c59ae3",
+    "workspace_id": "5a74dd496f026424f735244581c93064"
+  },
+  "files": [
+    {
+      "blake3": "acf0be994588cb339ef0cd09e0a87c9bea9525b9ce2595d60fe666ba6cbd7b33",
+      "byte_length": 1252,
+      "path": "workspace/manifest.pwm"
+    },
+    {
+      "blake3": "0230f5d1a3e4268323d38ec7fe383cde2cdaee7a4ed75971c296694489f804b5",
+      "byte_length": 534,
+      "path": "workspace/operations/01010101010101010101010101010101.ready"
+    },
+    {
+      "blake3": "3a0b7bb03d6fe6955420f2c674c9ceaf4e487369c7198df0e9175a34901a67ad",
+      "byte_length": 524,
+      "path": "workspace/operations/02020202020202020202020202020202.ready"
+    },
+    {
+      "blake3": "cc6f7e4c76c4c36b959b1b74b0d2503d4403557a65810d76ef6421b83fbce245",
+      "byte_length": 184,
+      "path": "workspace/operations/03030303030303030303030303030303.reject"
+    },
+    {
+      "blake3": "0230f5d1a3e4268323d38ec7fe383cde2cdaee7a4ed75971c296694489f804b5",
+      "byte_length": 534,
+      "path": "workspace/revisions/00000000000000000001-4cf1a675aa841c6e804d10917eea98a9f908f31885e1b379788923e7c2dfeb68.pwr"
+    }
+  ],
+  "owner": "point-workspace",
+  "path_base": "manifest_directory",
+  "semantic_version": 1,
+  "source_contract_version": 1,
+  "source_fixture": {
+    "classification_values_in_logical_order": [
+      0,
+      7,
+      6,
+      5,
+      4,
+      3,
+      2,
+      1,
+      0,
+      7,
+      6,
+      6
+    ],
+    "point_count": 12,
+    "source_id": "c59395f7e623418147be771e09ff6b6b86195fe1c0444b10b6efb2fdac217240"
+  },
+  "support_class": "authoritative"
+}

@@ -26,6 +26,10 @@ use point_workspace::{
 };
 
 use crate::{
+    canonical_output::{
+        CanonicalOutputError, CanonicalOutputErrorClass, CanonicalOutputLimits,
+        CanonicalOutputRetry,
+    },
     diagnostic::{
         Certainty, FailureCode, FailureContext, PublicationPhase, RecoveryAction, WorkflowFailure,
         WorkflowStage,
@@ -36,7 +40,7 @@ use crate::{
         WorkflowIntent as DurableIntent, WorkflowRunId,
     },
     publication::same_file_identity,
-    report::{self, LimitFact, ReportError, ReportFacts, ReportLimits, SurfaceChangeEnvelope},
+    report::{self, LimitFact, ReportFacts, SurfaceChangeEnvelope},
 };
 
 const PATH_BINDING_BYTES: u64 = 4 * 1024;
@@ -243,7 +247,7 @@ pub struct WorkflowLimits {
     qa: CheckPointLimits,
     landxml: LandXmlLimits,
     journal: JournalLimits,
-    report: ReportLimits,
+    report: CanonicalOutputLimits,
     max_envelope_faces: u64,
     max_envelope_working_bytes: u64,
     max_aggregate_working_bytes: u64,
@@ -262,7 +266,7 @@ impl Default for WorkflowLimits {
             qa: CheckPointLimits::default(),
             landxml: LandXmlLimits::default(),
             journal: JournalLimits::default(),
-            report: ReportLimits::default(),
+            report: CanonicalOutputLimits::default(),
             max_envelope_faces: 20_000_000,
             max_envelope_working_bytes: 1024 * 1024 * 1024,
             max_aggregate_working_bytes: 8 * 1024 * 1024 * 1024,
@@ -2353,11 +2357,10 @@ fn index_failure(
     control: &OperationControl,
     context: FailureContext,
 ) -> WorkflowFailure {
-    if control.check_cancelled().is_err()
-        || matches!(
-            &error,
-            IndexError::Runtime(foundation_runtime::RuntimeError::Cancelled)
-        )
+    if matches!(
+        &error,
+        IndexError::Runtime(foundation_runtime::RuntimeError::Cancelled)
+    ) || (control.check_cancelled().is_err() && !matches!(&error, IndexError::Io { .. }))
     {
         return cancelled_failure(stage, context);
     }
@@ -2399,6 +2402,14 @@ fn index_failure(
             error,
             RecoveryAction::StopAndPreserve,
         ),
+        error @ IndexError::Io { .. } => WorkflowFailure::new(
+            FailureCode::Io,
+            stage,
+            Certainty::Indeterminate(PublicationPhase::IndexTarget),
+            context,
+            error,
+            RecoveryAction::RetryAfterRestoringDisk,
+        ),
         error => phase_failure(stage, error, context),
     }
 }
@@ -2409,8 +2420,8 @@ fn terrain_failure(
     control: &OperationControl,
     context: FailureContext,
 ) -> WorkflowFailure {
-    if control.check_cancelled().is_err()
-        || matches!(&error, point_terrain::TerrainError::Cancelled)
+    if matches!(&error, point_terrain::TerrainError::Cancelled)
+        || (control.check_cancelled().is_err() && !terrain_error_is_io(&error))
     {
         return cancelled_failure(stage, context);
     }
@@ -2450,13 +2461,36 @@ fn terrain_failure(
     }
 }
 
+fn terrain_error_is_io(error: &point_terrain::TerrainError) -> bool {
+    match error {
+        point_terrain::TerrainError::Io { .. } => true,
+        point_terrain::TerrainError::Workspace { source, .. } => workspace_error_is_io(source),
+        _ => false,
+    }
+}
+
+fn workspace_error_is_io(error: &WorkspaceError) -> bool {
+    match error {
+        WorkspaceError::Io { .. } => true,
+        WorkspaceError::Index { source, .. } => matches!(source, IndexError::Io { .. }),
+        _ => false,
+    }
+}
+
 fn workspace_failure(
     stage: WorkflowStage,
     error: WorkspaceError,
     control: &OperationControl,
     context: FailureContext,
 ) -> WorkflowFailure {
-    if control.check_cancelled().is_err() || matches!(&error, WorkspaceError::Cancelled) {
+    let error_is_io = workspace_error_is_io(&error);
+    let error_is_indeterminate = matches!(
+        &error,
+        WorkspaceError::Poisoned | WorkspaceError::RecoveryIndeterminate { .. }
+    );
+    if matches!(&error, WorkspaceError::Cancelled)
+        || (control.check_cancelled().is_err() && !error_is_io && !error_is_indeterminate)
+    {
         return cancelled_failure(stage, context);
     }
     let (code, certainty, action) = match &error {
@@ -2495,7 +2529,7 @@ fn workspace_failure(
             Certainty::PrePublication,
             RecoveryAction::ResumeSameRun,
         ),
-        WorkspaceError::Io { .. } => (
+        _ if error_is_io => (
             FailureCode::Io,
             Certainty::PrePublication,
             RecoveryAction::RetryAfterRestoringDisk,
@@ -2528,11 +2562,7 @@ fn terrain_output_failure(
 ) -> WorkflowFailure {
     match error {
         point_terrain::TerrainError::ExportConflict { .. }
-        | point_terrain::TerrainError::TargetExists { .. }
-        | point_terrain::TerrainError::InvalidArgument {
-            argument: "LandXML target",
-            ..
-        } => WorkflowFailure::new(
+        | point_terrain::TerrainError::TargetExists { .. } => WorkflowFailure::new(
             FailureCode::OutputConflict,
             stage,
             Certainty::DurableFact,
@@ -2548,17 +2578,33 @@ fn terrain_output_failure(
             error,
             RecoveryAction::ResumeSameRun,
         ),
+        error @ point_terrain::TerrainError::TargetChanged { .. } => WorkflowFailure::new(
+            FailureCode::Io,
+            stage,
+            Certainty::PrePublication,
+            context,
+            error,
+            RecoveryAction::ResumeSameRun,
+        ),
+        error @ point_terrain::TerrainError::Io { .. } => WorkflowFailure::new(
+            FailureCode::Io,
+            stage,
+            Certainty::PrePublication,
+            context,
+            error,
+            RecoveryAction::RetryAfterRestoringDisk,
+        ),
         error => terrain_failure(stage, error, control, context),
     }
 }
 
 fn report_failure(
     stage: WorkflowStage,
-    error: ReportError,
+    error: CanonicalOutputError,
     context: FailureContext,
 ) -> WorkflowFailure {
-    match error {
-        ReportError::Conflict { .. } | ReportError::TargetConflict { .. } => WorkflowFailure::new(
+    match error.classify() {
+        CanonicalOutputErrorClass::Conflict => WorkflowFailure::new(
             FailureCode::OutputConflict,
             stage,
             Certainty::DurableFact,
@@ -2566,15 +2612,18 @@ fn report_failure(
             error,
             RecoveryAction::RemoveOrRenameConflictingTarget,
         ),
-        ReportError::TargetChanged { .. } => WorkflowFailure::new(
-            FailureCode::PublicationIndeterminate,
+        CanonicalOutputErrorClass::PrePublicationIo(retry) => WorkflowFailure::new(
+            FailureCode::Io,
             stage,
-            Certainty::Indeterminate(PublicationPhase::ReportTarget),
+            Certainty::PrePublication,
             context,
             error,
-            RecoveryAction::StopAndPreserve,
+            match retry {
+                CanonicalOutputRetry::SameIntent => RecoveryAction::ResumeSameRun,
+                CanonicalOutputRetry::AfterRestoringDisk => RecoveryAction::RetryAfterRestoringDisk,
+            },
         ),
-        ReportError::Indeterminate { .. } => WorkflowFailure::new(
+        CanonicalOutputErrorClass::PublicationIndeterminate => WorkflowFailure::new(
             FailureCode::PublicationIndeterminate,
             stage,
             Certainty::Indeterminate(PublicationPhase::ReportTarget),
@@ -2582,7 +2631,7 @@ fn report_failure(
             error,
             RecoveryAction::ResumeSameRun,
         ),
-        ReportError::Resource { .. } => WorkflowFailure::new(
+        CanonicalOutputErrorClass::ResourceLimit => WorkflowFailure::new(
             FailureCode::ResourceLimit,
             stage,
             Certainty::PrePublication,
@@ -2590,8 +2639,15 @@ fn report_failure(
             error,
             RecoveryAction::RaiseLimitOrNarrow,
         ),
-        ReportError::Cancelled => cancelled_failure(stage, context),
-        error => phase_failure(stage, error, context),
+        CanonicalOutputErrorClass::Cancelled => cancelled_failure(stage, context),
+        CanonicalOutputErrorClass::InvalidInput => WorkflowFailure::new(
+            FailureCode::InvalidRequest,
+            stage,
+            Certainty::PrePublication,
+            context,
+            error,
+            RecoveryAction::CorrectInvalidRequest,
+        ),
     }
 }
 
@@ -2637,13 +2693,37 @@ fn journal_failure(
             error,
             RecoveryAction::StopAndPreserve,
         ),
-        error => WorkflowFailure::new(
+        error @ (JournalError::Exists(_) | JournalError::Conflict(_)) => WorkflowFailure::new(
             FailureCode::JournalConflict,
             stage,
             Certainty::DurableFact,
             context,
             error,
             RecoveryAction::StopAndPreserve,
+        ),
+        error @ JournalError::Invalid(_) => WorkflowFailure::new(
+            FailureCode::InvalidRequest,
+            stage,
+            Certainty::PrePublication,
+            context,
+            error,
+            RecoveryAction::CorrectInvalidRequest,
+        ),
+        error @ JournalError::Locked => WorkflowFailure::new(
+            FailureCode::Io,
+            stage,
+            Certainty::PrePublication,
+            context,
+            error,
+            RecoveryAction::ResumeSameRun,
+        ),
+        error @ (JournalError::Entropy | JournalError::Io { .. }) => WorkflowFailure::new(
+            FailureCode::Io,
+            stage,
+            Certainty::PrePublication,
+            context,
+            error,
+            RecoveryAction::RetryAfterRestoringDisk,
         ),
     }
 }
@@ -3037,11 +3117,216 @@ mod workflow_test_support;
 
 #[cfg(test)]
 mod tests {
+    use std::io;
+
     use super::*;
     use point_contracts::AttributeId;
     use point_workspace::{WorkspaceSchema, create};
 
     use super::workflow_test_support::{TestDirectory, write_las_family_fixture};
+
+    #[test]
+    fn index_io_failure_preserves_the_recoverable_workflow_taxonomy() {
+        let error = IndexError::Io {
+            operation: "write and flush",
+            path: PathBuf::from("fixture.pidx.work"),
+            source: io::Error::new(io::ErrorKind::StorageFull, "disk is full"),
+        };
+        assert_eq!(
+            error.to_string(),
+            "failed to write and flush fixture.pidx.work: disk is full"
+        );
+        let failure = index_failure(
+            WorkflowStage::Index,
+            error,
+            &OperationControl::new(),
+            FailureContext::default(),
+        );
+
+        assert_eq!(failure.code(), "PWF_IO");
+        assert_eq!(failure.stage(), "index");
+        assert_eq!(failure.certainty(), "indeterminate");
+        assert_eq!(failure.publication_phase(), Some("index-target"));
+        assert_eq!(
+            failure.recovery_action(),
+            "restore disk capacity or permissions, then resume the same Run"
+        );
+        assert_eq!(
+            failure.diagnostic(),
+            "failed to write and flush fixture.pidx.work: disk is full"
+        );
+    }
+
+    #[test]
+    fn index_io_uncertainty_wins_over_concurrent_ambient_cancellation() {
+        let control = OperationControl::new();
+        control.cancel();
+        let failure = index_failure(
+            WorkflowStage::Index,
+            IndexError::Io {
+                operation: "sync published target",
+                path: PathBuf::from("fixture.pidx"),
+                source: io::Error::other("injected terminal I/O"),
+            },
+            &control,
+            FailureContext::default(),
+        );
+        assert_eq!(failure.code(), "PWF_IO");
+        assert_eq!(failure.certainty(), "indeterminate");
+        assert_eq!(failure.publication_phase(), Some("index-target"));
+    }
+
+    #[test]
+    fn terrain_io_wins_over_concurrent_ambient_cancellation() {
+        let control = OperationControl::new();
+        control.cancel();
+        let failure = terrain_failure(
+            WorkflowStage::Terrain,
+            point_terrain::TerrainError::Io {
+                operation: "read terrain input",
+                path: point_terrain::TerrainDiagnostic::new("terrain-input.bin"),
+                source: io::Error::other("injected terrain I/O"),
+            },
+            &control,
+            FailureContext::default(),
+        );
+
+        assert_eq!(failure.code(), "PWF_IO");
+        assert_eq!(failure.stage(), "terrain-derivation");
+        assert_eq!(failure.certainty(), "pre_publication");
+        assert!(failure.diagnostic().contains("terrain-input.bin"));
+        assert!(failure.diagnostic().contains("injected terrain I/O"));
+    }
+
+    #[test]
+    fn workspace_io_wins_over_concurrent_ambient_cancellation() {
+        let control = OperationControl::new();
+        control.cancel();
+        let workspace_io = WorkspaceError::Io {
+            operation: "read Workspace rows",
+            path: point_workspace::WorkspaceDiagnostic::new("rows.bin"),
+            source: io::Error::other("injected Workspace I/O"),
+        };
+        let failure = workspace_failure(
+            WorkflowStage::Selection,
+            workspace_io,
+            &control,
+            FailureContext::default(),
+        );
+
+        assert_eq!(failure.code(), "PWF_IO");
+        assert_eq!(failure.stage(), "exact-selection");
+        assert_eq!(failure.certainty(), "pre_publication");
+        assert!(failure.diagnostic().contains("rows.bin"));
+        assert!(failure.diagnostic().contains("injected Workspace I/O"));
+
+        let nested = terrain_failure(
+            WorkflowStage::Terrain,
+            point_terrain::TerrainError::from(WorkspaceError::Io {
+                operation: "read terrain Workspace rows",
+                path: point_workspace::WorkspaceDiagnostic::new("terrain-rows.bin"),
+                source: io::Error::other("injected nested Workspace I/O"),
+            }),
+            &control,
+            FailureContext::default(),
+        );
+        assert_eq!(nested.code(), "PWF_IO");
+        assert!(nested.diagnostic().contains("terrain-rows.bin"));
+        assert!(
+            nested
+                .diagnostic()
+                .contains("injected nested Workspace I/O")
+        );
+
+        let nested_index = workspace_failure(
+            WorkflowStage::Selection,
+            WorkspaceError::from(IndexError::Io {
+                operation: "read Workspace index",
+                path: PathBuf::from("workspace.pidx"),
+                source: io::Error::other("injected nested Index I/O"),
+            }),
+            &control,
+            FailureContext::default(),
+        );
+        assert_eq!(nested_index.code(), "PWF_IO");
+        assert_eq!(nested_index.certainty(), "pre_publication");
+        assert!(nested_index.diagnostic().contains("workspace.pidx"));
+        assert!(
+            nested_index
+                .diagnostic()
+                .contains("injected nested Index I/O")
+        );
+
+        let terrain_nested_index = terrain_failure(
+            WorkflowStage::Terrain,
+            point_terrain::TerrainError::from(WorkspaceError::from(IndexError::Io {
+                operation: "read terrain Workspace index",
+                path: PathBuf::from("terrain-workspace.pidx"),
+                source: io::Error::other("injected terrain nested Index I/O"),
+            })),
+            &control,
+            FailureContext::default(),
+        );
+        assert_eq!(terrain_nested_index.code(), "PWF_IO");
+        assert!(
+            terrain_nested_index
+                .diagnostic()
+                .contains("terrain-workspace.pidx")
+        );
+        assert!(
+            terrain_nested_index
+                .diagnostic()
+                .contains("injected terrain nested Index I/O")
+        );
+    }
+
+    #[test]
+    fn workspace_uncertainty_wins_over_concurrent_ambient_cancellation() {
+        let control = OperationControl::new();
+        control.cancel();
+        let failure = workspace_failure(
+            WorkflowStage::Commit,
+            WorkspaceError::RecoveryIndeterminate {
+                operation: None,
+                reason: point_workspace::WorkspaceDiagnostic::new(
+                    "injected directory-sync uncertainty",
+                ),
+                source: Box::new(WorkspaceError::Io {
+                    operation: "sync Workspace directory",
+                    path: point_workspace::WorkspaceDiagnostic::new("workspace"),
+                    source: io::Error::other("injected directory-sync failure"),
+                }),
+                reconciliation: None,
+            },
+            &control,
+            FailureContext::default(),
+        );
+
+        assert_eq!(failure.code(), "PWF_OPERATION_INDETERMINATE");
+        assert_eq!(failure.certainty(), "indeterminate");
+        assert_eq!(
+            failure.publication_phase(),
+            Some("workspace-directory-sync")
+        );
+        assert_eq!(
+            failure.recovery_action(),
+            "resume to resolve the recorded Operation Identity"
+        );
+        assert!(
+            failure
+                .diagnostic()
+                .contains("injected directory-sync uncertainty")
+        );
+
+        let poisoned = workspace_failure(
+            WorkflowStage::Commit,
+            WorkspaceError::Poisoned,
+            &control,
+            FailureContext::default(),
+        );
+        assert_eq!(poisoned.code(), "PWF_OPERATION_INDETERMINATE");
+        assert_eq!(poisoned.certainty(), "indeterminate");
+    }
 
     #[test]
     fn run_root_witness_detects_same_path_replacement() {
@@ -3233,6 +3518,7 @@ mod tests {
             WorkflowStage::LandXml,
             point_terrain::TerrainError::ExportIndeterminate {
                 expected_hash: point_contracts::ContentHash::new([1; 32]),
+                source: Box::new(point_terrain::TerrainError::Cancelled),
             },
             &control,
             FailureContext::default(),
@@ -3241,6 +3527,163 @@ mod tests {
         assert_eq!(failure.code(), "PWF_PUBLICATION_INDETERMINATE");
         assert_eq!(failure.certainty(), "indeterminate");
         assert_eq!(failure.publication_phase(), Some("landxml-target"));
+    }
+
+    #[test]
+    fn landxml_io_before_publication_preserves_prepublication_taxonomy() {
+        let failure = terrain_output_failure(
+            WorkflowStage::LandXml,
+            point_terrain::TerrainError::Io {
+                operation: "create LandXML stage",
+                path: point_terrain::TerrainDiagnostic::new(".punctra-landxml.stage"),
+                source: io::Error::other("disk is full"),
+            },
+            &OperationControl::new(),
+            FailureContext::default(),
+        );
+
+        assert_eq!(failure.code(), "PWF_IO");
+        assert_eq!(failure.certainty(), "pre_publication");
+        assert_eq!(failure.publication_phase(), None);
+        assert_eq!(
+            failure.recovery_action(),
+            "restore disk capacity or permissions, then resume the same Run"
+        );
+    }
+
+    #[test]
+    fn landxml_target_replacement_is_retryable_io_not_output_conflict() {
+        let failure = terrain_output_failure(
+            WorkflowStage::LandXml,
+            point_terrain::TerrainError::TargetChanged {
+                path: point_terrain::TerrainDiagnostic::new("terrain.xml"),
+            },
+            &OperationControl::new(),
+            FailureContext::default(),
+        );
+
+        assert_eq!(failure.code(), "PWF_IO");
+        assert_eq!(failure.certainty(), "pre_publication");
+        assert_eq!(
+            failure.recovery_action(),
+            "resume the same Run with the same identities and paths"
+        );
+    }
+
+    #[test]
+    fn report_operational_failures_keep_their_stable_taxonomy() {
+        let context = FailureContext::default();
+        let invalid = report_failure(
+            WorkflowStage::Report,
+            CanonicalOutputError::Invalid("invalid request".to_owned()),
+            context,
+        );
+        assert_eq!(invalid.code(), "PWF_INVALID_REQUEST");
+        assert_eq!(invalid.certainty(), "pre_publication");
+
+        let io = report_failure(
+            WorkflowStage::Report,
+            CanonicalOutputError::Io {
+                operation: "sync report".to_owned(),
+                path: PathBuf::from("audit.json"),
+                source: io::Error::other("disk unavailable"),
+            },
+            context,
+        );
+        assert_eq!(io.code(), "PWF_IO");
+        assert_eq!(io.certainty(), "pre_publication");
+        assert_eq!(
+            io.recovery_action(),
+            "restore disk capacity or permissions, then resume the same Run"
+        );
+
+        let indeterminate = report_failure(
+            WorkflowStage::Report,
+            CanonicalOutputError::Indeterminate {
+                path: PathBuf::from("audit.json"),
+                expected_hash: [1; 32],
+                source: io::Error::other(CanonicalOutputError::Io {
+                    operation: "sync created report target".to_owned(),
+                    path: PathBuf::from("audit.json"),
+                    source: io::Error::other("disk unavailable after publication"),
+                }),
+            },
+            context,
+        );
+        assert_eq!(indeterminate.code(), "PWF_PUBLICATION_INDETERMINATE");
+        assert_eq!(indeterminate.certainty(), "indeterminate");
+        assert!(
+            indeterminate
+                .diagnostic()
+                .contains("sync created report target")
+        );
+        assert!(
+            indeterminate
+                .diagnostic()
+                .contains("disk unavailable after publication")
+        );
+
+        let target_changed = report_failure(
+            WorkflowStage::Report,
+            CanonicalOutputError::TargetChanged {
+                path: PathBuf::from("audit.json"),
+            },
+            context,
+        );
+        assert_eq!(target_changed.code(), "PWF_IO");
+        assert_eq!(target_changed.certainty(), "pre_publication");
+        assert_eq!(target_changed.publication_phase(), None);
+        assert_eq!(
+            target_changed.recovery_action(),
+            "resume the same Run with the same identities and paths"
+        );
+    }
+
+    #[test]
+    fn journal_operational_failures_keep_their_stable_taxonomy() {
+        let context = FailureContext::default();
+        for (error, code, action) in [
+            (
+                JournalError::Invalid("bad request"),
+                "PWF_INVALID_REQUEST",
+                "correct the invalid request and start a new Run",
+            ),
+            (
+                JournalError::Locked,
+                "PWF_IO",
+                "resume the same Run with the same identities and paths",
+            ),
+            (
+                JournalError::Entropy,
+                "PWF_IO",
+                "restore disk capacity or permissions, then resume the same Run",
+            ),
+            (
+                JournalError::Exists(PathBuf::from("run.pwf")),
+                "PWF_JOURNAL_CONFLICT",
+                "stop and preserve all Run and Workspace files",
+            ),
+            (
+                JournalError::Corrupt("bad frame"),
+                "PWF_JOURNAL_CORRUPT",
+                "stop and preserve all Run and Workspace files",
+            ),
+        ] {
+            let failure = journal_failure(WorkflowStage::Intent, error, context);
+            assert_eq!(failure.code(), code);
+            assert_eq!(failure.recovery_action(), action);
+        }
+        let io = journal_failure(
+            WorkflowStage::Intent,
+            JournalError::Io {
+                operation: "sync intent",
+                path: PathBuf::from("run.pwf"),
+                source: io::Error::other("disk unavailable"),
+            },
+            context,
+        );
+        assert_eq!(io.code(), "PWF_IO");
+        assert_eq!(io.certainty(), "pre_publication");
     }
 
     #[test]

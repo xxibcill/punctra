@@ -1,8 +1,8 @@
 # Point-Cloud Foundation Architecture
 
-Status: v0.1 through the narrow v0.8 repository qualification slice implemented;
-broader terrain, export, external interoperability evidence, and product layers
-remain deferred
+Status: v0.1 through the narrow v0.9 repository trust and version-1
+compatibility-candidate slice Complete; broader terrain, export, external
+interoperability evidence, and product layers remain deferred
 
 The accepted versioned designs are authoritative:
 
@@ -14,6 +14,7 @@ The accepted versioned designs are authoritative:
 - [v0.6 Terrain and QA benchmark](../design/terrain-qa-benchmark-v0.6.md)
 - [v0.7 Technical partner-alpha readiness](../design/technical-alpha-readiness-v0.7.md)
 - [v0.8 Repository interoperability qualification](../design/design-partner-mvp-v0.8.md)
+- [v0.9 Repository Trust and v1 Candidate](../design/trust-v1-candidate-v0.9.md)
 
 The current foundation is headless and embeddable. It reads immutable Sources,
 prepares a complete rebuildable Spatial Index, resolves progressive display,
@@ -24,6 +25,12 @@ Surface with detached QA and a metric-metre LandXML deliverable. The headless
 audited Workflow Run without turning orchestration policy into another
 foundation crate. A crate exists only when its behavior, direct tests, and a
 caller exist.
+
+The frozen [v0.9 public interface review](v0.9-interface-review.md) classifies
+reusable, adapter-author, test-support, and private application surfaces. The
+[v0.9 support, upgrade, and recovery matrix](v0.9-support-matrix.md) defines
+the exact workflow profile, artifact policies, platform evidence, and operator
+actions; the [release record](../releases/v0.9.0.md) owns exact local results.
 
 ## Current module shape
 
@@ -103,7 +110,8 @@ buffers, Workspace journal frames, spill files, or GPU buffers.
   canonical `SurfaceVertex`/`SurfaceFace` values, detached Check Point QA, and
   the private LandXML encoder and exact-target reconciliation.
 - `terrain-demo` owns its Run lock, eight-frame journal, cross-module recovery
-  policy, Surface Change Envelope, canonical report, and structured actions.
+  policy, Surface Change Envelope, canonical report, read-only Complete-Run
+  qualifier, canonical Round-Trip Evidence, and structured actions.
 - `render-protocol` owns generation and replacement semantics.
 - `point-view` owns deterministic culling, LOD demand, retention, and safe
   retirement decisions.
@@ -196,7 +204,7 @@ Operation states with the original identity. It opens but never creates the
 Workspace; an absent Workspace is `PWF_INVALID_REQUEST` before Run creation or
 Workspace mutation.
 
-## Scope boundary after v0.7
+## Scope boundary after v0.9
 
 Implemented document and terrain behavior is deliberately narrow:
 
@@ -214,12 +222,14 @@ Implemented document and terrain behavior is deliberately narrow:
   exact-existing reconciliation;
 - exact immutable Revision Audits and Edit Footprints; and
 - one private eight-frame `terrain-demo` Workflow Run with canonical report,
-  exclusive lock, linked cancellation, and structured recovery actions.
+  exclusive lock, linked cancellation, and structured recovery actions; and
+- one private read-only Complete-Run LandXML verifier with bounded streaming
+  comparison and separate canonical pass/fail evidence outside the Run root.
 
 General predicate languages, position or other Attribute Edits, named Point
 Sets, branches, merge, compaction, multiple Sources, Breaklines, constrained or
 persistent terrain, general export/import, networking, autosave policy, and
-product UI remain outside v0.7. Licensed-data, partner, named downstream-
+product UI remain outside v0.9. Licensed-data, partner, named downstream-
 application, above-500-million-Point, and human-workflow evidence also remains
 outstanding.
 
@@ -227,6 +237,12 @@ The implemented v0.8 design adds private `terrain-demo` semantic LandXML
 comparison, read-only Complete-Run binding, full-export-ceiling streaming, and a
 separate canonical evidence artifact without changing the public foundation
 shape. Every v0.7 journal and report contract remains unchanged.
+
+The completed v0.9 slice freezes the version-1 compatibility fixtures, artifact
+support classes, persistence/recovery behavior, platform evidence, and reviewed
+interface classifications for that same narrow shape. It adds no new workflow
+or product feature family, and a repository v1 candidate is not `1.0.0` or an
+external product-readiness claim.
 
 ## Document map
 

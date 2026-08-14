@@ -28,6 +28,12 @@ const DEFAULT_FRAME_RECORDS: usize = 4_096;
 const MIN_RESIDENT_GROWTH_RECORDS: usize = 4_096;
 const RANDOM_NAME_ATTEMPTS: usize = 32;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct SpillIdentity {
+    volume_id: u64,
+    file_id: u64,
+}
+
 /// One bounded batch from repeatable Point Set identity iteration.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PointIdBatch {
@@ -137,14 +143,6 @@ struct PointSetInner {
     _session: Arc<Session>,
 }
 
-impl Drop for PointSetInner {
-    fn drop(&mut self) {
-        if let PointSetStorage::Spill(spill) = &self.storage {
-            let _ = fs::remove_file(&spill.path);
-        }
-    }
-}
-
 enum PointSetStorage {
     Memory(Vec<PointSetRecord>),
     Spill(SpillDescriptor),
@@ -152,6 +150,7 @@ enum PointSetStorage {
 
 struct SpillDescriptor {
     path: PathBuf,
+    identity: SpillIdentity,
     file_bytes: u64,
     modified: SystemTime,
     max_frame_records: usize,
@@ -564,7 +563,7 @@ struct SpillWriter {
     frame_capacity: usize,
     max_frame_records_written: usize,
     buffer: Vec<PointSetRecord>,
-    keep: bool,
+    identity: SpillIdentity,
 }
 
 impl SpillWriter {
@@ -574,7 +573,7 @@ impl SpillWriter {
         max_working_bytes: u64,
     ) -> Result<Self, WorkspaceError> {
         let frame_capacity = frame_capacity(max_working_bytes)?;
-        let (path, file) = create_spill_file(scratch)?;
+        let (path, file, identity) = create_spill_file(scratch)?;
         let mut writer = Self {
             path,
             file,
@@ -584,7 +583,7 @@ impl SpillWriter {
             frame_capacity,
             max_frame_records_written: 0,
             buffer: Vec::new(),
-            keep: false,
+            identity,
         };
         writer.write_hashed(FILE_MAGIC)?;
         writer.write_hashed(&FILE_VERSION.to_le_bytes())?;
@@ -660,9 +659,10 @@ impl SpillWriter {
                 error,
             )
         })?;
-        self.keep = true;
+        require_spill_path_identity(&self.path, &self.file, self.identity)?;
         Ok(SpillDescriptor {
             path: self.path.clone(),
+            identity: self.identity,
             file_bytes,
             modified,
             max_frame_records: self.max_frame_records_written,
@@ -726,19 +726,12 @@ impl SpillWriter {
     }
 }
 
-impl Drop for SpillWriter {
-    fn drop(&mut self) {
-        if !self.keep {
-            let _ = fs::remove_file(&self.path);
-        }
-    }
-}
-
 struct SpillReader {
     path: PathBuf,
     file: File,
     sealed_file_bytes: u64,
     sealed_modified: SystemTime,
+    sealed_identity: SpillIdentity,
     file_hasher: Hasher,
     frame: Vec<PointSetRecord>,
     sealed_max_frame_records: usize,
@@ -759,6 +752,12 @@ impl SpillReader {
         metadata: &PointSetMetadata,
         limits: PointIdReadLimits,
     ) -> Result<Self, WorkspaceError> {
+        let path_metadata = regular_spill_metadata(&descriptor.path)?;
+        if spill_identity(&path_metadata, &descriptor.path)? != descriptor.identity {
+            return Err(WorkspaceError::invalid_point_set(
+                "Point Set spill identity changed after sealing",
+            ));
+        }
         let file = File::open(&descriptor.path).map_err(|error| {
             if error.kind() == io::ErrorKind::NotFound {
                 WorkspaceError::invalid_point_set("Point Set spill is missing")
@@ -798,6 +797,7 @@ impl SpillReader {
             file,
             sealed_file_bytes: descriptor.file_bytes,
             sealed_modified: descriptor.modified,
+            sealed_identity: descriptor.identity,
             file_hasher: domain_hasher(FILE_HASH_DOMAIN),
             frame,
             sealed_max_frame_records: descriptor.max_frame_records,
@@ -977,13 +977,17 @@ impl SpillReader {
     }
 
     fn verify_path_state(&self) -> Result<(), WorkspaceError> {
-        let actual = fs::metadata(&self.path).map_err(|error| {
-            if error.kind() == io::ErrorKind::NotFound {
-                WorkspaceError::invalid_point_set("Point Set spill is missing")
-            } else {
-                WorkspaceError::io("inspect Point Set spill", self.path.display(), error)
-            }
+        let actual = regular_spill_metadata(&self.path)?;
+        let opened = self.file.metadata().map_err(|error| {
+            WorkspaceError::io("inspect open Point Set spill", self.path.display(), error)
         })?;
+        if spill_identity(&actual, &self.path)? != self.sealed_identity
+            || spill_identity(&opened, &self.path)? != self.sealed_identity
+        {
+            return Err(WorkspaceError::invalid_point_set(
+                "Point Set spill identity changed after sealing",
+            ));
+        }
         if actual.len() != self.sealed_file_bytes {
             return Err(WorkspaceError::invalid_point_set(
                 "Point Set spill length changed after sealing",
@@ -1174,7 +1178,89 @@ fn frame_capacity(max_working_bytes: u64) -> Result<usize, WorkspaceError> {
     })
 }
 
-fn create_spill_file(scratch: &Path) -> Result<(PathBuf, File), WorkspaceError> {
+fn require_spill_path_identity(
+    path: &Path,
+    file: &File,
+    expected: SpillIdentity,
+) -> Result<(), WorkspaceError> {
+    let path_metadata = regular_spill_metadata(path)?;
+    let opened_metadata = file.metadata().map_err(|error| {
+        WorkspaceError::io("inspect open Point Set spill", path.display(), error)
+    })?;
+    if spill_identity(&path_metadata, path)? == expected
+        && spill_identity(&opened_metadata, path)? == expected
+    {
+        return Ok(());
+    }
+    Err(WorkspaceError::invalid_point_set(
+        "Point Set spill identity changed",
+    ))
+}
+
+fn regular_spill_metadata(path: &Path) -> Result<fs::Metadata, WorkspaceError> {
+    let metadata = fs::symlink_metadata(path).map_err(|error| {
+        if error.kind() == io::ErrorKind::NotFound {
+            WorkspaceError::invalid_point_set("Point Set spill is missing")
+        } else {
+            WorkspaceError::io("inspect Point Set spill", path.display(), error)
+        }
+    })?;
+    if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
+        return Err(WorkspaceError::invalid_point_set(
+            "Point Set spill is not a regular non-symlink file",
+        ));
+    }
+    Ok(metadata)
+}
+
+#[cfg(unix)]
+#[allow(clippy::unnecessary_wraps)]
+fn spill_identity(metadata: &fs::Metadata, _path: &Path) -> Result<SpillIdentity, WorkspaceError> {
+    use std::os::unix::fs::MetadataExt;
+
+    Ok(SpillIdentity {
+        volume_id: metadata.dev(),
+        file_id: metadata.ino(),
+    })
+}
+
+#[cfg(windows)]
+fn spill_identity(metadata: &fs::Metadata, path: &Path) -> Result<SpillIdentity, WorkspaceError> {
+    use std::os::windows::fs::MetadataExt;
+
+    let volume_id = u64::from(metadata.volume_serial_number().ok_or_else(|| {
+        WorkspaceError::io(
+            "establish Point Set spill identity",
+            path.display(),
+            io::Error::new(
+                io::ErrorKind::Unsupported,
+                "volume serial number is unavailable",
+            ),
+        )
+    })?);
+    let file_id = metadata.file_index().ok_or_else(|| {
+        WorkspaceError::io(
+            "establish Point Set spill identity",
+            path.display(),
+            io::Error::new(io::ErrorKind::Unsupported, "file index is unavailable"),
+        )
+    })?;
+    Ok(SpillIdentity { volume_id, file_id })
+}
+
+#[cfg(not(any(unix, windows)))]
+fn spill_identity(_metadata: &fs::Metadata, path: &Path) -> Result<SpillIdentity, WorkspaceError> {
+    Err(WorkspaceError::io(
+        "establish Point Set spill identity",
+        path.display(),
+        io::Error::new(
+            io::ErrorKind::Unsupported,
+            "stable file identity is unavailable on this platform",
+        ),
+    ))
+}
+
+fn create_spill_file(scratch: &Path) -> Result<(PathBuf, File, SpillIdentity), WorkspaceError> {
     for _ in 0..RANDOM_NAME_ATTEMPTS {
         let mut random = [0_u8; 16];
         getrandom::fill(&mut random).map_err(WorkspaceError::random)?;
@@ -1186,7 +1272,13 @@ fn create_spill_file(scratch: &Path) -> Result<(PathBuf, File), WorkspaceError> 
             .write(true)
             .open(&path)
         {
-            Ok(file) => return Ok((path, file)),
+            Ok(file) => {
+                let metadata = file.metadata().map_err(|error| {
+                    WorkspaceError::io("inspect created Point Set spill", path.display(), error)
+                })?;
+                let identity = spill_identity(&metadata, &path)?;
+                return Ok((path, file, identity));
+            }
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
             Err(error) => {
                 return Err(WorkspaceError::io(
@@ -1308,6 +1400,21 @@ mod tests {
     }
 
     #[test]
+    fn failed_spill_writer_drop_preserves_a_path_replacement() {
+        let writer = SpillWriter::create(&std::env::temp_dir(), 4_096, 4_096).unwrap();
+        let path = writer.path.clone();
+        let displaced = path.with_extension("writer-displaced");
+        fs::rename(&path, &displaced).unwrap();
+        fs::write(&path, b"racing spill replacement").unwrap();
+
+        drop(writer);
+
+        assert_eq!(fs::read(&path).unwrap(), b"racing spill replacement");
+        fs::remove_file(path).unwrap();
+        fs::remove_file(displaced).unwrap();
+    }
+
+    #[test]
     fn resident_storage_grows_geometrically_within_its_preflighted_ceiling() {
         const RECORDS: usize = 100_000;
         const AVAILABLE_BYTES: u64 = 4 * 1024 * 1024;
@@ -1373,6 +1480,48 @@ mod tests {
             crate::WorkspaceError::InvalidPointSet { .. }
         ));
         fs::remove_file(descriptor.path).unwrap();
+    }
+
+    #[test]
+    fn sealed_spill_identity_rejects_an_exact_byte_path_replacement() {
+        let provenance = SnapshotProvenance::new(
+            WorkspaceId::from_bytes([7; 16]).unwrap(),
+            SourceId::new([8; 32]),
+            RevisionId::from_bytes([9; 32]).unwrap(),
+        );
+        let record = PointSetRecord {
+            ordinal: 13,
+            effective_classification: 2,
+        };
+        let mut point_ids = CanonicalPointIdHasher::new(provenance.source());
+        let mut content = content_hasher(&provenance);
+        update_hashes(&mut point_ids, &mut content, record);
+        let metadata = PointSetMetadata::new(
+            provenance,
+            1,
+            point_ids.finalize(),
+            ContentHash::new(*content.finalize().as_bytes()),
+        );
+        let mut writer = SpillWriter::create(&std::env::temp_dir(), 4_096, 4_096).unwrap();
+        writer.allocate_buffer().unwrap();
+        writer.push(record).unwrap();
+        let descriptor = writer.finish(&metadata).unwrap();
+        let displaced = descriptor.path.with_extension("sealed-displaced");
+        fs::rename(&descriptor.path, &displaced).unwrap();
+        fs::copy(&displaced, &descriptor.path).unwrap();
+
+        let Err(error) = SpillReader::open(&descriptor, &metadata, PointIdReadLimits::default())
+        else {
+            panic!("a distinct inode is not the sealed spill");
+        };
+
+        assert!(matches!(
+            error,
+            crate::WorkspaceError::InvalidPointSet { .. }
+        ));
+        assert!(descriptor.path.is_file());
+        fs::remove_file(descriptor.path).unwrap();
+        fs::remove_file(displaced).unwrap();
     }
 
     #[test]

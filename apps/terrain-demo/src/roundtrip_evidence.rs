@@ -10,11 +10,12 @@ use std::{
 use foundation_runtime::OperationControl;
 
 use crate::{
-    journal::{Complete, JournalLimits, SealedJournal, WorkflowRunId},
-    publication::{
-        CanonicalFileError, CanonicalFileLimits, CanonicalFileReceipt, DirectoryWitness,
-        publish_canonical_bytes_controlled,
+    canonical_output::{
+        CanonicalOutputError, CanonicalOutputLimits, CanonicalOutputReceipt, CanonicalOutputSpec,
+        ensure_output,
     },
+    journal::{Complete, CompleteRunSnapshot, JournalLimits, WorkflowRunId, read_complete_run},
+    publication::DirectoryWitness,
     report::{REPORT_HASH_DOMAIN, REPORT_SCHEMA},
     roundtrip::{
         RoundTripDeclaration, RoundTripEvaluation, RoundTripFailure, RoundTripLimits,
@@ -26,10 +27,13 @@ use crate::{
 
 const EVIDENCE_SCHEMA: &str = "punctra.terrain-demo.landxml-round-trip-evidence.v1";
 const MATCHER_VERSION: &str = "punctra-landxml-semantic-match-v1";
+const EVIDENCE_OUTPUT: CanonicalOutputSpec =
+    CanonicalOutputSpec::new("Round-Trip Evidence", "round-trip-evidence", b"");
 const DEFAULT_MAX_EVIDENCE_BYTES: u64 = 1024 * 1024;
 const DEFAULT_MAX_EVIDENCE_WRITE_BUFFER_BYTES: u64 = 8 * 1024;
 const DEFAULT_MAX_EVIDENCE_WORKING_BYTES: u64 =
     DEFAULT_MAX_EVIDENCE_BYTES + DEFAULT_MAX_EVIDENCE_WRITE_BUFFER_BYTES;
+const PATH_BINDING_BYTES: u64 = 4 * 1024;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum QualificationResult {
@@ -60,7 +64,7 @@ pub(crate) enum RoundTripEvidenceError {
     Invalid(String),
     Journal(crate::journal::JournalError),
     Comparison(RoundTripFailure),
-    Publication(CanonicalFileError),
+    Publication(CanonicalOutputError),
 }
 
 impl fmt::Display for RoundTripEvidenceError {
@@ -88,8 +92,8 @@ impl From<RoundTripFailure> for RoundTripEvidenceError {
     }
 }
 
-impl From<CanonicalFileError> for RoundTripEvidenceError {
-    fn from(error: CanonicalFileError) -> Self {
+impl From<CanonicalOutputError> for RoundTripEvidenceError {
+    fn from(error: CanonicalOutputError) -> Self {
         Self::Publication(error)
     }
 }
@@ -124,9 +128,14 @@ fn verify_round_trip_with_control(
         RoundTripEvidenceError::Invalid(format!("Run root cannot be witnessed: {error}"))
     })?;
     let evidence_parent_witness = require_external_target(run_root, evidence_target)?;
-    let journal = SealedJournal::open(&run_root.join("run.pwf"), JournalLimits::default())?;
+    let journal = read_complete_run(&run_root.join("run.pwf"), JournalLimits::default())?;
+    if crate::journal::bind_path(run_root, PATH_BINDING_BYTES)? != journal.intent.path_bindings[3] {
+        return Err(RoundTripEvidenceError::Invalid(
+            "Run root path differs from the Complete Run binding".to_owned(),
+        ));
+    }
     check_cancelled(control)?;
-    let complete = journal.complete();
+    let complete = journal.complete;
     let audit = capture_round_trip_file(&run_root.join("audit.json"), DEFAULT_MAX_EVIDENCE_BYTES)?;
     let audit_hash = domain_hash(REPORT_HASH_DOMAIN, &audit.bytes);
     if audit_hash != complete.report_hash {
@@ -150,7 +159,7 @@ fn verify_round_trip_with_control(
             "terrain.xml does not match the Complete checkpoint".to_owned(),
         ));
     }
-    if evaluation.reference_bytes() != journal.export().byte_length {
+    if evaluation.reference_bytes() != journal.export.byte_length {
         return Err(RoundTripEvidenceError::Invalid(
             "terrain.xml byte length does not match the ExportEnsured checkpoint".to_owned(),
         ));
@@ -158,7 +167,7 @@ fn verify_round_trip_with_control(
     run_witness.verify().map_err(|error| {
         RoundTripEvidenceError::Invalid(format!("Run root changed during qualification: {error}"))
     })?;
-    journal.verify()?;
+    journal.verify_unchanged()?;
     audit.verify()?;
     streaming.verify_inputs()?;
     evidence_parent_witness.verify().map_err(|error| {
@@ -168,53 +177,27 @@ fn verify_round_trip_with_control(
     })?;
     check_cancelled(control)?;
     let evidence = encode_evidence(&journal, complete, &audit, evaluation, limits)?;
-    let publication = publish_canonical_bytes_controlled(
+    let validate_inputs = || {
+        run_witness.verify()?;
+        journal.verify_unchanged().map_err(io::Error::other)?;
+        audit.verify().map_err(io::Error::other)?;
+        streaming.verify_inputs().map_err(io::Error::other)?;
+        evidence_parent_witness.verify()
+    };
+    let publication = ensure_output(
         evidence_target,
-        evidence.as_bytes(),
-        CanonicalFileLimits {
-            output_bytes: DEFAULT_MAX_EVIDENCE_BYTES,
-            staging_bytes: DEFAULT_MAX_EVIDENCE_BYTES,
-            write_buffer_bytes: DEFAULT_MAX_EVIDENCE_WRITE_BUFFER_BYTES,
-            working_bytes: DEFAULT_MAX_EVIDENCE_WORKING_BYTES,
+        EVIDENCE_OUTPUT,
+        CanonicalOutputLimits {
+            max_output_bytes: DEFAULT_MAX_EVIDENCE_BYTES,
+            max_staging_bytes: DEFAULT_MAX_EVIDENCE_BYTES,
+            max_write_buffer_bytes: DEFAULT_MAX_EVIDENCE_WRITE_BUFFER_BYTES,
+            max_working_bytes: DEFAULT_MAX_EVIDENCE_WORKING_BYTES,
         },
         control,
+        |writer| writer.write_all(evidence.as_bytes()),
+        validate_inputs,
     )?;
-    if let Err(error) = run_witness.verify() {
-        return Err(post_publication_indeterminate(
-            evidence_target,
-            publication,
-            format_args!("Run root changed during publication: {error}"),
-        ));
-    }
-    if let Err(error) = journal.verify() {
-        return Err(post_publication_indeterminate(
-            evidence_target,
-            publication,
-            format_args!("Run journal changed during publication: {error}"),
-        ));
-    }
-    if let Err(error) = audit.verify() {
-        return Err(post_publication_indeterminate(
-            evidence_target,
-            publication,
-            format_args!("audit.json changed during publication: {error}"),
-        ));
-    }
-    if let Err(error) = streaming.verify_inputs() {
-        return Err(post_publication_indeterminate(
-            evidence_target,
-            publication,
-            format_args!("LandXML input changed during publication: {error}"),
-        ));
-    }
-    if let Err(error) = evidence_parent_witness.verify() {
-        return Err(post_publication_indeterminate(
-            evidence_target,
-            publication,
-            format_args!("evidence parent changed during publication: {error}"),
-        ));
-    }
-    Ok(receipt(journal.run(), evaluation, publication))
+    Ok(receipt(journal.run, evaluation, publication))
 }
 
 fn check_cancelled(control: &OperationControl) -> Result<(), RoundTripEvidenceError> {
@@ -224,10 +207,10 @@ fn check_cancelled(control: &OperationControl) -> Result<(), RoundTripEvidenceEr
 }
 
 fn validate_audit_bindings(
-    journal: &SealedJournal,
+    journal: &CompleteRunSnapshot,
     bytes: &[u8],
 ) -> Result<(), RoundTripEvidenceError> {
-    let report = journal.report();
+    let report = journal.report;
     if bytes.len() as u64 != report.byte_length {
         return Err(RoundTripEvidenceError::Invalid(
             "audit.json byte length does not match the ReportEnsured checkpoint".to_owned(),
@@ -240,16 +223,106 @@ fn validate_audit_bindings(
     require_audit_string(
         &document,
         "/identities/run",
-        &hex_string(&journal.run().into_bytes()),
+        &hex_string(&journal.run.into_bytes()),
         "Run Identity",
     )?;
     require_audit_string(
         &document,
         "/request/request_hash",
-        &hex_string(&journal.intent().request_hash),
+        &hex_string(&journal.intent.request_hash),
         "request hash",
     )?;
-    let export = journal.export();
+    require_audit_string(
+        &document,
+        "/identities/source",
+        &hex_string(&journal.intent.source),
+        "Source Identity",
+    )?;
+    require_audit_string(
+        &document,
+        "/identities/workspace",
+        &hex_string(&journal.intent.workspace),
+        "Workspace Identity",
+    )?;
+    require_audit_string(
+        &document,
+        "/identities/baseline_revision",
+        &hex_string(&journal.intent.baseline_revision),
+        "baseline Revision",
+    )?;
+    require_audit_string(
+        &document,
+        "/identities/operation",
+        &hex_string(&journal.intent.operation),
+        "Operation Identity",
+    )?;
+    require_audit_string(
+        &document,
+        "/identities/changed_revision",
+        &hex_string(&journal.complete.revision),
+        "changed Revision",
+    )?;
+    require_audit_string(
+        &document,
+        "/request/ordinal_hash",
+        &hex_string(&journal.intent.ordinal_hash),
+        "ordinal hash",
+    )?;
+    require_audit_string(
+        &document,
+        "/request/recipe_hash",
+        &hex_string(&journal.intent.recipe_hash),
+        "terrain recipe hash",
+    )?;
+    require_audit_string(
+        &document,
+        "/request/qa_input_hash",
+        &hex_string(&journal.intent.qa_input_hash),
+        "QA input hash",
+    )?;
+    require_audit_string(
+        &document,
+        "/request/landxml_options_hash",
+        &hex_string(&journal.intent.options_hash),
+        "LandXML options hash",
+    )?;
+    let path_bindings = document
+        .pointer("/request/path_bindings")
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(|| {
+            RoundTripEvidenceError::Invalid(
+                "audit.json path bindings are absent or invalid".to_owned(),
+            )
+        })?;
+    if path_bindings.len() != journal.intent.path_bindings.len()
+        || path_bindings
+            .iter()
+            .zip(journal.intent.path_bindings)
+            .any(|(actual, expected)| actual.as_str() != Some(&hex_string(&expected)))
+    {
+        return Err(RoundTripEvidenceError::Invalid(
+            "audit.json path bindings do not match the Complete Run".to_owned(),
+        ));
+    }
+    require_audit_string(
+        &document,
+        "/edit/audit_hash",
+        &hex_string(&journal.complete.audit_hash),
+        "Revision Audit hash",
+    )?;
+    require_audit_string(
+        &document,
+        "/terrain/changed/artifact_hash",
+        &hex_string(&journal.complete.surface_hash),
+        "changed terrain artifact hash",
+    )?;
+    require_audit_string(
+        &document,
+        "/qa/result_hash",
+        &hex_string(&journal.complete.qa_hash),
+        "QA result hash",
+    )?;
+    let export = journal.export;
     require_audit_string(
         &document,
         "/landxml/content_hash",
@@ -325,16 +398,137 @@ fn require_audit_false(
     }
 }
 
-fn post_publication_indeterminate(
-    evidence_target: &Path,
-    publication: CanonicalFileReceipt,
-    error: impl fmt::Display,
-) -> RoundTripEvidenceError {
-    RoundTripEvidenceError::Publication(CanonicalFileError::Indeterminate {
-        path: evidence_target.to_path_buf(),
-        expected_hash: publication.content_hash,
-        source: io::Error::other(error.to_string()),
-    })
+#[cfg(test)]
+fn validate_checked_evidence(
+    journal: &CompleteRunSnapshot,
+    audit_bytes: u64,
+    evaluation: &RoundTripEvaluation,
+    bytes: &[u8],
+) -> Result<(), RoundTripEvidenceError> {
+    let document: serde_json::Value = serde_json::from_slice(bytes).map_err(|error| {
+        RoundTripEvidenceError::Invalid(format!("evidence is not valid JSON: {error}"))
+    })?;
+    let expected_result = if evaluation.is_passed() {
+        "passed"
+    } else {
+        "failed"
+    };
+    require_evidence_string(&document, "/schema", EVIDENCE_SCHEMA, "schema")?;
+    require_evidence_string(&document, "/result", expected_result, "result")?;
+    require_evidence_string(
+        &document,
+        "/run/run_id",
+        &hex_string(&journal.run.into_bytes()),
+        "Run Identity",
+    )?;
+    require_evidence_string(
+        &document,
+        "/run/request_hash",
+        &hex_string(&journal.intent.request_hash),
+        "request hash",
+    )?;
+    require_evidence_string(
+        &document,
+        "/run/complete_journal_hash",
+        &hex_string(&journal.journal_hash),
+        "Complete Run hash",
+    )?;
+    require_evidence_u64(
+        &document,
+        "/run/complete_journal_bytes",
+        journal.journal_bytes,
+        "Complete Run byte length",
+    )?;
+    require_evidence_string(
+        &document,
+        "/run/original_landxml_hash",
+        &hex_string(&journal.complete.landxml_hash),
+        "original LandXML hash",
+    )?;
+    require_evidence_string(
+        &document,
+        "/run/audit_json_hash",
+        &hex_string(&journal.complete.report_hash),
+        "audit report hash",
+    )?;
+    require_evidence_u64(
+        &document,
+        "/run/audit_json_bytes",
+        audit_bytes,
+        "audit report byte length",
+    )?;
+    require_evidence_string(
+        &document,
+        "/comparison_policy/matcher_version",
+        MATCHER_VERSION,
+        "matcher version",
+    )?;
+    require_evidence_string(
+        &document,
+        "/returned_landxml/content_hash",
+        &hex_string(&evaluation.returned_content_hash()),
+        "returned LandXML hash",
+    )?;
+    require_evidence_u64(
+        &document,
+        "/returned_landxml/bytes",
+        evaluation.returned_bytes(),
+        "returned LandXML byte length",
+    )?;
+    match evaluation.reason() {
+        Some(reason) => require_evidence_string(
+            &document,
+            "/checks/tolerance/reason_code",
+            reason.as_str(),
+            "semantic failure reason",
+        ),
+        None => require_evidence_string(
+            &document,
+            "/checks/tolerance/status",
+            "passed",
+            "passing tolerance status",
+        ),
+    }
+}
+
+#[cfg(test)]
+fn require_evidence_string(
+    document: &serde_json::Value,
+    pointer: &str,
+    expected: &str,
+    label: &str,
+) -> Result<(), RoundTripEvidenceError> {
+    if document
+        .pointer(pointer)
+        .and_then(serde_json::Value::as_str)
+        == Some(expected)
+    {
+        Ok(())
+    } else {
+        Err(RoundTripEvidenceError::Invalid(format!(
+            "evidence {label} does not match its owning Run and comparison"
+        )))
+    }
+}
+
+#[cfg(test)]
+fn require_evidence_u64(
+    document: &serde_json::Value,
+    pointer: &str,
+    expected: u64,
+    label: &str,
+) -> Result<(), RoundTripEvidenceError> {
+    if document
+        .pointer(pointer)
+        .and_then(serde_json::Value::as_u64)
+        == Some(expected)
+    {
+        Ok(())
+    } else {
+        Err(RoundTripEvidenceError::Invalid(format!(
+            "evidence {label} does not match its owning Run and comparison"
+        )))
+    }
 }
 
 fn require_external_target(
@@ -367,7 +561,7 @@ fn require_external_target(
 fn receipt(
     run: WorkflowRunId,
     evaluation: &RoundTripEvaluation,
-    publication: CanonicalFileReceipt,
+    publication: CanonicalOutputReceipt,
 ) -> RoundTripEvidenceReceipt {
     RoundTripEvidenceReceipt {
         run,
@@ -383,7 +577,7 @@ fn receipt(
 }
 
 fn encode_evidence(
-    journal: &SealedJournal,
+    journal: &CompleteRunSnapshot,
     complete: Complete,
     audit: &CapturedRoundTripFile,
     evaluation: &RoundTripEvaluation,
@@ -402,15 +596,15 @@ fn encode_evidence(
         },
     )?;
     write!(json, ",\"run\":{{\"run_id\":")?;
-    hex(&mut json, &journal.run().into_bytes())?;
+    hex(&mut json, &journal.run.into_bytes())?;
     write!(json, ",\"request_hash\":")?;
-    hex(&mut json, &journal.intent().request_hash)?;
+    hex(&mut json, &journal.intent.request_hash)?;
     write!(json, ",\"complete_journal_hash\":")?;
-    hex(&mut json, &journal.content_hash())?;
+    hex(&mut json, &journal.journal_hash)?;
     write!(
         json,
         ",\"complete_journal_bytes\":{}",
-        journal.byte_length()
+        journal.journal_bytes
     )?;
     write!(json, ",\"original_landxml_hash\":")?;
     hex(&mut json, &complete.landxml_hash)?;
@@ -691,8 +885,17 @@ fn domain_hash(domain: &[u8], bytes: &[u8]) -> [u8; 32] {
 }
 
 fn number(output: &mut String, value: f64) -> Result<(), fmt::Error> {
-    let number = serde_json::Number::from_f64(value).ok_or(fmt::Error)?;
-    write!(output, "{number}")
+    let fixed = format!("{value:.17}");
+    if fixed
+        .parse::<f64>()
+        .is_ok_and(|parsed| parsed.to_bits() == value.to_bits())
+    {
+        output.push_str(&fixed);
+        return Ok(());
+    }
+
+    let exact = serde_json::Number::from_f64(value).ok_or(fmt::Error)?;
+    write!(output, "{exact}")
 }
 
 fn hex(output: &mut String, bytes: &[u8]) -> Result<(), fmt::Error> {
@@ -738,21 +941,110 @@ impl From<fmt::Error> for RoundTripEvidenceError {
 #[cfg(test)]
 mod tests {
     use std::{
+        fs,
         path::Path,
         sync::atomic::{AtomicU64, Ordering},
     };
 
     use foundation_runtime::OperationControl;
 
-    use crate::roundtrip::{
-        RoundTripDeclaration, RoundTripFailureKind, RoundTripReason, RoundTripTolerances,
+    use crate::{
+        journal::{JournalLimits, read_complete_run},
+        roundtrip::{
+            RoundTripDeclaration, RoundTripFailureKind, RoundTripLimits, RoundTripReason,
+            RoundTripTolerances,
+        },
+        roundtrip_file::capture_round_trip_file,
+        roundtrip_stream::evaluate_streaming_round_trip_with_control,
     };
 
     use super::{
-        CheckStatus, RoundTripEvidenceError, check_statuses, verify_round_trip_with_control,
+        CheckStatus, RoundTripEvidenceError, check_statuses, number, validate_audit_bindings,
+        validate_checked_evidence, verify_round_trip_with_control,
     };
 
     static NEXT_TARGET: AtomicU64 = AtomicU64::new(0);
+
+    #[test]
+    fn checked_in_corpus_is_consumed_through_strict_owners() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/qualification-v1");
+        let journal = read_complete_run(&root.join("run-complete.pwf"), JournalLimits::default())
+            .expect("the journal owner must read the frozen Complete Run");
+        let audit = capture_round_trip_file(&root.join("audit.json"), 1024 * 1024)
+            .expect("the report owner must capture the frozen audit report");
+        validate_audit_bindings(&journal, &audit.bytes)
+            .expect("the report owner must bind the frozen report to the Complete Run");
+
+        let declaration =
+            RoundTripDeclaration::new("generated-fixture", "test-only", "metric-tin-v1").unwrap();
+        let tolerances = RoundTripTolerances::new(0.0, 0.0).unwrap();
+        let limits =
+            RoundTripLimits::new(1024 * 1024, 10_000, 1024 * 1024, 1_000, 2_000, 1_000_000);
+        let control = OperationControl::new();
+        let passing = evaluate_streaming_round_trip_with_control(
+            &root.join("terrain.xml"),
+            &root.join("returned-pass.xml"),
+            declaration.clone(),
+            tolerances,
+            limits,
+            &control,
+        )
+        .expect("the LandXML owner must parse the frozen passing pair");
+        assert!(passing.evaluation.is_passed());
+        passing.verify_inputs().unwrap();
+        validate_checked_evidence(
+            &journal,
+            audit.bytes.len() as u64,
+            &passing.evaluation,
+            &fs::read(root.join("evidence-pass.json")).unwrap(),
+        )
+        .expect("the evidence owner must read the frozen passing evidence");
+
+        let failing = evaluate_streaming_round_trip_with_control(
+            &root.join("terrain.xml"),
+            &root.join("returned-fail.xml"),
+            declaration,
+            tolerances,
+            limits,
+            &control,
+        )
+        .expect("the LandXML owner must parse the frozen failing pair");
+        assert_eq!(
+            failing.evaluation.reason(),
+            Some(RoundTripReason::ToleranceDrift)
+        );
+        failing.verify_inputs().unwrap();
+        validate_checked_evidence(
+            &journal,
+            audit.bytes.len() as u64,
+            &failing.evaluation,
+            &fs::read(root.join("evidence-fail.json")).unwrap(),
+        )
+        .expect("the evidence owner must read the frozen failing evidence");
+
+        journal.verify_unchanged().unwrap();
+        audit.verify().unwrap();
+    }
+
+    #[test]
+    fn canonical_numbers_preserve_exact_f64_values() {
+        for value in [1.0e-18, f64::MIN_POSITIVE, f64::from_bits(1)] {
+            let mut encoded = String::new();
+            number(&mut encoded, value).expect("writing to a String must succeed");
+            let decoded: f64 =
+                serde_json::from_str(&encoded).expect("canonical number must be valid JSON");
+
+            assert_eq!(decoded.to_bits(), value.to_bits(), "encoded as {encoded}");
+        }
+    }
+
+    #[test]
+    fn canonical_numbers_retain_existing_exact_fixed_point_bytes() {
+        let mut encoded = String::new();
+        number(&mut encoded, 0.001).expect("writing to a String must succeed");
+
+        assert_eq!(encoded, "0.00100000000000000");
+    }
 
     #[test]
     fn ambiguous_mapping_leaves_dependent_checks_not_evaluated() {

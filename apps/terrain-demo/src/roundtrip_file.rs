@@ -104,6 +104,13 @@ fn read_regular_file_retained(
             "{side} changed while it was being read"
         )));
     }
+    witness
+        .seal_content(*blake3::hash(&bytes).as_bytes(), expected_bytes)
+        .map_err(|error| {
+            RoundTripFailure::invalid(format_args!(
+                "{side} content cannot be sealed after capture: {error}"
+            ))
+        })?;
     Ok((FileSnapshot { bytes }, witness))
 }
 

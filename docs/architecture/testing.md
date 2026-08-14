@@ -1,7 +1,7 @@
 # Verification Strategy
 
-Status: implemented verification through the narrow v0.7 technical-readiness
-slice; all gates run locally
+Status: **Complete for the v0.9 repository trust and version-1 compatibility
+candidate; all gates run locally**
 
 Verification follows public contracts first. Private tests are used for fault
 injection and measured implementation boundaries that cannot be triggered
@@ -18,9 +18,12 @@ safely through the public API. Hosted CI is not configured.
 5. **Composition tests** exercise Source-to-index, index-to-View, Workspace-to-
    Terrain, terrain-to-LandXML, and planner-to-renderer behavior without private
    cross-crate access.
-6. **Benchmarks and resource gates** measure Source-scale time, heap,
+6. **Frozen compatibility fixtures** reopen committed version-1 bytes and
+   exercise format, checksum, lineage, binding, and semantic mutations without
+   regenerating the expected side.
+7. **Benchmarks and resource gates** measure Source-scale time, heap,
    temporary bytes, durable growth, and GPU residency.
-7. **Required local GPU acceptance** proves the wgpu path when an adapter is
+8. **Required local GPU acceptance** proves the wgpu path when an adapter is
    expected.
 
 Tests assert semantic results, ordering, exactness, publication certainty, and
@@ -41,6 +44,9 @@ itself a persisted or public contract.
 - Compare semantic values before exact bytes unless deterministic bytes are a
   stated contract.
 - Never commit licensed production data without redistribution rights.
+- Keep frozen expected bytes owner-local with a manifest that pins relative
+  paths, lengths, hashes, versions, identities, support class, and semantic
+  facts. Consumers read or copy those bytes; they do not regenerate truth.
 
 Generated files prove implemented behavior, not production representativeness
 or customer value.
@@ -81,6 +87,11 @@ Generated LAS covers point-data record formats 0–10. Generated LAZ covers
 formats 0–8; 9 and 10 are explicit unsupported cases. One-million-Point memory,
 LAS, and LAZ benchmarks enforce adapter-specific memory ceilings.
 
+The version-1 Source corpus freezes the generic Source Record plus the memory
+and LAS adapter representations. Reopen preserves exact identities and facts;
+future version, truncation, checksum/content, and Source-binding mutations fail
+closed without modifying the committed fixture.
+
 ### point-index
 
 - candidate plans have no false negatives against a sequential exact oracle;
@@ -94,12 +105,15 @@ LAS, and LAZ benchmarks enforce adapter-specific memory ceilings.
 - process smoke covers Full verification, Built then Opened index paths, and
   one complete CPU-model renderer Upsert.
 
+The rebuildable index corpus pins one complete disk-1/recipe-1 artifact and one
+valid resumable work prefix. Tests open, resume, and rebuild equivalently while
+preserving incompatible or corrupt artifacts for diagnosis.
+
 ### point-workspace
 
-The merged v0.7 package has 83 tests: 33 integration tests through the public
-interface and 50 unit, fault-injection, and allocation gates. It retains the
-v0.6 lifecycle, selection, row-stream, persistence, fault-injection, and
-allocation coverage and adds the Revision Audit suite. The public suites prove:
+The current public, persistence, fixture, fault-injection, and allocation suites
+retain the v0.6/v0.7 lifecycle, selection, row-stream, persistence, and Revision
+Audit coverage. They prove:
 
 - create, root identity, exclusive lock, complete-handle lifetime, and reopen;
 - schema rejection when the chosen classification Attribute is absent or not
@@ -110,7 +124,8 @@ allocation coverage and adds the Revision Audit suite. The public suites prove:
   varied Source batching;
 - Point-ID Source validation, bounds, sorting, and deduplication;
 - identical resident/forced-spill membership, order, hashes, repeated reads,
-  corruption detection, and final-handle cleanup;
+  corruption detection, live path-replacement rejection, and retained private
+  spill behavior;
 - mixed before-values, sparse classification rows, no-op rejection, immutable
   historical Snapshots, immediate-head Revert, and redo-by-Revert;
 - Point Identity through Source, index, Point Set, commit, Revert, and reopen;
@@ -131,6 +146,11 @@ allocation coverage and adds the Revision Audit suite. The public suites prove:
   content hashes, Edit Footprints, historical immutability, Source partition
   independence, every audit resource family, cancellation, and corruption
   rejection.
+
+The Workspace version-1 corpus freezes a complete root/Revision lineage,
+retryable ready Operation, definitive rejection, and absence of a live lock.
+It reopens without mutation and fails closed on future versions, truncation,
+checksum changes, lineage forks, and Source/index binding drift.
 
 Private persistence tests inject error, cancellation, panic, and lost
 acknowledgement at candidate stage/file-sync/close/read-only/revalidation,
@@ -175,8 +195,8 @@ for create, reconcile, conflict, races, symlink/non-regular rejection,
 publication faults, post-link cancellation certainty, and lost
 acknowledgement.
 
-`terrain-demo` has 43 package tests: 25 unit/private tests, 15 through the
-public workflow facade, and three through the process boundary. They cover:
+The `terrain-demo` unit/private, frozen-corpus, workflow-facade, and process
+suites cover:
 
 - every prefix of the eight-frame journal resuming to the same receipt and one
   Operation Revision;
@@ -195,7 +215,15 @@ public workflow facade, and three through the process boundary. They cover:
   Workspace mutation;
 - Run-root validation failures retaining the already-known Run, Operation, and
   baseline Revision identities; and
-- bounded `start`, `resume`, and `inspect` CLI output and structured failures.
+- bounded `start`, `resume`, `inspect`, `compare-landxml`, and
+  `verify-round-trip` CLI output and structured failures;
+- every committed journal prefix and one Complete Run with exact report,
+  LandXML, returned pass/fail files, and canonical pass/fail evidence;
+- full-export-ceiling streaming, XML/subset/Coordinate-Reference/unit/
+  Point-count/vertex-mapping/tolerance/topology reason families, adversarial
+  token and retained-memory bounds, and presentation-only rewrites; and
+- strict immutable input witnesses, no Run repair or mutation, exact evidence
+  reconciliation, conflicting targets, and post-publication uncertainty.
 
 The retained v0.6 process/regression coverage also proves deterministic
 generated LAS and LAZ Terrain semantics, exact changed Ground Input,
@@ -358,7 +386,9 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace --all-features
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps
-
+cargo fmt --manifest-path fuzz/Cargo.toml --all --check
+cargo check --manifest-path fuzz/Cargo.toml --bin index_persistence
+cargo test --manifest-path fuzz/Cargo.toml --lib
 cargo bench -p point-view --bench planner
 cargo bench -p source-memory --bench read
 cargo bench -p source-las --bench read
@@ -369,10 +399,9 @@ cargo bench -p terrain-demo --bench journal
 
 cargo run -p source-memory --example memory_source
 cargo run -p point-index --example direct_use
-cargo run --release -p point-workspace --example classify -- \
-  survey.laz survey.laz.pidx survey.pcw 6
+cargo test -p point-workspace --all-features
 cargo run -p point-terrain --example derive
-
+cargo test -p point-terrain --all-features
 cargo test -p terrain-demo --test workflow
 cargo test -p terrain-demo --test process
 cargo test -p renderer-demo --test headless_smoke
@@ -401,6 +430,9 @@ In addition to the full local sequence:
 - review persisted-format and fault-injection coverage;
 - set `PUNCTRA_REQUIRE_GPU=1` on the expected local adapter; and
 - record external evidence as outstanding unless it was actually obtained.
+
+The authoritative v0.9 outcomes, environment, and Criterion observations are
+recorded in the [repository verification record](../releases/v0.9.0.md).
 
 ## Definition of verified
 

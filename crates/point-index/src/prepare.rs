@@ -55,8 +55,9 @@ fn run(
     }
 
     let mut work = open_or_create_work(&source, target, limits, control)?;
-    let durable_points = work.durable_points();
+    let durable_points = work.verified_durable_points()?;
     report_progress(control, durable_points, source.metadata().point_count())?;
+    work.verified_durable_points()?;
     build_missing_blocks(&source, &mut work, limits, control)?;
     let plan = tree::plan(work.leaves(), limits, control)?;
     finalize(&source, target, &mut work, &plan, limits, control)?;
@@ -102,9 +103,9 @@ fn build_missing_blocks(
     control: &OperationControl,
 ) -> Result<(), IndexError> {
     let point_count = source.metadata().point_count();
-    while work.durable_points() < point_count {
+    while work.verified_durable_points()? < point_count {
         control.check_cancelled()?;
-        let first = work.durable_points();
+        let first = work.verified_durable_points()?;
         let count = point_count.saturating_sub(first).min(BLOCK_POINTS);
         let span = SourceSpan::new(first, count)?;
         let (bounds, samples) = read_block(
@@ -116,7 +117,9 @@ fn build_missing_blocks(
         )?;
         control.check_cancelled()?;
         work.append_block(span, bounds, &samples, limits)?;
-        report_progress(control, work.durable_points(), point_count)?;
+        let durable_points = work.verified_durable_points()?;
+        report_progress(control, durable_points, point_count)?;
+        work.verified_durable_points()?;
     }
     Ok(())
 }

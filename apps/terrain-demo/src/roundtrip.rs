@@ -130,6 +130,7 @@ pub(crate) struct RoundTripLimits {
     points: u64,
     faces: u64,
     comparisons: u64,
+    retained_model_bytes: u64,
 }
 
 impl RoundTripLimits {
@@ -141,6 +142,7 @@ impl RoundTripLimits {
             points: 10_000_000,
             faces: 20_000_000,
             comparisons: 160_000_000,
+            retained_model_bytes: 4 * 1024 * 1024 * 1024,
         }
     }
 
@@ -160,7 +162,14 @@ impl RoundTripLimits {
             points: max_points,
             faces: max_faces,
             comparisons: max_comparisons,
+            retained_model_bytes: 4 * 1024 * 1024 * 1024,
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) const fn with_retained_model_bytes(mut self, bytes: u64) -> Self {
+        self.retained_model_bytes = bytes;
+        self
     }
 
     pub(crate) const fn file_bytes(self) -> u64 {
@@ -186,6 +195,10 @@ impl RoundTripLimits {
     pub(crate) const fn comparisons(self) -> u64 {
         self.comparisons
     }
+
+    pub(crate) const fn retained_model_bytes(self) -> u64 {
+        self.retained_model_bytes
+    }
 }
 
 impl Default for RoundTripLimits {
@@ -197,6 +210,7 @@ impl Default for RoundTripLimits {
             points: DEFAULT_MAX_POINTS,
             faces: DEFAULT_MAX_FACES,
             comparisons: DEFAULT_MAX_COMPARISONS,
+            retained_model_bytes: 64 * 1024 * 1024,
         }
     }
 }
@@ -1486,6 +1500,57 @@ fn compare_surfaces(
     Ok(facts)
 }
 
+struct TolerantMatchBuffers {
+    returned_by_easting: Vec<usize>,
+    returned_to_reference: Vec<usize>,
+    reference_candidates: Vec<usize>,
+    returned_candidate_counts: Vec<u8>,
+}
+
+fn prepare_tolerant_match_buffers(
+    reference_len: usize,
+    returned_len: usize,
+) -> Result<TolerantMatchBuffers, RoundTripFailure> {
+    let mut returned_by_easting = Vec::new();
+    reserve_matcher_items(
+        &mut returned_by_easting,
+        returned_len,
+        "returned easting index",
+    )?;
+    returned_by_easting.extend(0..returned_len);
+
+    let mut returned_to_reference = Vec::new();
+    reserve_matcher_items(
+        &mut returned_to_reference,
+        returned_len,
+        "returned-to-reference mapping",
+    )?;
+    returned_to_reference.resize(returned_len, usize::MAX);
+
+    let mut reference_candidates = Vec::new();
+    reserve_matcher_items(
+        &mut reference_candidates,
+        reference_len,
+        "reference candidate mapping",
+    )?;
+    reference_candidates.resize(reference_len, usize::MAX);
+
+    let mut returned_candidate_counts = Vec::new();
+    reserve_matcher_items(
+        &mut returned_candidate_counts,
+        returned_len,
+        "returned candidate counts",
+    )?;
+    returned_candidate_counts.resize(returned_len, 0_u8);
+
+    Ok(TolerantMatchBuffers {
+        returned_by_easting,
+        returned_to_reference,
+        reference_candidates,
+        returned_candidate_counts,
+    })
+}
+
 fn match_points(
     reference: &[Position],
     returned: &[Position],
@@ -1496,13 +1561,15 @@ fn match_points(
     if tolerances.horizontal_metres() == 0.0 && tolerances.vertical_metres() == 0.0 {
         return match_exact_points(reference, returned, max_comparisons, control);
     }
-    let mut returned_by_easting = (0..returned.len()).collect::<Vec<_>>();
+    let TolerantMatchBuffers {
+        mut returned_by_easting,
+        mut returned_to_reference,
+        mut reference_candidates,
+        mut returned_candidate_counts,
+    } = prepare_tolerant_match_buffers(reference.len(), returned.len())?;
     returned_by_easting.sort_unstable_by(|left, right| {
         returned[*left].easting.total_cmp(&returned[*right].easting)
     });
-    let mut returned_to_reference = vec![usize::MAX; returned.len()];
-    let mut reference_candidates = vec![usize::MAX; reference.len()];
-    let mut returned_candidate_counts = vec![0_u8; returned.len()];
     let mut facts = ComparisonFacts::default();
     for (reference_index, reference_point) in reference.iter().enumerate() {
         check_round_trip_cancelled(control)?;
@@ -1598,7 +1665,13 @@ fn match_exact_points(
             .and_modify(|(_, count)| *count = count.saturating_add(1))
             .or_insert((index, 1));
     }
-    let mut returned_to_reference = vec![usize::MAX; returned.len()];
+    let mut returned_to_reference = Vec::new();
+    reserve_matcher_items(
+        &mut returned_to_reference,
+        returned.len(),
+        "exact returned-to-reference mapping",
+    )?;
+    returned_to_reference.resize(returned.len(), usize::MAX);
     let mut facts = ComparisonFacts {
         comparison_count,
         ..ComparisonFacts::default()
@@ -1640,6 +1713,27 @@ fn match_exact_points(
         ));
     }
     Ok((returned_to_reference, facts))
+}
+
+fn reserve_matcher_items<T>(
+    values: &mut Vec<T>,
+    items: usize,
+    label: &'static str,
+) -> Result<(), RoundTripFailure> {
+    let requested = (items as u64).saturating_mul(std::mem::size_of::<T>() as u64);
+    values.try_reserve_exact(items).map_err(|_| {
+        RoundTripFailure::resource(format_args!(
+            "{label} allocation for {requested} bytes failed"
+        ))
+    })?;
+    let retained = (values.capacity() as u64).saturating_mul(std::mem::size_of::<T>() as u64);
+    if retained > requested {
+        Err(RoundTripFailure::resource(format_args!(
+            "{label} allocator retained {retained} bytes for a {requested} byte request"
+        )))
+    } else {
+        Ok(())
+    }
 }
 
 fn mapping_failure(
@@ -1701,18 +1795,32 @@ fn compare_topology(
     control: Option<&OperationControl>,
 ) -> Result<(), RoundTripFailure> {
     check_round_trip_cancelled(control)?;
-    let mut reference_faces = reference
-        .faces
-        .iter()
-        .copied()
-        .map(Triangle::canonical_point_indices)
-        .collect::<Vec<_>>();
-    let mut returned_faces = returned
-        .faces
-        .iter()
-        .copied()
-        .map(|face| face.remap(returned_to_reference).canonical_point_indices())
-        .collect::<Vec<_>>();
+    let mut reference_faces = Vec::new();
+    reserve_matcher_items(
+        &mut reference_faces,
+        reference.faces.len(),
+        "reference topology projection",
+    )?;
+    reference_faces.extend(
+        reference
+            .faces
+            .iter()
+            .copied()
+            .map(Triangle::canonical_point_indices),
+    );
+    let mut returned_faces = Vec::new();
+    reserve_matcher_items(
+        &mut returned_faces,
+        returned.faces.len(),
+        "returned topology projection",
+    )?;
+    returned_faces.extend(
+        returned
+            .faces
+            .iter()
+            .copied()
+            .map(|face| face.remap(returned_to_reference).canonical_point_indices()),
+    );
     reference_faces.sort_unstable();
     returned_faces.sort_unstable();
     check_round_trip_cancelled(control)?;

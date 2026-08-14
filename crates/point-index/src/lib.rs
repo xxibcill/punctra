@@ -52,7 +52,14 @@ pub type IndexJob = Job<PreparedIndex, IndexError>;
 ///
 /// A compatible complete artifact is opened without rebuilding. Otherwise a
 /// compatible append-only work file is resumed, or a new one is created. An
-/// incompatible or corrupt target fails without being replaced.
+/// incompatible or corrupt target fails without being replaced. Successful
+/// builds retain their valid work prefix because deleting it by pathname could
+/// delete a racing replacement; when both paths exist, the complete artifact
+/// wins and the work file is left untouched. Private named build stages and
+/// sample spools may also remain as per-attempt bounded debris on platforms
+/// that cannot publish from an unnamed file; Linux publication stages are
+/// unnamed and leave no alias after their descriptor closes. `prepare` never
+/// scans, adopts, or removes private names.
 #[must_use]
 pub fn prepare(source: Source, target: impl AsRef<Path>, limits: PrepareLimits) -> IndexJob {
     prepare::start(source, target.as_ref().to_path_buf(), limits)

@@ -394,6 +394,11 @@ Export uses create-new publication:
 6. sync the parent directory; and
 7. remove disposable staging state.
 
+The v0.9 trust hardening supersedes step 7: the private stage is retained when
+pathname cleanup cannot prove ownership at the unlink instant. It also
+publishes an independent descriptor-bound copy, syncs an open target witness,
+and revalidates the target leaf after parent sync and terminal progress.
+
 Before publication, cancellation or failure leaves no target. A failure after
 publication begins reports an explicit indeterminate export with the expected
 content hash; the caller inspects the target rather than overwriting it.
@@ -560,7 +565,7 @@ not claim an observed worker-heap value.
 
 - `point-workspace` has 72 tests: 46 unit/fault/allocation tests and 26 public
   integration tests, including six exact Point-row stream tests.
-- `point-terrain` has 46 package tests—17 unit/private and 29 integration—plus
+- `point-terrain` has 70 package tests—31 unit/private and 39 integration—plus
   one documentation test across interface, topology, resource, detached-QA,
   LandXML, robust-algorithm, and publication-fault suites.
 - `terrain-demo` has two process tests covering the complete generated LAS/LAZ

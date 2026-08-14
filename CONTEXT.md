@@ -1,13 +1,10 @@
 # Domain Context: Point-Cloud Foundation
 
-Status: renderer, adaptive View planning, Real Sources, Spatial Index/out-of-
-core View, the narrow Workspace, v0.6 Terrain and Check Point QA, and the v0.7
-technical-readiness Workflow Run are implemented; the narrow v0.8 repository
-Interoperability Qualification design is implemented with read-only Run binding,
-streaming semantic comparison, and separate canonical evidence; broader terrain
-and external product terms remain deferred
+Status: the narrow v0.1 through v0.8 repository slices and the v0.9 repository
+trust/version-1 compatibility candidate are Complete; broader terrain,
+external interoperability, product, and `1.0.0` terms remain deferred
 
-Punctra v0.8 builds on the reusable render engine, renderer-neutral View
+Punctra v0.9 builds on the reusable render engine, renderer-neutral View
 planner, and verified Source path described in the accepted [v0.1 renderer
 design](docs/design/render-engine-v0.1.md), [v0.2 planning
 design](docs/design/adaptive-view-planning-v0.2.md), and [v0.3 Real Sources
@@ -33,6 +30,13 @@ Downstream Declaration, Interoperability Qualification, Round-Trip Evidence,
 and Tolerance Profile for the post-Run verifier. Those terms and a published
 repository evidence record do not imply that a downstream product was actually
 exercised or that any external product gate was satisfied.
+The implemented [v0.9 Trust and v1 Candidate
+design](docs/design/trust-v1-candidate-v0.9.md) fixes the repository meanings of
+artifact support class, version-1 compatibility, rebuild policy, recovery
+certainty, platform evidence, and v1 candidate. Here, v1 candidate means only
+that the frozen repository surface passed its recorded local qualification; it
+does not mean `1.0.0`, production support, product readiness, or external
+acceptance.
 
 ## Artifact
 
