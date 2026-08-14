@@ -28,15 +28,15 @@ use crate::{
     scene::SceneMetrics,
 };
 use point_index::{
-    IndexRecipe, NodeReadBudget, PrepareDisposition, PrepareLimits, PreparedIndex,
-    prepare_fresh_with_recipe, prepare_with_recipe,
+    NodeReadBudget, PrepareDisposition, PrepareLimits, PreparedIndex, prepare_fresh_with_recipe,
+    prepare_with_recipe,
 };
 use point_view::{AvailableNodes, PlannerConfig, ViewPlanner};
 use render_protocol::{
     ProtocolError, RenderLimits, RenderUpdate, ResidentStats, ViewGenerationKey, Viewport,
 };
 use render_wgpu::{Frame, RendererConfig, RendererError, WgpuRenderer};
-use renderer_demo::display::{DisplayMode, inspection_attribute_ids};
+use renderer_demo::display::DisplayMode;
 
 const MANIFEST_SCHEMA: &str = "punctra.renderer-demo.field-corpus.v1";
 const REPORT_SCHEMA: &str = "punctra.renderer-demo.viewing-report.v1";
@@ -368,7 +368,7 @@ fn execute_entry(
     )?;
     let display_mode = display_mode(entry.display());
     validate_display_source(display_mode, source.metadata())?;
-    let recipe = index_recipe(entry.display());
+    let recipe = display_mode.index_policy().recipe();
     let warm_source = source.clone();
     let prepare_started = Instant::now();
     let prepared =
@@ -800,13 +800,6 @@ fn validate_display_source(
     })
 }
 
-fn index_recipe(choice: DisplayChoice) -> IndexRecipe {
-    if matches!(choice, DisplayChoice::Neutral | DisplayChoice::Elevation) {
-        return IndexRecipe::PositionOnlyV1;
-    }
-    IndexRecipe::InspectionV1(inspection_attribute_ids())
-}
-
 const fn projection_mode(choice: ProjectionChoice) -> ProjectionMode {
     match choice {
         ProjectionChoice::Perspective => ProjectionMode::Perspective,
@@ -859,7 +852,8 @@ pub(crate) struct IndexEvidence {
 
 impl IndexEvidence {
     fn expected(display: DisplayChoice) -> Self {
-        let (index_recipe_version, index_disk_version) = expected_index_versions(display);
+        let (index_recipe_version, index_disk_version) =
+            display_mode(display).index_policy().versions();
         Self {
             index_recipe_version,
             index_disk_version,
@@ -1075,13 +1069,6 @@ fn owned_report_text(text: &str) -> Result<String, ViewFailure> {
     })?;
     owned.push_str(text);
     Ok(owned)
-}
-
-const fn expected_index_versions(display: DisplayChoice) -> (u32, u32) {
-    match display {
-        DisplayChoice::Neutral | DisplayChoice::Elevation => (1, 1),
-        DisplayChoice::Rgb | DisplayChoice::Intensity | DisplayChoice::Classification => (2, 2),
-    }
 }
 
 const fn prepare_disposition(disposition: PrepareDisposition) -> &'static str {

@@ -19,7 +19,7 @@ use std::{
 use diagnostic::{ViewFailure, ViewPhase};
 use orbit_camera::{OrbitCamera, ProjectionMode};
 use point_contracts::SourceMetadata;
-use point_index::{IndexRecipe, PrepareLimits, PreparedIndex, prepare_with_recipe};
+use point_index::{PrepareLimits, PreparedIndex, prepare_with_recipe};
 use point_view::{
     AvailableNodes, PlannerConfig, PlanningBudget, ResourceUsage, ViewPlan, ViewPlanner,
 };
@@ -31,7 +31,7 @@ use render_protocol::{
 use render_wgpu::{
     Camera, Frame, FrameReport, PointStyle, RendererConfig, RendererError, WgpuRenderer,
 };
-use renderer_demo::display::{DisplayMode, inspection_attribute_ids};
+use renderer_demo::display::DisplayMode;
 use scene::{Scene, SceneMetrics};
 use synthetic::{RESIDENT_BATCH_BUDGET, RESIDENT_BYTE_BUDGET, RESIDENT_POINT_BUDGET};
 use winit::{
@@ -228,7 +228,7 @@ fn load_scene(command: &Command) -> DemoResult<Scene> {
 
     let prepare_started = Instant::now();
     println!("View phase: index-prepare (running)");
-    let recipe = display_index_recipe(command.display_mode);
+    let recipe = command.display_mode.index_policy().recipe();
     let prepared = prepare_with_recipe(source, &index_target, recipe, PrepareLimits::default())
         .blocking_wait()
         .map_err(|error| ViewFailure::index(&index_target, &error))?;
@@ -263,13 +263,6 @@ fn display_description(mode: DisplayMode, bounds: Option<point_contracts::WorldB
     }
 }
 
-fn display_index_recipe(mode: DisplayMode) -> IndexRecipe {
-    if !mode.requires_inspection_index() {
-        return IndexRecipe::PositionOnlyV1;
-    }
-    IndexRecipe::InspectionV1(inspection_attribute_ids())
-}
-
 fn validate_display_source(mode: DisplayMode, metadata: &SourceMetadata) -> DemoResult<()> {
     mode.validate_source(metadata)
         .map_err(|message| invalid_argument(format_args!("--display {mode}: {message}")))
@@ -291,11 +284,7 @@ fn print_prepare_report(index: &PreparedIndex, target: &Path, elapsed: Duration)
 
 fn default_index_target(source: &Path, display_mode: DisplayMode) -> PathBuf {
     let mut target = source.as_os_str().to_os_string();
-    target.push(if display_mode.requires_inspection_index() {
-        ".inspection-v2.pidx"
-    } else {
-        ".pidx"
-    });
+    target.push(display_mode.index_policy().target_suffix());
     PathBuf::from(target)
 }
 

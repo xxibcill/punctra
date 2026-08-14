@@ -1,7 +1,7 @@
 use std::{ffi::OsStr, fmt};
 
 use point_contracts::{AttributeDataType, AttributeId, SourceMetadata, WorldBounds};
-use point_index::{DisplayAttributes, InspectionAttributeIds};
+use point_index::{DisplayAttributes, IndexRecipe, InspectionAttributeIds};
 
 /// Stable neutral display color used when no semantic mode is selected.
 pub const NEUTRAL_COLOR: [u8; 4] = [190, 205, 220, 255];
@@ -65,6 +65,44 @@ pub enum DisplayMode {
     Classification,
 }
 
+/// Index recipe, artifact naming, and version policy for one display family.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DisplayIndexPolicy {
+    /// Position-only samples used by neutral and elevation display.
+    PositionOnly,
+    /// Attributed inspection samples used by RGB, intensity, and classification.
+    Inspection,
+}
+
+impl DisplayIndexPolicy {
+    /// Builds the exact index recipe for this display family.
+    #[must_use]
+    pub fn recipe(self) -> IndexRecipe {
+        match self {
+            Self::PositionOnly => IndexRecipe::PositionOnlyV1,
+            Self::Inspection => IndexRecipe::InspectionV1(inspection_attribute_ids()),
+        }
+    }
+
+    /// Returns the default suffix appended to the complete Source path.
+    #[must_use]
+    pub const fn target_suffix(self) -> &'static str {
+        match self {
+            Self::PositionOnly => ".pidx",
+            Self::Inspection => ".inspection-v2.pidx",
+        }
+    }
+
+    /// Returns the expected recipe and disk versions.
+    #[must_use]
+    pub const fn versions(self) -> (u32, u32) {
+        match self {
+            Self::PositionOnly => (1, 1),
+            Self::Inspection => (2, 2),
+        }
+    }
+}
+
 impl DisplayMode {
     /// Parses one exact CLI display name.
     #[must_use]
@@ -93,7 +131,16 @@ impl DisplayMode {
     /// Reports whether the v2 attributed inspection recipe is required.
     #[must_use]
     pub const fn requires_inspection_index(self) -> bool {
-        matches!(self, Self::Rgb | Self::Intensity | Self::Classification)
+        matches!(self.index_policy(), DisplayIndexPolicy::Inspection)
+    }
+
+    /// Returns the complete index policy for this display mode.
+    #[must_use]
+    pub const fn index_policy(self) -> DisplayIndexPolicy {
+        match self {
+            Self::Neutral | Self::Elevation => DisplayIndexPolicy::PositionOnly,
+            Self::Rgb | Self::Intensity | Self::Classification => DisplayIndexPolicy::Inspection,
+        }
     }
 
     /// Validates the fixed Source Attribute inputs required by this host mode.
@@ -326,6 +373,22 @@ mod tests {
         ] {
             assert!(PointColorizer::for_source(mode, None).requires_attributes());
         }
+    }
+
+    #[test]
+    fn display_index_policy_keeps_recipe_suffix_and_versions_together() {
+        let position_only = DisplayMode::Elevation.index_policy();
+        assert_eq!(position_only.target_suffix(), ".pidx");
+        assert_eq!(position_only.versions(), (1, 1));
+        assert!(matches!(
+            position_only.recipe(),
+            IndexRecipe::PositionOnlyV1
+        ));
+
+        let inspection = DisplayMode::Classification.index_policy();
+        assert_eq!(inspection.target_suffix(), ".inspection-v2.pidx");
+        assert_eq!(inspection.versions(), (2, 2));
+        assert!(matches!(inspection.recipe(), IndexRecipe::InspectionV1(_)));
     }
 
     #[test]
