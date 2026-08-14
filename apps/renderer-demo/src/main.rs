@@ -18,10 +18,8 @@ use std::{
 
 use diagnostic::{ViewFailure, ViewPhase};
 use orbit_camera::{OrbitCamera, ProjectionMode};
-use point_contracts::{AttributeId, SourceMetadata};
-use point_index::{
-    IndexRecipe, InspectionAttributeIds, PrepareLimits, PreparedIndex, prepare_with_recipe,
-};
+use point_contracts::SourceMetadata;
+use point_index::{IndexRecipe, PrepareLimits, PreparedIndex, prepare_with_recipe};
 use point_view::{
     AvailableNodes, PlannerConfig, PlanningBudget, ResourceUsage, ViewPlan, ViewPlanner,
 };
@@ -33,7 +31,7 @@ use render_protocol::{
 use render_wgpu::{
     Camera, Frame, FrameReport, PointStyle, RendererConfig, RendererError, WgpuRenderer,
 };
-use renderer_demo::display::DisplayMode;
+use renderer_demo::display::{DisplayMode, inspection_attribute_ids};
 use scene::{Scene, SceneMetrics};
 use synthetic::{RESIDENT_BATCH_BUDGET, RESIDENT_BYTE_BUDGET, RESIDENT_POINT_BUDGET};
 use winit::{
@@ -229,7 +227,7 @@ fn load_scene(command: &Command) -> DemoResult<Scene> {
 
     let prepare_started = Instant::now();
     println!("View phase: index-prepare (running)");
-    let recipe = display_index_recipe(command.display_mode)?;
+    let recipe = display_index_recipe(command.display_mode);
     let prepared = prepare_with_recipe(source, &index_target, recipe, PrepareLimits::default())
         .blocking_wait()
         .map_err(|error| ViewFailure::index(&index_target, &error))?;
@@ -264,16 +262,11 @@ fn display_description(mode: DisplayMode, bounds: Option<point_contracts::WorldB
     }
 }
 
-fn display_index_recipe(mode: DisplayMode) -> DemoResult<IndexRecipe> {
+fn display_index_recipe(mode: DisplayMode) -> IndexRecipe {
     if !mode.requires_inspection_index() {
-        return Ok(IndexRecipe::PositionOnlyV1);
+        return IndexRecipe::PositionOnlyV1;
     }
-    let id = |value| AttributeId::new(value).map_err(Box::<dyn Error>::from);
-    Ok(IndexRecipe::InspectionV1(InspectionAttributeIds::new(
-        id(1)?,
-        id(6)?,
-        [id(16)?, id(17)?, id(18)?],
-    )?))
+    IndexRecipe::InspectionV1(inspection_attribute_ids())
 }
 
 fn validate_display_source(mode: DisplayMode, metadata: &SourceMetadata) -> DemoResult<()> {

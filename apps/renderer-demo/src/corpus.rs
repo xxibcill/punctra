@@ -27,15 +27,15 @@ use crate::{
     scene::SceneMetrics,
 };
 use point_index::{
-    IndexRecipe, InspectionAttributeIds, NodeReadBudget, PrepareDisposition, PrepareLimits,
-    PreparedIndex, prepare_fresh_with_recipe, prepare_with_recipe,
+    IndexRecipe, NodeReadBudget, PrepareDisposition, PrepareLimits, PreparedIndex,
+    prepare_fresh_with_recipe, prepare_with_recipe,
 };
 use point_view::{AvailableNodes, PlannerConfig, ViewPlanner};
 use render_protocol::{
     ProtocolError, RenderLimits, RenderUpdate, ResidentStats, ViewGenerationKey, Viewport,
 };
 use render_wgpu::{Frame, RendererConfig, RendererError, WgpuRenderer};
-use renderer_demo::display::DisplayMode;
+use renderer_demo::display::{DisplayMode, inspection_attribute_ids};
 
 const MANIFEST_SCHEMA: &str = "punctra.renderer-demo.field-corpus.v1";
 const REPORT_SCHEMA: &str = "punctra.renderer-demo.viewing-report.v1";
@@ -367,7 +367,7 @@ fn execute_entry(
     )?;
     let display_mode = display_mode(entry.display());
     validate_display_source(display_mode, source.metadata())?;
-    let recipe = index_recipe(entry.display())?;
+    let recipe = index_recipe(entry.display());
     let warm_source = source.clone();
     let prepare_started = Instant::now();
     let prepared =
@@ -799,17 +799,11 @@ fn validate_display_source(
     })
 }
 
-fn index_recipe(choice: DisplayChoice) -> Result<IndexRecipe, ViewFailure> {
+fn index_recipe(choice: DisplayChoice) -> IndexRecipe {
     if matches!(choice, DisplayChoice::Neutral | DisplayChoice::Elevation) {
-        return Ok(IndexRecipe::PositionOnlyV1);
+        return IndexRecipe::PositionOnlyV1;
     }
-    let id = |value| {
-        point_contracts::AttributeId::new(value)
-            .map_err(|error| ViewFailure::internal(ViewPhase::IndexPrepare, error))
-    };
-    let attributes = InspectionAttributeIds::new(id(1)?, id(6)?, [id(16)?, id(17)?, id(18)?])
-        .map_err(|error| ViewFailure::internal(ViewPhase::IndexPrepare, error))?;
-    Ok(IndexRecipe::InspectionV1(attributes))
+    IndexRecipe::InspectionV1(inspection_attribute_ids())
 }
 
 const fn projection_mode(choice: ProjectionChoice) -> ProjectionMode {

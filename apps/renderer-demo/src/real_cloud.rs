@@ -1496,7 +1496,7 @@ mod tests {
         let index = point_index::prepare_with_recipe(
             source,
             directory.join("fixture.inspection.pidx"),
-            crate::display_index_recipe(display_mode)?,
+            crate::display_index_recipe(display_mode),
             PrepareLimits::default(),
         )
         .blocking_wait()?;

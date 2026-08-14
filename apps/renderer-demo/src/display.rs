@@ -1,10 +1,45 @@
 use std::{ffi::OsStr, fmt};
 
 use point_contracts::{AttributeDataType, AttributeId, SourceMetadata, WorldBounds};
-use point_index::DisplayAttributes;
+use point_index::{DisplayAttributes, InspectionAttributeIds};
 
 /// Stable neutral display color used when no semantic mode is selected.
 pub const NEUTRAL_COLOR: [u8; 4] = [190, 205, 220, 255];
+
+/// Stable `source-las` Attribute identity for raw pulse-return intensity.
+pub const LAS_INTENSITY_ATTRIBUTE: AttributeId = fixed_attribute_id(1);
+
+/// Stable `source-las` Attribute identity for raw classification.
+pub const LAS_CLASSIFICATION_ATTRIBUTE: AttributeId = fixed_attribute_id(6);
+
+/// Stable `source-las` Attribute identities for raw red, green, and blue channels.
+pub const LAS_RGB_ATTRIBUTES: [AttributeId; 3] = [
+    fixed_attribute_id(16),
+    fixed_attribute_id(17),
+    fixed_attribute_id(18),
+];
+
+const fn fixed_attribute_id(value: u32) -> AttributeId {
+    match AttributeId::new(value) {
+        Ok(id) => id,
+        Err(_) => panic!("fixed LAS Attribute identity must be nonzero"),
+    }
+}
+
+/// Returns the single fixed inspection Attribute profile used by this host.
+///
+/// # Panics
+///
+/// Panics if the checked-in LAS Attribute identities stop being distinct.
+#[must_use]
+pub fn inspection_attribute_ids() -> InspectionAttributeIds {
+    InspectionAttributeIds::new(
+        LAS_INTENSITY_ATTRIBUTE,
+        LAS_CLASSIFICATION_ATTRIBUTE,
+        LAS_RGB_ATTRIBUTES,
+    )
+    .expect("fixed LAS inspection Attribute identities are distinct")
+}
 
 const ELEVATION_COLORS: [[u8; 4]; 5] = [
     [68, 1, 84, 255],
@@ -71,15 +106,19 @@ impl DisplayMode {
         if !self.requires_inspection_index() {
             return Ok(());
         }
-        if !has_attribute(metadata, 1, AttributeDataType::U16)
-            || !has_attribute(metadata, 6, AttributeDataType::U8)
+        if !has_attribute(metadata, LAS_INTENSITY_ATTRIBUTE, AttributeDataType::U16)
+            || !has_attribute(
+                metadata,
+                LAS_CLASSIFICATION_ATTRIBUTE,
+                AttributeDataType::U8,
+            )
         {
             return Err(
                 "attributed display requires LAS intensity Attribute 1 as U16 and classification Attribute 6 as U8",
             );
         }
         if self == Self::Rgb
-            && ![16, 17, 18]
+            && !LAS_RGB_ATTRIBUTES
                 .into_iter()
                 .all(|id| has_attribute(metadata, id, AttributeDataType::U16))
         {
@@ -89,8 +128,7 @@ impl DisplayMode {
     }
 }
 
-fn has_attribute(metadata: &SourceMetadata, value: u32, data_type: AttributeDataType) -> bool {
-    let id = AttributeId::new(value).expect("the fixed LAS Attribute identities are nonzero");
+fn has_attribute(metadata: &SourceMetadata, id: AttributeId, data_type: AttributeDataType) -> bool {
     metadata
         .attributes()
         .get(id)
