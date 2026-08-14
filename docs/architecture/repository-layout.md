@@ -235,7 +235,7 @@ point-terrain -> point-workspace + point-contracts + foundation-runtime
 render-protocol -> point-contracts
 point-view -> render-protocol
 render-wgpu -> render-protocol + point-contracts
-renderer-demo -> source-las + point-index + point-view + render-protocol + render-wgpu
+renderer-demo -> source-las + point-source + point-index + point-view + render-protocol + render-wgpu + point-contracts + foundation-runtime
 terrain-demo -> source-las + point-source + point-index + point-workspace + point-terrain + point-contracts + foundation-runtime
 ~~~
 
