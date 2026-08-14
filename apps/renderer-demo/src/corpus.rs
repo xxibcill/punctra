@@ -718,7 +718,7 @@ fn render_offscreen(
             label: Some("punctra corpus viewing encoder"),
         });
     let frame = Frame::new(view_generation, camera, viewport)
-        .map_err(|error| ViewFailure::gpu(ViewPhase::Rendering, error))?;
+        .map_err(|error| ViewFailure::internal(ViewPhase::Rendering, error))?;
     let recorded = renderer
         .render(&mut encoder, &target, &frame)
         .map_err(|error| renderer_failure(ViewPhase::Rendering, error))?;
@@ -815,17 +815,29 @@ const fn projection_mode(choice: ProjectionChoice) -> ProjectionMode {
 }
 
 fn renderer_failure(phase: ViewPhase, error: RendererError) -> ViewFailure {
-    if matches!(
-        &error,
-        RendererError::Protocol(ProtocolError::ResidentLimitExceeded { .. })
-            | RendererError::BatchTooLarge { .. }
-            | RendererError::BatchBufferTooLarge { .. }
-            | RendererError::FrameUniformStagingSizeOverflow { .. }
-            | RendererError::FrameUniformStagingBufferTooLarge { .. }
-    ) {
+    match error {
+        RendererError::Protocol(error) => protocol_failure(phase, error),
+        error @ (RendererError::BatchTooLarge { .. }
+        | RendererError::BatchBufferTooLarge { .. }
+        | RendererError::FrameUniformStagingSizeOverflow { .. }
+        | RendererError::FrameUniformStagingBufferTooLarge { .. }) => {
+            ViewFailure::resource(phase, error)
+        }
+        error @ (RendererError::NoActiveViewGeneration
+        | RendererError::ViewGenerationMismatch { .. }
+        | RendererError::ForeignRecordedFrame
+        | RendererError::PickOutsideViewport { .. }
+        | RendererError::PickMetadataUnavailable
+        | RendererError::BatchOriginOutOfRange { .. }) => ViewFailure::internal(phase, error),
+        error => ViewFailure::gpu(phase, error),
+    }
+}
+
+fn protocol_failure(phase: ViewPhase, error: ProtocolError) -> ViewFailure {
+    if matches!(error, ProtocolError::ResidentLimitExceeded { .. }) {
         ViewFailure::resource(phase, error)
     } else {
-        ViewFailure::gpu(phase, error)
+        ViewFailure::internal(phase, error)
     }
 }
 
@@ -2935,6 +2947,20 @@ mod tests {
 
         assert_eq!(failure.code(), ViewFailureCode::ResourceLimit);
         assert_eq!(failure.phase(), ViewPhase::GpuUpload);
+    }
+
+    #[test]
+    fn renderer_host_state_and_protocol_failures_remain_internal() {
+        for error in [
+            RendererError::NoActiveViewGeneration,
+            RendererError::ForeignRecordedFrame,
+            RendererError::Protocol(ProtocolError::EmptyPointBatch),
+        ] {
+            let failure = renderer_failure(ViewPhase::Rendering, error);
+
+            assert_eq!(failure.code(), ViewFailureCode::Internal);
+            assert_eq!(failure.phase(), ViewPhase::Rendering);
+        }
     }
 
     #[test]
