@@ -1,6 +1,7 @@
 //! Bounded local field-corpus manifest and canonical viewing-report contracts.
 
 use std::{
+    borrow::Cow,
     error::Error,
     fmt,
     fs::{self, File, OpenOptions},
@@ -48,7 +49,7 @@ const MAX_FRAMES_PER_POSE: u32 = 256;
 const MAX_ID_BYTES: usize = 128;
 const MAX_TEXT_BYTES: usize = 256;
 const MAX_PATH_BYTES: usize = 4 * 1024;
-const MAX_MANIFEST_STRING_TOKEN_BYTES: usize = MAX_PATH_BYTES;
+const MAX_MANIFEST_STRING_TOKEN_BYTES: usize = MAX_PATH_BYTES * 6;
 const MAX_STAGE_ATTEMPTS: usize = 128;
 // `source-las` fixes this bound for Full-verification decode work in v0.10.
 // The private corpus schema records that effective adapter limit without
@@ -1238,9 +1239,9 @@ where
 #[serde(deny_unknown_fields)]
 struct BorrowedCorpusManifest<'a> {
     #[serde(borrow)]
-    schema: &'a str,
+    schema: Cow<'a, str>,
     #[serde(borrow)]
-    corpus_id: &'a str,
+    corpus_id: Cow<'a, str>,
     #[serde(borrow)]
     machine: BorrowedMachineDeclaration<'a>,
     #[serde(borrow, deserialize_with = "deserialize_borrowed_entries")]
@@ -1251,28 +1252,28 @@ struct BorrowedCorpusManifest<'a> {
 #[serde(deny_unknown_fields)]
 struct BorrowedMachineDeclaration<'a> {
     #[serde(borrow)]
-    label: &'a str,
+    label: Cow<'a, str>,
     #[serde(borrow)]
-    operating_system: &'a str,
+    operating_system: Cow<'a, str>,
     #[serde(borrow)]
-    filesystem: &'a str,
+    filesystem: Cow<'a, str>,
     #[serde(borrow)]
-    gpu_expectation: &'a str,
+    gpu_expectation: Cow<'a, str>,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct BorrowedCorpusEntry<'a> {
     #[serde(borrow)]
-    id: &'a str,
+    id: Cow<'a, str>,
     #[serde(borrow)]
-    project_id: &'a str,
+    project_id: Cow<'a, str>,
     #[serde(borrow)]
-    firm_id: &'a str,
+    firm_id: Cow<'a, str>,
     #[serde(borrow)]
-    source_path: &'a str,
+    source_path: Cow<'a, str>,
     #[serde(borrow)]
-    index_path: &'a str,
+    index_path: Cow<'a, str>,
     inspect_permission: bool,
     measure_permission: bool,
     display: DisplayChoice,
@@ -1296,13 +1297,13 @@ impl BorrowedCorpusManifest<'_> {
         }
         Ok(CorpusManifest {
             schema: manifest_text(
-                self.schema,
+                &self.schema,
                 "corpus manifest schema",
                 MANIFEST_SCHEMA.len(),
                 permit_allocation,
             )?,
             corpus_id: manifest_text(
-                self.corpus_id,
+                &self.corpus_id,
                 "corpus identifier",
                 MAX_ID_BYTES,
                 permit_allocation,
@@ -1320,25 +1321,25 @@ impl BorrowedMachineDeclaration<'_> {
     ) -> io::Result<MachineDeclaration> {
         Ok(MachineDeclaration {
             label: manifest_text(
-                self.label,
+                &self.label,
                 "machine declaration",
                 MAX_TEXT_BYTES,
                 permit_allocation,
             )?,
             operating_system: manifest_text(
-                self.operating_system,
+                &self.operating_system,
                 "machine declaration",
                 MAX_TEXT_BYTES,
                 permit_allocation,
             )?,
             filesystem: manifest_text(
-                self.filesystem,
+                &self.filesystem,
                 "machine declaration",
                 MAX_TEXT_BYTES,
                 permit_allocation,
             )?,
             gpu_expectation: manifest_text(
-                self.gpu_expectation,
+                &self.gpu_expectation,
                 "machine declaration",
                 MAX_TEXT_BYTES,
                 permit_allocation,
@@ -1353,25 +1354,25 @@ impl BorrowedCorpusEntry<'_> {
         trace.extend(self.trace.into_values());
         Ok(CorpusEntry {
             id: manifest_text(
-                self.id,
+                &self.id,
                 "corpus identifier",
                 MAX_ID_BYTES,
                 permit_allocation,
             )?,
             project_id: manifest_text(
-                self.project_id,
+                &self.project_id,
                 "corpus identifier",
                 MAX_ID_BYTES,
                 permit_allocation,
             )?,
             firm_id: manifest_text(
-                self.firm_id,
+                &self.firm_id,
                 "corpus identifier",
                 MAX_ID_BYTES,
                 permit_allocation,
             )?,
-            source_path: manifest_path(self.source_path, permit_allocation)?,
-            index_path: manifest_path(self.index_path, permit_allocation)?,
+            source_path: manifest_path(&self.source_path, permit_allocation)?,
+            index_path: manifest_path(&self.index_path, permit_allocation)?,
             inspect_permission: self.inspect_permission,
             measure_permission: self.measure_permission,
             display: self.display,
@@ -1528,13 +1529,14 @@ fn preflight_manifest_json_strings(bytes: &[u8]) -> io::Result<()> {
 
         cursor += 1;
         let string_start = cursor;
+        let mut decoded_bytes = 0_usize;
         loop {
             let Some(&byte) = bytes.get(cursor) else {
                 return invalid("corpus manifest contains an unterminated JSON string");
             };
             if cursor - string_start > MAX_MANIFEST_STRING_TOKEN_BYTES {
                 return invalid(format!(
-                    "corpus manifest JSON strings may contain at most {MAX_MANIFEST_STRING_TOKEN_BYTES} literal UTF-8 bytes"
+                    "corpus manifest encoded JSON strings may contain at most {MAX_MANIFEST_STRING_TOKEN_BYTES} bytes"
                 ));
             }
             match byte {
@@ -1543,18 +1545,77 @@ fn preflight_manifest_json_strings(bytes: &[u8]) -> io::Result<()> {
                     break;
                 }
                 b'\\' => {
-                    return invalid(
-                        "corpus manifest JSON strings must use literal UTF-8; JSON escapes are not accepted",
-                    );
+                    let (next, escaped_bytes) = preflight_json_escape(bytes, cursor)?;
+                    cursor = next;
+                    decoded_bytes = decoded_bytes.saturating_add(escaped_bytes);
                 }
                 0x00..=0x1f => {
                     return invalid("corpus manifest JSON strings may not contain control bytes");
                 }
-                _ => cursor += 1,
+                _ => {
+                    cursor += 1;
+                    decoded_bytes = decoded_bytes.saturating_add(1);
+                }
+            }
+            if decoded_bytes > MAX_PATH_BYTES {
+                return invalid(format!(
+                    "corpus manifest decoded JSON strings may contain at most {MAX_PATH_BYTES} UTF-8 bytes"
+                ));
             }
         }
     }
     Ok(())
+}
+
+fn preflight_json_escape(bytes: &[u8], cursor: usize) -> io::Result<(usize, usize)> {
+    let Some(&escaped) = bytes.get(cursor + 1) else {
+        return invalid("corpus manifest contains an incomplete JSON escape");
+    };
+    if matches!(
+        escaped,
+        b'"' | b'\\' | b'/' | b'b' | b'f' | b'n' | b'r' | b't'
+    ) {
+        return Ok((cursor + 2, 1));
+    }
+    if escaped != b'u' {
+        return invalid("corpus manifest contains an invalid JSON escape");
+    }
+
+    let scalar = json_hex_quad(bytes, cursor + 2)?;
+    if (0xd800..=0xdbff).contains(&scalar) {
+        if bytes.get(cursor + 6..cursor + 8) != Some(&b"\\u"[..]) {
+            return invalid("corpus manifest contains an unpaired JSON high surrogate");
+        }
+        let low = json_hex_quad(bytes, cursor + 8)?;
+        if !(0xdc00..=0xdfff).contains(&low) {
+            return invalid("corpus manifest contains an invalid JSON surrogate pair");
+        }
+        return Ok((cursor + 12, 4));
+    }
+    if (0xdc00..=0xdfff).contains(&scalar) {
+        return invalid("corpus manifest contains an unpaired JSON low surrogate");
+    }
+    let decoded = char::from_u32(u32::from(scalar))
+        .expect("a non-surrogate JSON code unit is a Unicode scalar")
+        .len_utf8();
+    Ok((cursor + 6, decoded))
+}
+
+fn json_hex_quad(bytes: &[u8], start: usize) -> io::Result<u16> {
+    let Some(digits) = bytes.get(start..start + 4) else {
+        return invalid("corpus manifest contains an incomplete JSON Unicode escape");
+    };
+    let mut value = 0_u16;
+    for digit in digits {
+        let nibble = match digit {
+            b'0'..=b'9' => u16::from(*digit - b'0'),
+            b'a'..=b'f' => u16::from(*digit - b'a' + 10),
+            b'A'..=b'F' => u16::from(*digit - b'A' + 10),
+            _ => return invalid("corpus manifest contains an invalid JSON Unicode escape"),
+        };
+        value = value * 16 + nibble;
+    }
+    Ok(value)
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -2592,10 +2653,36 @@ mod tests {
         .unwrap();
         let error = CorpusManifest::load(&escaped_oversized).unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::InvalidData);
-        assert!(error.to_string().contains("JSON escapes are not accepted"));
+        assert!(error.to_string().contains("1 to 128 UTF-8 bytes"));
         assert_eq!(
             manifest_loading_failure(&error).code(),
             ViewFailureCode::InvalidRequest
+        );
+
+        let oversized_decoded_string = format!(r#""{}""#, "\\u0061".repeat(MAX_PATH_BYTES + 1));
+        let error = preflight_manifest_json_strings(oversized_decoded_string.as_bytes())
+            .expect_err("decoded escaped text must retain the manifest string bound");
+        assert!(error.to_string().contains("decoded JSON strings"));
+    }
+
+    #[test]
+    fn manifest_accepts_bounded_standard_json_escapes() {
+        let escaped = std::str::from_utf8(VALID_EMPTY_ENTRY_MANIFEST)
+            .unwrap()
+            .replace(r#""corpus_id":"c""#, r#""corpus_id":"\ud83d\ude80""#)
+            .replace(r#""label":"m""#, r#""label":"m\u0022achine""#)
+            .replace(
+                r#""source_path":"missing.laz""#,
+                r#""source_path":"C:\\field\\source.laz""#,
+            );
+
+        let manifest = parse_manifest_bytes(escaped.as_bytes(), &mut || true).unwrap();
+
+        assert_eq!(manifest.corpus_id, "🚀");
+        assert_eq!(manifest.machine.label, "m\"achine");
+        assert_eq!(
+            manifest.entries[0].source_path,
+            PathBuf::from(r"C:\field\source.laz")
         );
     }
 
