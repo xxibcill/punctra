@@ -105,12 +105,17 @@ pub enum WorkspaceError {
     Poisoned,
 
     /// Open could not durably reconcile a visible post-crash operation state.
-    #[error("Workspace recovery is indeterminate: {reason}")]
+    #[error("Workspace recovery is indeterminate: {reason}: {source}")]
     RecoveryIndeterminate {
         /// Operation being reconciled when its identity is known.
         operation: Option<OperationId>,
         /// Bounded durability diagnostic.
         reason: WorkspaceDiagnostic,
+        /// Structured failure that made publication or recovery uncertain.
+        #[source]
+        source: Box<WorkspaceError>,
+        /// Additional structured failure observed while reconciling the first.
+        reconciliation: Option<Box<WorkspaceError>>,
     },
 
     /// A requested immutable Revision does not exist.

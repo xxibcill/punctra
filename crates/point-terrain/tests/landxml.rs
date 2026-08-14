@@ -411,7 +411,7 @@ fn ensure_applies_resource_limits_before_reconciling_an_existing_target() {
 }
 
 #[test]
-fn every_landxml_resource_family_fails_without_target_or_retained_payload() {
+fn every_landxml_resource_family_fails_without_a_target_and_retains_only_safe_stages() {
     let (_fixture, surface) = planar_surface("landxml-limits");
     let output = TemporaryOutput::new("limits");
     let defaults = LandXmlLimits::default();
@@ -480,12 +480,12 @@ fn every_landxml_resource_family_fails_without_target_or_retained_payload() {
             TerrainError::ResourceLimit { limit, .. } if limit == expected_limit
         ));
         assert!(!target.exists());
-        output.assert_stages_are_safe();
+        output.assert_stages_fit(limits);
     }
 }
 
 #[test]
-fn cancellation_before_publication_leaves_no_target_or_retained_payload() {
+fn cancellation_before_publication_leaves_no_target_and_only_safe_private_stages() {
     let side = 72_i64;
     let ticks = (0..side)
         .flat_map(|y| (0..side).map(move |x| [x, y, x + 2 * y]))
@@ -507,7 +507,7 @@ fn cancellation_before_publication_leaves_no_target_or_retained_payload() {
 }
 
 #[test]
-fn ensure_cancellation_before_publication_leaves_no_target_or_retained_payload() {
+fn ensure_cancellation_before_publication_leaves_no_target_and_only_safe_private_stages() {
     let side = 72_i64;
     let ticks = (0..side)
         .flat_map(|y| (0..side).map(move |x| [x, y, x + 2 * y]))
@@ -756,21 +756,29 @@ impl TemporaryOutput {
     }
 
     fn assert_stages_are_safe(&self) {
-        for stage in fs::read_dir(&self.directory)
-            .expect("read output directory")
-            .filter_map(Result::ok)
-            .filter(|entry| {
-                entry
-                    .file_name()
-                    .to_string_lossy()
-                    .starts_with(".punctra-landxml-")
-            })
-        {
-            let metadata = stage.metadata().expect("inspect retained LandXML stage");
-            assert!(metadata.is_file(), "retained stage is a regular file");
+        self.assert_stages_fit(LandXmlLimits::default());
+    }
+
+    fn assert_stages_fit(&self, limits: LandXmlLimits) {
+        for entry in fs::read_dir(&self.directory).expect("read output directory") {
+            let entry = entry.expect("read output entry");
+            if !entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with(".punctra-landxml-")
+            {
+                continue;
+            }
+            let metadata = fs::symlink_metadata(entry.path()).expect("inspect retained stage");
             assert!(
-                metadata.len() <= LandXmlLimits::default().max_output_bytes(),
-                "retained stage remains inside the declared output ceiling"
+                metadata.file_type().is_file(),
+                "retained LandXML stage must be a regular non-symlink file: {}",
+                entry.path().display()
+            );
+            assert!(
+                metadata.len() <= limits.max_staging_bytes(),
+                "retained LandXML stage exceeds its per-attempt byte ceiling: {}",
+                entry.path().display()
             );
         }
     }

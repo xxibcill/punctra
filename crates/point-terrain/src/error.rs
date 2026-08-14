@@ -150,6 +150,13 @@ pub enum TerrainError {
         actual_hash: ContentHash,
     },
 
+    /// An existing export target changed while it was being reconciled.
+    #[error("LandXML target changed during verification at {path}")]
+    TargetChanged {
+        /// Bounded target path.
+        path: TerrainDiagnostic,
+    },
+
     /// A terrain-owned filesystem operation failed.
     #[error("failed to {operation} {path}: {source}")]
     Io {
@@ -163,10 +170,13 @@ pub enum TerrainError {
     },
 
     /// Export publication may have created the complete target.
-    #[error("LandXML publication is indeterminate for expected hash {expected_hash}")]
+    #[error("LandXML publication is indeterminate for expected hash {expected_hash}: {source}")]
     ExportIndeterminate {
         /// Expected complete output content hash.
         expected_hash: ContentHash,
+        /// Structured failure observed after the no-replace target link.
+        #[source]
+        source: Box<TerrainError>,
     },
 
     /// Cooperative cancellation was requested before result publication.
@@ -223,6 +233,13 @@ impl TerrainError {
             operation,
             path: TerrainDiagnostic::new(path.to_string()),
             source,
+        }
+    }
+
+    pub(crate) fn export_indeterminate(expected_hash: ContentHash, source: TerrainError) -> Self {
+        Self::ExportIndeterminate {
+            expected_hash,
+            source: Box::new(source),
         }
     }
 }

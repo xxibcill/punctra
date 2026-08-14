@@ -177,8 +177,10 @@ version = "0.10.0-alpha.1"
 dependencies = [
  "blake3",
  "foundation-runtime",
+ "getrandom 0.3.4",
  "point-contracts",
  "point-source",
+ "rustix",
  "thiserror",
 ]
 

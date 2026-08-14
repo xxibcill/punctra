@@ -1,0 +1,35 @@
+{
+  "expected": {
+    "adapter_name": "source-las",
+    "adapter_version": "1",
+    "classification_values_in_logical_order": [
+      2,
+      7,
+      2
+    ],
+    "content_hash": "dbfbda7edebbac4050cd2de54cd752b851f7499262a1f8467b7b7d9d9f677121",
+    "fast_token_hex": "66756c6c2d6f6e6c792d7631",
+    "logical_order": "LAS/LAZ point-record order v1",
+    "point_count": 3,
+    "source_id": "f014512df07f3bf03245d337aedb6881fb93aacc7bdce3c9f8280c90aee612f3"
+  },
+  "files": [
+    {
+      "blake3": "dbfbda7edebbac4050cd2de54cd752b851f7499262a1f8467b7b7d9d9f677121",
+      "byte_length": 287,
+      "path": "tiny.las"
+    },
+    {
+      "blake3": "3151710a91dbc7d8a0654dd7086e2b818ca51f69356b852f2192e7e3a6c234f7",
+      "byte_length": 2712,
+      "path": "source-record.json"
+    }
+  ],
+  "las_version": "1.2",
+  "owner": "source-las",
+  "path_base": "manifest_directory",
+  "point_format": 0,
+  "source_contract_version": 1,
+  "source_record_version": 1,
+  "support_class": "authoritative"
+}

@@ -214,9 +214,12 @@ impl PointSetLimits {
     /// `max_working_bytes` is the combined peak of retained candidate spans,
     /// the current Source batch, overlay state, and builder buffers; child
     /// limits are not independent extra allowances. `max_temporary_bytes`
-    /// charges all spill bytes written during the selection. A zero resident
-    /// ceiling forces every nonempty Point Set to spill; a simultaneous zero
-    /// temporary ceiling therefore permits only an empty result.
+    /// charges all spill bytes written during this selection. Spill paths are
+    /// retained after the attempt because safe conditional unlink is not
+    /// portable, so debris from separate selections can accumulate outside
+    /// this per-selection ceiling. A zero resident ceiling forces every
+    /// nonempty Point Set to spill; a simultaneous zero temporary ceiling
+    /// therefore permits only an empty result.
     #[must_use]
     #[allow(clippy::too_many_arguments)]
     pub const fn new(
@@ -291,7 +294,7 @@ impl PointSetLimits {
         self.max_resident_bytes
     }
 
-    /// Returns the cumulative Point Set spill-byte ceiling.
+    /// Returns the cumulative spill-byte ceiling for one Point Set selection.
     #[must_use]
     pub const fn max_temporary_bytes(self) -> u64 {
         self.max_temporary_bytes
@@ -618,7 +621,9 @@ impl CommitLimits {
     /// charged even when many rows are unchanged. Zero selected, changed,
     /// block, temporary, Revision, or total-durable capacity prevents
     /// publication of a nonempty Edit. Temporary bytes are cumulative across
-    /// all staging files; working bytes are peak simultaneous memory.
+    /// all staging files created by this commit; retained debris from separate
+    /// attempts is not charged again. Working bytes are peak simultaneous
+    /// memory.
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -676,7 +681,7 @@ impl CommitLimits {
         self
     }
 
-    /// Sets the cumulative commit staging-byte ceiling.
+    /// Sets the cumulative staging-byte ceiling for one commit.
     #[must_use]
     pub const fn with_max_temporary_bytes(mut self, value: u64) -> Self {
         self.max_temporary_bytes = value;
@@ -733,7 +738,7 @@ impl CommitLimits {
         self.max_working_bytes
     }
 
-    /// Returns the cumulative commit staging-byte ceiling.
+    /// Returns the cumulative staging-byte ceiling for one commit.
     #[must_use]
     pub const fn max_temporary_bytes(self) -> u64 {
         self.max_temporary_bytes

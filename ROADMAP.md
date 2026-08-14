@@ -9,20 +9,16 @@ as technical and customer evidence changes. Milestone outcomes and dependency
 order matter more than version numbers.
 
 Among incomplete releases, only an **Active** release has accepted
-implementation scope. Punctra v0.1 through v0.7 are complete repository
-technical slices. v0.8 and v0.9 remain incomplete alphas. Fold-forward work now
-implements the bounded v0.8 Complete-Run verifier/evidence path and ownership-
-safe initial index-work publication, full-ceiling streaming, persisted-v1
-fixture corpus, and representative recovery/support matrix. Independent
-Standards/Spec review is complete with no P0–P3 findings. The complete
-one-commit local candidate record and every external product gate remain
-outstanding. Those gates are prerequisites of the Active
+implementation scope. Punctra v0.1 through v0.9 are Complete repository
+technical slices. The v0.8 interoperability qualification and v0.9 trust
+candidate are repository-verified, while every external product gate remains
+outstanding. The Active
 [v0.10 Field Qualification and
 Professional Inspection View design](docs/design/field-inspection-view-v0.10.md),
-not retroactive Complete labels. The v0.10 repository implementation is
-complete without claiming that its field or adoption-publication gates are
-satisfied. v0.11 through v0.20 remain uncommitted Candidate themes; each needs
-evidence and an accepted design before implementation.
+has a complete repository implementation without claiming that its field or
+adoption-publication gates are satisfied. v0.11 through v0.20 remain
+uncommitted Candidate themes; each needs evidence and an accepted design before
+implementation.
 
 ## Working direction
 
@@ -80,9 +76,9 @@ release can be Complete while every product gate remains outstanding.
 
 ## Scope and evidence checkpoint
 
-Status: **v0.10 professional inspection View Active; repository implementation
-present; field/adoption publication and inherited v0.9 support qualification
-outstanding**
+Status: **v0.8 and v0.9 repository slices Complete; v0.10 professional
+inspection View Active with repository implementation present; field and
+adoption-publication evidence outstanding**
 
 The [implemented v0.5 design](docs/design/durable-document-core-v0.5.md) places
 exact classification selection, temporary Point Sets, sparse Revisions, and
@@ -102,16 +98,15 @@ Footprint, and exact LandXML/report targets reconcile without overwrite. Its
 generated tests and benchmark establish only those technical guarantees; they
 do not satisfy any external evidence item below.
 
-The accepted v0.8 slice did not broaden that workflow. Its private comparator
-can compare the exact v0.7 metric-metre LandXML TIN with a caller-returned
-LandXML 1.2 file under declared tolerances. Fold-forward work adds strict
-read-only Complete-Run binding, canonical no-replace evidence publication, and
-full-ceiling exact-byte streaming outside the Run root. Caller-declared
-application/version/settings labels are still not proof that the application
-ran, and generated variants do not satisfy product evidence. The v0.7 journal
-and `audit.json` remain unchanged.
+The completed v0.8 slice did not broaden that workflow. Its private verifier
+compares the exact v0.7 metric-metre LandXML TIN with a caller-returned LandXML
+1.2 file under declared tolerances, with strict read-only Complete-Run binding,
+canonical no-replace evidence publication, and full-ceiling exact-byte
+streaming outside the Run root. Caller-declared application/version/settings
+labels are still not proof that the application ran. The v0.7 journal and
+`audit.json` remain unchanged.
 
-The accepted v0.9 slice adds no new feature family. It extends the inherited
+The completed v0.9 slice adds no new feature family. It extends the inherited
 Spatial Index v1 goldens across the remaining persisted-v1 compatibility
 surface, distinguishes authoritative, rebuildable, and temporary artifacts,
 hardens recovery and filesystem failure behavior, publishes the exact support
@@ -120,9 +115,8 @@ resource/performance gates. Implemented hardening preserves Index filesystem
 failures as recoverable I/O diagnostics through the private Workflow seam and
 publishes a complete synced initial `.work` header from an owned temporary by
 a no-replace link. Unknown, racing, and caller-owned targets remain untouched.
-The repository fixture/recovery/support matrix is implemented and independently
-reviewed; v0.9 remains incomplete pending the complete one-commit local
-candidate record.
+The repository fixture/recovery/support matrix, complete local candidate record,
+and independent review are recorded in the v0.9 release evidence.
 
 The accepted v0.10 design adds a separate repository View track. The private
 host now owns five deterministic display modes, perspective/orthographic
@@ -155,8 +149,8 @@ any later repository release.
 
 ## Release sequence
 
-There is one Active repository track after the completed v0.7 and incomplete
-v0.8/v0.9 alphas. Ten provisional Candidate themes, v0.11 through v0.20,
+There is one Active repository track after the completed v0.9. Ten provisional
+Candidate themes, v0.11 through v0.20,
 extend the path after v0.10. This is a planning sequence, not a requirement to
 publish every number or to publish v1 after v0.20. Candidates may be narrowed,
 split, merged, reordered, or stopped before becoming Active.
@@ -951,7 +945,7 @@ v0.20 theme is by itself a reason to publish v1.
 |---|---|---|---|
 | Renderer and planning foundations | v0.1–v0.2 | Complete; repository-verified | Reusable bounded display engine and adaptive View planner. |
 | Source, document, terrain, and workflow baseline | v0.3–v0.7 | Complete; repository-verified only | Headless technical path from verified LAS/LAZ to one narrow resumable terrain deliverable; field and product evidence remains separate. |
-| Qualifier and trust baseline | v0.8–v0.9 | Repository verifier/fixture/recovery matrix independently reviewed; complete local candidate record outstanding | Close inherited qualification gates and harden only the existing narrow repository compatibility surface. |
+| Qualifier and trust baseline | v0.8–v0.9 | Complete; repository-verified only | Close inherited qualification gates and harden only the existing narrow repository compatibility surface. |
 | Field inspection and exact correction | v0.10–v0.11 | v0.10 repository implementation complete but field/adoption exits outstanding; v0.11 Candidate | Qualify representative Sources and connect a professional View to CPU-authoritative review and reversible correction. |
 | Spatial contract and production terrain | v0.12–v0.13 | Candidate | Make reference semantics explicit before persisting a bounded production-scale Surface. |
 | Terrain acceptance tooling | v0.14–v0.15 | Candidate | Add exact QA and only the constraints earned by field evidence. |

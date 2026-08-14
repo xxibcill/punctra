@@ -1,21 +1,21 @@
 # Field Qualification and Professional Inspection View Design (v0.10)
 
-Status: **Accepted and Active — repository implementation complete; field,
-adoption-publication, and inherited support qualification outstanding**
+Status: **Accepted and Active — repository implementation complete; field and
+adoption-publication evidence outstanding**
 
-This design is authoritative for the Punctra v0.10 repository track. Its exact
-base is commit `3dc4cb1`, the `0.9.0-alpha.1` state. The six post-base v0.8
-comparator correctness and regression commits from the source series ending at
-`ce0e325` are reconciled here as commits `19f33b8` through `42a45ca`. Carrying
-those fixes forward does not complete v0.8 or v0.9.
+This design is authoritative for the Punctra v0.10 repository track. Its
+development base was commit `3dc4cb1`, the `0.9.0-alpha.1` state. The branch is
+now reconciled with the completed v0.9 repository candidate, including the six
+post-base v0.8 comparator correctness and regression commits and the final v0.9
+qualification fixes.
 
 The instruction to start v0.10 accepted and activated repository
 implementation. The resulting code, fixtures, local measurement path, and
 documentation do not manufacture external evidence. No permitted production
 corpus, observed professional workflow, workstation baseline, failure
 baseline, or current-time baseline has been recorded in this repository. Those
-field gates plus the outstanding v0.9 complete one-commit local candidate
-record remain prerequisites to any field-qualified or support-qualified claim.
+field gates remain prerequisites to any field-qualified or support-qualified
+claim.
 
 ## Outcome
 
@@ -45,7 +45,7 @@ Repository delivery status and external evidence maturity are independent.
 | Five-project, three-firm corpus with two Sources above 500 million Points | Outstanding |
 | Observed professional feature-location trials | Outstanding |
 | v0.9 independent Standards/Spec review | Complete — 2026-08-13, zero P0–P3 findings on both axes |
-| v0.9 complete one-commit local candidate record | Outstanding |
+| v0.9 complete one-commit local candidate record | Complete — recorded with the v0.9 release evidence |
 
 Generated fixtures, public example data, maintainer-operated runs, declared
 application labels, and repository tests may prove code behavior. They do not
@@ -418,6 +418,6 @@ evidence table above.
    a permitted published benchmark, partner evidence, and support
    qualification explicitly outside repository-generated proof.
 
-No slice may describe v0.8 or v0.9 as Complete, call v0.10 field-qualified, or
-claim professional preference, production scale, partner value, downstream
-acceptance, support readiness, or v1 status without the corresponding evidence.
+No slice may call v0.10 field-qualified or claim professional preference,
+production scale, partner value, downstream acceptance, support readiness, or
+v1 status without the corresponding evidence.

@@ -17,22 +17,18 @@ headless `terrain-demo` composition. The completed [v0.7 technical-readiness
 scope](docs/design/technical-alpha-readiness-v0.7.md) permits linked child
 cancellation, exact Revision Audit and Edit Footprint facts, exact LandXML
 ensure/reconciliation, and the private durable `terrain-demo` Workflow Run,
-canonical report, and structured recovery diagnostics. The accepted
+canonical report, and structured recovery diagnostics. The completed
 [v0.8 repository interoperability qualification
 scope](docs/design/design-partner-mvp-v0.8.md) implements the private, bounded
-`terrain-demo` LandXML comparison reader. Its inherited Run-bound evidence
-closure, full-ceiling streaming reader, and generated/golden matrix are now
-implemented in v0.10 prerequisite work. Independent Standards/Spec review is
-complete with no P0–P3 findings; the complete one-commit local release record
-and external product evidence remain outstanding. The incomplete alpha was
-inherited by the [v0.9 Trust and v1 Candidate
-scope](docs/design/trust-v1-candidate-v0.9.md). That v0.9 scope permits
-compatibility fixtures, recovery and failure hardening, support-matrix
-documentation, interface review, and reproducible local qualification for the
-existing narrow workflow. Its repository matrix is implemented and
-independently reviewed, but it remains incomplete pending a complete
-one-commit local candidate record; that outstanding gate is a prerequisite of
-the accepted [v0.10 Field
+`terrain-demo` LandXML comparison reader, read-only Complete-Run binding,
+full-ceiling streaming verification, and separate canonical Round-Trip
+Evidence. The completed [v0.9 Trust and v1 Candidate
+scope](docs/design/trust-v1-candidate-v0.9.md) permits version-1 compatibility
+fixtures, ownership-safe persistence hardening, the frozen support matrix,
+interface review, and reproducible local qualification for the same narrow
+workflow. Its exact command outcomes and benchmark observations are recorded
+in the [repository verification record](docs/releases/v0.9.0.md). The accepted
+[v0.10 Field
 Qualification and Professional Inspection View
 scope](docs/design/field-inspection-view-v0.10.md). v0.10
 permits evidence collection and a staged professional display path while
@@ -76,7 +72,6 @@ cargo test -p point-terrain --all-features
 cargo test -p terrain-demo --lib --all-features
 cargo test -p terrain-demo --test workflow
 cargo test -p terrain-demo --test process
-cargo test -p terrain-demo --test run_golden_v1
 cargo test -p renderer-demo --test headless_smoke
 PUNCTRA_REQUIRE_GPU=1 cargo test -p renderer-demo --test headless_smoke \
   corpus_success_binds_trace_inputs_and_separate_resource_measurements -- --exact

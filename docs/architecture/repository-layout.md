@@ -1,7 +1,7 @@
 # Repository and Dependency Layout
 
-Status: current with the v0.10 professional inspection View repository
-implementation present; later crates are created only with accepted behavior
+Status: frozen for the completed v0.9 repository trust and version-1
+compatibility candidate; later crates are created only with accepted behavior
 and a caller
 
 The repository is one Cargo workspace. Each current crate is independently
@@ -39,20 +39,23 @@ apps/
     src/
       lib.rs
       main.rs
+      bounded_diagnostic.rs
       cli.rs
       diagnostic.rs
       evidence.rs
       journal.rs
-      qualification.rs
+      publication.rs
       report.rs
       roundtrip.rs
+      roundtrip_evidence.rs
+      roundtrip_stream.rs
       workflow.rs
     benches/journal.rs
     tests/
-      fixtures/round-trip-evidence-v1/
       process.rs
       workflow.rs
       support/mod.rs
+      fixtures/qualification-v1/
 
 crates/
   foundation-runtime/
@@ -69,13 +72,22 @@ crates/
       adapter.rs
       error.rs
       stream.rs
-    tests/interface.rs
+    tests/
+      fixture_manifest.rs
+      interface.rs
+      fixtures/v1/
+      v1_fixtures.rs
 
   source-memory/
     src/lib.rs
     examples/memory_source.rs
+    examples/generate_v1_fixtures.rs
     benches/read.rs
-    tests/interface.rs
+    tests/
+      fixture_manifest.rs
+      interface.rs
+      fixtures/v1/
+      v1_fixtures.rs
 
   source-las/
     src/
@@ -83,10 +95,15 @@ crates/
       decode.rs
       format.rs
     examples/inspect.rs
+    examples/generate_v1_fixtures.rs
     benches/read.rs
     tests/
       conformance.rs
+      fixture_manifest.rs
+      fixtures/v1/
       point_formats.rs
+      sequential_laz.rs
+      v1_fixtures.rs
 
   point-index/
     src/
@@ -106,18 +123,23 @@ crates/
       fixtures/v2/
       interface.rs
       persistence.rs
+      support/mod.rs
 
   point-workspace/
     src/
       lib.rs
       error.rs
+      hashes.rs
       limits.rs
       model.rs
       persistence.rs
+      point_id_hash.rs
       point_rows.rs
       point_set.rs
+      query.rs
       revision_audit.rs
       selection.rs
+      util.rs
       workspace.rs
     examples/classify.rs
     benches/document.rs
@@ -127,6 +149,9 @@ crates/
       row_stream.rs
       selection.rs
       persistence.rs
+      v1_fixtures.rs
+      fixtures/v1/
+      support/
 
   point-terrain/
     src/
@@ -179,7 +204,7 @@ crates/
 docs/
   architecture/
   design/
-  guides/
+  releases/
   adr/
   research/
 ~~~
@@ -188,7 +213,10 @@ Files inside a crate are private locality, not additional public modules. In
 particular, `point-workspace/selection.rs`, `point_rows.rs`, `point_set.rs`, and
 `persistence.rs` implement one deep caller-facing Workspace contract. Likewise,
 `point-terrain` keeps derivation, triangulation, QA, and LandXML encoding behind
-one public terrain seam. These files are not separate public crate seams.
+one public terrain seam. `terrain-demo` likewise keeps journal, publication,
+comparison, streaming, qualification, evidence, report, and recovery policy
+behind one private application surface. These files are not separate public
+crate seams.
 
 ## Cargo dependency direction
 
@@ -298,8 +326,8 @@ Private behavior hidden behind it includes:
 - exact ordered Point-row filtering, row/content hashing, fused terminal
   summary, and row-specific ledgers;
 - Point-ID validation, sorting, deduplication, and span normalization;
-- in-memory Point Set growth, checked spill, repeated bounded reads, and
-  cleanup;
+- in-memory Point Set growth, checked spill, repeated bounded reads, retained
+  private storage, and ownership-safe offline cleanup policy;
 - request/delta hashing and sparse before/after rows;
 - immutable manifest, intent, rejection, and Revision encodings;
 - exact Revision-row validation, Source-position joining, transitions, hashes,
@@ -361,6 +389,9 @@ run-root/
   run.lock                   # exclusive Run lock
   terrain.xml                # caller-owned exactly ensured LandXML Export
   audit.json                 # caller-owned exactly ensured canonical report
+
+evidence/
+  round-trip.json            # caller-owned pass/fail evidence outside run-root
 ~~~
 
 Ownership rules:
@@ -368,11 +399,11 @@ Ownership rules:
 - only `point-index` interprets `.pidx` and its sidecars;
 - only `point-workspace` interprets the Workspace directory;
 - the Source remains outside the Workspace and is never rewritten;
-- a live Point Set owns its spill payload; final-handle release clears that
-  payload through the open handle but conservatively retains the recognized
-  scratch name so pathname cleanup cannot race a caller replacement;
+- a Point Set spill is temporary, per-attempt bounded, retained as private
+  debris, and ignored by recovery;
 - `TerrainSurface`, View, and GPU state are not persisted as authoritative
-  document data; LandXML and `audit.json` are caller-requested deliverables;
+  document data; LandXML, `audit.json`, and Round-Trip Evidence are
+  caller-requested deliverables;
   and
 - only `terrain-demo` interprets `run.pwf`; unknown Run-root children are never
   deleted.
@@ -392,13 +423,12 @@ versions, and LandXML/journal/report format versions are separate axes. A Cargo
 - Golden fixtures are required before a persisted compatibility promise or a
   second persisted version is accepted.
 
-v0.9 began without changing a persisted schema. V0.10 adds Spatial Index
-disk/recipe version 2 for bounded inspection samples while retaining immutable
-v1 complete/work fixtures and explicit caller-owned move/delete-and-rebuild
-migration. One path can hold only one recipe; incompatible artifacts/work are
-preserved and rejected. Source
-Record version 1, Workspace disk/semantic version 1, Terrain algorithm version
-1, Workflow journal version 1, and LandXML/report subsets evolve independently.
+v0.9 keeps every persisted schema at version 1 and does not invent a
+migration solely to exercise migration machinery. Source Record version 1,
+Spatial Index disk/recipe version 1, Workspace disk/semantic version 1,
+Terrain algorithm version 1, Workflow journal version 1, and the supported
+LandXML/report subsets evolve independently of Cargo versions. Frozen fixtures
+must precede any future second persisted version.
 
 ## Implementation order
 
@@ -412,13 +442,13 @@ Completed vertical slices are:
 6. one exact Snapshot Point-row stream plus one deep deterministic Terrain/QA/
    LandXML technical slice; and
 7. linked cancellation, exact Revision Audit/LandXML reconciliation, and one
-   private durable application Workflow Run with canonical evidence; and
-8. the narrow disk-v2 inspection cache, five private display modes,
-   perspective/orthographic View, truthful progressive state/diagnostics, and
-   local permission-gated corpus reporting.
+   private durable application Workflow Run with canonical report; and
+8. strict read-only Complete-Run qualification, full-ceiling streaming,
+   canonical Round-Trip Evidence, frozen version-1 fixtures, and the reviewed
+   support/recovery surface.
 
-The next accepted slice may add only terrain or workflow behavior earned by its
-real caller and evidence. COPC, general LandXML, UI, bindings, and other
+Any later accepted slice may add only terrain or workflow behavior earned by
+its real caller and evidence. COPC, general LandXML, UI, bindings, and other
 adapters remain deferred until their own evidence and designs exist.
 
 ## Definition of ready for a crate

@@ -1,8 +1,8 @@
 # Cross-Module Contracts and Invariants
 
-Status: existing contracts with the v0.10 professional inspection View
-repository implementation complete; field/support evidence and broader
-terrain/export contracts remain outstanding
+Status: frozen for the completed v0.9 repository trust and version-1
+compatibility candidate; broader terrain, export, and product contracts remain
+deferred
 
 The versioned designs in [`docs/design`](../design) control exact release
 scope. This document summarizes the invariants that cross current crate seams.
@@ -235,11 +235,10 @@ The Point Set retains bounded records in memory and automatically spills to a
 checksummed append-only file when its resident ceiling is crossed. Iteration
 through `PointSet::ids(PointIdReadLimits)` is repeatable and bounded. Missing,
 changed, truncated, or corrupt spill storage fails before false completion.
-The final handle releases the spill but conservatively retains its recognized
-scratch name; it never deletes by pathname after a caller may have replaced
-that name. It clears the owned spill payload through the still-open file handle,
-so a replacement at the retained name is untouched. A Point Set is not a
-durable named selection or recovery record.
+The spill is retained as bounded private debris rather than unlinked through a
+replaceable pathname. It is ignored by recovery and may be removed only as
+offline caller-owned maintenance while no related handle, job, or process is
+live. A Point Set is not a durable named selection or recovery record.
 
 ### Classification Revision and Revert
 
@@ -310,26 +309,19 @@ workspace.pcw/
 ~~~
 
 Manifest, ready, rejection, and Revision values are immutable, versioned, and
-checksummed. Complete values are staged and synced, closed, made read-only,
-reopened and revalidated, then hard-linked without replacement. Directory sync
-establishes the durable commit point. Recovery validates contiguous linear
-history and every published operation record under `OpenLimits`; it fails
-closed on gaps, forks, lineage/Source mismatch, duplicate identities, or
-corruption.
+checksummed. Complete scratch values are staged and synced, made read-only,
+reopened and revalidated, then published as independent descriptor-bound
+no-replace copies. The ready Operation to Revision path alone intentionally
+hard-links one authoritative identity. Directory sync establishes the durable
+commit point. Recovery validates contiguous linear history and every published
+operation record under `OpenLimits`; it fails closed on gaps, forks,
+lineage/Source mismatch, duplicate identities, or corruption.
 
-Recognized incomplete scratch files are disposable but conservatively retained.
-Recovery validates their private regular-file kind, ignores their contents,
-and never opens a published immutable value for mutation. Abandoned stages
-release payload bytes through an already-owned handle. A stage alias retained
-after no-replace hard-link publication shares the published inode and does not
-duplicate physical payload blocks.
-
-Point Set and commit temporary-byte ceilings are per selection or commit
-attempt; they do not claim a global cumulative ceiling over retained scratch
-names from earlier attempts. Owned-handle payload clearing is best-effort in
-destructors: an operating-system truncate or sync failure may retain the
-already-bounded attempt payload for explicit operator cleanup, without
-authorizing pathname deletion.
+Recognized incomplete scratch files are per-attempt bounded and ignored by
+recovery. They are retained because automatic pathname deletion cannot exclude
+a racing replacement; offline cleanup is permitted only with no live
+Workspace, Snapshot, Point Set, or job. Recovery never opens a published
+immutable value for mutation.
 
 ## Terrain Surface contract
 
@@ -373,14 +365,23 @@ as northing, easting, elevation. The caller must explicitly assert that Source
 units are metres because the declared-or-unknown Coordinate Reference remains
 opaque to the exporter. No unit or CRS transformation occurs.
 
-Export stages and syncs a bounded sibling file, reopens and verifies it, then
-publishes by no-replace hard link and syncs the parent. Before publication,
-failure leaves no target. Once publication starts, verification, sync, cleanup,
-or terminal-progress failure is conservatively `ExportIndeterminate`; a
-`LandXmlReceipt` is returned only after durable completion. Cleanup verifies
-and conservatively retains the unique stage alias; after publication it is a
-hard link to the target and consumes no duplicate payload blocks. The independent
-`roxmltree` acceptance parser is test-only and shares no encoder helpers.
+Export stages and syncs a per-attempt bounded sibling file, reopens and
+verifies it, then publishes an independent descriptor-bound copy with atomic
+no-replace semantics and syncs the parent. The verified macOS path uses
+`fclonefileat`; the unverified Linux path copies into an unnamed `O_TMPFILE`
+and links that descriptor exactly once. Unsupported filesystems or platforms
+fail closed. The separately encoded named stage is retained as recognized
+debris because pathname cleanup cannot conditionally unlink the owned open
+file. Before publication, failure
+leaves no target. Once publication starts, verification, sync, or terminal-
+progress failure is conservatively `ExportIndeterminate`; a `LandXmlReceipt`
+is returned only after durable completion. Publication retains an open witness
+for the published leaf, syncs that destination file before the parent
+directory, and revalidates both the open file and target name after directory
+sync and terminal progress. Reconciliation retains and revalidates the same
+kind of leaf witness through its final acknowledgement boundary. The
+independent `roxmltree`
+acceptance parser is test-only and shares no encoder helpers.
 
 `TerrainSurface::ensure_landxml` applies the same deterministic encoding and
 publication limits but also reconciles a pre-existing regular target. An exact
@@ -434,52 +435,31 @@ Change Envelope, QA, stable `ensured_exact` LandXML facts, all semantic limit
 facts, and explicit partner/downstream/human-acceptance nonclaims. Machine and
 elapsed-time observations do not enter canonical bytes.
 
-## Post-Run qualification contract
+## Run-bound interoperability qualification contract
 
-`verify-round-trip` is a private `terrain-demo` application command, not a
-public foundation API. It requires an existing empty regular `run.lock`, holds
-it shared, witnesses the Run-root identity, and opens `run.pwf` strictly
-read-only. Qualification accepts only the exact validated eight-frame pattern
-ending in `Complete`; unlike `inspect`, it never truncates a torn suffix,
-creates a lock, repairs a Run, or writes a checkpoint.
+`terrain-demo verify-round-trip` opens exactly one Complete eight-frame Run
+without repairing or mutating it. It retains and revalidates stable witnesses
+for the Run root, `run.pwf`, `terrain.xml`, `audit.json`, the caller-returned
+LandXML, and the evidence parent. The Complete checkpoint and canonical report
+must agree on Run, request, LandXML, and report facts before evaluation.
 
-The qualifier revalidates journal identities/hashes, the Run-root path binding,
-the exact `terrain.xml` and `audit.json` length/content facts, and the report's
-Run/request/Source/Workspace/baseline/changed-Revision/Operation/LandXML
-bindings. It captures the returned regular LandXML under stable identity,
-length, and time facts, then performs the private narrow metric-TIN comparison.
-The existing non-evidence `compare-landxml` command remains independent and
-does not claim any Run binding.
+The verifier streams both LandXML inputs under the full supported v0.7 export
+ceiling and builds only the bounded metric-metre single-TIN semantic model.
+Presentation order, identifiers, triangle winding, and supported bounded
+metadata do not change meaning. XML, subset, Coordinate-Reference, unit,
+Point-count, unique-vertex-mapping, tolerance, and topology outcomes use stable
+semantic reason codes. Once both
+files are completely witnessed, a supported semantic rejection is a canonical
+failed evaluation; inability to witness or completely evaluate an input,
+resource exhaustion, cancellation, or changed input is operational failure and
+does not become success.
 
-One linear canonical encoder emits
-`punctra.terrain-demo.landxml-round-trip-evidence.v1`. A complete semantic pass
-or fully evaluated semantic mismatch may create or exactly reconcile a target
-whose existing parent is outside the Run root. Publication uses a synced stage,
-no-replace hard link, read-back, parent sync, ownership-safe retained-alias
-cleanup, and final
-acknowledgement. Different caller bytes are a conflict. Operational failure
-publishes no final pass/fail evidence; semantic failure publishes canonical
-failed evidence and returns a distinct nonzero result. The record binds hashes,
-byte lengths, declarations, policy, check status, comparison facts, effective
-limits, and explicit external nonclaims, with no clock field.
-
-The comparator uses a bounded local XML stream over the exact captured file
-length. Defaults match the LandXML export contract: 4 GiB per XML input, 10
-million Points, and 20 million faces, plus 70,000,128 XML nodes, 4 GiB of XML
-text/attribute bytes, a 4-KiB lexical token, 8 MiB of accounted parser working
-bytes per input, 32 million candidate comparisons, and 4 GiB of accounted
-retained working bytes across parsing and comparison. DTDs and unsupported
-declarations fail before parser allocation; borrowed `quick-xml` token views do
-not own the stream state. Lexical scanning also binds
-comments, CDATA, processing instructions, entity references, namespace-stack
-growth, and bytes appended beyond the captured length.
-
-The pass/fail evidence records deterministic `accounted_*_peak_bytes` values.
-They charge exact requested algorithm payloads and concurrent buffers, not
-allocator metadata/slack, process RSS, or an observed heap. Each modeled
-collection growth is checked before its fallible reserve. This repository
-closure is technical evidence only; it does not establish that a downstream
-application ran or that a firm accepted the result.
+Canonical pass or fail evidence uses schema
+`punctra.terrain-demo.landxml-round-trip-evidence.v1` and is published outside
+the Run root by exact-existing reconciliation or descriptor-bound no-replace
+publication. Different existing bytes are never overwritten. Caller-provided
+application, version, and settings are opaque declarations, not proof that a
+downstream product ran or accepted the deliverable.
 
 ## View and renderer contracts
 
@@ -555,9 +535,8 @@ publication. Separate ledgers cover:
 - Workflow intent counts, journal/frame/path bytes, Revision Audit, Surface
   Change Envelope, canonical report output/staging/buffer bytes, and combined
   live orchestrator working bytes; and
-- renderer-demo hierarchy, request queue, staging, renderer residency, corpus
-  manifest/report, navigation-trace, index temporary disk, and Source
-  verification measurement limits.
+- qualification XML input, node, text/attribute, semantic-model, comparison,
+  evidence output/staging/buffer, and retained-witness bytes.
 
 Round-Trip qualification separately accounts parser file/nodes/text,
 Point/face/comparison, evidence output, and publication-buffer ceilings.

@@ -85,14 +85,26 @@ impl PrepareLimits {
         self
     }
 
-    /// Sets the maximum append-only incomplete-file size.
+    /// Sets the maximum append-only incomplete-file size per preparation attempt.
+    ///
+    /// A successful build may retain this bounded valid work file and one
+    /// separately bounded sample spool beside the complete artifact until the
+    /// caller explicitly removes the index family. Each failed named
+    /// initial-header stage is separately bounded by the fixed format header
+    /// size; Linux uses an unnamed stage that disappears when its descriptor
+    /// closes.
     #[must_use]
     pub const fn with_max_incomplete_bytes(mut self, value: u64) -> Self {
         self.max_incomplete_bytes = value;
         self
     }
 
-    /// Sets the maximum complete-artifact size.
+    /// Sets the maximum complete-artifact size per preparation attempt.
+    ///
+    /// On platforms with named publication stages, the owner may retain one
+    /// separately bounded private artifact stage because pathname cleanup
+    /// cannot safely delete a racing replacement. Linux publication stages are
+    /// unnamed.
     #[must_use]
     pub const fn with_max_artifact_bytes(mut self, value: u64) -> Self {
         self.max_artifact_bytes = value;
@@ -137,7 +149,7 @@ impl PrepareLimits {
         self.max_build_working_bytes
     }
 
-    /// Returns the incomplete-file byte ceiling.
+    /// Returns the retained incomplete-file byte ceiling.
     #[must_use]
     pub const fn max_incomplete_bytes(self) -> u64 {
         self.max_incomplete_bytes
