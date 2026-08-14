@@ -2612,12 +2612,12 @@ fn report_failure(
             )
         }
         CanonicalOutputError::TargetChanged { .. } => WorkflowFailure::new(
-            FailureCode::PublicationIndeterminate,
+            FailureCode::Io,
             stage,
-            Certainty::Indeterminate(PublicationPhase::ReportTarget),
+            Certainty::PrePublication,
             context,
             error,
-            RecoveryAction::StopAndPreserve,
+            RecoveryAction::ResumeSameRun,
         ),
         CanonicalOutputError::Indeterminate { .. } => WorkflowFailure::new(
             FailureCode::PublicationIndeterminate,
@@ -3625,6 +3625,21 @@ mod tests {
             indeterminate
                 .diagnostic()
                 .contains("disk unavailable after publication")
+        );
+
+        let target_changed = report_failure(
+            WorkflowStage::Report,
+            CanonicalOutputError::TargetChanged {
+                path: PathBuf::from("audit.json"),
+            },
+            context,
+        );
+        assert_eq!(target_changed.code(), "PWF_IO");
+        assert_eq!(target_changed.certainty(), "pre_publication");
+        assert_eq!(target_changed.publication_phase(), None);
+        assert_eq!(
+            target_changed.recovery_action(),
+            "resume the same Run with the same identities and paths"
         );
     }
 

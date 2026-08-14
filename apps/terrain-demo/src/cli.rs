@@ -742,8 +742,7 @@ fn round_trip_evidence_failure(error: RoundTripEvidenceError) -> WorkflowFailure
                     error,
                     RecoveryAction::RemoveOrRenameConflictingTarget,
                 ),
-                error @ (CanonicalOutputError::Indeterminate { .. }
-                | CanonicalOutputError::TargetChanged { .. }) => WorkflowFailure::new(
+                error @ CanonicalOutputError::Indeterminate { .. } => WorkflowFailure::new(
                     FailureCode::PublicationIndeterminate,
                     WorkflowStage::RoundTrip,
                     Certainty::Indeterminate(
@@ -752,6 +751,14 @@ fn round_trip_evidence_failure(error: RoundTripEvidenceError) -> WorkflowFailure
                     FailureContext::default(),
                     error,
                     RecoveryAction::StopAndPreserve,
+                ),
+                error @ CanonicalOutputError::TargetChanged { .. } => WorkflowFailure::new(
+                    FailureCode::Io,
+                    WorkflowStage::RoundTrip,
+                    Certainty::PrePublication,
+                    FailureContext::default(),
+                    error,
+                    RecoveryAction::ResumeSameRun,
                 ),
                 error @ CanonicalOutputError::Resource { .. } => WorkflowFailure::new(
                     FailureCode::RoundTripResourceLimit,
@@ -930,6 +937,31 @@ fn round_trip_evidence_summary(receipt: RoundTripEvidenceReceipt) -> String {
         Hex(&receipt.evidence_hash),
         receipt.evidence_bytes,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        canonical_output::CanonicalOutputError, roundtrip_evidence::RoundTripEvidenceError,
+    };
+
+    #[test]
+    fn evidence_target_replacement_is_retryable_prepublication_io() {
+        let failure = round_trip_evidence_failure(RoundTripEvidenceError::Publication(
+            CanonicalOutputError::TargetChanged {
+                path: PathBuf::from("round-trip-evidence.json"),
+            },
+        ));
+
+        assert_eq!(failure.code(), "PWF_IO");
+        assert_eq!(failure.certainty(), "pre_publication");
+        assert_eq!(failure.publication_phase(), None);
+        assert_eq!(
+            failure.recovery_action(),
+            "resume the same Run with the same identities and paths"
+        );
+    }
 }
 
 struct Hex<'a>(&'a [u8]);
