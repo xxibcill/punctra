@@ -1174,13 +1174,14 @@ impl PlanFacts {
 fn coverage_state(scene: SceneMetrics) -> String {
     if scene.authored_resident_batches > 0 {
         return format!(
-            "authored fixture presentation: {} batches / {} pts",
+            "display coverage: Sampled {} batches / {} pts; Complete {} batches / {} pts; authored fixture presentation {} batches / {} pts (not Query completion)",
+            scene.sampled_resident_batches,
+            compact_count(scene.sampled_resident_points),
+            scene.complete_resident_batches,
+            compact_count(scene.complete_resident_points),
             scene.authored_resident_batches,
             compact_count(scene.authored_resident_points)
         );
-    }
-    if scene.sampled_resident_batches == 0 && scene.complete_resident_batches == 0 {
-        return "display coverage: none resident (never Query completion)".to_owned();
     }
     format!(
         "display coverage: Sampled {} batches / {} pts; Complete {} batches / {} pts (not Query completion)",
@@ -1409,7 +1410,7 @@ mod tests {
     }
 
     #[test]
-    fn coverage_copy_never_confuses_display_with_query_completion() {
+    fn coverage_copy_always_names_both_kinds_without_claiming_query_completion() {
         let sampled = SceneMetrics {
             sampled_resident_batches: 2,
             sampled_resident_points: 4_096,
@@ -1422,6 +1423,21 @@ mod tests {
         assert!(label.contains("Sampled 2 batches"));
         assert!(label.contains("Complete 1 batches"));
         assert!(label.contains("not Query completion"));
+
+        let empty = coverage_state(SceneMetrics::default());
+        assert!(empty.contains("Sampled 0 batches"));
+        assert!(empty.contains("Complete 0 batches"));
+        assert!(empty.contains("not Query completion"));
+
+        let authored = coverage_state(SceneMetrics {
+            authored_resident_batches: 1,
+            authored_resident_points: 32,
+            ..SceneMetrics::default()
+        });
+        assert!(authored.contains("Sampled 0 batches"));
+        assert!(authored.contains("Complete 0 batches"));
+        assert!(authored.contains("authored fixture presentation 1 batches / 32 pts"));
+        assert!(authored.contains("not Query completion"));
     }
 
     #[test]
