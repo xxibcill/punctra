@@ -424,7 +424,7 @@ impl DemoApp {
 
     fn initialize(&mut self, event_loop: &ActiveEventLoop) -> DemoResult<()> {
         let attributes = Window::default_attributes()
-            .with_title(BASE_TITLE)
+            .with_title(initial_title())
             .with_inner_size(LogicalSize::new(INITIAL_WIDTH, INITIAL_HEIGHT))
             .with_visible(false);
         let window = Arc::new(event_loop.create_window(attributes)?);
@@ -1166,6 +1166,10 @@ fn coverage_state(scene: SceneMetrics) -> String {
     )
 }
 
+fn initial_title() -> String {
+    format!("{BASE_TITLE} | {}", coverage_state(SceneMetrics::default()))
+}
+
 fn has_area(size: PhysicalSize<u32>) -> bool {
     size.width > 0 && size.height > 0
 }
@@ -1412,6 +1416,12 @@ mod tests {
         assert!(authored.contains("Complete 0 batches"));
         assert!(authored.contains("authored fixture presentation 1 batches / 32 pts"));
         assert!(authored.contains("not Query completion"));
+
+        let initial = initial_title();
+        assert!(initial.starts_with(BASE_TITLE));
+        assert!(initial.contains("Sampled 0 batches"));
+        assert!(initial.contains("Complete 0 batches"));
+        assert!(initial.contains("not Query completion"));
     }
 
     #[test]
