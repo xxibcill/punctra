@@ -1589,9 +1589,9 @@ impl Store {
         F: FnOnce() -> Result<(), PersistenceError>,
     {
         self.verify_lock()?;
-        mark_publication_attempted()?;
         inject_fault(&self.root, FaultPoint::ReadyLink)?;
         sealed.stage.verify_revision(&sealed.file)?;
+        mark_publication_attempted()?;
         let published = sealed
             .stage
             .publish_independent_no_replace(&prepared.path)?;
@@ -1677,10 +1677,10 @@ impl Store {
         G: FnOnce(),
     {
         self.verify_lock()?;
-        mark_publication_attempted()?;
         inject_fault(&self.root, FaultPoint::RevisionLink)?;
         let source = OpenFileWitness::open(ready.path.clone())?;
         source.verify_revision(ready)?;
+        mark_publication_attempted()?;
         let published = source.publish_authoritative_alias_no_replace(&prepared.path)?;
         mark_directory_sync_attempted();
         inject_fault(&self.root, FaultPoint::RevisionTargetSync)?;
@@ -1791,8 +1791,8 @@ impl Store {
             inject_fault(&self.root, FaultPoint::RejectionRevalidate)?;
             validate_rejection_file(stage.path(), Some(prepared.facts.operation))?;
             stage.verify_exact_bytes(&prepared.bytes)?;
-            mark_publication_attempted()?;
             inject_fault(&self.root, FaultPoint::RejectionLink)?;
+            mark_publication_attempted()?;
             let published = stage.publish_independent_no_replace(&prepared.target_path)?;
             inject_fault(&self.root, FaultPoint::RejectionTargetSync)?;
             published.sync()?;
@@ -5360,6 +5360,83 @@ mod tests {
             );
             assert!(catalog.revisions.is_empty());
         }
+    }
+
+    #[test]
+    fn pre_link_faults_do_not_mark_publication_attempted() {
+        let ready_directory = TestDirectory::new();
+        let ready_store = initialized_store(&ready_directory);
+        let ready_candidate = sealed(&ready_store);
+        let ready_marked = std::cell::Cell::new(false);
+        let ready_fault = test_fault::Guard::install(
+            ready_directory.path(),
+            FaultPoint::ReadyLink,
+            test_fault::Action::Error,
+        );
+        assert!(
+            ready_store
+                .publish_ready(&ready_candidate, || {
+                    ready_marked.set(true);
+                    Ok(())
+                })
+                .is_err()
+        );
+        assert!(!ready_marked.get());
+        drop(ready_fault);
+
+        let revision_directory = TestDirectory::new();
+        let revision_store = initialized_store(&revision_directory);
+        let revision_candidate = sealed(&revision_store);
+        let ready = revision_store
+            .publish_ready(&revision_candidate, || Ok(()))
+            .expect("publish ready payload");
+        let revision_marked = std::cell::Cell::new(false);
+        let revision_fault = test_fault::Guard::install(
+            revision_directory.path(),
+            FaultPoint::RevisionLink,
+            test_fault::Action::Error,
+        );
+        assert!(
+            revision_store
+                .publish_revision(
+                    &ready,
+                    || {
+                        revision_marked.set(true);
+                        Ok(())
+                    },
+                    || {},
+                )
+                .is_err()
+        );
+        assert!(!revision_marked.get());
+        drop(revision_fault);
+
+        let rejection_directory = TestDirectory::new();
+        let rejection_store = initialized_store(&rejection_directory);
+        let rejection = RejectionFacts {
+            workspace: manifest().workspace,
+            operation: candidate().operation,
+            request_digest: candidate().request_digest,
+            reason_code: 3,
+            expected_head: [0; REVISION_ID_BYTES],
+            actual_head: [0; REVISION_ID_BYTES],
+        };
+        let rejection_marked = std::cell::Cell::new(false);
+        let rejection_fault = test_fault::Guard::install(
+            rejection_directory.path(),
+            FaultPoint::RejectionLink,
+            test_fault::Action::Error,
+        );
+        assert!(
+            rejection_store
+                .publish_rejection(rejection, || {
+                    rejection_marked.set(true);
+                    Ok(())
+                })
+                .is_err()
+        );
+        assert!(!rejection_marked.get());
+        drop(rejection_fault);
     }
 
     #[test]

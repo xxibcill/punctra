@@ -935,6 +935,17 @@ fn round_trip_evidence_summary(receipt: RoundTripEvidenceReceipt) -> String {
     )
 }
 
+struct Hex<'a>(&'a [u8]);
+
+impl std::fmt::Display for Hex<'_> {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for byte in self.0 {
+            write!(formatter, "{byte:02x}")?;
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -979,16 +990,5 @@ mod tests {
             failure.recovery_action(),
             "retry verify-round-trip with the same Run, returned LandXML, and evidence target"
         );
-    }
-}
-
-struct Hex<'a>(&'a [u8]);
-
-impl std::fmt::Display for Hex<'_> {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        for byte in self.0 {
-            write!(formatter, "{byte:02x}")?;
-        }
-        Ok(())
     }
 }

@@ -234,8 +234,9 @@ impl CommitJob {
     ///
     /// # Errors
     ///
-    /// Returns only failures known to precede durable publication. A failure
-    /// after publication begins becomes `CommitOutcome::Indeterminate`.
+    /// Returns only failures with a known publication state. A durable recorded
+    /// Operation may remain retryable; unresolved publication becomes
+    /// `CommitOutcome::Indeterminate`.
     ///
     /// # Panics
     ///
@@ -254,15 +255,16 @@ impl CommitJob {
     /// Waits while linking this commit's cooperative cancellation to `parent`.
     ///
     /// Parent cancellation reaches the active commit worker but does not erase
-    /// publication certainty: cancellation before publication is returned as
-    /// an error, while any failure after publication begins is still mapped to
+    /// publication certainty: cancellation outside an unresolved publication
+    /// is returned as an error, while uncertain visibility is still mapped to
     /// [`CommitOutcome::Indeterminate`]. Cancelling this commit does not cancel
     /// `parent`, and the direct link exists only for this wait.
     ///
     /// # Errors
     ///
-    /// Returns only failures known to precede durable publication. A failure
-    /// after publication begins becomes `CommitOutcome::Indeterminate`.
+    /// Returns only failures with a known publication state. A durable recorded
+    /// Operation may remain retryable; unresolved publication becomes
+    /// `CommitOutcome::Indeterminate`.
     ///
     /// # Panics
     ///
@@ -420,6 +422,10 @@ impl PublicationPhase {
 
     fn mark_revision_sync(&self) {
         self.0.fetch_max(Self::REVISION_SYNC, Ordering::SeqCst);
+    }
+
+    fn clear_acknowledged(&self) {
+        self.0.store(Self::NONE, Ordering::SeqCst);
     }
 
     fn current(&self) -> Option<CommitPhase> {
@@ -1061,6 +1067,7 @@ fn publish_and_commit(
             begin_publication(control, phase, false)
         })
         .map_err(map_persistence)?;
+    phase.clear_acknowledged();
     drop(sealed);
     session
         .catalog
@@ -1140,6 +1147,7 @@ fn commit_ready(
             || phase.mark_revision_sync(),
         )
         .map_err(map_persistence)?;
+    phase.clear_acknowledged();
     let receipt = receipt_from_revision(&committed)?;
     session
         .catalog
@@ -1680,6 +1688,7 @@ fn record_rejection(
         .store
         .publish_prepared_rejection(prepared, || begin_publication(control, phase, false))
         .map_err(map_persistence)?;
+    phase.clear_acknowledged();
     session
         .catalog
         .write()
@@ -2691,6 +2700,98 @@ mod tests {
             OperationResolution::NotRecorded
         );
         assert!(!workspace.session.poisoned.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn pre_link_faults_keep_known_operation_states_retryable() {
+        let ready_directory = TestDirectory::new();
+        let ready_workspace = create_one_point_workspace(&ready_directory, "ready-pre-link");
+        let ready_points = ready_workspace
+            .head()
+            .select(crate::PointQuery::all(), PointSetLimits::default())
+            .blocking_wait()
+            .expect("select ready Point Set");
+        let ready_operation = OperationId::from_bytes([23; 16]).expect("ready Operation");
+        let ready_fault = test_fault::Guard::install(
+            &ready_directory.0.join("ready-pre-link.pcw"),
+            FaultPoint::ReadyLink,
+            test_fault::Action::Error,
+        );
+        assert!(matches!(
+            ready_workspace
+                .commit(
+                    CommitRequest::set_classification(ready_operation, ready_points, 1),
+                    CommitLimits::default(),
+                )
+                .blocking_wait(),
+            Err(WorkspaceError::Io { .. })
+        ));
+        drop(ready_fault);
+        assert!(!ready_workspace.session.poisoned.load(Ordering::SeqCst));
+        assert_eq!(
+            ready_workspace.resolve_operation(ready_operation).unwrap(),
+            OperationResolution::NotRecorded
+        );
+
+        let revision_directory = TestDirectory::new();
+        let revision_workspace =
+            create_one_point_workspace(&revision_directory, "revision-pre-link");
+        let revision_points = revision_workspace
+            .head()
+            .select(crate::PointQuery::all(), PointSetLimits::default())
+            .blocking_wait()
+            .expect("select Revision Point Set");
+        let revision_operation = OperationId::from_bytes([24; 16]).expect("Revision Operation");
+        let revision_fault = test_fault::Guard::install(
+            &revision_directory.0.join("revision-pre-link.pcw"),
+            FaultPoint::RevisionLink,
+            test_fault::Action::Error,
+        );
+        assert!(matches!(
+            revision_workspace
+                .commit(
+                    CommitRequest::set_classification(revision_operation, revision_points, 1,),
+                    CommitLimits::default(),
+                )
+                .blocking_wait(),
+            Err(WorkspaceError::Io { .. })
+        ));
+        drop(revision_fault);
+        assert!(!revision_workspace.session.poisoned.load(Ordering::SeqCst));
+        assert!(matches!(
+            revision_workspace
+                .resolve_operation(revision_operation)
+                .unwrap(),
+            OperationResolution::Retryable(intent) if intent.operation() == revision_operation
+        ));
+
+        let rejection_directory = TestDirectory::new();
+        let rejection_workspace =
+            create_one_point_workspace(&rejection_directory, "rejection-pre-link");
+        let rejection_operation = OperationId::from_bytes([25; 16]).expect("rejection Operation");
+        let unknown_revision = RevisionId::from_bytes([26; 32]).expect("unknown Revision");
+        let rejection_fault = test_fault::Guard::install(
+            &rejection_directory.0.join("rejection-pre-link.pcw"),
+            FaultPoint::RejectionLink,
+            test_fault::Action::Error,
+        );
+        assert!(matches!(
+            rejection_workspace
+                .commit(
+                    CommitRequest::revert_head(rejection_operation, unknown_revision),
+                    CommitLimits::default(),
+                )
+                .blocking_wait(),
+            Err(WorkspaceError::Io { .. })
+        ));
+        drop(rejection_fault);
+        assert!(!rejection_workspace.session.poisoned.load(Ordering::SeqCst));
+        assert_eq!(
+            rejection_workspace
+                .resolve_operation(rejection_operation)
+                .unwrap(),
+            OperationResolution::NotRecorded
+        );
     }
 
     #[test]
