@@ -834,20 +834,45 @@ fn renderer_failure(phase: ViewPhase, error: RendererError) -> ViewFailure {
     }
 }
 
-#[derive(Debug)]
-struct EntryEvidence {
+#[derive(Clone, Debug, Default, Serialize, PartialEq)]
+#[allow(clippy::struct_field_names)]
+pub(crate) struct SourceEvidence {
     source_identity: Option<String>,
     source_point_count: Option<u64>,
     source_format: Option<String>,
-    source_verification_nanoseconds: Option<u64>,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, PartialEq)]
+#[allow(clippy::struct_field_names)]
+pub(crate) struct IndexEvidence {
     index_recipe_version: u32,
     index_disk_version: u32,
     index_disposition: Option<&'static str>,
+}
+
+impl IndexEvidence {
+    fn expected(display: DisplayChoice) -> Self {
+        let (index_recipe_version, index_disk_version) = expected_index_versions(display);
+        Self {
+            index_recipe_version,
+            index_disk_version,
+            index_disposition: None,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Serialize, PartialEq)]
+pub(crate) struct MeasurementEvidence {
+    source_verification_nanoseconds: Option<u64>,
     index_prepare_nanoseconds: Option<u64>,
     index_warm_open_nanoseconds: Option<u64>,
+    first_accepted_visible_batch_nanoseconds: Option<u64>,
     index_artifact_bytes: Option<u64>,
     peak_index_temporary_disk_bytes: Option<u64>,
-    first_accepted_visible_batch_nanoseconds: Option<u64>,
+}
+
+#[derive(Clone, Copy, Debug, Default, Serialize, PartialEq)]
+pub(crate) struct ResidencyEvidence {
     peak_queued_batches: u64,
     peak_staged_points: u64,
     peak_staged_bytes: u64,
@@ -860,37 +885,24 @@ struct EntryEvidence {
     peak_resident_batches: u64,
     peak_resident_points: u64,
     peak_resident_bytes: u64,
+}
+
+#[derive(Debug)]
+struct EntryEvidence {
+    source: SourceEvidence,
+    index: IndexEvidence,
+    measurements: MeasurementEvidence,
+    residency: ResidencyEvidence,
     trace: Vec<TraceReport>,
 }
 
 impl EntryEvidence {
     fn new(entry: &CorpusEntry) -> Self {
-        let (index_recipe_version, index_disk_version) = expected_index_versions(entry.display());
         Self {
-            source_identity: None,
-            source_point_count: None,
-            source_format: None,
-            source_verification_nanoseconds: None,
-            index_recipe_version,
-            index_disk_version,
-            index_disposition: None,
-            index_prepare_nanoseconds: None,
-            index_warm_open_nanoseconds: None,
-            index_artifact_bytes: None,
-            peak_index_temporary_disk_bytes: None,
-            first_accepted_visible_batch_nanoseconds: None,
-            peak_queued_batches: 0,
-            peak_staged_points: 0,
-            peak_staged_bytes: 0,
-            resident_batches: 0,
-            resident_points: 0,
-            sampled_resident_points: 0,
-            complete_resident_points: 0,
-            retired_batches: 0,
-            cancelled_requests: 0,
-            peak_resident_batches: 0,
-            peak_resident_points: 0,
-            peak_resident_bytes: 0,
+            source: SourceEvidence::default(),
+            index: IndexEvidence::expected(entry.display()),
+            measurements: MeasurementEvidence::default(),
+            residency: ResidencyEvidence::default(),
             trace: Vec::new(),
         }
     }
@@ -902,56 +914,89 @@ impl EntryEvidence {
         format: &str,
         verification_nanoseconds: u64,
     ) -> Result<(), ViewFailure> {
-        self.source_identity = Some(source_identity_text(identity)?);
-        self.source_point_count = Some(point_count);
-        self.source_format = Some(owned_report_text(format)?);
-        self.source_verification_nanoseconds = Some(verification_nanoseconds);
+        self.source.source_identity = Some(source_identity_text(identity)?);
+        self.source.source_point_count = Some(point_count);
+        self.source.source_format = Some(owned_report_text(format)?);
+        self.measurements.source_verification_nanoseconds = Some(verification_nanoseconds);
         Ok(())
     }
 
     fn record_index(&mut self, prepared: &PreparedIndex, prepare_nanoseconds: u64) {
         let descriptor = prepared.descriptor();
         let report = *prepared.prepare_report();
-        self.index_recipe_version = descriptor.recipe_version();
-        self.index_disk_version = descriptor.disk_version();
-        self.index_disposition = Some(prepare_disposition(report.disposition()));
-        self.index_prepare_nanoseconds = Some(prepare_nanoseconds);
-        self.index_artifact_bytes = Some(report.artifact_bytes());
-        self.peak_index_temporary_disk_bytes = Some(report.peak_temporary_disk_bytes());
+        self.index.index_recipe_version = descriptor.recipe_version();
+        self.index.index_disk_version = descriptor.disk_version();
+        self.index.index_disposition = Some(prepare_disposition(report.disposition()));
+        self.measurements.index_prepare_nanoseconds = Some(prepare_nanoseconds);
+        self.measurements.index_artifact_bytes = Some(report.artifact_bytes());
+        self.measurements.peak_index_temporary_disk_bytes =
+            Some(report.peak_temporary_disk_bytes());
     }
 
     fn record_warm_open(&mut self, warm_open_nanoseconds: u64) {
-        self.index_warm_open_nanoseconds = Some(warm_open_nanoseconds);
+        self.measurements.index_warm_open_nanoseconds = Some(warm_open_nanoseconds);
     }
 
     fn latch_first_visible_frame(&mut self, elapsed: std::time::Duration) {
-        if self.first_accepted_visible_batch_nanoseconds.is_none() {
-            self.first_accepted_visible_batch_nanoseconds = Some(elapsed_nanoseconds(elapsed));
+        if self
+            .measurements
+            .first_accepted_visible_batch_nanoseconds
+            .is_none()
+        {
+            self.measurements.first_accepted_visible_batch_nanoseconds =
+                Some(elapsed_nanoseconds(elapsed));
         }
     }
 
     fn observe_scene(&mut self, metrics: SceneMetrics) {
-        self.peak_queued_batches = self.peak_queued_batches.max(metrics.peak_queued_batches);
-        self.peak_staged_points = self.peak_staged_points.max(metrics.peak_staged_points);
-        self.peak_staged_bytes = self.peak_staged_bytes.max(metrics.peak_staged_bytes);
-        self.resident_batches = metrics.resident_batches;
-        self.resident_points = metrics.resident_points;
-        self.sampled_resident_points = metrics.sampled_resident_points;
-        self.complete_resident_points = metrics.complete_resident_points;
-        self.retired_batches = metrics.retired_batches;
-        self.cancelled_requests = metrics.cancelled_requests;
+        self.residency.peak_queued_batches = self
+            .residency
+            .peak_queued_batches
+            .max(metrics.peak_queued_batches);
+        self.residency.peak_staged_points = self
+            .residency
+            .peak_staged_points
+            .max(metrics.peak_staged_points);
+        self.residency.peak_staged_bytes = self
+            .residency
+            .peak_staged_bytes
+            .max(metrics.peak_staged_bytes);
+        self.residency.resident_batches = metrics.resident_batches;
+        self.residency.resident_points = metrics.resident_points;
+        self.residency.sampled_resident_points = metrics.sampled_resident_points;
+        self.residency.complete_resident_points = metrics.complete_resident_points;
+        self.residency.retired_batches = metrics.retired_batches;
+        self.residency.cancelled_requests = metrics.cancelled_requests;
     }
 
     fn observe_resident(&mut self, resident: ResidentStats) {
-        self.peak_resident_batches = self.peak_resident_batches.max(resident.batch_count());
-        self.peak_resident_points = self.peak_resident_points.max(resident.point_count());
-        self.peak_resident_bytes = self.peak_resident_bytes.max(resident.estimated_gpu_bytes());
+        self.residency.peak_resident_batches = self
+            .residency
+            .peak_resident_batches
+            .max(resident.batch_count());
+        self.residency.peak_resident_points = self
+            .residency
+            .peak_resident_points
+            .max(resident.point_count());
+        self.residency.peak_resident_bytes = self
+            .residency
+            .peak_resident_bytes
+            .max(resident.estimated_gpu_bytes());
     }
 
     fn observe_frame(&mut self, report: render_wgpu::FrameReport) {
-        self.peak_resident_batches = self.peak_resident_batches.max(report.draw_calls());
-        self.peak_resident_points = self.peak_resident_points.max(report.drawn_points());
-        self.peak_resident_bytes = self.peak_resident_bytes.max(report.resident_bytes());
+        self.residency.peak_resident_batches = self
+            .residency
+            .peak_resident_batches
+            .max(report.draw_calls());
+        self.residency.peak_resident_points = self
+            .residency
+            .peak_resident_points
+            .max(report.drawn_points());
+        self.residency.peak_resident_bytes = self
+            .residency
+            .peak_resident_bytes
+            .max(report.resident_bytes());
     }
 
     fn finish(self, entry: CorpusEntry, failure: Option<&ViewFailure>) -> EntryReport {
@@ -975,36 +1020,15 @@ impl EntryEvidence {
         } = entry;
         EntryReport {
             id,
-            source_identity: self.source_identity,
-            source_point_count: self.source_point_count,
-            source_format: self.source_format,
-            index_recipe_version: self.index_recipe_version,
-            index_disk_version: self.index_disk_version,
-            index_disposition: self.index_disposition,
+            source: self.source,
+            index: self.index,
             display,
             projection,
             declared_initial_frame_count: initial_frame_count,
             declared_trace,
-            source_verification_nanoseconds: self.source_verification_nanoseconds,
-            index_prepare_nanoseconds: self.index_prepare_nanoseconds,
-            index_warm_open_nanoseconds: self.index_warm_open_nanoseconds,
-            first_accepted_visible_batch_nanoseconds: self
-                .first_accepted_visible_batch_nanoseconds,
-            index_artifact_bytes: self.index_artifact_bytes,
-            peak_index_temporary_disk_bytes: self.peak_index_temporary_disk_bytes,
+            measurements: self.measurements,
             limits: EffectiveLimits::current(),
-            peak_queued_batches: self.peak_queued_batches,
-            peak_staged_points: self.peak_staged_points,
-            peak_staged_bytes: self.peak_staged_bytes,
-            resident_batches: self.resident_batches,
-            resident_points: self.resident_points,
-            sampled_resident_points: self.sampled_resident_points,
-            complete_resident_points: self.complete_resident_points,
-            retired_batches: self.retired_batches,
-            cancelled_requests: self.cancelled_requests,
-            peak_resident_batches: self.peak_resident_batches,
-            peak_resident_points: self.peak_resident_points,
-            peak_resident_bytes: self.peak_resident_bytes,
+            residency: self.residency,
             trace: self.trace,
             disposition,
             failure: failure.map(|failure| FailureReport {
@@ -1817,35 +1841,19 @@ pub(crate) struct ReportSummary {
 #[derive(Clone, Debug, Serialize, PartialEq)]
 pub(crate) struct EntryReport {
     pub(crate) id: String,
-    pub(crate) source_identity: Option<String>,
-    pub(crate) source_point_count: Option<u64>,
-    pub(crate) source_format: Option<String>,
-    pub(crate) index_recipe_version: u32,
-    pub(crate) index_disk_version: u32,
-    pub(crate) index_disposition: Option<&'static str>,
+    #[serde(flatten)]
+    pub(crate) source: SourceEvidence,
+    #[serde(flatten)]
+    pub(crate) index: IndexEvidence,
     pub(crate) display: DisplayChoice,
     pub(crate) projection: ProjectionChoice,
     pub(crate) declared_initial_frame_count: u32,
     pub(crate) declared_trace: Vec<TraceStep>,
-    pub(crate) source_verification_nanoseconds: Option<u64>,
-    pub(crate) index_prepare_nanoseconds: Option<u64>,
-    pub(crate) index_warm_open_nanoseconds: Option<u64>,
-    pub(crate) first_accepted_visible_batch_nanoseconds: Option<u64>,
-    pub(crate) index_artifact_bytes: Option<u64>,
-    pub(crate) peak_index_temporary_disk_bytes: Option<u64>,
+    #[serde(flatten)]
+    pub(crate) measurements: MeasurementEvidence,
     pub(crate) limits: EffectiveLimits,
-    pub(crate) peak_queued_batches: u64,
-    pub(crate) peak_staged_points: u64,
-    pub(crate) peak_staged_bytes: u64,
-    pub(crate) resident_batches: u64,
-    pub(crate) resident_points: u64,
-    pub(crate) sampled_resident_points: u64,
-    pub(crate) complete_resident_points: u64,
-    pub(crate) retired_batches: u64,
-    pub(crate) cancelled_requests: u64,
-    pub(crate) peak_resident_batches: u64,
-    pub(crate) peak_resident_points: u64,
-    pub(crate) peak_resident_bytes: u64,
+    #[serde(flatten)]
+    pub(crate) residency: ResidencyEvidence,
     pub(crate) trace: Vec<TraceReport>,
     pub(crate) disposition: EntryDisposition,
     pub(crate) failure: Option<FailureReport>,
@@ -2769,6 +2777,7 @@ mod tests {
         assert_eq!(
             evidence
                 .finish(entry, None)
+                .measurements
                 .first_accepted_visible_batch_nanoseconds,
             Some(7)
         );
@@ -2796,12 +2805,15 @@ mod tests {
         assert_eq!(failure.phase(), ViewPhase::HostStaging);
         assert_eq!(report.disposition, EntryDisposition::ResourceLimited);
         assert_eq!(
-            report.source_identity.as_deref(),
+            report.source.source_identity.as_deref(),
             Some("0101010101010101010101010101010101010101010101010101010101010101")
         );
-        assert_eq!(report.source_verification_nanoseconds, Some(44));
-        assert_eq!(report.index_prepare_nanoseconds, None);
-        assert_eq!(report.index_warm_open_nanoseconds, None);
+        assert_eq!(
+            report.measurements.source_verification_nanoseconds,
+            Some(44)
+        );
+        assert_eq!(report.measurements.index_prepare_nanoseconds, None);
+        assert_eq!(report.measurements.index_warm_open_nanoseconds, None);
         let report_failure = report.failure.as_ref().unwrap();
         assert_eq!(report_failure.phase, "host-staging");
         assert_eq!(report_failure.safe_action, terminal.action().as_str());
@@ -3030,12 +3042,16 @@ mod tests {
     fn fixture_entry() -> EntryReport {
         EntryReport {
             id: "entry".into(),
-            source_identity: Some("00".repeat(32)),
-            source_point_count: Some(10),
-            source_format: Some("laz".into()),
-            index_recipe_version: 2,
-            index_disk_version: 2,
-            index_disposition: Some("opened"),
+            source: SourceEvidence {
+                source_identity: Some("00".repeat(32)),
+                source_point_count: Some(10),
+                source_format: Some("laz".into()),
+            },
+            index: IndexEvidence {
+                index_recipe_version: 2,
+                index_disk_version: 2,
+                index_disposition: Some("opened"),
+            },
             display: DisplayChoice::Elevation,
             projection: ProjectionChoice::Orthographic,
             declared_initial_frame_count: 2,
@@ -3047,25 +3063,29 @@ mod tests {
                 zoom_lines: 5.0,
                 frame_count: 2,
             }],
-            source_verification_nanoseconds: Some(1),
-            index_prepare_nanoseconds: Some(2),
-            index_warm_open_nanoseconds: Some(3),
-            first_accepted_visible_batch_nanoseconds: Some(4),
-            index_artifact_bytes: Some(4),
-            peak_index_temporary_disk_bytes: Some(5),
+            measurements: MeasurementEvidence {
+                source_verification_nanoseconds: Some(1),
+                index_prepare_nanoseconds: Some(2),
+                index_warm_open_nanoseconds: Some(3),
+                first_accepted_visible_batch_nanoseconds: Some(4),
+                index_artifact_bytes: Some(4),
+                peak_index_temporary_disk_bytes: Some(5),
+            },
             limits: EffectiveLimits::current(),
-            peak_queued_batches: 1,
-            peak_staged_points: 10,
-            peak_staged_bytes: 240,
-            resident_batches: 1,
-            resident_points: 10,
-            sampled_resident_points: 10,
-            complete_resident_points: 0,
-            retired_batches: 0,
-            cancelled_requests: 0,
-            peak_resident_batches: 1,
-            peak_resident_points: 10,
-            peak_resident_bytes: 240,
+            residency: ResidencyEvidence {
+                peak_queued_batches: 1,
+                peak_staged_points: 10,
+                peak_staged_bytes: 240,
+                resident_batches: 1,
+                resident_points: 10,
+                sampled_resident_points: 10,
+                complete_resident_points: 0,
+                retired_batches: 0,
+                cancelled_requests: 0,
+                peak_resident_batches: 1,
+                peak_resident_points: 10,
+                peak_resident_bytes: 240,
+            },
             trace: vec![TraceReport {
                 step: 0,
                 input: TraceStep::stationary(2),
