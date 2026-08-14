@@ -831,6 +831,9 @@ impl Graphics {
             }
         };
         self.scene.mark_resident(batch_key, batch_version);
+        if self.highlights_enabled {
+            self.apply_highlights()?;
+        }
         self.metrics.record_upload(report, upload_started.elapsed());
         Ok(())
     }
@@ -925,6 +928,10 @@ impl Graphics {
 
     fn toggle_highlights(&mut self) -> DemoResult<()> {
         self.highlights_enabled = !self.highlights_enabled;
+        self.apply_highlights()
+    }
+
+    fn apply_highlights(&mut self) -> DemoResult<()> {
         let point_ids = if self.highlights_enabled {
             self.scene.highlight_ids()
         } else {

@@ -174,7 +174,7 @@ impl SceneBackend for RealCloudScene {
     }
 
     fn highlight_ids(&self) -> Vec<PointId> {
-        Vec::new()
+        RealCloudScene::highlight_ids(self)
     }
 
     fn metrics(&self) -> SceneMetrics {
