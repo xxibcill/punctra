@@ -393,15 +393,40 @@ mod tests {
     }
 
     #[test]
-    fn every_u8_classification_has_one_deterministic_opaque_color() {
-        assert_eq!(classification_color(2), [139, 95, 57, 255]);
-        assert_eq!(classification_color(6), [220, 70, 70, 255]);
-        assert_eq!(classification_color(18), [245, 245, 245, 255]);
-        assert_eq!(classification_color(19), [148, 150, 214, 255]);
-        for value in u8::MIN..=u8::MAX {
-            let color = classification_color(value);
-            assert_eq!(color, classification_color(value));
-            assert_eq!(color[3], 255);
+    fn every_u8_classification_matches_the_exact_mapping_oracle() {
+        let standard = [
+            [120, 120, 120, 255],
+            [155, 155, 155, 255],
+            [139, 95, 57, 255],
+            [80, 180, 80, 255],
+            [45, 150, 45, 255],
+            [20, 110, 20, 255],
+            [220, 70, 70, 255],
+            [200, 200, 200, 255],
+            [170, 120, 220, 255],
+            [80, 150, 230, 255],
+            [60, 100, 210, 255],
+            [40, 180, 210, 255],
+            [230, 170, 60, 255],
+            [220, 120, 40, 255],
+            [235, 80, 150, 255],
+            [170, 70, 170, 255],
+            [255, 220, 80, 255],
+            [100, 220, 190, 255],
+            [245, 245, 245, 255],
+        ];
+        for (classification, expected) in (u8::MIN..=18).zip(standard) {
+            assert_eq!(classification_color(classification), expected);
+        }
+
+        for classification in 19..=u8::MAX {
+            let channel = |factor: u16, offset: u16| {
+                u8::try_from((u16::from(classification) * factor + offset) % 256).unwrap()
+            };
+            assert_eq!(
+                classification_color(classification),
+                [channel(73, 41), channel(151, 97), channel(199, 17), 255]
+            );
         }
     }
 }
