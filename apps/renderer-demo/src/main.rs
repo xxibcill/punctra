@@ -16,7 +16,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use diagnostic::{ViewFailure, ViewPhase};
+use diagnostic::{ViewFailure, ViewPhase, classify_protocol_failure, classify_renderer_failure};
 use orbit_camera::{OrbitCamera, ProjectionMode};
 use point_contracts::SourceMetadata;
 use point_index::{PrepareLimits, PreparedIndex, prepare_with_recipe};
@@ -65,30 +65,11 @@ fn gpu_failure(phase: ViewPhase, error: impl std::fmt::Display) -> Box<dyn Error
 }
 
 fn protocol_failure(phase: ViewPhase, error: ProtocolError) -> Box<dyn Error> {
-    if matches!(error, ProtocolError::ResidentLimitExceeded { .. }) {
-        Box::new(ViewFailure::resource(phase, error))
-    } else {
-        internal_failure(phase, error)
-    }
+    Box::new(classify_protocol_failure(phase, error))
 }
 
 fn renderer_failure(phase: ViewPhase, error: RendererError) -> Box<dyn Error> {
-    match error {
-        RendererError::Protocol(error) => protocol_failure(phase, error),
-        error @ (RendererError::BatchTooLarge { .. }
-        | RendererError::BatchBufferTooLarge { .. }
-        | RendererError::FrameUniformStagingSizeOverflow { .. }
-        | RendererError::FrameUniformStagingBufferTooLarge { .. }) => {
-            Box::new(ViewFailure::resource(phase, error))
-        }
-        error @ (RendererError::NoActiveViewGeneration
-        | RendererError::ViewGenerationMismatch { .. }
-        | RendererError::ForeignRecordedFrame
-        | RendererError::PickOutsideViewport { .. }
-        | RendererError::PickMetadataUnavailable
-        | RendererError::BatchOriginOutOfRange { .. }) => internal_failure(phase, error),
-        error => gpu_failure(phase, error),
-    }
+    Box::new(classify_renderer_failure(phase, error))
 }
 
 fn preserve_failure_or_internal(phase: ViewPhase, error: Box<dyn Error>) -> Box<dyn Error> {

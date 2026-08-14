@@ -19,7 +19,7 @@ use serde::{
 
 use crate::{
     PLANNING_BUDGET, VIEW_GENERATION,
-    diagnostic::{ViewFailure, ViewFailureCode, ViewPhase},
+    diagnostic::{ViewFailure, ViewFailureCode, ViewPhase, classify_renderer_failure},
     orbit_camera::{OrbitCamera, ProjectionMode},
     real_cloud::{
         HIERARCHY_BYTE_BUDGET, QUEUED_HOST_BYTE_BUDGET, QUEUED_NODE_BUDGET, RealCloudScene,
@@ -32,10 +32,8 @@ use point_index::{
     prepare_with_recipe,
 };
 use point_view::{AvailableNodes, PlannerConfig, ViewPlanner};
-use render_protocol::{
-    ProtocolError, RenderLimits, RenderUpdate, ResidentStats, ViewGenerationKey, Viewport,
-};
-use render_wgpu::{Frame, RendererConfig, RendererError, WgpuRenderer};
+use render_protocol::{RenderLimits, RenderUpdate, ResidentStats, ViewGenerationKey, Viewport};
+use render_wgpu::{Frame, RendererConfig, WgpuRenderer};
 use renderer_demo::display::DisplayMode;
 
 const MANIFEST_SCHEMA: &str = "punctra.renderer-demo.field-corpus.v1";
@@ -445,7 +443,7 @@ fn run_prepared_entry(
     );
     let reset = renderer
         .apply(&RenderUpdate::Reset { view_generation })
-        .map_err(|error| renderer_failure(ViewPhase::GpuUpload, error))?;
+        .map_err(|error| classify_renderer_failure(ViewPhase::GpuUpload, error))?;
     evidence.observe_resident(reset.resident());
 
     evidence
@@ -554,7 +552,7 @@ fn run_trace_frame(runtime: &mut TraceRuntime<'_>) -> Result<FrameEvidence, View
         let update = runtime
             .renderer
             .apply(&retirement.render_update())
-            .map_err(|error| renderer_failure(ViewPhase::GpuUpload, error))?;
+            .map_err(|error| classify_renderer_failure(ViewPhase::GpuUpload, error))?;
         runtime.evidence.observe_resident(update.resident());
         runtime
             .scene
@@ -582,7 +580,7 @@ fn run_trace_frame(runtime: &mut TraceRuntime<'_>) -> Result<FrameEvidence, View
             }
             Err(error) => {
                 runtime.scene.mark_rejected(key, version);
-                return Err(renderer_failure(ViewPhase::GpuUpload, error));
+                return Err(classify_renderer_failure(ViewPhase::GpuUpload, error));
             }
         }
     }
@@ -721,7 +719,7 @@ fn render_offscreen(
         .map_err(|error| ViewFailure::internal(ViewPhase::Rendering, error))?;
     let recorded = renderer
         .render(&mut encoder, &target, &frame)
-        .map_err(|error| renderer_failure(ViewPhase::Rendering, error))?;
+        .map_err(|error| classify_renderer_failure(ViewPhase::Rendering, error))?;
     gpu.queue.submit([encoder.finish()]);
     gpu.device
         .poll(wgpu::PollType::wait_indefinitely())
@@ -804,33 +802,6 @@ const fn projection_mode(choice: ProjectionChoice) -> ProjectionMode {
     match choice {
         ProjectionChoice::Perspective => ProjectionMode::Perspective,
         ProjectionChoice::Orthographic => ProjectionMode::Orthographic,
-    }
-}
-
-fn renderer_failure(phase: ViewPhase, error: RendererError) -> ViewFailure {
-    match error {
-        RendererError::Protocol(error) => protocol_failure(phase, error),
-        error @ (RendererError::BatchTooLarge { .. }
-        | RendererError::BatchBufferTooLarge { .. }
-        | RendererError::FrameUniformStagingSizeOverflow { .. }
-        | RendererError::FrameUniformStagingBufferTooLarge { .. }) => {
-            ViewFailure::resource(phase, error)
-        }
-        error @ (RendererError::NoActiveViewGeneration
-        | RendererError::ViewGenerationMismatch { .. }
-        | RendererError::ForeignRecordedFrame
-        | RendererError::PickOutsideViewport { .. }
-        | RendererError::PickMetadataUnavailable
-        | RendererError::BatchOriginOutOfRange { .. }) => ViewFailure::internal(phase, error),
-        error => ViewFailure::gpu(phase, error),
-    }
-}
-
-fn protocol_failure(phase: ViewPhase, error: ProtocolError) -> ViewFailure {
-    if matches!(error, ProtocolError::ResidentLimitExceeded { .. }) {
-        ViewFailure::resource(phase, error)
-    } else {
-        ViewFailure::internal(phase, error)
     }
 }
 
@@ -2397,6 +2368,8 @@ fn invalid<T>(message: impl Into<String>) -> io::Result<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use render_protocol::ProtocolError;
+    use render_wgpu::RendererError;
 
     const VALID_EMPTY_ENTRY_MANIFEST: &[u8] = br#"{"schema":"punctra.renderer-demo.field-corpus.v1","corpus_id":"c","machine":{"label":"m","operating_system":"o","filesystem":"f","gpu_expectation":"g"},"entries":[{"id":"e","project_id":"p","firm_id":"f","source_path":"missing.laz","index_path":"index.pidx","inspect_permission":true,"measure_permission":true,"display":"neutral","projection":"perspective","trace":[]}]}"#;
 
@@ -2824,7 +2797,7 @@ mod tests {
     #[test]
     fn completed_corpus_failures_have_one_complete_retry_action() {
         for failure in [
-            renderer_failure(
+            classify_renderer_failure(
                 ViewPhase::GpuUpload,
                 RendererError::Protocol(ProtocolError::ResidentLimitExceeded {
                     resource: render_protocol::ResidentResource::Points,
@@ -2923,7 +2896,7 @@ mod tests {
 
     #[test]
     fn renderer_residency_limit_remains_a_resource_failure() {
-        let failure = renderer_failure(
+        let failure = classify_renderer_failure(
             ViewPhase::GpuUpload,
             RendererError::Protocol(ProtocolError::ResidentLimitExceeded {
                 resource: render_protocol::ResidentResource::Points,
@@ -2943,7 +2916,7 @@ mod tests {
             RendererError::ForeignRecordedFrame,
             RendererError::Protocol(ProtocolError::EmptyPointBatch),
         ] {
-            let failure = renderer_failure(ViewPhase::Rendering, error);
+            let failure = classify_renderer_failure(ViewPhase::Rendering, error);
 
             assert_eq!(failure.code(), ViewFailureCode::Internal);
             assert_eq!(failure.phase(), ViewPhase::Rendering);

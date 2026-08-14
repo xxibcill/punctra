@@ -3,6 +3,8 @@ use std::{error::Error, fmt, io, path::Path};
 use foundation_runtime::RuntimeError;
 use point_index::IndexError;
 use point_source::SourceError;
+use render_protocol::ProtocolError;
+use render_wgpu::RendererError;
 
 const MAX_MESSAGE_BYTES: usize = 1_024;
 const ELLIPSIS: &str = "…";
@@ -144,6 +146,33 @@ pub(crate) struct ViewFailure {
     phase: ViewPhase,
     message: DiagnosticMessage,
     action: RecoveryAction,
+}
+
+pub(crate) fn classify_protocol_failure(phase: ViewPhase, error: ProtocolError) -> ViewFailure {
+    if matches!(error, ProtocolError::ResidentLimitExceeded { .. }) {
+        ViewFailure::resource(phase, error)
+    } else {
+        ViewFailure::internal(phase, error)
+    }
+}
+
+pub(crate) fn classify_renderer_failure(phase: ViewPhase, error: RendererError) -> ViewFailure {
+    match error {
+        RendererError::Protocol(error) => classify_protocol_failure(phase, error),
+        error @ (RendererError::BatchTooLarge { .. }
+        | RendererError::BatchBufferTooLarge { .. }
+        | RendererError::FrameUniformStagingSizeOverflow { .. }
+        | RendererError::FrameUniformStagingBufferTooLarge { .. }) => {
+            ViewFailure::resource(phase, error)
+        }
+        error @ (RendererError::NoActiveViewGeneration
+        | RendererError::ViewGenerationMismatch { .. }
+        | RendererError::ForeignRecordedFrame
+        | RendererError::PickOutsideViewport { .. }
+        | RendererError::PickMetadataUnavailable
+        | RendererError::BatchOriginOutOfRange { .. }) => ViewFailure::internal(phase, error),
+        error => ViewFailure::gpu(phase, error),
+    }
 }
 
 #[derive(Debug)]
