@@ -1,4 +1,4 @@
-use std::{ffi::OsStr, fmt};
+use std::{error::Error, ffi::OsStr, fmt};
 
 use point_contracts::{AttributeDataType, AttributeId, SourceMetadata, WorldBounds};
 use point_index::{DisplayAttributes, IndexRecipe, InspectionAttributeIds};
@@ -212,6 +212,25 @@ pub enum PointColorizer {
     Classification,
 }
 
+/// Failure to provide the explicit sampled input required by a display mode.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DisplayMappingError {
+    /// An attributed display received no inspection Attribute row.
+    MissingAttributes(DisplayMode),
+}
+
+impl fmt::Display for DisplayMappingError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::MissingAttributes(mode) => {
+                write!(formatter, "{mode} display requires inspection Attributes")
+            }
+        }
+    }
+}
+
+impl Error for DisplayMappingError {}
+
 impl PointColorizer {
     /// Binds Source-wide facts needed by one display mode.
     #[must_use]
@@ -234,23 +253,37 @@ impl PointColorizer {
     }
 
     /// Maps one sample to the exact RGBA8 bytes uploaded by the renderer.
-    #[must_use]
-    pub fn color(self, world_z: f64, attributes: Option<DisplayAttributes>) -> [u8; 4] {
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DisplayMappingError::MissingAttributes`] when an attributed
+    /// display receives no explicit inspection Attribute row.
+    pub fn color(
+        self,
+        world_z: f64,
+        attributes: Option<DisplayAttributes>,
+    ) -> Result<[u8; 4], DisplayMappingError> {
         match self {
-            Self::Neutral => NEUTRAL_COLOR,
+            Self::Neutral => Ok(NEUTRAL_COLOR),
             Self::Elevation {
                 source_z_range: Some([minimum, maximum]),
-            } => elevation_color(world_z, minimum, maximum),
+            } => Ok(elevation_color(world_z, minimum, maximum)),
             Self::Elevation {
                 source_z_range: None,
-            } => ELEVATION_COLORS[2],
-            Self::Rgb => attributes.map_or(NEUTRAL_COLOR, |attributes| rgb_color(attributes.rgb())),
-            Self::Intensity => attributes.map_or(NEUTRAL_COLOR, |attributes| {
-                intensity_color(attributes.intensity())
-            }),
-            Self::Classification => attributes.map_or(NEUTRAL_COLOR, |attributes| {
-                classification_color(attributes.classification())
-            }),
+            } => Ok(ELEVATION_COLORS[2]),
+            Self::Rgb => attributes
+                .map(|attributes| rgb_color(attributes.rgb()))
+                .ok_or(DisplayMappingError::MissingAttributes(DisplayMode::Rgb)),
+            Self::Intensity => attributes
+                .map(|attributes| intensity_color(attributes.intensity()))
+                .ok_or(DisplayMappingError::MissingAttributes(
+                    DisplayMode::Intensity,
+                )),
+            Self::Classification => attributes
+                .map(|attributes| classification_color(attributes.classification()))
+                .ok_or(DisplayMappingError::MissingAttributes(
+                    DisplayMode::Classification,
+                )),
         }
     }
 }
@@ -396,8 +429,8 @@ mod tests {
         let bounds = WorldBounds::new([-10.0; 3], [10.0; 3]).unwrap();
         let colorizer = PointColorizer::for_source(DisplayMode::Neutral, Some(bounds));
 
-        assert_eq!(colorizer.color(-1_000.0, None), NEUTRAL_COLOR);
-        assert_eq!(colorizer.color(1_000.0, None), NEUTRAL_COLOR);
+        assert_eq!(colorizer.color(-1_000.0, None).unwrap(), NEUTRAL_COLOR);
+        assert_eq!(colorizer.color(1_000.0, None).unwrap(), NEUTRAL_COLOR);
     }
 
     #[test]
@@ -405,13 +438,13 @@ mod tests {
         let bounds = WorldBounds::new([0.0, 0.0, 100.0], [1.0, 1.0, 200.0]).unwrap();
         let colorizer = PointColorizer::for_source(DisplayMode::Elevation, Some(bounds));
 
-        assert_eq!(colorizer.color(0.0, None), ELEVATION_COLORS[0]);
-        assert_eq!(colorizer.color(100.0, None), ELEVATION_COLORS[0]);
-        assert_eq!(colorizer.color(125.0, None), ELEVATION_COLORS[1]);
-        assert_eq!(colorizer.color(150.0, None), ELEVATION_COLORS[2]);
-        assert_eq!(colorizer.color(175.0, None), ELEVATION_COLORS[3]);
-        assert_eq!(colorizer.color(200.0, None), ELEVATION_COLORS[4]);
-        assert_eq!(colorizer.color(300.0, None), ELEVATION_COLORS[4]);
+        assert_eq!(colorizer.color(0.0, None).unwrap(), ELEVATION_COLORS[0]);
+        assert_eq!(colorizer.color(100.0, None).unwrap(), ELEVATION_COLORS[0]);
+        assert_eq!(colorizer.color(125.0, None).unwrap(), ELEVATION_COLORS[1]);
+        assert_eq!(colorizer.color(150.0, None).unwrap(), ELEVATION_COLORS[2]);
+        assert_eq!(colorizer.color(175.0, None).unwrap(), ELEVATION_COLORS[3]);
+        assert_eq!(colorizer.color(200.0, None).unwrap(), ELEVATION_COLORS[4]);
+        assert_eq!(colorizer.color(300.0, None).unwrap(), ELEVATION_COLORS[4]);
     }
 
     #[test]
@@ -441,8 +474,31 @@ mod tests {
         let flat = PointColorizer::for_source(DisplayMode::Elevation, Some(flat_bounds));
         let empty = PointColorizer::for_source(DisplayMode::Elevation, None);
 
-        assert_eq!(flat.color(42.0, None), ELEVATION_COLORS[2]);
-        assert_eq!(empty.color(42.0, None), ELEVATION_COLORS[2]);
+        assert_eq!(flat.color(42.0, None).unwrap(), ELEVATION_COLORS[2]);
+        assert_eq!(empty.color(42.0, None).unwrap(), ELEVATION_COLORS[2]);
+    }
+
+    #[test]
+    fn attributed_modes_reject_missing_rows_instead_of_using_neutral_color() {
+        for (mode, expected) in [
+            (
+                DisplayMode::Rgb,
+                DisplayMappingError::MissingAttributes(DisplayMode::Rgb),
+            ),
+            (
+                DisplayMode::Intensity,
+                DisplayMappingError::MissingAttributes(DisplayMode::Intensity),
+            ),
+            (
+                DisplayMode::Classification,
+                DisplayMappingError::MissingAttributes(DisplayMode::Classification),
+            ),
+        ] {
+            assert_eq!(
+                PointColorizer::for_source(mode, None).color(0.0, None),
+                Err(expected)
+            );
+        }
     }
 
     #[test]

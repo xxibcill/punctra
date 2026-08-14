@@ -477,7 +477,8 @@ impl RealCloudScene {
                 points.push(RenderPoint::new(
                     relative,
                     self.colorizer
-                        .color(world[2], attributes.map(|values| values[row])),
+                        .color(world[2], attributes.map(|values| values[row]))
+                        .map_err(|error| internal_failure(ViewPhase::HostStaging, error))?,
                     sample.point_id(source),
                 )?);
             }
