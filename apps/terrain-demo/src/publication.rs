@@ -228,6 +228,21 @@ pub(crate) struct DirectoryWitness {
     identity: fs::Metadata,
 }
 
+#[derive(Debug)]
+pub(crate) enum DirectoryWitnessError {
+    Changed(&'static str),
+    Io(io::Error),
+}
+
+impl DirectoryWitnessError {
+    fn into_io(self) -> io::Error {
+        match self {
+            Self::Changed(reason) => io::Error::new(io::ErrorKind::InvalidData, reason),
+            Self::Io(source) => source,
+        }
+    }
+}
+
 impl DirectoryWitness {
     pub(crate) fn capture(path: &Path) -> io::Result<Self> {
         let identity = fs::symlink_metadata(path)?;
@@ -244,17 +259,20 @@ impl DirectoryWitness {
     }
 
     pub(crate) fn verify(&self) -> io::Result<()> {
-        let current = fs::symlink_metadata(&self.path)?;
+        self.verify_detailed()
+            .map_err(DirectoryWitnessError::into_io)
+    }
+
+    pub(crate) fn verify_detailed(&self) -> Result<(), DirectoryWitnessError> {
+        let current = fs::symlink_metadata(&self.path).map_err(DirectoryWitnessError::Io)?;
         if !current.file_type().is_dir() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
+            return Err(DirectoryWitnessError::Changed(
                 "publication parent changed type",
             ));
         }
         #[cfg(any(unix, windows))]
         if !same_file_identity(&self.identity, &current) {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
+            return Err(DirectoryWitnessError::Changed(
                 "publication parent directory identity changed",
             ));
         }

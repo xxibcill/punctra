@@ -17,8 +17,9 @@ use thiserror::Error;
 use crate::{
     journal::Digest,
     publication::{
-        DirectoryWitness, StageCreationError, StageGuard, create_stage as create_publication_stage,
-        same_file_identity, same_file_state, sync_directory,
+        DirectoryWitness, DirectoryWitnessError, StageCreationError, StageGuard,
+        create_stage as create_publication_stage, same_file_identity, same_file_state,
+        sync_directory,
     },
 };
 
@@ -368,14 +369,10 @@ fn reconcile_existing(
     }
     hook.reach(PublicationBoundary::TargetVerification, control)
         .map_err(|source| kind.io("verify reconciled boundary", target, source))?;
-    parent_witness
-        .verify()
-        .map_err(|_| changed_target_error(target))?;
+    verify_reconciled_parent(parent_witness, parent, target, kind)?;
     target_witness.verify(target, limits, control, kind)?;
     check_cancelled(control)?;
-    parent_witness
-        .verify()
-        .map_err(|_| changed_target_error(target))?;
+    verify_reconciled_parent(parent_witness, parent, target, kind)?;
     hook.reach(PublicationBoundary::ParentSync, control)
         .map_err(|source| kind.io("sync reconciled boundary", target, source))?;
     sync_directory(parent).map_err(|source| kind.io("sync reconciled parent", parent, source))?;
@@ -388,9 +385,7 @@ fn reconcile_existing(
         .map_err(|source| kind.io("sync retained stage", target, source))?;
     sync_directory(parent)
         .map_err(|source| kind.io("sync reconciled stage retention", parent, source))?;
-    parent_witness
-        .verify()
-        .map_err(|_| changed_target_error(target))?;
+    verify_reconciled_parent(parent_witness, parent, target, kind)?;
     target_witness.verify(target, limits, control, kind)?;
     hook.reach(PublicationBoundary::TerminalAcknowledgement, control)
         .map_err(|source| kind.io("acknowledge reconciled target", target, source))?;
@@ -869,6 +864,21 @@ fn require_stable_target(
 fn changed_target_error(path: &Path) -> CanonicalOutputError {
     CanonicalOutputError::TargetChanged {
         path: path.to_path_buf(),
+    }
+}
+
+fn verify_reconciled_parent(
+    witness: &DirectoryWitness,
+    parent: &Path,
+    target: &Path,
+    kind: CanonicalOutputSpec,
+) -> Result<(), CanonicalOutputError> {
+    match witness.verify_detailed() {
+        Ok(()) => Ok(()),
+        Err(DirectoryWitnessError::Changed(_)) => Err(changed_target_error(target)),
+        Err(DirectoryWitnessError::Io(source)) => {
+            Err(kind.io("verify reconciled parent", parent, source))
+        }
     }
 }
 
@@ -1481,6 +1491,47 @@ mod tests {
         fs::remove_dir(&directory.path).unwrap();
         fs::create_dir(&directory.path).unwrap();
         assert!(witness.verify().is_err());
+    }
+
+    #[cfg(any(unix, windows))]
+    #[test]
+    fn reconciled_parent_verification_distinguishes_identity_change_from_io() {
+        let replaced = Directory::new("reconciled-parent-replaced");
+        let replaced_witness = DirectoryWitness::capture(&replaced.path).unwrap();
+        let replaced_target = replaced.path.join("audit.json");
+        fs::remove_dir(&replaced.path).unwrap();
+        fs::create_dir(&replaced.path).unwrap();
+
+        assert!(matches!(
+            verify_reconciled_parent(
+                &replaced_witness,
+                &replaced.path,
+                &replaced_target,
+                REPORT_OUTPUT,
+            ),
+            Err(CanonicalOutputError::TargetChanged { path }) if path == replaced_target
+        ));
+
+        let missing = Directory::new("reconciled-parent-missing");
+        let missing_witness = DirectoryWitness::capture(&missing.path).unwrap();
+        let missing_target = missing.path.join("audit.json");
+        fs::remove_dir(&missing.path).unwrap();
+
+        assert!(matches!(
+            verify_reconciled_parent(
+                &missing_witness,
+                &missing.path,
+                &missing_target,
+                REPORT_OUTPUT,
+            ),
+            Err(CanonicalOutputError::Io {
+                operation,
+                path,
+                source,
+            }) if operation == "verify reconciled parent for report"
+                && path == missing.path
+                && source.kind() == io::ErrorKind::NotFound
+        ));
     }
 
     fn publish_prepared(
