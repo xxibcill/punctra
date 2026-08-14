@@ -846,6 +846,7 @@ pub(crate) struct MeasurementEvidence {
 #[derive(Clone, Copy, Debug, Default, Serialize, PartialEq)]
 pub(crate) struct ResidencyEvidence {
     peak_queued_batches: u64,
+    peak_queued_host_bytes: u64,
     peak_staged_points: u64,
     peak_staged_bytes: u64,
     resident_batches: u64,
@@ -925,6 +926,10 @@ impl EntryEvidence {
             .residency
             .peak_queued_batches
             .max(metrics.peak_queued_batches);
+        self.residency.peak_queued_host_bytes = self
+            .residency
+            .peak_queued_host_bytes
+            .max(metrics.peak_queued_host_bytes);
         self.residency.peak_staged_points = self
             .residency
             .peak_staged_points
@@ -3141,6 +3146,7 @@ mod tests {
             limits: EffectiveLimits::current(),
             residency: ResidencyEvidence {
                 peak_queued_batches: 1,
+                peak_queued_host_bytes: 128,
                 peak_staged_points: 10,
                 peak_staged_bytes: 240,
                 resident_batches: 1,

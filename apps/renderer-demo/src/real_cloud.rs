@@ -63,6 +63,7 @@ pub(crate) struct RealCloudScene {
     staged_points: u64,
     staged_bytes: u64,
     peak_queued_batches: u64,
+    peak_queued_host_bytes: u64,
     peak_staged_points: u64,
     peak_staged_bytes: u64,
     cancelled_requests: u64,
@@ -169,6 +170,7 @@ impl RealCloudScene {
             staged_points: 0,
             staged_bytes: 0,
             peak_queued_batches: 0,
+            peak_queued_host_bytes: 0,
             peak_staged_points: 0,
             peak_staged_bytes: 0,
             cancelled_requests: 0,
@@ -225,6 +227,12 @@ impl RealCloudScene {
             }
         }
 
+        let queued_host_bytes = queue_charge(
+            next_pending.capacity(),
+            reserved_host_bytes,
+            retained_queue_bytes,
+        )?;
+
         for pending_index in 0..self.pending.len() {
             let key = self.pending[pending_index];
             if next_pending.contains(&key) {
@@ -259,6 +267,7 @@ impl RealCloudScene {
 
         let queued = u64::try_from(self.pending.len()).unwrap_or(u64::MAX);
         self.peak_queued_batches = self.peak_queued_batches.max(queued);
+        self.peak_queued_host_bytes = self.peak_queued_host_bytes.max(queued_host_bytes);
         Ok(issued)
     }
 
@@ -365,6 +374,7 @@ impl RealCloudScene {
             staged_points: self.staged_points,
             staged_bytes: self.staged_bytes,
             peak_queued_batches: self.peak_queued_batches,
+            peak_queued_host_bytes: self.peak_queued_host_bytes,
             peak_staged_points: self.peak_staged_points,
             peak_staged_bytes: self.peak_staged_bytes,
             cancelled_requests: self.cancelled_requests,
@@ -1286,6 +1296,9 @@ mod tests {
             .unwrap();
         assert_eq!(scene.pending.len(), 1);
         assert_eq!(scene.planning_nodes[0].status(), NodeStatus::Requested);
+        let peak_queued_host_bytes = scene.metrics().peak_queued_host_bytes;
+        assert!(peak_queued_host_bytes > 0);
+        assert!(peak_queued_host_bytes <= QUEUED_HOST_BYTE_BUDGET);
 
         let hidden = hidden_camera(&scene);
         let changed = plan(&mut planner, &scene, &hidden);
@@ -1297,6 +1310,10 @@ mod tests {
         assert!(scene.pending.is_empty());
         assert_eq!(scene.planning_nodes[0].status(), NodeStatus::Missing);
         assert_eq!(scene.metrics().cancelled_requests, 1);
+        assert_eq!(
+            scene.metrics().peak_queued_host_bytes,
+            peak_queued_host_bytes
+        );
     }
 
     #[test]
