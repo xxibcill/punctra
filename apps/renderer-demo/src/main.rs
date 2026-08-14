@@ -201,7 +201,8 @@ fn push_positional(
 
 fn load_scene(command: &Command) -> DemoResult<Scene> {
     let Some(source_path) = command.source.as_deref() else {
-        return Scene::synthetic(VIEW_GENERATION);
+        return Scene::synthetic(VIEW_GENERATION)
+            .map_err(|error| preserve_failure_or_internal(ViewPhase::Planning, error));
     };
     let index_target = command
         .index_target
