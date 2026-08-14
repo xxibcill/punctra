@@ -392,10 +392,13 @@ fn run_main() -> DemoResult<()> {
         scene.label(),
     );
 
-    let event_loop = EventLoop::new()?;
+    let event_loop =
+        EventLoop::new().map_err(|error| internal_failure(ViewPhase::GpuSetup, error))?;
     event_loop.set_control_flow(ControlFlow::Wait);
     let mut app = DemoApp::new(scene, command.projection);
-    event_loop.run_app(&mut app)?;
+    event_loop
+        .run_app(&mut app)
+        .map_err(|error| internal_failure(ViewPhase::Rendering, error))?;
     if let Some(failure) = app.failure {
         return Err(Box::new(failure));
     }
