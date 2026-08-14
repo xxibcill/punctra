@@ -189,6 +189,7 @@ pub(crate) enum RecoveryAction {
     CorrectRoundTripInput,
     UseSupportedRoundTripSize,
     ReviewReturnedLandXml,
+    RetryRoundTripEvidence,
     StopAndPreserve,
 }
 
@@ -214,6 +215,9 @@ impl RecoveryAction {
             Self::UseSupportedRoundTripSize => "use inputs within the named round-trip limits",
             Self::ReviewReturnedLandXml => {
                 "review the downstream export settings or reject the returned deliverable"
+            }
+            Self::RetryRoundTripEvidence => {
+                "retry verify-round-trip with the same Run, returned LandXML, and evidence target"
             }
             Self::StopAndPreserve => "stop and preserve all Run and Workspace files",
         }

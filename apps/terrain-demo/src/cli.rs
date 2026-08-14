@@ -750,7 +750,7 @@ fn round_trip_evidence_failure(error: RoundTripEvidenceError) -> WorkflowFailure
                     ),
                     FailureContext::default(),
                     error,
-                    RecoveryAction::StopAndPreserve,
+                    RecoveryAction::RetryRoundTripEvidence,
                 ),
                 error @ CanonicalOutputError::TargetChanged { .. } => WorkflowFailure::new(
                     FailureCode::Io,
@@ -758,7 +758,7 @@ fn round_trip_evidence_failure(error: RoundTripEvidenceError) -> WorkflowFailure
                     Certainty::PrePublication,
                     FailureContext::default(),
                     error,
-                    RecoveryAction::ResumeSameRun,
+                    RecoveryAction::RetryRoundTripEvidence,
                 ),
                 error @ CanonicalOutputError::Resource { .. } => WorkflowFailure::new(
                     FailureCode::RoundTripResourceLimit,
@@ -959,7 +959,29 @@ mod tests {
         assert_eq!(failure.publication_phase(), None);
         assert_eq!(
             failure.recovery_action(),
-            "resume the same Run with the same identities and paths"
+            "retry verify-round-trip with the same Run, returned LandXML, and evidence target"
+        );
+    }
+
+    #[test]
+    fn indeterminate_evidence_publication_retries_through_the_owning_interface() {
+        let failure = round_trip_evidence_failure(RoundTripEvidenceError::Publication(
+            CanonicalOutputError::Indeterminate {
+                path: PathBuf::from("round-trip-evidence.json"),
+                expected_hash: [1; 32],
+                source: std::io::Error::other("parent sync failed after publication"),
+            },
+        ));
+
+        assert_eq!(failure.code(), "PWF_PUBLICATION_INDETERMINATE");
+        assert_eq!(failure.certainty(), "indeterminate");
+        assert_eq!(
+            failure.publication_phase(),
+            Some("round-trip-evidence-target")
+        );
+        assert_eq!(
+            failure.recovery_action(),
+            "retry verify-round-trip with the same Run, returned LandXML, and evidence target"
         );
     }
 }
