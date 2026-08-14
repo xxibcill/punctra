@@ -447,7 +447,8 @@ cargo bench -p point-index --bench index
 cargo bench -p point-workspace --bench document
 cargo bench -p point-review --bench review
 cargo bench -p point-terrain --bench terrain
-cargo bench -p terrain-demo --bench journal
+cargo bench -p terrain-demo --bench journal -- \
+  --save-baseline "qualification-$$-$(date +%s)"
 cargo bench -p renderer-demo --bench viewing
 
 cargo run -p source-memory --example memory_source
@@ -481,7 +482,8 @@ PUNCTRA_POINT_WORKSPACE_BENCH_POINTS=10000000 \
 PUNCTRA_TERRAIN_BENCH_POINTS=100000 \
   cargo bench -p point-terrain --bench terrain
 PUNCTRA_TERRAIN_WORKFLOW_BENCH_POINTS=100000 \
-  cargo bench -p terrain-demo --bench journal
+  cargo bench -p terrain-demo --bench journal -- \
+  --save-baseline "qualification-$$-$(date +%s)"
 PUNCTRA_RENDERER_VIEW_BENCH_POINTS=1000000 \
   cargo bench -p renderer-demo --bench viewing
 ~~~
@@ -536,13 +538,13 @@ a release candidate or close any external evidence gate.
 
 ### v0.11 exact-commit verification record
 
-On 2026-08-13, the complete authoritative sequence above passed from the exact
-`codex/exact-interactive-review-v0.11` commit containing this record, based
-directly on canonical v0.10 commit `30ea9ff`. The reference environment was an
-Apple M5 Pro (`Mac17,9`), 24 GiB, arm64, macOS 26.5.2, APFS, Rust 1.90.0, and
-Cargo 1.90.0. Required GPU acceptance used the built-in 16-core Apple M5 Pro
-through Metal 4 with `PUNCTRA_REQUIRE_GPU=1`; renderer offscreen, planner,
-display, corpus, and the public `third_party_host` pick example all passed.
+On 2026-08-13, the complete authoritative sequence above passed from exact
+implementation commit `f2eaadb`, based directly on canonical v0.10 commit
+`30ea9ff`. The reference environment was an Apple M5 Pro (`Mac17,9`), 24 GiB,
+arm64, macOS 26.5.2, APFS, Rust 1.90.0, and Cargo 1.90.0. Required GPU
+acceptance used the built-in 16-core Apple M5 Pro through Metal 4 with
+`PUNCTRA_REQUIRE_GPU=1`; renderer offscreen, planner, display, corpus, and the
+public `third_party_host` pick example all passed.
 
 Formatting, workspace Clippy with warnings denied, all-feature workspace tests,
 rustdoc with warnings denied, fuzz formatting/check/tests, every documented
@@ -567,6 +569,28 @@ heap. File evidence is a stable recursive count and sum of logical file lengths
 inside the benchmark-owned temporary root, not allocated filesystem blocks or
 process-wide disk use. Criterion intervals are local generated-fixture
 microbenchmarks, not production latency or interactive-response promises.
+
+A 2026-08-14 follow-up investigated the terrain-workflow labels emitted by an
+unnamed historical Criterion baseline. Canonical v0.10 `30ea9ff`, v0.11
+`f2eaadb`, and the same unchanged v0.10 binary ran A/B/A through one shared
+target on the reference machine. The estimates in milliseconds were:
+
+| Durable workflow mode | v0.10 A1 | v0.11 B | v0.10 A2 self-check |
+|---|---:|---:|---:|
+| Cold start | 142.25 | 148.93 | 143.29 |
+| Resume after committed Edit | 108.98 | 125.58 | 135.13 |
+| Resume from Retryable intent | 146.84 | 133.63 | 163.67 |
+| LandXML/report reconciliation | 92.329 | 107.21 | 130.10 |
+| Complete revalidation | 79.576 | 96.452 | 139.16 |
+
+The unchanged base self-check moved by up to 74.9% and was slower than the
+v0.11 run in four modes. The original labels therefore cannot be attributed to
+v0.11 code; these wall times intentionally include workstation/APFS durable
+filesystem synchronization. Qualification now saves each run under a unique
+baseline name, retaining its sampled intervals and resource facts without
+loading comparison history. Any cross-Revision performance claim requires a
+deliberate named same-machine, same-target A/B/A comparison whose unchanged
+base self-check remains stable.
 
 Independent Standards/Spec review after the final cancellation, boundary,
 highlight, durability, and benchmark-evidence fixes found no remaining P0–P2

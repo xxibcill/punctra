@@ -643,7 +643,8 @@ cargo bench -p point-index --bench index
 cargo bench -p point-workspace --bench document
 cargo bench -p point-review --bench review
 cargo bench -p point-terrain --bench terrain
-cargo bench -p terrain-demo --bench journal
+cargo bench -p terrain-demo --bench journal -- \
+  --save-baseline "qualification-$$-$(date +%s)"
 cargo bench -p renderer-demo --bench viewing
 cargo run -p point-index --example direct_use
 cargo test -p point-review --test interface

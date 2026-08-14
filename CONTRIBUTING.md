@@ -76,7 +76,8 @@ cargo bench -p point-index --bench index
 cargo bench -p point-workspace --bench document
 cargo bench -p point-review --bench review
 cargo bench -p point-terrain --bench terrain
-cargo bench -p terrain-demo --bench journal
+cargo bench -p terrain-demo --bench journal -- \
+  --save-baseline "qualification-$$-$(date +%s)"
 cargo bench -p renderer-demo --bench viewing
 cargo run -p source-memory --example memory_source
 cargo run -p point-index --example direct_use
@@ -112,7 +113,8 @@ PUNCTRA_POINT_WORKSPACE_BENCH_POINTS=10000000 \
 PUNCTRA_TERRAIN_BENCH_POINTS=100000 \
   cargo bench -p point-terrain --bench terrain
 PUNCTRA_TERRAIN_WORKFLOW_BENCH_POINTS=100000 \
-  cargo bench -p terrain-demo --bench journal
+  cargo bench -p terrain-demo --bench journal -- \
+  --save-baseline "qualification-$$-$(date +%s)"
 PUNCTRA_RENDERER_VIEW_BENCH_POINTS=1000000 \
   cargo bench -p renderer-demo --bench viewing
 ```
@@ -129,6 +131,17 @@ LandXML/report reconciliation, and Complete revalidation. Its journal/report
 bytes and semantic limit facts are deterministic generated evidence. It does
 not measure worker peak heap or establish production, partner, downstream, or
 human-workflow acceptance.
+
+The qualification command saves each run under a unique baseline name because
+these wall-time intervals intentionally include durable filesystem syncs and
+an unknown prior workstation state is not a valid comparator. A fresh name
+preserves current intervals and resource facts for inspection without loading
+historical results or emitting unattributable `Performance has regressed`
+labels. A cross-Revision performance claim instead requires a deliberate named
+same-machine, same-target A/B/A run: save the base, compare the head to that
+name, then rerun the unchanged base against the same name. If the base
+self-check moves materially, do not attribute the head/base difference to
+code.
 
 The renderer viewing benchmark defaults to 100,000 generated Points and
 measures a warm verified position-only index open plus the first bounded root

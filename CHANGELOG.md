@@ -39,6 +39,11 @@ All notable changes to Punctra are documented here. The project follows
   resource-fact benchmarks, and required local GPU coverage. No new persisted
   Workspace, Spatial Index, Run, Point Set spill, or LandXML version was
   introduced.
+- Prevented the durable terrain-workflow qualification lane from comparing
+  against an unnamed historical Criterion baseline. The benchmark still
+  measures filesystem synchronization and reports current intervals, while
+  cross-Revision attribution now requires a named same-machine A/B/A run with
+  a stable base self-check.
 
 ## Unreleased - 0.10.0-alpha.1
 
