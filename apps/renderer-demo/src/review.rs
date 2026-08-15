@@ -383,6 +383,24 @@ impl ReviewSession {
         self.status
     }
 
+    pub(crate) fn close_if_indeterminate(
+        session: &mut Option<Self>,
+        disposition: MutationDisposition,
+    ) -> bool {
+        let MutationDisposition::Indeterminate { operation } = disposition else {
+            return false;
+        };
+        let closed = session.take();
+        debug_assert!(
+            closed.is_some(),
+            "an interactive mutation has a review session"
+        );
+        eprintln!(
+            "Exact review session closed after indeterminate Operation {operation}; reopen explicitly with --resolve-operation-id {operation} before further review or mutation"
+        );
+        true
+    }
+
     pub(crate) const fn is_busy(&self) -> bool {
         self.pending.is_some()
     }
@@ -1165,6 +1183,27 @@ mod tests {
             .to_string();
         assert!(indeterminate.contains("indeterminate"));
         assert!(indeterminate.contains("explicitly resolved"));
+    }
+
+    #[test]
+    fn indeterminate_interactive_mutation_closes_the_complete_review_session() {
+        let operation = OperationId::from_bytes([0x91; 16]).unwrap();
+        let (session, _directory, _source) = review_session("indeterminate-close");
+        let mut session = Some(session);
+
+        assert!(!ReviewSession::close_if_indeterminate(
+            &mut session,
+            MutationDisposition::Rejected {
+                operation,
+                reason: CommitRejection::NoChanges,
+            },
+        ));
+        assert!(session.is_some());
+        assert!(ReviewSession::close_if_indeterminate(
+            &mut session,
+            MutationDisposition::Indeterminate { operation },
+        ));
+        assert!(session.is_none());
     }
 
     #[test]

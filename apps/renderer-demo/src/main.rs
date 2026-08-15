@@ -35,7 +35,10 @@ use render_wgpu::{
     RendererConfig, RendererError, WgpuRenderer,
 };
 use renderer_demo::display::{DisplayIndexPolicy, DisplayMode};
-use review::{ClassificationEdit, ReviewCapture, ReviewOptions, ReviewSession, ReviewStatus};
+use review::{
+    ClassificationEdit, MutationDisposition, ReviewCapture, ReviewOptions, ReviewSession,
+    ReviewStatus,
+};
 use scene::{Scene, SceneMetrics};
 use synthetic::{RESIDENT_BATCH_BUDGET, RESIDENT_BYTE_BUDGET, RESIDENT_POINT_BUDGET};
 use winit::{
@@ -1346,11 +1349,19 @@ impl Graphics {
         let Some(review) = self.review.as_mut() else {
             return;
         };
-        if let Err(error) = review.commit_selected(VIEW_GENERATION, self.interaction_generation) {
-            if review.is_stale() {
-                eprintln!("exact review commit blocked: {error}");
-            } else {
-                review.fail(error.as_ref());
+        let result = review.commit_selected(VIEW_GENERATION, self.interaction_generation);
+        match result {
+            Ok(disposition) => self.finish_interactive_mutation(disposition),
+            Err(error) => {
+                let review = self
+                    .review
+                    .as_mut()
+                    .expect("failed mutation retains its review session");
+                if review.is_stale() {
+                    eprintln!("exact review commit blocked: {error}");
+                } else {
+                    review.fail(error.as_ref());
+                }
             }
         }
         self.window.request_redraw();
@@ -1360,10 +1371,23 @@ impl Graphics {
         let Some(review) = self.review.as_mut() else {
             return;
         };
-        if let Err(error) = review.revert_head() {
-            review.fail(error.as_ref());
+        let result = review.revert_head();
+        match result {
+            Ok(disposition) => self.finish_interactive_mutation(disposition),
+            Err(error) => self
+                .review
+                .as_mut()
+                .expect("failed Revert retains its review session")
+                .fail(error.as_ref()),
         }
         self.window.request_redraw();
+    }
+
+    fn finish_interactive_mutation(&mut self, disposition: MutationDisposition) {
+        if ReviewSession::close_if_indeterminate(&mut self.review, disposition) {
+            self.pending_pick = None;
+            self.latest_recorded_frame = None;
+        }
     }
 
     fn clear_exact_selection(&mut self) -> DemoResult<()> {
