@@ -24,6 +24,26 @@ pub(crate) const DISK_VERSION_V1: u32 = 1;
 /// Inspection-sample complete/work-file schema introduced in v0.10.
 pub(crate) const DISK_VERSION_V2: u32 = 2;
 
+const POSITION_ONLY_LAYOUT: IndexRecipeLayout = IndexRecipeLayout {
+    disk_version: DISK_VERSION_V1,
+    recipe_version: POSITION_RECIPE_VERSION,
+    sample_bytes: 32,
+    work_header_body_bytes: 168,
+    work_header_bytes: 200,
+    artifact_header_bytes: 208,
+    sample_hash_domain: b"punctra-index-samples-v1",
+};
+
+const INSPECTION_LAYOUT: IndexRecipeLayout = IndexRecipeLayout {
+    disk_version: DISK_VERSION_V2,
+    recipe_version: INSPECTION_RECIPE_VERSION,
+    sample_bytes: 42,
+    work_header_body_bytes: 200,
+    work_header_bytes: 232,
+    artifact_header_bytes: 240,
+    sample_hash_domain: b"punctra-index-samples-v2",
+};
+
 const CANDIDATE_CANCELLATION_CADENCE: u64 = 1_024;
 
 /// Stable Attribute identities retained by the inspection index recipe.
@@ -97,26 +117,73 @@ pub enum IndexRecipe {
     InspectionV1(InspectionAttributeIds),
 }
 
-impl IndexRecipe {
-    pub(crate) const fn disk_version(self) -> u32 {
-        match self {
-            Self::PositionOnlyV1 => DISK_VERSION_V1,
-            Self::InspectionV1(_) => DISK_VERSION_V2,
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct IndexRecipeLayout {
+    disk_version: u32,
+    recipe_version: u32,
+    sample_bytes: u64,
+    work_header_body_bytes: usize,
+    work_header_bytes: u64,
+    artifact_header_bytes: u64,
+    sample_hash_domain: &'static [u8],
+}
+
+impl IndexRecipeLayout {
+    pub(crate) const fn from_disk_version(disk_version: u32) -> Option<Self> {
+        match disk_version {
+            DISK_VERSION_V1 => Some(POSITION_ONLY_LAYOUT),
+            DISK_VERSION_V2 => Some(INSPECTION_LAYOUT),
+            _ => None,
         }
+    }
+
+    pub(crate) const fn disk_version(self) -> u32 {
+        self.disk_version
     }
 
     pub(crate) const fn recipe_version(self) -> u32 {
-        match self {
-            Self::PositionOnlyV1 => POSITION_RECIPE_VERSION,
-            Self::InspectionV1(_) => INSPECTION_RECIPE_VERSION,
-        }
+        self.recipe_version
     }
 
     pub(crate) const fn sample_bytes(self) -> u64 {
+        self.sample_bytes
+    }
+
+    pub(crate) const fn work_header_body_bytes(self) -> usize {
+        self.work_header_body_bytes
+    }
+
+    pub(crate) const fn work_header_bytes(self) -> u64 {
+        self.work_header_bytes
+    }
+
+    pub(crate) const fn artifact_header_bytes(self) -> u64 {
+        self.artifact_header_bytes
+    }
+
+    pub(crate) const fn sample_hash_domain(self) -> &'static [u8] {
+        self.sample_hash_domain
+    }
+}
+
+impl IndexRecipe {
+    pub(crate) const fn layout(self) -> IndexRecipeLayout {
         match self {
-            Self::PositionOnlyV1 => 32,
-            Self::InspectionV1(_) => 42,
+            Self::PositionOnlyV1 => POSITION_ONLY_LAYOUT,
+            Self::InspectionV1(_) => INSPECTION_LAYOUT,
         }
+    }
+
+    pub(crate) const fn disk_version(self) -> u32 {
+        self.layout().disk_version()
+    }
+
+    pub(crate) const fn recipe_version(self) -> u32 {
+        self.layout().recipe_version()
+    }
+
+    pub(crate) const fn sample_bytes(self) -> u64 {
+        self.layout().sample_bytes()
     }
 
     pub(crate) fn resolve_contract(

@@ -4,12 +4,15 @@
 //! immutable classification Revisions, and crash-reconcilable commit intents.
 //! Source geometry and attributes remain authoritative and unchanged.
 //!
-//! # Interface classification
-//!
-//! The documented Workspace, Snapshot, Query, Edit, audit, limits, and error
-//! APIs are a **v1-candidate foundation surface**. Persisted stages and private
-//! recovery controls are not interfaces. This records v0.9 review intent, not
-//! a `1.0.0` or production-support claim.
+//! Temporary scratch paths are never removed automatically: a pathname can be
+//! replaced after its owner checks it, and portable filesystems provide no
+//! conditional unlink tied to an open file identity. Each selection or commit
+//! bounds the bytes it creates, while retained debris can accumulate across
+//! attempts and is ignored by recovery. An operator may remove `scratch/`
+//! contents only while no Workspace, Snapshot, Point Set, or job is live.
+//! Publishing a retained named stage requires an independent descriptor-bound
+//! copy; the reference macOS implementation uses clone-on-write publication,
+//! while platforms without that primitive fail closed.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]

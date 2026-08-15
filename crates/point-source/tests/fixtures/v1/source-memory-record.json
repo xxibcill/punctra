@@ -1,0 +1,123 @@
+{
+  "version": 1,
+  "source": [
+    79,
+    184,
+    55,
+    118,
+    123,
+    95,
+    216,
+    144,
+    1,
+    5,
+    156,
+    244,
+    2,
+    145,
+    225,
+    126,
+    82,
+    19,
+    109,
+    94,
+    119,
+    70,
+    107,
+    182,
+    56,
+    4,
+    40,
+    129,
+    17,
+    134,
+    132,
+    135
+  ],
+  "content_hash": [
+    23,
+    168,
+    67,
+    141,
+    107,
+    145,
+    36,
+    253,
+    108,
+    222,
+    225,
+    80,
+    193,
+    59,
+    170,
+    236,
+    200,
+    168,
+    233,
+    55,
+    166,
+    95,
+    115,
+    40,
+    101,
+    11,
+    179,
+    11,
+    97,
+    232,
+    201,
+    14
+  ],
+  "adapter_name": "source-memory",
+  "adapter_version": "1",
+  "logical_order": "immutable input row order v1",
+  "metadata": {
+    "point_count": 3,
+    "position_transform": {
+      "offset": [
+        100.0,
+        -50.0,
+        1000.0
+      ],
+      "scale": [
+        0.25,
+        0.5,
+        2.0
+      ]
+    },
+    "coordinate_reference": "Unknown",
+    "attributes": {
+      "definitions": [
+        {
+          "id": 6,
+          "name": "classification",
+          "data_type": "U8"
+        }
+      ]
+    },
+    "world_bounds": {
+      "min": [
+        99.5,
+        -51.5,
+        1018.0
+      ],
+      "max": [
+        101.75,
+        -47.5,
+        1022.0
+      ]
+    },
+    "format_name": "memory",
+    "metadata_records": []
+  },
+  "fast_token": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ]
+}

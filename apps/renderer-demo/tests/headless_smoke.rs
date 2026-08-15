@@ -448,6 +448,7 @@ fn corpus_success_binds_trace_inputs_and_separate_resource_measurements() {
     );
     assert!(entry["peak_index_temporary_disk_bytes"].as_u64().unwrap() > 0);
     assert!(entry["first_accepted_visible_batch_nanoseconds"].is_number());
+    assert!(entry["peak_queued_host_bytes"].as_u64().unwrap() >= 1);
     assert!(entry["peak_resident_batches"].as_u64().unwrap() >= 1);
     assert!(entry["peak_resident_points"].as_u64().unwrap() >= 1);
     assert!(entry["peak_resident_bytes"].as_u64().unwrap() >= 1);

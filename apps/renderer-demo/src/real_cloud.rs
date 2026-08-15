@@ -6,7 +6,7 @@ use point_index::{
 };
 use point_view::{AvailableNode, AxisAlignedBox, NodeKey, NodeRequest, NodeStatus};
 use render_protocol::{
-    BatchKey, BatchVersion, ESTIMATED_GPU_BYTES_PER_POINT, PointBatch, RenderPoint,
+    BatchKey, BatchVersion, ESTIMATED_GPU_BYTES_PER_POINT, PointBatch, PointId, RenderPoint,
     ViewGenerationKey,
 };
 
@@ -31,6 +31,7 @@ const HIERARCHY_FIXED_WORKING_BYTES: u64 = 64 * 1_024;
 // cached AvailableNode snapshot, plus point-view's simultaneous hierarchy
 // clone, ordered indexes/sets, child lists, projections, and traversal arrays.
 const HIERARCHY_WORKING_BYTES_PER_NODE: u64 = 2 * 1_024;
+const HIGHLIGHT_ID_COUNT: usize = 3;
 
 #[derive(Clone, Copy, Debug)]
 struct QueueBudget {
@@ -54,6 +55,7 @@ pub(crate) struct RealCloudScene {
     nodes: Vec<RealNode>,
     planning_nodes: Vec<AvailableNode>,
     pending: VecDeque<NodeKey>,
+    highlight_ids: Vec<PointId>,
     camera_target: [f64; 3],
     camera_radius: f64,
     bridge_ready_at: Instant,
@@ -61,6 +63,7 @@ pub(crate) struct RealCloudScene {
     staged_points: u64,
     staged_bytes: u64,
     peak_queued_batches: u64,
+    peak_queued_host_bytes: u64,
     peak_staged_points: u64,
     peak_staged_bytes: u64,
     cancelled_requests: u64,
@@ -97,39 +100,7 @@ impl RealCloudScene {
             exact_review,
         )?;
         let node_count = index.hierarchy().nodes().len();
-        let preflight_hierarchy_bytes = hierarchy_charge(node_count)?;
-        if preflight_hierarchy_bytes > HIERARCHY_BYTE_BUDGET {
-            return Err(resource_limit(
-                ViewPhase::Hierarchy,
-                "application hierarchy bytes",
-                HIERARCHY_BYTE_BUDGET,
-            ));
-        }
-        let mut nodes = Vec::new();
-        nodes.try_reserve_exact(node_count).map_err(|error| {
-            allocation_failure(
-                ViewPhase::Hierarchy,
-                format_args!("could not reserve hierarchy: {error}"),
-            )
-        })?;
-        let mut planning_nodes = Vec::new();
-        planning_nodes
-            .try_reserve_exact(node_count)
-            .map_err(|error| {
-                allocation_failure(
-                    ViewPhase::Hierarchy,
-                    format_args!("could not reserve planning snapshot: {error}"),
-                )
-            })?;
-        if hierarchy_charge(nodes.capacity().max(planning_nodes.capacity()))?
-            > HIERARCHY_BYTE_BUDGET
-        {
-            return Err(resource_limit(
-                ViewPhase::Hierarchy,
-                "application hierarchy bytes",
-                HIERARCHY_BYTE_BUDGET,
-            ));
-        }
+        let (mut nodes, mut planning_nodes) = reserve_hierarchy_vectors(node_count)?;
         for indexed in index.hierarchy().nodes() {
             let key = node_key(indexed.id())?;
             let parent = indexed.parent().map(node_key).transpose()?;
@@ -161,6 +132,15 @@ impl RealCloudScene {
             });
             planning_nodes.push(available);
         }
+        let mut highlight_ids = Vec::new();
+        highlight_ids
+            .try_reserve_exact(HIGHLIGHT_ID_COUNT)
+            .map_err(|error| {
+                allocation_failure(
+                    ViewPhase::Hierarchy,
+                    format_args!("could not reserve highlight identities: {error}"),
+                )
+            })?;
 
         let world_bounds = index.descriptor().world_bounds();
         let (camera_target, camera_radius) = camera_frame(world_bounds)?;
@@ -171,6 +151,7 @@ impl RealCloudScene {
             nodes,
             planning_nodes,
             pending: VecDeque::new(),
+            highlight_ids,
             camera_target,
             camera_radius,
             bridge_ready_at: Instant::now(),
@@ -178,6 +159,7 @@ impl RealCloudScene {
             staged_points: 0,
             staged_bytes: 0,
             peak_queued_batches: 0,
+            peak_queued_host_bytes: 0,
             peak_staged_points: 0,
             peak_staged_bytes: 0,
             cancelled_requests: 0,
@@ -234,6 +216,12 @@ impl RealCloudScene {
             }
         }
 
+        let queued_host_bytes = queue_charge(
+            next_pending.capacity(),
+            reserved_host_bytes,
+            retained_queue_bytes,
+        )?;
+
         for pending_index in 0..self.pending.len() {
             let key = self.pending[pending_index];
             if next_pending.contains(&key) {
@@ -268,6 +256,7 @@ impl RealCloudScene {
 
         let queued = u64::try_from(self.pending.len()).unwrap_or(u64::MAX);
         self.peak_queued_batches = self.peak_queued_batches.max(queued);
+        self.peak_queued_host_bytes = self.peak_queued_host_bytes.max(queued_host_bytes);
         Ok(issued)
     }
 
@@ -292,6 +281,7 @@ impl RealCloudScene {
                 return Err(error);
             }
         };
+        self.capture_highlight_ids(batch.points());
         self.staged_points = batch.point_count();
         self.staged_bytes = staged_bytes;
         self.peak_staged_points = self.peak_staged_points.max(self.staged_points);
@@ -361,6 +351,10 @@ impl RealCloudScene {
         self.camera_radius
     }
 
+    pub(crate) fn highlight_ids(&self) -> Vec<PointId> {
+        self.highlight_ids.clone()
+    }
+
     pub(crate) fn metrics(&self) -> SceneMetrics {
         let mut metrics = SceneMetrics {
             logical_points: self.index.descriptor().source_point_count(),
@@ -369,6 +363,7 @@ impl RealCloudScene {
             staged_points: self.staged_points,
             staged_bytes: self.staged_bytes,
             peak_queued_batches: self.peak_queued_batches,
+            peak_queued_host_bytes: self.peak_queued_host_bytes,
             peak_staged_points: self.peak_staged_points,
             peak_staged_bytes: self.peak_staged_bytes,
             cancelled_requests: self.cancelled_requests,
@@ -471,7 +466,8 @@ impl RealCloudScene {
                 points.push(RenderPoint::new(
                     relative,
                     self.colorizer
-                        .color(world[2], attributes.map(|values| values[row])),
+                        .color(world[2], attributes.map(|values| values[row]))
+                        .map_err(|error| internal_failure(ViewPhase::HostStaging, error))?,
                     sample.point_id(source),
                 )?);
             }
@@ -524,10 +520,64 @@ impl RealCloudScene {
         index
     }
 
+    fn capture_highlight_ids(&mut self, points: &[RenderPoint]) {
+        if !self.highlight_ids.is_empty() || points.is_empty() {
+            return;
+        }
+        for numerator in 1..=HIGHLIGHT_ID_COUNT {
+            let index = points
+                .len()
+                .saturating_mul(numerator)
+                .checked_div(HIGHLIGHT_ID_COUNT + 1)
+                .unwrap_or(0)
+                .min(points.len() - 1);
+            let point_id = points[index].point_id();
+            if !self.highlight_ids.contains(&point_id) {
+                self.highlight_ids.push(point_id);
+            }
+        }
+    }
+
     fn clear_staging(&mut self) {
         self.staged_points = 0;
         self.staged_bytes = 0;
     }
+}
+
+fn reserve_hierarchy_vectors(
+    node_count: usize,
+) -> SceneResult<(Vec<RealNode>, Vec<AvailableNode>)> {
+    if hierarchy_charge(node_count)? > HIERARCHY_BYTE_BUDGET {
+        return Err(resource_limit(
+            ViewPhase::Hierarchy,
+            "application hierarchy bytes",
+            HIERARCHY_BYTE_BUDGET,
+        ));
+    }
+    let mut nodes = Vec::new();
+    nodes.try_reserve_exact(node_count).map_err(|error| {
+        allocation_failure(
+            ViewPhase::Hierarchy,
+            format_args!("could not reserve hierarchy: {error}"),
+        )
+    })?;
+    let mut planning_nodes = Vec::new();
+    planning_nodes
+        .try_reserve_exact(node_count)
+        .map_err(|error| {
+            allocation_failure(
+                ViewPhase::Hierarchy,
+                format_args!("could not reserve planning snapshot: {error}"),
+            )
+        })?;
+    if hierarchy_charge(nodes.capacity().max(planning_nodes.capacity()))? > HIERARCHY_BYTE_BUDGET {
+        return Err(resource_limit(
+            ViewPhase::Hierarchy,
+            "application hierarchy bytes",
+            HIERARCHY_BYTE_BUDGET,
+        ));
+    }
+    Ok((nodes, planning_nodes))
 }
 
 fn reserve_node_staging(point_count: u64) -> SceneResult<(Vec<RenderPoint>, u64)> {
@@ -923,6 +973,7 @@ fn internal_failure(
 #[cfg(test)]
 mod tests {
     use std::{
+        collections::BTreeSet,
         fs, io,
         path::Path,
         sync::atomic::{AtomicU64, Ordering},
@@ -967,6 +1018,29 @@ mod tests {
             usize::try_from(HIERARCHY_WORKING_BYTES_PER_NODE).unwrap() > always_live_metadata,
             "the transient planner allowance must exceed the always-live metadata"
         );
+    }
+
+    #[test]
+    fn first_coarse_batch_supplies_stable_highlight_identities() {
+        let directory = TestDirectory::new().unwrap();
+        let mut scene = fixture_scene(directory.path()).unwrap();
+
+        let batch = materialize_first_batch(&mut scene);
+        let displayed = batch
+            .points()
+            .iter()
+            .map(RenderPoint::point_id)
+            .collect::<BTreeSet<_>>();
+        let highlights = scene.highlight_ids();
+
+        assert!(!highlights.is_empty());
+        assert!(highlights.len() <= HIGHLIGHT_ID_COUNT);
+        assert!(
+            highlights
+                .iter()
+                .all(|point_id| displayed.contains(point_id))
+        );
+        assert_eq!(highlights, scene.highlight_ids());
     }
 
     #[test]
@@ -1250,6 +1324,9 @@ mod tests {
             .unwrap();
         assert_eq!(scene.pending.len(), 1);
         assert_eq!(scene.planning_nodes[0].status(), NodeStatus::Requested);
+        let peak_queued_host_bytes = scene.metrics().peak_queued_host_bytes;
+        assert!(peak_queued_host_bytes > 0);
+        assert!(peak_queued_host_bytes <= QUEUED_HOST_BYTE_BUDGET);
 
         let hidden = hidden_camera(&scene);
         let changed = plan(&mut planner, &scene, &hidden);
@@ -1261,6 +1338,10 @@ mod tests {
         assert!(scene.pending.is_empty());
         assert_eq!(scene.planning_nodes[0].status(), NodeStatus::Missing);
         assert_eq!(scene.metrics().cancelled_requests, 1);
+        assert_eq!(
+            scene.metrics().peak_queued_host_bytes,
+            peak_queued_host_bytes
+        );
     }
 
     #[test]
@@ -1519,7 +1600,7 @@ mod tests {
         let index = point_index::prepare_with_recipe(
             source,
             directory.join("fixture.inspection.pidx"),
-            crate::display_index_recipe(display_mode, false)?,
+            display_mode.index_policy().recipe(),
             PrepareLimits::default(),
         )
         .blocking_wait()?;

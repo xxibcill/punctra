@@ -60,50 +60,39 @@ with one safe recovery action. It does not add Breaklines or establish the
 external design-partner, production-data, downstream-application, paid-use,
 or human-workflow evidence required by the product milestone.
 
-Version 0.8.0-alpha.1 started the accepted
+Version 0.8.0-alpha.1 completes the repository slice in the implemented
 [repository interoperability qualification
-design](docs/design/design-partner-mvp-v0.8.md). Its narrow planned repository
-slice is a private `terrain-demo` semantic LandXML 1.2 round-trip verifier and
-separate canonical evidence output. The bounded file-to-file comparison core
-and explicitly non-evidence `compare-landxml` CLI are implemented. Fold-forward
-v0.10 prerequisite work now adds strict read-only Complete-Run qualification,
-canonical pass/fail evidence publication through `verify-round-trip`, and the
-full-ceiling streaming reader plus generated/golden qualification matrix.
-Independent Standards/Spec review completed with no P0–P3 findings. The
-complete one-commit local release record remains outstanding, so this alpha is
-not relabeled Complete. The v0.7 journal and
-`audit.json` are unchanged, and no actual Civil 3D, Bentley, partner,
-paid-pilot, conversion, or labor-savings test is claimed.
+design](docs/design/design-partner-mvp-v0.8.md). The narrow implementation adds
+a private `terrain-demo` semantic LandXML 1.2 comparator, read-only Complete-Run
+binding, a streaming verifier covering the v0.7 export ceiling, and separate
+canonical pass/fail evidence published without replacement. The v0.7 journal
+and `audit.json` remain unchanged. No actual Civil 3D, Bentley, partner,
+paid-pilot, conversion, or labor-savings test is claimed, so the product MVP
+gates remain outstanding.
 
-Version 0.9.0-alpha.1 started the accepted [Trust and v1 Candidate
-design](docs/design/trust-v1-candidate-v0.9.md). It narrowed work to qualifying
-the existing headless workflow for a maintainable compatibility and support
-promise: close the inherited Run-bound qualification gap, freeze owner-local
-persisted-v1 fixtures beyond the inherited Spatial Index goldens, harden
-recovery and disk-failure behavior, publish the exact support matrix, and
-reproduce local resource and performance evidence. The first hardening slice
-preserves Spatial Index filesystem failures as recoverable `PWF_IO` diagnostics
-through `terrain-demo`, including bounded operation/path/error rendering.
-Fold-forward v0.10 prerequisite work now publishes the first complete synced
-`.work` header from a uniquely owned temporary with no replacement; unknown or
-partial pre-existing paths remain untouched and fail closed. It also completes
-the owner-local persisted-v1 fixture and representative recovery/support
-matrix. This work added no new product feature family. v0.9 remains an
-incomplete alpha with independent review complete but a complete one-commit
-local candidate record outstanding; that gate is a prerequisite of v0.10.
+Version 0.9.0 completes the repository trust and version-1 compatibility
+candidate described by the implemented [Trust and v1 Candidate
+design](docs/design/trust-v1-candidate-v0.9.md). It freezes owner-local
+version-1 fixtures for Source Records, Spatial Indexes, Workspaces, Workflow
+Runs, reports, LandXML, and Round-Trip Evidence; hardens descriptor-bound
+no-replace publication and conservative recovery; and records the reviewed
+interface and support boundaries for the existing narrow workflow. The exact
+local release results are recorded in the [v0.9 verification
+record](docs/releases/v0.9.0.md). This repository candidate is not `1.0.0`, a
+product-readiness claim, or evidence of external downstream execution or
+customer acceptance.
 
 Version 0.10.0-alpha.1 implements the repository track of the accepted [Field
 Qualification and Professional Inspection View
 design](docs/design/field-inspection-view-v0.10.md)
-from that exact v0.9 alpha base. It adds deterministic neutral, elevation,
+from the completed v0.9 repository candidate. It adds deterministic neutral,
 RGB, intensity, and classification display; perspective and orthographic
 navigation; explicit loading/Coverage state; bounded `PVIEW_*` diagnostics;
 the narrow disk-v2 inspection recipe for exact raw display samples; and a
 permission-gated local corpus runner with canonical nonclaim-bearing reports.
-The six later v0.8 comparator correctness fixes are also reconciled into the
-base. v0.8 and v0.9 are not relabeled Complete, and no production corpus,
-observed workflow, workstation, usability, partner, or support qualification
-is claimed. Spatial Index v1 remains supported and position-only; v2
+No production corpus, observed workflow, workstation, usability, partner, or
+support qualification is claimed. Spatial Index v1 remains supported and
+position-only; v2
 inspection samples are bounded rebuildable display data. Sampled colors are
 disposable display values, not exact Query, Edit, terrain, QA, or export
 results.
@@ -656,7 +645,6 @@ PUNCTRA_REQUIRE_GPU=1 cargo run -p render-wgpu --example third_party_host
 cargo test -p terrain-demo --lib --all-features
 cargo test -p terrain-demo --test workflow
 cargo test -p terrain-demo --test process
-cargo test -p terrain-demo --test run_golden_v1
 cargo test -p renderer-demo --test headless_smoke
 PUNCTRA_REQUIRE_GPU=1 cargo test -p renderer-demo --test headless_smoke \
   corpus_success_binds_trace_inputs_and_separate_resource_measurements -- --exact

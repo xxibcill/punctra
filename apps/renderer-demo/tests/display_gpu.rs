@@ -70,7 +70,9 @@ fn mapped_colors() -> [[u8; 4]; 5] {
     let bounds = WorldBounds::new([0.0, 0.0, 0.0], [100.0; 3]).unwrap();
     [
         NEUTRAL_COLOR,
-        PointColorizer::for_source(DisplayMode::Elevation, Some(bounds)).color(75.0, None),
+        PointColorizer::for_source(DisplayMode::Elevation, Some(bounds))
+            .color(75.0, None)
+            .unwrap(),
         rgb_color([0, 32_768, u16::MAX]),
         intensity_color(32_768),
         classification_color(2),

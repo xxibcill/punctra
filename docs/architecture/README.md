@@ -1,14 +1,12 @@
 # Point-Cloud Foundation Architecture
 
-Status: v0.1 through the narrow v0.7 technical-readiness slice implemented;
-v0.8 is an incomplete repository-qualification alpha with bounded comparison
-and strict Run-bound evidence plus full-ceiling streaming implemented; v0.9 is
-an incomplete trust-qualification alpha with independent review complete and a
-complete local candidate record outstanding; the v0.10 professional inspection
-View repository implementation is complete with field/adoption publication
+Status: v0.1 through the narrow v0.9 repository trust and version-1
+compatibility-candidate slice Complete; the v0.10 professional inspection View
+repository implementation is complete with field/adoption publication
 outstanding; the v0.11 exact-review technical slice is repository-verified
-with its field-activation evidence outstanding; broader terrain, export, and
-product layers remain deferred
+with field-activation and independent-adoption evidence outstanding; broader
+terrain, export, external interoperability evidence, and product layers remain
+deferred
 
 The accepted versioned designs are authoritative:
 
@@ -20,7 +18,7 @@ The accepted versioned designs are authoritative:
 - [v0.6 Terrain and QA benchmark](../design/terrain-qa-benchmark-v0.6.md)
 - [v0.7 Technical partner-alpha readiness](../design/technical-alpha-readiness-v0.7.md)
 - [v0.8 Repository interoperability qualification](../design/design-partner-mvp-v0.8.md)
-- [v0.9 Trust and v1 Candidate](../design/trust-v1-candidate-v0.9.md)
+- [v0.9 Repository Trust and v1 Candidate](../design/trust-v1-candidate-v0.9.md)
 - [v0.10 Field Qualification and Professional Inspection View](../design/field-inspection-view-v0.10.md)
 - [v0.11 Exact Interactive Review and Ground Correction](../design/exact-interactive-review-v0.11.md)
 
@@ -33,6 +31,12 @@ Surface with detached QA and a metric-metre LandXML deliverable. The headless
 audited Workflow Run without turning orchestration policy into another
 foundation crate. A crate exists only when its behavior, direct tests, and a
 caller exist.
+
+The frozen [v0.9 public interface review](v0.9-interface-review.md) classifies
+reusable, adapter-author, test-support, and private application surfaces. The
+[v0.9 support, upgrade, and recovery matrix](v0.9-support-matrix.md) defines
+the exact workflow profile, artifact policies, platform evidence, and operator
+actions; the [release record](../releases/v0.9.0.md) owns exact local results.
 
 ## Current module shape
 
@@ -126,7 +130,8 @@ buffers, Workspace journal frames, spill files, or GPU buffers.
   canonical `SurfaceVertex`/`SurfaceFace` values, detached Check Point QA, and
   the private LandXML encoder and exact-target reconciliation.
 - `terrain-demo` owns its Run lock, eight-frame journal, cross-module recovery
-  policy, Surface Change Envelope, canonical report, and structured actions.
+  policy, Surface Change Envelope, canonical report, read-only Complete-Run
+  qualifier, canonical Round-Trip Evidence, and structured actions.
 - `render-protocol` owns generation and replacement semantics.
 - `point-view` owns deterministic culling, LOD demand, retention, and safe
   retirement decisions.
@@ -226,7 +231,7 @@ Operation states with the original identity. It opens but never creates the
 Workspace; an absent Workspace is `PWF_INVALID_REQUEST` before Run creation or
 Workspace mutation.
 
-## Current scope boundary
+## Scope boundary after v0.9
 
 Implemented document and terrain behavior is deliberately narrow:
 
@@ -247,29 +252,27 @@ Implemented document and terrain behavior is deliberately narrow:
   path, each pinned to an immutable Snapshot and returning a spillable Point
   Set; and
 - one private eight-frame `terrain-demo` Workflow Run with canonical report,
-  exclusive lock, linked cancellation, and structured recovery actions.
+  exclusive lock, linked cancellation, and structured recovery actions; and
+- one private read-only Complete-Run LandXML verifier with bounded streaming
+  comparison and separate canonical pass/fail evidence outside the Run root.
 
 General predicate languages, position or other Attribute Edits, named Point
 Sets, branches, merge, compaction, multiple Sources, Breaklines, constrained or
 persistent terrain, general export/import, networking, autosave policy, and
-product UI remain outside v0.7. Licensed-data, partner, named downstream-
+product UI remain outside v0.9. Licensed-data, partner, named downstream-
 application, above-500-million-Point, and human-workflow evidence also remains
 outstanding.
 
-The accepted v0.8 design adds a private `terrain-demo` semantic LandXML
-comparison module and CLI without changing the public foundation shape.
-Fold-forward work binds the verifier strictly read-only to one Complete Run and
-publishes separate canonical no-replace evidence; every v0.7 journal and report
-contract remains unchanged. Declared downstream labels do not prove execution.
+The implemented v0.8 design adds private `terrain-demo` semantic LandXML
+comparison, read-only Complete-Run binding, full-export-ceiling streaming, and a
+separate canonical evidence artifact without changing the public foundation
+shape. Every v0.7 journal and report contract remains unchanged.
 
-The v0.10 View adds one narrow public index recipe rather than a general
-display framework. Disk v1 remains position-only for neutral/elevation. Disk
-v2 retains row-aligned raw `U16` intensity, `U8` classification, and optional
-all-or-none `U16` RGB for disposable display. The private host maps those
-values, supports perspective/orthographic navigation, labels progressive
-Coverage, reports structured failures, and runs permission-gated local corpus
-measurements. None changes exact Source, Workspace, Query, terrain, QA, or
-export semantics.
+The completed v0.9 slice freezes the version-1 compatibility fixtures, artifact
+support classes, persistence/recovery behavior, platform evidence, and reviewed
+interface classifications for that same narrow shape. It adds no new workflow
+or product feature family, and a repository v1 candidate is not `1.0.0` or an
+external product-readiness claim.
 
 ## Document map
 

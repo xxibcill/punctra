@@ -4,14 +4,18 @@
 #![warn(missing_docs)]
 
 mod bounded_diagnostic;
+mod canonical_output;
 mod cli;
 mod diagnostic;
-mod evidence;
 mod journal;
 mod publication;
-mod qualification;
 mod report;
 mod roundtrip;
+mod roundtrip_evidence;
+mod roundtrip_file;
+mod roundtrip_stream;
+mod roundtrip_surface;
+mod stable_file;
 mod workflow;
 
 pub use cli::run_cli;

@@ -62,7 +62,7 @@ fn benchmark_viewing(criterion: &mut Criterion) {
             );
             for sample in batch.samples() {
                 let world = sample.world_position(batch.transform());
-                black_box(colorizer.color(world[2], None));
+                black_box(colorizer.color(world[2], None).unwrap());
             }
             black_box(batch);
         });

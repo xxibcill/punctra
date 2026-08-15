@@ -17,12 +17,10 @@ use std::{
     time::{Duration, Instant},
 };
 
-use diagnostic::{ViewFailure, ViewPhase};
+use diagnostic::{ViewFailure, ViewPhase, classify_protocol_failure, classify_renderer_failure};
 use orbit_camera::{OrbitCamera, ProjectionMode};
-use point_contracts::{AttributeId, SourceMetadata};
-use point_index::{
-    IndexRecipe, InspectionAttributeIds, PrepareLimits, PreparedIndex, prepare_with_recipe,
-};
+use point_contracts::SourceMetadata;
+use point_index::{PrepareLimits, PreparedIndex, prepare_with_recipe};
 use point_view::{
     AvailableNodes, PlannerConfig, PlanningBudget, ResourceUsage, ViewPlan, ViewPlanner,
 };
@@ -36,7 +34,7 @@ use render_wgpu::{
     Camera, Frame, FrameReport, PickPoll, PickRequest, PickTicket, PointStyle, RecordedFrame,
     RendererConfig, RendererError, WgpuRenderer,
 };
-use renderer_demo::display::DisplayMode;
+use renderer_demo::display::{DisplayIndexPolicy, DisplayMode};
 use review::{ClassificationEdit, ReviewCapture, ReviewOptions, ReviewSession, ReviewStatus};
 use scene::{Scene, SceneMetrics};
 use synthetic::{RESIDENT_BATCH_BUDGET, RESIDENT_BYTE_BUDGET, RESIDENT_POINT_BUDGET};
@@ -71,33 +69,11 @@ fn gpu_failure(phase: ViewPhase, error: impl std::fmt::Display) -> Box<dyn Error
 }
 
 fn protocol_failure(phase: ViewPhase, error: ProtocolError) -> Box<dyn Error> {
-    if matches!(
-        error,
-        ProtocolError::ResidentLimitExceeded { .. } | ProtocolError::HighlightLimitExceeded { .. }
-    ) {
-        Box::new(ViewFailure::resource(phase, error))
-    } else {
-        internal_failure(phase, error)
-    }
+    Box::new(classify_protocol_failure(phase, error))
 }
 
 fn renderer_failure(phase: ViewPhase, error: RendererError) -> Box<dyn Error> {
-    match error {
-        RendererError::Protocol(error) => protocol_failure(phase, error),
-        error @ (RendererError::BatchTooLarge { .. }
-        | RendererError::BatchBufferTooLarge { .. }
-        | RendererError::FrameUniformStagingSizeOverflow { .. }
-        | RendererError::FrameUniformStagingBufferTooLarge { .. }) => {
-            Box::new(ViewFailure::resource(phase, error))
-        }
-        error @ (RendererError::NoActiveViewGeneration
-        | RendererError::ViewGenerationMismatch { .. }
-        | RendererError::ForeignRecordedFrame
-        | RendererError::PickOutsideViewport { .. }
-        | RendererError::PickMetadataUnavailable
-        | RendererError::BatchOriginOutOfRange { .. }) => internal_failure(phase, error),
-        error => gpu_failure(phase, error),
-    }
+    Box::new(classify_renderer_failure(phase, error))
 }
 
 fn preserve_failure_or_internal(phase: ViewPhase, error: Box<dyn Error>) -> Box<dyn Error> {
@@ -371,8 +347,10 @@ struct LoadedDemo {
 
 fn load_scene(command: &Command) -> DemoResult<LoadedDemo> {
     let Some(source_path) = command.source.as_deref() else {
+        let scene = Scene::synthetic(VIEW_GENERATION)
+            .map_err(|error| preserve_failure_or_internal(ViewPhase::Planning, error))?;
         return Ok(LoadedDemo {
-            scene: Scene::synthetic(VIEW_GENERATION)?,
+            scene,
             review: None,
             reopen: None,
         });
@@ -404,7 +382,7 @@ fn load_scene(command: &Command) -> DemoResult<LoadedDemo> {
 
     let prepare_started = Instant::now();
     println!("View phase: index-prepare (running)");
-    let recipe = display_index_recipe(command.display_mode, command.workspace.is_some())?;
+    let recipe = display_index_policy(command.display_mode, command.workspace.is_some()).recipe();
     let prepared = prepare_with_recipe(source, &index_target, recipe, PrepareLimits::default())
         .blocking_wait()
         .map_err(|error| ViewFailure::index(&index_target, &error))?;
@@ -453,18 +431,13 @@ fn display_description(mode: DisplayMode, bounds: Option<point_contracts::WorldB
     }
 }
 
-fn display_index_recipe(mode: DisplayMode, exact_review: bool) -> DemoResult<IndexRecipe> {
-    if !mode.requires_inspection_index() && !exact_review {
-        return Ok(IndexRecipe::PositionOnlyV1);
+const fn display_index_policy(mode: DisplayMode, exact_review: bool) -> DisplayIndexPolicy {
+    if exact_review {
+        DisplayIndexPolicy::Inspection
+    } else {
+        mode.index_policy()
     }
-    let id = |value| AttributeId::new(value).map_err(Box::<dyn Error>::from);
-    Ok(IndexRecipe::InspectionV1(InspectionAttributeIds::new(
-        id(1)?,
-        id(6)?,
-        [id(16)?, id(17)?, id(18)?],
-    )?))
 }
-
 fn validate_display_source(mode: DisplayMode, metadata: &SourceMetadata) -> DemoResult<()> {
     mode.validate_source(metadata)
         .map_err(|message| invalid_argument(format_args!("--display {mode}: {message}")))
@@ -486,13 +459,7 @@ fn print_prepare_report(index: &PreparedIndex, target: &Path, elapsed: Duration)
 
 fn default_index_target(source: &Path, display_mode: DisplayMode, exact_review: bool) -> PathBuf {
     let mut target = source.as_os_str().to_os_string();
-    target.push(
-        if display_mode.requires_inspection_index() || exact_review {
-            ".inspection-v2.pidx"
-        } else {
-            ".pidx"
-        },
-    );
+    target.push(display_index_policy(display_mode, exact_review).target_suffix());
     PathBuf::from(target)
 }
 
@@ -694,10 +661,13 @@ fn run_main() -> DemoResult<()> {
         scene.label(),
     );
 
-    let event_loop = EventLoop::new()?;
+    let event_loop =
+        EventLoop::new().map_err(|error| internal_failure(ViewPhase::GpuSetup, error))?;
     event_loop.set_control_flow(ControlFlow::Wait);
     let mut app = DemoApp::new(scene, review, command.projection);
-    event_loop.run_app(&mut app)?;
+    event_loop
+        .run_app(&mut app)
+        .map_err(|error| internal_failure(ViewPhase::Rendering, error))?;
     if let Some(failure) = app.failure {
         return Err(Box::new(failure));
     }
@@ -725,7 +695,7 @@ impl DemoApp {
 
     fn initialize(&mut self, event_loop: &ActiveEventLoop) -> DemoResult<()> {
         let attributes = Window::default_attributes()
-            .with_title(BASE_TITLE)
+            .with_title(initial_title())
             .with_inner_size(LogicalSize::new(INITIAL_WIDTH, INITIAL_HEIGHT))
             .with_visible(false);
         let window = Arc::new(event_loop.create_window(attributes)?);
@@ -1236,6 +1206,9 @@ impl Graphics {
             }
         };
         self.scene.mark_resident(batch_key, batch_version);
+        if self.highlights_enabled {
+            self.apply_highlights()?;
+        }
         self.metrics.record_upload(report, upload_started.elapsed());
         Ok(())
     }
@@ -1339,8 +1312,17 @@ impl Graphics {
     }
 
     fn toggle_highlights(&mut self) -> DemoResult<()> {
-        let enable = !self.highlights_enabled;
-        let point_ids = if enable {
+        let previous = self.highlights_enabled;
+        self.highlights_enabled = !self.highlights_enabled;
+        if let Err(error) = self.apply_highlights() {
+            self.highlights_enabled = previous;
+            return Err(error);
+        }
+        Ok(())
+    }
+
+    fn apply_highlights(&mut self) -> DemoResult<()> {
+        let point_ids = if self.highlights_enabled {
             match self.review.as_ref() {
                 Some(review) => review
                     .selected_highlights()?
@@ -1357,7 +1339,6 @@ impl Graphics {
         self.renderer
             .apply(&update)
             .map_err(|error| renderer_failure(ViewPhase::GpuUpload, error))?;
-        self.highlights_enabled = enable;
         Ok(())
     }
 
@@ -1742,13 +1723,14 @@ impl PlanFacts {
 fn coverage_state(scene: SceneMetrics) -> String {
     if scene.authored_resident_batches > 0 {
         return format!(
-            "authored fixture presentation: {} batches / {} pts",
+            "display coverage: Sampled {} batches / {} pts; Complete {} batches / {} pts; authored fixture presentation {} batches / {} pts (not Query completion)",
+            scene.sampled_resident_batches,
+            compact_count(scene.sampled_resident_points),
+            scene.complete_resident_batches,
+            compact_count(scene.complete_resident_points),
             scene.authored_resident_batches,
             compact_count(scene.authored_resident_points)
         );
-    }
-    if scene.sampled_resident_batches == 0 && scene.complete_resident_batches == 0 {
-        return "display coverage: none resident (never Query completion)".to_owned();
     }
     format!(
         "display coverage: Sampled {} batches / {} pts; Complete {} batches / {} pts (not Query completion)",
@@ -1757,6 +1739,10 @@ fn coverage_state(scene: SceneMetrics) -> String {
         scene.complete_resident_batches,
         compact_count(scene.complete_resident_points),
     )
+}
+
+fn initial_title() -> String {
+    format!("{BASE_TITLE} | {}", coverage_state(SceneMetrics::default()))
 }
 
 fn has_area(size: PhysicalSize<u32>) -> bool {
@@ -2057,7 +2043,7 @@ mod tests {
     }
 
     #[test]
-    fn coverage_copy_never_confuses_display_with_query_completion() {
+    fn coverage_copy_always_names_both_kinds_without_claiming_query_completion() {
         let sampled = SceneMetrics {
             sampled_resident_batches: 2,
             sampled_resident_points: 4_096,
@@ -2070,6 +2056,27 @@ mod tests {
         assert!(label.contains("Sampled 2 batches"));
         assert!(label.contains("Complete 1 batches"));
         assert!(label.contains("not Query completion"));
+
+        let empty = coverage_state(SceneMetrics::default());
+        assert!(empty.contains("Sampled 0 batches"));
+        assert!(empty.contains("Complete 0 batches"));
+        assert!(empty.contains("not Query completion"));
+
+        let authored = coverage_state(SceneMetrics {
+            authored_resident_batches: 1,
+            authored_resident_points: 32,
+            ..SceneMetrics::default()
+        });
+        assert!(authored.contains("Sampled 0 batches"));
+        assert!(authored.contains("Complete 0 batches"));
+        assert!(authored.contains("authored fixture presentation 1 batches / 32 pts"));
+        assert!(authored.contains("not Query completion"));
+
+        let initial = initial_title();
+        assert!(initial.starts_with(BASE_TITLE));
+        assert!(initial.contains("Sampled 0 batches"));
+        assert!(initial.contains("Complete 0 batches"));
+        assert!(initial.contains("not Query completion"));
     }
 
     #[test]

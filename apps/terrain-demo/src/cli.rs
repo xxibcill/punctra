@@ -2,26 +2,21 @@
 // one bounded grammar routine so duplicate and positional rules are explicit.
 #![allow(clippy::result_large_err, clippy::too_many_lines)]
 
-use std::{
-    ffi::OsString,
-    path::{Path, PathBuf},
-};
+use std::{ffi::OsString, path::PathBuf};
 
 use point_terrain::{CheckPoint, CheckPointId, LandXmlOptions, TerrainRecipe};
 use point_workspace::{OperationId, RevisionId};
-use serde::Deserialize;
 
 use crate::{
     WorkflowFailure, WorkflowLimits, WorkflowPaths, WorkflowRunId, WorkflowRunIntent,
     diagnostic::{Certainty, FailureCode, FailureContext, RecoveryAction, WorkflowStage},
-    evidence::{EvidenceError, publish_evidence},
-    inspect_and_repair_run,
-    qualification::{CompleteRunQualification, QualificationError},
-    resume_run,
+    inspect_and_repair_run, resume_run,
     roundtrip::{
-        RoundTripDeclaration, RoundTripEvaluation, RoundTripFailure, RoundTripLimits,
-        RoundTripReport, RoundTripTolerances, evaluate_landxml_round_trip,
-        verify_landxml_round_trip,
+        RoundTripDeclaration, RoundTripFailure, RoundTripLimits, RoundTripReport,
+        RoundTripTolerances, verify_landxml_round_trip,
+    },
+    roundtrip_evidence::{
+        QualificationResult, RoundTripEvidenceError, RoundTripEvidenceReceipt, verify_round_trip,
     },
     start_run,
 };
@@ -67,7 +62,7 @@ Required compare-landxml options:
 Required verify-round-trip options:
   --downstream-app TEXT          caller-declared downstream application
   --downstream-version TEXT      caller-declared downstream version
-  --downstream-setting KEY=VALUE caller-declared opaque setting; repeatable
+  --downstream-setting TEXT      one opaque caller settings-profile label
   --horizontal-tolerance-metres N
   --vertical-tolerance-metres N
 ";
@@ -136,13 +131,34 @@ pub fn run_cli(arguments: impl IntoIterator<Item = OsString>) -> Result<String, 
             evidence_target,
             declaration,
             tolerances,
-        } => verify_round_trip(
-            &run_root,
-            &returned,
-            &evidence_target,
-            declaration,
-            tolerances,
-        ),
+        } => {
+            let receipt = verify_round_trip(
+                &run_root,
+                &returned,
+                &evidence_target,
+                declaration,
+                tolerances,
+            )
+            .map_err(round_trip_evidence_failure)?;
+            if let Some(reason) = receipt.failure_reason {
+                return Err(WorkflowFailure::new(
+                    reason.failure_code(),
+                    WorkflowStage::RoundTrip,
+                    Certainty::DurableFact,
+                    FailureContext {
+                        run: Some(receipt.run),
+                        ..FailureContext::default()
+                    },
+                    format_args!(
+                        "canonical failed evidence published with hash {} and {} bytes",
+                        Hex(&receipt.evidence_hash),
+                        receipt.evidence_bytes
+                    ),
+                    RecoveryAction::ReviewReturnedLandXml,
+                ));
+            }
+            Ok(round_trip_evidence_summary(receipt))
+        }
         Command::Start {
             resume,
             paths,
@@ -344,157 +360,74 @@ fn parse_verify_round_trip<I>(
 where
     I: Iterator<Item = OsString>,
 {
-    let mut application = None;
-    let mut version = None;
-    let mut settings = Vec::new();
-    let mut horizontal_tolerance = None;
-    let mut vertical_tolerance = None;
-    let mut paths = Vec::new();
-    reserve(&mut settings, 64, "downstream setting storage")?;
-    reserve(&mut paths, 3, "Run-bound round-trip path storage")?;
-    while let Some(argument) = arguments.next()? {
-        match argument.to_str() {
-            Some("--downstream-app") => set_once(
-                &mut application,
-                arguments.require_value("--downstream-app")?,
-                "--downstream-app",
-            )?,
-            Some("--downstream-version") => set_once(
-                &mut version,
-                arguments.require_value("--downstream-version")?,
-                "--downstream-version",
-            )?,
-            Some("--downstream-setting") => push_bounded(
-                &mut settings,
-                arguments.require_value("--downstream-setting")?,
-                64,
-                "downstream setting count",
-            )?,
-            Some("--horizontal-tolerance-metres") => set_once(
-                &mut horizontal_tolerance,
-                parse_f64(
-                    &arguments.require_value("--horizontal-tolerance-metres")?,
-                    "horizontal tolerance",
-                )?,
-                "--horizontal-tolerance-metres",
-            )?,
-            Some("--vertical-tolerance-metres") => set_once(
-                &mut vertical_tolerance,
-                parse_f64(
-                    &arguments.require_value("--vertical-tolerance-metres")?,
-                    "vertical tolerance",
-                )?,
-                "--vertical-tolerance-metres",
-            )?,
-            Some(value) if value.starts_with('-') => {
-                return Err(invalid(
-                    "unknown verify-round-trip option; use --help for usage",
-                ));
-            }
-            _ => push_bounded(
-                &mut paths,
-                PathBuf::from(argument),
-                3,
-                "Run-bound round-trip positional path count",
-            )?,
-        }
-    }
-    let [run_root, returned, evidence_target]: [PathBuf; 3] = paths.try_into().map_err(|_| {
-        invalid("verify-round-trip requires RUN_ROOT RETURNED EVIDENCE_TARGET paths")
-    })?;
-    let settings_profile = canonical_settings_profile(&settings)?;
-    let declaration = RoundTripDeclaration::new(
-        unicode(
-            application
-                .as_ref()
-                .ok_or_else(|| invalid("missing --downstream-app"))?,
-            "--downstream-app",
-        )?,
-        unicode(
-            version
-                .as_ref()
-                .ok_or_else(|| invalid("missing --downstream-version"))?,
-            "--downstream-version",
-        )?,
-        settings_profile,
-    )
-    .map_err(|error| round_trip_failure(&error))?;
-    let tolerances = RoundTripTolerances::new(
-        horizontal_tolerance.ok_or_else(|| invalid("missing --horizontal-tolerance-metres"))?,
-        vertical_tolerance.ok_or_else(|| invalid("missing --vertical-tolerance-metres"))?,
-    )
-    .map_err(|error| round_trip_failure(&error))?;
+    let parsed = parse_round_trip_arguments(
+        arguments,
+        RoundTripCliGrammar {
+            application: "--downstream-app",
+            version: "--downstream-version",
+            settings_profile: "--downstream-setting",
+            path_storage_limit: "round-trip evidence path storage",
+            positional_limit: "round-trip evidence positional path count",
+            positional_error: "verify-round-trip requires RUN_ROOT, RETURNED, and EVIDENCE_TARGET paths",
+            unknown_option_error: "unknown verify-round-trip option; use --help for usage",
+        },
+    )?;
+    let [run_root, returned, evidence_target] = parsed.paths;
     Ok(Command::VerifyRoundTrip {
         run_root,
         returned,
         evidence_target,
-        declaration,
-        tolerances,
+        declaration: parsed.declaration,
+        tolerances: parsed.tolerances,
     })
 }
 
-fn canonical_settings_profile(settings: &[OsString]) -> Result<String, WorkflowFailure> {
-    if settings.is_empty() {
-        return Err(invalid("at least one --downstream-setting is required"));
-    }
-    let mut values = Vec::new();
-    reserve(
-        &mut values,
-        settings.len(),
-        "downstream setting canonicalization storage",
+fn parse_compare_landxml<I>(arguments: &mut BoundedArguments<I>) -> Result<Command, WorkflowFailure>
+where
+    I: Iterator<Item = OsString>,
+{
+    let parsed = parse_round_trip_arguments(
+        arguments,
+        RoundTripCliGrammar {
+            application: "--application",
+            version: "--application-version",
+            settings_profile: "--settings-profile",
+            path_storage_limit: "round-trip path storage",
+            positional_limit: "round-trip positional path count",
+            positional_error: "compare-landxml requires REFERENCE and RETURNED paths",
+            unknown_option_error: "unknown compare-landxml option; use --help for usage",
+        },
     )?;
-    for value in settings {
-        let value = unicode(value, "--downstream-setting")?;
-        let (key, setting) = value
-            .split_once('=')
-            .ok_or_else(|| invalid("--downstream-setting requires nonempty KEY=VALUE text"))?;
-        if key.is_empty() || setting.is_empty() {
-            return Err(invalid(
-                "--downstream-setting requires nonempty KEY=VALUE text",
-            ));
-        }
-        if value.contains(';') {
-            return Err(invalid(
-                "--downstream-setting must not contain the canonical ';' separator",
-            ));
-        }
-        values.push(value);
-    }
-    values.sort_unstable();
-    if values.windows(2).any(|pair| pair[0] == pair[1]) {
-        return Err(invalid("duplicate --downstream-setting"));
-    }
-    let byte_length = values
-        .iter()
-        .try_fold(values.len().saturating_sub(1), |length, value| {
-            length.checked_add(value.len())
-        })
-        .ok_or_else(|| resource("settings profile bytes", u64::MAX, 1_024))?;
-    if byte_length > 1_024 {
-        return Err(resource(
-            "settings profile bytes",
-            u64::try_from(byte_length).unwrap_or(u64::MAX),
-            1_024,
-        ));
-    }
-    let mut profile = String::new();
-    profile.try_reserve_exact(byte_length).map_err(|_| {
-        resource(
-            "settings profile allocation",
-            u64::try_from(byte_length).unwrap_or(u64::MAX),
-            1_024,
-        )
-    })?;
-    for (index, value) in values.into_iter().enumerate() {
-        if index != 0 {
-            profile.push(';');
-        }
-        profile.push_str(value);
-    }
-    Ok(profile)
+    let [reference, returned] = parsed.paths;
+    Ok(Command::CompareLandXml {
+        reference,
+        returned,
+        declaration: parsed.declaration,
+        tolerances: parsed.tolerances,
+    })
 }
 
-fn parse_compare_landxml<I>(arguments: &mut BoundedArguments<I>) -> Result<Command, WorkflowFailure>
+#[derive(Clone, Copy)]
+struct RoundTripCliGrammar {
+    application: &'static str,
+    version: &'static str,
+    settings_profile: &'static str,
+    path_storage_limit: &'static str,
+    positional_limit: &'static str,
+    positional_error: &'static str,
+    unknown_option_error: &'static str,
+}
+
+struct ParsedRoundTripArguments<const PATHS: usize> {
+    paths: [PathBuf; PATHS],
+    declaration: RoundTripDeclaration,
+    tolerances: RoundTripTolerances,
+}
+
+fn parse_round_trip_arguments<I, const PATHS: usize>(
+    arguments: &mut BoundedArguments<I>,
+    grammar: RoundTripCliGrammar,
+) -> Result<ParsedRoundTripArguments<PATHS>, WorkflowFailure>
 where
     I: Iterator<Item = OsString>,
 {
@@ -504,23 +437,23 @@ where
     let mut horizontal_tolerance = None;
     let mut vertical_tolerance = None;
     let mut paths = Vec::new();
-    reserve(&mut paths, 2, "round-trip path storage")?;
+    reserve(&mut paths, PATHS, grammar.path_storage_limit)?;
     while let Some(argument) = arguments.next()? {
         match argument.to_str() {
-            Some("--application") => set_once(
+            Some(option) if option == grammar.application => set_once(
                 &mut application,
-                arguments.require_value("--application")?,
-                "--application",
+                arguments.require_value(grammar.application)?,
+                grammar.application,
             )?,
-            Some("--application-version") => set_once(
+            Some(option) if option == grammar.version => set_once(
                 &mut version,
-                arguments.require_value("--application-version")?,
-                "--application-version",
+                arguments.require_value(grammar.version)?,
+                grammar.version,
             )?,
-            Some("--settings-profile") => set_once(
+            Some(option) if option == grammar.settings_profile => set_once(
                 &mut settings_profile,
-                arguments.require_value("--settings-profile")?,
-                "--settings-profile",
+                arguments.require_value(grammar.settings_profile)?,
+                grammar.settings_profile,
             )?,
             Some("--horizontal-tolerance-metres") => set_once(
                 &mut horizontal_tolerance,
@@ -539,39 +472,37 @@ where
                 "--vertical-tolerance-metres",
             )?,
             Some(value) if value.starts_with('-') => {
-                return Err(invalid(
-                    "unknown compare-landxml option; use --help for usage",
-                ));
+                return Err(invalid(grammar.unknown_option_error));
             }
             _ => push_bounded(
                 &mut paths,
                 PathBuf::from(argument),
-                2,
-                "round-trip positional path count",
+                PATHS,
+                grammar.positional_limit,
             )?,
         }
     }
-    let [reference, returned]: [PathBuf; 2] = paths
+    let paths = paths
         .try_into()
-        .map_err(|_| invalid("compare-landxml requires REFERENCE and RETURNED paths"))?;
+        .map_err(|_| invalid(grammar.positional_error))?;
     let declaration = RoundTripDeclaration::new(
         unicode(
             application
                 .as_ref()
-                .ok_or_else(|| invalid("missing --application"))?,
-            "--application",
+                .ok_or_else(|| invalid(format_args!("missing {}", grammar.application)))?,
+            grammar.application,
         )?,
         unicode(
             version
                 .as_ref()
-                .ok_or_else(|| invalid("missing --application-version"))?,
-            "--application-version",
+                .ok_or_else(|| invalid(format_args!("missing {}", grammar.version)))?,
+            grammar.version,
         )?,
         unicode(
             settings_profile
                 .as_ref()
-                .ok_or_else(|| invalid("missing --settings-profile"))?,
-            "--settings-profile",
+                .ok_or_else(|| invalid(format_args!("missing {}", grammar.settings_profile)))?,
+            grammar.settings_profile,
         )?,
     )
     .map_err(|error| round_trip_failure(&error))?;
@@ -580,247 +511,11 @@ where
         vertical_tolerance.ok_or_else(|| invalid("missing --vertical-tolerance-metres"))?,
     )
     .map_err(|error| round_trip_failure(&error))?;
-    Ok(Command::CompareLandXml {
-        reference,
-        returned,
+    Ok(ParsedRoundTripArguments {
+        paths,
         declaration,
         tolerances,
     })
-}
-
-fn verify_round_trip(
-    run_root: &Path,
-    returned: &Path,
-    evidence_target: &Path,
-    declaration: RoundTripDeclaration,
-    tolerances: RoundTripTolerances,
-) -> Result<String, WorkflowFailure> {
-    let limits = RoundTripLimits::default();
-    let qualification =
-        CompleteRunQualification::acquire(run_root, crate::journal::JournalLimits::default())
-            .map_err(qualification_failure)?;
-    let artifacts = qualification
-        .verify_artifacts()
-        .map_err(qualification_failure)?;
-    validate_audit_binding(&artifacts.audit_json, qualification.snapshot())?;
-    verify_qualified_run(&qualification, &artifacts).map_err(qualification_failure)?;
-
-    let reference = qualification
-        .verify_reference()
-        .map_err(qualification_failure)?;
-    let evaluation =
-        evaluate_landxml_round_trip(&reference, returned, declaration, tolerances, limits)
-            .map_err(|error| round_trip_failure(&error))?;
-    verify_qualified_run(&qualification, &artifacts).map_err(qualification_failure)?;
-    let receipt = publish_evidence(
-        evidence_target,
-        qualification.run_root(),
-        qualification.snapshot(),
-        &evaluation,
-        limits,
-    )
-    .map_err(evidence_failure)?;
-    verify_qualified_run(&qualification, &artifacts)
-        .map_err(|error| published_qualification_failure(&error))?;
-    if let RoundTripEvaluation::Failed(report) = &evaluation {
-        let reason = report
-            .failure()
-            .reason()
-            .expect("semantic failed evidence has a reason");
-        return Err(run_bound_failure(
-            FailureCode::RoundTripSemanticMismatch,
-            Certainty::DurableFact,
-            format_args!(
-                "canonical failed evidence published: reason {}, hash {}, bytes {}",
-                reason.as_str(),
-                Hex(&receipt.content_hash),
-                receipt.byte_length
-            ),
-            RecoveryAction::ReviewReturnedLandXml,
-        ));
-    }
-    Ok(format!(
-        "LandXML round-trip evidence published\n\
-result {}\n\
-run {}\n\
-evidence hash {}\n\
-evidence bytes {}\n\
-semantic reason none\n\
-run bound true\n\
-canonical evidence published true\n\
-external application execution verified false\n",
-        receipt.result.as_str(),
-        qualification.snapshot().run,
-        Hex(&receipt.content_hash),
-        receipt.byte_length,
-    ))
-}
-
-fn verify_qualified_run(
-    qualification: &CompleteRunQualification,
-    artifacts: &crate::qualification::QualifiedRunArtifacts,
-) -> Result<(), QualificationError> {
-    qualification.verify()?;
-    artifacts.verify()
-}
-
-fn validate_audit_binding(
-    bytes: &[u8],
-    snapshot: &crate::qualification::CompleteRunQualificationSnapshot,
-) -> Result<(), WorkflowFailure> {
-    let report: AuditBinding<'_> = serde_json::from_slice(bytes).map_err(|error| {
-        run_bound_failure(
-            FailureCode::JournalCorrupt,
-            Certainty::DurableFact,
-            format_args!("audit.json is not valid canonical JSON: {error}"),
-            RecoveryAction::StopAndPreserve,
-        )
-    })?;
-    let valid = report.schema == "punctra.terrain-workflow.audit.v1"
-        && hex_matches(report.identities.run, snapshot.run.as_bytes())
-        && hex_matches(report.request.request_hash, &snapshot.request_hash)
-        && hex_matches(report.identities.source, &snapshot.source)
-        && hex_matches(report.identities.workspace, &snapshot.workspace)
-        && hex_matches(
-            report.identities.baseline_revision,
-            &snapshot.baseline_revision,
-        )
-        && hex_matches(report.identities.changed_revision, &snapshot.revision)
-        && hex_matches(report.identities.operation, &snapshot.operation)
-        && hex_matches(report.landxml.content_hash, &snapshot.landxml_hash)
-        && report.landxml.byte_length == snapshot.landxml_bytes;
-    if valid {
-        Ok(())
-    } else {
-        Err(run_bound_failure(
-            FailureCode::JournalCorrupt,
-            Certainty::DurableFact,
-            "audit.json identities or LandXML facts differ from the Complete journal",
-            RecoveryAction::StopAndPreserve,
-        ))
-    }
-}
-
-#[derive(Deserialize)]
-struct AuditBinding<'a> {
-    schema: &'a str,
-    #[serde(borrow)]
-    identities: AuditIdentities<'a>,
-    #[serde(borrow)]
-    request: AuditRequest<'a>,
-    #[serde(borrow)]
-    landxml: AuditLandXml<'a>,
-}
-
-#[derive(Deserialize)]
-struct AuditIdentities<'a> {
-    run: &'a str,
-    source: &'a str,
-    workspace: &'a str,
-    baseline_revision: &'a str,
-    changed_revision: &'a str,
-    operation: &'a str,
-}
-
-#[derive(Deserialize)]
-struct AuditRequest<'a> {
-    request_hash: &'a str,
-}
-
-#[derive(Deserialize)]
-struct AuditLandXml<'a> {
-    content_hash: &'a str,
-    byte_length: u64,
-}
-
-fn hex_matches(text: &str, expected: &[u8]) -> bool {
-    const DIGITS: &[u8; 16] = b"0123456789abcdef";
-    text.len() == expected.len().saturating_mul(2)
-        && text
-            .as_bytes()
-            .chunks_exact(2)
-            .zip(expected)
-            .all(|(hex, byte)| {
-                hex == [
-                    DIGITS[usize::from(byte >> 4)],
-                    DIGITS[usize::from(byte & 0x0f)],
-                ]
-            })
-}
-
-fn qualification_failure(error: QualificationError) -> WorkflowFailure {
-    let (code, action) = match &error {
-        QualificationError::Journal(_) => {
-            (FailureCode::JournalCorrupt, RecoveryAction::StopAndPreserve)
-        }
-        QualificationError::Conflict(_) | QualificationError::ArtifactConflict { .. } => {
-            (FailureCode::OutputConflict, RecoveryAction::StopAndPreserve)
-        }
-        QualificationError::ArtifactResource { .. } => (
-            FailureCode::RoundTripResourceLimit,
-            RecoveryAction::UseSupportedRoundTripSize,
-        ),
-        QualificationError::Io { .. } => (FailureCode::Io, RecoveryAction::RetryAfterRestoringDisk),
-    };
-    run_bound_failure(code, Certainty::PrePublication, error, action)
-}
-
-fn published_qualification_failure(error: &QualificationError) -> WorkflowFailure {
-    run_bound_failure(
-        FailureCode::PublicationIndeterminate,
-        Certainty::Indeterminate(crate::diagnostic::PublicationPhase::RoundTripEvidenceTarget),
-        format_args!(
-            "canonical evidence target may exist, but its Complete Run witness could not be revalidated: {error}"
-        ),
-        RecoveryAction::StopAndPreserve,
-    )
-}
-
-fn evidence_failure(error: EvidenceError) -> WorkflowFailure {
-    match error {
-        EvidenceError::Conflict(_)
-        | EvidenceError::RunBindingConflict
-        | EvidenceError::InvalidTarget => run_bound_failure(
-            FailureCode::OutputConflict,
-            Certainty::PrePublication,
-            error,
-            RecoveryAction::RemoveOrRenameConflictingTarget,
-        ),
-        EvidenceError::Resource(_) => run_bound_failure(
-            FailureCode::RoundTripResourceLimit,
-            Certainty::PrePublication,
-            error,
-            RecoveryAction::UseSupportedRoundTripSize,
-        ),
-        EvidenceError::Indeterminate { .. } => run_bound_failure(
-            FailureCode::PublicationIndeterminate,
-            Certainty::Indeterminate(crate::diagnostic::PublicationPhase::RoundTripEvidenceTarget),
-            error,
-            RecoveryAction::StopAndPreserve,
-        ),
-        EvidenceError::Io { .. } | EvidenceError::Encode(_) => run_bound_failure(
-            FailureCode::Io,
-            Certainty::PrePublication,
-            error,
-            RecoveryAction::RetryAfterRestoringDisk,
-        ),
-    }
-}
-
-fn run_bound_failure(
-    code: FailureCode,
-    certainty: Certainty,
-    error: impl std::fmt::Display,
-    action: RecoveryAction,
-) -> WorkflowFailure {
-    WorkflowFailure::new(
-        code,
-        WorkflowStage::RoundTrip,
-        certainty,
-        FailureContext::default(),
-        error,
-        action,
-    )
 }
 
 struct BoundedArguments<I> {
@@ -1032,6 +727,131 @@ fn round_trip_failure(error: &RoundTripFailure) -> WorkflowFailure {
     )
 }
 
+fn round_trip_evidence_failure(error: RoundTripEvidenceError) -> WorkflowFailure {
+    match error {
+        RoundTripEvidenceError::Comparison(error) => round_trip_failure(&error),
+        RoundTripEvidenceError::Publication(error) => {
+            use crate::canonical_output::{CanonicalOutputErrorClass, CanonicalOutputRetry};
+            match error.classify() {
+                CanonicalOutputErrorClass::Conflict => WorkflowFailure::new(
+                    FailureCode::OutputConflict,
+                    WorkflowStage::RoundTrip,
+                    Certainty::DurableFact,
+                    FailureContext::default(),
+                    error,
+                    RecoveryAction::RemoveOrRenameConflictingTarget,
+                ),
+                CanonicalOutputErrorClass::PublicationIndeterminate => WorkflowFailure::new(
+                    FailureCode::PublicationIndeterminate,
+                    WorkflowStage::RoundTrip,
+                    Certainty::Indeterminate(
+                        crate::diagnostic::PublicationPhase::RoundTripEvidenceTarget,
+                    ),
+                    FailureContext::default(),
+                    error,
+                    RecoveryAction::RetryRoundTripEvidence,
+                ),
+                CanonicalOutputErrorClass::PrePublicationIo(retry) => WorkflowFailure::new(
+                    FailureCode::Io,
+                    WorkflowStage::RoundTrip,
+                    Certainty::PrePublication,
+                    FailureContext::default(),
+                    error,
+                    match retry {
+                        CanonicalOutputRetry::SameIntent => RecoveryAction::RetryRoundTripEvidence,
+                        CanonicalOutputRetry::AfterRestoringDisk => {
+                            RecoveryAction::RetryAfterRestoringDisk
+                        }
+                    },
+                ),
+                CanonicalOutputErrorClass::ResourceLimit => WorkflowFailure::new(
+                    FailureCode::RoundTripResourceLimit,
+                    WorkflowStage::RoundTrip,
+                    Certainty::PrePublication,
+                    FailureContext::default(),
+                    error,
+                    RecoveryAction::UseSupportedRoundTripSize,
+                ),
+                CanonicalOutputErrorClass::Cancelled => WorkflowFailure::new(
+                    FailureCode::Cancelled,
+                    WorkflowStage::RoundTrip,
+                    Certainty::PrePublication,
+                    FailureContext::default(),
+                    error,
+                    RecoveryAction::ResumeSameRun,
+                ),
+                CanonicalOutputErrorClass::InvalidInput => WorkflowFailure::new(
+                    FailureCode::RoundTripInvalidInput,
+                    WorkflowStage::RoundTrip,
+                    Certainty::PrePublication,
+                    FailureContext::default(),
+                    error,
+                    RecoveryAction::CorrectRoundTripInput,
+                ),
+            }
+        }
+        RoundTripEvidenceError::Invalid(error) => WorkflowFailure::new(
+            FailureCode::RoundTripInvalidInput,
+            WorkflowStage::RoundTrip,
+            Certainty::PrePublication,
+            FailureContext::default(),
+            error,
+            RecoveryAction::CorrectRoundTripInput,
+        ),
+        RoundTripEvidenceError::Journal(error) => round_trip_journal_failure(error),
+    }
+}
+
+fn round_trip_journal_failure(error: crate::journal::JournalError) -> WorkflowFailure {
+    use crate::journal::JournalError;
+
+    let (code, certainty, action) = match &error {
+        JournalError::Resource { .. } => (
+            FailureCode::RoundTripResourceLimit,
+            Certainty::PrePublication,
+            RecoveryAction::UseSupportedRoundTripSize,
+        ),
+        JournalError::Corrupt(_) | JournalError::Incompatible(_) => (
+            FailureCode::JournalCorrupt,
+            Certainty::DurableFact,
+            RecoveryAction::StopAndPreserve,
+        ),
+        JournalError::Exists(_) | JournalError::Conflict(_) => (
+            FailureCode::JournalConflict,
+            Certainty::DurableFact,
+            RecoveryAction::StopAndPreserve,
+        ),
+        JournalError::Locked => (
+            FailureCode::Io,
+            Certainty::PrePublication,
+            RecoveryAction::ResumeSameRun,
+        ),
+        JournalError::Entropy | JournalError::Io { .. } => (
+            FailureCode::Io,
+            Certainty::PrePublication,
+            RecoveryAction::RetryAfterRestoringDisk,
+        ),
+        JournalError::Invalid(_) => (
+            FailureCode::RoundTripInvalidInput,
+            Certainty::PrePublication,
+            RecoveryAction::CorrectRoundTripInput,
+        ),
+        JournalError::Indeterminate { .. } | JournalError::CheckpointIndeterminate { .. } => (
+            FailureCode::PublicationIndeterminate,
+            Certainty::Indeterminate(crate::diagnostic::PublicationPhase::RoundTripEvidenceTarget),
+            RecoveryAction::StopAndPreserve,
+        ),
+    };
+    WorkflowFailure::new(
+        code,
+        WorkflowStage::RoundTrip,
+        certainty,
+        FailureContext::default(),
+        error,
+        action,
+    )
+}
+
 fn round_trip_cli_failure(error: WorkflowFailure) -> WorkflowFailure {
     match error.code {
         FailureCode::RoundTripInvalidInput
@@ -1104,6 +924,17 @@ external application execution verified false\n",
     )
 }
 
+fn round_trip_evidence_summary(receipt: RoundTripEvidenceReceipt) -> String {
+    debug_assert_eq!(receipt.result, QualificationResult::Passed);
+    format!(
+        "LandXML round-trip {}\nRun {}\ncanonical evidence published true\nevidence hash {}\nevidence bytes {}\nexternal application execution verified false\n",
+        receipt.result.as_str(),
+        receipt.run,
+        Hex(&receipt.evidence_hash),
+        receipt.evidence_bytes,
+    )
+}
+
 struct Hex<'a>(&'a [u8]);
 
 impl std::fmt::Display for Hex<'_> {
@@ -1118,22 +949,46 @@ impl std::fmt::Display for Hex<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{
+        canonical_output::CanonicalOutputError, roundtrip_evidence::RoundTripEvidenceError,
+    };
 
     #[test]
-    fn downstream_settings_are_canonical_and_unambiguous() {
-        let settings = [OsString::from("z=last"), OsString::from("a=first")];
+    fn evidence_target_replacement_is_retryable_prepublication_io() {
+        let failure = round_trip_evidence_failure(RoundTripEvidenceError::Publication(
+            CanonicalOutputError::TargetChanged {
+                path: PathBuf::from("round-trip-evidence.json"),
+            },
+        ));
+
+        assert_eq!(failure.code(), "PWF_IO");
+        assert_eq!(failure.certainty(), "pre_publication");
+        assert_eq!(failure.publication_phase(), None);
         assert_eq!(
-            canonical_settings_profile(&settings).unwrap(),
-            "a=first;z=last"
+            failure.recovery_action(),
+            "retry verify-round-trip with the same Run, returned LandXML, and evidence target"
         );
+    }
 
-        let ambiguous = [OsString::from("a=first;z=last")];
-        assert!(canonical_settings_profile(&ambiguous).is_err());
+    #[test]
+    fn indeterminate_evidence_publication_retries_through_the_owning_interface() {
+        let failure = round_trip_evidence_failure(RoundTripEvidenceError::Publication(
+            CanonicalOutputError::Indeterminate {
+                path: PathBuf::from("round-trip-evidence.json"),
+                expected_hash: [1; 32],
+                source: std::io::Error::other("parent sync failed after publication"),
+            },
+        ));
 
-        let exact = [OsString::from(format!("key={}", "v".repeat(1_020)))];
-        assert_eq!(canonical_settings_profile(&exact).unwrap().len(), 1_024);
-        let over = [OsString::from(format!("key={}", "v".repeat(1_021)))];
-        let error = canonical_settings_profile(&over).unwrap_err();
-        assert_eq!(error.code, FailureCode::ResourceLimit);
+        assert_eq!(failure.code(), "PWF_PUBLICATION_INDETERMINATE");
+        assert_eq!(failure.certainty(), "indeterminate");
+        assert_eq!(
+            failure.publication_phase(),
+            Some("round-trip-evidence-target")
+        );
+        assert_eq!(
+            failure.recovery_action(),
+            "retry verify-round-trip with the same Run, returned LandXML, and evidence target"
+        );
     }
 }

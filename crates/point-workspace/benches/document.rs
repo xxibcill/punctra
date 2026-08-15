@@ -148,7 +148,7 @@ fn report_selection_resources(workspace: &Workspace, workspace_path: &Path, poin
     drop(resident);
 
     let scratch_path = workspace_path.join("scratch");
-    let scratch_baseline = logical_directory_entry_bytes(&scratch_path);
+    let scratch_baseline_bytes = logical_directory_entry_bytes(&scratch_path);
     let rss_before_spill = process_rss_bytes().expect("sample pre-spill process RSS with ps");
     let spill_job = root.select(PointQuery::all(), forced_spill_limits());
     let handle = spill_job.handle();
@@ -167,11 +167,23 @@ fn report_selection_resources(workspace: &Workspace, workspace_path: &Path, poin
         .expect("resource-report forced-spill selection succeeds");
     peak_rss =
         peak_rss.max(process_rss_bytes().expect("sample completed-spill process RSS with ps"));
-    let scratch_before_drop = logical_directory_entry_bytes(&scratch_path);
-    assert!(
-        scratch_before_drop > scratch_baseline,
-        "the live append-only spill contributes temporary payload"
+    assert_eq!(
+        fs::read_dir(&scratch_path)
+            .expect("read completed spill directory")
+            .filter(|entry| {
+                entry.as_ref().ok().is_some_and(|entry| {
+                    entry
+                        .path()
+                        .extension()
+                        .is_some_and(|extension| extension == "pset")
+                })
+            })
+            .count(),
+        1,
+        "one append-only sealed spill owns the monotonically grown temporary payload"
     );
+    let peak_temporary_bytes =
+        logical_directory_entry_bytes(&scratch_path).saturating_sub(scratch_baseline_bytes);
     assert_eq!(spilled.metadata().exact_count(), point_count);
     eprintln!(
         "point-workspace resource evidence: points={} resident_process_rss={} spill_baseline_rss={} spill_peak_process_rss={} spill_peak_rss_delta={} spill_peak_temporary_bytes={}",
@@ -180,7 +192,7 @@ fn report_selection_resources(workspace: &Workspace, workspace_path: &Path, poin
         rss_before_spill,
         peak_rss,
         peak_rss.saturating_sub(rss_before_spill),
-        scratch_before_drop
+        peak_temporary_bytes
     );
     eprintln!(
         "point-workspace worker peak heap: unclaimed (process RSS is reported separately; synchronous allocation-counter evidence covers only public Point-ID iteration)"
@@ -188,8 +200,8 @@ fn report_selection_resources(workspace: &Workspace, workspace_path: &Path, poin
     drop(spilled);
     assert_eq!(
         logical_directory_entry_bytes(&scratch_path),
-        scratch_baseline,
-        "dropping the final handle clears owned spill bytes without unlinking its name"
+        scratch_baseline_bytes.saturating_add(peak_temporary_bytes),
+        "the bounded spill is retained because pathname cleanup cannot exclude a racing replacement"
     );
 }
 

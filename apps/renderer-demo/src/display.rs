@@ -1,10 +1,45 @@
-use std::{ffi::OsStr, fmt};
+use std::{error::Error, ffi::OsStr, fmt};
 
 use point_contracts::{AttributeDataType, AttributeId, SourceMetadata, WorldBounds};
-use point_index::DisplayAttributes;
+use point_index::{DisplayAttributes, IndexRecipe, InspectionAttributeIds};
 
 /// Stable neutral display color used when no semantic mode is selected.
 pub const NEUTRAL_COLOR: [u8; 4] = [190, 205, 220, 255];
+
+/// Stable `source-las` Attribute identity for raw pulse-return intensity.
+pub const LAS_INTENSITY_ATTRIBUTE: AttributeId = fixed_attribute_id(1);
+
+/// Stable `source-las` Attribute identity for raw classification.
+pub const LAS_CLASSIFICATION_ATTRIBUTE: AttributeId = fixed_attribute_id(6);
+
+/// Stable `source-las` Attribute identities for raw red, green, and blue channels.
+pub const LAS_RGB_ATTRIBUTES: [AttributeId; 3] = [
+    fixed_attribute_id(16),
+    fixed_attribute_id(17),
+    fixed_attribute_id(18),
+];
+
+const fn fixed_attribute_id(value: u32) -> AttributeId {
+    match AttributeId::new(value) {
+        Ok(id) => id,
+        Err(_) => panic!("fixed LAS Attribute identity must be nonzero"),
+    }
+}
+
+/// Returns the single fixed inspection Attribute profile used by this host.
+///
+/// # Panics
+///
+/// Panics if the checked-in LAS Attribute identities stop being distinct.
+#[must_use]
+pub fn inspection_attribute_ids() -> InspectionAttributeIds {
+    InspectionAttributeIds::new(
+        LAS_INTENSITY_ATTRIBUTE,
+        LAS_CLASSIFICATION_ATTRIBUTE,
+        LAS_RGB_ATTRIBUTES,
+    )
+    .expect("fixed LAS inspection Attribute identities are distinct")
+}
 
 const ELEVATION_COLORS: [[u8; 4]; 5] = [
     [68, 1, 84, 255],
@@ -28,6 +63,44 @@ pub enum DisplayMode {
     Intensity,
     /// Raw unsigned 8-bit LAS classification.
     Classification,
+}
+
+/// Index recipe, artifact naming, and version policy for one display family.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DisplayIndexPolicy {
+    /// Position-only samples used by neutral and elevation display.
+    PositionOnly,
+    /// Attributed inspection samples used by RGB, intensity, and classification.
+    Inspection,
+}
+
+impl DisplayIndexPolicy {
+    /// Builds the exact index recipe for this display family.
+    #[must_use]
+    pub fn recipe(self) -> IndexRecipe {
+        match self {
+            Self::PositionOnly => IndexRecipe::PositionOnlyV1,
+            Self::Inspection => IndexRecipe::InspectionV1(inspection_attribute_ids()),
+        }
+    }
+
+    /// Returns the default suffix appended to the complete Source path.
+    #[must_use]
+    pub const fn target_suffix(self) -> &'static str {
+        match self {
+            Self::PositionOnly => ".pidx",
+            Self::Inspection => ".inspection-v2.pidx",
+        }
+    }
+
+    /// Returns the expected recipe and disk versions.
+    #[must_use]
+    pub const fn versions(self) -> (u32, u32) {
+        match self {
+            Self::PositionOnly => (1, 1),
+            Self::Inspection => (2, 2),
+        }
+    }
 }
 
 impl DisplayMode {
@@ -58,7 +131,16 @@ impl DisplayMode {
     /// Reports whether the v2 attributed inspection recipe is required.
     #[must_use]
     pub const fn requires_inspection_index(self) -> bool {
-        matches!(self, Self::Rgb | Self::Intensity | Self::Classification)
+        matches!(self.index_policy(), DisplayIndexPolicy::Inspection)
+    }
+
+    /// Returns the complete index policy for this display mode.
+    #[must_use]
+    pub const fn index_policy(self) -> DisplayIndexPolicy {
+        match self {
+            Self::Neutral | Self::Elevation => DisplayIndexPolicy::PositionOnly,
+            Self::Rgb | Self::Intensity | Self::Classification => DisplayIndexPolicy::Inspection,
+        }
     }
 
     /// Validates the fixed Source Attribute inputs required by this host mode.
@@ -71,15 +153,19 @@ impl DisplayMode {
         if !self.requires_inspection_index() {
             return Ok(());
         }
-        if !has_attribute(metadata, 1, AttributeDataType::U16)
-            || !has_attribute(metadata, 6, AttributeDataType::U8)
+        if !has_attribute(metadata, LAS_INTENSITY_ATTRIBUTE, AttributeDataType::U16)
+            || !has_attribute(
+                metadata,
+                LAS_CLASSIFICATION_ATTRIBUTE,
+                AttributeDataType::U8,
+            )
         {
             return Err(
                 "attributed display requires LAS intensity Attribute 1 as U16 and classification Attribute 6 as U8",
             );
         }
         if self == Self::Rgb
-            && ![16, 17, 18]
+            && !LAS_RGB_ATTRIBUTES
                 .into_iter()
                 .all(|id| has_attribute(metadata, id, AttributeDataType::U16))
         {
@@ -89,8 +175,7 @@ impl DisplayMode {
     }
 }
 
-fn has_attribute(metadata: &SourceMetadata, value: u32, data_type: AttributeDataType) -> bool {
-    let id = AttributeId::new(value).expect("the fixed LAS Attribute identities are nonzero");
+fn has_attribute(metadata: &SourceMetadata, id: AttributeId, data_type: AttributeDataType) -> bool {
     metadata
         .attributes()
         .get(id)
@@ -127,6 +212,25 @@ pub enum PointColorizer {
     Classification,
 }
 
+/// Failure to provide the explicit sampled input required by a display mode.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DisplayMappingError {
+    /// An attributed display received no inspection Attribute row.
+    MissingAttributes(DisplayMode),
+}
+
+impl fmt::Display for DisplayMappingError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::MissingAttributes(mode) => {
+                write!(formatter, "{mode} display requires inspection Attributes")
+            }
+        }
+    }
+}
+
+impl Error for DisplayMappingError {}
+
 impl PointColorizer {
     /// Binds Source-wide facts needed by one display mode.
     #[must_use]
@@ -149,23 +253,37 @@ impl PointColorizer {
     }
 
     /// Maps one sample to the exact RGBA8 bytes uploaded by the renderer.
-    #[must_use]
-    pub fn color(self, world_z: f64, attributes: Option<DisplayAttributes>) -> [u8; 4] {
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DisplayMappingError::MissingAttributes`] when an attributed
+    /// display receives no explicit inspection Attribute row.
+    pub fn color(
+        self,
+        world_z: f64,
+        attributes: Option<DisplayAttributes>,
+    ) -> Result<[u8; 4], DisplayMappingError> {
         match self {
-            Self::Neutral => NEUTRAL_COLOR,
+            Self::Neutral => Ok(NEUTRAL_COLOR),
             Self::Elevation {
                 source_z_range: Some([minimum, maximum]),
-            } => elevation_color(world_z, minimum, maximum),
+            } => Ok(elevation_color(world_z, minimum, maximum)),
             Self::Elevation {
                 source_z_range: None,
-            } => ELEVATION_COLORS[2],
-            Self::Rgb => attributes.map_or(NEUTRAL_COLOR, |attributes| rgb_color(attributes.rgb())),
-            Self::Intensity => attributes.map_or(NEUTRAL_COLOR, |attributes| {
-                intensity_color(attributes.intensity())
-            }),
-            Self::Classification => attributes.map_or(NEUTRAL_COLOR, |attributes| {
-                classification_color(attributes.classification())
-            }),
+            } => Ok(ELEVATION_COLORS[2]),
+            Self::Rgb => attributes
+                .map(|attributes| rgb_color(attributes.rgb()))
+                .ok_or(DisplayMappingError::MissingAttributes(DisplayMode::Rgb)),
+            Self::Intensity => attributes
+                .map(|attributes| intensity_color(attributes.intensity()))
+                .ok_or(DisplayMappingError::MissingAttributes(
+                    DisplayMode::Intensity,
+                )),
+            Self::Classification => attributes
+                .map(|attributes| classification_color(attributes.classification()))
+                .ok_or(DisplayMappingError::MissingAttributes(
+                    DisplayMode::Classification,
+                )),
         }
     }
 }
@@ -291,12 +409,28 @@ mod tests {
     }
 
     #[test]
+    fn display_index_policy_keeps_recipe_suffix_and_versions_together() {
+        let position_only = DisplayMode::Elevation.index_policy();
+        assert_eq!(position_only.target_suffix(), ".pidx");
+        assert_eq!(position_only.versions(), (1, 1));
+        assert!(matches!(
+            position_only.recipe(),
+            IndexRecipe::PositionOnlyV1
+        ));
+
+        let inspection = DisplayMode::Classification.index_policy();
+        assert_eq!(inspection.target_suffix(), ".inspection-v2.pidx");
+        assert_eq!(inspection.versions(), (2, 2));
+        assert!(matches!(inspection.recipe(), IndexRecipe::InspectionV1(_)));
+    }
+
+    #[test]
     fn neutral_color_does_not_depend_on_source_elevation() {
         let bounds = WorldBounds::new([-10.0; 3], [10.0; 3]).unwrap();
         let colorizer = PointColorizer::for_source(DisplayMode::Neutral, Some(bounds));
 
-        assert_eq!(colorizer.color(-1_000.0, None), NEUTRAL_COLOR);
-        assert_eq!(colorizer.color(1_000.0, None), NEUTRAL_COLOR);
+        assert_eq!(colorizer.color(-1_000.0, None).unwrap(), NEUTRAL_COLOR);
+        assert_eq!(colorizer.color(1_000.0, None).unwrap(), NEUTRAL_COLOR);
     }
 
     #[test]
@@ -304,13 +438,13 @@ mod tests {
         let bounds = WorldBounds::new([0.0, 0.0, 100.0], [1.0, 1.0, 200.0]).unwrap();
         let colorizer = PointColorizer::for_source(DisplayMode::Elevation, Some(bounds));
 
-        assert_eq!(colorizer.color(0.0, None), ELEVATION_COLORS[0]);
-        assert_eq!(colorizer.color(100.0, None), ELEVATION_COLORS[0]);
-        assert_eq!(colorizer.color(125.0, None), ELEVATION_COLORS[1]);
-        assert_eq!(colorizer.color(150.0, None), ELEVATION_COLORS[2]);
-        assert_eq!(colorizer.color(175.0, None), ELEVATION_COLORS[3]);
-        assert_eq!(colorizer.color(200.0, None), ELEVATION_COLORS[4]);
-        assert_eq!(colorizer.color(300.0, None), ELEVATION_COLORS[4]);
+        assert_eq!(colorizer.color(0.0, None).unwrap(), ELEVATION_COLORS[0]);
+        assert_eq!(colorizer.color(100.0, None).unwrap(), ELEVATION_COLORS[0]);
+        assert_eq!(colorizer.color(125.0, None).unwrap(), ELEVATION_COLORS[1]);
+        assert_eq!(colorizer.color(150.0, None).unwrap(), ELEVATION_COLORS[2]);
+        assert_eq!(colorizer.color(175.0, None).unwrap(), ELEVATION_COLORS[3]);
+        assert_eq!(colorizer.color(200.0, None).unwrap(), ELEVATION_COLORS[4]);
+        assert_eq!(colorizer.color(300.0, None).unwrap(), ELEVATION_COLORS[4]);
     }
 
     #[test]
@@ -340,8 +474,31 @@ mod tests {
         let flat = PointColorizer::for_source(DisplayMode::Elevation, Some(flat_bounds));
         let empty = PointColorizer::for_source(DisplayMode::Elevation, None);
 
-        assert_eq!(flat.color(42.0, None), ELEVATION_COLORS[2]);
-        assert_eq!(empty.color(42.0, None), ELEVATION_COLORS[2]);
+        assert_eq!(flat.color(42.0, None).unwrap(), ELEVATION_COLORS[2]);
+        assert_eq!(empty.color(42.0, None).unwrap(), ELEVATION_COLORS[2]);
+    }
+
+    #[test]
+    fn attributed_modes_reject_missing_rows_instead_of_using_neutral_color() {
+        for (mode, expected) in [
+            (
+                DisplayMode::Rgb,
+                DisplayMappingError::MissingAttributes(DisplayMode::Rgb),
+            ),
+            (
+                DisplayMode::Intensity,
+                DisplayMappingError::MissingAttributes(DisplayMode::Intensity),
+            ),
+            (
+                DisplayMode::Classification,
+                DisplayMappingError::MissingAttributes(DisplayMode::Classification),
+            ),
+        ] {
+            assert_eq!(
+                PointColorizer::for_source(mode, None).color(0.0, None),
+                Err(expected)
+            );
+        }
     }
 
     #[test]
@@ -355,15 +512,40 @@ mod tests {
     }
 
     #[test]
-    fn every_u8_classification_has_one_deterministic_opaque_color() {
-        assert_eq!(classification_color(2), [139, 95, 57, 255]);
-        assert_eq!(classification_color(6), [220, 70, 70, 255]);
-        assert_eq!(classification_color(18), [245, 245, 245, 255]);
-        assert_eq!(classification_color(19), [148, 150, 214, 255]);
-        for value in u8::MIN..=u8::MAX {
-            let color = classification_color(value);
-            assert_eq!(color, classification_color(value));
-            assert_eq!(color[3], 255);
+    fn every_u8_classification_matches_the_exact_mapping_oracle() {
+        let standard = [
+            [120, 120, 120, 255],
+            [155, 155, 155, 255],
+            [139, 95, 57, 255],
+            [80, 180, 80, 255],
+            [45, 150, 45, 255],
+            [20, 110, 20, 255],
+            [220, 70, 70, 255],
+            [200, 200, 200, 255],
+            [170, 120, 220, 255],
+            [80, 150, 230, 255],
+            [60, 100, 210, 255],
+            [40, 180, 210, 255],
+            [230, 170, 60, 255],
+            [220, 120, 40, 255],
+            [235, 80, 150, 255],
+            [170, 70, 170, 255],
+            [255, 220, 80, 255],
+            [100, 220, 190, 255],
+            [245, 245, 245, 255],
+        ];
+        for (classification, expected) in (u8::MIN..=18).zip(standard) {
+            assert_eq!(classification_color(classification), expected);
+        }
+
+        for classification in 19..=u8::MAX {
+            let channel = |factor: u16, offset: u16| {
+                u8::try_from((u16::from(classification) * factor + offset) % 256).unwrap()
+            };
+            assert_eq!(
+                classification_color(classification),
+                [channel(73, 41), channel(151, 97), channel(199, 17), 255]
+            );
         }
     }
 }

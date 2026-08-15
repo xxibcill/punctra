@@ -671,8 +671,8 @@ fn forced_spill_point_set_remains_exact_and_repeatable() {
     assert!(spilled.summary().accounted_peak_working_bytes() <= limits.max_working_bytes());
 
     drop(spilled);
-    let after_spill_release = fixture.stable_owned_file_footprint();
-    assert_eq!(after_spill_release.bytes, with_resident.bytes);
+    let after_spill_drop = fixture.stable_owned_file_footprint();
+    assert_eq!(after_spill_drop, with_spill);
 }
 
 #[test]

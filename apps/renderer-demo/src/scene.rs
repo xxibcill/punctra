@@ -42,6 +42,7 @@ pub(crate) struct SceneMetrics {
     pub(crate) staged_points: u64,
     pub(crate) staged_bytes: u64,
     pub(crate) peak_queued_batches: u64,
+    pub(crate) peak_queued_host_bytes: u64,
     pub(crate) peak_staged_points: u64,
     pub(crate) peak_staged_bytes: u64,
     pub(crate) cancelled_requests: u64,
@@ -174,7 +175,7 @@ impl SceneBackend for RealCloudScene {
     }
 
     fn highlight_ids(&self) -> Vec<PointId> {
-        Vec::new()
+        RealCloudScene::highlight_ids(self)
     }
 
     fn metrics(&self) -> SceneMetrics {

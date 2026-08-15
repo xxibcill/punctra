@@ -1,12 +1,17 @@
 # Module Catalog
 
-Status: current module ownership with the v0.10 professional inspection View
+Status: frozen module ownership through the completed v0.9 repository trust and
+version-1 compatibility candidate, with the v0.10 professional inspection View
 and repository-verified v0.11 exact-review technical slice; external evidence
 gates and broader terrain/export modules remain outstanding
 
 This is the ownership map for implemented crates. Each crate has one public
 job. Several private files may cooperate behind one deep interface; private
 file boundaries are not public module promises.
+
+The v0.9 compatibility classification, caller obligations, side effects,
+limits, and recovery modes are frozen in the
+[v0.9 public interface review](v0.9-interface-review.md).
 
 ## Catalog
 
@@ -356,15 +361,15 @@ private composition without turning it into a public framework.
 ## 11. terrain-demo
 
 **Job:** own one recoverable GPU-free LAS/LAZ-to-Terrain Workflow Run and its
-private post-Run qualification without turning application policy into another
+read-only post-Run qualifier without turning application policy into another
 foundation crate.
 
 The package exposes a small application facade: `WorkflowPaths`,
 `WorkflowRunIntent`, `WorkflowLimits`, `WorkflowPhase`, `WorkflowReceipt`,
 `WorkflowStatus`, `WorkflowFailure`, `start_run`, `resume_run`, and
-`inspect_and_repair_run`. The binary is a thin bounded grammar and presentation
-layer with `start`, `resume`, `inspect`, `compare-landxml`, and
-`verify-round-trip` commands. Start/resume require the same
+`inspect_and_repair_run`. The binary is a thin bounded grammar and presentation layer with
+`start`, `resume`, `inspect`, `compare-landxml`, and `verify-round-trip`
+commands. Start/resume require the same
 caller-owned Run/Operation identities, expected baseline Revision, nonempty
 exact Ground-ordinal set, normalized Terrain Recipe, detached Check Points,
 LandXML options, four paths, and limits.
@@ -382,32 +387,30 @@ uses Source Attribute 6 (`source-las` classification) as the selected `U8`
 Attribute, and provides an already existing Run-root directory. An absent
 Workspace is an invalid request before Run creation or Workspace mutation.
 
-Private `journal`, `workflow`, `report`, `diagnostic`, `roundtrip`,
-`qualification`, and `evidence` modules own the exclusive workflow lock, shared
-qualification lock, exact path bindings, eight-frame journal, Operation
+Private journal, workflow, report, publication, comparison, streaming, evidence,
+qualification, and diagnostic modules own the
+exclusive Run lock, exact path bindings, eight-frame journal, Operation
 resolution, Revision Audit, baseline/changed Derivation, conservative Surface
-Change Envelope, QA, LandXML/report reconciliation, strict non-repairing
-Complete-Run reads, semantic comparison, canonical evidence publication, and
-one-action structured failures. The fixed Run root contains `run.pwf`,
-`run.lock`, `terrain.xml`, and `audit.json`; qualification writes only its
-separate caller-owned target outside that root. No Terrain Surface or audit
-cache is persisted.
+Change Envelope, QA, LandXML/report reconciliation, and one-action structured
+failures. The fixed Run root contains `run.pwf`, `run.lock`, `terrain.xml`, and
+`audit.json`. No Terrain Surface or audit cache is persisted.
 
-**Independent proof:** 133 package tests—109 unit/private, 15 through the public
-workflow facade, eight through the process boundary, and one checked-Run v1
-golden-corpus test—cover every
-eight-frame restart prefix, one-Revision idempotence, exact report/XML conflict
-and recovery, 12 public limit families, LAS/LAZ semantic projection, Source
-immutability, stale/mismatched state, Retryable intent, cancellation,
-identity-bearing Run-root validation, dropped-Workflow recovery, and CLI
-diagnostics. They also cover strict Complete-Run/artifact binding, nonmutation,
-canonical pass/fail evidence, exact reconciliation/conflict, semantic versus
-operational results, checked-in v1 pass/topology-failure evidence bytes, every
-post-link acknowledgement boundary, no-replace create races, and target
-replacement preservation.
+Qualification strictly reads a Complete Run, original and returned LandXML,
+and canonical report without repair or Run-root mutation. It streams the full
+supported export ceiling, evaluates the narrow semantic model, and creates or
+exactly reconciles separate canonical pass/fail evidence outside the Run root.
+The caller declaration is recorded but never treated as observed external
+execution.
+
+**Independent proof:** package, frozen-fixture, workflow-facade, and process
+tests cover every eight-frame restart prefix, one-Revision idempotence, exact
+report/XML/evidence conflict and recovery, public limit families, LAS/LAZ
+semantic projection, Complete-Run and immutable-input binding, streaming XML
+and semantic reason families, Source immutability, stale/mismatched state,
+Retryable intent, cancellation, dropped-Workflow recovery, and CLI diagnostics.
 The generated 10k/100k/1M-capable Criterion benchmark has five
-cold/restart/reconciliation modes. Its evidence is generated-only and does not
-claim the verifier's full 4-GiB ceiling, worker heap, or external acceptance.
+cold/restart/reconciliation modes. Exact current results belong to the release
+record; generated evidence claims neither worker heap nor external acceptance.
 
 Private journal faults exhaust the application-defined Intent-publication and
 `Complete` append-before-write, before-sync, and after-sync lost-

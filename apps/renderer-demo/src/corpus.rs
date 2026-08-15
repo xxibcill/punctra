@@ -1,6 +1,7 @@
 //! Bounded local field-corpus manifest and canonical viewing-report contracts.
 
 use std::{
+    borrow::Cow,
     error::Error,
     fmt,
     fs::{self, File, OpenOptions},
@@ -18,7 +19,7 @@ use serde::{
 
 use crate::{
     PLANNING_BUDGET, VIEW_GENERATION,
-    diagnostic::{ViewFailure, ViewFailureCode, ViewPhase},
+    diagnostic::{ViewFailure, ViewFailureCode, ViewPhase, classify_renderer_failure},
     orbit_camera::{OrbitCamera, ProjectionMode},
     real_cloud::{
         HIERARCHY_BYTE_BUDGET, QUEUED_HOST_BYTE_BUDGET, QUEUED_NODE_BUDGET, RealCloudScene,
@@ -27,14 +28,12 @@ use crate::{
     scene::SceneMetrics,
 };
 use point_index::{
-    IndexRecipe, InspectionAttributeIds, NodeReadBudget, PrepareDisposition, PrepareLimits,
-    PreparedIndex, prepare_fresh_with_recipe, prepare_with_recipe,
+    NodeReadBudget, PrepareDisposition, PrepareLimits, PreparedIndex, prepare_fresh_with_recipe,
+    prepare_with_recipe,
 };
 use point_view::{AvailableNodes, PlannerConfig, ViewPlanner};
-use render_protocol::{
-    ProtocolError, RenderLimits, RenderUpdate, ResidentStats, ViewGenerationKey, Viewport,
-};
-use render_wgpu::{Frame, RendererConfig, RendererError, WgpuRenderer};
+use render_protocol::{RenderLimits, RenderUpdate, ResidentStats, ViewGenerationKey, Viewport};
+use render_wgpu::{Frame, RendererConfig, WgpuRenderer};
 use renderer_demo::display::DisplayMode;
 
 const MANIFEST_SCHEMA: &str = "punctra.renderer-demo.field-corpus.v1";
@@ -48,7 +47,7 @@ const MAX_FRAMES_PER_POSE: u32 = 256;
 const MAX_ID_BYTES: usize = 128;
 const MAX_TEXT_BYTES: usize = 256;
 const MAX_PATH_BYTES: usize = 4 * 1024;
-const MAX_MANIFEST_STRING_TOKEN_BYTES: usize = MAX_PATH_BYTES;
+const MAX_MANIFEST_STRING_TOKEN_BYTES: usize = MAX_PATH_BYTES * 6;
 const MAX_STAGE_ATTEMPTS: usize = 128;
 // `source-las` fixes this bound for Full-verification decode work in v0.10.
 // The private corpus schema records that effective adapter limit without
@@ -367,7 +366,7 @@ fn execute_entry(
     )?;
     let display_mode = display_mode(entry.display());
     validate_display_source(display_mode, source.metadata())?;
-    let recipe = index_recipe(entry.display())?;
+    let recipe = display_mode.index_policy().recipe();
     let warm_source = source.clone();
     let prepare_started = Instant::now();
     let prepared =
@@ -444,7 +443,7 @@ fn run_prepared_entry(
     );
     let reset = renderer
         .apply(&RenderUpdate::Reset { view_generation })
-        .map_err(|error| renderer_failure(ViewPhase::GpuUpload, error))?;
+        .map_err(|error| classify_renderer_failure(ViewPhase::GpuUpload, error))?;
     evidence.observe_resident(reset.resident());
 
     evidence
@@ -553,7 +552,7 @@ fn run_trace_frame(runtime: &mut TraceRuntime<'_>) -> Result<FrameEvidence, View
         let update = runtime
             .renderer
             .apply(&retirement.render_update())
-            .map_err(|error| renderer_failure(ViewPhase::GpuUpload, error))?;
+            .map_err(|error| classify_renderer_failure(ViewPhase::GpuUpload, error))?;
         runtime.evidence.observe_resident(update.resident());
         runtime
             .scene
@@ -581,7 +580,7 @@ fn run_trace_frame(runtime: &mut TraceRuntime<'_>) -> Result<FrameEvidence, View
             }
             Err(error) => {
                 runtime.scene.mark_rejected(key, version);
-                return Err(renderer_failure(ViewPhase::GpuUpload, error));
+                return Err(classify_renderer_failure(ViewPhase::GpuUpload, error));
             }
         }
     }
@@ -717,10 +716,10 @@ fn render_offscreen(
             label: Some("punctra corpus viewing encoder"),
         });
     let frame = Frame::new(view_generation, camera, viewport)
-        .map_err(|error| ViewFailure::gpu(ViewPhase::Rendering, error))?;
+        .map_err(|error| ViewFailure::internal(ViewPhase::Rendering, error))?;
     let recorded = renderer
         .render(&mut encoder, &target, &frame)
-        .map_err(|error| renderer_failure(ViewPhase::Rendering, error))?;
+        .map_err(|error| classify_renderer_failure(ViewPhase::Rendering, error))?;
     gpu.queue.submit([encoder.finish()]);
     gpu.device
         .poll(wgpu::PollType::wait_indefinitely())
@@ -799,19 +798,6 @@ fn validate_display_source(
     })
 }
 
-fn index_recipe(choice: DisplayChoice) -> Result<IndexRecipe, ViewFailure> {
-    if matches!(choice, DisplayChoice::Neutral | DisplayChoice::Elevation) {
-        return Ok(IndexRecipe::PositionOnlyV1);
-    }
-    let id = |value| {
-        point_contracts::AttributeId::new(value)
-            .map_err(|error| ViewFailure::internal(ViewPhase::IndexPrepare, error))
-    };
-    let attributes = InspectionAttributeIds::new(id(1)?, id(6)?, [id(16)?, id(17)?, id(18)?])
-        .map_err(|error| ViewFailure::internal(ViewPhase::IndexPrepare, error))?;
-    Ok(IndexRecipe::InspectionV1(attributes))
-}
-
 const fn projection_mode(choice: ProjectionChoice) -> ProjectionMode {
     match choice {
         ProjectionChoice::Perspective => ProjectionMode::Perspective,
@@ -819,36 +805,48 @@ const fn projection_mode(choice: ProjectionChoice) -> ProjectionMode {
     }
 }
 
-fn renderer_failure(phase: ViewPhase, error: RendererError) -> ViewFailure {
-    if matches!(
-        &error,
-        RendererError::Protocol(ProtocolError::ResidentLimitExceeded { .. })
-            | RendererError::BatchTooLarge { .. }
-            | RendererError::BatchBufferTooLarge { .. }
-            | RendererError::FrameUniformStagingSizeOverflow { .. }
-            | RendererError::FrameUniformStagingBufferTooLarge { .. }
-    ) {
-        ViewFailure::resource(phase, error)
-    } else {
-        ViewFailure::gpu(phase, error)
-    }
-}
-
-#[derive(Debug)]
-struct EntryEvidence {
+#[derive(Clone, Debug, Default, Serialize, PartialEq)]
+#[allow(clippy::struct_field_names)]
+pub(crate) struct SourceEvidence {
     source_identity: Option<String>,
     source_point_count: Option<u64>,
     source_format: Option<String>,
-    source_verification_nanoseconds: Option<u64>,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, PartialEq)]
+#[allow(clippy::struct_field_names)]
+pub(crate) struct IndexEvidence {
     index_recipe_version: u32,
     index_disk_version: u32,
     index_disposition: Option<&'static str>,
+}
+
+impl IndexEvidence {
+    fn expected(display: DisplayChoice) -> Self {
+        let (index_recipe_version, index_disk_version) =
+            display_mode(display).index_policy().versions();
+        Self {
+            index_recipe_version,
+            index_disk_version,
+            index_disposition: None,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Serialize, PartialEq)]
+pub(crate) struct MeasurementEvidence {
+    source_verification_nanoseconds: Option<u64>,
     index_prepare_nanoseconds: Option<u64>,
     index_warm_open_nanoseconds: Option<u64>,
+    first_accepted_visible_batch_nanoseconds: Option<u64>,
     index_artifact_bytes: Option<u64>,
     peak_index_temporary_disk_bytes: Option<u64>,
-    first_accepted_visible_batch_nanoseconds: Option<u64>,
+}
+
+#[derive(Clone, Copy, Debug, Default, Serialize, PartialEq)]
+pub(crate) struct ResidencyEvidence {
     peak_queued_batches: u64,
+    peak_queued_host_bytes: u64,
     peak_staged_points: u64,
     peak_staged_bytes: u64,
     resident_batches: u64,
@@ -860,37 +858,24 @@ struct EntryEvidence {
     peak_resident_batches: u64,
     peak_resident_points: u64,
     peak_resident_bytes: u64,
+}
+
+#[derive(Debug)]
+struct EntryEvidence {
+    source: SourceEvidence,
+    index: IndexEvidence,
+    measurements: MeasurementEvidence,
+    residency: ResidencyEvidence,
     trace: Vec<TraceReport>,
 }
 
 impl EntryEvidence {
     fn new(entry: &CorpusEntry) -> Self {
-        let (index_recipe_version, index_disk_version) = expected_index_versions(entry.display());
         Self {
-            source_identity: None,
-            source_point_count: None,
-            source_format: None,
-            source_verification_nanoseconds: None,
-            index_recipe_version,
-            index_disk_version,
-            index_disposition: None,
-            index_prepare_nanoseconds: None,
-            index_warm_open_nanoseconds: None,
-            index_artifact_bytes: None,
-            peak_index_temporary_disk_bytes: None,
-            first_accepted_visible_batch_nanoseconds: None,
-            peak_queued_batches: 0,
-            peak_staged_points: 0,
-            peak_staged_bytes: 0,
-            resident_batches: 0,
-            resident_points: 0,
-            sampled_resident_points: 0,
-            complete_resident_points: 0,
-            retired_batches: 0,
-            cancelled_requests: 0,
-            peak_resident_batches: 0,
-            peak_resident_points: 0,
-            peak_resident_bytes: 0,
+            source: SourceEvidence::default(),
+            index: IndexEvidence::expected(entry.display()),
+            measurements: MeasurementEvidence::default(),
+            residency: ResidencyEvidence::default(),
             trace: Vec::new(),
         }
     }
@@ -902,56 +887,93 @@ impl EntryEvidence {
         format: &str,
         verification_nanoseconds: u64,
     ) -> Result<(), ViewFailure> {
-        self.source_identity = Some(source_identity_text(identity)?);
-        self.source_point_count = Some(point_count);
-        self.source_format = Some(owned_report_text(format)?);
-        self.source_verification_nanoseconds = Some(verification_nanoseconds);
+        self.source.source_identity = Some(source_identity_text(identity)?);
+        self.source.source_point_count = Some(point_count);
+        self.source.source_format = Some(owned_report_text(format)?);
+        self.measurements.source_verification_nanoseconds = Some(verification_nanoseconds);
         Ok(())
     }
 
     fn record_index(&mut self, prepared: &PreparedIndex, prepare_nanoseconds: u64) {
         let descriptor = prepared.descriptor();
         let report = *prepared.prepare_report();
-        self.index_recipe_version = descriptor.recipe_version();
-        self.index_disk_version = descriptor.disk_version();
-        self.index_disposition = Some(prepare_disposition(report.disposition()));
-        self.index_prepare_nanoseconds = Some(prepare_nanoseconds);
-        self.index_artifact_bytes = Some(report.artifact_bytes());
-        self.peak_index_temporary_disk_bytes = Some(report.peak_temporary_disk_bytes());
+        self.index.index_recipe_version = descriptor.recipe_version();
+        self.index.index_disk_version = descriptor.disk_version();
+        self.index.index_disposition = Some(prepare_disposition(report.disposition()));
+        self.measurements.index_prepare_nanoseconds = Some(prepare_nanoseconds);
+        self.measurements.index_artifact_bytes = Some(report.artifact_bytes());
+        self.measurements.peak_index_temporary_disk_bytes =
+            Some(report.peak_temporary_disk_bytes());
     }
 
     fn record_warm_open(&mut self, warm_open_nanoseconds: u64) {
-        self.index_warm_open_nanoseconds = Some(warm_open_nanoseconds);
+        self.measurements.index_warm_open_nanoseconds = Some(warm_open_nanoseconds);
     }
 
     fn latch_first_visible_frame(&mut self, elapsed: std::time::Duration) {
-        if self.first_accepted_visible_batch_nanoseconds.is_none() {
-            self.first_accepted_visible_batch_nanoseconds = Some(elapsed_nanoseconds(elapsed));
+        if self
+            .measurements
+            .first_accepted_visible_batch_nanoseconds
+            .is_none()
+        {
+            self.measurements.first_accepted_visible_batch_nanoseconds =
+                Some(elapsed_nanoseconds(elapsed));
         }
     }
 
     fn observe_scene(&mut self, metrics: SceneMetrics) {
-        self.peak_queued_batches = self.peak_queued_batches.max(metrics.peak_queued_batches);
-        self.peak_staged_points = self.peak_staged_points.max(metrics.peak_staged_points);
-        self.peak_staged_bytes = self.peak_staged_bytes.max(metrics.peak_staged_bytes);
-        self.resident_batches = metrics.resident_batches;
-        self.resident_points = metrics.resident_points;
-        self.sampled_resident_points = metrics.sampled_resident_points;
-        self.complete_resident_points = metrics.complete_resident_points;
-        self.retired_batches = metrics.retired_batches;
-        self.cancelled_requests = metrics.cancelled_requests;
+        self.residency.peak_queued_batches = self
+            .residency
+            .peak_queued_batches
+            .max(metrics.peak_queued_batches);
+        self.residency.peak_queued_host_bytes = self
+            .residency
+            .peak_queued_host_bytes
+            .max(metrics.peak_queued_host_bytes);
+        self.residency.peak_staged_points = self
+            .residency
+            .peak_staged_points
+            .max(metrics.peak_staged_points);
+        self.residency.peak_staged_bytes = self
+            .residency
+            .peak_staged_bytes
+            .max(metrics.peak_staged_bytes);
+        self.residency.resident_batches = metrics.resident_batches;
+        self.residency.resident_points = metrics.resident_points;
+        self.residency.sampled_resident_points = metrics.sampled_resident_points;
+        self.residency.complete_resident_points = metrics.complete_resident_points;
+        self.residency.retired_batches = metrics.retired_batches;
+        self.residency.cancelled_requests = metrics.cancelled_requests;
     }
 
     fn observe_resident(&mut self, resident: ResidentStats) {
-        self.peak_resident_batches = self.peak_resident_batches.max(resident.batch_count());
-        self.peak_resident_points = self.peak_resident_points.max(resident.point_count());
-        self.peak_resident_bytes = self.peak_resident_bytes.max(resident.estimated_gpu_bytes());
+        self.residency.peak_resident_batches = self
+            .residency
+            .peak_resident_batches
+            .max(resident.batch_count());
+        self.residency.peak_resident_points = self
+            .residency
+            .peak_resident_points
+            .max(resident.point_count());
+        self.residency.peak_resident_bytes = self
+            .residency
+            .peak_resident_bytes
+            .max(resident.estimated_gpu_bytes());
     }
 
     fn observe_frame(&mut self, report: render_wgpu::FrameReport) {
-        self.peak_resident_batches = self.peak_resident_batches.max(report.draw_calls());
-        self.peak_resident_points = self.peak_resident_points.max(report.drawn_points());
-        self.peak_resident_bytes = self.peak_resident_bytes.max(report.resident_bytes());
+        self.residency.peak_resident_batches = self
+            .residency
+            .peak_resident_batches
+            .max(report.draw_calls());
+        self.residency.peak_resident_points = self
+            .residency
+            .peak_resident_points
+            .max(report.drawn_points());
+        self.residency.peak_resident_bytes = self
+            .residency
+            .peak_resident_bytes
+            .max(report.resident_bytes());
     }
 
     fn finish(self, entry: CorpusEntry, failure: Option<&ViewFailure>) -> EntryReport {
@@ -975,36 +997,15 @@ impl EntryEvidence {
         } = entry;
         EntryReport {
             id,
-            source_identity: self.source_identity,
-            source_point_count: self.source_point_count,
-            source_format: self.source_format,
-            index_recipe_version: self.index_recipe_version,
-            index_disk_version: self.index_disk_version,
-            index_disposition: self.index_disposition,
+            source: self.source,
+            index: self.index,
             display,
             projection,
             declared_initial_frame_count: initial_frame_count,
             declared_trace,
-            source_verification_nanoseconds: self.source_verification_nanoseconds,
-            index_prepare_nanoseconds: self.index_prepare_nanoseconds,
-            index_warm_open_nanoseconds: self.index_warm_open_nanoseconds,
-            first_accepted_visible_batch_nanoseconds: self
-                .first_accepted_visible_batch_nanoseconds,
-            index_artifact_bytes: self.index_artifact_bytes,
-            peak_index_temporary_disk_bytes: self.peak_index_temporary_disk_bytes,
+            measurements: self.measurements,
             limits: EffectiveLimits::current(),
-            peak_queued_batches: self.peak_queued_batches,
-            peak_staged_points: self.peak_staged_points,
-            peak_staged_bytes: self.peak_staged_bytes,
-            resident_batches: self.resident_batches,
-            resident_points: self.resident_points,
-            sampled_resident_points: self.sampled_resident_points,
-            complete_resident_points: self.complete_resident_points,
-            retired_batches: self.retired_batches,
-            cancelled_requests: self.cancelled_requests,
-            peak_resident_batches: self.peak_resident_batches,
-            peak_resident_points: self.peak_resident_points,
-            peak_resident_bytes: self.peak_resident_bytes,
+            residency: self.residency,
             trace: self.trace,
             disposition,
             failure: failure.map(|failure| FailureReport {
@@ -1044,13 +1045,6 @@ fn owned_report_text(text: &str) -> Result<String, ViewFailure> {
     })?;
     owned.push_str(text);
     Ok(owned)
-}
-
-const fn expected_index_versions(display: DisplayChoice) -> (u32, u32) {
-    match display {
-        DisplayChoice::Neutral | DisplayChoice::Elevation => (1, 1),
-        DisplayChoice::Rgb | DisplayChoice::Intensity | DisplayChoice::Classification => (2, 2),
-    }
 }
 
 const fn prepare_disposition(disposition: PrepareDisposition) -> &'static str {
@@ -1220,9 +1214,9 @@ where
 #[serde(deny_unknown_fields)]
 struct BorrowedCorpusManifest<'a> {
     #[serde(borrow)]
-    schema: &'a str,
+    schema: Cow<'a, str>,
     #[serde(borrow)]
-    corpus_id: &'a str,
+    corpus_id: Cow<'a, str>,
     #[serde(borrow)]
     machine: BorrowedMachineDeclaration<'a>,
     #[serde(borrow, deserialize_with = "deserialize_borrowed_entries")]
@@ -1233,28 +1227,28 @@ struct BorrowedCorpusManifest<'a> {
 #[serde(deny_unknown_fields)]
 struct BorrowedMachineDeclaration<'a> {
     #[serde(borrow)]
-    label: &'a str,
+    label: Cow<'a, str>,
     #[serde(borrow)]
-    operating_system: &'a str,
+    operating_system: Cow<'a, str>,
     #[serde(borrow)]
-    filesystem: &'a str,
+    filesystem: Cow<'a, str>,
     #[serde(borrow)]
-    gpu_expectation: &'a str,
+    gpu_expectation: Cow<'a, str>,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct BorrowedCorpusEntry<'a> {
     #[serde(borrow)]
-    id: &'a str,
+    id: Cow<'a, str>,
     #[serde(borrow)]
-    project_id: &'a str,
+    project_id: Cow<'a, str>,
     #[serde(borrow)]
-    firm_id: &'a str,
+    firm_id: Cow<'a, str>,
     #[serde(borrow)]
-    source_path: &'a str,
+    source_path: Cow<'a, str>,
     #[serde(borrow)]
-    index_path: &'a str,
+    index_path: Cow<'a, str>,
     inspect_permission: bool,
     measure_permission: bool,
     display: DisplayChoice,
@@ -1278,13 +1272,13 @@ impl BorrowedCorpusManifest<'_> {
         }
         Ok(CorpusManifest {
             schema: manifest_text(
-                self.schema,
+                &self.schema,
                 "corpus manifest schema",
                 MANIFEST_SCHEMA.len(),
                 permit_allocation,
             )?,
             corpus_id: manifest_text(
-                self.corpus_id,
+                &self.corpus_id,
                 "corpus identifier",
                 MAX_ID_BYTES,
                 permit_allocation,
@@ -1302,25 +1296,25 @@ impl BorrowedMachineDeclaration<'_> {
     ) -> io::Result<MachineDeclaration> {
         Ok(MachineDeclaration {
             label: manifest_text(
-                self.label,
+                &self.label,
                 "machine declaration",
                 MAX_TEXT_BYTES,
                 permit_allocation,
             )?,
             operating_system: manifest_text(
-                self.operating_system,
+                &self.operating_system,
                 "machine declaration",
                 MAX_TEXT_BYTES,
                 permit_allocation,
             )?,
             filesystem: manifest_text(
-                self.filesystem,
+                &self.filesystem,
                 "machine declaration",
                 MAX_TEXT_BYTES,
                 permit_allocation,
             )?,
             gpu_expectation: manifest_text(
-                self.gpu_expectation,
+                &self.gpu_expectation,
                 "machine declaration",
                 MAX_TEXT_BYTES,
                 permit_allocation,
@@ -1335,25 +1329,25 @@ impl BorrowedCorpusEntry<'_> {
         trace.extend(self.trace.into_values());
         Ok(CorpusEntry {
             id: manifest_text(
-                self.id,
+                &self.id,
                 "corpus identifier",
                 MAX_ID_BYTES,
                 permit_allocation,
             )?,
             project_id: manifest_text(
-                self.project_id,
+                &self.project_id,
                 "corpus identifier",
                 MAX_ID_BYTES,
                 permit_allocation,
             )?,
             firm_id: manifest_text(
-                self.firm_id,
+                &self.firm_id,
                 "corpus identifier",
                 MAX_ID_BYTES,
                 permit_allocation,
             )?,
-            source_path: manifest_path(self.source_path, permit_allocation)?,
-            index_path: manifest_path(self.index_path, permit_allocation)?,
+            source_path: manifest_path(&self.source_path, permit_allocation)?,
+            index_path: manifest_path(&self.index_path, permit_allocation)?,
             inspect_permission: self.inspect_permission,
             measure_permission: self.measure_permission,
             display: self.display,
@@ -1510,13 +1504,14 @@ fn preflight_manifest_json_strings(bytes: &[u8]) -> io::Result<()> {
 
         cursor += 1;
         let string_start = cursor;
+        let mut decoded_bytes = 0_usize;
         loop {
             let Some(&byte) = bytes.get(cursor) else {
                 return invalid("corpus manifest contains an unterminated JSON string");
             };
             if cursor - string_start > MAX_MANIFEST_STRING_TOKEN_BYTES {
                 return invalid(format!(
-                    "corpus manifest JSON strings may contain at most {MAX_MANIFEST_STRING_TOKEN_BYTES} literal UTF-8 bytes"
+                    "corpus manifest encoded JSON strings may contain at most {MAX_MANIFEST_STRING_TOKEN_BYTES} bytes"
                 ));
             }
             match byte {
@@ -1525,18 +1520,77 @@ fn preflight_manifest_json_strings(bytes: &[u8]) -> io::Result<()> {
                     break;
                 }
                 b'\\' => {
-                    return invalid(
-                        "corpus manifest JSON strings must use literal UTF-8; JSON escapes are not accepted",
-                    );
+                    let (next, escaped_bytes) = preflight_json_escape(bytes, cursor)?;
+                    cursor = next;
+                    decoded_bytes = decoded_bytes.saturating_add(escaped_bytes);
                 }
                 0x00..=0x1f => {
                     return invalid("corpus manifest JSON strings may not contain control bytes");
                 }
-                _ => cursor += 1,
+                _ => {
+                    cursor += 1;
+                    decoded_bytes = decoded_bytes.saturating_add(1);
+                }
+            }
+            if decoded_bytes > MAX_PATH_BYTES {
+                return invalid(format!(
+                    "corpus manifest decoded JSON strings may contain at most {MAX_PATH_BYTES} UTF-8 bytes"
+                ));
             }
         }
     }
     Ok(())
+}
+
+fn preflight_json_escape(bytes: &[u8], cursor: usize) -> io::Result<(usize, usize)> {
+    let Some(&escaped) = bytes.get(cursor + 1) else {
+        return invalid("corpus manifest contains an incomplete JSON escape");
+    };
+    if matches!(
+        escaped,
+        b'"' | b'\\' | b'/' | b'b' | b'f' | b'n' | b'r' | b't'
+    ) {
+        return Ok((cursor + 2, 1));
+    }
+    if escaped != b'u' {
+        return invalid("corpus manifest contains an invalid JSON escape");
+    }
+
+    let scalar = json_hex_quad(bytes, cursor + 2)?;
+    if (0xd800..=0xdbff).contains(&scalar) {
+        if bytes.get(cursor + 6..cursor + 8) != Some(&b"\\u"[..]) {
+            return invalid("corpus manifest contains an unpaired JSON high surrogate");
+        }
+        let low = json_hex_quad(bytes, cursor + 8)?;
+        if !(0xdc00..=0xdfff).contains(&low) {
+            return invalid("corpus manifest contains an invalid JSON surrogate pair");
+        }
+        return Ok((cursor + 12, 4));
+    }
+    if (0xdc00..=0xdfff).contains(&scalar) {
+        return invalid("corpus manifest contains an unpaired JSON low surrogate");
+    }
+    let decoded = char::from_u32(u32::from(scalar))
+        .expect("a non-surrogate JSON code unit is a Unicode scalar")
+        .len_utf8();
+    Ok((cursor + 6, decoded))
+}
+
+fn json_hex_quad(bytes: &[u8], start: usize) -> io::Result<u16> {
+    let Some(digits) = bytes.get(start..start + 4) else {
+        return invalid("corpus manifest contains an incomplete JSON Unicode escape");
+    };
+    let mut value = 0_u16;
+    for digit in digits {
+        let nibble = match digit {
+            b'0'..=b'9' => u16::from(*digit - b'0'),
+            b'a'..=b'f' => u16::from(*digit - b'a' + 10),
+            b'A'..=b'F' => u16::from(*digit - b'A' + 10),
+            _ => return invalid("corpus manifest contains an invalid JSON Unicode escape"),
+        };
+        value = value * 16 + nibble;
+    }
+    Ok(value)
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -1817,35 +1871,19 @@ pub(crate) struct ReportSummary {
 #[derive(Clone, Debug, Serialize, PartialEq)]
 pub(crate) struct EntryReport {
     pub(crate) id: String,
-    pub(crate) source_identity: Option<String>,
-    pub(crate) source_point_count: Option<u64>,
-    pub(crate) source_format: Option<String>,
-    pub(crate) index_recipe_version: u32,
-    pub(crate) index_disk_version: u32,
-    pub(crate) index_disposition: Option<&'static str>,
+    #[serde(flatten)]
+    pub(crate) source: SourceEvidence,
+    #[serde(flatten)]
+    pub(crate) index: IndexEvidence,
     pub(crate) display: DisplayChoice,
     pub(crate) projection: ProjectionChoice,
     pub(crate) declared_initial_frame_count: u32,
     pub(crate) declared_trace: Vec<TraceStep>,
-    pub(crate) source_verification_nanoseconds: Option<u64>,
-    pub(crate) index_prepare_nanoseconds: Option<u64>,
-    pub(crate) index_warm_open_nanoseconds: Option<u64>,
-    pub(crate) first_accepted_visible_batch_nanoseconds: Option<u64>,
-    pub(crate) index_artifact_bytes: Option<u64>,
-    pub(crate) peak_index_temporary_disk_bytes: Option<u64>,
+    #[serde(flatten)]
+    pub(crate) measurements: MeasurementEvidence,
     pub(crate) limits: EffectiveLimits,
-    pub(crate) peak_queued_batches: u64,
-    pub(crate) peak_staged_points: u64,
-    pub(crate) peak_staged_bytes: u64,
-    pub(crate) resident_batches: u64,
-    pub(crate) resident_points: u64,
-    pub(crate) sampled_resident_points: u64,
-    pub(crate) complete_resident_points: u64,
-    pub(crate) retired_batches: u64,
-    pub(crate) cancelled_requests: u64,
-    pub(crate) peak_resident_batches: u64,
-    pub(crate) peak_resident_points: u64,
-    pub(crate) peak_resident_bytes: u64,
+    #[serde(flatten)]
+    pub(crate) residency: ResidencyEvidence,
     pub(crate) trace: Vec<TraceReport>,
     pub(crate) disposition: EntryDisposition,
     pub(crate) failure: Option<FailureReport>,
@@ -2335,6 +2373,8 @@ fn invalid<T>(message: impl Into<String>) -> io::Result<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use render_protocol::ProtocolError;
+    use render_wgpu::RendererError;
 
     const VALID_EMPTY_ENTRY_MANIFEST: &[u8] = br#"{"schema":"punctra.renderer-demo.field-corpus.v1","corpus_id":"c","machine":{"label":"m","operating_system":"o","filesystem":"f","gpu_expectation":"g"},"entries":[{"id":"e","project_id":"p","firm_id":"f","source_path":"missing.laz","index_path":"index.pidx","inspect_permission":true,"measure_permission":true,"display":"neutral","projection":"perspective","trace":[]}]}"#;
 
@@ -2590,10 +2630,36 @@ mod tests {
         .unwrap();
         let error = CorpusManifest::load(&escaped_oversized).unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::InvalidData);
-        assert!(error.to_string().contains("JSON escapes are not accepted"));
+        assert!(error.to_string().contains("1 to 128 UTF-8 bytes"));
         assert_eq!(
             manifest_loading_failure(&error).code(),
             ViewFailureCode::InvalidRequest
+        );
+
+        let oversized_decoded_string = format!(r#""{}""#, "\\u0061".repeat(MAX_PATH_BYTES + 1));
+        let error = preflight_manifest_json_strings(oversized_decoded_string.as_bytes())
+            .expect_err("decoded escaped text must retain the manifest string bound");
+        assert!(error.to_string().contains("decoded JSON strings"));
+    }
+
+    #[test]
+    fn manifest_accepts_bounded_standard_json_escapes() {
+        let escaped = std::str::from_utf8(VALID_EMPTY_ENTRY_MANIFEST)
+            .unwrap()
+            .replace(r#""corpus_id":"c""#, r#""corpus_id":"\ud83d\ude80""#)
+            .replace(r#""label":"m""#, r#""label":"m\u0022achine""#)
+            .replace(
+                r#""source_path":"missing.laz""#,
+                r#""source_path":"C:\\field\\source.laz""#,
+            );
+
+        let manifest = parse_manifest_bytes(escaped.as_bytes(), &mut || true).unwrap();
+
+        assert_eq!(manifest.corpus_id, "🚀");
+        assert_eq!(manifest.machine.label, "m\"achine");
+        assert_eq!(
+            manifest.entries[0].source_path,
+            PathBuf::from(r"C:\field\source.laz")
         );
     }
 
@@ -2736,7 +2802,7 @@ mod tests {
     #[test]
     fn completed_corpus_failures_have_one_complete_retry_action() {
         for failure in [
-            renderer_failure(
+            classify_renderer_failure(
                 ViewPhase::GpuUpload,
                 RendererError::Protocol(ProtocolError::ResidentLimitExceeded {
                     resource: render_protocol::ResidentResource::Points,
@@ -2769,6 +2835,7 @@ mod tests {
         assert_eq!(
             evidence
                 .finish(entry, None)
+                .measurements
                 .first_accepted_visible_batch_nanoseconds,
             Some(7)
         );
@@ -2796,12 +2863,15 @@ mod tests {
         assert_eq!(failure.phase(), ViewPhase::HostStaging);
         assert_eq!(report.disposition, EntryDisposition::ResourceLimited);
         assert_eq!(
-            report.source_identity.as_deref(),
+            report.source.source_identity.as_deref(),
             Some("0101010101010101010101010101010101010101010101010101010101010101")
         );
-        assert_eq!(report.source_verification_nanoseconds, Some(44));
-        assert_eq!(report.index_prepare_nanoseconds, None);
-        assert_eq!(report.index_warm_open_nanoseconds, None);
+        assert_eq!(
+            report.measurements.source_verification_nanoseconds,
+            Some(44)
+        );
+        assert_eq!(report.measurements.index_prepare_nanoseconds, None);
+        assert_eq!(report.measurements.index_warm_open_nanoseconds, None);
         let report_failure = report.failure.as_ref().unwrap();
         assert_eq!(report_failure.phase, "host-staging");
         assert_eq!(report_failure.safe_action, terminal.action().as_str());
@@ -2831,7 +2901,7 @@ mod tests {
 
     #[test]
     fn renderer_residency_limit_remains_a_resource_failure() {
-        let failure = renderer_failure(
+        let failure = classify_renderer_failure(
             ViewPhase::GpuUpload,
             RendererError::Protocol(ProtocolError::ResidentLimitExceeded {
                 resource: render_protocol::ResidentResource::Points,
@@ -2842,6 +2912,20 @@ mod tests {
 
         assert_eq!(failure.code(), ViewFailureCode::ResourceLimit);
         assert_eq!(failure.phase(), ViewPhase::GpuUpload);
+    }
+
+    #[test]
+    fn renderer_host_state_and_protocol_failures_remain_internal() {
+        for error in [
+            RendererError::NoActiveViewGeneration,
+            RendererError::ForeignRecordedFrame,
+            RendererError::Protocol(ProtocolError::EmptyPointBatch),
+        ] {
+            let failure = classify_renderer_failure(ViewPhase::Rendering, error);
+
+            assert_eq!(failure.code(), ViewFailureCode::Internal);
+            assert_eq!(failure.phase(), ViewPhase::Rendering);
+        }
     }
 
     #[test]
@@ -3030,12 +3114,16 @@ mod tests {
     fn fixture_entry() -> EntryReport {
         EntryReport {
             id: "entry".into(),
-            source_identity: Some("00".repeat(32)),
-            source_point_count: Some(10),
-            source_format: Some("laz".into()),
-            index_recipe_version: 2,
-            index_disk_version: 2,
-            index_disposition: Some("opened"),
+            source: SourceEvidence {
+                source_identity: Some("00".repeat(32)),
+                source_point_count: Some(10),
+                source_format: Some("laz".into()),
+            },
+            index: IndexEvidence {
+                index_recipe_version: 2,
+                index_disk_version: 2,
+                index_disposition: Some("opened"),
+            },
             display: DisplayChoice::Elevation,
             projection: ProjectionChoice::Orthographic,
             declared_initial_frame_count: 2,
@@ -3047,25 +3135,30 @@ mod tests {
                 zoom_lines: 5.0,
                 frame_count: 2,
             }],
-            source_verification_nanoseconds: Some(1),
-            index_prepare_nanoseconds: Some(2),
-            index_warm_open_nanoseconds: Some(3),
-            first_accepted_visible_batch_nanoseconds: Some(4),
-            index_artifact_bytes: Some(4),
-            peak_index_temporary_disk_bytes: Some(5),
+            measurements: MeasurementEvidence {
+                source_verification_nanoseconds: Some(1),
+                index_prepare_nanoseconds: Some(2),
+                index_warm_open_nanoseconds: Some(3),
+                first_accepted_visible_batch_nanoseconds: Some(4),
+                index_artifact_bytes: Some(4),
+                peak_index_temporary_disk_bytes: Some(5),
+            },
             limits: EffectiveLimits::current(),
-            peak_queued_batches: 1,
-            peak_staged_points: 10,
-            peak_staged_bytes: 240,
-            resident_batches: 1,
-            resident_points: 10,
-            sampled_resident_points: 10,
-            complete_resident_points: 0,
-            retired_batches: 0,
-            cancelled_requests: 0,
-            peak_resident_batches: 1,
-            peak_resident_points: 10,
-            peak_resident_bytes: 240,
+            residency: ResidencyEvidence {
+                peak_queued_batches: 1,
+                peak_queued_host_bytes: 128,
+                peak_staged_points: 10,
+                peak_staged_bytes: 240,
+                resident_batches: 1,
+                resident_points: 10,
+                sampled_resident_points: 10,
+                complete_resident_points: 0,
+                retired_batches: 0,
+                cancelled_requests: 0,
+                peak_resident_batches: 1,
+                peak_resident_points: 10,
+                peak_resident_bytes: 240,
+            },
             trace: vec![TraceReport {
                 step: 0,
                 input: TraceStep::stationary(2),

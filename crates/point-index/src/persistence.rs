@@ -20,7 +20,10 @@ use crate::{
     IndexHierarchy, IndexLimit, IndexNode, IndexNodeId, IndexRecipe, InspectionAttributeIds,
     PrepareLimits,
     limits::require,
-    model::{DISK_VERSION_V1, DISK_VERSION_V2, INSPECTION_RECIPE_VERSION, POSITION_RECIPE_VERSION},
+    model::{
+        DISK_VERSION_V1, DISK_VERSION_V2, INSPECTION_RECIPE_VERSION, IndexRecipeLayout,
+        POSITION_RECIPE_VERSION,
+    },
     read::StoredSample,
     tree::{BLOCK_POINTS, LeafRecord, MAX_NODE_SAMPLES, TreePlan},
 };
@@ -28,19 +31,11 @@ use crate::{
 const WORK_MAGIC: &[u8; 8] = b"PNWRK004";
 const ARTIFACT_MAGIC: &[u8; 8] = b"PNIDX004";
 const FRAME_MAGIC: &[u8; 4] = b"BLK1";
-const WORK_HEADER_V1_BODY_BYTES: usize = 168;
-const WORK_HEADER_V1_BYTES: u64 = 200;
-const WORK_HEADER_V2_BODY_BYTES: usize = 200;
-const WORK_HEADER_V2_BYTES: u64 = 232;
 const FRAME_PREFIX_BYTES: u64 = 40;
 const FRAME_FIXED_PAYLOAD_BYTES: u64 = 72;
-const ARTIFACT_HEADER_V1_BYTES: u64 = 208;
-const ARTIFACT_HEADER_V2_BYTES: u64 = 240;
 const NODE_RECORD_BYTES: u64 = 168;
 const ARTIFACT_CHECKSUM_BYTES: u64 = 32;
 const HASH_BUFFER_BYTES: u64 = 64 * 1024;
-const SAMPLE_HASH_DOMAIN_V1: &[u8] = b"punctra-index-samples-v1";
-const SAMPLE_HASH_DOMAIN_V2: &[u8] = b"punctra-index-samples-v2";
 const ORDINAL_HASH_DOMAIN: u64 = 0x706e_6374_7261_0401;
 const TEMPORARY_CREATE_ATTEMPTS: usize = 128;
 
@@ -69,39 +64,24 @@ impl PersistenceProfile {
         self.recipe.sample_bytes()
     }
 
-    const fn sample_width(self) -> usize {
-        match self.recipe {
-            IndexRecipe::PositionOnlyV1 => 32,
-            IndexRecipe::InspectionV1(_) => 42,
-        }
+    fn sample_width(self) -> usize {
+        usize::try_from(self.recipe.layout().sample_bytes()).expect("sample width fits usize")
     }
 
     const fn work_header_body_bytes(self) -> usize {
-        match self.recipe {
-            IndexRecipe::PositionOnlyV1 => WORK_HEADER_V1_BODY_BYTES,
-            IndexRecipe::InspectionV1(_) => WORK_HEADER_V2_BODY_BYTES,
-        }
+        self.recipe.layout().work_header_body_bytes()
     }
 
     const fn work_header_bytes(self) -> u64 {
-        match self.recipe {
-            IndexRecipe::PositionOnlyV1 => WORK_HEADER_V1_BYTES,
-            IndexRecipe::InspectionV1(_) => WORK_HEADER_V2_BYTES,
-        }
+        self.recipe.layout().work_header_bytes()
     }
 
     const fn artifact_header_bytes(self) -> u64 {
-        match self.recipe {
-            IndexRecipe::PositionOnlyV1 => ARTIFACT_HEADER_V1_BYTES,
-            IndexRecipe::InspectionV1(_) => ARTIFACT_HEADER_V2_BYTES,
-        }
+        self.recipe.layout().artifact_header_bytes()
     }
 
     const fn sample_hash_domain(self) -> &'static [u8] {
-        match self.recipe {
-            IndexRecipe::PositionOnlyV1 => SAMPLE_HASH_DOMAIN_V1,
-            IndexRecipe::InspectionV1(_) => SAMPLE_HASH_DOMAIN_V2,
-        }
+        self.recipe.layout().sample_hash_domain()
     }
 }
 
@@ -202,7 +182,7 @@ fn read_persisted_position_samples(
     file.seek(SeekFrom::Start(offset))
         .map_err(|error| IndexError::io("seek in", path, error))?;
     let mut hasher = Hasher::new();
-    hasher.update(SAMPLE_HASH_DOMAIN_V1);
+    hasher.update(IndexRecipe::PositionOnlyV1.layout().sample_hash_domain());
     for _ in 0..count {
         let mut encoded = [0; 32];
         file.read_exact(&mut encoded).map_err(|error| {
@@ -1418,16 +1398,12 @@ fn read_work_profile(
     }
     let disk = decoder.u32("work disk version")?;
     let _recipe = decoder.u32("work recipe version")?;
-    let header_bytes = match disk {
-        DISK_VERSION_V1 => WORK_HEADER_V1_BYTES,
-        DISK_VERSION_V2 => WORK_HEADER_V2_BYTES,
-        version => {
-            return Err(IndexError::UnsupportedVersion {
-                kind: "incomplete-index disk",
-                version,
-            });
-        }
-    };
+    let header_bytes = IndexRecipeLayout::from_disk_version(disk)
+        .ok_or(IndexError::UnsupportedVersion {
+            kind: "incomplete-index disk",
+            version: disk,
+        })?
+        .work_header_bytes();
     if file_bytes < header_bytes {
         return Err(IndexError::CorruptWork {
             reason: "work header is truncated",
@@ -2852,7 +2828,10 @@ pub(crate) fn open_complete(
         limits.max_artifact_bytes(),
         IndexLimit::ArtifactBytes,
     )?;
-    let minimum_bytes = ARTIFACT_HEADER_V1_BYTES.saturating_add(ARTIFACT_CHECKSUM_BYTES);
+    let minimum_bytes = IndexRecipe::PositionOnlyV1
+        .layout()
+        .artifact_header_bytes()
+        .saturating_add(ARTIFACT_CHECKSUM_BYTES);
     if artifact_bytes < minimum_bytes {
         return Err(IndexError::CorruptArtifact {
             reason: "artifact is shorter than its fixed header and checksum",
@@ -2879,16 +2858,12 @@ pub(crate) fn open_complete(
     }
     let disk = prefix_decoder.u32("artifact disk version")?;
     let _recipe = prefix_decoder.u32("artifact recipe version")?;
-    let header_length = match disk {
-        DISK_VERSION_V1 => ARTIFACT_HEADER_V1_BYTES,
-        DISK_VERSION_V2 => ARTIFACT_HEADER_V2_BYTES,
-        version => {
-            return Err(IndexError::UnsupportedVersion {
-                kind: "complete-index disk",
-                version,
-            });
-        }
-    };
+    let header_length = IndexRecipeLayout::from_disk_version(disk)
+        .ok_or(IndexError::UnsupportedVersion {
+            kind: "complete-index disk",
+            version: disk,
+        })?
+        .artifact_header_bytes();
     if artifact_bytes < header_length.saturating_add(ARTIFACT_CHECKSUM_BYTES) {
         return Err(IndexError::CorruptArtifact {
             reason: "artifact is shorter than its fixed header and checksum",

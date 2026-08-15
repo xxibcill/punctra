@@ -234,8 +234,9 @@ impl CommitJob {
     ///
     /// # Errors
     ///
-    /// Returns only failures known to precede durable publication. A failure
-    /// after publication begins becomes `CommitOutcome::Indeterminate`.
+    /// Returns only failures with a known publication state. A durable recorded
+    /// Operation may remain retryable; unresolved publication becomes
+    /// `CommitOutcome::Indeterminate`.
     ///
     /// # Panics
     ///
@@ -254,15 +255,16 @@ impl CommitJob {
     /// Waits while linking this commit's cooperative cancellation to `parent`.
     ///
     /// Parent cancellation reaches the active commit worker but does not erase
-    /// publication certainty: cancellation before publication is returned as
-    /// an error, while any failure after publication begins is still mapped to
+    /// publication certainty: cancellation outside an unresolved publication
+    /// is returned as an error, while uncertain visibility is still mapped to
     /// [`CommitOutcome::Indeterminate`]. Cancelling this commit does not cancel
     /// `parent`, and the direct link exists only for this wait.
     ///
     /// # Errors
     ///
-    /// Returns only failures known to precede durable publication. A failure
-    /// after publication begins becomes `CommitOutcome::Indeterminate`.
+    /// Returns only failures with a known publication state. A durable recorded
+    /// Operation may remain retryable; unresolved publication becomes
+    /// `CommitOutcome::Indeterminate`.
     ///
     /// # Panics
     ///
@@ -420,6 +422,10 @@ impl PublicationPhase {
 
     fn mark_revision_sync(&self) {
         self.0.fetch_max(Self::REVISION_SYNC, Ordering::SeqCst);
+    }
+
+    fn clear_acknowledged(&self) {
+        self.0.store(Self::NONE, Ordering::SeqCst);
     }
 
     fn current(&self) -> Option<CommitPhase> {
@@ -1061,6 +1067,7 @@ fn publish_and_commit(
             begin_publication(control, phase, false)
         })
         .map_err(map_persistence)?;
+    phase.clear_acknowledged();
     drop(sealed);
     session
         .catalog
@@ -1140,6 +1147,7 @@ fn commit_ready(
             || phase.mark_revision_sync(),
         )
         .map_err(map_persistence)?;
+    phase.clear_acknowledged();
     let receipt = receipt_from_revision(&committed)?;
     session
         .catalog
@@ -1680,6 +1688,7 @@ fn record_rejection(
         .store
         .publish_prepared_rejection(prepared, || begin_publication(control, phase, false))
         .map_err(map_persistence)?;
+    phase.clear_acknowledged();
     session
         .catalog
         .write()
@@ -1849,7 +1858,11 @@ fn create_workspace(
     );
     let mut store = Store::create(root).map_err(map_persistence)?;
     control.check_cancelled()?;
-    store.publish_manifest(&manifest).map_err(map_persistence)?;
+    if let Err(error) = store.publish_manifest(&manifest) {
+        return Err(classify_manifest_publication_failure(
+            &store, &manifest, error,
+        ));
+    }
     let catalog = Catalog::empty(manifest.root_revision);
     Ok(Workspace {
         session: Arc::new(Session {
@@ -1866,6 +1879,38 @@ fn create_workspace(
             writer_waiters: std::sync::atomic::AtomicUsize::new(0),
         }),
     })
+}
+
+fn classify_manifest_publication_failure(
+    store: &Store,
+    manifest: &ManifestFacts,
+    error: PersistenceError,
+) -> WorkspaceError {
+    let publication_error = map_persistence(error);
+    match store.manifest_is_published_as(manifest) {
+        Ok(true) => WorkspaceError::RecoveryIndeterminate {
+            operation: None,
+            reason: WorkspaceDiagnostic::new(
+                "Workspace creation may already be complete; reopen this exact root",
+            ),
+            source: Box::new(publication_error),
+            reconciliation: None,
+        },
+        // No durable manifest exists, so the original structured failure and
+        // its filesystem operation, path, and OS error remain definitive.
+        Ok(false) => publication_error,
+        Err(reconcile) => {
+            let reconciliation = map_persistence(reconcile);
+            WorkspaceError::RecoveryIndeterminate {
+                operation: None,
+                reason: WorkspaceDiagnostic::new(format!(
+                    "Workspace creation could not be reconciled; reopen this exact root; reconciliation failure: {reconciliation}"
+                )),
+                source: Box::new(publication_error),
+                reconciliation: Some(Box::new(reconciliation)),
+            }
+        }
+    }
 }
 
 fn open_workspace(
@@ -1911,9 +1956,16 @@ fn sync_recovered_directories(store: &Store) -> Result<(), WorkspaceError> {
         .and_then(|()| store.sync_root())
         .and_then(|()| store.sync_operations())
         .and_then(|()| store.sync_revisions())
-        .map_err(|error| WorkspaceError::RecoveryIndeterminate {
-            operation: None,
-            reason: WorkspaceDiagnostic::new(map_persistence(error).to_string()),
+        .map_err(|error| {
+            let source = map_persistence(error);
+            WorkspaceError::RecoveryIndeterminate {
+                operation: None,
+                reason: WorkspaceDiagnostic::new(
+                    "recovered Workspace directories could not be durably synchronized",
+                ),
+                source: Box::new(source),
+                reconciliation: None,
+            }
         })
 }
 
@@ -2186,6 +2238,88 @@ mod tests {
     }
 
     #[test]
+    fn absent_manifest_preserves_the_original_publication_io_failure() {
+        let directory = TestDirectory::new();
+        let mut store = Store::create(&directory.0).expect("create premanifest Store");
+        let mut classification_name = [0; MAX_ATTRIBUTE_NAME_BYTES];
+        classification_name[.."classification".len()].copy_from_slice(b"classification");
+        let manifest = ManifestFacts {
+            workspace: [1; 16],
+            source: [2; 32],
+            source_point_count: 0,
+            position_transform_bits: [0; 6],
+            classification: PersistedAttributeDefinition {
+                id: 7,
+                name_len: u32::try_from("classification".len()).unwrap(),
+                name: classification_name,
+                data_type: ATTRIBUTE_DATA_TYPE_U8,
+            },
+            root_revision: [3; 32],
+            source_contract: [4; 32],
+        };
+        let original_path = directory.0.join("scratch/manifest-stage");
+        let error = PersistenceError::Io {
+            action: "flush Workspace manifest stage",
+            path: original_path.clone(),
+            source: std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "injected permission failure",
+            ),
+        };
+
+        let result = classify_manifest_publication_failure(&store, &manifest, error);
+
+        let WorkspaceError::Io {
+            operation,
+            path,
+            source,
+        } = result
+        else {
+            panic!("an absent manifest must retain its definitive I/O failure");
+        };
+        assert_eq!(operation, "flush Workspace manifest stage");
+        assert_eq!(path.as_str(), original_path.display().to_string());
+        assert_eq!(source.kind(), std::io::ErrorKind::PermissionDenied);
+
+        store
+            .publish_manifest(&manifest)
+            .expect("publish the complete manifest");
+        let uncertain_path = directory.0.join("manifest.pwm");
+        let uncertain = classify_manifest_publication_failure(
+            &store,
+            &manifest,
+            PersistenceError::Io {
+                action: "sync Workspace manifest parent",
+                path: uncertain_path.clone(),
+                source: std::io::Error::new(
+                    std::io::ErrorKind::StorageFull,
+                    "injected post-publication failure",
+                ),
+            },
+        );
+        let WorkspaceError::RecoveryIndeterminate {
+            source,
+            reconciliation,
+            ..
+        } = uncertain
+        else {
+            panic!("a published manifest must retain indeterminate I/O");
+        };
+        assert!(reconciliation.is_none());
+        let WorkspaceError::Io {
+            operation,
+            path,
+            source,
+        } = *source
+        else {
+            panic!("indeterminate creation must retain the typed I/O source");
+        };
+        assert_eq!(operation, "sync Workspace manifest parent");
+        assert_eq!(path.as_str(), uncertain_path.display().to_string());
+        assert_eq!(source.kind(), std::io::ErrorKind::StorageFull);
+    }
+
+    #[test]
     fn dropped_worker_guard_poisons_only_after_publication_begins() {
         let prepublication = Arc::new(AtomicBool::new(false));
         let phase = Arc::new(PublicationPhase::new());
@@ -2273,10 +2407,18 @@ mod tests {
             let directory = TestDirectory::new();
             let store = Store::create(&directory.0).expect("create test Store");
             let fault = test_fault::Guard::install(&directory.0, point, test_fault::Action::Error);
-            assert!(matches!(
-                sync_recovered_directories(&store),
-                Err(WorkspaceError::RecoveryIndeterminate { .. })
-            ));
+            let error = sync_recovered_directories(&store)
+                .expect_err("an injected sync failure must remain indeterminate");
+            let WorkspaceError::RecoveryIndeterminate {
+                source,
+                reconciliation,
+                ..
+            } = error
+            else {
+                panic!("recovered-directory sync must retain uncertainty");
+            };
+            assert!(reconciliation.is_none());
+            assert!(matches!(source.as_ref(), WorkspaceError::Io { .. }));
             drop(fault);
             drop(store);
         }
@@ -2558,6 +2700,98 @@ mod tests {
             OperationResolution::NotRecorded
         );
         assert!(!workspace.session.poisoned.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn pre_link_faults_keep_known_operation_states_retryable() {
+        let ready_directory = TestDirectory::new();
+        let ready_workspace = create_one_point_workspace(&ready_directory, "ready-pre-link");
+        let ready_points = ready_workspace
+            .head()
+            .select(crate::PointQuery::all(), PointSetLimits::default())
+            .blocking_wait()
+            .expect("select ready Point Set");
+        let ready_operation = OperationId::from_bytes([23; 16]).expect("ready Operation");
+        let ready_fault = test_fault::Guard::install(
+            &ready_directory.0.join("ready-pre-link.pcw"),
+            FaultPoint::ReadyLink,
+            test_fault::Action::Error,
+        );
+        assert!(matches!(
+            ready_workspace
+                .commit(
+                    CommitRequest::set_classification(ready_operation, ready_points, 1),
+                    CommitLimits::default(),
+                )
+                .blocking_wait(),
+            Err(WorkspaceError::Io { .. })
+        ));
+        drop(ready_fault);
+        assert!(!ready_workspace.session.poisoned.load(Ordering::SeqCst));
+        assert_eq!(
+            ready_workspace.resolve_operation(ready_operation).unwrap(),
+            OperationResolution::NotRecorded
+        );
+
+        let revision_directory = TestDirectory::new();
+        let revision_workspace =
+            create_one_point_workspace(&revision_directory, "revision-pre-link");
+        let revision_points = revision_workspace
+            .head()
+            .select(crate::PointQuery::all(), PointSetLimits::default())
+            .blocking_wait()
+            .expect("select Revision Point Set");
+        let revision_operation = OperationId::from_bytes([24; 16]).expect("Revision Operation");
+        let revision_fault = test_fault::Guard::install(
+            &revision_directory.0.join("revision-pre-link.pcw"),
+            FaultPoint::RevisionLink,
+            test_fault::Action::Error,
+        );
+        assert!(matches!(
+            revision_workspace
+                .commit(
+                    CommitRequest::set_classification(revision_operation, revision_points, 1,),
+                    CommitLimits::default(),
+                )
+                .blocking_wait(),
+            Err(WorkspaceError::Io { .. })
+        ));
+        drop(revision_fault);
+        assert!(!revision_workspace.session.poisoned.load(Ordering::SeqCst));
+        assert!(matches!(
+            revision_workspace
+                .resolve_operation(revision_operation)
+                .unwrap(),
+            OperationResolution::Retryable(intent) if intent.operation() == revision_operation
+        ));
+
+        let rejection_directory = TestDirectory::new();
+        let rejection_workspace =
+            create_one_point_workspace(&rejection_directory, "rejection-pre-link");
+        let rejection_operation = OperationId::from_bytes([25; 16]).expect("rejection Operation");
+        let unknown_revision = RevisionId::from_bytes([26; 32]).expect("unknown Revision");
+        let rejection_fault = test_fault::Guard::install(
+            &rejection_directory.0.join("rejection-pre-link.pcw"),
+            FaultPoint::RejectionLink,
+            test_fault::Action::Error,
+        );
+        assert!(matches!(
+            rejection_workspace
+                .commit(
+                    CommitRequest::revert_head(rejection_operation, unknown_revision),
+                    CommitLimits::default(),
+                )
+                .blocking_wait(),
+            Err(WorkspaceError::Io { .. })
+        ));
+        drop(rejection_fault);
+        assert!(!rejection_workspace.session.poisoned.load(Ordering::SeqCst));
+        assert_eq!(
+            rejection_workspace
+                .resolve_operation(rejection_operation)
+                .unwrap(),
+            OperationResolution::NotRecorded
+        );
     }
 
     #[test]

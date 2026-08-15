@@ -228,11 +228,16 @@ pub enum LandXmlDisposition {
 syncs the complete expected stage under the existing limits before making a
 target decision.
 
-- If the target is absent, ensure uses the existing no-replace hard-link,
-  verification, directory-sync, and cleanup protocol and returns `Created`.
+- If the target is absent, ensure uses the existing no-replace publication,
+  verification, and directory-sync protocol and returns `Created`. The v0.9
+  implementation strengthens this to an independent descriptor-bound copy and
+  retained private stage rather than a named hard-link plus pathname cleanup.
+  It syncs an open destination witness before parent-directory sync and
+  revalidates the target leaf after that sync and terminal progress.
 - If a regular target exists, ensure streams and bounds its verification. It
   returns `ReconciledExisting` only when length and content hash exactly match
-  the expected bytes.
+  the expected bytes and the retained open witness still binds the target leaf
+  at the final acknowledgement boundary.
 - A different file returns a structured conflict containing expected and
   actual hashes and never modifies either file.
 - Symlinks and non-regular targets fail closed.
@@ -328,7 +333,9 @@ audit.json    canonical complete report
 ```
 
 Temporary journal, XML, and report stages are sibling names with a private
-fixed prefix. Unknown children are never deleted.
+fixed prefix. The v0.9 ownership-hardening protocol supersedes v0.7's automatic
+pathname cleanup: per-attempt bounded private stages may remain, and unknown
+children or racing replacements are never deleted.
 
 The binary is a thin bounded grammar and presentation layer:
 
