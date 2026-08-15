@@ -563,6 +563,18 @@ a release candidate or close any external evidence gate.
 
 ### v0.11 exact-commit verification record
 
+On 2026-08-16, the complete authoritative sequence above passed from the final
+PR tree containing this record. That tree includes review fixes which close the
+complete interactive session after an indeterminate mutation and verify that a
+committed immediate-head Revert has an exact inverse Revision Audit before the
+host reports success. The sweep used the reference environment below, required
+the expected local GPU with `PUNCTRA_REQUIRE_GPU=1`, and passed every formatting,
+Clippy, test, rustdoc, fuzz, benchmark, example, focused, guide, JSON, GPU, and
+diff-check lane. No hosted CI was used.
+
+The earlier implementation qualification is retained below as historical
+evidence for its exact commit; it does not qualify later PR changes by itself.
+
 On 2026-08-13, the complete authoritative sequence above passed from exact
 implementation commit `f2eaadb`, based directly on canonical v0.10 commit
 `30ea9ff`. The reference environment was an Apple M5 Pro (`Mac17,9`), 24 GiB,
