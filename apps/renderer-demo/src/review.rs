@@ -15,8 +15,8 @@ use point_review::{
 };
 use point_workspace::{
     CommitLimits, CommitOutcome, CommitRejection, CommitRequest, OpenLimits, OperationId,
-    PointIdReadLimits, PointSet, RevisionAudit, RevisionAuditLimits, RevisionId, Snapshot,
-    SnapshotProvenance, Workspace, open,
+    PointIdReadLimits, PointSet, RevisionAudit, RevisionAuditLimits, RevisionId, RevisionKind,
+    Snapshot, SnapshotProvenance, Workspace, open,
 };
 use render_protocol::{BatchKey, BatchVersion, Camera, ViewGenerationKey, Viewport};
 use render_wgpu::PickHit;
@@ -202,7 +202,7 @@ pub(crate) enum MutationDisposition {
     Committed {
         operation: OperationId,
         revision: RevisionId,
-        audit_reported: bool,
+        audit_verified: bool,
     },
     Rejected {
         operation: OperationId,
@@ -217,15 +217,15 @@ impl MutationDisposition {
     pub(crate) fn require_committed(self, requested: &str) -> ReviewResult<()> {
         match self {
             Self::Committed {
-                audit_reported: true,
+                audit_verified: true,
                 ..
             } => Ok(()),
             Self::Committed {
                 operation,
                 revision,
-                audit_reported: false,
+                audit_verified: false,
             } => Err(format!(
-                "requested {requested} Operation {operation} committed as Revision {revision}, but its audit could not be reported; no dependent mutation was attempted"
+                "requested {requested} Operation {operation} committed as Revision {revision}, but its audit could not be verified; no dependent mutation was attempted"
             )
             .into()),
             Self::Rejected {
@@ -295,6 +295,10 @@ pub(crate) enum ReviewStatus {
         revision: RevisionId,
         changed_points: u64,
     },
+    CommittedUnverified {
+        revision: RevisionId,
+        changed_points: u64,
+    },
     StaleDiscarded,
     Rejected,
     Indeterminate,
@@ -327,6 +331,13 @@ impl ReviewStatus {
                 changed_points,
             } => format!(
                 "review:reverted {changed_points}@{}",
+                short_revision(revision)
+            ),
+            Self::CommittedUnverified {
+                revision,
+                changed_points,
+            } => format!(
+                "review:committed-unverified {changed_points}@{}",
                 short_revision(revision)
             ),
             Self::StaleDiscarded => "review:stale-discarded".to_owned(),
@@ -722,7 +733,7 @@ impl ReviewSession {
                 CommitLimits::default(),
             )
             .blocking_wait()?;
-        Ok(self.finish_mutation("classification", edit.operation, outcome))
+        Ok(self.finish_mutation("classification", edit.operation, outcome, None))
     }
 
     pub(crate) fn revert_head(&mut self) -> ReviewResult<MutationDisposition> {
@@ -736,6 +747,10 @@ impl ReviewSession {
         }
         self.revert_operation_used = true;
         let expected_head = self.workspace.head().provenance().revision();
+        let reverted_audit = self
+            .workspace
+            .revision_audit(expected_head, RevisionAuditLimits::default())
+            .blocking_wait()?;
         println!(
             "Immediate-head Revert requested\n  Operation: {operation}\n  expected head: {expected_head}"
         );
@@ -746,7 +761,7 @@ impl ReviewSession {
                 CommitLimits::default(),
             )
             .blocking_wait()?;
-        Ok(self.finish_mutation("Revert", operation, outcome))
+        Ok(self.finish_mutation("Revert", operation, outcome, Some(&reverted_audit)))
     }
 
     pub(crate) fn fail(&mut self, error: &dyn std::fmt::Display) {
@@ -782,44 +797,58 @@ impl ReviewSession {
         label: &'static str,
         operation: OperationId,
         outcome: CommitOutcome,
+        reverted_audit: Option<&RevisionAudit>,
     ) -> MutationDisposition {
         match outcome {
             CommitOutcome::Committed(receipt) => {
                 let revision = receipt.revision();
                 let changed_points = receipt.revision_info().kind().changed_points();
                 self.snapshot = self.workspace.head();
-                self.status = if label == "Revert" {
-                    ReviewStatus::Reverted {
-                        revision,
-                        changed_points,
-                    }
-                } else {
-                    ReviewStatus::Committed {
-                        revision,
-                        changed_points,
-                    }
-                };
                 let audit = self
                     .workspace
                     .revision_audit(revision, RevisionAuditLimits::default())
                     .blocking_wait();
-                match audit {
+                match audit.map_err(|error| error.to_string()).and_then(|audit| {
+                    verify_mutation_audit(
+                        operation,
+                        revision,
+                        changed_points,
+                        &audit,
+                        reverted_audit,
+                    )?;
+                    Ok(audit)
+                }) {
                     Ok(audit) => {
+                        self.status = if label == "Revert" {
+                            ReviewStatus::Reverted {
+                                revision,
+                                changed_points,
+                            }
+                        } else {
+                            ReviewStatus::Committed {
+                                revision,
+                                changed_points,
+                            }
+                        };
                         print_audit(label, operation, &audit);
                         MutationDisposition::Committed {
                             operation,
                             revision,
-                            audit_reported: true,
+                            audit_verified: true,
                         }
                     }
                     Err(error) => {
+                        self.status = ReviewStatus::CommittedUnverified {
+                            revision,
+                            changed_points,
+                        };
                         eprintln!(
-                            "Workspace mutation is durably committed but its Revision Audit could not be reported\n  Operation: {operation}\n  Revision: {revision}\n  changed Points from receipt: {changed_points}\n  audit error: {error}\n  recovery state: committed; no automatic retry or dependent mutation"
+                            "Workspace mutation is durably committed but its Revision Audit could not be verified\n  Operation: {operation}\n  Revision: {revision}\n  changed Points from receipt: {changed_points}\n  audit error: {error}\n  recovery state: committed; no automatic retry or dependent mutation"
                         );
                         MutationDisposition::Committed {
                             operation,
                             revision,
-                            audit_reported: false,
+                            audit_verified: false,
                         }
                     }
                 }
@@ -963,6 +992,99 @@ fn poll_future<T, E>(future: Pin<&mut impl Future<Output = Result<T, E>>>) -> Po
     let waker = Waker::noop();
     let mut context = Context::from_waker(waker);
     future.poll(&mut context)
+}
+
+fn verify_mutation_audit(
+    operation: OperationId,
+    revision: RevisionId,
+    changed_points: u64,
+    audit: &RevisionAudit,
+    reverted_audit: Option<&RevisionAudit>,
+) -> Result<(), String> {
+    if audit.revision().id() != revision || audit.provenance().revision() != revision {
+        return Err("Revision Audit does not identify the committed Revision".to_owned());
+    }
+    if audit.revision().operation() != Some(operation) {
+        return Err("Revision Audit does not identify the committed Operation".to_owned());
+    }
+    if audit.changed_point_count() != changed_points
+        || audit.revision().kind().changed_points() != changed_points
+    {
+        return Err("Revision Audit changed-Point count disagrees with the receipt".to_owned());
+    }
+    if let Some(reverted_audit) = reverted_audit {
+        verify_revert_audit(reverted_audit, audit)
+    } else {
+        Ok(())
+    }
+}
+
+fn verify_revert_audit(
+    reverted_audit: &RevisionAudit,
+    revert_audit: &RevisionAudit,
+) -> Result<(), String> {
+    let reverted_revision = reverted_audit.revision();
+    let revert_revision = revert_audit.revision();
+    if reverted_audit.provenance().workspace() != revert_audit.provenance().workspace()
+        || reverted_audit.provenance().source() != revert_audit.provenance().source()
+    {
+        return Err("Revert audit changed Workspace or Source identity".to_owned());
+    }
+    if reverted_audit.provenance().revision() != reverted_revision.id()
+        || revert_audit.provenance().revision() != revert_revision.id()
+    {
+        return Err("Revert audit provenance disagrees with its Revision identity".to_owned());
+    }
+    if revert_revision.parent() != Some(reverted_revision.id()) {
+        return Err("Revert Revision is not a child of the audited immediate head".to_owned());
+    }
+    if reverted_revision.sequence().checked_add(1) != Some(revert_revision.sequence()) {
+        return Err("Revert Revision sequence does not immediately follow its parent".to_owned());
+    }
+    let RevisionKind::Revert {
+        reverted_revision: target,
+        changed_points,
+    } = revert_revision.kind()
+    else {
+        return Err("committed Revision Audit is not a Revert".to_owned());
+    };
+    if target != reverted_revision.id() {
+        return Err("Revert Revision targets a different Revision".to_owned());
+    }
+    if changed_points != reverted_audit.changed_point_count()
+        || changed_points != revert_audit.changed_point_count()
+    {
+        return Err("Revert changed-Point count is not the exact inverse count".to_owned());
+    }
+    if reverted_audit.edit_footprint() != revert_audit.edit_footprint() {
+        return Err("Revert Edit Footprint differs from the reverted Revision".to_owned());
+    }
+    if reverted_audit.point_id_hash() != revert_audit.point_id_hash() {
+        return Err("Revert Point ID hash differs from the reverted Revision".to_owned());
+    }
+
+    let mut expected_transitions = reverted_audit
+        .transitions()
+        .iter()
+        .map(|transition| (transition.after(), transition.before(), transition.count()))
+        .collect::<Vec<_>>();
+    let mut actual_transitions = revert_audit
+        .transitions()
+        .iter()
+        .map(|transition| (transition.before(), transition.after(), transition.count()))
+        .collect::<Vec<_>>();
+    expected_transitions.sort_unstable();
+    actual_transitions.sort_unstable();
+    if expected_transitions != actual_transitions {
+        return Err("Revert classification transitions are not exact inverses".to_owned());
+    }
+    if reverted_audit.content_hash().into_bytes() == [0; 32]
+        || revert_audit.content_hash().into_bytes() == [0; 32]
+        || reverted_audit.content_hash() == revert_audit.content_hash()
+    {
+        return Err("Revert content hashes do not distinguish both audited states".to_owned());
+    }
+    Ok(())
 }
 
 fn print_audit(label: &str, operation: OperationId, audit: &RevisionAudit) {
@@ -1150,7 +1272,7 @@ mod tests {
             MutationDisposition::Committed {
                 operation,
                 revision,
-                audit_reported: true,
+                audit_verified: true,
             }
             .require_committed("classification edit")
             .is_ok()
@@ -1159,7 +1281,7 @@ mod tests {
         let missing_audit = MutationDisposition::Committed {
             operation,
             revision,
-            audit_reported: false,
+            audit_verified: false,
         }
         .require_committed("classification edit")
         .unwrap_err()
@@ -1204,6 +1326,58 @@ mod tests {
             MutationDisposition::Indeterminate { operation },
         ));
         assert!(session.is_none());
+    }
+
+    #[test]
+    fn interactive_revert_reports_success_only_after_inverse_audit_verification() {
+        let (mut session, _directory, source) = review_session("verified-revert");
+        let point = PointId::new(source, 0);
+        let points = session
+            .workspace
+            .head()
+            .select_point_ids([point], PointSetLimits::default())
+            .blocking_wait()
+            .unwrap();
+        let edit = session
+            .workspace
+            .commit(
+                CommitRequest::set_classification(
+                    OperationId::from_bytes([0x92; 16]).unwrap(),
+                    points,
+                    7,
+                ),
+                CommitLimits::default(),
+            )
+            .blocking_wait()
+            .unwrap();
+        let CommitOutcome::Committed(edit_receipt) = edit else {
+            panic!("classification fixture must commit");
+        };
+        let operation = OperationId::from_bytes([0x93; 16]).unwrap();
+        session.options.revert_operation = Some(operation);
+
+        let disposition = session.revert_head().unwrap();
+
+        let MutationDisposition::Committed {
+            operation: actual_operation,
+            revision,
+            audit_verified,
+        } = disposition
+        else {
+            panic!("verified immediate-head Revert must commit");
+        };
+        assert_eq!(actual_operation, operation);
+        assert!(audit_verified);
+        assert_eq!(session.snapshot.provenance().revision(), revision);
+        assert_eq!(
+            session.status,
+            ReviewStatus::Reverted {
+                revision,
+                changed_points: 1,
+            }
+        );
+        let revert_info = session.workspace.revision_info(revision).unwrap();
+        assert_eq!(revert_info.parent(), Some(edit_receipt.revision()));
     }
 
     #[test]
@@ -1432,6 +1606,8 @@ mod tests {
         assert_eq!(revert_audit.edit_footprint(), Some(footprint));
         assert_eq!(revert_audit.point_id_hash(), edit_audit.point_id_hash());
         assert_ne!(revert_audit.content_hash(), edit_audit.content_hash());
+        verify_revert_audit(&edit_audit, &revert_audit).unwrap();
+        assert!(verify_revert_audit(&revert_audit, &edit_audit).is_err());
         let terminal_revision = revert_receipt.revision();
 
         drop(renderer);
