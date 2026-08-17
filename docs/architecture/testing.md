@@ -639,12 +639,15 @@ support qualification remain outstanding.
 
 ### v0.12 local verification record
 
-On 2026-08-17, the complete authoritative local sequence passed for the v0.12
-candidate tree containing this record. The reference environment was an Apple
-M5 Pro (`Mac17,9`), 24 GiB, arm64, macOS 26.5.2 on APFS, Rust 1.90.0, and Cargo
-1.90.0. Required GPU acceptance used the built-in 16-core Apple M5 Pro through
-Metal 4 with `PUNCTRA_REQUIRE_GPU=1`; offscreen rendering, planner, display,
-corpus, and the public `third_party_host` example passed. No hosted CI was used.
+On 2026-08-17, the complete authoritative local sequence passed against exact
+local implementation commit `0ff6a137d718c803bff82dfe3adfd6fc7bf229ac` on
+`codex/explicit-spatial-reference-v0.12`. This record was added afterward as a
+documentation-only successor, not used as a moving qualification target. The
+reference environment was an Apple M5 Pro (`Mac17,9`), 24 GiB, arm64, macOS
+26.5.2 on APFS, Rust 1.90.0, and Cargo 1.90.0. Required GPU acceptance used the
+built-in 16-core Apple M5 Pro through Metal 4 with `PUNCTRA_REQUIRE_GPU=1`;
+offscreen rendering, planner, display, corpus, and the public
+`third_party_host` example passed. No hosted CI was used.
 
 Formatting, workspace Clippy with warnings denied, all-feature workspace tests,
 rustdoc with warnings denied, fuzz formatting/check/tests, documented examples,
@@ -668,10 +671,10 @@ package was uploaded.
 
 All nine default benchmark commands exited successfully and their declared
 resource ceilings passed. The durable workflow run used the unique local
-baseline `qualification-v012-20260817`. Other Criterion commands may display
-comparisons against workstation-local historical baselines; those labels are
-not a same-machine A/B/A attribution and no v0.12 performance claim is made
-from them.
+baseline `qualification-v012-0ff6a13-1786978339`. Other Criterion commands may
+display comparisons against workstation-local historical baselines; those
+labels are not a same-machine A/B/A attribution and no v0.12 performance claim
+is made from them.
 
 This closes only the bounded v0.12 repository technical and local packaging
 slice. The production-corpus activation gate, independent reference-coordinate
