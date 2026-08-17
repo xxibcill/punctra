@@ -162,28 +162,41 @@ impl Command {
                 })?;
                 projection_selected = true;
             } else if argument == OsStr::new("--workspace") {
-                set_once_path(&mut workspace, arguments.next(), "--workspace")?;
+                set_once(&mut workspace, arguments.next(), "--workspace", parse_path)?;
             } else if argument == OsStr::new("--operation-id") {
-                set_once_operation(&mut operation, arguments.next(), "--operation-id")?;
+                set_once(
+                    &mut operation,
+                    arguments.next(),
+                    "--operation-id",
+                    parse_operation,
+                )?;
             } else if argument == OsStr::new("--classification") {
-                set_once_u8(&mut classification, arguments.next(), "--classification")?;
+                set_once(
+                    &mut classification,
+                    arguments.next(),
+                    "--classification",
+                    parse_u8,
+                )?;
             } else if argument == OsStr::new("--filter-classification") {
-                set_once_u8(
+                set_once(
                     &mut classification_filter,
                     arguments.next(),
                     "--filter-classification",
+                    parse_u8,
                 )?;
             } else if argument == OsStr::new("--revert-operation-id") {
-                set_once_operation(
+                set_once(
                     &mut revert_operation,
                     arguments.next(),
                     "--revert-operation-id",
+                    parse_operation,
                 )?;
             } else if argument == OsStr::new("--resolve-operation-id") {
-                set_once_operation(
+                set_once(
                     &mut resolve_operation,
                     arguments.next(),
                     "--resolve-operation-id",
+                    parse_operation,
                 )?;
             } else if argument == OsStr::new("--") {
                 for positional in arguments {
@@ -240,32 +253,28 @@ impl Command {
     }
 }
 
-fn set_once_path(
-    target: &mut Option<PathBuf>,
+fn set_once<T>(
+    target: &mut Option<T>,
     value: Option<OsString>,
     option: &'static str,
+    parse: impl FnOnce(Option<OsString>, &'static str) -> DemoResult<T>,
 ) -> DemoResult<()> {
     if target.is_some() {
         return Err(invalid_argument(format_args!(
             "{option} may be specified only once"
         )));
     }
-    *target = Some(PathBuf::from(value.ok_or_else(|| {
-        invalid_argument(format_args!("{option} requires a path"))
-    })?));
+    *target = Some(parse(value, option)?);
     Ok(())
 }
 
-fn set_once_operation(
-    target: &mut Option<OperationId>,
-    value: Option<OsString>,
-    option: &'static str,
-) -> DemoResult<()> {
-    if target.is_some() {
-        return Err(invalid_argument(format_args!(
-            "{option} may be specified only once"
-        )));
-    }
+fn parse_path(value: Option<OsString>, option: &'static str) -> DemoResult<PathBuf> {
+    Ok(PathBuf::from(value.ok_or_else(|| {
+        invalid_argument(format_args!("{option} requires a path"))
+    })?))
+}
+
+fn parse_operation(value: Option<OsString>, option: &'static str) -> DemoResult<OperationId> {
     let value = value.ok_or_else(|| {
         invalid_argument(format_args!(
             "{option} requires exactly 32 hexadecimal digits"
@@ -279,11 +288,8 @@ fn set_once_operation(
             "{option} requires exactly 32 hexadecimal digits"
         ))
     })?;
-    *target = Some(
-        OperationId::from_bytes(bytes)
-            .map_err(|_| invalid_argument(format_args!("{option} must be nonzero")))?,
-    );
-    Ok(())
+    OperationId::from_bytes(bytes)
+        .map_err(|_| invalid_argument(format_args!("{option} must be nonzero")))
 }
 
 fn decode_operation_hex(value: &str) -> Option<[u8; 16]> {
@@ -309,24 +315,11 @@ const fn hex_nibble(value: u8) -> Option<u8> {
     }
 }
 
-fn set_once_u8(
-    target: &mut Option<u8>,
-    value: Option<OsString>,
-    option: &'static str,
-) -> DemoResult<()> {
-    if target.is_some() {
-        return Err(invalid_argument(format_args!(
-            "{option} may be specified only once"
-        )));
-    }
-    let value = value
+fn parse_u8(value: Option<OsString>, option: &'static str) -> DemoResult<u8> {
+    value
         .and_then(|value| value.into_string().ok())
         .and_then(|value| value.parse::<u8>().ok())
-        .ok_or_else(|| {
-            invalid_argument(format_args!("{option} requires an integer from 0 to 255"))
-        })?;
-    *target = Some(value);
-    Ok(())
+        .ok_or_else(|| invalid_argument(format_args!("{option} requires an integer from 0 to 255")))
 }
 
 fn push_positional(
@@ -1917,6 +1910,28 @@ mod tests {
             command.review.resolve_operation.unwrap().into_bytes(),
             [3; 16]
         );
+    }
+
+    #[test]
+    fn command_rejects_repeated_review_options_before_reparsing() {
+        for arguments in [
+            vec!["--workspace", "first", "--workspace"],
+            vec![
+                "--filter-classification",
+                "2",
+                "--filter-classification",
+                "not-an-integer",
+            ],
+            vec![
+                "--resolve-operation-id",
+                "03030303030303030303030303030303",
+                "--resolve-operation-id",
+                "not-an-operation",
+            ],
+        ] {
+            let error = Command::parse(arguments.into_iter().map(OsString::from)).unwrap_err();
+            assert!(error.to_string().contains("specified only once"));
+        }
     }
 
     #[test]
