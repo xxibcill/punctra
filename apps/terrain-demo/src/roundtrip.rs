@@ -1201,7 +1201,8 @@ fn validate_root_children(side: InputSide, root: Node<'_, '_>) -> Result<(), Rou
         ],
     )?;
     unique_child(side, root, "Surfaces")?;
-    at_most_one_child(side, root, "CoordinateSystem")?;
+    at_most_one_child(side, root, "CoordinateSystem")
+        .map_err(|_| coordinate_reference_failure(side))?;
     at_most_one_child(side, root, "Project")?;
     at_most_one_child(side, root, "Application")?;
     Ok(())
@@ -2202,6 +2203,36 @@ mod tests {
             default_limits(),
         )
         .expect_err("nested reference metadata must not pass as a legacy file");
+        assert_eq!(
+            error.reason(),
+            Some(RoundTripReason::CoordinateReferenceUnsupported)
+        );
+    }
+
+    #[test]
+    fn duplicate_coordinate_system_is_a_coordinate_reference_failure() {
+        let fixture = Fixture::new("duplicate-coordinate-system");
+        let legacy = landxml(REFERENCE_POINTS, REFERENCE_FACES, false);
+        let coordinate_system = "<CoordinateSystem name=\"EPSG:32647+EPSG:5703\" horizontalCoordinateSystemName=\"EPSG:32647\" verticalDatum=\"EPSG:5703\" desc=\"axes=easting,northing,elevation; horizontalUnit=metre; verticalUnit=metre; provenance=sourceMetadata\"/>";
+        let reference_xml = legacy.replacen(
+            "<Application",
+            &format!("{coordinate_system}\n<Application"),
+            1,
+        );
+        let returned_xml = reference_xml.replacen(
+            coordinate_system,
+            &format!("{coordinate_system}\n{coordinate_system}"),
+            1,
+        );
+        let (reference, returned) = fixture.write_pair(&reference_xml, &returned_xml);
+
+        let error = verify(
+            &reference,
+            &returned,
+            tolerances(f64::MAX, f64::MAX),
+            default_limits(),
+        )
+        .expect_err("duplicate reference metadata must fail as a coordinate reference");
         assert_eq!(
             error.reason(),
             Some(RoundTripReason::CoordinateReferenceUnsupported)
