@@ -36,8 +36,8 @@ use render_wgpu::{
 };
 use renderer_demo::display::{DisplayIndexPolicy, DisplayMode};
 use review::{
-    ClassificationEdit, MutationDisposition, ReviewCapture, ReviewOptions, ReviewSession,
-    ReviewStatus,
+    CaptureView, ClassificationEdit, MutationDisposition, ReviewCapture, ReviewOptions,
+    ReviewSession, ReviewStatus,
 };
 use scene::{Scene, SceneMetrics};
 use synthetic::{RESIDENT_BATCH_BUDGET, RESIDENT_BYTE_BUDGET, RESIDENT_POINT_BUDGET};
@@ -60,6 +60,10 @@ const PLANNING_BUDGET: PlanningBudget = PlanningBudget::new(
     RESIDENT_BYTE_BUDGET,
     RESIDENT_BATCH_BUDGET,
 );
+
+const fn active_capture_view(interaction_generation: u64) -> CaptureView {
+    CaptureView::new(VIEW_GENERATION, interaction_generation)
+}
 
 type DemoResult<T> = Result<T, Box<dyn Error>>;
 
@@ -573,7 +577,7 @@ fn run_headless_smoke(loaded: LoadedDemo, projection: ProjectionMode) -> DemoRes
         }
         if review.has_classification_edit() {
             review
-                .commit_selected(VIEW_GENERATION, 0)?
+                .commit_selected(active_capture_view(0))?
                 .require_committed("classification edit")?;
         }
         if review.has_revert() {
@@ -1084,7 +1088,8 @@ impl Graphics {
                         .review
                         .as_mut()
                         .expect("completed review has a session");
-                    match review.accept(completed, VIEW_GENERATION, self.interaction_generation) {
+                    match review.accept(completed, active_capture_view(self.interaction_generation))
+                    {
                         Ok(highlights) => highlights,
                         Err(error) => {
                             if !review.is_stale() {
@@ -1144,7 +1149,8 @@ impl Graphics {
         };
         let provisional = review::ProvisionalPickHint::from(hit);
         if provisional.view_generation() != capture.view_generation()
-            || !review.is_capture_current(&capture, VIEW_GENERATION, self.interaction_generation)
+            || !review
+                .is_capture_current(&capture, active_capture_view(self.interaction_generation))
         {
             review
                 .stale_provisional_discarded("GPU pick View generation or pinned Revision changed");
@@ -1349,7 +1355,7 @@ impl Graphics {
         let Some(review) = self.review.as_mut() else {
             return;
         };
-        let result = review.commit_selected(VIEW_GENERATION, self.interaction_generation);
+        let result = review.commit_selected(active_capture_view(self.interaction_generation));
         match result {
             Ok(disposition) => self.finish_interactive_mutation(disposition),
             Err(error) => {
@@ -1460,7 +1466,7 @@ impl Graphics {
             .review
             .as_ref()
             .expect("review pick requires session")
-            .capture(VIEW_GENERATION, self.interaction_generation);
+            .capture(active_capture_view(self.interaction_generation));
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -1493,7 +1499,7 @@ impl Graphics {
         }
         let viewport = Viewport::new(self.surface_config.width, self.surface_config.height)?;
         let camera = self.camera.as_render_camera()?;
-        let capture = review.capture(VIEW_GENERATION, self.interaction_generation);
+        let capture = review.capture(active_capture_view(self.interaction_generation));
         if let Err(error) = review.select_screen(
             capture,
             camera,
@@ -1548,7 +1554,7 @@ impl Graphics {
         self.interaction_generation = self.interaction_generation.saturating_add(1);
         self.latest_recorded_frame = None;
         if let Some(review) = self.review.as_mut() {
-            review.invalidate_selection_view(VIEW_GENERATION, self.interaction_generation);
+            review.invalidate_selection_view(active_capture_view(self.interaction_generation));
         }
     }
 }

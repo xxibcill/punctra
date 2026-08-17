@@ -143,18 +143,20 @@ pub(crate) struct ReviewOptions {
 pub(crate) struct ReviewCapture {
     snapshot: Snapshot,
     provenance: SnapshotProvenance,
-    view_generation: ViewGenerationKey,
-    interaction_generation: u64,
+    view: CaptureView,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct CaptureView {
+pub(crate) struct CaptureView {
     view_generation: ViewGenerationKey,
     interaction_generation: u64,
 }
 
 impl CaptureView {
-    const fn new(view_generation: ViewGenerationKey, interaction_generation: u64) -> Self {
+    pub(crate) const fn new(
+        view_generation: ViewGenerationKey,
+        interaction_generation: u64,
+    ) -> Self {
         Self {
             view_generation,
             interaction_generation,
@@ -170,10 +172,7 @@ enum SelectionFreshness {
 
 impl SelectionFreshness {
     const fn from_capture(capture: &ReviewCapture) -> Self {
-        Self::Current(CaptureView::new(
-            capture.view_generation,
-            capture.interaction_generation,
-        ))
+        Self::Current(capture.view)
     }
 
     fn invalidate(&mut self, active: CaptureView) -> bool {
@@ -245,7 +244,7 @@ impl MutationDisposition {
 
 impl ReviewCapture {
     pub(crate) const fn view_generation(&self) -> ViewGenerationKey {
-        self.view_generation
+        self.view.view_generation
     }
 }
 
@@ -424,16 +423,11 @@ impl ReviewSession {
         self.options.revert_operation.is_some()
     }
 
-    pub(crate) fn capture(
-        &self,
-        view_generation: ViewGenerationKey,
-        interaction_generation: u64,
-    ) -> ReviewCapture {
+    pub(crate) fn capture(&self, view: CaptureView) -> ReviewCapture {
         ReviewCapture {
             snapshot: self.snapshot.clone(),
             provenance: *self.snapshot.provenance(),
-            view_generation,
-            interaction_generation,
+            view,
         }
     }
 
@@ -450,13 +444,8 @@ impl ReviewSession {
         };
     }
 
-    pub(crate) fn is_capture_current(
-        &self,
-        capture: &ReviewCapture,
-        view_generation: ViewGenerationKey,
-        interaction_generation: u64,
-    ) -> bool {
-        self.capture_is_current(capture, view_generation, interaction_generation)
+    pub(crate) fn is_capture_current(&self, capture: &ReviewCapture, active: CaptureView) -> bool {
+        self.capture_is_current(capture, active)
     }
 
     pub(crate) fn confirm_provisional(
@@ -465,7 +454,7 @@ impl ReviewSession {
         hint: ProvisionalPickHint,
     ) -> ReviewResult<()> {
         self.require_idle()?;
-        if hint.view_generation() != capture.view_generation {
+        if hint.view_generation() != capture.view.view_generation {
             return Err(
                 "provisional PickHit does not belong to its captured View generation".into(),
             );
@@ -511,10 +500,10 @@ impl ReviewSession {
         camera: Camera,
         viewport: Viewport,
     ) -> ReviewResult<ExactHighlights> {
-        let capture = self.capture(
+        let capture = self.capture(CaptureView::new(
             ViewGenerationKey::new(render_protocol::ViewId::new(1), 1),
             0,
-        );
+        ));
         let rect = ScreenRect::new(
             [0.0, 0.0],
             [f64::from(viewport.width()), f64::from(viewport.height())],
@@ -531,8 +520,10 @@ impl ReviewSession {
                 capture,
                 inspection,
             },
-            ViewGenerationKey::new(render_protocol::ViewId::new(1), 1),
-            0,
+            CaptureView::new(
+                ViewGenerationKey::new(render_protocol::ViewId::new(1), 1),
+                0,
+            ),
         )
     }
 
@@ -586,15 +577,14 @@ impl ReviewSession {
     pub(crate) fn accept(
         &mut self,
         completed: CompletedReview,
-        view_generation: ViewGenerationKey,
-        interaction_generation: u64,
+        active: CaptureView,
     ) -> ReviewResult<ExactHighlights> {
         let capture = match &completed {
             CompletedReview::Pick { capture, .. } | CompletedReview::Screen { capture, .. } => {
                 capture
             }
         };
-        if !self.capture_is_current(capture, view_generation, interaction_generation) {
+        if !self.capture_is_current(capture, active) {
             self.stale_exact_result_discarded(
                 "exact CPU result no longer matches the active View or Revision",
             );
@@ -662,12 +652,7 @@ impl ReviewSession {
             .transpose()
     }
 
-    pub(crate) fn invalidate_selection_view(
-        &mut self,
-        view_generation: ViewGenerationKey,
-        interaction_generation: u64,
-    ) {
-        let active = CaptureView::new(view_generation, interaction_generation);
+    pub(crate) fn invalidate_selection_view(&mut self, active: CaptureView) {
         let Some(selection) = self.selected.as_mut() else {
             return;
         };
@@ -691,8 +676,7 @@ impl ReviewSession {
 
     pub(crate) fn commit_selected(
         &mut self,
-        view_generation: ViewGenerationKey,
-        interaction_generation: u64,
+        active: CaptureView,
     ) -> ReviewResult<MutationDisposition> {
         self.require_idle()?;
         let edit = self
@@ -702,7 +686,6 @@ impl ReviewSession {
         if self.commit_operation_used {
             return Err("the caller-owned --operation-id was already submitted".into());
         }
-        let active = CaptureView::new(view_generation, interaction_generation);
         let selection = self
             .selected
             .as_ref()
@@ -893,14 +876,8 @@ impl ReviewSession {
         Ok(())
     }
 
-    fn capture_is_current(
-        &self,
-        capture: &ReviewCapture,
-        view_generation: ViewGenerationKey,
-        interaction_generation: u64,
-    ) -> bool {
-        capture.view_generation == view_generation
-            && capture.interaction_generation == interaction_generation
+    fn capture_is_current(&self, capture: &ReviewCapture, active: CaptureView) -> bool {
+        capture.view == active
             && capture.provenance == *self.snapshot.provenance()
             && capture.provenance.revision() == self.workspace.head().provenance().revision()
     }
@@ -1202,14 +1179,14 @@ mod tests {
             ),
         ] {
             let (mut session, _directory, _source) = review_session(label);
-            let capture = session.capture(captured_view, captured_interaction);
-            assert!(session.is_capture_current(&capture, captured_view, captured_interaction));
+            let captured = CaptureView::new(captured_view, captured_interaction);
+            let capture = session.capture(captured);
+            assert!(session.is_capture_current(&capture, captured));
 
             reject_stale_provisional_without_exact_work(
                 &mut session,
                 &capture,
-                active_view,
-                active_interaction,
+                CaptureView::new(active_view, active_interaction),
             );
         }
     }
@@ -1219,8 +1196,9 @@ mod tests {
         let (mut session, _directory, source) = review_session("stale-provisional-head");
         let view = ViewGenerationKey::new(ViewId::new(11), 2);
         let interaction = 5;
-        let capture = session.capture(view, interaction);
-        assert!(session.is_capture_current(&capture, view, interaction));
+        let captured = CaptureView::new(view, interaction);
+        let capture = session.capture(captured);
+        assert!(session.is_capture_current(&capture, captured));
 
         let point_set = session
             .snapshot
@@ -1248,7 +1226,7 @@ mod tests {
             "the captured Snapshot must become historical before stale-pick rejection"
         );
 
-        reject_stale_provisional_without_exact_work(&mut session, &capture, view, interaction);
+        reject_stale_provisional_without_exact_work(&mut session, &capture, captured);
     }
 
     #[test]
@@ -1700,12 +1678,11 @@ mod tests {
     fn reject_stale_provisional_without_exact_work(
         session: &mut ReviewSession,
         capture: &ReviewCapture,
-        active_view: ViewGenerationKey,
-        active_interaction: u64,
+        active: CaptureView,
     ) {
         let snapshot_before = *session.snapshot.provenance();
         let head_before = session.workspace.head().provenance().revision();
-        assert!(!session.is_capture_current(capture, active_view, active_interaction));
+        assert!(!session.is_capture_current(capture, active));
         assert_no_exact_review_or_mutation_submission(session);
 
         session.stale_provisional_discarded(
