@@ -197,6 +197,34 @@ struct ExactSelection {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum MutationKind {
+    Classification,
+    Revert,
+}
+
+impl MutationKind {
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Classification => "classification",
+            Self::Revert => "Revert",
+        }
+    }
+
+    const fn status(self, revision: RevisionId, changed_points: u64) -> ReviewStatus {
+        match self {
+            Self::Classification => ReviewStatus::Committed {
+                revision,
+                changed_points,
+            },
+            Self::Revert => ReviewStatus::Reverted {
+                revision,
+                changed_points,
+            },
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum MutationDisposition {
     Committed {
         operation: OperationId,
@@ -716,7 +744,7 @@ impl ReviewSession {
                 CommitLimits::default(),
             )
             .blocking_wait()?;
-        Ok(self.finish_mutation("classification", edit.operation, outcome, None))
+        Ok(self.finish_mutation(MutationKind::Classification, edit.operation, outcome, None))
     }
 
     pub(crate) fn revert_head(&mut self) -> ReviewResult<MutationDisposition> {
@@ -744,7 +772,12 @@ impl ReviewSession {
                 CommitLimits::default(),
             )
             .blocking_wait()?;
-        Ok(self.finish_mutation("Revert", operation, outcome, Some(&reverted_audit)))
+        Ok(self.finish_mutation(
+            MutationKind::Revert,
+            operation,
+            outcome,
+            Some(&reverted_audit),
+        ))
     }
 
     pub(crate) fn fail(&mut self, error: &dyn std::fmt::Display) {
@@ -777,7 +810,7 @@ impl ReviewSession {
 
     fn finish_mutation(
         &mut self,
-        label: &'static str,
+        kind: MutationKind,
         operation: OperationId,
         outcome: CommitOutcome,
         reverted_audit: Option<&RevisionAudit>,
@@ -802,18 +835,8 @@ impl ReviewSession {
                     Ok(audit)
                 }) {
                     Ok(audit) => {
-                        self.status = if label == "Revert" {
-                            ReviewStatus::Reverted {
-                                revision,
-                                changed_points,
-                            }
-                        } else {
-                            ReviewStatus::Committed {
-                                revision,
-                                changed_points,
-                            }
-                        };
-                        print_audit(label, operation, &audit);
+                        self.status = kind.status(revision, changed_points);
+                        print_audit(kind.label(), operation, &audit);
                         MutationDisposition::Committed {
                             operation,
                             revision,
