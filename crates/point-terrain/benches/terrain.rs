@@ -19,7 +19,8 @@ use std::{
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use point_contracts::{
     AttributeColumn, AttributeColumns, AttributeDataType, AttributeDefinition, AttributeId,
-    AttributeValues, CoordinateReference, PositionTransform,
+    AttributeValues, CoordinateReference, LinearUnit, PositionTransform, SpatialAxes,
+    SpatialReferenceProfile, SpatialReferenceProvenance,
 };
 use point_index::{PrepareLimits, prepare};
 use point_terrain::{
@@ -59,7 +60,7 @@ fn benchmark_terrain(criterion: &mut Criterion) {
     let qa_elapsed_us = qa_started.elapsed().as_micros();
     assert_qa(&expected_qa, &expected_qa, qa_limits);
 
-    let landxml_options = asserted_landxml_options();
+    let landxml_options = landxml_options();
     let baseline_target = fixture.next_export_target();
     let landxml_started = Instant::now();
     let expected_receipt = export_surface(
@@ -296,10 +297,9 @@ fn check_point(id: u64, position: [f64; 3]) -> CheckPoint {
     .expect("benchmark Check Point position is finite")
 }
 
-fn asserted_landxml_options() -> LandXmlOptions {
+fn landxml_options() -> LandXmlOptions {
     LandXmlOptions::metric_metres("Punctra Terrain Benchmark", "2026-08-10", "12:34:56Z")
         .expect("benchmark LandXML options are valid")
-        .assert_coordinates_are_metric_metres()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -489,7 +489,17 @@ fn memory_fixture(point_count: usize) -> MemorySource {
         .expect("benchmark Attribute rows are aligned");
     MemorySource::from_columns(
         PositionTransform::new([0.0; 3], [1.0, 1.0, 0.01]).expect("benchmark transform is valid"),
-        CoordinateReference::Unknown,
+        CoordinateReference::profile(
+            SpatialReferenceProfile::new(
+                32_647,
+                5_703,
+                SpatialAxes::EastingNorthingElevation,
+                LinearUnit::Metre,
+                LinearUnit::Metre,
+                SpatialReferenceProvenance::CallerDeclaration,
+            )
+            .expect("benchmark spatial profile is valid"),
+        ),
         ticks,
         attributes,
     )

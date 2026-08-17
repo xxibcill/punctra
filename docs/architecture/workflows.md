@@ -288,8 +288,9 @@ sequenceDiagram
 Residual is observed Z minus Surface Z. Outside-hull positions are explicit
 gaps. For a structured v0.12 profile, QA and LandXML require metre/metre,
 easting/northing/elevation coordinates and LandXML emits one matching
-`CoordinateSystem`; legacy unknown-reference fixtures retain their explicit
-caller metric assertion. LandXML point text is northing, easting, elevation.
+`CoordinateSystem`; the frozen legacy boolean is readable only by the private
+legacy reconciliation verifier. LandXML point text is northing, easting,
+elevation.
 No transformation or clock read occurs. Once target publication starts, any inability to prove final
 verification, durability, target binding, or terminal acknowledgement is reported as
 indeterminate rather than success.

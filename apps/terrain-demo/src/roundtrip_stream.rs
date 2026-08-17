@@ -17,10 +17,10 @@ use quick_xml::{
 
 use crate::{
     roundtrip::{
-        InputSide, ParsedRoundTrip, RoundTripDeclaration, RoundTripEvaluation, RoundTripFailure,
-        RoundTripFileFacts, RoundTripLimits, RoundTripReason, RoundTripTolerances,
-        evaluate_parsed_round_trip, semantic_evaluation_failure, structured_spatial_profile,
-        validate_utf8_declaration,
+        CoordinateSystemAttributes, InputSide, ParsedRoundTrip, RoundTripDeclaration,
+        RoundTripEvaluation, RoundTripFailure, RoundTripFileFacts, RoundTripLimits,
+        RoundTripReason, RoundTripTolerances, evaluate_parsed_round_trip,
+        semantic_evaluation_failure, validate_utf8_declaration,
     },
     roundtrip_file::require_file_bytes,
     roundtrip_surface::{ParsedSurface, Position, SemanticSurfaceBuilder},
@@ -1066,10 +1066,7 @@ impl<'a> StreamParser<'a> {
         &mut self,
         start: &BytesStart<'_>,
     ) -> Result<(), RoundTripFailure> {
-        let mut name = None;
-        let mut horizontal = None;
-        let mut vertical = None;
-        let mut description = None;
+        let mut attributes = CoordinateSystemAttributes::default();
         for attribute in start.attributes() {
             let attribute = attribute.map_err(|_| self.coordinate_reference_failure())?;
             let key = attribute.key.as_ref();
@@ -1083,24 +1080,12 @@ impl<'a> StreamParser<'a> {
                 .normalized_value(XmlVersion::Implicit1_0)
                 .map_err(|_| self.coordinate_reference_failure())?
                 .into_owned();
-            let target = match key {
-                b"name" => &mut name,
-                b"horizontalCoordinateSystemName" => &mut horizontal,
-                b"verticalDatum" => &mut vertical,
-                b"desc" => &mut description,
-                _ => return Err(self.coordinate_reference_failure()),
-            };
-            if target.replace(value).is_some() {
-                return Err(self.coordinate_reference_failure());
-            }
+            let key = std::str::from_utf8(key).map_err(|_| self.coordinate_reference_failure())?;
+            attributes
+                .insert(key, &value)
+                .map_err(|()| self.coordinate_reference_failure())?;
         }
-        self.spatial_reference_profile = Some(structured_spatial_profile(
-            self.side,
-            name.as_deref(),
-            horizontal.as_deref(),
-            vertical.as_deref(),
-            description.as_deref(),
-        )?);
+        self.spatial_reference_profile = Some(attributes.spatial_profile(self.side)?);
         Ok(())
     }
 

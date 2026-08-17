@@ -65,7 +65,6 @@ pub struct LandXmlOptions {
     surface_name: Box<str>,
     document_date: Box<str>,
     document_time: Box<str>,
-    coordinates_are_metric_metres: bool,
 }
 
 impl LandXmlOptions {
@@ -94,19 +93,7 @@ impl LandXmlOptions {
             surface_name: surface_name.into(),
             document_date: document_date.into(),
             document_time: document_time.into(),
-            coordinates_are_metric_metres: false,
         })
-    }
-
-    /// Explicitly asserts that Source coordinates use metric metres.
-    ///
-    /// The Coordinate Reference is opaque to this crate, so the exporter does
-    /// not infer or transform its units. This is the caller's checked assertion
-    /// that Source X/Y/Z already mean easting, northing, and elevation in metres.
-    #[must_use]
-    pub fn assert_coordinates_are_metric_metres(mut self) -> Self {
-        self.coordinates_are_metric_metres = true;
-        self
     }
 
     /// Returns the caller-supplied Surface name.
@@ -125,12 +112,6 @@ impl LandXmlOptions {
     #[must_use]
     pub fn document_time(&self) -> &str {
         &self.document_time
-    }
-
-    /// Reports the explicit Source-coordinate metric-metre assertion.
-    #[must_use]
-    pub const fn coordinates_are_metric_metres_asserted(&self) -> bool {
-        self.coordinates_are_metric_metres
     }
 }
 
@@ -1017,17 +998,17 @@ fn validate_export(
         limits.max_faces(),
     )?;
     match surface.descriptor().spatial_reference_profile() {
-        Some(profile) if !profile.is_supported_metric_survey() => {
+        Some(profile) if profile.is_supported_metric_survey() => {}
+        Some(_) => {
             return Err(TerrainError::unsupported_metric_export(
                 "the structured spatial profile requires unsupported axes or non-metre units",
             ));
         }
-        None if !options.coordinates_are_metric_metres_asserted() => {
+        None => {
             return Err(TerrainError::unsupported_metric_export(
-                "Source coordinates require an explicit metric-metre assertion",
+                "Source coordinates require a complete supported structured spatial profile",
             ));
         }
-        Some(_) | None => {}
     }
     let escaped_name_bytes = escaped_len(options.surface_name())?;
     check_token_len("LandXML Surface name token", escaped_name_bytes, limits)?;
@@ -2186,7 +2167,8 @@ mod tests {
     use foundation_runtime::ProgressPhase;
     use point_contracts::{
         AttributeColumn, AttributeColumns, AttributeDataType, AttributeDefinition, AttributeId,
-        AttributeValues, CoordinateReference, PositionTransform,
+        AttributeValues, CoordinateReference, LinearUnit, PositionTransform, SpatialAxes,
+        SpatialReferenceProfile, SpatialReferenceProvenance,
     };
     use point_index::{PrepareLimits, prepare};
     use point_workspace::{OpenLimits, WorkspaceSchema, create};
@@ -2414,7 +2396,7 @@ mod tests {
     }
 
     #[test]
-    fn declared_non_metric_reference_requires_an_explicit_metric_assertion() {
+    fn opaque_reference_cannot_be_overridden_by_caller_options() {
         let coordinate_reference = CoordinateReference::wkt(
             "PROJCRS[\"Local feet\",CS[Cartesian,3],LENGTHUNIT[\"foot\",0.3048]]",
         )
@@ -2438,19 +2420,21 @@ mod tests {
         ));
         assert!(!target.exists());
 
-        let receipt = publish(
+        let repeated_failure = publish(
             &fixture.surface,
             &target,
             &LandXmlOptions::metric_metres("Feet", "2026-08-10", "12:34:56Z")
-                .expect("fixture LandXML options are valid")
-                .assert_coordinates_are_metric_metres(),
+                .expect("fixture LandXML options are valid"),
             LandXmlLimits::default(),
             &OperationControl::new(),
             &ProductionPublicationHook,
         )
-        .expect("explicitly asserted coordinates export deterministically");
-        assert!(receipt.byte_length() > 0);
-        assert!(target.exists());
+        .expect_err("opaque reference remains unsupported on repeated export");
+        assert!(matches!(
+            repeated_failure,
+            TerrainError::UnsupportedMetricExport { .. }
+        ));
+        assert!(!target.exists());
         fixture.assert_stages_are_safe();
     }
 
@@ -3120,7 +3104,6 @@ mod tests {
     fn options() -> LandXmlOptions {
         LandXmlOptions::metric_metres("Fault Fixture", "2026-08-10", "12:34:56Z")
             .expect("fault fixture options are valid")
-            .assert_coordinates_are_metric_metres()
     }
 
     struct ExportFixture {
@@ -3130,7 +3113,7 @@ mod tests {
 
     impl ExportFixture {
         fn new(label: &str) -> Self {
-            Self::with_coordinate_reference(label, CoordinateReference::Unknown)
+            Self::with_coordinate_reference(label, supported_reference())
         }
 
         fn with_coordinate_reference(
@@ -3235,6 +3218,20 @@ mod tests {
                 }
             }
         }
+    }
+
+    fn supported_reference() -> CoordinateReference {
+        CoordinateReference::profile(
+            SpatialReferenceProfile::new(
+                32_647,
+                5_703,
+                SpatialAxes::EastingNorthingElevation,
+                LinearUnit::Metre,
+                LinearUnit::Metre,
+                SpatialReferenceProvenance::CallerDeclaration,
+            )
+            .expect("fault fixture spatial profile is valid"),
+        )
     }
 
     impl Drop for ExportFixture {

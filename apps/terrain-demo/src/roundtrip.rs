@@ -1195,59 +1195,73 @@ fn parse_coordinate_system(
     node: Node<'_, '_>,
 ) -> Result<SpatialReferenceProfile, RoundTripFailure> {
     validate_allowed_children(side, node, &[]).map_err(|_| coordinate_reference_failure(side))?;
-    let allowed = [
-        "name",
-        "horizontalCoordinateSystemName",
-        "verticalDatum",
-        "desc",
-    ];
-    if node
-        .attributes()
-        .any(|attribute| attribute.namespace().is_some() || !allowed.contains(&attribute.name()))
-    {
-        return Err(coordinate_reference_failure(side));
+    let mut attributes = CoordinateSystemAttributes::default();
+    for attribute in node.attributes() {
+        if attribute.namespace().is_some()
+            || attributes
+                .insert(attribute.name(), attribute.value())
+                .is_err()
+        {
+            return Err(coordinate_reference_failure(side));
+        }
     }
-    structured_spatial_profile(
-        side,
-        unqualified_attribute(node, "name"),
-        unqualified_attribute(node, "horizontalCoordinateSystemName"),
-        unqualified_attribute(node, "verticalDatum"),
-        unqualified_attribute(node, "desc"),
-    )
+    attributes.spatial_profile(side)
 }
 
-pub(crate) fn structured_spatial_profile(
-    side: InputSide,
-    name: Option<&str>,
-    horizontal: Option<&str>,
-    vertical: Option<&str>,
-    description: Option<&str>,
-) -> Result<SpatialReferenceProfile, RoundTripFailure> {
-    let horizontal =
-        parse_epsg_label(horizontal).ok_or_else(|| coordinate_reference_failure(side))?;
-    let vertical = parse_epsg_label(vertical).ok_or_else(|| coordinate_reference_failure(side))?;
-    let expected_name = format!("EPSG:{horizontal}+EPSG:{vertical}");
-    if name != Some(expected_name.as_str()) {
-        return Err(coordinate_reference_failure(side));
+#[derive(Default)]
+pub(crate) struct CoordinateSystemAttributes {
+    name: Option<Box<str>>,
+    horizontal: Option<Box<str>>,
+    vertical: Option<Box<str>>,
+    description: Option<Box<str>>,
+}
+
+impl CoordinateSystemAttributes {
+    pub(crate) fn insert(&mut self, name: &str, value: &str) -> Result<(), ()> {
+        let target = match name {
+            "name" => &mut self.name,
+            "horizontalCoordinateSystemName" => &mut self.horizontal,
+            "verticalDatum" => &mut self.vertical,
+            "desc" => &mut self.description,
+            _ => return Err(()),
+        };
+        if target.replace(value.into()).is_some() {
+            return Err(());
+        }
+        Ok(())
     }
-    let provenance = match description {
-        Some(
-            "axes=easting,northing,elevation; horizontalUnit=metre; verticalUnit=metre; provenance=sourceMetadata",
-        ) => SpatialReferenceProvenance::SourceMetadata,
-        Some(
-            "axes=easting,northing,elevation; horizontalUnit=metre; verticalUnit=metre; provenance=callerDeclaration",
-        ) => SpatialReferenceProvenance::CallerDeclaration,
-        _ => return Err(coordinate_reference_failure(side)),
-    };
-    SpatialReferenceProfile::new(
-        horizontal,
-        vertical,
-        SpatialAxes::EastingNorthingElevation,
-        LinearUnit::Metre,
-        LinearUnit::Metre,
-        provenance,
-    )
-    .map_err(|_| coordinate_reference_failure(side))
+
+    pub(crate) fn spatial_profile(
+        &self,
+        side: InputSide,
+    ) -> Result<SpatialReferenceProfile, RoundTripFailure> {
+        let horizontal = parse_epsg_label(self.horizontal.as_deref())
+            .ok_or_else(|| coordinate_reference_failure(side))?;
+        let vertical = parse_epsg_label(self.vertical.as_deref())
+            .ok_or_else(|| coordinate_reference_failure(side))?;
+        let expected_name = format!("EPSG:{horizontal}+EPSG:{vertical}");
+        if self.name.as_deref() != Some(expected_name.as_str()) {
+            return Err(coordinate_reference_failure(side));
+        }
+        let provenance = match self.description.as_deref() {
+            Some(
+                "axes=easting,northing,elevation; horizontalUnit=metre; verticalUnit=metre; provenance=sourceMetadata",
+            ) => SpatialReferenceProvenance::SourceMetadata,
+            Some(
+                "axes=easting,northing,elevation; horizontalUnit=metre; verticalUnit=metre; provenance=callerDeclaration",
+            ) => SpatialReferenceProvenance::CallerDeclaration,
+            _ => return Err(coordinate_reference_failure(side)),
+        };
+        SpatialReferenceProfile::new(
+            horizontal,
+            vertical,
+            SpatialAxes::EastingNorthingElevation,
+            LinearUnit::Metre,
+            LinearUnit::Metre,
+            provenance,
+        )
+        .map_err(|_| coordinate_reference_failure(side))
+    }
 }
 
 fn parse_epsg_label(value: Option<&str>) -> Option<u32> {

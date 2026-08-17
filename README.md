@@ -129,8 +129,9 @@ lineage, Terrain descriptors, detached QA, and LandXML. `source-las` publishes
 that profile only from one complete direct GeoTIFF key directory; ambiguity,
 indirection, missing facts, unsupported values, and opaque WKT fail closed
 without guessing. The Terrain/QA/export path supports metre/metre only and
-does no coordinate transformation. Frozen unknown-reference workflows retain
-their explicit legacy assertion.
+does no coordinate transformation. Frozen unknown-reference workflow facts
+remain readable by the private legacy reconciliation verifier, but current
+start, resume, QA, and LandXML write paths require the supported profile.
 
 The same release defines the local crates.io/docs.rs path for all twelve public
 libraries. They use versioned local/registry dependencies, Rust 1.90, empty
@@ -310,10 +311,8 @@ the nonzero Run and Workspace Operation identities and the expected baseline
 Revision before invoking the command. Both the Workspace and `RUN_ROOT` must
 already exist. `terrain-demo` opens but never creates the Workspace; an absent
 Workspace fails with `PWF_INVALID_REQUEST` before Run creation or Workspace
-mutation. The Source must carry the supported structured metre/metre profile.
-For a legacy Source whose Coordinate Reference is explicitly Unknown, the
-optional `--assert-unknown-crs-metric` compatibility flag is an explicit caller
-assertion, not CRS inference. Omit that flag for a structured Source:
+mutation. The Source must carry the supported structured metre/metre profile;
+Unknown, opaque WKT, and unsupported profiles fail closed:
 
 ```bash
 cargo run --release -p terrain-demo -- start \

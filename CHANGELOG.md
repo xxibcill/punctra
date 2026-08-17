@@ -17,8 +17,9 @@ All notable changes to Punctra are documented here. The project follows
   structured profile.
 - Bound structured or exact opaque reference semantics into Workspace reopen
   and Terrain Artifact identity. Detached QA and LandXML accept the new
-  metre/metre profile, reject structured non-metre input, and retain the
-  explicit unknown-reference boolean only for frozen legacy workflows.
+  metre/metre profile, reject structured non-metre input, and keep the frozen
+  unknown-reference boolean readable only by legacy reconciliation. Current
+  workflow, QA, and export paths require the supported profile.
 - Emitted and compared one strict LandXML 1.2 `CoordinateSystem` declaration,
   with reference drift rejected before numeric coordinate tolerances in both
   DOM and bounded streaming round-trip readers.

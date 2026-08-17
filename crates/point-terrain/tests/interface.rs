@@ -2,7 +2,7 @@
 
 mod support;
 
-use point_contracts::{CoordinateReference, WorldBounds};
+use point_contracts::WorldBounds;
 use point_terrain::{ALGORITHM_VERSION, TerrainError, TerrainLimits, TerrainRecipe};
 use point_workspace::{CommitLimits, CommitRequest};
 
@@ -53,7 +53,7 @@ fn three_point_plane_publishes_exact_canonical_surface_facts() {
     );
     assert_eq!(
         descriptor.coordinate_reference(),
-        &CoordinateReference::Unknown
+        &support::supported_reference()
     );
     assert_eq!(descriptor.input_point_count(), 3);
     assert_eq!(descriptor.vertex_count(), 3);

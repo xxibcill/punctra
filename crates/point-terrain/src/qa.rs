@@ -1,6 +1,7 @@
 use std::mem;
 
 use foundation_runtime::{Job, OperationControl, ProgressPhase, ProgressSnapshot};
+use point_contracts::SpatialReferenceProfile;
 use robust::{Coord, orient2d};
 
 use crate::{
@@ -21,14 +22,14 @@ where
 {
     let surface = surface.clone();
     Job::spawn(move |control| {
-        if surface
+        if !surface
             .descriptor()
             .spatial_reference_profile()
-            .is_some_and(|profile| !profile.is_supported_metric_survey())
+            .is_some_and(SpatialReferenceProfile::is_supported_metric_survey)
         {
             return Err(TerrainError::invalid(
                 "Check Point spatial reference",
-                "the v0.12 QA path requires easting/northing/elevation axes and metre horizontal and vertical units",
+                "the v0.12 QA path requires a complete easting/northing/elevation profile with metre horizontal and vertical units",
             ));
         }
         let (check_points, collection_bytes) =

@@ -23,7 +23,7 @@ use serde_json::Value;
 use support::{
     RevisionDirectoryBlocker, TestDirectory, journal_frame_ends, overwrite_and_sync,
     restore_journal_prefix, semantic_report_projection, write_las_family_fixture,
-    write_las_family_fixture_with_profile,
+    write_las_family_fixture_with_profile, write_las_family_fixture_without_profile,
 };
 use terrain_demo::{
     WorkflowLimits, WorkflowPaths, WorkflowPhase, WorkflowReceipt, WorkflowRunId,
@@ -302,7 +302,7 @@ fn generated_las_and_laz_have_equal_semantic_projection_without_hiding_identity(
 }
 
 #[test]
-fn structured_metric_source_completes_without_the_legacy_assertion() {
+fn structured_metric_source_completes_with_its_profile() {
     let fixture = WorkflowFixture::new_with_spatial_reference(
         "structured-reference",
         "las",
@@ -316,6 +316,27 @@ fn structured_metric_source_completes_without_the_legacy_assertion() {
     assert!(landxml.contains(
         "<CoordinateSystem name=\"EPSG:32647+EPSG:5703\" horizontalCoordinateSystemName=\"EPSG:32647\" verticalDatum=\"EPSG:5703\""
     ));
+}
+
+#[test]
+fn new_unknown_reference_run_is_rejected_before_journal_publication() {
+    let fixture = WorkflowFixture::new_with_spatial_reference(
+        "unknown-reference",
+        "las",
+        100,
+        62,
+        FixtureSpatialReference::LegacyUnknown,
+    );
+
+    let error = start_run(
+        fixture.paths.clone(),
+        fixture.intent.clone(),
+        WorkflowLimits::default(),
+    )
+    .blocking_wait()
+    .expect_err("a fresh v0.12 run requires a structured spatial profile");
+    assert_eq!(error.code(), "PWF_INVALID_REQUEST");
+    assert!(!fixture.journal().exists());
 }
 
 #[test]
@@ -786,7 +807,7 @@ impl WorkflowFixture {
             point_count,
             identity,
             classification_attribute,
-            FixtureSpatialReference::LegacyUnknown,
+            FixtureSpatialReference::StructuredMetric,
         )
     }
 
@@ -823,7 +844,7 @@ impl WorkflowFixture {
         fs::create_dir(&run_root).expect("create caller-owned Run root");
         match spatial_reference {
             FixtureSpatialReference::LegacyUnknown => {
-                write_las_family_fixture(&source, point_count)
+                write_las_family_fixture_without_profile(&source, point_count)
             }
             FixtureSpatialReference::StructuredMetric => {
                 write_las_family_fixture_with_profile(&source, point_count)
@@ -858,12 +879,6 @@ impl WorkflowFixture {
             "00:00:00Z",
         )
         .expect("valid deterministic LandXML options");
-        let landxml = match spatial_reference {
-            FixtureSpatialReference::LegacyUnknown => {
-                landxml.assert_coordinates_are_metric_metres()
-            }
-            FixtureSpatialReference::StructuredMetric => landxml,
-        };
         let intent = WorkflowRunIntent::new(
             WorkflowRunId::new([identity; 16]).expect("nonzero Workflow Run ID"),
             OperationId::from_bytes([identity.wrapping_add(1); 16])

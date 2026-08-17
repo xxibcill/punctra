@@ -44,10 +44,9 @@ fn planar_surface(label: &str) -> (TerrainFixture, TerrainSurface) {
     (fixture, surface)
 }
 
-fn asserted_options(name: &str) -> LandXmlOptions {
+fn options(name: &str) -> LandXmlOptions {
     LandXmlOptions::metric_metres(name, "2026-08-10", "12:34:56Z")
         .expect("fixture LandXML options are valid")
-        .assert_coordinates_are_metric_metres()
 }
 
 #[test]
@@ -61,12 +60,6 @@ fn options_require_bounded_xml_text_and_explicit_valid_root_date_time() {
     assert_eq!(options.surface_name(), "Existing Ground");
     assert_eq!(options.document_date(), "2024-02-29");
     assert_eq!(options.document_time(), "00:00:00Z");
-    assert!(!options.coordinates_are_metric_metres_asserted());
-    assert!(
-        options
-            .assert_coordinates_are_metric_metres()
-            .coordinates_are_metric_metres_asserted()
-    );
 
     for (name, date, time) in [
         (" ", "2026-08-10", "00:00:00Z"),
@@ -100,7 +93,7 @@ fn target_path_is_checked_before_export_or_ensure_copies_it() {
     );
 
     let export_error = surface
-        .export_landxml(&target, asserted_options("Ground"), limits)
+        .export_landxml(&target, options("Ground"), limits)
         .blocking_wait()
         .expect_err("target path exceeds the export working ceiling");
 
@@ -116,7 +109,7 @@ fn target_path_is_checked_before_export_or_ensure_copies_it() {
     output.assert_stages_are_safe();
 
     let ensure_error = surface
-        .ensure_landxml(&target, asserted_options("Ground"), limits)
+        .ensure_landxml(&target, options("Ground"), limits)
         .blocking_wait()
         .expect_err("target path exceeds the ensure working ceiling");
 
@@ -133,8 +126,14 @@ fn target_path_is_checked_before_export_or_ensure_copies_it() {
 }
 
 #[test]
-fn source_coordinates_require_the_explicit_metric_metre_assertion() {
-    let (_fixture, surface) = planar_surface("landxml-reference");
+fn missing_structured_reference_fails_closed() {
+    let fixture = TerrainFixture::with_reference(
+        "landxml-reference",
+        CoordinateReference::Unknown,
+        vec![[0, 0, 0], [10, 0, 10], [10, 10, 30], [0, 10, 20]],
+        vec![GROUND; 4],
+    );
+    let surface = derive_surface(fixture.snapshot(), GROUND);
     assert!(surface.descriptor().coordinate_reference().is_unknown());
     let output = TemporaryOutput::new("reference");
     let target = output.path("terrain.xml");
@@ -149,14 +148,14 @@ fn source_coordinates_require_the_explicit_metric_metre_assertion() {
         error,
         TerrainError::UnsupportedMetricExport { reason }
             if reason.as_str()
-                == "Source coordinates require an explicit metric-metre assertion"
+                == "Source coordinates require a complete supported structured spatial profile"
     ));
     assert!(!target.exists());
     output.assert_stages_are_safe();
 }
 
 #[test]
-fn structured_metric_profile_is_exported_without_a_legacy_unit_assertion() {
+fn structured_metric_profile_is_exported_with_coordinate_system() {
     let profile = SpatialReferenceProfile::new(
         32_647,
         5_703,
@@ -184,7 +183,7 @@ fn structured_metric_profile_is_exported_without_a_legacy_unit_assertion() {
     surface
         .export_landxml(&target, options, LandXmlLimits::default())
         .blocking_wait()
-        .expect("structured metre profile exports without a legacy assertion");
+        .expect("structured metre profile exports with its coordinate system");
     let xml = fs::read_to_string(&target).unwrap();
     let document = Document::parse(&xml).unwrap();
     let root = document.root_element();
@@ -236,13 +235,9 @@ fn structured_non_metre_profile_fails_before_export() {
     let target = output.path("terrain.xml");
 
     let error = surface
-        .export_landxml(
-            &target,
-            asserted_options("Ground"),
-            LandXmlLimits::default(),
-        )
+        .export_landxml(&target, options("Ground"), LandXmlLimits::default())
         .blocking_wait()
-        .expect_err("a legacy assertion cannot override structured foot units");
+        .expect_err("structured foot units are unsupported");
     assert!(matches!(
         error,
         TerrainError::UnsupportedMetricExport { reason }
@@ -259,7 +254,7 @@ fn deterministic_bytes_round_trip_through_an_independent_semantic_parser() {
     let second = output.path("second.xml");
     let single_byte_buffer = output.path("single-byte-buffer.xml");
     let expected_name = "Existing & <Ground> \"A\"\nB\tC\rD";
-    let options = asserted_options(expected_name);
+    let options = options(expected_name);
 
     let first_receipt = surface
         .export_landxml(&first, options.clone(), LandXmlLimits::default())
@@ -339,11 +334,7 @@ fn create_new_never_replaces_an_existing_target() {
     fs::write(&target, b"caller-owned sentinel").expect("create caller-owned target");
 
     let error = surface
-        .export_landxml(
-            &target,
-            asserted_options("Ground"),
-            LandXmlLimits::default(),
-        )
+        .export_landxml(&target, options("Ground"), LandXmlLimits::default())
         .blocking_wait()
         .expect_err("create-new export rejects an existing target");
 
@@ -360,7 +351,7 @@ fn ensure_creates_then_reconciles_the_exact_existing_target() {
     let (_fixture, surface) = planar_surface("landxml-ensure");
     let output = TemporaryOutput::new("ensure");
     let target = output.path("terrain.xml");
-    let options = asserted_options("Recovery Ground");
+    let options = options("Recovery Ground");
 
     let created = surface
         .ensure_landxml(&target, options.clone(), LandXmlLimits::default())
@@ -397,7 +388,7 @@ fn ensure_reports_conflict_without_modifying_different_existing_bytes() {
     let error = surface
         .ensure_landxml(
             &target,
-            asserted_options("Expected Ground"),
+            options("Expected Ground"),
             LandXmlLimits::default(),
         )
         .blocking_wait()
@@ -433,7 +424,7 @@ fn ensure_rejects_non_regular_targets_without_modification() {
     let error = surface
         .ensure_landxml(
             &target,
-            asserted_options("Expected Ground"),
+            options("Expected Ground"),
             LandXmlLimits::default(),
         )
         .blocking_wait()
@@ -460,7 +451,7 @@ fn ensure_rejects_a_symlink_without_reading_or_modifying_its_destination() {
     let error = surface
         .ensure_landxml(
             &target,
-            asserted_options("Expected Ground"),
+            options("Expected Ground"),
             LandXmlLimits::default(),
         )
         .blocking_wait()
@@ -482,7 +473,7 @@ fn ensure_applies_resource_limits_before_reconciling_an_existing_target() {
     let (_fixture, surface) = planar_surface("landxml-ensure-limits");
     let output = TemporaryOutput::new("ensure-limits");
     let target = output.path("terrain.xml");
-    let options = asserted_options("Bounded Recovery Ground");
+    let options = options("Bounded Recovery Ground");
     surface
         .ensure_landxml(&target, options.clone(), LandXmlLimits::default())
         .blocking_wait()
@@ -571,7 +562,7 @@ fn every_landxml_resource_family_fails_without_a_target_and_retains_only_safe_st
     for (name, limits, expected_limit) in cases {
         let target = output.path(name);
         let error = surface
-            .export_landxml(&target, asserted_options("S"), limits)
+            .export_landxml(&target, options("S"), limits)
             .blocking_wait()
             .expect_err("resource ceiling rejects a complete publication");
         assert!(matches!(
@@ -595,7 +586,7 @@ fn cancellation_before_publication_leaves_no_target_and_only_safe_private_stages
     let target = output.path("cancelled.xml");
     let job = surface.export_landxml(
         &target,
-        asserted_options("Cancellation Fixture"),
+        options("Cancellation Fixture"),
         LandXmlLimits::default(),
     );
     job.handle().cancel();
@@ -621,7 +612,7 @@ fn ensure_cancellation_before_publication_leaves_no_target_and_only_safe_private
     let target = output.path("cancelled.xml");
     let job = surface.ensure_landxml(
         &target,
-        asserted_options("Ensure Cancellation Fixture"),
+        options("Ensure Cancellation Fixture"),
         LandXmlLimits::default(),
     );
     job.handle().cancel();
@@ -674,7 +665,24 @@ fn parse_landxml(xml: &str) -> ParsedSurface {
              http://www.landxml.org/schema/LandXML-1.2/LandXML-1.2.xsd"
         )
     );
-    assert_eq!(element_names(root), ["Units", "Surfaces"]);
+    assert_eq!(
+        element_names(root),
+        ["CoordinateSystem", "Units", "Surfaces"]
+    );
+
+    let coordinate_system = only_child(root, "CoordinateSystem");
+    assert_eq!(
+        required_attribute(coordinate_system, "name"),
+        "EPSG:32647+EPSG:5703"
+    );
+    assert_eq!(
+        required_attribute(coordinate_system, "horizontalCoordinateSystemName"),
+        "EPSG:32647"
+    );
+    assert_eq!(
+        required_attribute(coordinate_system, "verticalDatum"),
+        "EPSG:5703"
+    );
 
     let units = only_child(root, "Units");
     assert_eq!(element_names(units), ["Metric"]);

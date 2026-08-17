@@ -606,7 +606,6 @@ fn run(
     let source_id = source.identity();
     validate_source_reference(
         source.metadata().coordinate_reference(),
-        request,
         base_context(request),
     )?;
     if let Some(journal) = resumed_journal.as_ref()
@@ -1445,34 +1444,19 @@ fn validate_ground_ordinals(
 
 fn validate_source_reference(
     reference: &CoordinateReference,
-    request: &WorkflowRunIntent,
     context: FailureContext,
 ) -> Result<(), WorkflowFailure> {
-    let legacy_assertion = request.landxml.coordinates_are_metric_metres_asserted();
     match reference.spatial_profile() {
-        Some(profile) if !profile.is_supported_metric_survey() => {
-            Err(WorkflowFailure::invalid_with_context(
-                WorkflowStage::Source,
-                context,
-                "the structured spatial profile requires unsupported axes or non-metre units",
-            ))
-        }
-        Some(_) if legacy_assertion => Err(WorkflowFailure::invalid_with_context(
+        Some(profile) if profile.is_supported_metric_survey() => Ok(()),
+        Some(_) => Err(WorkflowFailure::invalid_with_context(
             WorkflowStage::Source,
             context,
-            "the legacy unknown-reference assertion cannot be used with a structured spatial profile",
-        )),
-        Some(_) => Ok(()),
-        None if reference.is_unknown() && legacy_assertion => Ok(()),
-        None if reference.is_unknown() => Err(WorkflowFailure::invalid_with_context(
-            WorkflowStage::Source,
-            context,
-            "an unknown Coordinate Reference requires the explicit legacy metric-metre assertion",
+            "the structured spatial profile requires unsupported axes or non-metre units",
         )),
         None => Err(WorkflowFailure::invalid_with_context(
             WorkflowStage::Source,
             context,
-            "opaque Coordinate Reference metadata cannot establish the supported metre survey profile",
+            "an unknown or opaque Coordinate Reference cannot establish the supported metre survey profile",
         )),
     }
 }
@@ -1505,7 +1489,7 @@ fn durable_intent(
         request.landxml.surface_name().into(),
         request.landxml.document_date().into(),
         request.landxml.document_time().into(),
-        request.landxml.coordinates_are_metric_metres_asserted(),
+        false,
         bindings,
         limits,
     )
@@ -1537,7 +1521,6 @@ fn validate_supplied_intent(
         || durable.document_date.as_ref() != supplied.landxml.document_date()
         || durable.document_time.as_ref() != supplied.landxml.document_time()
         || durable.coordinates_are_metric_metres_asserted
-            != supplied.landxml.coordinates_are_metric_metres_asserted()
         || durable.path_bindings != path_bindings
     {
         return Err(WorkflowFailure::new(
@@ -3466,8 +3449,7 @@ mod tests {
             TerrainRecipe::new(2),
             [],
             LandXmlOptions::metric_metres("Ground", "2026-08-12", "00:00:00Z")
-                .expect("valid deterministic LandXML options")
-                .assert_coordinates_are_metric_metres(),
+                .expect("valid deterministic LandXML options"),
         )
         .expect("create Workflow intent");
         let durable = DurableIntent::new(
@@ -3504,25 +3486,12 @@ mod tests {
     }
 
     #[test]
-    fn workflow_reference_policy_separates_profiles_from_legacy_assertions() {
+    fn workflow_reference_policy_requires_the_supported_profile() {
         use point_contracts::{
             CoordinateReference, LinearUnit, SpatialAxes, SpatialReferenceProfile,
             SpatialReferenceProvenance,
         };
 
-        let landxml = LandXmlOptions::metric_metres("Ground", "2026-08-12", "00:00:00Z")
-            .expect("valid deterministic LandXML options");
-        let request = WorkflowRunIntent::new(
-            WorkflowRunId::new([1; 16]).expect("nonzero Run identity"),
-            test_operation(2),
-            RevisionId::from_bytes([3; 32]).expect("nonzero Revision identity"),
-            [4],
-            1,
-            point_terrain::TerrainRecipe::new(2),
-            [],
-            landxml.clone(),
-        )
-        .expect("reference policy is evaluated after the Source opens");
         let metric_profile = CoordinateReference::profile(
             SpatialReferenceProfile::new(
                 32_647,
@@ -3534,9 +3503,7 @@ mod tests {
             )
             .unwrap(),
         );
-        assert!(
-            validate_source_reference(&metric_profile, &request, FailureContext::default()).is_ok()
-        );
+        assert!(validate_source_reference(&metric_profile, FailureContext::default()).is_ok());
 
         let feet_profile = CoordinateReference::profile(
             SpatialReferenceProfile::new(
@@ -3549,33 +3516,17 @@ mod tests {
             )
             .unwrap(),
         );
+        assert!(validate_source_reference(&feet_profile, FailureContext::default()).is_err());
         assert!(
-            validate_source_reference(&feet_profile, &request, FailureContext::default()).is_err()
+            validate_source_reference(&CoordinateReference::Unknown, FailureContext::default())
+                .is_err()
         );
         assert!(
             validate_source_reference(
-                &CoordinateReference::Unknown,
-                &request,
+                &CoordinateReference::wkt("LOCAL_CS[\"opaque\"]").unwrap(),
                 FailureContext::default()
             )
             .is_err()
-        );
-
-        let legacy_request = WorkflowRunIntent {
-            landxml: landxml.assert_coordinates_are_metric_metres(),
-            ..request
-        };
-        assert!(
-            validate_source_reference(
-                &CoordinateReference::Unknown,
-                &legacy_request,
-                FailureContext::default()
-            )
-            .is_ok()
-        );
-        assert!(
-            validate_source_reference(&metric_profile, &legacy_request, FailureContext::default())
-                .is_err()
         );
     }
 

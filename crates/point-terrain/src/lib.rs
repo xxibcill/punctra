@@ -4,8 +4,8 @@
 //! in-memory 2.5D Terrain Surface, evaluates detached Check Points, and creates
 //! the narrow metric-metre `LandXML` deliverable accepted for Punctra v0.6.
 //! A complete v0.12 structured Source profile is propagated and must declare
-//! easting/northing/elevation metre coordinates. The explicit assertion API is
-//! retained only for legacy unknown-reference workflows.
+//! easting/northing/elevation metre coordinates. Unstructured references fail
+//! closed on every current QA and `LandXML` write path.
 //!
 //! # Example
 //!

@@ -98,6 +98,11 @@ impl Drop for RevisionDirectoryBlocker {
 
 /// Writes equivalent generated LAS or LAZ meaning according to `path`'s extension.
 pub fn write_las_family_fixture(path: &Path, point_count: usize) -> io::Result<()> {
+    write_las_family_fixture_with_profile(path, point_count)
+}
+
+/// Writes a generated LAS or LAZ fixture without projection metadata.
+pub fn write_las_family_fixture_without_profile(path: &Path, point_count: usize) -> io::Result<()> {
     write_las_family_fixture_with_vlrs(path, point_count, Vec::new())
 }
 

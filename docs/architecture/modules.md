@@ -382,9 +382,8 @@ its Spatial Index, opens the caller-created Workspace, resolves or commits the
 recorded classification correction, audits the resulting Revision, derives
 the baseline and changed class-2 Surfaces, evaluates detached QA, and ensures
 the supported LandXML and canonical report. A structured Source must carry the
-supported metre/metre survey profile. Only legacy explicitly Unknown
-references use the caller's compatibility metric-metre assertion; opaque WKT
-and unsupported structured profiles fail closed.
+supported metre/metre survey profile. Unknown, opaque WKT, and unsupported
+structured references fail closed on current start and resume paths.
 
 The Workflow never creates a Workspace. The caller creates one through the
 public `point-workspace` lifecycle, supplies the current head as the baseline,

@@ -135,8 +135,8 @@ Detached Check Point QA uses the same Terrain descriptor. The current public
 residual and tolerance path is newly accepted for the metre/metre,
 easting/northing/elevation profile. A non-metre structured profile fails before
 evaluation; no numeric result is published under an incorrect metre label. The
-explicit legacy unknown-reference assertion remains only for compatibility as
-described below.
+frozen legacy unknown-reference fact remains readable only for compatibility
+as described below.
 
 The new LandXML path likewise requires the Surface's complete supported
 profile. It emits exactly one LandXML 1.2 `CoordinateSystem` before `Units`,
@@ -145,10 +145,10 @@ datum attributes, plus the already explicit Metric `linearUnit="meter"`.
 LandXML point text remains Northing, Easting, Elevation, so the axis swap is
 declared and tested rather than inferred.
 
-The v0.6-v0.11 boolean metric assertion remains only for reopening and exactly
-reconciling legacy generated-v1 workflow fixtures whose Coordinate Reference
-was unstructured. A structured Surface cannot use that compatibility path. New
-v0.12 examples and tests use the profile path.
+The v0.6-v0.11 boolean metric assertion remains in the frozen journal wire
+format only for reading and exactly reconciling legacy generated-v1 workflow
+fixtures whose Coordinate Reference was unstructured. No current CLI or public
+writer can set it, and every new v0.12 QA/export workflow uses the profile path.
 
 The private round-trip verifier accepts either both legacy files without a
 CoordinateSystem or both v0.12 files with exactly the same supported

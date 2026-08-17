@@ -455,7 +455,16 @@ fn process_help_and_invalid_input_are_bounded_and_do_not_create_a_run() {
     assert!(help.contains("terrain-demo inspect"));
     assert!(help.contains("terrain-demo compare-landxml"));
     assert!(help.contains("terrain-demo verify-round-trip"));
+    assert!(!help.contains("assert-unknown-crs-metric"));
     assert!(help.len() < 4 * 1024);
+
+    let removed_compatibility_flag = Command::new(env!("CARGO_BIN_EXE_terrain-demo"))
+        .args(["start", "--assert-unknown-crs-metric"])
+        .output()
+        .expect("run removed compatibility flag request");
+    assert!(!removed_compatibility_flag.status.success());
+    let diagnostic = String::from_utf8_lossy(&removed_compatibility_flag.stderr);
+    assert!(diagnostic.contains("unknown option; use --help for usage"));
 
     let fixture = ProcessFixture::new("invalid");
     let invalid = Command::new(env!("CARGO_BIN_EXE_terrain-demo"))
@@ -608,7 +617,6 @@ impl ProcessFixture {
             .args(["--check-point", "2,600000,4600000,120"])
             .args(["--date", "2026-08-10"])
             .args(["--time", "00:00:00Z"])
-            .arg("--assert-unknown-crs-metric")
             .arg(&self.source)
             .arg(&self.index)
             .arg(&self.workspace)

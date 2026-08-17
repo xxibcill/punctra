@@ -13,7 +13,8 @@ use std::{
 
 use point_contracts::{
     AttributeColumn, AttributeColumns, AttributeDataType, AttributeDefinition, AttributeId,
-    AttributeValues, CoordinateReference, PointId, PositionTransform,
+    AttributeValues, CoordinateReference, LinearUnit, PointId, PositionTransform, SpatialAxes,
+    SpatialReferenceProfile, SpatialReferenceProvenance,
 };
 use point_index::{PrepareLimits, prepare};
 use point_terrain::{TerrainError, TerrainLimits, TerrainRecipe, TerrainSurface};
@@ -47,7 +48,7 @@ impl TerrainFixture {
         Self::with_transform_and_reference(
             label,
             transform,
-            CoordinateReference::Unknown,
+            supported_reference(),
             ticks,
             classifications,
         )
@@ -132,6 +133,20 @@ impl TerrainFixture {
             .blocking_wait()
             .expect("Terrain fixture Edit target materializes")
     }
+}
+
+pub fn supported_reference() -> CoordinateReference {
+    CoordinateReference::profile(
+        SpatialReferenceProfile::new(
+            32_647,
+            5_703,
+            SpatialAxes::EastingNorthingElevation,
+            LinearUnit::Metre,
+            LinearUnit::Metre,
+            SpatialReferenceProvenance::CallerDeclaration,
+        )
+        .expect("fixture spatial profile is valid"),
+    )
 }
 
 pub fn classification_attribute() -> AttributeId {

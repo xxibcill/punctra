@@ -363,10 +363,9 @@ same effective geometry.
 
 `TerrainSurface::check_points` accepts finite, uniquely identified detached
 observations already expressed in the Surface coordinate system and units.
-One structured Coordinate Reference must be the supported
-easting/northing/elevation metre/metre profile; a structured foot profile fails
-before evaluation. Legacy unstructured-reference behavior remains unchanged
-for frozen compatibility.
+The Coordinate Reference must be the supported easting/northing/elevation
+metre/metre profile; a structured foot profile and every unstructured
+reference fail before evaluation.
 Closed face boundaries are covered; a point outside the convex hull produces
 an explicit `CheckPointOutcome::Gap`. For coverage, residual is observed Z
 minus interpolated Surface Z. Results preserve caller order and statistics use
@@ -379,9 +378,9 @@ breach publishes no partial `CheckPointReport`.
 LandXML 1.2 metric-metre TIN with explicit caller-supplied date/time, one
 Surface, consecutive point IDs, and canonical faces. Coordinates are written
 as northing, easting, elevation. A supported structured profile emits one
-matching `CoordinateSystem` and needs no caller unit assertion. A structured
-unsupported profile fails; the caller assertion is accepted only for legacy
-unknown or opaque references. No unit or CRS transformation occurs.
+matching `CoordinateSystem`. An unsupported or unstructured reference fails;
+no caller assertion can override the Source contract. No unit or CRS
+transformation occurs.
 
 Export stages and syncs a per-attempt bounded sibling file, reopens and
 verifies it, then publishes an independent descriptor-bound copy with atomic

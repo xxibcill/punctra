@@ -2,13 +2,13 @@
 
 use point_contracts::{
     AttributeColumn, AttributeColumns, AttributeDataType, AttributeDefinition, AttributeId,
-    AttributeSchema, AttributeValues, ContentHash, ContractError, CoordinateReference, LinearUnit,
-    MAX_ATTRIBUTE_DEFINITIONS, MAX_ATTRIBUTE_NAME_BYTES, MAX_COORDINATE_REFERENCE_WKT_BYTES,
-    MAX_LOGICAL_ORDER_BYTES, MAX_METADATA_NAME_BYTES, MAX_METADATA_NAMESPACE_BYTES,
-    MAX_METADATA_RECORD_PAYLOAD_BYTES, MAX_METADATA_RECORDS, MAX_SOURCE_FORMAT_NAME_BYTES,
-    MetadataRecord, PointBatch, PointId, PositionTransform, QuantizedPositions, SourceId,
-    SourceMetadata, SourceProvenance, SpatialAxes, SpatialReferenceProfile,
-    SpatialReferenceProvenance, WorldBounds,
+    AttributeSchema, AttributeValues, ContentHash, ContractError, CoordinateReference,
+    CoordinateReferenceHashEncoding, LinearUnit, MAX_ATTRIBUTE_DEFINITIONS,
+    MAX_ATTRIBUTE_NAME_BYTES, MAX_COORDINATE_REFERENCE_WKT_BYTES, MAX_LOGICAL_ORDER_BYTES,
+    MAX_METADATA_NAME_BYTES, MAX_METADATA_NAMESPACE_BYTES, MAX_METADATA_RECORD_PAYLOAD_BYTES,
+    MAX_METADATA_RECORDS, MAX_SOURCE_FORMAT_NAME_BYTES, MetadataRecord, PointBatch, PointId,
+    PositionTransform, QuantizedPositions, SourceId, SourceMetadata, SourceProvenance, SpatialAxes,
+    SpatialReferenceProfile, SpatialReferenceProvenance, WorldBounds,
 };
 use serde::Serialize;
 use serde_json::json;
@@ -412,6 +412,80 @@ fn every_structured_profile_value_has_exact_wire_and_canonical_code() {
             );
         }
     }
+}
+
+#[test]
+fn coordinate_reference_hash_framing_is_centralized_and_legacy_exact() {
+    let profile = SpatialReferenceProfile::new(
+        32_647,
+        5_703,
+        SpatialAxes::EastingNorthingElevation,
+        LinearUnit::Metre,
+        LinearUnit::Metre,
+        SpatialReferenceProvenance::SourceMetadata,
+    )
+    .unwrap();
+    let wkt = CoordinateReference::wkt("LOCAL_CS[\"fixture\"]").unwrap();
+    let structured = CoordinateReference::profile(profile);
+
+    assert_eq!(
+        hash_framing(
+            &CoordinateReference::Unknown,
+            CoordinateReferenceHashEncoding::WorkspaceSourceContractV1,
+        ),
+        Vec::<u8>::new(),
+    );
+    let mut expected_workspace_wkt = b"opaque-coordinate-reference-wkt-v1".to_vec();
+    expected_workspace_wkt.extend_from_slice(&19_u64.to_le_bytes());
+    expected_workspace_wkt.extend_from_slice(b"LOCAL_CS[\"fixture\"]");
+    assert_eq!(
+        hash_framing(
+            &wkt,
+            CoordinateReferenceHashEncoding::WorkspaceSourceContractV1,
+        ),
+        expected_workspace_wkt,
+    );
+    let mut expected_workspace_profile = b"structured-spatial-profile-v1".to_vec();
+    expected_workspace_profile.extend_from_slice(&profile.canonical_bytes());
+    assert_eq!(
+        hash_framing(
+            &structured,
+            CoordinateReferenceHashEncoding::WorkspaceSourceContractV1,
+        ),
+        expected_workspace_profile,
+    );
+
+    assert_eq!(
+        hash_framing(
+            &CoordinateReference::Unknown,
+            CoordinateReferenceHashEncoding::TerrainArtifactV1,
+        ),
+        0_u64.to_le_bytes(),
+    );
+    let mut expected_terrain_wkt = 19_u64.to_le_bytes().to_vec();
+    expected_terrain_wkt.extend_from_slice(b"LOCAL_CS[\"fixture\"]");
+    assert_eq!(
+        hash_framing(&wkt, CoordinateReferenceHashEncoding::TerrainArtifactV1,),
+        expected_terrain_wkt,
+    );
+    let mut expected_terrain_profile = u64::MAX.to_le_bytes().to_vec();
+    expected_terrain_profile.extend_from_slice(&profile.canonical_bytes());
+    assert_eq!(
+        hash_framing(
+            &structured,
+            CoordinateReferenceHashEncoding::TerrainArtifactV1,
+        ),
+        expected_terrain_profile,
+    );
+}
+
+fn hash_framing(
+    reference: &CoordinateReference,
+    encoding: CoordinateReferenceHashEncoding,
+) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    reference.visit_hash_bytes(encoding, |chunk| bytes.extend_from_slice(chunk));
+    bytes
 }
 
 #[test]

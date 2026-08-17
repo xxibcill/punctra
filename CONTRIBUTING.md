@@ -209,7 +209,6 @@ cargo run --release -p terrain-demo -- start \
   --run-id "$RUN_ID_HEX" --operation-id "$OPERATION_ID_HEX" \
   --baseline "$BASELINE_REVISION_HEX" --exclude-ground-ordinal 4 \
   --date 2026-08-10 --time 00:00:00Z \
-  --assert-unknown-crs-metric \
   path/to/source.laz path/to/source.pidx path/to/workspace.pcw path/to/run-root
 cargo run --release -p terrain-demo -- inspect path/to/run-root
 cargo run --release -p terrain-demo -- verify-round-trip \
@@ -290,12 +289,11 @@ command and request with `resume` in place of `start`. At least one repeated
 be in the baseline class-2 Ground Input. Optional detached observations use
 repeated `--check-point ID,X,Y,Z` arguments.
 
-`terrain-demo` requires metric-metre coordinates and performs no
-transformation. A complete structured metre/metre profile needs no assertion.
-The caller may pass `--assert-unknown-crs-metric` only for a legacy explicitly
-Unknown Coordinate Reference whose units are independently known; a structured
-profile cannot use that compatibility path, and opaque WKT cannot establish
-the supported workflow profile.
+`terrain-demo` requires the complete supported structured metre/metre profile
+and performs no transformation. Unknown, opaque WKT, and unsupported profiles
+fail closed. The frozen legacy assertion field remains readable only by the
+private legacy reconciliation verifier; no current CLI or public writer can
+set it.
 
 The durable v0.7 command replaces the v0.6 one-shot
 `--exercise-correction-revert` grammar. It still validates the correction

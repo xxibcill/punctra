@@ -2102,15 +2102,12 @@ fn source_contract(source: &Source, classification: &AttributeDefinition) -> [u8
 }
 
 fn hash_coordinate_reference(hasher: &mut Hasher, reference: &CoordinateReference) {
-    if let Some(profile) = reference.spatial_profile() {
-        hasher.update(b"structured-spatial-profile-v1");
-        hasher.update(&profile.canonical_bytes());
-    } else if let Some(wkt) = reference.as_wkt() {
-        hasher.update(b"opaque-coordinate-reference-wkt-v1");
-        let length = u64::try_from(wkt.len()).expect("bounded Coordinate Reference fits u64");
-        hasher.update(&length.to_le_bytes());
-        hasher.update(wkt.as_bytes());
-    }
+    reference.visit_hash_bytes(
+        point_contracts::CoordinateReferenceHashEncoding::WorkspaceSourceContractV1,
+        |bytes| {
+            hasher.update(bytes);
+        },
+    );
 }
 
 fn persisted_attribute_definition(

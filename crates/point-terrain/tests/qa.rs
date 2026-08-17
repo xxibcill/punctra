@@ -110,6 +110,40 @@ fn structured_non_metre_profile_is_rejected_before_qa() {
 }
 
 #[test]
+fn missing_or_opaque_spatial_reference_is_rejected_before_qa() {
+    for (label, reference) in [
+        ("unknown", CoordinateReference::Unknown),
+        (
+            "opaque-wkt",
+            CoordinateReference::wkt("LOCAL_CS[\"opaque\"]").unwrap(),
+        ),
+    ] {
+        let fixture = TerrainFixture::with_reference(
+            &format!("qa-{label}-reference"),
+            reference,
+            vec![[0, 0, 0], [10, 0, 10], [0, 10, 20]],
+            vec![2; 3],
+        );
+        let surface = derive_surface(fixture.snapshot(), 2);
+
+        let error = surface
+            .check_points(
+                [check_point(1, [1.0, 1.0, 1.0])],
+                CheckPointLimits::default(),
+            )
+            .blocking_wait()
+            .expect_err("QA requires a complete supported spatial profile");
+        assert!(matches!(
+            error,
+            TerrainError::InvalidArgument {
+                argument: "Check Point spatial reference",
+                ..
+            }
+        ));
+    }
+}
+
+#[test]
 fn closed_boundaries_choose_the_lowest_face_and_residuals_preserve_caller_order() {
     let (_fixture, surface) = planar_surface("qa-analytic");
     let surface = &surface;
