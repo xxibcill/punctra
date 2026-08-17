@@ -1141,13 +1141,15 @@ fn parse_geotiff_profile(bytes: &[u8]) -> Option<SpatialReferenceProfile> {
     .ok()
 }
 
-const fn linear_unit(value: u16) -> Option<LinearUnit> {
-    match value {
-        9001 => Some(LinearUnit::Metre),
-        9002 => Some(LinearUnit::InternationalFoot),
-        9003 => Some(LinearUnit::UsSurveyFoot),
-        _ => None,
-    }
+fn linear_unit(value: u16) -> Option<LinearUnit> {
+    let epsg_code = u32::from(value);
+    [
+        LinearUnit::Metre,
+        LinearUnit::InternationalFoot,
+        LinearUnit::UsSurveyFoot,
+    ]
+    .into_iter()
+    .find(|unit| unit.epsg_code() == epsg_code)
 }
 
 fn metadata_records(

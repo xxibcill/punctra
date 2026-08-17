@@ -396,6 +396,7 @@ fn every_structured_profile_value_has_exact_wire_and_canonical_code() {
             )
             .unwrap();
             let canonical = profile.canonical_bytes();
+            assert_eq!(LinearUnit::from_epsg_code(unit.epsg_code()), Some(unit));
             assert_eq!(canonical[12], 1, "axis canonical code");
             assert_eq!(canonical[13], unit_canonical, "horizontal unit code");
             assert_eq!(canonical[14], unit_canonical, "vertical unit code");
@@ -412,6 +413,7 @@ fn every_structured_profile_value_has_exact_wire_and_canonical_code() {
             );
         }
     }
+    assert_eq!(LinearUnit::from_epsg_code(9_012), None);
 }
 
 #[test]

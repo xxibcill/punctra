@@ -1954,6 +1954,17 @@ pub enum LinearUnit {
 }
 
 impl LinearUnit {
+    /// Returns the recognized linear unit for one EPSG unit code.
+    #[must_use]
+    pub const fn from_epsg_code(value: u32) -> Option<Self> {
+        match value {
+            9001 => Some(Self::Metre),
+            9002 => Some(Self::InternationalFoot),
+            9003 => Some(Self::UsSurveyFoot),
+            _ => None,
+        }
+    }
+
     /// Returns the EPSG unit code used by LAS `GeoTIFF` metadata.
     #[must_use]
     pub const fn epsg_code(self) -> u32 {
