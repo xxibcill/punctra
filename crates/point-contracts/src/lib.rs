@@ -2013,12 +2013,32 @@ impl SpatialReferenceProvenance {
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[serde(try_from = "SpatialReferenceProfileUnchecked")]
 pub struct SpatialReferenceProfile {
-    horizontal_epsg: u32,
-    vertical_epsg: u32,
+    horizontal_epsg: EpsgCode,
+    vertical_epsg: EpsgCode,
     axes: SpatialAxes,
     horizontal_unit: LinearUnit,
     vertical_unit: LinearUnit,
     provenance: SpatialReferenceProvenance,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize)]
+#[serde(transparent)]
+struct EpsgCode(u32);
+
+impl EpsgCode {
+    const USER_DEFINED: u32 = 32_767;
+
+    const fn new(value: u32) -> Option<Self> {
+        if value == 0 || value == Self::USER_DEFINED {
+            None
+        } else {
+            Some(Self(value))
+        }
+    }
+
+    const fn get(self) -> u32 {
+        self.0
+    }
 }
 
 #[derive(Deserialize)]
@@ -2046,16 +2066,16 @@ impl SpatialReferenceProfile {
         vertical_unit: LinearUnit,
         provenance: SpatialReferenceProvenance,
     ) -> Result<Self, ContractError> {
-        if horizontal_epsg == 0 || horizontal_epsg == 32_767 {
+        let Some(horizontal_epsg) = EpsgCode::new(horizontal_epsg) else {
             return Err(ContractError::InvalidHorizontalEpsg {
                 value: horizontal_epsg,
             });
-        }
-        if vertical_epsg == 0 || vertical_epsg == 32_767 {
+        };
+        let Some(vertical_epsg) = EpsgCode::new(vertical_epsg) else {
             return Err(ContractError::InvalidVerticalEpsg {
                 value: vertical_epsg,
             });
-        }
+        };
         Ok(Self {
             horizontal_epsg,
             vertical_epsg,
@@ -2069,13 +2089,13 @@ impl SpatialReferenceProfile {
     /// Returns the projected horizontal EPSG identity.
     #[must_use]
     pub const fn horizontal_epsg(self) -> u32 {
-        self.horizontal_epsg
+        self.horizontal_epsg.get()
     }
 
     /// Returns the vertical EPSG identity.
     #[must_use]
     pub const fn vertical_epsg(self) -> u32 {
-        self.vertical_epsg
+        self.vertical_epsg.get()
     }
 
     /// Returns the authoritative axis meaning and order.
@@ -2113,8 +2133,8 @@ impl SpatialReferenceProfile {
     /// Returns the stable fixed-width v1 bytes used by authoritative hashes.
     #[must_use]
     pub const fn canonical_bytes(self) -> [u8; SPATIAL_REFERENCE_PROFILE_CANONICAL_BYTES] {
-        let horizontal = self.horizontal_epsg.to_le_bytes();
-        let vertical = self.vertical_epsg.to_le_bytes();
+        let horizontal = self.horizontal_epsg.get().to_le_bytes();
+        let vertical = self.vertical_epsg.get().to_le_bytes();
         [
             1,
             0,

@@ -12,7 +12,7 @@ use std::{
 
 use blake3::Hasher;
 use foundation_runtime::{Job, OperationControl};
-use point_contracts::{ContentHash, PointId, WorldBounds};
+use point_contracts::{ContentHash, CoordinateReference, PointId, WorldBounds};
 use point_index::{IndexError, PrepareLimits};
 use point_source::SourceError;
 use point_terrain::{
@@ -164,12 +164,6 @@ impl WorkflowRunIntent {
         check_points: impl IntoIterator<Item = CheckPoint>,
         landxml: LandXmlOptions,
     ) -> Result<Self, WorkflowFailure> {
-        if !landxml.coordinates_are_metric_metres_asserted() {
-            return Err(WorkflowFailure::invalid(
-                WorkflowStage::Validate,
-                "LandXML requires an explicit metric-metre coordinate assertion",
-            ));
-        }
         let mut ordinals = collect_bounded(
             correction_ordinals,
             MAX_INTENT_ORDINALS,
@@ -610,6 +604,11 @@ fn run(
     verify_run_binding(&lock, &witness)
         .map_err(|error| io_failure(WorkflowStage::Source, error, base_context(request)))?;
     let source_id = source.identity();
+    validate_source_reference(
+        source.metadata().coordinate_reference(),
+        request,
+        base_context(request),
+    )?;
     if let Some(journal) = resumed_journal.as_ref()
         && journal.intent().source != source_id.into_bytes()
     {
@@ -1442,6 +1441,40 @@ fn validate_ground_ordinals(
         ));
     }
     Ok(())
+}
+
+fn validate_source_reference(
+    reference: &CoordinateReference,
+    request: &WorkflowRunIntent,
+    context: FailureContext,
+) -> Result<(), WorkflowFailure> {
+    let legacy_assertion = request.landxml.coordinates_are_metric_metres_asserted();
+    match reference.spatial_profile() {
+        Some(profile) if !profile.is_supported_metric_survey() => {
+            Err(WorkflowFailure::invalid_with_context(
+                WorkflowStage::Source,
+                context,
+                "the structured spatial profile requires unsupported axes or non-metre units",
+            ))
+        }
+        Some(_) if legacy_assertion => Err(WorkflowFailure::invalid_with_context(
+            WorkflowStage::Source,
+            context,
+            "the legacy unknown-reference assertion cannot be used with a structured spatial profile",
+        )),
+        Some(_) => Ok(()),
+        None if reference.is_unknown() && legacy_assertion => Ok(()),
+        None if reference.is_unknown() => Err(WorkflowFailure::invalid_with_context(
+            WorkflowStage::Source,
+            context,
+            "an unknown Coordinate Reference requires the explicit legacy metric-metre assertion",
+        )),
+        None => Err(WorkflowFailure::invalid_with_context(
+            WorkflowStage::Source,
+            context,
+            "opaque Coordinate Reference metadata cannot establish the supported metre survey profile",
+        )),
+    }
 }
 
 fn durable_intent(
@@ -3471,8 +3504,15 @@ mod tests {
     }
 
     #[test]
-    fn workflow_intent_requires_metric_coordinates_before_run_creation() {
-        let failure = WorkflowRunIntent::new(
+    fn workflow_reference_policy_separates_profiles_from_legacy_assertions() {
+        use point_contracts::{
+            CoordinateReference, LinearUnit, SpatialAxes, SpatialReferenceProfile,
+            SpatialReferenceProvenance,
+        };
+
+        let landxml = LandXmlOptions::metric_metres("Ground", "2026-08-12", "00:00:00Z")
+            .expect("valid deterministic LandXML options");
+        let request = WorkflowRunIntent::new(
             WorkflowRunId::new([1; 16]).expect("nonzero Run identity"),
             test_operation(2),
             RevisionId::from_bytes([3; 32]).expect("nonzero Revision identity"),
@@ -3480,15 +3520,63 @@ mod tests {
             1,
             point_terrain::TerrainRecipe::new(2),
             [],
-            point_terrain::LandXmlOptions::metric_metres("Ground", "2026-08-12", "00:00:00Z")
-                .expect("valid deterministic LandXML options"),
+            landxml.clone(),
         )
-        .expect_err("an unasserted metric request must fail before Run creation");
+        .expect("reference policy is evaluated after the Source opens");
+        let metric_profile = CoordinateReference::profile(
+            SpatialReferenceProfile::new(
+                32_647,
+                5_703,
+                SpatialAxes::EastingNorthingElevation,
+                LinearUnit::Metre,
+                LinearUnit::Metre,
+                SpatialReferenceProvenance::SourceMetadata,
+            )
+            .unwrap(),
+        );
+        assert!(
+            validate_source_reference(&metric_profile, &request, FailureContext::default()).is_ok()
+        );
 
-        assert_eq!(failure.code(), "PWF_INVALID_REQUEST");
-        assert_eq!(failure.stage(), "validate");
-        assert_eq!(failure.certainty(), "pre_publication");
-        assert!(failure.to_string().contains("metric-metre"));
+        let feet_profile = CoordinateReference::profile(
+            SpatialReferenceProfile::new(
+                2_230,
+                5_703,
+                SpatialAxes::EastingNorthingElevation,
+                LinearUnit::UsSurveyFoot,
+                LinearUnit::UsSurveyFoot,
+                SpatialReferenceProvenance::SourceMetadata,
+            )
+            .unwrap(),
+        );
+        assert!(
+            validate_source_reference(&feet_profile, &request, FailureContext::default()).is_err()
+        );
+        assert!(
+            validate_source_reference(
+                &CoordinateReference::Unknown,
+                &request,
+                FailureContext::default()
+            )
+            .is_err()
+        );
+
+        let legacy_request = WorkflowRunIntent {
+            landxml: landxml.assert_coordinates_are_metric_metres(),
+            ..request
+        };
+        assert!(
+            validate_source_reference(
+                &CoordinateReference::Unknown,
+                &legacy_request,
+                FailureContext::default()
+            )
+            .is_ok()
+        );
+        assert!(
+            validate_source_reference(&metric_profile, &legacy_request, FailureContext::default())
+                .is_err()
+        );
     }
 
     #[test]

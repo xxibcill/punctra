@@ -368,6 +368,53 @@ fn structured_spatial_profile_is_explicit_bounded_and_canonical() {
 }
 
 #[test]
+fn every_structured_profile_value_has_exact_wire_and_canonical_code() {
+    for (unit, unit_wire, unit_canonical) in [
+        (LinearUnit::Metre, "Metre", 1),
+        (LinearUnit::InternationalFoot, "InternationalFoot", 2),
+        (LinearUnit::UsSurveyFoot, "UsSurveyFoot", 3),
+    ] {
+        for (provenance, provenance_wire, provenance_canonical) in [
+            (
+                SpatialReferenceProvenance::SourceMetadata,
+                "SourceMetadata",
+                1,
+            ),
+            (
+                SpatialReferenceProvenance::CallerDeclaration,
+                "CallerDeclaration",
+                2,
+            ),
+        ] {
+            let profile = SpatialReferenceProfile::new(
+                32_647,
+                5_703,
+                SpatialAxes::EastingNorthingElevation,
+                unit,
+                unit,
+                provenance,
+            )
+            .unwrap();
+            let canonical = profile.canonical_bytes();
+            assert_eq!(canonical[12], 1, "axis canonical code");
+            assert_eq!(canonical[13], unit_canonical, "horizontal unit code");
+            assert_eq!(canonical[14], unit_canonical, "vertical unit code");
+            assert_eq!(canonical[15], provenance_canonical, "provenance code");
+
+            let encoded = serde_json::to_value(CoordinateReference::profile(profile)).unwrap();
+            assert_eq!(encoded["Profile"]["axes"], "EastingNorthingElevation");
+            assert_eq!(encoded["Profile"]["horizontal_unit"], unit_wire);
+            assert_eq!(encoded["Profile"]["vertical_unit"], unit_wire);
+            assert_eq!(encoded["Profile"]["provenance"], provenance_wire);
+            assert_eq!(
+                serde_json::from_value::<CoordinateReference>(encoded).unwrap(),
+                CoordinateReference::profile(profile)
+            );
+        }
+    }
+}
+
+#[test]
 fn source_bounds_exist_exactly_when_points_exist() {
     let transform = PositionTransform::new([0.0; 3], [1.0; 3]).unwrap();
     let bounds = WorldBounds::new([0.0; 3], [1.0; 3]).unwrap();

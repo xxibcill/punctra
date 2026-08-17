@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::fs::{File, Metadata};
 use std::io::{BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
@@ -1065,7 +1066,6 @@ const GEOTIFF_DIRECTORY_VERSION: u16 = 1;
 const GEOTIFF_KEY_REVISION: u16 = 1;
 const GEOTIFF_MINOR_REVISION: u16 = 0;
 const GEOTIFF_MODEL_TYPE_PROJECTED: u16 = 1;
-const GEOTIFF_USER_DEFINED: u16 = 32_767;
 const GT_MODEL_TYPE_KEY: u16 = 1024;
 const PROJECTED_CS_TYPE_KEY: u16 = 3072;
 const PROJECTED_LINEAR_UNITS_KEY: u16 = 3076;
@@ -1099,10 +1099,14 @@ fn parse_geotiff_profile(bytes: &[u8]) -> Option<SpatialReferenceProfile> {
     let mut horizontal_unit = None;
     let mut vertical_epsg = None;
     let mut vertical_unit = None;
+    let mut seen_keys = BTreeSet::new();
     for entry in words[4..].chunks_exact(4) {
         let [key, location, count, value] = entry else {
             return None;
         };
+        if !seen_keys.insert(*key) || *location != 0 || *count != 1 {
+            return None;
+        }
         if !matches!(
             *key,
             GT_MODEL_TYPE_KEY
@@ -1113,9 +1117,6 @@ fn parse_geotiff_profile(bytes: &[u8]) -> Option<SpatialReferenceProfile> {
         ) {
             continue;
         }
-        if *location != 0 || *count != 1 {
-            return None;
-        }
         let target = match *key {
             GT_MODEL_TYPE_KEY => &mut model_type,
             PROJECTED_CS_TYPE_KEY => &mut horizontal_epsg,
@@ -1124,32 +1125,20 @@ fn parse_geotiff_profile(bytes: &[u8]) -> Option<SpatialReferenceProfile> {
             VERTICAL_UNITS_KEY => &mut vertical_unit,
             _ => unreachable!(),
         };
-        if target.replace(*value).is_some() {
-            return None;
-        }
+        *target = Some(*value);
     }
     if model_type != Some(GEOTIFF_MODEL_TYPE_PROJECTED) {
         return None;
     }
-    let horizontal_epsg = authority_code(horizontal_epsg?)?;
-    let vertical_epsg = authority_code(vertical_epsg?)?;
     SpatialReferenceProfile::new(
-        horizontal_epsg,
-        vertical_epsg,
+        u32::from(horizontal_epsg?),
+        u32::from(vertical_epsg?),
         SpatialAxes::EastingNorthingElevation,
         linear_unit(horizontal_unit?)?,
         linear_unit(vertical_unit?)?,
         SpatialReferenceProvenance::SourceMetadata,
     )
     .ok()
-}
-
-fn authority_code(value: u16) -> Option<u32> {
-    if value == 0 || value == GEOTIFF_USER_DEFINED {
-        None
-    } else {
-        Some(u32::from(value))
-    }
 }
 
 const fn linear_unit(value: u16) -> Option<LinearUnit> {

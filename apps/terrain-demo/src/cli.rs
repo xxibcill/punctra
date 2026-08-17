@@ -44,12 +44,12 @@ Required start/resume options:
   --exclude-ground-ordinal N     exact Source ordinal; repeat for a nonempty set
   --date YYYY-MM-DD              deterministic LandXML document date
   --time HH:MM:SSZ               deterministic LandXML UTC document time
-  --assert-unknown-crs-metric    assert Source coordinates are metric metres
 
 Optional:
   --check-point ID,X,Y,Z         detached QA point; repeatable
   --non-ground-classification N  replacement class (default 1)
   --surface-name TEXT            LandXML Surface name
+  --assert-unknown-crs-metric    legacy Unknown-reference metric assertion
   -h, --help                     show this help
 
 Required compare-landxml options:

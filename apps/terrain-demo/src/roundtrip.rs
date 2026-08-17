@@ -1203,7 +1203,7 @@ fn parse_coordinate_system(
     ];
     if node
         .attributes()
-        .any(|attribute| attribute.namespace().is_none() && !allowed.contains(&attribute.name()))
+        .any(|attribute| attribute.namespace().is_some() || !allowed.contains(&attribute.name()))
     {
         return Err(coordinate_reference_failure(side));
     }
@@ -2127,6 +2127,13 @@ mod tests {
             (
                 "missing-reference.xml",
                 reference_xml.replace(coordinate_system, ""),
+            ),
+            (
+                "foreign-reference-attribute.xml",
+                reference_xml.replace(
+                    "<CoordinateSystem ",
+                    "<CoordinateSystem xmlns:vendor=\"urn:vendor:reference\" vendor:epoch=\"2020.0\" ",
+                ),
             ),
         ];
         for (name, returned_xml) in unsupported {

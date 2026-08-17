@@ -58,8 +58,10 @@ During uncommitted local development, use
 `PUNCTRA_PACKAGE_ALLOW_DIRTY=1 scripts/verify-packages.rb`; the same metadata,
 content inspection, and extracted-package builds still run. The script calls
 `cargo package --list` for every library and then `cargo package` for the
-publishable workspace subset. It never uploads, tags, signs, or changes a
-registry.
+publishable workspace subset. It derives the publishable inventory, private
+applications, shared version/license/MSRV policy, and dependency order from
+Cargo metadata so release policy has one manifest source of truth. It never
+uploads, tags, signs, or changes a registry.
 
 An actual publication is a separate maintainer action. Publish in the order
 used by the script's package list, wait for each registry package to become

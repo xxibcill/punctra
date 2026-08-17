@@ -291,9 +291,11 @@ be in the baseline class-2 Ground Input. Optional detached observations use
 repeated `--check-point ID,X,Y,Z` arguments.
 
 `terrain-demo` requires metric-metre coordinates and performs no
-transformation. The caller must pass `--assert-unknown-crs-metric` only when
-that unit assertion is independently known to be true; the application cannot
-infer units from the opaque Coordinate Reference.
+transformation. A complete structured metre/metre profile needs no assertion.
+The caller may pass `--assert-unknown-crs-metric` only for a legacy explicitly
+Unknown Coordinate Reference whose units are independently known; a structured
+profile cannot use that compatibility path, and opaque WKT cannot establish
+the supported workflow profile.
 
 The durable v0.7 command replaces the v0.6 one-shot
 `--exercise-correction-revert` grammar. It still validates the correction

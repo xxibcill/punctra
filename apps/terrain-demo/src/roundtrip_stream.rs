@@ -1073,8 +1073,11 @@ impl<'a> StreamParser<'a> {
         for attribute in start.attributes() {
             let attribute = attribute.map_err(|_| self.coordinate_reference_failure())?;
             let key = attribute.key.as_ref();
-            if key == b"xmlns" || key.starts_with(b"xmlns:") || key.contains(&b':') {
+            if key == b"xmlns" || key.starts_with(b"xmlns:") {
                 continue;
+            }
+            if key.contains(&b':') {
+                return Err(self.coordinate_reference_failure());
             }
             let value = attribute
                 .normalized_value(XmlVersion::Implicit1_0)
@@ -1473,6 +1476,28 @@ mod tests {
             RoundTripLimits::full_v07_export(),
         )
         .expect("reference drift is a semantic evaluation");
+        assert!(matches!(
+            evaluation,
+            RoundTripEvaluation::Failed(ref mismatch)
+                if mismatch.reason() == RoundTripReason::CoordinateReferenceUnsupported
+        ));
+
+        fs::write(
+            &returned,
+            reference_xml.replace(
+                "<CoordinateSystem ",
+                "<CoordinateSystem xmlns:vendor=\"urn:vendor:reference\" vendor:epoch=\"2020.0\" ",
+            ),
+        )
+        .unwrap();
+        let evaluation = evaluate_streaming_round_trip(
+            &reference,
+            &returned,
+            RoundTripDeclaration::new("generated", "test", "metric").unwrap(),
+            RoundTripTolerances::new(f64::MAX, f64::MAX).unwrap(),
+            RoundTripLimits::full_v07_export(),
+        )
+        .expect("foreign reference metadata is a semantic evaluation");
         assert!(matches!(
             evaluation,
             RoundTripEvaluation::Failed(ref mismatch)

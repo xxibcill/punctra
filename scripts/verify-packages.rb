@@ -4,24 +4,8 @@
 require "json"
 require "open3"
 
-LIBRARIES = %w[
-  foundation-runtime
-  point-contracts
-  point-source
-  render-protocol
-  source-memory
-  source-las
-  point-index
-  point-workspace
-  point-view
-  render-wgpu
-  point-review
-  point-terrain
-].freeze
-APPLICATIONS = %w[renderer-demo terrain-demo].freeze
-VERSION = "0.12.0-alpha.1"
-LICENSE = "MIT OR Apache-2.0"
-MSRV = "1.90"
+EXPECTED_LIBRARY_COUNT = 12
+EXPECTED_APPLICATION_COUNT = 2
 
 def capture!(*command)
   output, error, status = Open3.capture3(*command)
@@ -38,14 +22,50 @@ end
 root = File.expand_path("..", __dir__)
 Dir.chdir(root)
 metadata = JSON.parse(capture!("cargo", "metadata", "--no-deps", "--format-version", "1"))
-packages = metadata.fetch("packages").to_h { |package| [package.fetch("name"), package] }
+workspace_members = metadata.fetch("workspace_members")
+workspace_packages = metadata.fetch("packages").select do |package|
+  workspace_members.include?(package.fetch("id"))
+end
+libraries = workspace_packages.reject { |package| package.fetch("publish") == [] }
+applications = workspace_packages.select { |package| package.fetch("publish") == [] }
 
-LIBRARIES.each do |name|
-  package = packages.fetch(name)
-  assert!(package.fetch("version") == VERSION, "#{name}: unexpected package version")
+assert!(libraries.length == EXPECTED_LIBRARY_COUNT,
+        "expected #{EXPECTED_LIBRARY_COUNT} publishable libraries, found #{libraries.length}")
+assert!(applications.length == EXPECTED_APPLICATION_COUNT,
+        "expected #{EXPECTED_APPLICATION_COUNT} private applications, found #{applications.length}")
+
+library_names = libraries.to_h { |package| [package.fetch("name"), package] }
+ordered_names = []
+pending_names = library_names.keys.sort
+until pending_names.empty?
+  ready = pending_names.select do |name|
+    library_names.fetch(name).fetch("dependencies").all? do |dependency|
+      !library_names.key?(dependency.fetch("name")) || ordered_names.include?(dependency.fetch("name"))
+    end
+  end
+  abort "publishable library dependency cycle: #{pending_names.join(", ")}" if ready.empty?
+
+  ordered_names.concat(ready)
+  pending_names -= ready
+end
+libraries = ordered_names.map { |name| library_names.fetch(name) }
+
+versions = workspace_packages.map { |package| package.fetch("version") }.uniq
+licenses = libraries.map { |package| package.fetch("license") }.uniq
+msrvs = libraries.map { |package| package.fetch("rust_version") }.uniq
+assert!(versions.length == 1, "workspace package versions differ: #{versions.join(", ")}")
+assert!(licenses.length == 1 && !licenses.first.to_s.empty?, "library license policy differs")
+assert!(msrvs.length == 1 && !msrvs.first.to_s.empty?, "library MSRV policy differs")
+version = versions.fetch(0)
+license = licenses.fetch(0)
+msrv = msrvs.fetch(0)
+
+libraries.each do |package|
+  name = package.fetch("name")
+  assert!(package.fetch("version") == version, "#{name}: unexpected package version")
   assert!(package["publish"] != [], "#{name}: package is not publishable")
-  assert!(package.fetch("license") == LICENSE, "#{name}: dual license metadata is absent")
-  assert!(package.fetch("rust_version") == MSRV, "#{name}: MSRV is not #{MSRV}")
+  assert!(package.fetch("license") == license, "#{name}: license metadata differs")
+  assert!(package.fetch("rust_version") == msrv, "#{name}: MSRV differs")
   assert!(package.fetch("repository").start_with?("https://"), "#{name}: repository is absent")
   assert!(package.fetch("homepage").start_with?("https://"), "#{name}: homepage is absent")
   assert!(package.fetch("documentation") == "https://docs.rs/#{name}", "#{name}: docs.rs URL differs")
@@ -62,10 +82,10 @@ LIBRARIES.each do |name|
           "#{name}: docs.rs build policy differs")
 
   package.fetch("dependencies").each do |dependency|
-    next unless LIBRARIES.include?(dependency.fetch("name"))
+    next unless library_names.key?(dependency.fetch("name"))
 
-    assert!(dependency.fetch("req") == "=#{VERSION}",
-            "#{name}: #{dependency.fetch("name")} is not pinned to =#{VERSION}")
+    assert!(dependency.fetch("req") == "=#{version}",
+            "#{name}: #{dependency.fetch("name")} is not pinned to =#{version}")
   end
 
   list_arguments = ["cargo", "package", "-p", name, "--list"]
@@ -77,14 +97,17 @@ LIBRARIES.each do |name|
           "#{name}: package contains build output or field data")
 end
 
-APPLICATIONS.each do |name|
-  assert!(packages.fetch(name).fetch("publish") == [], "#{name}: application must remain private")
+applications.each do |package|
+  name = package.fetch("name")
+  assert!(package.fetch("publish") == [], "#{name}: application must remain private")
+  manifest = File.read(package.fetch("manifest_path"))
+  assert!(manifest.match?(/^publish = false$/), "#{name}: publish = false is not explicit")
 end
 
-package_arguments = [
-  "cargo", "package", "--workspace",
-  "--exclude", "renderer-demo", "--exclude", "terrain-demo"
-]
+package_arguments = ["cargo", "package", "--workspace"]
+applications.each do |package|
+  package_arguments.concat(["--exclude", package.fetch("name")])
+end
 package_arguments << "--allow-dirty" if ENV["PUNCTRA_PACKAGE_ALLOW_DIRTY"] == "1"
 system(*package_arguments, exception: true)
-puts "verified #{LIBRARIES.length} publishable library packages at #{VERSION}"
+puts "verified #{libraries.length} publishable library packages at #{version}"

@@ -23,6 +23,7 @@ use serde_json::Value;
 use support::{
     RevisionDirectoryBlocker, TestDirectory, journal_frame_ends, overwrite_and_sync,
     restore_journal_prefix, semantic_report_projection, write_las_family_fixture,
+    write_las_family_fixture_with_profile,
 };
 use terrain_demo::{
     WorkflowLimits, WorkflowPaths, WorkflowPhase, WorkflowReceipt, WorkflowRunId,
@@ -298,6 +299,23 @@ fn generated_las_and_laz_have_equal_semantic_projection_without_hiding_identity(
         fs::read(&compressed_fixture.source).unwrap(),
         compressed_source
     );
+}
+
+#[test]
+fn structured_metric_source_completes_without_the_legacy_assertion() {
+    let fixture = WorkflowFixture::new_with_spatial_reference(
+        "structured-reference",
+        "las",
+        100,
+        61,
+        FixtureSpatialReference::StructuredMetric,
+    );
+
+    fixture.start();
+    let landxml = String::from_utf8(fixture.landxml_bytes()).expect("LandXML is UTF-8");
+    assert!(landxml.contains(
+        "<CoordinateSystem name=\"EPSG:32647+EPSG:5703\" horizontalCoordinateSystemName=\"EPSG:32647\" verticalDatum=\"EPSG:5703\""
+    ));
 }
 
 #[test]
@@ -738,6 +756,12 @@ struct WorkflowFixture {
     intent: WorkflowRunIntent,
 }
 
+#[derive(Clone, Copy)]
+enum FixtureSpatialReference {
+    LegacyUnknown,
+    StructuredMetric,
+}
+
 impl WorkflowFixture {
     fn new(label: &str, extension: &str, point_count: usize, identity: u8) -> Self {
         Self::new_with_classification_attribute(
@@ -756,13 +780,56 @@ impl WorkflowFixture {
         identity: u8,
         classification_attribute: u32,
     ) -> Self {
+        Self::new_with_spatial_reference_and_classification(
+            label,
+            extension,
+            point_count,
+            identity,
+            classification_attribute,
+            FixtureSpatialReference::LegacyUnknown,
+        )
+    }
+
+    fn new_with_spatial_reference(
+        label: &str,
+        extension: &str,
+        point_count: usize,
+        identity: u8,
+        spatial_reference: FixtureSpatialReference,
+    ) -> Self {
+        Self::new_with_spatial_reference_and_classification(
+            label,
+            extension,
+            point_count,
+            identity,
+            CLASSIFICATION_ATTRIBUTE,
+            spatial_reference,
+        )
+    }
+
+    fn new_with_spatial_reference_and_classification(
+        label: &str,
+        extension: &str,
+        point_count: usize,
+        identity: u8,
+        classification_attribute: u32,
+        spatial_reference: FixtureSpatialReference,
+    ) -> Self {
         let directory = TestDirectory::new(label).expect("create workflow fixture directory");
         let source = directory.path().join(format!("fixture.{extension}"));
         let index = directory.path().join("fixture.pidx");
         let workspace = directory.path().join("fixture.pcw");
         let run_root = directory.path().join("run");
         fs::create_dir(&run_root).expect("create caller-owned Run root");
-        write_las_family_fixture(&source, point_count).expect("write generated LAS-family Source");
+        match spatial_reference {
+            FixtureSpatialReference::LegacyUnknown => {
+                write_las_family_fixture(&source, point_count)
+            }
+            FixtureSpatialReference::StructuredMetric => {
+                write_las_family_fixture_with_profile(&source, point_count)
+            }
+        }
+        .expect("write generated LAS-family Source");
 
         let source_handle = source_las::open(&source)
             .blocking_wait()
@@ -785,6 +852,18 @@ impl WorkflowFixture {
         drop(workspace_handle);
 
         let paths = WorkflowPaths::new(&source, &index, &workspace, &run_root);
+        let landxml = LandXmlOptions::metric_metres(
+            "Punctra Technical Alpha Surface",
+            "2026-08-10",
+            "00:00:00Z",
+        )
+        .expect("valid deterministic LandXML options");
+        let landxml = match spatial_reference {
+            FixtureSpatialReference::LegacyUnknown => {
+                landxml.assert_coordinates_are_metric_metres()
+            }
+            FixtureSpatialReference::StructuredMetric => landxml,
+        };
         let intent = WorkflowRunIntent::new(
             WorkflowRunId::new([identity; 16]).expect("nonzero Workflow Run ID"),
             OperationId::from_bytes([identity.wrapping_add(1); 16])
@@ -805,13 +884,7 @@ impl WorkflowFixture {
                 )
                 .expect("finite gap Check Point"),
             ],
-            LandXmlOptions::metric_metres(
-                "Punctra Technical Alpha Surface",
-                "2026-08-10",
-                "00:00:00Z",
-            )
-            .expect("valid deterministic LandXML options")
-            .assert_coordinates_are_metric_metres(),
+            landxml,
         )
         .expect("construct bounded workflow intent");
         Self {
