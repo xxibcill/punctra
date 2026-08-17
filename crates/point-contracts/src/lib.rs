@@ -1997,19 +1997,6 @@ pub enum SpatialReferenceProvenance {
     CallerDeclaration,
 }
 
-/// Authoritative byte framing used when a Coordinate Reference enters a digest.
-///
-/// The two existing boundaries intentionally retain different legacy framing.
-/// Keeping their dispatch here prevents future Coordinate Reference variants
-/// from being handled inconsistently by Workspace and Terrain.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum CoordinateReferenceHashEncoding {
-    /// Workspace Source-contract v1 framing.
-    WorkspaceSourceContractV1,
-    /// Terrain Artifact v1 framing.
-    TerrainArtifactV1,
-}
-
 impl SpatialReferenceProvenance {
     const fn canonical_code(self) -> u8 {
         match self {
@@ -2259,70 +2246,6 @@ impl CoordinateReference {
     #[must_use]
     pub const fn is_unknown(&self) -> bool {
         matches!(self.0, CoordinateReferenceValue::Unknown)
-    }
-
-    /// Visits the exact ordered byte chunks for one authoritative hash boundary.
-    ///
-    /// Unknown Workspace references deliberately visit no bytes to preserve the
-    /// frozen v1 Source-contract digest. No allocation or coordinate inference
-    /// occurs.
-    ///
-    /// # Panics
-    ///
-    /// Panics only on a hypothetical platform where a bounded WKT byte length
-    /// cannot be represented by `u64`.
-    pub fn visit_hash_bytes(
-        &self,
-        encoding: CoordinateReferenceHashEncoding,
-        mut visit: impl FnMut(&[u8]),
-    ) {
-        match (encoding, &self.0) {
-            (
-                CoordinateReferenceHashEncoding::WorkspaceSourceContractV1,
-                CoordinateReferenceValue::Unknown,
-            ) => {}
-            (
-                CoordinateReferenceHashEncoding::WorkspaceSourceContractV1,
-                CoordinateReferenceValue::Wkt(wkt),
-            ) => {
-                visit(b"opaque-coordinate-reference-wkt-v1");
-                visit(
-                    &u64::try_from(wkt.len())
-                        .expect("bounded WKT length fits u64")
-                        .to_le_bytes(),
-                );
-                visit(wkt.as_bytes());
-            }
-            (
-                CoordinateReferenceHashEncoding::WorkspaceSourceContractV1,
-                CoordinateReferenceValue::Profile(profile),
-            ) => {
-                visit(b"structured-spatial-profile-v1");
-                visit(&profile.canonical_bytes());
-            }
-            (
-                CoordinateReferenceHashEncoding::TerrainArtifactV1,
-                CoordinateReferenceValue::Unknown,
-            ) => visit(&0_u64.to_le_bytes()),
-            (
-                CoordinateReferenceHashEncoding::TerrainArtifactV1,
-                CoordinateReferenceValue::Wkt(wkt),
-            ) => {
-                visit(
-                    &u64::try_from(wkt.len())
-                        .expect("bounded WKT length fits u64")
-                        .to_le_bytes(),
-                );
-                visit(wkt.as_bytes());
-            }
-            (
-                CoordinateReferenceHashEncoding::TerrainArtifactV1,
-                CoordinateReferenceValue::Profile(profile),
-            ) => {
-                visit(&u64::MAX.to_le_bytes());
-                visit(&profile.canonical_bytes());
-            }
-        }
     }
 }
 

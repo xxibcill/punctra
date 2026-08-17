@@ -834,12 +834,15 @@ fn artifact_hash(
     hasher.update(provenance.revision().as_bytes());
     hasher.update(recipe_hash.as_bytes());
     hash_transform(&mut hasher, transform);
-    coordinate_reference.visit_hash_bytes(
-        point_contracts::CoordinateReferenceHashEncoding::TerrainArtifactV1,
-        |bytes| {
-            hasher.update(bytes);
-        },
-    );
+    if let Some(profile) = coordinate_reference.spatial_profile() {
+        hasher.update(&u64::MAX.to_le_bytes());
+        hasher.update(&profile.canonical_bytes());
+    } else if let Some(wkt) = coordinate_reference.as_wkt() {
+        hasher.update(&u64::try_from(wkt.len()).unwrap_or(u64::MAX).to_le_bytes());
+        hasher.update(wkt.as_bytes());
+    } else {
+        hasher.update(&0_u64.to_le_bytes());
+    }
     hasher.update(input_hash.as_bytes());
     hasher.update(geometry_hash.as_bytes());
     hasher.update(topology_hash.as_bytes());
