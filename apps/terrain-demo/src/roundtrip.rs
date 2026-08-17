@@ -1143,6 +1143,7 @@ fn parse_landxml_document(
     if unqualified_attribute(root, "version") != Some("1.2") {
         return Err(schema_error(side, "LandXML version must be 1.2"));
     }
+    reject_misplaced_coordinate_system(side, root)?;
     validate_root_children(side, root)?;
     let spatial_reference_profile = element_children(root)
         .find(|node| node.has_tag_name((LANDXML_NAMESPACE, "CoordinateSystem")))
@@ -1169,6 +1170,22 @@ fn parse_landxml_document(
         .collect::<Vec<_>>()
         .into_boxed_slice();
     Ok(parsed)
+}
+
+fn reject_misplaced_coordinate_system(
+    side: InputSide,
+    root: Node<'_, '_>,
+) -> Result<(), RoundTripFailure> {
+    let has_misplaced_reference = root.descendants().filter(Node::is_element).any(|node| {
+        node.tag_name().name() == "CoordinateSystem"
+            && (node.parent() != Some(root)
+                || node.tag_name().namespace() != Some(LANDXML_NAMESPACE))
+    });
+    if has_misplaced_reference {
+        Err(coordinate_reference_failure(side))
+    } else {
+        Ok(())
+    }
 }
 
 fn validate_root_children(side: InputSide, root: Node<'_, '_>) -> Result<(), RoundTripFailure> {
@@ -2165,6 +2182,30 @@ mod tests {
                 "{name}"
             );
         }
+    }
+
+    #[test]
+    fn nested_coordinate_system_is_not_ignored_as_legacy_metadata() {
+        let fixture = Fixture::new("nested-coordinate-system");
+        let legacy = landxml(REFERENCE_POINTS, REFERENCE_FACES, false);
+        let nested = legacy.replace(
+            "<Application name=\"Declared elsewhere\" version=\"ignored\"/>",
+            "<Application name=\"Declared elsewhere\" version=\"ignored\"><CoordinateSystem name=\"EPSG:32647+EPSG:5703\" horizontalCoordinateSystemName=\"EPSG:32647\" verticalDatum=\"EPSG:5703\" desc=\"axes=easting,northing,elevation; horizontalUnit=metre; verticalUnit=metre; provenance=sourceMetadata\"/></Application>",
+        );
+        assert_ne!(nested, legacy);
+        let (reference, returned) = fixture.write_pair(&legacy, &nested);
+
+        let error = verify(
+            &reference,
+            &returned,
+            tolerances(f64::MAX, f64::MAX),
+            default_limits(),
+        )
+        .expect_err("nested reference metadata must not pass as a legacy file");
+        assert_eq!(
+            error.reason(),
+            Some(RoundTripReason::CoordinateReferenceUnsupported)
+        );
     }
 
     #[test]

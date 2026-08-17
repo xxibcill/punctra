@@ -880,6 +880,9 @@ impl<'a> StreamParser<'a> {
             return Err(self.unsupported("XInclude is unsupported"));
         }
         if self.metadata_depth != 0 {
+            if start.local_name().as_ref() == b"CoordinateSystem" {
+                return Err(self.coordinate_reference_failure());
+            }
             self.metadata_depth += 1;
             return Ok(());
         }
@@ -1483,6 +1486,35 @@ mod tests {
             RoundTripLimits::full_v07_export(),
         )
         .expect("foreign reference metadata is a semantic evaluation");
+        assert!(matches!(
+            evaluation,
+            RoundTripEvaluation::Failed(ref mismatch)
+                if mismatch.reason() == RoundTripReason::CoordinateReferenceUnsupported
+        ));
+    }
+
+    #[test]
+    fn streaming_reader_rejects_coordinate_system_hidden_in_metadata() {
+        let directory = Directory::new();
+        let reference = directory.path.join("reference-hidden-spatial.xml");
+        let returned = directory.path.join("returned-hidden-spatial.xml");
+        let reference_xml = xml("1", "2", "3", "1 2 3");
+        let returned_xml = reference_xml.replacen(
+            "<Units>",
+            "<Project><CoordinateSystem name=\"EPSG:32647+EPSG:5703\" horizontalCoordinateSystemName=\"EPSG:32647\" verticalDatum=\"EPSG:5703\" desc=\"axes=easting,northing,elevation; horizontalUnit=metre; verticalUnit=metre; provenance=sourceMetadata\"/></Project><Units>",
+            1,
+        );
+        fs::write(&reference, reference_xml).unwrap();
+        fs::write(&returned, returned_xml).unwrap();
+
+        let evaluation = evaluate_streaming_round_trip(
+            &reference,
+            &returned,
+            RoundTripDeclaration::new("generated", "test", "metric").unwrap(),
+            RoundTripTolerances::new(f64::MAX, f64::MAX).unwrap(),
+            RoundTripLimits::full_v07_export(),
+        )
+        .expect("nested reference metadata is a semantic evaluation");
         assert!(matches!(
             evaluation,
             RoundTripEvaluation::Failed(ref mismatch)
