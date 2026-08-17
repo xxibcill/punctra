@@ -1,7 +1,10 @@
 # Runtime Workflows
 
 Status: **v0.7 durable Run, v0.8 Run-bound qualification, and v0.9 trust/
-compatibility hardening Complete; broader workflows deferred**
+compatibility hardening Complete; the v0.10 repository View implementation and
+repository-verified v0.11 exact-review technical workflow preserve the same
+authoritative boundaries; field evidence and broader workflows remain
+outstanding**
 
 The host composes sibling modules explicitly. Lower crates never call back into
 an application, discover a Source for a Workspace, submit a GPU queue, or infer
@@ -413,6 +416,50 @@ The host owns scheduling, staging, update ordering, queue submission, and device
 polling. A node becomes Resident only after a complete accepted Upsert. Parent
 Coverage remains until the planner emits its exact conditional retirement.
 
+## 11a. Confirm and correct exact review state
+
+Display and exact state meet only through canonical Point identity and a
+caller-owned View-generation check.
+
+~~~mermaid
+sequenceDiagram
+    participant HOST as Host adapter
+    participant GPU as render-wgpu
+    participant REV as point-review
+    participant WS as point-workspace
+
+    HOST->>GPU: pick(encoder, RecordedFrame, pixel)
+    GPU-->>HOST: provisional PickHit or miss
+    HOST->>HOST: reject stale View generation; a miss proves nothing exact
+    HOST->>WS: pin head Snapshot
+    HOST->>REV: confirm_pick(Snapshot, PointId, limits)
+    REV->>WS: select_point_ids + exact point_rows
+    WS-->>REV: one-Point Point Set + exact row
+    REV-->>HOST: ConfirmedPoint
+    opt inclusive screen-through rectangle
+        HOST->>REV: screen_through(Snapshot, Camera, Viewport, rectangle, limits)
+        REV->>WS: complete exact Point-row scan + select_point_ids
+        REV-->>HOST: complete Point Set + terminal summary
+    end
+    HOST->>WS: bounded PointSet::ids read
+    HOST->>GPU: one complete SetHighlights from only those IDs
+    opt explicit caller-owned correction
+        HOST->>WS: set_classification(OperationId, Point Set, class)
+        WS-->>HOST: Committed, Rejected, or Indeterminate
+        HOST->>WS: revision_audit or same-Operation reopen/resolve
+        opt immediate-head Revert requested
+            HOST->>WS: revert_head(new OperationId, exact head)
+        end
+    end
+~~~
+
+The Workspace must already exist and remain bound to the same prepared Source.
+The host retains both mutation Operation identities before submission and
+allows no second correction while one outcome is unresolved. A completed old
+Point Set remains exact for its pinned Snapshot but cannot commit over a newer
+head. Highlights are display overlays only: exact selected identities that are
+not resident need not be visible.
+
 ## 12. Cancellation and crash matrix
 
 | Operation | Safe cancellation boundary | Permitted residue | Published truth |
@@ -422,6 +469,7 @@ Coverage remains until the planner emits its exact conditional retirement.
 | Workspace create/open | Before manifest/session publication; recovery becomes noncancellable once durable create is visible | Recognized scratch/partial pre-manifest directory | No Workspace, or one complete reopenable Workspace |
 | Exact selection | Between candidate/Source/overlay/Point Set blocks | Bounded private spill retained after completion or cancellation; ignored by recovery and removable only during offline maintenance | No Point Set, or one sealed complete Point Set |
 | Snapshot Point rows | Between candidate/Source/overlay/output blocks | Private in-memory partial batch only | No summary, or one complete terminal summary |
+| Exact screen review | Between Snapshot row batches, projected rows, and Point Set construction | Private retained identity vector and Job-owned Point Set spill | No review result, or one complete exact Point Set and terminal summary |
 | Revision commit | Before publication; afterward certainty is conservative | Complete ready/rejection/Revision links and recognized scratch | Rejected old head, Committed new head, or Indeterminate until reopen |
 | Terrain Derivation | Between rows, sort/predicate/topology blocks, and before final seal | Private in-memory working allocations | No Surface, or one complete immutable Surface |
 | Detached QA | Between inputs and bounded face-location work | Private partial results | No report, or one complete report |
@@ -465,6 +513,6 @@ flowchart LR
 ## Deferred workflows
 
 Breakline/constrained or persisted terrain, general Attribute Point-row
-streaming, general LandXML/import, autosave, screen selection, and product UI
-require later accepted designs. They are not implied by the current Workspace
-or Terrain vocabulary.
+streaming, general LandXML/import, autosave, polygon/brush/visible-only
+selection, continuous painting, and product UI require later accepted designs.
+They are not implied by the current Workspace, review, or Terrain vocabulary.

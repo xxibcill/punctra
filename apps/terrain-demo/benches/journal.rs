@@ -119,6 +119,9 @@ fn report_resource_evidence(point_count: usize) {
     eprintln!(
         "terrain-workflow retryable-intent mode: fixture obstructs only the test-owned revisions directory after Workspace open, restores it, reopens, and requires OperationResolution::Retryable before timing"
     );
+    eprintln!(
+        "terrain-workflow comparison policy: timed intervals include durable filesystem synchronization; attribute a saved-baseline change only after a named same-machine A/B/A comparison with a stable base self-check"
+    );
 }
 
 fn configured_point_count() -> usize {

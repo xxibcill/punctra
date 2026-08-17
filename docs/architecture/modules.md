@@ -1,7 +1,9 @@
 # Module Catalog
 
-Status: frozen module ownership for the completed v0.9 repository trust and
-version-1 compatibility candidate; broader terrain and export modules deferred
+Status: frozen module ownership through the completed v0.9 repository trust and
+version-1 compatibility candidate, with the v0.10 professional inspection View
+and repository-verified v0.11 exact-review technical slice; external evidence
+gates and broader terrain/export modules remain outstanding
 
 This is the ownership map for implemented crates. Each crate has one public
 job. Several private files may cooperate behind one deep interface; private
@@ -22,17 +24,19 @@ limits, and recovery modes are frozen in the
 | `source-las` | Decode supported local LAS/LAZ through the Source contract. | LAS/LAZ path | `point-source` capability |
 | `point-index` | Prepare and query one rebuildable persistent spatial index. | Verified Source, target, limits | Complete `PreparedIndex`, candidates, display reads |
 | `point-workspace` | Make narrow exact classification selection/history durable and stream exact effective Point rows for one Source. | Complete index, schema, selection/row/commit requests | Workspace, Snapshot, Point rows, Point Set, commit/recovery outcomes |
+| `point-review` | Compose one pinned Snapshot with renderer-neutral screen or Point identity input for exact CPU review. | Snapshot, Camera, Viewport, rectangle or PointId, limits | Confirmed Point or exact spillable Point Set plus terminal facts |
 | `point-terrain` | Derive and evaluate the narrow Terrain Surface and encode or reconcile its supported deliverable. | Snapshot, Terrain Recipe, detached Check Points | `TerrainSurface`, QA report, LandXML receipt |
 | `render-protocol` | Define generation-safe renderer-neutral point display state. | Camera and display values | Validated updates and frame values |
 | `point-view` | Plan one frozen View over a host-owned hierarchy without I/O. | Camera, viewport, hierarchy/residency, budget | Demand, requests, retention, retirements |
 | `render-wgpu` | Maintain and draw one wgpu representation of render-protocol state. | Render updates, frame, host target | Recorded commands, report, provisional picks |
-| `renderer-demo` | Exercise synthetic or indexed LAS/LAZ View-to-render composition. | CLI or generated inputs | Interactive demo or GPU-free process smoke |
-| `terrain-demo` | Own one recoverable headless LAS/LAZ-to-terrain Workflow Run and its read-only post-Run qualifier. | Caller-owned paths, identities, baseline, correction/QA intent, returned LandXML, declaration, tolerances, limits | Eight-frame journal, Revision, Terrain/QA evidence, LandXML, canonical report, separate Round-Trip Evidence |
+| `renderer-demo` | Exercise indexed LAS/LAZ View-to-render composition, exact review/correction, and local viewing measurement. | CLI, permitted corpus manifest, generated inputs, or an existing Workspace | Interactive demo, exact review outcome, GPU-free process smoke, or canonical Viewing Report |
+| `terrain-demo` | Own one recoverable headless LAS/LAZ-to-terrain Workflow Run and its private post-Run qualification. | Caller-owned paths, identities, baseline, correction/QA intent, limits, and returned LandXML declaration | Eight-frame journal, Revision, Terrain/QA evidence, LandXML/report, and separate Round-Trip Evidence |
 
 `source-copc`, constrained or persisted terrain, general LandXML, general
 application UI, bindings, and remote storage are not implemented modules in
-v0.10. Display policy remains private to `renderer-demo`; v0.10 does not add a
-public display-policy crate.
+v0.11. Display and correction workflow policy remain private to
+`renderer-demo`; v0.11 does not add a public display-policy or mutation-facade
+crate.
 
 ## 1. point-contracts
 
@@ -192,7 +196,8 @@ let audit = workspace
     .blocking_wait()?;
 ~~~
 
-Public types include `Workspace`, `Snapshot`, `PointSet`, `PointQuery`,
+Public types include `Workspace`, `Snapshot`, `PointSet`, `PointSetEntry`,
+`PointSetEntryBatch`, `PointSetEntryBatches`, `PointQuery`,
 `SnapshotPointBatch`, `SnapshotPointBatches`, `SnapshotPointSummary`,
 `RevisionAudit`, `ClassificationTransition`, `WorkspaceSchema`, the commit and
 Operation-resolution variants, explicit limit types, and bounded diagnostics.
@@ -217,6 +222,28 @@ The v0.7 audit seam adds `RevisionAudit`, `ClassificationTransition`, and
 Revision structure and hashes, joins exact Source positions, and publishes
 complete transitions, Point membership/content hashes, and Edit Footprint only
 after bounded completion. It adds no persisted audit cache or schema change.
+
+## 5a. point-review
+
+**Job:** turn renderer-neutral screen or Point identity input into exact facts
+from one immutable Workspace Snapshot.
+
+It owns normalized finite `ScreenRect` values, a Camera/Viewport-bound
+`ScreenSelection`, explicit review limits, f64 perspective and orthographic
+projection, complete screen-through evaluation, one-Point confirmation, and
+complete-only review summaries. It scans CPU-authoritative Snapshot rows and
+materializes accepted identities through `Snapshot::select_point_ids`; it does
+not consume GPU positions, depth, visibility, or residency.
+
+It does not own `PickHit` generation validation, input gestures, windows, wgpu,
+Workspace creation, commits, Revert, recovery policy, or renderer highlights.
+Those remain host decisions composed from existing public seams.
+
+**Independent proof:** deterministic memory-Source interface tests cover both
+projection kinds, classification overlays, inclusive boundaries, invalid
+rectangles and identities, limits, cancellation, resident/forced-spill Point
+Sets, and exact confirmed Point values. The generated benchmark measures the
+complete CPU scan without claiming production latency.
 
 ## 6. point-terrain
 
@@ -265,8 +292,9 @@ example and generated 10k/100k/1M-capable benchmark compose only public seams;
 state.
 
 It owns camera/frame values, stable batch keys, monotonically versioned atomic
-Upserts, conditional Removes, Reset generations, and bounded CPU state-model
-validation. It owns no GPU, I/O, Source, index, LOD, or Workspace behavior.
+Upserts, conditional Removes, Reset generations, independently bounded complete
+highlight input, and CPU state-model validation. It owns no GPU, I/O, Source,
+index, LOD, or Workspace behavior.
 
 **Independent proof:** contract and state-model tests run without a GPU.
 
@@ -314,7 +342,11 @@ versioned bounded raw samples; renderer-demo owns presentation mapping.
 The host also owns perspective/orthographic orbit-pan-zoom controls, truthful
 demand/issued/resident and Sampled/Complete Coverage presentation, stable
 `PVIEW_*` diagnostics, and the permission-gated bounded corpus manifest and
-canonical no-replace Viewing Report. Its report does not claim production
+canonical no-replace Viewing Report. With an explicitly opened existing
+Workspace it composes provisional generation-checked picking, pinned exact
+confirmation/screen-through review, Point Set-derived highlights, caller-owned
+classification Operations, Revision Audit, immediate-head Revert, and
+same-identity reconciliation. Its report does not claim production
 corpus completion, professional preference, terrain capacity, partner
 acceptance, or human-time savings.
 
@@ -415,11 +447,12 @@ The allowlist is stricter than what Cargo can compile:
 | `source-memory`, `source-las` | `point-source`, `point-contracts`, `foundation-runtime` |
 | `point-index` | `point-source`, `point-contracts`, `foundation-runtime` |
 | `point-workspace` | `point-index`, `point-source`, `point-contracts`, `foundation-runtime` |
+| `point-review` | `point-workspace`, `render-protocol`, `point-contracts`, `foundation-runtime` |
 | `point-terrain` | `point-workspace`, `point-contracts`, `foundation-runtime`, narrow private algorithm/encoding dependencies |
 | `render-protocol` | `point-contracts` |
 | `point-view` | `render-protocol` and narrow math/value dependencies |
 | `render-wgpu` | `render-protocol`, `point-contracts` |
-| `renderer-demo` | only the Source/index/View/render crates it composes |
+| `renderer-demo` | only the Source/index/Workspace/review/View/render crates it composes |
 | `terrain-demo` | `source-las`, `point-source`, `point-index`, `point-workspace`, `point-terrain`, `point-contracts`, `foundation-runtime`, and narrow checksum, identity-generation, and error dependencies |
 
 Additional rules:
@@ -442,11 +475,12 @@ The implemented reusable seams are:
 4. complete persistent `point-index` preparation and reads;
 5. the one-deep-crate `point-workspace` document, exact Point-row, and Revision
    Audit interface;
-6. deterministic Terrain Derivation, QA, and supported deliverable ensure in
+6. exact renderer-neutral Snapshot review in `point-review`;
+7. deterministic Terrain Derivation, QA, and supported deliverable ensure in
    `point-terrain`;
-7. generation-safe `render-protocol` values;
-8. deterministic `point-view` planning; and
-9. host-owned-lifecycle `render-wgpu` recording.
+8. generation-safe `render-protocol` values;
+9. deterministic `point-view` planning; and
+10. host-owned-lifecycle `render-wgpu` recording.
 
 Index pages, decoder buffers, Point Set frames, overlay tables, Operation
 records, Revision blocks, triangulation arenas, XML encoder state, scheduling

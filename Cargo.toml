@@ -5,6 +5,7 @@ members = [
     "crates/foundation-runtime",
     "crates/point-contracts",
     "crates/point-index",
+    "crates/point-review",
     "crates/point-terrain",
     "crates/point-workspace",
     "crates/point-source",
@@ -17,7 +18,7 @@ members = [
 resolver = "3"
 
 [workspace.package]
-version = "0.10.0-alpha.1"
+version = "0.11.0-alpha.1"
 edition = "2024"
 rust-version = "1.90"
 license = "MIT OR Apache-2.0"
@@ -41,6 +42,7 @@ pollster = "1.0.1"
 quick-xml = "=0.41.0"
 point-contracts = { path = "crates/point-contracts" }
 point-index = { path = "crates/point-index" }
+point-review = { path = "crates/point-review" }
 point-terrain = { path = "crates/point-terrain" }
 point-workspace = { path = "crates/point-workspace" }
 point-source = { path = "crates/point-source" }

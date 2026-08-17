@@ -97,6 +97,28 @@ inspection samples are bounded rebuildable display data. Sampled colors are
 disposable display values, not exact Query, Edit, terrain, QA, or export
 results.
 
+Version 0.11.0-alpha.1 completes the repository-verified technical track of the
+accepted [Exact Interactive Review and Ground Correction
+design](docs/design/exact-interactive-review-v0.11.md). The public
+`point-review` crate confirms one provisional renderer Point Identity against
+a pinned Workspace Snapshot and materializes one inclusive, screen-through
+rectangle as an exact CPU-scanned Point Set, with an optional effective-
+classification equality filter. Highlight inputs have an explicit protocol
+ceiling and are derived from bounded exact Point Set iteration rather than
+resident LOD samples. Durable correction continues to use caller-owned
+Operation Identities and the existing Workspace classification commit,
+immediate-head Revert, Revision Audit, Edit Footprint, and Operation
+reconciliation interfaces. The public `render-wgpu` `third_party_host` example
+demonstrates host ownership and provisional picking without depending on
+`renderer-demo` private state. This narrow repository slice adds no polygon,
+brush, visible-only, or occlusion selection, no arbitrary Attribute or
+position Edit, and no general UI or automatic recovery policy.
+
+Repository verification does not satisfy the roadmap's field activation or
+adoption evidence gates. No permitted production correction workflow,
+independent adopter, professional time saving, reduced rework, partner
+acceptance, or product efficacy is claimed.
+
 To try the implemented View safely, follow the five-minute [first LAS/LAZ
 guide](docs/guides/first-las-laz.md). It separates position-only disk-v1 and
 attributed disk-v2 caches and explains what progressive Coverage does and does
@@ -112,7 +134,8 @@ The host owns its wgpu device, queue, command encoder, target texture, data
 loading, and View policy. Punctra owns validated resident state and rendering:
 
 ```rust,ignore
-let limits = RenderLimits::new(512 * 1024 * 1024, 20_000_000, 4096);
+let limits = RenderLimits::new(512 * 1024 * 1024, 20_000_000, 4096)
+    .with_max_highlight_points(1_000_000);
 let config = RendererConfig::new(surface_format, limits);
 let mut renderer = WgpuRenderer::new(&device, config)?;
 
@@ -141,6 +164,16 @@ identity metadata displayed by that render. Retaining a `RecordedFrame` pins
 any replaced GPU resources it references until the value is dropped. Picking
 otherwise follows the same host-owned flow: submit the encoder, drive normal
 wgpu device polling, and poll the returned `PickTicket` without blocking.
+
+A `PickHit` is only a provisional identity from one recorded display frame.
+The host rejects a stale View generation, pins the intended Workspace
+Snapshot, and passes only the hinted `PointId` to `point_review::confirm_pick`.
+For rectangle review, `point_review::screen_through` scans exact Snapshot rows
+with the caller's `Camera`, `Viewport`, inclusive continuous-pixel
+`ScreenRect`, and optional effective-classification filter. It ignores GPU
+residency and depth occlusion. A host builds `SetHighlights` only after bounded
+Point Set identity iteration completes; an oversized highlight input is
+rejected before replacing the prior renderer highlight state.
 
 Adaptive View planning is a separate renderer-neutral step. The host reports a
 generation-stamped hierarchy snapshot, including which nodes are missing,
@@ -171,12 +204,19 @@ no I/O and never mutates renderer state.
   classification-aware `Snapshot::point_rows` pull stream behind one deep
   caller interface. It can also rebuild a bounded exact `RevisionAudit`,
   including transitions and the Edit Footprint, from immutable Revision rows.
+- `point-review` composes exact Snapshot rows, renderer-neutral Camera and
+  Viewport values, CPU projection, and existing Point Set materialization for
+  provisional-pick confirmation and one inclusive screen-through rectangle.
+  It owns no GPU, window, gesture, commit, or recovery state.
 - `point-terrain` derives one immutable `TerrainSurface` with canonical
   `SurfaceVertex` and `SurfaceFace` values, evaluates detached Check Points,
   and durably creates or exactly reconciles the supported LandXML 1.2 subset.
-- `render-protocol` defines and validates renderer-neutral View updates.
+- `render-protocol` defines and validates renderer-neutral View updates,
+  including a caller-selected complete highlight-input ceiling.
 - `point-view` plans deterministic, budgeted hierarchy requests and retirement.
-- `render-wgpu` owns GPU resources, pipelines, drawing, and picking.
+- `render-wgpu` owns renderer GPU resources, pipelines, drawing, and
+  provisional picking while the embedding host owns device, queue, encoder,
+  target, submission, polling, and exact-confirmation policy.
 - `renderer-demo` exercises the engine with either generated point batches or
   one Full-verified indexed LAS/LAZ Source. It privately owns display mapping,
   perspective/orthographic controls, truthful progressive state, structured
@@ -184,9 +224,9 @@ no I/O and never mutates renderer state.
 - `terrain-demo` owns the GPU-free, restartable LAS/LAZ-to-index-to-Workspace-
   to-terrain-to-QA-to-LandXML Workflow Run and its canonical audit report.
 
-Networking, screen selection, general editing, Source rewriting, persistent or
-constrained terrain, general export, and general application UI remain outside
-the accepted scope.
+Networking, polygon/brush/visible-only/occlusion selection, general editing,
+Source rewriting, persistent or constrained terrain, general export, and
+general application UI remain outside the accepted scope.
 
 ## Examples
 
@@ -216,6 +256,19 @@ Run the deterministic adaptive-LOD demo with:
 ```bash
 cargo run --release -p renderer-demo
 ```
+
+Run the minimal public offscreen renderer host, including one deliberately
+provisional GPU pick, without any `renderer-demo` dependency:
+
+```bash
+PUNCTRA_REQUIRE_GPU=1 cargo run -p render-wgpu --example third_party_host
+```
+
+The example owns the wgpu lifecycle and reports the provisional Point
+Identity. It does not fabricate a Workspace or claim CPU confirmation; an
+editing host must validate the View generation and call the public
+`point-review` interface against its pinned Snapshot. A missing expected
+headless adapter is a failure when `PUNCTRA_REQUIRE_GPU=1` is set.
 
 Create a Workspace over one LAS/LAZ Source, select exact class-2 Points,
 classify them, append an immediate-head Revert, and reopen the durable result:
@@ -577,13 +630,18 @@ cargo bench -p source-memory --bench read
 cargo bench -p source-las --bench read
 cargo bench -p point-index --bench index
 cargo bench -p point-workspace --bench document
+cargo bench -p point-review --bench review
 cargo bench -p point-terrain --bench terrain
-cargo bench -p terrain-demo --bench journal
+cargo bench -p terrain-demo --bench journal -- \
+  --save-baseline "qualification-$$-$(date +%s)"
 cargo bench -p renderer-demo --bench viewing
 cargo run -p point-index --example direct_use
+cargo test -p point-review --test interface
+cargo test -p render-protocol --test state_model
 cargo run --release -p point-workspace --example classify -- \
   survey.laz survey.laz.pidx survey.pcw 6
 cargo run -p point-terrain --example derive
+PUNCTRA_REQUIRE_GPU=1 cargo run -p render-wgpu --example third_party_host
 cargo test -p terrain-demo --lib --all-features
 cargo test -p terrain-demo --test workflow
 cargo test -p terrain-demo --test process
@@ -594,7 +652,8 @@ PUNCTRA_REQUIRE_GPU=1 cargo test -p render-wgpu --test offscreen
 PUNCTRA_REQUIRE_GPU=1 cargo test -p renderer-demo --test planner
 PUNCTRA_REQUIRE_GPU=1 cargo test -p renderer-demo --test display_gpu
 test -f docs/guides/first-las-laz.md
-jq -e . docs/guides/field-corpus.example.json >/dev/null
+ruby -rjson -e 'JSON.parse(File.read(ARGV.fetch(0)))' \
+  docs/guides/field-corpus.example.json
 git diff --check
 ```
 

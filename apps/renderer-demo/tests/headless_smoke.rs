@@ -9,6 +9,9 @@ use std::{
 
 use las::point::{Classification, Format};
 use las::{Builder, Color, Point, Transform, Vector, Writer};
+use point_contracts::AttributeId;
+use point_index::{IndexRecipe, InspectionAttributeIds, PrepareLimits, prepare_with_recipe};
+use point_workspace::{OpenLimits, WorkspaceSchema, create};
 
 #[test]
 fn synthetic_headless_smoke_needs_no_gpu() {
@@ -191,6 +194,188 @@ fn default_bare_index_targets_separate_position_and_inspection_recipes() {
 }
 
 #[test]
+fn exact_review_smoke_confirms_selects_commits_reverts_resolves_and_reopens() {
+    let directory = TestDirectory::new().unwrap();
+    let source = directory.path().join("review.las");
+    let index = directory.path().join("review.inspection.pidx");
+    let workspace = directory.path().join("review.workspace");
+    write_las(&source).unwrap();
+    let source_bytes = fs::read(&source).unwrap();
+    create_review_workspace(&source, &index, &workspace);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_renderer-demo"))
+        .args([
+            "--smoke",
+            "--workspace",
+            workspace.to_str().unwrap(),
+            "--filter-classification",
+            "2",
+            "--operation-id",
+            "01010101010101010101010101010101",
+            "--classification",
+            "1",
+            "--revert-operation-id",
+            "02020202020202020202020202020202",
+            "--resolve-operation-id",
+            "03030303030303030303030303030303",
+        ])
+        .arg(&source)
+        .arg(&index)
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "{}", diagnostics(&output));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for expected in [
+        "Exact review Workspace opened",
+        "state: not-recorded",
+        "kind: exact inclusive screen-through rectangle",
+        "Exact CPU confirmation smoke",
+        "kind: classification",
+        "kind: Revert",
+        "Workspace Revision Audit",
+        "transitions: [2->1:4]",
+        "transitions: [1->2:4]",
+        "Edit Footprint:",
+        "Point ID hash:",
+        "content hash:",
+        "Exact review Workspace reopened without retry",
+    ] {
+        assert!(stdout.contains(expected), "missing {expected}:\n{stdout}");
+    }
+    assert_eq!(stdout.matches("Workspace Revision Audit").count(), 2);
+    assert_eq!(
+        fs::read(&source).unwrap(),
+        source_bytes,
+        "review, commit, audit, and Revert must not change verified Source bytes"
+    );
+
+    let resolved = Command::new(env!("CARGO_BIN_EXE_renderer-demo"))
+        .args([
+            "--smoke",
+            "--workspace",
+            workspace.to_str().unwrap(),
+            "--resolve-operation-id",
+            "01010101010101010101010101010101",
+        ])
+        .arg(&source)
+        .arg(&index)
+        .output()
+        .unwrap();
+    assert!(resolved.status.success(), "{}", diagnostics(&resolved));
+    let resolved_stdout = String::from_utf8_lossy(&resolved.stdout);
+    assert!(resolved_stdout.contains("state: committed"));
+    assert_eq!(
+        fs::read(&source).unwrap(),
+        source_bytes,
+        "reopen and Operation reconciliation must preserve verified Source bytes"
+    );
+}
+
+#[test]
+fn rejected_headless_edit_does_not_trigger_revert_and_rejected_revert_fails() {
+    let directory = TestDirectory::new().unwrap();
+    let source = directory.path().join("rejected-review.las");
+    let index = directory.path().join("rejected-review.inspection.pidx");
+    let workspace = directory.path().join("rejected-review.workspace");
+    write_las(&source).unwrap();
+    create_review_workspace(&source, &index, &workspace);
+
+    let rejected_edit = Command::new(env!("CARGO_BIN_EXE_renderer-demo"))
+        .args([
+            "--smoke",
+            "--workspace",
+            workspace.to_str().unwrap(),
+            "--operation-id",
+            "11111111111111111111111111111111",
+            "--classification",
+            "2",
+            "--revert-operation-id",
+            "12121212121212121212121212121212",
+        ])
+        .arg(&source)
+        .arg(&index)
+        .output()
+        .unwrap();
+
+    assert!(
+        !rejected_edit.status.success(),
+        "{}",
+        diagnostics(&rejected_edit)
+    );
+    let stdout = String::from_utf8_lossy(&rejected_edit.stdout);
+    assert!(stdout.contains("Workspace mutation definitively rejected"));
+    assert!(stdout.contains("NoChanges"));
+    assert!(!stdout.contains("Immediate-head Revert requested"));
+    assert!(
+        String::from_utf8_lossy(&rejected_edit.stderr)
+            .contains("requested classification edit Operation")
+    );
+
+    let rejected_revert = Command::new(env!("CARGO_BIN_EXE_renderer-demo"))
+        .args([
+            "--smoke",
+            "--workspace",
+            workspace.to_str().unwrap(),
+            "--revert-operation-id",
+            "13131313131313131313131313131313",
+        ])
+        .arg(&source)
+        .arg(&index)
+        .output()
+        .unwrap();
+
+    assert!(
+        !rejected_revert.status.success(),
+        "{}",
+        diagnostics(&rejected_revert)
+    );
+    let stdout = String::from_utf8_lossy(&rejected_revert.stdout);
+    assert!(stdout.contains("RootCannotBeReverted"));
+    assert!(
+        String::from_utf8_lossy(&rejected_revert.stderr)
+            .contains("requested immediate-head Revert Operation")
+    );
+}
+
+#[test]
+fn empty_source_does_not_skip_an_explicit_mutation_request() {
+    let directory = TestDirectory::new().unwrap();
+    let source = directory.path().join("empty-review.las");
+    let index = directory.path().join("empty-review.inspection.pidx");
+    let workspace = directory.path().join("empty-review.workspace");
+    write_empty_las(&source).unwrap();
+    create_review_workspace(&source, &index, &workspace);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_renderer-demo"))
+        .args([
+            "--smoke",
+            "--workspace",
+            workspace.to_str().unwrap(),
+            "--operation-id",
+            "14141414141414141414141414141414",
+            "--classification",
+            "1",
+            "--revert-operation-id",
+            "15151515151515151515151515151515",
+        ])
+        .arg(&source)
+        .arg(&index)
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success(), "{}", diagnostics(&output));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("verified empty Source; no display batch exists"));
+    assert!(stdout.contains("exact Point Set: 0"));
+    assert!(stdout.contains("NoChanges"));
+    assert!(!stdout.contains("Immediate-head Revert requested"));
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("requested classification edit Operation")
+    );
+}
+
+#[test]
 fn corpus_failure_publishes_a_private_report_and_returns_the_causal_diagnostic() {
     let directory = TestDirectory::new().unwrap();
     let manifest = directory.path().join("manifest.json");
@@ -318,6 +503,31 @@ fn run_corpus(manifest: &Path, report: &Path) -> std::process::Output {
         .unwrap()
 }
 
+fn create_review_workspace(source: &Path, index: &Path, workspace: &Path) {
+    let source = source_las::open(source).blocking_wait().unwrap();
+    let attribute = |value| AttributeId::new(value).unwrap();
+    let recipe = IndexRecipe::InspectionV1(
+        InspectionAttributeIds::new(
+            attribute(1),
+            attribute(6),
+            [attribute(16), attribute(17), attribute(18)],
+        )
+        .unwrap(),
+    );
+    let prepared = prepare_with_recipe(source, index, recipe, PrepareLimits::default())
+        .blocking_wait()
+        .unwrap();
+    let session = create(
+        workspace,
+        prepared,
+        WorkspaceSchema::new(attribute(6)),
+        OpenLimits::default(),
+    )
+    .blocking_wait()
+    .unwrap();
+    drop(session);
+}
+
 fn write_corpus_manifest(
     path: &Path,
     source: &Path,
@@ -370,6 +580,13 @@ fn assert_smoke_output(output: &std::process::Output, disposition: &str) {
 
 fn write_las(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
     write_las_with_format(path, Format::new(2)?, true)
+}
+
+fn write_empty_las(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    let mut builder = Builder::from((1, 4));
+    builder.point_format = Format::new(2)?;
+    Writer::from_path(path, builder.into_header()?)?.close()?;
+    Ok(())
 }
 
 fn write_las_without_rgb(path: &Path) -> Result<(), Box<dyn std::error::Error>> {

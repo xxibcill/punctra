@@ -19,7 +19,8 @@ use point_contracts::{PointId, WorldBounds};
 use point_index::{PrepareLimits, prepare};
 use point_workspace::{
     CommitLimits, CommitOutcome, CommitRequest, OpenLimits, OperationId, PointIdReadLimits,
-    PointQuery, PointSetLimits, WorkspaceError, WorkspaceSchema, create, open,
+    PointQuery, PointSet, PointSetEntry, PointSetLimits, WorkspaceError, WorkspaceSchema, create,
+    open,
 };
 
 use evidence::{
@@ -198,6 +199,74 @@ fn explicit_point_identity_selection_is_source_checked_sorted_and_deduplicated()
 }
 
 #[test]
+fn point_set_entries_expose_pinned_effective_classification_for_exact_review() {
+    let (_temporary, _index, workspace, _ticks, classifications) =
+        create_fixture_workspace("exact-review-entries", 257);
+    let root = workspace.head();
+    let source = workspace.source();
+    let selected_ids = [
+        PointId::new(source, 0),
+        PointId::new(source, 128),
+        PointId::new(source, 256),
+    ];
+    let selected = root
+        .select_point_ids(selected_ids, selection_limits(2, 8 * MIB))
+        .blocking_wait()
+        .expect("exact review Point Set materializes");
+
+    let entries = collect_entries(&selected, 2);
+
+    assert_eq!(
+        entries
+            .iter()
+            .map(|entry| entry.point_id().ordinal())
+            .collect::<Vec<_>>(),
+        vec![0, 128, 256]
+    );
+    assert_eq!(
+        entries
+            .iter()
+            .map(|entry| entry.effective_classification())
+            .collect::<Vec<_>>(),
+        [
+            classifications[0],
+            classifications[128],
+            classifications[256]
+        ]
+    );
+
+    let outcome = workspace
+        .commit(
+            CommitRequest::set_classification(
+                OperationId::from_bytes([51; 16]).unwrap(),
+                selected.clone(),
+                42,
+            ),
+            CommitLimits::default(),
+        )
+        .blocking_wait()
+        .expect("overlay fixture commit has a certain outcome");
+    assert!(matches!(outcome, CommitOutcome::Committed(_)));
+
+    assert_eq!(
+        collect_entries(&selected, 1),
+        entries,
+        "the pre-Edit Point Set retains its pinned effective values"
+    );
+    let edited = workspace
+        .head()
+        .select_point_ids(selected_ids, selection_limits(2, 8 * MIB))
+        .blocking_wait()
+        .expect("edited exact review Point Set materializes");
+    assert!(
+        collect_entries(&edited, 2)
+            .iter()
+            .all(|entry| entry.effective_classification() == 42),
+        "a Point Set from the edited Snapshot exposes overlay values"
+    );
+}
+
+#[test]
 fn resident_and_forced_spill_point_sets_have_identical_repeatable_public_meaning() {
     let (_temporary, _index, workspace, _ticks, _classifications) =
         create_fixture_workspace("spill-equivalence", 9_017);
@@ -221,6 +290,37 @@ fn resident_and_forced_spill_point_sets_have_identical_repeatable_public_meaning
     assert_eq!(ordinals(&resident, 127), expected);
     assert_eq!(ordinals(&spilled, 1), expected);
     assert_eq!(ordinals(&spilled, 257), expected);
+
+    let resident_entries = collect_entries(&resident, 127);
+    assert_eq!(collect_entries(&spilled, 1), resident_entries);
+    assert_eq!(collect_entries(&spilled, 257), resident_entries);
+    assert!(
+        resident_entries
+            .iter()
+            .all(|entry| entry.effective_classification() == 4)
+    );
+}
+
+fn collect_entries(point_set: &PointSet, batch_points: u64) -> Vec<PointSetEntry> {
+    let entry_bytes =
+        u64::try_from(mem::size_of::<PointSetEntry>()).expect("PointSetEntry size fits u64");
+    let batch_bytes = batch_points.saturating_mul(entry_bytes).max(1);
+    let mut batches = point_set
+        .entries(PointIdReadLimits::new(
+            point_set.metadata().exact_count(),
+            batch_points,
+            batch_bytes,
+            MIB,
+            2 * MIB,
+        ))
+        .expect("Point Set entry stream opens");
+    let mut entries = Vec::new();
+    while let Some(batch) = batches.next().expect("Point Set entry batch validates") {
+        assert!(!batch.is_empty());
+        assert!(u64::try_from(batch.len()).unwrap() <= batch_points);
+        entries.extend_from_slice(batch.entries());
+    }
+    entries
 }
 
 #[test]
@@ -384,6 +484,26 @@ fn selection_and_identity_read_limits_fail_instead_of_publishing_prefixes() {
         panic!("read ceiling below exact count must fail before a stream is published");
     };
     assert!(matches!(error, WorkspaceError::ResourceLimit { .. }));
+
+    let entry_bytes =
+        u64::try_from(mem::size_of::<PointSetEntry>()).expect("PointSetEntry size fits u64");
+    let Err(error) = complete.entries(PointIdReadLimits::new(
+        101,
+        1,
+        entry_bytes - 1,
+        MIB,
+        2 * MIB,
+    )) else {
+        panic!("entry output-byte ceiling must be charged before a stream is published");
+    };
+    assert!(matches!(
+        error,
+        WorkspaceError::ResourceLimit {
+            limit: "Point Set output-element batch capacity",
+            required,
+            allowed,
+        } if required == entry_bytes && allowed == entry_bytes - 1
+    ));
 }
 
 #[test]

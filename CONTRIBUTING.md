@@ -37,11 +37,20 @@ perspective/orthographic controls, View-state diagnostics, and corpus runner
 stay inside the private `renderer-demo` host. The narrow public point-index
 additions are an explicit disk-v2 inspection recipe and an ownership-safe
 fresh-preparation policy used by corpus and benchmark cold-build measurements;
-the disk-v1 path remains byte-compatible. Apart from the explicit v0.8 reader
-exception, external format decoding belongs only in accepted Source adapter
-crates.
-Networking, screen selection, general editing, constrained or persistent
-terrain, general export, Source rewriting, and general host UI remain in
+the disk-v1 path remains byte-compatible. The completed [v0.11 Exact
+Interactive Review and Ground Correction
+scope](docs/design/exact-interactive-review-v0.11.md) permits one public
+`point-review` crate for exact CPU confirmation of a provisional Point
+Identity and one inclusive screen-through rectangle at a pinned Snapshot. It
+also permits bounded Point Set entry/identity iteration, an explicit renderer
+highlight-input ceiling, and the public `render-wgpu` `third_party_host`
+example. Durable correction reuses caller-owned Operation Identities and the
+existing Workspace commit, immediate-head Revert, Audit/Edit Footprint, and
+Operation-resolution seams. Apart from the explicit v0.8 reader exception,
+external format decoding belongs only in accepted Source adapter crates.
+Networking, polygon/brush/visible-only/occlusion selection, arbitrary
+Attribute or position edits, constrained or persistent terrain, general
+export, Source rewriting, automatic recovery, and general host UI remain in
 callers or future projects unless the scope is explicitly revised.
 
 ## Local verification
@@ -61,12 +70,16 @@ cargo bench -p source-memory --bench read
 cargo bench -p source-las --bench read
 cargo bench -p point-index --bench index
 cargo bench -p point-workspace --bench document
+cargo bench -p point-review --bench review
 cargo bench -p point-terrain --bench terrain
-cargo bench -p terrain-demo --bench journal
+cargo bench -p terrain-demo --bench journal -- \
+  --save-baseline "qualification-$$-$(date +%s)"
 cargo bench -p renderer-demo --bench viewing
 cargo run -p source-memory --example memory_source
 cargo run -p point-index --example direct_use
 cargo test -p point-workspace --all-features
+cargo test -p point-review --test interface
+cargo test -p render-protocol --test state_model
 cargo run -p point-terrain --example derive
 cargo test -p point-terrain --all-features
 cargo test -p terrain-demo --lib --all-features
@@ -78,8 +91,10 @@ PUNCTRA_REQUIRE_GPU=1 cargo test -p renderer-demo --test headless_smoke \
 PUNCTRA_REQUIRE_GPU=1 cargo test -p render-wgpu --test offscreen
 PUNCTRA_REQUIRE_GPU=1 cargo test -p renderer-demo --test planner
 PUNCTRA_REQUIRE_GPU=1 cargo test -p renderer-demo --test display_gpu
+PUNCTRA_REQUIRE_GPU=1 cargo run -p render-wgpu --example third_party_host
 test -f docs/guides/first-las-laz.md
-jq -e . docs/guides/field-corpus.example.json >/dev/null
+ruby -rjson -e 'JSON.parse(File.read(ARGV.fetch(0)))' \
+  docs/guides/field-corpus.example.json
 git diff --check
 ```
 
@@ -93,7 +108,8 @@ PUNCTRA_POINT_WORKSPACE_BENCH_POINTS=10000000 \
 PUNCTRA_TERRAIN_BENCH_POINTS=100000 \
   cargo bench -p point-terrain --bench terrain
 PUNCTRA_TERRAIN_WORKFLOW_BENCH_POINTS=100000 \
-  cargo bench -p terrain-demo --bench journal
+  cargo bench -p terrain-demo --bench journal -- \
+  --save-baseline "qualification-$$-$(date +%s)"
 PUNCTRA_RENDERER_VIEW_BENCH_POINTS=1000000 \
   cargo bench -p renderer-demo --bench viewing
 ```
@@ -111,6 +127,17 @@ bytes and semantic limit facts are deterministic generated evidence. It does
 not measure worker peak heap or establish production, partner, downstream, or
 human-workflow acceptance.
 
+The qualification command saves each run under a unique baseline name because
+these wall-time intervals intentionally include durable filesystem syncs and
+an unknown prior workstation state is not a valid comparator. A fresh name
+preserves current intervals and resource facts for inspection without loading
+historical results or emitting unattributable `Performance has regressed`
+labels. A cross-Revision performance claim instead requires a deliberate named
+same-machine, same-target A/B/A run: save the base, compare the head to that
+name, then rerun the unchanged base against the same name. If the base
+self-check moves materially, do not attribute the head/base difference to
+code.
+
 The renderer viewing benchmark defaults to 100,000 generated Points and
 measures a warm verified position-only index open plus the first bounded root
 display batch. `PUNCTRA_RENDERER_VIEW_BENCH_POINTS` accepts a positive size
@@ -118,6 +145,45 @@ through ten million. It prints generated Point/node counts plus artifact and
 observed index-temporary bytes. This is a local generated-fixture
 microbenchmark, not a GPU frame benchmark, production-corpus result, first-use
 promise, or professional workflow observation.
+
+The exact review benchmark uses 20,000 generated Snapshot Points to measure the
+public CPU screen-through path with both resident and forced-spill Point Set
+construction. It prints the generated Source/match counts, declared composite,
+row, Point Set, and retained-match working ceilings, plus the resident and
+temporary Point Set ceilings for each disposition. It also records the
+completed review's conservative algorithm-accounted working high-water and the
+stable owned-fixture file-count/logical-file-length delta while a verified
+resident or forced-spill Point Set remains alive. These are not measured heap,
+allocated filesystem blocks, or process-wide disk observations. The benchmark
+is not a GPU frame benchmark, production-corpus observation,
+interaction-latency promise, or evidence that correction reduces attended time
+or rework.
+
+The v0.11 exact-review seam is intentionally narrower than general screen
+selection. `point_review::screen_through` evaluates the center of every exact
+Snapshot Point against one perspective or orthographic Camera, one physical
+Viewport, and one inclusive top-left-origin continuous-pixel rectangle. Its
+optional classification predicate uses the effective value at the pinned
+Revision. GPU residency, splat coverage, transparency, and occlusion never
+exclude an otherwise matching Point. `point_review::confirm_pick` accepts only
+a provisional Point Identity after the host has validated its View generation;
+it confirms exact ticks, world position, effective classification, and a
+one-Point Point Set from the Snapshot.
+
+Renderer highlights must come from a complete bounded Point Set identity read,
+not from resident batches or Pick tokens. `RenderLimits` independently bounds
+complete highlight-update input. Classification changes continue through
+`CommitRequest::set_classification`; immediate undo is
+`CommitRequest::revert_head`; Audit/Edit Footprint and uncertain-publication
+reconciliation remain the existing `point-workspace` operations. Callers
+record a nonzero Operation Identity before each commit or Revert and never
+invent a replacement identity after an indeterminate result.
+
+The public `third_party_host` example owns its wgpu instance, device, queue,
+encoder, target, submission, and polling and imports no `renderer-demo` state.
+It demonstrates a provisional Pick only; repository example execution is not
+independent adoption or field evidence. Set `PUNCTRA_REQUIRE_GPU=1` for the
+required local run so absence of the expected headless adapter fails.
 
 Exercise the complete real-cloud process path without requiring a GPU:
 
@@ -229,9 +295,12 @@ geometry, topology, vertices, and faces and keep the Source bytes unchanged.
 The v0.7 Workflow does not automatically Revert a committed classification
 Revision when a later Derivation, QA, export, or report phase fails.
 
-GPU acceptance tests use any available headless wgpu adapter. They skip when no
-adapter is present unless `PUNCTRA_REQUIRE_GPU=1`. Run all verification locally;
-the repository does not use hosted CI.
+GPU acceptance tests and the public renderer example use any available
+headless wgpu adapter. Without `PUNCTRA_REQUIRE_GPU=1`, GPU tests may skip and
+the example may exit without exercising rendering when no adapter is present.
+Required local qualification sets `PUNCTRA_REQUIRE_GPU=1`, making a missing
+adapter fail. Run all verification locally; the repository does not use hosted
+CI.
 
 The stable fuzz-crate test runs the checked-in short corpus through the same
 bounded harness as libFuzzer. Longer local campaigns may use `cargo-fuzz` and a

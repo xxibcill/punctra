@@ -149,7 +149,10 @@ pub(crate) struct ViewFailure {
 }
 
 pub(crate) fn classify_protocol_failure(phase: ViewPhase, error: ProtocolError) -> ViewFailure {
-    if matches!(error, ProtocolError::ResidentLimitExceeded { .. }) {
+    if matches!(
+        error,
+        ProtocolError::ResidentLimitExceeded { .. } | ProtocolError::HighlightLimitExceeded { .. }
+    ) {
         ViewFailure::resource(phase, error)
     } else {
         ViewFailure::internal(phase, error)

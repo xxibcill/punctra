@@ -2830,6 +2830,50 @@ mod tests {
     }
 
     #[test]
+    fn operation_resolution_directory_sync_failure_is_indeterminate() {
+        let directory = TestDirectory::new();
+        let workspace = create_one_point_workspace(&directory, "resolution-indeterminate");
+        let points = workspace
+            .head()
+            .select(crate::PointQuery::all(), PointSetLimits::default())
+            .blocking_wait()
+            .expect("select Point Set");
+        let operation = OperationId::from_bytes([27; 16]).expect("Operation Identity");
+        let outcome = workspace
+            .commit(
+                CommitRequest::set_classification(operation, points, 1),
+                CommitLimits::default(),
+            )
+            .blocking_wait()
+            .expect("classification commits before resolution fault");
+        assert!(matches!(outcome, CommitOutcome::Committed(_)));
+
+        let workspace_path = directory.0.join("resolution-indeterminate.pcw");
+        let fault = test_fault::Guard::install(
+            &workspace_path,
+            FaultPoint::RecoveryRevisionsSync,
+            test_fault::Action::Error,
+        );
+        let resolution = workspace
+            .resolve_operation(operation)
+            .expect("directory-sync uncertainty is a resolution state");
+        drop(fault);
+
+        assert!(matches!(
+            resolution,
+            OperationResolution::Indeterminate(uncertainty)
+                if uncertainty.operation() == operation
+                    && uncertainty.phase() == CommitPhase::RevisionDirectorySync
+                    && !uncertainty.reason().to_string().is_empty()
+        ));
+        assert!(workspace.session.poisoned.load(Ordering::SeqCst));
+        assert!(matches!(
+            workspace.resolve_operation(operation),
+            Err(WorkspaceError::Poisoned)
+        ));
+    }
+
+    #[test]
     fn dropping_commit_during_post_ready_panic_poisoned_retained_workspace() {
         assert_dropped_commit_poisons(
             FaultPoint::OperationLostAcknowledgement,

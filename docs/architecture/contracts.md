@@ -1,8 +1,9 @@
 # Cross-Module Contracts and Invariants
 
-Status: frozen for the completed v0.9 repository trust and version-1
-compatibility candidate; broader terrain, export, and product contracts remain
-deferred
+Status: frozen through the completed v0.9 repository trust and version-1
+compatibility candidate, with the v0.10 professional inspection View and
+repository-verified v0.11 exact-review technical slice; external evidence and
+broader terrain, export, and product contracts remain outstanding
 
 The versioned designs in [`docs/design`](../design) control exact release
 scope. This document summarizes the invariants that cross current crate seams.
@@ -200,9 +201,12 @@ to spans. Both paths read exact Source positions/classification, apply every
 overlay through the pinned Revision, run final predicates, and publish a Point
 Set only after complete terminal Source verification.
 
-View samples, GPU picks, visibility, depth, and occlusion never exclude a
-Point. v0.7 has no polygon, corridor, frustum, screen-through, brush,
-visible-only, or occlusion Query.
+View samples, GPU picks, visibility, depth, and occlusion never exclude a Point
+from Workspace Queries. The Workspace grammar itself has no polygon, corridor,
+frustum, screen, brush, visible-only, or occlusion Query. v0.11's sibling
+`point-review` crate composes `Snapshot::point_rows` with renderer-neutral
+Camera/Viewport values to implement one inclusive CPU screen-through rectangle;
+it does not change the Workspace Query grammar.
 
 ### Exact Snapshot Point rows
 
@@ -472,6 +476,21 @@ conditional safe retirements. It performs no I/O.
 `render-wgpu` records work into the host's encoder and never owns queue
 submission or device polling. A `RecordedFrame` pins exactly the displayed
 resources used by asynchronous picking. Picks are provisional Point hints.
+Complete highlight-update input has an independent host-selected count ceiling
+and is rejected atomically before duplicate removal.
+
+`point-review` accepts no `PickHit` and therefore cannot validate display
+generation. A host first rejects a hit whose `ViewGenerationKey` is not active,
+then pins a Snapshot and confirms only the hinted `PointId`. Confirmation
+returns exact ticks, transform, world position, effective classification, and a
+one-Point Point Set from that Snapshot. A miss is never negative Query evidence.
+
+A `ScreenSelection` binds a normalized finite physical-pixel rectangle to one
+validated Camera and Viewport. Its bounds must lie in inclusive
+`[0,width] x [0,height]`. Perspective and orthographic projection use f64 CPU
+math; near/far, clip, and rectangle boundaries are inclusive. Selection is
+screen-through: residency, occlusion, splat size, and depth-test winners do not
+alter membership. Only terminal success publishes a complete Point Set.
 
 `CameraProjection` is explicit. Perspective uses vertical field of view;
 orthographic uses vertical world height. Orthographic frustum and
@@ -525,6 +544,8 @@ publication. Separate ledgers cover:
 - Point-row candidate facts, Source batches, overlays, emitted rows, batch
   payload, working memory, and total rows;
 - Point-ID count, batch payload, read buffer, and working memory;
+- review row-stream limits, accepted match count, retained identity bytes, and
+  terminal Point Set limits;
 - commit selected/changed Points, input frames, block sizes, work, temporary
   bytes, Revision bytes, and total durable bytes;
 - Ground Input rows, vertices/faces, topology work, overlapping working
@@ -535,6 +556,11 @@ publication. Separate ledgers cover:
 - Workflow intent counts, journal/frame/path bytes, Revision Audit, Surface
   Change Envelope, canonical report output/staging/buffer bytes, and combined
   live orchestrator working bytes; and
+- render highlight-update input independently of resident points, batches, and
+  bytes; and
+- renderer-demo hierarchy, request queue, staging, renderer residency, corpus
+  manifest/report, navigation-trace, index temporary disk, and Source
+  verification measurement limits; and
 - qualification XML input, node, text/attribute, semantic-model, comparison,
   evidence output/staging/buffer, and retained-witness bytes.
 
@@ -572,6 +598,6 @@ resource/cancellation, GPU, I/O, request, and internal failures remain distinct.
 
 Breaklines, constrained or persisted terrain, general Attribute Point-row
 streams, general LandXML/import, migration beyond explicit index rebuild,
-multi-Source Workspaces, remote storage, and exact screen selection require
-later accepted designs. Their vocabulary in the roadmap is not a current
-public API promise.
+multi-Source Workspaces, remote storage, polygon/brush/visible-only selection,
+and general Attribute or position correction require later accepted designs.
+Their vocabulary in the roadmap is not a current public API promise.

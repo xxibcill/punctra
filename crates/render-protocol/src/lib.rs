@@ -4,6 +4,22 @@
 //! producer can send to a renderer without exposing renderer implementation
 //! details.
 //!
+//! # Display authority and resource limits
+//!
+//! A [`PointId`] retains canonical Source-aware identity across display
+//! batching, but [`RenderPoint`] positions and colors remain disposable display
+//! values. Display Coverage, highlighting, or a renderer pick must never be used
+//! as an exact Query result or a negative completeness witness. Inspection and
+//! Edit hosts confirm identities and effective values through their
+//! revision-pinned CPU authority.
+//!
+//! [`RenderLimits`] places hard ceilings on the protocol's logical resident
+//! point bytes, point count, batch count, and complete highlight-update input.
+//! The byte model is fixed by [`ESTIMATED_GPU_BYTES_PER_POINT`] and deliberately
+//! excludes render targets, command buffers, allocator padding, and host
+//! scheduling state. A host owns and bounds those additional resources
+//! separately.
+//!
 //! # Interface classification
 //!
 //! The documented camera, viewport, update, residency, and error contracts are
@@ -334,17 +350,34 @@ pub struct RenderLimits {
     estimated_gpu_bytes: u64,
     points: u64,
     batches: u64,
+    highlight_points: u64,
 }
 
 impl RenderLimits {
     /// Creates hard limits. Zero is valid and permits an empty generation only.
+    ///
+    /// The initial highlight-input ceiling equals `max_points`. Call
+    /// [`Self::with_max_highlight_points`] when a host intentionally uses a
+    /// smaller exact-overlay budget.
     #[must_use]
     pub const fn new(max_estimated_gpu_bytes: u64, max_points: u64, max_batches: u64) -> Self {
         Self {
             estimated_gpu_bytes: max_estimated_gpu_bytes,
             points: max_points,
             batches: max_batches,
+            highlight_points: max_points,
         }
+    }
+
+    /// Replaces the maximum Point Identities accepted by one highlight update.
+    ///
+    /// The complete input vector is charged before duplicate identities are
+    /// removed. This lets an implementation reject oversized input before
+    /// allocating its ordered highlight set.
+    #[must_use]
+    pub const fn with_max_highlight_points(mut self, value: u64) -> Self {
+        self.highlight_points = value;
+        self
     }
 
     /// Returns the maximum estimated GPU bytes.
@@ -363,6 +396,12 @@ impl RenderLimits {
     #[must_use]
     pub const fn max_batches(self) -> u64 {
         self.batches
+    }
+
+    /// Returns the maximum Point Identities accepted by one highlight update.
+    #[must_use]
+    pub const fn max_highlight_points(self) -> u64 {
+        self.highlight_points
     }
 }
 
@@ -809,6 +848,14 @@ impl RenderStateModel {
         point_ids: &[PointId],
     ) -> Result<UpdateReport, ProtocolError> {
         self.require_active_view_generation(view_generation)?;
+        let input_count =
+            u64::try_from(point_ids.len()).map_err(|_| ProtocolError::SizeOverflow)?;
+        if input_count > self.limits.max_highlight_points() {
+            return Err(ProtocolError::HighlightLimitExceeded {
+                limit: self.limits.max_highlight_points(),
+                attempted: input_count,
+            });
+        }
         let next_highlights: BTreeSet<_> = point_ids.iter().copied().collect();
         u64::try_from(next_highlights.len()).map_err(|_| ProtocolError::SizeOverflow)?;
 
@@ -962,6 +1009,14 @@ pub enum ProtocolError {
         /// The configured hard limit.
         limit: u64,
         /// The residency that the rejected update would produce.
+        attempted: u64,
+    },
+    /// A complete highlight update exceeded its caller-selected input limit.
+    #[error("highlight input {attempted} exceeds hard limit {limit}")]
+    HighlightLimitExceeded {
+        /// The configured maximum input identities.
+        limit: u64,
+        /// The number of identities supplied before duplicate removal.
         attempted: u64,
     },
 }

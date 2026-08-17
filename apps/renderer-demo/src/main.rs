@@ -4,6 +4,7 @@ mod corpus;
 mod diagnostic;
 mod orbit_camera;
 mod real_cloud;
+mod review;
 mod scene;
 mod synthetic;
 
@@ -23,15 +24,21 @@ use point_index::{PrepareLimits, PreparedIndex, prepare_with_recipe};
 use point_view::{
     AvailableNodes, PlannerConfig, PlanningBudget, ResourceUsage, ViewPlan, ViewPlanner,
 };
+use point_workspace::OperationId;
 use real_cloud::RealCloudScene;
 use render_protocol::{
     ProtocolError, RenderLimits, RenderStateModel, RenderUpdate, UpdateReport, ViewGenerationKey,
     ViewId, Viewport,
 };
 use render_wgpu::{
-    Camera, Frame, FrameReport, PointStyle, RendererConfig, RendererError, WgpuRenderer,
+    Camera, Frame, FrameReport, PickPoll, PickRequest, PickTicket, PointStyle, RecordedFrame,
+    RendererConfig, RendererError, WgpuRenderer,
 };
-use renderer_demo::display::DisplayMode;
+use renderer_demo::display::{DisplayIndexPolicy, DisplayMode};
+use review::{
+    CaptureView, ClassificationEdit, MutationDisposition, ReviewCapture, ReviewOptions,
+    ReviewSession, ReviewStatus,
+};
 use scene::{Scene, SceneMetrics};
 use synthetic::{RESIDENT_BATCH_BUDGET, RESIDENT_BYTE_BUDGET, RESIDENT_POINT_BUDGET};
 use winit::{
@@ -43,7 +50,7 @@ use winit::{
     window::{Window, WindowId},
 };
 
-const BASE_TITLE: &str = "Punctra professional inspection View v0.10";
+const BASE_TITLE: &str = "Punctra exact interactive review View v0.11";
 const INITIAL_WIDTH: f64 = 1_280.0;
 const INITIAL_HEIGHT: f64 = 800.0;
 const TITLE_REFRESH_INTERVAL: Duration = Duration::from_millis(500);
@@ -53,6 +60,10 @@ const PLANNING_BUDGET: PlanningBudget = PlanningBudget::new(
     RESIDENT_BYTE_BUDGET,
     RESIDENT_BATCH_BUDGET,
 );
+
+const fn active_capture_view(interaction_generation: u64) -> CaptureView {
+    CaptureView::new(VIEW_GENERATION, interaction_generation)
+}
 
 type DemoResult<T> = Result<T, Box<dyn Error>>;
 
@@ -86,17 +97,29 @@ struct Command {
     headless_smoke: bool,
     display_mode: DisplayMode,
     projection: ProjectionMode,
+    workspace: Option<PathBuf>,
+    review: ReviewOptions,
     source: Option<PathBuf>,
     index_target: Option<PathBuf>,
 }
 
 impl Command {
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one bounded OsString pass keeps option values private and order-independent"
+    )]
     fn parse(arguments: impl IntoIterator<Item = OsString>) -> DemoResult<Self> {
         let mut headless_smoke = false;
         let mut display_mode = DisplayMode::Neutral;
         let mut display_selected = false;
         let mut projection = ProjectionMode::Perspective;
         let mut projection_selected = false;
+        let mut workspace = None;
+        let mut operation = None;
+        let mut classification = None;
+        let mut classification_filter = None;
+        let mut revert_operation = None;
+        let mut resolve_operation = None;
         let mut source = None;
         let mut index_target = None;
         let mut arguments = arguments.into_iter();
@@ -107,6 +130,8 @@ impl Command {
                     headless_smoke: false,
                     display_mode: DisplayMode::Neutral,
                     projection: ProjectionMode::Perspective,
+                    workspace: None,
+                    review: ReviewOptions::default(),
                     source: None,
                     index_target: None,
                 });
@@ -136,6 +161,43 @@ impl Command {
                     invalid_argument("unsupported projection; expected perspective or orthographic")
                 })?;
                 projection_selected = true;
+            } else if argument == OsStr::new("--workspace") {
+                set_once(&mut workspace, arguments.next(), "--workspace", parse_path)?;
+            } else if argument == OsStr::new("--operation-id") {
+                set_once(
+                    &mut operation,
+                    arguments.next(),
+                    "--operation-id",
+                    parse_operation,
+                )?;
+            } else if argument == OsStr::new("--classification") {
+                set_once(
+                    &mut classification,
+                    arguments.next(),
+                    "--classification",
+                    parse_u8,
+                )?;
+            } else if argument == OsStr::new("--filter-classification") {
+                set_once(
+                    &mut classification_filter,
+                    arguments.next(),
+                    "--filter-classification",
+                    parse_u8,
+                )?;
+            } else if argument == OsStr::new("--revert-operation-id") {
+                set_once(
+                    &mut revert_operation,
+                    arguments.next(),
+                    "--revert-operation-id",
+                    parse_operation,
+                )?;
+            } else if argument == OsStr::new("--resolve-operation-id") {
+                set_once(
+                    &mut resolve_operation,
+                    arguments.next(),
+                    "--resolve-operation-id",
+                    parse_operation,
+                )?;
             } else if argument == OsStr::new("--") {
                 for positional in arguments {
                     push_positional(&mut source, &mut index_target, positional)?;
@@ -152,15 +214,112 @@ impl Command {
                 "--display {display_mode} requires a LAS or LAZ SOURCE"
             )));
         }
+        if workspace.is_some() && source.is_none() {
+            return Err(invalid_argument("--workspace requires a LAS or LAZ SOURCE"));
+        }
+        if operation.is_some() != classification.is_some() {
+            return Err(invalid_argument(
+                "--operation-id and --classification must be supplied together",
+            ));
+        }
+        if workspace.is_none()
+            && (operation.is_some()
+                || classification_filter.is_some()
+                || revert_operation.is_some()
+                || resolve_operation.is_some())
+        {
+            return Err(invalid_argument(
+                "review, correction, and Revert options require --workspace",
+            ));
+        }
+        let classification_edit = operation
+            .zip(classification)
+            .map(|(operation, value)| ClassificationEdit { operation, value });
         Ok(Self {
             show_help: false,
             headless_smoke,
             display_mode,
             projection,
+            workspace,
+            review: ReviewOptions {
+                classification_filter,
+                classification_edit,
+                revert_operation,
+                resolve_operation,
+            },
             source,
             index_target,
         })
     }
+}
+
+fn set_once<T>(
+    target: &mut Option<T>,
+    value: Option<OsString>,
+    option: &'static str,
+    parse: impl FnOnce(Option<OsString>, &'static str) -> DemoResult<T>,
+) -> DemoResult<()> {
+    if target.is_some() {
+        return Err(invalid_argument(format_args!(
+            "{option} may be specified only once"
+        )));
+    }
+    *target = Some(parse(value, option)?);
+    Ok(())
+}
+
+fn parse_path(value: Option<OsString>, option: &'static str) -> DemoResult<PathBuf> {
+    Ok(PathBuf::from(value.ok_or_else(|| {
+        invalid_argument(format_args!("{option} requires a path"))
+    })?))
+}
+
+fn parse_operation(value: Option<OsString>, option: &'static str) -> DemoResult<OperationId> {
+    let value = value.ok_or_else(|| {
+        invalid_argument(format_args!(
+            "{option} requires exactly 32 hexadecimal digits"
+        ))
+    })?;
+    let value = value.to_str().ok_or_else(|| {
+        invalid_argument(format_args!("{option} requires ASCII hexadecimal digits"))
+    })?;
+    let bytes = decode_operation_hex(value).ok_or_else(|| {
+        invalid_argument(format_args!(
+            "{option} requires exactly 32 hexadecimal digits"
+        ))
+    })?;
+    OperationId::from_bytes(bytes)
+        .map_err(|_| invalid_argument(format_args!("{option} must be nonzero")))
+}
+
+fn decode_operation_hex(value: &str) -> Option<[u8; 16]> {
+    let encoded = value.as_bytes();
+    if encoded.len() != 32 || !encoded.is_ascii() {
+        return None;
+    }
+    let mut bytes = [0_u8; 16];
+    for (output, pair) in bytes.iter_mut().zip(encoded.chunks_exact(2)) {
+        let high = hex_nibble(pair[0])?;
+        let low = hex_nibble(pair[1])?;
+        *output = (high << 4) | low;
+    }
+    Some(bytes)
+}
+
+const fn hex_nibble(value: u8) -> Option<u8> {
+    match value {
+        b'0'..=b'9' => Some(value - b'0'),
+        b'a'..=b'f' => Some(value - b'a' + 10),
+        b'A'..=b'F' => Some(value - b'A' + 10),
+        _ => None,
+    }
+}
+
+fn parse_u8(value: Option<OsString>, option: &'static str) -> DemoResult<u8> {
+    value
+        .and_then(|value| value.into_string().ok())
+        .and_then(|value| value.parse::<u8>().ok())
+        .ok_or_else(|| invalid_argument(format_args!("{option} requires an integer from 0 to 255")))
 }
 
 fn push_positional(
@@ -180,15 +339,29 @@ fn push_positional(
     Ok(())
 }
 
-fn load_scene(command: &Command) -> DemoResult<Scene> {
+struct LoadedDemo {
+    scene: Scene,
+    review: Option<ReviewSession>,
+    reopen: Option<(PathBuf, PreparedIndex)>,
+}
+
+fn load_scene(command: &Command) -> DemoResult<LoadedDemo> {
     let Some(source_path) = command.source.as_deref() else {
-        return Scene::synthetic(VIEW_GENERATION)
-            .map_err(|error| preserve_failure_or_internal(ViewPhase::Planning, error));
+        let scene = Scene::synthetic(VIEW_GENERATION)
+            .map_err(|error| preserve_failure_or_internal(ViewPhase::Planning, error))?;
+        return Ok(LoadedDemo {
+            scene,
+            review: None,
+            reopen: None,
+        });
     };
-    let index_target = command
-        .index_target
-        .clone()
-        .unwrap_or_else(|| default_index_target(source_path, command.display_mode));
+    let index_target = command.index_target.clone().unwrap_or_else(|| {
+        default_index_target(
+            source_path,
+            command.display_mode,
+            command.workspace.is_some(),
+        )
+    });
 
     let verification_started = Instant::now();
     println!("View phase: source-verification (running)");
@@ -209,18 +382,32 @@ fn load_scene(command: &Command) -> DemoResult<Scene> {
 
     let prepare_started = Instant::now();
     println!("View phase: index-prepare (running)");
-    let recipe = command.display_mode.index_policy().recipe();
+    let recipe = display_index_policy(command.display_mode, command.workspace.is_some()).recipe();
     let prepared = prepare_with_recipe(source, &index_target, recipe, PrepareLimits::default())
         .blocking_wait()
         .map_err(|error| ViewFailure::index(&index_target, &error))?;
     let prepare_elapsed = prepare_started.elapsed();
     println!("View phase: index-prepare (complete)");
     print_prepare_report(&prepared, &index_target, prepare_elapsed);
-    Ok(Scene::real(RealCloudScene::new(
-        VIEW_GENERATION,
-        prepared,
-        command.display_mode,
-    )?))
+    let review = command
+        .workspace
+        .as_deref()
+        .map(|root| ReviewSession::open(root, prepared.clone(), command.review))
+        .transpose()?;
+    let reopen = command
+        .workspace
+        .as_ref()
+        .map(|root| (root.clone(), prepared.clone()));
+    let scene = if command.workspace.is_some() {
+        RealCloudScene::new_for_review(VIEW_GENERATION, prepared, command.display_mode)?
+    } else {
+        RealCloudScene::new(VIEW_GENERATION, prepared, command.display_mode)?
+    };
+    Ok(LoadedDemo {
+        scene: Scene::real(scene),
+        review,
+        reopen,
+    })
 }
 
 fn display_description(mode: DisplayMode, bounds: Option<point_contracts::WorldBounds>) -> String {
@@ -244,6 +431,13 @@ fn display_description(mode: DisplayMode, bounds: Option<point_contracts::WorldB
     }
 }
 
+const fn display_index_policy(mode: DisplayMode, exact_review: bool) -> DisplayIndexPolicy {
+    if exact_review {
+        DisplayIndexPolicy::Inspection
+    } else {
+        mode.index_policy()
+    }
+}
 fn validate_display_source(mode: DisplayMode, metadata: &SourceMetadata) -> DemoResult<()> {
     mode.validate_source(metadata)
         .map_err(|message| invalid_argument(format_args!("--display {mode}: {message}")))
@@ -263,9 +457,9 @@ fn print_prepare_report(index: &PreparedIndex, target: &Path, elapsed: Duration)
     );
 }
 
-fn default_index_target(source: &Path, display_mode: DisplayMode) -> PathBuf {
+fn default_index_target(source: &Path, display_mode: DisplayMode, exact_review: bool) -> PathBuf {
     let mut target = source.as_os_str().to_os_string();
-    target.push(display_mode.index_policy().target_suffix());
+    target.push(display_index_policy(display_mode, exact_review).target_suffix());
     PathBuf::from(target)
 }
 
@@ -273,12 +467,24 @@ fn invalid_argument(message: impl std::fmt::Display) -> Box<dyn Error> {
     Box::new(ViewFailure::invalid_request(message))
 }
 
-fn run_headless_smoke(mut scene: Scene, projection: ProjectionMode) -> DemoResult<()> {
-    let mut renderer = RenderStateModel::new(RenderLimits::new(
-        RESIDENT_BYTE_BUDGET,
-        RESIDENT_POINT_BUDGET,
-        RESIDENT_BATCH_BUDGET,
-    ));
+#[allow(
+    clippy::too_many_lines,
+    reason = "the smoke preserves one linear evidence transcript across render and review stages"
+)]
+fn run_headless_smoke(loaded: LoadedDemo, projection: ProjectionMode) -> DemoResult<()> {
+    let LoadedDemo {
+        mut scene,
+        mut review,
+        reopen,
+    } = loaded;
+    let mut renderer = RenderStateModel::new(
+        RenderLimits::new(
+            RESIDENT_BYTE_BUDGET,
+            RESIDENT_POINT_BUDGET,
+            RESIDENT_BATCH_BUDGET,
+        )
+        .with_max_highlight_points(review::MAX_HIGHLIGHT_POINTS),
+    );
     renderer
         .apply(&RenderUpdate::Reset {
             view_generation: VIEW_GENERATION,
@@ -292,10 +498,10 @@ fn run_headless_smoke(mut scene: Scene, projection: ProjectionMode) -> DemoResul
         PlannerConfig::new(2.0, 0.25)
             .map_err(|error| internal_failure(ViewPhase::Planning, error))?,
     );
+    let viewport =
+        Viewport::new(1_280, 800).map_err(|error| internal_failure(ViewPhase::Planning, error))?;
     let plan = {
         let nodes = scene.planning_nodes();
-        let viewport = Viewport::new(1_280, 800)
-            .map_err(|error| internal_failure(ViewPhase::Planning, error))?;
         planner
             .plan(
                 &camera,
@@ -309,44 +515,92 @@ fn run_headless_smoke(mut scene: Scene, projection: ProjectionMode) -> DemoResul
         .reconcile_requests(plan.demanded_nodes(), plan.requests())
         .map_err(|error| preserve_failure_or_internal(ViewPhase::Planning, error))?;
 
-    let Some(batch) = scene
+    let batch = scene
         .next_batch()
-        .map_err(|error| preserve_failure_or_internal(ViewPhase::NodeRead, error))?
-    else {
-        if scene.metrics().logical_points == 0 {
-            println!("Headless bridge smoke: verified empty Source; no display batch exists");
-            return Ok(());
+        .map_err(|error| preserve_failure_or_internal(ViewPhase::NodeRead, error))?;
+    if let Some(batch) = batch {
+        let key = batch.key();
+        let version = batch.version();
+        let point_count = batch.point_count();
+        if let Err(error) = renderer.apply(&RenderUpdate::Upsert { batch }) {
+            scene.mark_rejected(key, version);
+            return Err(protocol_failure(ViewPhase::HostStaging, error));
         }
+        scene.mark_resident(key, version);
+        let metrics = scene.metrics();
+        println!(
+            "Headless bridge smoke accepted one atomic Upsert\n  scene: {}\n  Points: {point_count}\n  \
+             resident batches: {}\n  queued batches: {}\n  peak staging: {} Points / {} bytes",
+            scene.label(),
+            metrics.resident_batches,
+            metrics.queued_batches,
+            metrics.peak_staged_points,
+            metrics.peak_staged_bytes,
+        );
+    } else if scene.metrics().logical_points == 0 {
+        println!("Headless bridge smoke: verified empty Source; no display batch exists");
+    } else {
         return Err(internal_failure(
             ViewPhase::NodeRead,
             "headless bridge smoke produced no requested root batch",
         ));
-    };
-    let key = batch.key();
-    let version = batch.version();
-    let point_count = batch.point_count();
-    if let Err(error) = renderer.apply(&RenderUpdate::Upsert { batch }) {
-        scene.mark_rejected(key, version);
-        return Err(protocol_failure(ViewPhase::HostStaging, error));
     }
-    scene.mark_resident(key, version);
-    let metrics = scene.metrics();
-    println!(
-        "Headless bridge smoke accepted one atomic Upsert\n  scene: {}\n  Points: {point_count}\n  \
-         resident batches: {}\n  queued batches: {}\n  peak staging: {} Points / {} bytes",
-        scene.label(),
-        metrics.resident_batches,
-        metrics.queued_batches,
-        metrics.peak_staged_points,
-        metrics.peak_staged_bytes,
-    );
+
+    if let Some(review) = review.as_mut() {
+        let highlights = review.select_full_view_blocking(camera, viewport)?;
+        let exact_count = highlights.as_slice().len();
+        let point_ids = highlights.into_vec();
+        renderer
+            .apply(&RenderUpdate::SetHighlights {
+                view_generation: VIEW_GENERATION,
+                point_ids: point_ids.clone(),
+            })
+            .map_err(|error| protocol_failure(ViewPhase::HostStaging, error))?;
+        println!(
+            "Headless exact review published one complete highlight update\n  exact Points: {exact_count}"
+        );
+        if let Some(point) = point_ids.first().copied() {
+            let confirmed = review.confirm_headless(point)?;
+            if confirmed.as_slice() != [point] {
+                return Err(internal_failure(
+                    ViewPhase::HostStaging,
+                    "exact pick confirmation did not preserve the provisional Point identity",
+                ));
+            }
+        }
+        if review.has_classification_edit() {
+            review
+                .commit_selected(active_capture_view(0))?
+                .require_committed("classification edit")?;
+        }
+        if review.has_revert() {
+            review
+                .revert_head()?
+                .require_committed("immediate-head Revert")?;
+        }
+    }
+
+    let terminal_head = review.as_ref().map(ReviewSession::head_revision);
+    drop(review);
+    if let (Some((root, index)), Some(expected)) = (reopen, terminal_head) {
+        let reopened = review::reopen_head(&root, index)?;
+        if reopened != expected {
+            return Err(internal_failure(
+                ViewPhase::HostStaging,
+                "reopened Workspace head differs from the completed review state",
+            ));
+        }
+    }
     Ok(())
 }
 
 fn print_usage() {
     println!(
         "Usage: renderer-demo [--smoke] [--display neutral|elevation|rgb|intensity|classification] \
-         [--projection perspective|orthographic] \
+         [--projection perspective|orthographic] [--workspace PATH] \
+         [--filter-classification VALUE] \
+         [--operation-id HEX32 --classification VALUE] [--revert-operation-id HEX32] \
+         [--resolve-operation-id HEX32] \
          [SOURCE [INDEX_TARGET]]\n\
          With no SOURCE, runs the original synthetic scene. SOURCE must be LAS or LAZ; it is \
          Full-verified before the index is opened, resumed, or built. If INDEX_TARGET is omitted, \
@@ -355,7 +609,15 @@ fn print_usage() {
          Elevation maps indexed positions against complete Source world Z bounds. RGB, intensity, \
          and classification use a version-2 inspection index; RGB fails when the Source lacks all \
          three U16 channels. Perspective is the default; orthographic preserves target-plane scale. \
-         --smoke exercises one planned node and atomic CPU-model Upsert without a GPU."
+         --workspace opens an existing Workspace only and uses a cloned attributed PreparedIndex. \
+         Right click requests a provisional GPU pick followed by exact CPU confirmation; right drag \
+         performs inclusive screen-through selection. C commits the selected Point Set with the \
+         caller-owned operation and explicit classification; U uses only the caller-owned Revert \
+         operation against the immediate head; X clears selection. No Workspace is created and no \
+         stale result, mutation, retry, repin, or Revert is automatic. With --workspace, --smoke also \
+         exercises exact full-viewport selection, confirmation, complete highlighting, requested \
+         mutation, audit, and reopen without a GPU. --resolve-operation-id explicitly reopens and \
+         reports durable state for that same caller-retained identity without retrying it."
     );
 }
 
@@ -379,15 +641,22 @@ fn run_main() -> DemoResult<()> {
         print_usage();
         return Ok(());
     }
-    let scene = load_scene(&command)?;
+    let loaded = load_scene(&command)?;
     if command.headless_smoke {
-        return run_headless_smoke(scene, command.projection);
+        return run_headless_smoke(loaded, command.projection);
     }
+    let LoadedDemo {
+        scene,
+        review,
+        reopen: _,
+    } = loaded;
     let scene_metrics = scene.metrics();
     println!(
         "Punctra adaptive View demo ({} {}, fixed residency)\n\
          Left drag: orbit | Middle drag: pan | Wheel: zoom | P: projection | \
-         R: reset view | H: highlights | Space: pause loads | Escape: quit",
+         R: reset view | Right click: exact pick | Right drag: exact rectangle | \
+         C: commit classification | U: immediate-head Revert | X: clear exact selection | \
+         H: highlights | Space: pause loads | Escape: quit",
         compact_count(scene_metrics.logical_points),
         scene.label(),
     );
@@ -395,7 +664,7 @@ fn run_main() -> DemoResult<()> {
     let event_loop =
         EventLoop::new().map_err(|error| internal_failure(ViewPhase::GpuSetup, error))?;
     event_loop.set_control_flow(ControlFlow::Wait);
-    let mut app = DemoApp::new(scene, command.projection);
+    let mut app = DemoApp::new(scene, review, command.projection);
     event_loop
         .run_app(&mut app)
         .map_err(|error| internal_failure(ViewPhase::Rendering, error))?;
@@ -407,15 +676,17 @@ fn run_main() -> DemoResult<()> {
 
 struct DemoApp {
     scene: Option<Scene>,
+    review: Option<ReviewSession>,
     projection: ProjectionMode,
     graphics: Option<Graphics>,
     failure: Option<ViewFailure>,
 }
 
 impl DemoApp {
-    const fn new(scene: Scene, projection: ProjectionMode) -> Self {
+    const fn new(scene: Scene, review: Option<ReviewSession>, projection: ProjectionMode) -> Self {
         Self {
             scene: Some(scene),
+            review,
             projection,
             graphics: None,
             failure: None,
@@ -436,7 +707,14 @@ impl DemoApp {
             .scene
             .take()
             .ok_or_else(|| io::Error::other("demo scene was already consumed"))?;
-        let graphics = pollster::block_on(Graphics::new(instance, window, scene, self.projection))?;
+        let review = self.review.take();
+        let graphics = pollster::block_on(Graphics::new(
+            instance,
+            window,
+            scene,
+            review,
+            self.projection,
+        ))?;
         graphics.window.set_visible(true);
         graphics.window.request_redraw();
         self.graphics = Some(graphics);
@@ -558,10 +836,14 @@ impl ApplicationHandler for DemoApp {
                 self.handle_keyboard_input(event_loop, &event);
             }
             WindowEvent::MouseInput { state, button, .. } => {
-                self.graphics
+                let result = self
+                    .graphics
                     .as_mut()
                     .expect("mouse events are filtered to the demo window")
                     .handle_mouse_button(state, button);
+                if let Err(error) = result {
+                    self.fail(event_loop, ViewPhase::Rendering, error.as_ref());
+                }
             }
             WindowEvent::CursorMoved { position, .. } => {
                 let result = self
@@ -601,13 +883,27 @@ struct Graphics {
     renderer: WgpuRenderer,
     planner: ViewPlanner,
     scene: Scene,
+    review: Option<ReviewSession>,
     camera: OrbitCamera,
     camera_reset_radius: f64,
     style: PointStyle,
     input: PointerInput,
     loads_paused: bool,
     highlights_enabled: bool,
+    interaction_generation: u64,
+    latest_recorded_frame: Option<ReviewRecordedFrame>,
+    pending_pick: Option<PendingPick>,
     metrics: Metrics,
+}
+
+struct ReviewRecordedFrame {
+    recorded: RecordedFrame,
+    interaction_generation: u64,
+}
+
+struct PendingPick {
+    ticket: PickTicket,
+    capture: ReviewCapture,
 }
 
 impl Graphics {
@@ -615,6 +911,7 @@ impl Graphics {
         instance: wgpu::Instance,
         window: Arc<Window>,
         scene: Scene,
+        review: Option<ReviewSession>,
         projection: ProjectionMode,
     ) -> DemoResult<Self> {
         let surface = instance
@@ -665,7 +962,8 @@ impl Graphics {
             RESIDENT_BYTE_BUDGET,
             RESIDENT_POINT_BUDGET,
             RESIDENT_BATCH_BUDGET,
-        );
+        )
+        .with_max_highlight_points(review::MAX_HIGHLIGHT_POINTS);
         let mut renderer =
             WgpuRenderer::new(&device, RendererConfig::new(surface_config.format, limits))
                 .map_err(|error| ViewFailure::gpu(ViewPhase::GpuSetup, error))?;
@@ -696,6 +994,7 @@ impl Graphics {
             renderer,
             planner,
             scene,
+            review,
             camera: OrbitCamera::new(camera_target, camera_reset_radius)
                 .with_projection(projection),
             camera_reset_radius,
@@ -703,6 +1002,9 @@ impl Graphics {
             input: PointerInput::default(),
             loads_paused: false,
             highlights_enabled: false,
+            interaction_generation: 0,
+            latest_recorded_frame: None,
+            pending_pick: None,
             metrics: Metrics::new(),
         })
     }
@@ -711,6 +1013,7 @@ impl Graphics {
         if !self.presentation.is_drawable() {
             return Ok(());
         }
+        self.poll_review_work()?;
 
         let frame_started = Instant::now();
         let viewport = Viewport::new(self.surface_config.width, self.surface_config.height)
@@ -749,13 +1052,113 @@ impl Graphics {
 
         self.metrics
             .record_frame(recorded_frame.report(), frame_started.elapsed());
+        self.latest_recorded_frame = Some(ReviewRecordedFrame {
+            recorded: recorded_frame,
+            interaction_generation: self.interaction_generation,
+        });
+        let review_status = self.review.as_ref().map(ReviewSession::status);
         self.metrics.update_title(
             &self.window,
             self.scene.metrics(),
             self.loads_paused,
             self.highlights_enabled,
             self.camera.projection(),
+            review_status,
         );
+        Ok(())
+    }
+
+    fn poll_review_work(&mut self) -> DemoResult<()> {
+        self.poll_provisional_pick()?;
+        let completed = self.review.as_mut().and_then(ReviewSession::poll);
+        let Some(completed) = completed else {
+            return Ok(());
+        };
+        match completed {
+            Ok(completed) => {
+                let highlights = {
+                    let review = self
+                        .review
+                        .as_mut()
+                        .expect("completed review has a session");
+                    match review.accept(completed, active_capture_view(self.interaction_generation))
+                    {
+                        Ok(highlights) => highlights,
+                        Err(error) => {
+                            if !review.is_stale() {
+                                review.fail(error.as_ref());
+                            }
+                            return Ok(());
+                        }
+                    }
+                };
+                let update = RenderUpdate::SetHighlights {
+                    view_generation: VIEW_GENERATION,
+                    point_ids: highlights.into_vec(),
+                };
+                if let Err(error) = self.renderer.apply(&update) {
+                    self.review
+                        .as_mut()
+                        .expect("accepted review has a session")
+                        .fail(&error);
+                    return Ok(());
+                }
+                self.highlights_enabled = true;
+            }
+            Err(error) => self
+                .review
+                .as_mut()
+                .expect("failed review has a session")
+                .fail(&error),
+        }
+        Ok(())
+    }
+
+    fn poll_provisional_pick(&mut self) -> DemoResult<()> {
+        if self.pending_pick.is_none() {
+            return Ok(());
+        }
+        self.device
+            .poll(wgpu::PollType::Poll)
+            .map_err(|error| gpu_failure(ViewPhase::Rendering, error))?;
+        let poll = self
+            .pending_pick
+            .as_mut()
+            .expect("checked pending pick")
+            .ticket
+            .poll()
+            .map_err(|error| gpu_failure(ViewPhase::Rendering, error))?;
+        let PickPoll::Ready(hit) = poll else {
+            return Ok(());
+        };
+        let PendingPick { capture, .. } = self
+            .pending_pick
+            .take()
+            .expect("ready pick remains pending");
+        let review = self.review.as_mut().expect("pending pick requires review");
+        let Some(hit) = hit else {
+            review.note_pick_miss();
+            return Ok(());
+        };
+        let provisional = review::ProvisionalPickHint::from(hit);
+        if provisional.view_generation() != capture.view_generation()
+            || !review
+                .is_capture_current(&capture, active_capture_view(self.interaction_generation))
+        {
+            review
+                .stale_provisional_discarded("GPU pick View generation or pinned Revision changed");
+            return Ok(());
+        }
+        println!(
+            "Provisional GPU pick\n  Point hint: {:?}\n  View generation: {}\n  batch: {}\n  version: {}\n  authority: display hint only; exact CPU confirmation follows",
+            provisional.point(),
+            provisional.view_generation().generation(),
+            provisional.batch().get(),
+            provisional.version().get(),
+        );
+        if let Err(error) = review.confirm_provisional(capture, provisional) {
+            review.fail(error.as_ref());
+        }
         Ok(())
     }
 
@@ -849,6 +1252,7 @@ impl Graphics {
 
     fn resize(&mut self, size: PhysicalSize<u32>) {
         self.presentation.configured = has_area(size);
+        self.invalidate_interaction_state();
         if !self.presentation.configured {
             return;
         }
@@ -890,9 +1294,18 @@ impl Graphics {
 
     fn handle_key(&mut self, code: KeyCode) -> DemoResult<()> {
         match code {
-            KeyCode::KeyR => self.camera.reset(self.camera_reset_radius),
-            KeyCode::KeyP => self.camera.toggle_projection(),
+            KeyCode::KeyR => {
+                self.camera.reset(self.camera_reset_radius);
+                self.invalidate_interaction_state();
+            }
+            KeyCode::KeyP => {
+                self.camera.toggle_projection();
+                self.invalidate_interaction_state();
+            }
             KeyCode::KeyH => self.toggle_highlights()?,
+            KeyCode::KeyC => self.commit_selected(),
+            KeyCode::KeyU => self.revert_head(),
+            KeyCode::KeyX => self.clear_exact_selection()?,
             KeyCode::Space => self.loads_paused = !self.loads_paused,
             _ => return Ok(()),
         }
@@ -901,13 +1314,23 @@ impl Graphics {
     }
 
     fn toggle_highlights(&mut self) -> DemoResult<()> {
+        let previous = self.highlights_enabled;
         self.highlights_enabled = !self.highlights_enabled;
-        self.apply_highlights()
+        if let Err(error) = self.apply_highlights() {
+            self.highlights_enabled = previous;
+            return Err(error);
+        }
+        Ok(())
     }
 
     fn apply_highlights(&mut self) -> DemoResult<()> {
         let point_ids = if self.highlights_enabled {
-            self.scene.highlight_ids()
+            match self.review.as_ref() {
+                Some(review) => review
+                    .selected_highlights()?
+                    .map_or_else(Vec::new, review::ExactHighlights::into_vec),
+                None => self.scene.highlight_ids(),
+            }
         } else {
             Vec::new()
         };
@@ -921,11 +1344,170 @@ impl Graphics {
         Ok(())
     }
 
-    fn handle_mouse_button(&mut self, state: ElementState, button: MouseButton) {
+    fn commit_selected(&mut self) {
+        let Some(review) = self.review.as_mut() else {
+            return;
+        };
+        let result = review.commit_selected(active_capture_view(self.interaction_generation));
+        match result {
+            Ok(disposition) => self.finish_interactive_mutation(disposition),
+            Err(error) => {
+                let review = self
+                    .review
+                    .as_mut()
+                    .expect("failed mutation retains its review session");
+                if review.is_stale() {
+                    eprintln!("exact review commit blocked: {error}");
+                } else {
+                    review.fail(error.as_ref());
+                }
+            }
+        }
+        self.window.request_redraw();
+    }
+
+    fn revert_head(&mut self) {
+        let Some(review) = self.review.as_mut() else {
+            return;
+        };
+        let result = review.revert_head();
+        match result {
+            Ok(disposition) => self.finish_interactive_mutation(disposition),
+            Err(error) => self
+                .review
+                .as_mut()
+                .expect("failed Revert retains its review session")
+                .fail(error.as_ref()),
+        }
+        self.window.request_redraw();
+    }
+
+    fn finish_interactive_mutation(&mut self, disposition: MutationDisposition) {
+        if ReviewSession::close_if_indeterminate(&mut self.review, disposition) {
+            self.pending_pick = None;
+            self.latest_recorded_frame = None;
+        }
+    }
+
+    fn clear_exact_selection(&mut self) -> DemoResult<()> {
+        let Some(review) = self.review.as_mut() else {
+            return Ok(());
+        };
+        review.clear_selection();
+        self.highlights_enabled = false;
+        self.renderer
+            .apply(&RenderUpdate::SetHighlights {
+                view_generation: VIEW_GENERATION,
+                point_ids: Vec::new(),
+            })
+            .map_err(|error| renderer_failure(ViewPhase::GpuUpload, error))?;
+        Ok(())
+    }
+
+    fn handle_mouse_button(&mut self, state: ElementState, button: MouseButton) -> DemoResult<()> {
+        if button == MouseButton::Right && self.review.is_some() {
+            return self.handle_review_button(state);
+        }
         self.input.update_drag(state, button);
+        Ok(())
+    }
+
+    fn handle_review_button(&mut self, state: ElementState) -> DemoResult<()> {
+        match state {
+            ElementState::Pressed => {
+                let Some(cursor) = self.input.cursor else {
+                    return Ok(());
+                };
+                self.input.review_start = Some(cursor);
+            }
+            ElementState::Released => {
+                let Some(first) = self.input.review_start.take() else {
+                    return Ok(());
+                };
+                let second = self.input.cursor.unwrap_or(first);
+                let distance = (second.x - first.x).hypot(second.y - first.y);
+                if distance <= 3.0 {
+                    self.start_provisional_pick(second)?;
+                } else {
+                    self.start_screen_review(first, second)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn start_provisional_pick(&mut self, position: PhysicalPosition<f64>) -> DemoResult<()> {
+        if self.pending_pick.is_some() || self.review.as_ref().is_some_and(ReviewSession::is_busy) {
+            return Ok(());
+        }
+        if position.x < 0.0
+            || position.y < 0.0
+            || position.x >= f64::from(self.surface_config.width)
+            || position.y >= f64::from(self.surface_config.height)
+        {
+            return Ok(());
+        }
+        let Some(frame) = self.latest_recorded_frame.as_ref() else {
+            return Ok(());
+        };
+        if frame.interaction_generation != self.interaction_generation {
+            return Ok(());
+        }
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let pixel = [position.x.floor() as u32, position.y.floor() as u32];
+        let capture = self
+            .review
+            .as_ref()
+            .expect("review pick requires session")
+            .capture(active_capture_view(self.interaction_generation));
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("renderer-demo provisional pick"),
+            });
+        let ticket = self
+            .renderer
+            .pick(&mut encoder, &frame.recorded, PickRequest::new(pixel))
+            .map_err(|error| renderer_failure(ViewPhase::Rendering, error))?;
+        self.queue.submit([encoder.finish()]);
+        self.pending_pick = Some(PendingPick { ticket, capture });
+        self.review
+            .as_mut()
+            .expect("review pick requires session")
+            .note_provisional_pick();
+        self.window.request_redraw();
+        Ok(())
+    }
+
+    fn start_screen_review(
+        &mut self,
+        first: PhysicalPosition<f64>,
+        second: PhysicalPosition<f64>,
+    ) -> DemoResult<()> {
+        let Some(review) = self.review.as_mut() else {
+            return Ok(());
+        };
+        if review.is_busy() || self.pending_pick.is_some() {
+            return Ok(());
+        }
+        let viewport = Viewport::new(self.surface_config.width, self.surface_config.height)?;
+        let camera = self.camera.as_render_camera()?;
+        let capture = review.capture(active_capture_view(self.interaction_generation));
+        if let Err(error) = review.select_screen(
+            capture,
+            camera,
+            viewport,
+            [first.x, first.y],
+            [second.x, second.y],
+        ) {
+            review.fail(error.as_ref());
+        }
+        self.window.request_redraw();
+        Ok(())
     }
 
     fn handle_cursor_moved(&mut self, position: PhysicalPosition<f64>) -> DemoResult<()> {
+        self.input.cursor = Some(position);
         if let Some(action) = self.input.drag {
             if let Some(previous) = self.input.last_cursor {
                 let horizontal = position.x - previous.x;
@@ -938,6 +1520,7 @@ impl Graphics {
                             .map_err(|error| internal_failure(ViewPhase::Planning, error))?;
                     }
                 }
+                self.invalidate_interaction_state();
                 self.window.request_redraw();
             }
             self.input.last_cursor = Some(position);
@@ -947,6 +1530,7 @@ impl Graphics {
 
     fn clear_cursor_position(&mut self) {
         self.input.last_cursor = None;
+        self.input.cursor = None;
     }
 
     fn handle_mouse_wheel(&mut self, delta: MouseScrollDelta) {
@@ -955,7 +1539,16 @@ impl Graphics {
             MouseScrollDelta::PixelDelta(position) => position.y / 80.0,
         };
         self.camera.zoom(lines);
+        self.invalidate_interaction_state();
         self.window.request_redraw();
+    }
+
+    fn invalidate_interaction_state(&mut self) {
+        self.interaction_generation = self.interaction_generation.saturating_add(1);
+        self.latest_recorded_frame = None;
+        if let Some(review) = self.review.as_mut() {
+            review.invalidate_selection_view(active_capture_view(self.interaction_generation));
+        }
     }
 }
 
@@ -963,6 +1556,8 @@ impl Graphics {
 struct PointerInput {
     drag: Option<DragAction>,
     last_cursor: Option<PhysicalPosition<f64>>,
+    cursor: Option<PhysicalPosition<f64>>,
+    review_start: Option<PhysicalPosition<f64>>,
 }
 
 impl PointerInput {
@@ -1060,6 +1655,7 @@ impl Metrics {
         loads_paused: bool,
         highlights_enabled: bool,
         projection: ProjectionMode,
+        review_status: Option<ReviewStatus>,
     ) {
         let interval = self.interval_started.elapsed();
         if interval < TITLE_REFRESH_INTERVAL {
@@ -1078,6 +1674,8 @@ impl Metrics {
             "steady"
         };
         let highlight_state = if highlights_enabled { "on" } else { "off" };
+        let review_state =
+            review_status.map_or_else(|| "review:disabled".to_owned(), ReviewStatus::title);
         let coverage_state = coverage_state(scene);
         let title = format!(
             "{BASE_TITLE} | {} logical | {} / {} pts | {} MiB resident | {} MiB uploaded | \
@@ -1086,7 +1684,7 @@ impl Metrics {
              LOD {} demanded / {} candidates / {} issued / {} retained / {} retired-now | \
              {} planned | {} queued (peak {}) | {} staged pts (peak {}) / {} MiB peak | \
              {} requested / {} resident nodes ({} pts) | {} retired / {} rejected / {} cancelled | \
-             {coverage_state} | projection:{projection} | {stream_state} | H:{highlight_state}",
+             {coverage_state} | projection:{projection} | {review_state} | {stream_state} | H:{highlight_state}",
             compact_count(scene.logical_points),
             compact_count(report.drawn_points()),
             compact_count(RESIDENT_POINT_BUDGET),
@@ -1287,6 +1885,104 @@ mod tests {
     }
 
     #[test]
+    fn command_accepts_explicit_review_identities_and_values() {
+        let command = Command::parse([
+            OsString::from("--workspace"),
+            OsString::from("survey.workspace"),
+            OsString::from("--filter-classification"),
+            OsString::from("2"),
+            OsString::from("--operation-id"),
+            OsString::from("01010101010101010101010101010101"),
+            OsString::from("--classification"),
+            OsString::from("1"),
+            OsString::from("--revert-operation-id"),
+            OsString::from("02020202020202020202020202020202"),
+            OsString::from("--resolve-operation-id"),
+            OsString::from("03030303030303030303030303030303"),
+            OsString::from("survey.las"),
+        ])
+        .unwrap();
+
+        assert_eq!(command.workspace, Some(PathBuf::from("survey.workspace")));
+        assert_eq!(command.review.classification_filter, Some(2));
+        assert_eq!(command.review.classification_edit.unwrap().value, 1);
+        assert_eq!(
+            command.review.resolve_operation.unwrap().into_bytes(),
+            [3; 16]
+        );
+    }
+
+    #[test]
+    fn command_rejects_repeated_review_options_before_reparsing() {
+        for arguments in [
+            vec!["--workspace", "first", "--workspace"],
+            vec![
+                "--filter-classification",
+                "2",
+                "--filter-classification",
+                "not-an-integer",
+            ],
+            vec![
+                "--resolve-operation-id",
+                "03030303030303030303030303030303",
+                "--resolve-operation-id",
+                "not-an-operation",
+            ],
+        ] {
+            let error = Command::parse(arguments.into_iter().map(OsString::from)).unwrap_err();
+            assert!(error.to_string().contains("specified only once"));
+        }
+    }
+
+    #[test]
+    fn command_rejects_implicit_review_policy_and_invalid_identities() {
+        for arguments in [
+            vec!["--workspace", "workspace"],
+            vec![
+                "--operation-id",
+                "01010101010101010101010101010101",
+                "survey.las",
+            ],
+            vec!["--classification", "2", "survey.las"],
+            vec![
+                "--workspace",
+                "workspace",
+                "--operation-id",
+                "00000000000000000000000000000000",
+                "--classification",
+                "2",
+                "survey.las",
+            ],
+            vec![
+                "--workspace",
+                "workspace",
+                "--classification",
+                "256",
+                "survey.las",
+            ],
+        ] {
+            assert!(Command::parse(arguments.into_iter().map(OsString::from)).is_err());
+        }
+    }
+
+    #[test]
+    fn operation_identity_parser_rejects_non_ascii_without_panicking() {
+        let thirty_two_utf8_bytes = format!("€{}", "0".repeat(29));
+        assert_eq!(thirty_two_utf8_bytes.len(), 32);
+        assert_eq!(decode_operation_hex(&thirty_two_utf8_bytes), None);
+
+        let error = Command::parse([
+            OsString::from("--workspace"),
+            OsString::from("workspace"),
+            OsString::from("--resolve-operation-id"),
+            OsString::from(thirty_two_utf8_bytes),
+            OsString::from("survey.las"),
+        ])
+        .unwrap_err();
+        assert!(error.to_string().contains("32 hexadecimal digits"));
+    }
+
+    #[test]
     fn command_rejects_extra_positional_paths() {
         let error = Command::parse([
             OsString::from("one.las"),
@@ -1330,11 +2026,15 @@ mod tests {
     #[test]
     fn default_index_targets_preserve_the_source_path_and_separate_recipes() {
         assert_eq!(
-            default_index_target(Path::new("survey.laz"), DisplayMode::Neutral),
+            default_index_target(Path::new("survey.laz"), DisplayMode::Neutral, false),
             PathBuf::from("survey.laz.pidx")
         );
         assert_eq!(
-            default_index_target(Path::new("survey.laz"), DisplayMode::Classification),
+            default_index_target(Path::new("survey.laz"), DisplayMode::Classification, false,),
+            PathBuf::from("survey.laz.inspection-v2.pidx")
+        );
+        assert_eq!(
+            default_index_target(Path::new("survey.laz"), DisplayMode::Neutral, true),
             PathBuf::from("survey.laz.inspection-v2.pidx")
         );
     }
@@ -1447,6 +2147,16 @@ mod tests {
         assert_eq!(protocol.code(), ViewFailureCode::ResourceLimit);
         assert_eq!(protocol.phase(), ViewPhase::GpuUpload);
         assert_eq!(protocol.action(), RecoveryAction::RaiseNamedLimit);
+
+        let highlight = protocol_failure(
+            ViewPhase::GpuUpload,
+            ProtocolError::HighlightLimitExceeded {
+                limit: 10,
+                attempted: 11,
+            },
+        );
+        let highlight = highlight.downcast_ref::<ViewFailure>().unwrap();
+        assert_eq!(highlight.code(), ViewFailureCode::ResourceLimit);
 
         let untyped = preserve_failure_or_internal(
             ViewPhase::Planning,

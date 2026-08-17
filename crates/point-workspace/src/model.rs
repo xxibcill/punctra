@@ -611,7 +611,7 @@ impl PointSetMetadata {
         self.point_id_hash
     }
 
-    /// Returns the canonical hash of identities and private effective before-values.
+    /// Returns the canonical hash of identities and public effective before-values.
     #[must_use]
     pub const fn content_hash(self) -> ContentHash {
         self.content_hash

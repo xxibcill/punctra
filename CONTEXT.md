@@ -3,10 +3,12 @@
 Status: the narrow v0.1 through v0.9 repository slices are Complete; the v0.10
 professional inspection View repository implementation is complete while
 field, partner-validation, adoption-publication, and support evidence remain
-outstanding; broader terrain, external interoperability, product, and `1.0.0`
-terms remain deferred
+outstanding; the v0.11 exact interactive review technical slice is complete
+and repository-verified while field activation and independent-adoption
+evidence remain outstanding; broader selection, terrain, and product terms
+remain deferred
 
-Punctra v0.10 builds on the reusable render engine, renderer-neutral View
+Punctra v0.11 builds on the reusable render engine, renderer-neutral View
 planner, and verified Source path described in the accepted [v0.1 renderer
 design](docs/design/render-engine-v0.1.md), [v0.2 planning
 design](docs/design/adaptive-view-planning-v0.2.md), and [v0.3 Real Sources
@@ -49,6 +51,17 @@ elevation display and adds a narrow disk-v2 inspection sample for raw RGB,
 intensity, and classification. Perspective and orthographic projections,
 progressive loading/Coverage facts, structured View failures, and local corpus
 measurements remain application policy rather than exact Query semantics.
+The accepted [v0.11 Exact Interactive Review and Ground Correction
+design](docs/design/exact-interactive-review-v0.11.md) fixes one separate CPU-
+authoritative review composition. `point-review` confirms a provisional Point
+Identity against one pinned Snapshot or scans every exact Snapshot row through
+one inclusive physical-pixel Screen Rectangle, with an optional effective-
+classification equality predicate. Exact Point Sets, not Pick tokens or
+resident LOD samples, supply bounded renderer highlights. Classification
+commit, immediate-head Revert, Revision Audit/Edit Footprint, and uncertain-
+Operation reconciliation retain their existing Workspace meanings. Polygon,
+brush, visible-only, and occlusion selection, arbitrary Attribute/position
+editing, general UI, and automatic recovery are not accepted meanings.
 
 ## Artifact
 
@@ -75,6 +88,16 @@ Surface. A Check Point is not a Source Point and has its own caller-provided
 identity.
 
 _Avoid:_ control point, Point when the observation is detached from the Source
+
+## Confirmed Point
+
+One provisional renderer Point Identity resolved from exact Source ticks and
+the effective classification at a pinned Workspace Snapshot. Its world
+position, provenance, and one-Point Point Set come from CPU-authoritative
+Snapshot reads; GPU position, color, depth, and batch membership are not
+confirmation facts.
+
+_Avoid:_ Pick Hit, sampled display Point, current Point without a Revision
 
 ## Coordinate Reference
 
@@ -183,15 +206,22 @@ _Avoid:_ certification, application support, partner acceptance
 
 ## Operation Identity
 
-An opaque caller-chosen identity for one canonical commit request. The caller records it before starting the commit so recovery can determine whether that request committed, was rejected, or was never recorded.
+An opaque caller-chosen identity for one canonical commit request. The caller
+records it before starting the commit so recovery can determine whether that
+request committed, was rejected, or was never recorded. A classification
+commit and a later immediate-head Revert are distinct requests with distinct
+identities; retry or reconciliation of either request retains its original
+identity.
 
 _Avoid:_ Job handle, random retry ID
 
 ## Pick Hint
 
 A provisional Point Identity obtained from partial View residency. A Pick Hint
-may be confirmed through an exact explicit-Point-ID Query, but it never proves
-that a View or screen region contains no other matching Points.
+records the producing View generation, batch, and batch version. After the host
+rejects stale View state, `point-review` may confirm its Point Identity against
+a pinned Snapshot. A Pick Hint never proves effective values, Edit eligibility,
+or that a View or screen region contains no other matching Points.
 
 _Avoid:_ exact selection, Query result, visibility proof
 
@@ -215,7 +245,12 @@ _Avoid:_ array index, node-local ID, GPU ID
 
 ## Point Set
 
-An immutable collection of Point Identities captured at a known Revision. A Point Set may be used as the target of a later Edit.
+An immutable collection of Point Identities and effective classification
+before-values captured at a known Revision. A Point Set may be resident or
+spilled and may be read repeatedly through bounded ordered identity or entry
+batches. It may be used as the target of a later Edit. Renderer highlights are
+presentation derived from a complete bounded identity read; they are not Point
+Set storage or membership authority.
 
 _Avoid:_ selection when referring to the materialized result rather than the interaction
 
@@ -229,7 +264,9 @@ _Avoid:_ cross-section unless that narrower meaning is intended
 
 The camera projection used for a View. Perspective and orthographic projection
 change screen projection and LOD calculations but not Source coordinates,
-Point Identity, Coverage, or exact Query behavior.
+Point Identity, or Coverage. In v0.11 the same validated Camera projection is
+an explicit input to the separately defined exact CPU Screen-through Selection
+algorithm; that does not make GPU rasterization authoritative.
 
 _Avoid:_ Coordinate Reference, map projection, CRS
 
@@ -298,6 +335,25 @@ result. It is technical artifact evidence, not proof of paid use or customer
 acceptance.
 
 _Avoid:_ application certification, pilot evidence, acceptance report
+
+## Screen Rectangle
+
+One normalized inclusive rectangle in top-left-origin continuous physical-
+pixel coordinates, bound to a specific nonempty Viewport. The complete
+Viewport spans `[0, width]` by `[0, height]`; zero-width or zero-height
+rectangles retain exact boundary meaning.
+
+_Avoid:_ pixel-index range, lasso, polygon, brush stroke
+
+## Screen-through Selection
+
+An exact revision-pinned CPU Query that scans complete Snapshot rows and
+selects every Point center projecting inside one Screen Rectangle and the
+Camera's inclusive clip volume. An optional equality predicate uses effective
+classification at that Snapshot. GPU residency, splat size, transparency,
+occlusion, and visible-surface depth do not remove matches.
+
+_Avoid:_ visible-only selection, GPU selection, Pick region, occlusion query
 
 ## Run Checkpoint
 
@@ -380,6 +436,10 @@ _Avoid:_ fuzz, epsilon, automatic tolerance
 ## View
 
 A camera- and viewport-based request for progressive visual representation. A View may use partial Coverage and level of detail; it is not an exact Query.
+
+An exact v0.11 Screen-through Selection may capture the same Camera and
+Viewport values, but it remains a separate complete CPU operation over one
+pinned Snapshot.
 
 _Avoid:_ scene when referring to a request
 

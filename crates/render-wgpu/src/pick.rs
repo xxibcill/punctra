@@ -27,6 +27,13 @@ impl PickRequest {
 }
 
 /// Stable caller metadata associated with one provisional GPU pick.
+///
+/// The metadata identifies the resident display sample used by the recorded
+/// frame. It is not CPU confirmation of current Workspace membership,
+/// effective Attribute values, or Edit eligibility. Hosts must compare the View
+/// generation with their active state and pass [`Self::point`] to
+/// `point_review::confirm_pick` with a revision-pinned Snapshot before
+/// inspection or mutation.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PickHit {
     view_generation: ViewGenerationKey,
@@ -54,7 +61,12 @@ impl PickHit {
         self.version
     }
 
-    /// Returns the canonical Source-aware Point Identity.
+    /// Returns the canonical Source-aware Point Identity as a provisional hint.
+    ///
+    /// The identity is stable across display batching, but its presence in this
+    /// hit proves only that the producing recorded frame displayed it. Pass it
+    /// to `point_review::confirm_pick` with a revision-pinned Snapshot before
+    /// using it for an Edit.
     #[must_use]
     pub const fn point(self) -> PointId {
         self.point

@@ -285,7 +285,10 @@ fn reset_requires_forward_progress_per_view_and_clears_generation_state() {
 #[test]
 fn highlights_are_a_sorted_distinct_replaceable_set() {
     let view_generation = view_generation(5, 0);
-    let mut state = started_state(view_generation, RenderLimits::new(0, 0, 0));
+    let mut state = started_state(
+        view_generation,
+        RenderLimits::new(0, 0, 0).with_max_highlight_points(3),
+    );
 
     let report = state
         .apply(&RenderUpdate::SetHighlights {
@@ -306,6 +309,37 @@ fn highlights_are_a_sorted_distinct_replaceable_set() {
         })
         .unwrap();
     assert!(state.snapshot().highlights().is_empty());
+}
+
+#[test]
+fn highlight_input_limit_rejects_atomically_before_duplicate_removal() {
+    let view_generation = view_generation(5, 1);
+    let limits = RenderLimits::new(1_024, 32, 4).with_max_highlight_points(2);
+    let mut state = started_state(view_generation, limits);
+    state
+        .apply(&RenderUpdate::SetHighlights {
+            view_generation,
+            point_ids: vec![point_id(1)],
+        })
+        .unwrap();
+    let before = state.snapshot();
+
+    let error = state
+        .apply(&RenderUpdate::SetHighlights {
+            view_generation,
+            point_ids: vec![point_id(2), point_id(2), point_id(2)],
+        })
+        .unwrap_err();
+
+    assert_eq!(
+        error,
+        ProtocolError::HighlightLimitExceeded {
+            limit: 2,
+            attempted: 3,
+        }
+    );
+    assert_eq!(state.snapshot(), before);
+    assert_eq!(limits.max_highlight_points(), 2);
 }
 
 #[test]

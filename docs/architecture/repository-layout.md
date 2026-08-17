@@ -1,8 +1,9 @@
 # Repository and Dependency Layout
 
-Status: frozen for the completed v0.9 repository trust and version-1
-compatibility candidate; later crates are created only with accepted behavior
-and a caller
+Status: frozen through the completed v0.9 repository trust and version-1
+compatibility candidate, with the v0.10 professional inspection View and
+repository-verified v0.11 exact-review technical slice; later crates are
+created only with accepted behavior and a caller
 
 The repository is one Cargo workspace. Each current crate is independently
 buildable and exposes a smaller public interface than its private
@@ -153,6 +154,11 @@ crates/
       fixtures/v1/
       support/
 
+  point-review/
+    src/lib.rs
+    benches/review.rs
+    tests/interface.rs
+
   point-terrain/
     src/
       lib.rs
@@ -197,6 +203,7 @@ crates/
       renderer.rs
       targets.rs
       point.wgsl
+    examples/third_party_host.rs
     tests/
       contracts.rs
       offscreen.rs
@@ -231,11 +238,12 @@ source-memory -> point-source + point-contracts + foundation-runtime
 source-las -> point-source + point-contracts + foundation-runtime
 point-index -> point-source + point-contracts + foundation-runtime
 point-workspace -> point-index + point-source + point-contracts + foundation-runtime
+point-review -> point-workspace + render-protocol + point-contracts + foundation-runtime
 point-terrain -> point-workspace + point-contracts + foundation-runtime
 render-protocol -> point-contracts
 point-view -> render-protocol
 render-wgpu -> render-protocol + point-contracts
-renderer-demo -> source-las + point-source + point-index + point-view + render-protocol + render-wgpu + point-contracts + foundation-runtime
+renderer-demo -> source-las + point-source + point-index + point-workspace + point-review + point-view + render-protocol + render-wgpu + point-contracts + foundation-runtime
 terrain-demo -> source-las + point-source + point-index + point-workspace + point-terrain + point-contracts + foundation-runtime
 ~~~
 
@@ -271,9 +279,11 @@ cargo run -p point-index --example direct_use
 cargo bench -p point-index --bench index
 
 cargo test -p point-workspace --all-features
+cargo test -p point-review --all-targets
 cargo run --release -p point-workspace --example classify -- \
   survey.laz survey.laz.pidx survey.pcw 6
 cargo bench -p point-workspace --bench document
+cargo bench -p point-review --bench review
 
 cargo test -p point-terrain --all-features
 cargo run -p point-terrain --example derive
@@ -288,10 +298,12 @@ cargo test -p renderer-demo --test headless_smoke
 PUNCTRA_REQUIRE_GPU=1 cargo test -p renderer-demo --test headless_smoke \
   corpus_success_binds_trace_inputs_and_separate_resource_measurements -- --exact
 PUNCTRA_REQUIRE_GPU=1 cargo test -p render-wgpu --test offscreen
+PUNCTRA_REQUIRE_GPU=1 cargo run -p render-wgpu --example third_party_host
 PUNCTRA_REQUIRE_GPU=1 cargo test -p renderer-demo --test planner
 PUNCTRA_REQUIRE_GPU=1 cargo test -p renderer-demo --test display_gpu
 test -f docs/guides/first-las-laz.md
-jq -e . docs/guides/field-corpus.example.json >/dev/null
+ruby -rjson -e 'JSON.parse(File.read(ARGV.fetch(0)))' \
+  docs/guides/field-corpus.example.json
 git diff --check
 ~~~
 
