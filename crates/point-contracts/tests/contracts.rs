@@ -2,12 +2,13 @@
 
 use point_contracts::{
     AttributeColumn, AttributeColumns, AttributeDataType, AttributeDefinition, AttributeId,
-    AttributeSchema, AttributeValues, ContentHash, ContractError, CoordinateReference,
+    AttributeSchema, AttributeValues, ContentHash, ContractError, CoordinateReference, LinearUnit,
     MAX_ATTRIBUTE_DEFINITIONS, MAX_ATTRIBUTE_NAME_BYTES, MAX_COORDINATE_REFERENCE_WKT_BYTES,
     MAX_LOGICAL_ORDER_BYTES, MAX_METADATA_NAME_BYTES, MAX_METADATA_NAMESPACE_BYTES,
     MAX_METADATA_RECORD_PAYLOAD_BYTES, MAX_METADATA_RECORDS, MAX_SOURCE_FORMAT_NAME_BYTES,
     MetadataRecord, PointBatch, PointId, PositionTransform, QuantizedPositions, SourceId,
-    SourceMetadata, SourceProvenance, WorldBounds,
+    SourceMetadata, SourceProvenance, SpatialAxes, SpatialReferenceProfile,
+    SpatialReferenceProvenance, WorldBounds,
 };
 use serde::Serialize;
 use serde_json::json;
@@ -275,6 +276,95 @@ fn metadata_and_provenance_round_trip_without_guessing() {
         serde_json::from_str::<SourceProvenance>(&provenance_json).unwrap(),
         provenance
     );
+}
+
+#[test]
+fn structured_spatial_profile_is_explicit_bounded_and_canonical() {
+    let profile = SpatialReferenceProfile::new(
+        32_647,
+        5_703,
+        SpatialAxes::EastingNorthingElevation,
+        LinearUnit::Metre,
+        LinearUnit::Metre,
+        SpatialReferenceProvenance::SourceMetadata,
+    )
+    .unwrap();
+    let reference = CoordinateReference::profile(profile);
+
+    assert_eq!(profile.horizontal_epsg(), 32_647);
+    assert_eq!(profile.vertical_epsg(), 5_703);
+    assert_eq!(profile.axes(), SpatialAxes::EastingNorthingElevation);
+    assert_eq!(profile.horizontal_unit(), LinearUnit::Metre);
+    assert_eq!(profile.vertical_unit(), LinearUnit::Metre);
+    assert_eq!(
+        profile.provenance(),
+        SpatialReferenceProvenance::SourceMetadata
+    );
+    assert!(profile.is_supported_metric_survey());
+    assert_eq!(
+        profile.canonical_bytes(),
+        [1, 0, 0, 0, 0x87, 0x7f, 0, 0, 0x47, 0x16, 0, 0, 1, 1, 1, 1,]
+    );
+    assert_eq!(reference.spatial_profile(), Some(profile));
+    assert_eq!(reference.as_wkt(), None);
+    assert!(!reference.is_unknown());
+
+    let encoded = serde_json::to_value(&reference).unwrap();
+    assert_eq!(encoded["Profile"]["horizontal_epsg"], 32_647);
+    assert_eq!(encoded["Profile"]["vertical_epsg"], 5_703);
+    assert_eq!(
+        serde_json::from_value::<CoordinateReference>(encoded).unwrap(),
+        reference
+    );
+
+    assert_eq!(
+        SpatialReferenceProfile::new(
+            0,
+            5_703,
+            SpatialAxes::EastingNorthingElevation,
+            LinearUnit::Metre,
+            LinearUnit::Metre,
+            SpatialReferenceProvenance::CallerDeclaration,
+        ),
+        Err(ContractError::InvalidHorizontalEpsg { value: 0 })
+    );
+    assert_eq!(
+        SpatialReferenceProfile::new(
+            32_647,
+            32_767,
+            SpatialAxes::EastingNorthingElevation,
+            LinearUnit::Metre,
+            LinearUnit::Metre,
+            SpatialReferenceProvenance::CallerDeclaration,
+        ),
+        Err(ContractError::InvalidVerticalEpsg { value: 32_767 })
+    );
+    assert!(
+        serde_json::from_value::<CoordinateReference>(json!({
+            "Profile": {
+                "horizontal_epsg": 32647,
+                "vertical_epsg": 0,
+                "axes": "EastingNorthingElevation",
+                "horizontal_unit": "Metre",
+                "vertical_unit": "Metre",
+                "provenance": "CallerDeclaration"
+            }
+        }))
+        .is_err()
+    );
+
+    let feet = SpatialReferenceProfile::new(
+        2_230,
+        5_703,
+        SpatialAxes::EastingNorthingElevation,
+        LinearUnit::UsSurveyFoot,
+        LinearUnit::UsSurveyFoot,
+        SpatialReferenceProvenance::CallerDeclaration,
+    )
+    .unwrap();
+    assert!(!feet.is_supported_metric_survey());
+    assert_eq!(LinearUnit::InternationalFoot.epsg_code(), 9_002);
+    assert_eq!(LinearUnit::UsSurveyFoot.epsg_code(), 9_003);
 }
 
 #[test]

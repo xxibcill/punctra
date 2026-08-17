@@ -3,7 +3,8 @@
 Status: **Complete through the v0.9 repository trust and version-1
 compatibility candidate, the v0.10 professional inspection View repository
 implementation, and the repository-verified v0.11 exact-review technical
-slice; all gates run locally**
+slice, plus the v0.12 explicit spatial-reference and package-publication
+repository slice; all gates run locally**
 
 Verification follows public contracts first. Private tests are used for fault
 injection and measured implementation boundaries that cannot be triggered
@@ -635,6 +636,47 @@ blocker. This closes only v0.11's repository technical slice. Field activation,
 licensed workflow observation, professional time/rework evidence, independent
 adoption, partner validation, v0.9's inherited candidate record, and broader
 support qualification remain outstanding.
+
+### v0.12 local verification record
+
+On 2026-08-17, the complete authoritative local sequence passed for the v0.12
+candidate tree containing this record. The reference environment was an Apple
+M5 Pro (`Mac17,9`), 24 GiB, arm64, macOS 26.5.2 on APFS, Rust 1.90.0, and Cargo
+1.90.0. Required GPU acceptance used the built-in 16-core Apple M5 Pro through
+Metal 4 with `PUNCTRA_REQUIRE_GPU=1`; offscreen rendering, planner, display,
+corpus, and the public `third_party_host` example passed. No hosted CI was used.
+
+Formatting, workspace Clippy with warnings denied, all-feature workspace tests,
+rustdoc with warnings denied, fuzz formatting/check/tests, documented examples,
+focused package/process/golden lanes, guide and JSON checks, and
+`git diff --check` passed. The frozen persisted-v1 Source Record, Spatial Index,
+Workspace, Workflow Run, report, LandXML, and Round-Trip Evidence fixtures
+reproduced their existing bytes and semantics.
+
+The spatial-reference additions passed bounded value/wire/canonical-byte tests;
+complete, missing, duplicate, indirect, unsupported-unit, user-defined,
+unsupported-version, malformed, and WKT-conflicting GeoTIFF fixtures; exact
+Source Record and Workspace reopen tests; structured Terrain/QA/LandXML
+success/rejection tests; and DOM/streaming reference comparison before numeric
+tolerances. No untracked example file was assigned an inferred reference.
+
+The package gate inspected metadata and archive content for all twelve public
+libraries, rejected publishability for both applications, and built every
+extracted package with exact `0.12.0-alpha.1` inter-package requirements. The
+docs.rs-equivalent all-feature rustdoc lane passed with warnings denied. No
+package was uploaded.
+
+All nine default benchmark commands exited successfully and their declared
+resource ceilings passed. The durable workflow run used the unique local
+baseline `qualification-v012-20260817`. Other Criterion commands may display
+comparisons against workstation-local historical baselines; those labels are
+not a same-machine A/B/A attribution and no v0.12 performance claim is made
+from them.
+
+This closes only the bounded v0.12 repository technical and local packaging
+slice. The production-corpus activation gate, independent reference-coordinate
+checks, downstream application observation, crates.io publication, independent
+adoption, partner acceptance, and support qualification remain outstanding.
 
 ### Release qualification
 

@@ -3,7 +3,10 @@ use std::{
     sync::Arc,
 };
 
-use point_contracts::{ContentHash, CoordinateReference, PointId, PositionTransform, WorldBounds};
+use point_contracts::{
+    ContentHash, CoordinateReference, PointId, PositionTransform, SpatialReferenceProfile,
+    WorldBounds,
+};
 use point_workspace::SnapshotProvenance;
 
 /// Deterministic terrain algorithm contract implemented by this crate.
@@ -239,6 +242,12 @@ impl TerrainDescriptor {
     #[must_use]
     pub const fn coordinate_reference(&self) -> &CoordinateReference {
         &self.coordinate_reference
+    }
+
+    /// Returns the complete structured spatial profile when the Source supplied one.
+    #[must_use]
+    pub const fn spatial_reference_profile(&self) -> Option<SpatialReferenceProfile> {
+        self.coordinate_reference.spatial_profile()
     }
 
     /// Returns the complete Snapshot Point-row content hash.

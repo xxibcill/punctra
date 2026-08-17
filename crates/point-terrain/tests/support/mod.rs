@@ -44,16 +44,43 @@ impl TerrainFixture {
         ticks: Vec<[i64; 3]>,
         classifications: Vec<u8>,
     ) -> Self {
+        Self::with_transform_and_reference(
+            label,
+            transform,
+            CoordinateReference::Unknown,
+            ticks,
+            classifications,
+        )
+    }
+
+    pub fn with_reference(
+        label: &str,
+        coordinate_reference: CoordinateReference,
+        ticks: Vec<[i64; 3]>,
+        classifications: Vec<u8>,
+    ) -> Self {
+        Self::with_transform_and_reference(
+            label,
+            identity_transform(),
+            coordinate_reference,
+            ticks,
+            classifications,
+        )
+    }
+
+    fn with_transform_and_reference(
+        label: &str,
+        transform: PositionTransform,
+        coordinate_reference: CoordinateReference,
+        ticks: Vec<[i64; 3]>,
+        classifications: Vec<u8>,
+    ) -> Self {
         assert_eq!(ticks.len(), classifications.len());
         let temporary = TemporaryFixture::new(label);
         let attributes = classification_columns(classifications.clone(), ticks.len());
-        let memory = MemorySource::from_columns(
-            transform,
-            CoordinateReference::Unknown,
-            ticks.clone(),
-            attributes,
-        )
-        .expect("Terrain fixture memory Source is valid");
+        let memory =
+            MemorySource::from_columns(transform, coordinate_reference, ticks.clone(), attributes)
+                .expect("Terrain fixture memory Source is valid");
         let source = source_memory::open(memory)
             .blocking_wait()
             .expect("Terrain fixture Source opens");

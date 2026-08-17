@@ -3,6 +3,35 @@
 All notable changes to Punctra are documented here. The project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased - 0.12.0-alpha.1
+
+- Added one explicit projected survey-coordinate profile with horizontal and
+  vertical EPSG identities, easting/northing/elevation axes, separate linear
+  units, provenance, bounded serialization, and canonical hash bytes. Opaque
+  WKT and frozen unknown-reference encodings remain compatible and are never
+  guessed into the structured profile.
+- Added strict fail-closed LAS/LAZ GeoTIFF key decoding for complete direct
+  projected-reference facts. Metre, international-foot, and US-survey-foot
+  declarations are preserved; duplicate, indirect, missing, malformed,
+  user-defined, unsupported, and WKT-conflicting inputs do not publish a
+  structured profile.
+- Bound structured or exact opaque reference semantics into Workspace reopen
+  and Terrain Artifact identity. Detached QA and LandXML accept the new
+  metre/metre profile, reject structured non-metre input, and retain the
+  explicit unknown-reference boolean only for frozen legacy workflows.
+- Emitted and compared one strict LandXML 1.2 `CoordinateSystem` declaration,
+  with reference drift rejected before numeric coordinate tolerances in both
+  DOM and bounded streaming round-trip readers.
+- Prepared all twelve public library crates for local crates.io/docs.rs
+  validation with complete package metadata, exact versioned path
+  dependencies, empty default features, an explicit MSRV/license policy, a
+  dependency-role guide, package-content checks, and clean extracted-package
+  builds. The demo applications remain private and no registry upload occurs.
+- Preserved every frozen persisted-v1 fixture and the legacy unknown-reference
+  identity path. This bounded repository release does not claim a permitted
+  production corpus, coordinate transformation, downstream acceptance,
+  independent adoption, partner validation, or production support.
+
 ## Unreleased - 0.11.0-alpha.1
 
 - Completed and locally repository-verified the evidence-honest v0.11 Exact

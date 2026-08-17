@@ -3,8 +3,9 @@
 Status: **v0.7 durable Run, v0.8 Run-bound qualification, and v0.9 trust/
 compatibility hardening Complete; the v0.10 repository View implementation and
 repository-verified v0.11 exact-review technical workflow preserve the same
-authoritative boundaries; field evidence and broader workflows remain
-outstanding**
+authoritative boundaries; the v0.12 explicit spatial-reference profile now
+flows through the same Source, Workspace, Terrain, QA, export, and round-trip
+boundaries; field evidence and broader workflows remain outstanding**
 
 The host composes sibling modules explicitly. Lower crates never call back into
 an application, discover a Source for a Workspace, submit a GPU queue, or infer
@@ -50,6 +51,12 @@ without replacement. A v1 target cannot be opened as v2 or vice versa; the
 caller moves/deletes the rebuildable family or chooses a new target to migrate.
 `PreparedIndex` retains the exact verified Source capability used to build or
 open it.
+
+When the Source has a structured v0.12 Coordinate Reference, its horizontal and
+vertical identities, easting/northing/elevation axes, units, and provenance are
+part of the verified Source and downstream Workspace binding. A different
+reference cannot reopen the same Workspace even when Point rows are otherwise
+equal.
 
 For a claimed cold-build measurement, `prepare_fresh_with_recipe` rejects and
 preserves any existing complete/work family before it can be opened or resumed;
@@ -279,9 +286,11 @@ sequenceDiagram
 ~~~
 
 Residual is observed Z minus Surface Z. Outside-hull positions are explicit
-gaps. LandXML coordinates are northing, easting, elevation and require caller-
-established metric-metre Source coordinates; no transformation or clock read
-occurs. Once target publication starts, any inability to prove final
+gaps. For a structured v0.12 profile, QA and LandXML require metre/metre,
+easting/northing/elevation coordinates and LandXML emits one matching
+`CoordinateSystem`; legacy unknown-reference fixtures retain their explicit
+caller metric assertion. LandXML point text is northing, easting, elevation.
+No transformation or clock read occurs. Once target publication starts, any inability to prove final
 verification, durability, target binding, or terminal acknowledgement is reported as
 indeterminate rather than success.
 
@@ -382,6 +391,10 @@ failure is operational failure. After complete stable reads, supported semantic
 non-conformance produces canonical failed evidence with a stable reason. Exact
 existing evidence reconciles; different bytes are never overwritten. The
 opaque downstream declaration is not evidence that the named application ran.
+Both reference and returned v0.12 LandXML must carry the same complete
+supported `CoordinateSystem`; reference drift fails before coordinate
+tolerances are evaluated. Legacy generated files remain comparable only when
+both omit it.
 
 ## 11. Prepare and render a View
 

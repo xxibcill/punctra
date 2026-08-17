@@ -119,6 +119,27 @@ adoption evidence gates. No permitted production correction workflow,
 independent adopter, professional time saving, reduced rework, partner
 acceptance, or product efficacy is claimed.
 
+Version 0.12.0-alpha.1 implements the bounded repository track of the
+[Explicit Spatial Reference and Package Publication
+design](docs/design/explicit-spatial-reference-v0.12.md). A structured
+Coordinate Reference now carries horizontal and vertical EPSG identities,
+easting/northing/elevation axes, horizontal and vertical linear units, and
+provenance through verified Source metadata, Source Records, Workspace
+lineage, Terrain descriptors, detached QA, and LandXML. `source-las` publishes
+that profile only from one complete direct GeoTIFF key directory; ambiguity,
+indirection, missing facts, unsupported values, and opaque WKT fail closed
+without guessing. The Terrain/QA/export path supports metre/metre only and
+does no coordinate transformation. Frozen unknown-reference workflows retain
+their explicit legacy assertion.
+
+The same release defines the local crates.io/docs.rs path for all twelve public
+libraries. They use versioned local/registry dependencies, Rust 1.90, empty
+default features, dual-license and repository metadata, and clean package
+verification documented in the [library packaging
+guide](docs/guides/library-packaging.md). The applications remain private and
+no registry publication, external adoption, production corpus, downstream
+execution, or partner acceptance is claimed.
+
 To try the implemented View safely, follow the five-minute [first LAS/LAZ
 guide](docs/guides/first-las-laz.md). It separates position-only disk-v1 and
 attributed disk-v2 caches and explains what progressive Coverage does and does

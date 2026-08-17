@@ -21,6 +21,16 @@ where
 {
     let surface = surface.clone();
     Job::spawn(move |control| {
+        if surface
+            .descriptor()
+            .spatial_reference_profile()
+            .is_some_and(|profile| !profile.is_supported_metric_survey())
+        {
+            return Err(TerrainError::invalid(
+                "Check Point spatial reference",
+                "the v0.12 QA path requires easting/northing/elevation axes and metre horizontal and vertical units",
+            ));
+        }
         let (check_points, collection_bytes) =
             collect_check_points(check_points, limits, &control)?;
         evaluate(&surface, check_points, collection_bytes, limits, &control)

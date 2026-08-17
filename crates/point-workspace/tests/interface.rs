@@ -2,10 +2,16 @@
 
 mod support;
 
-use point_contracts::AttributeId;
+use point_contracts::{
+    AttributeId, CoordinateReference, LinearUnit, SpatialAxes, SpatialReferenceProfile,
+    SpatialReferenceProvenance,
+};
+use point_index::{PrepareLimits, prepare};
 use point_workspace::{OpenLimits, RevisionKind, WorkspaceError, WorkspaceSchema, create, open};
 
-use support::{classification_attribute, prepare_fixture};
+use support::{
+    classification_attribute, fixture_rows, open_source_with_reference, prepare_fixture,
+};
 
 #[test]
 fn commit_job_is_a_nameable_public_capability() {
@@ -95,4 +101,55 @@ fn create_rejects_a_missing_classification_attribute_without_publishing() {
 
     assert!(matches!(error, WorkspaceError::Incompatible { .. }));
     assert!(!temporary.workspace_path().exists());
+}
+
+#[test]
+fn reopen_rejects_changed_spatial_reference_with_unchanged_point_rows() {
+    let temporary = support::TemporaryFixture::new("spatial-reference");
+    let (ticks, classifications) = fixture_rows(67);
+    let profile = |vertical_epsg| {
+        CoordinateReference::profile(
+            SpatialReferenceProfile::new(
+                32_647,
+                vertical_epsg,
+                SpatialAxes::EastingNorthingElevation,
+                LinearUnit::Metre,
+                LinearUnit::Metre,
+                SpatialReferenceProvenance::CallerDeclaration,
+            )
+            .unwrap(),
+        )
+    };
+    let original_index = prepare(
+        open_source_with_reference(ticks.clone(), classifications.clone(), profile(5_703)),
+        temporary.index_path(),
+        PrepareLimits::default(),
+    )
+    .blocking_wait()
+    .unwrap();
+    let workspace = create(
+        temporary.workspace_path(),
+        original_index,
+        WorkspaceSchema::new(classification_attribute()),
+        OpenLimits::default(),
+    )
+    .blocking_wait()
+    .unwrap();
+    drop(workspace);
+
+    let changed_index = prepare(
+        open_source_with_reference(ticks, classifications, profile(5_704)),
+        temporary.path().join("changed-reference.pidx"),
+        PrepareLimits::default(),
+    )
+    .blocking_wait()
+    .unwrap();
+    let error = open(
+        temporary.workspace_path(),
+        changed_index,
+        OpenLimits::default(),
+    )
+    .blocking_wait()
+    .unwrap_err();
+    assert!(matches!(error, WorkspaceError::Incompatible { .. }));
 }

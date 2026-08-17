@@ -19,7 +19,8 @@ use crate::{
     roundtrip::{
         InputSide, ParsedRoundTrip, RoundTripDeclaration, RoundTripEvaluation, RoundTripFailure,
         RoundTripFileFacts, RoundTripLimits, RoundTripReason, RoundTripTolerances,
-        evaluate_parsed_round_trip, semantic_evaluation_failure, validate_utf8_declaration,
+        evaluate_parsed_round_trip, semantic_evaluation_failure, structured_spatial_profile,
+        validate_utf8_declaration,
     },
     roundtrip_file::require_file_bytes,
     roundtrip_surface::{ParsedSurface, Position, SemanticSurfaceBuilder},
@@ -598,6 +599,7 @@ impl Utf8Validator {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Tag {
     LandXml,
+    CoordinateSystem,
     Units,
     Metric,
     Project,
@@ -618,6 +620,7 @@ struct StreamParser<'a> {
     nodes: u64,
     text_attribute_bytes: u64,
     root_count: u64,
+    coordinate_system_count: u64,
     project_count: u64,
     application_count: u64,
     units_count: u64,
@@ -630,6 +633,7 @@ struct StreamParser<'a> {
     metadata_depth: usize,
     ignored_sections: Vec<Box<str>>,
     surface_name: Option<Box<str>>,
+    spatial_reference_profile: Option<point_contracts::SpatialReferenceProfile>,
     surface: SemanticSurfaceBuilder,
     pending_point_id: Option<u64>,
     simple_text: String,
@@ -645,6 +649,7 @@ impl<'a> StreamParser<'a> {
             nodes: 0,
             text_attribute_bytes: 0,
             root_count: 0,
+            coordinate_system_count: 0,
             project_count: 0,
             application_count: 0,
             units_count: 0,
@@ -657,6 +662,7 @@ impl<'a> StreamParser<'a> {
             metadata_depth: 0,
             ignored_sections: Vec::new(),
             surface_name: None,
+            spatial_reference_profile: None,
             surface: SemanticSurfaceBuilder::new(limits),
             pending_point_id: None,
             simple_text: String::new(),
@@ -883,12 +889,6 @@ impl<'a> StreamParser<'a> {
             }
             return Err(self.unsupported("foreign semantic element is unsupported"));
         }
-        if start.local_name().as_ref() == b"CoordinateSystem" {
-            return Err(RoundTripFailure::semantic(
-                RoundTripReason::CoordinateReferenceUnsupported,
-                format_args!("{} CoordinateSystem semantics are unsupported", self.side),
-            ));
-        }
         let tag = tag(start.local_name().as_ref()).ok_or_else(|| {
             if matches!(self.stack.last(), Some(Tag::Units | Tag::Metric)) {
                 self.unit_drift()
@@ -938,7 +938,11 @@ impl<'a> StreamParser<'a> {
             (None, Tag::LandXml)
                 | (
                     Some(Tag::LandXml),
-                    Tag::Units | Tag::Project | Tag::Application | Tag::Surfaces
+                    Tag::CoordinateSystem
+                        | Tag::Units
+                        | Tag::Project
+                        | Tag::Application
+                        | Tag::Surfaces
                 )
                 | (Some(Tag::Units), Tag::Metric)
                 | (Some(Tag::Surfaces), Tag::Surface)
@@ -948,6 +952,9 @@ impl<'a> StreamParser<'a> {
                 | (Some(Tag::Faces), Tag::Face)
         );
         if !valid {
+            if matches!(parent, Some(Tag::CoordinateSystem)) || tag == Tag::CoordinateSystem {
+                return Err(self.coordinate_reference_failure());
+            }
             if matches!(parent, Some(Tag::Units | Tag::Metric))
                 || matches!(tag, Tag::Units | Tag::Metric)
             {
@@ -957,6 +964,7 @@ impl<'a> StreamParser<'a> {
         }
         let counter = match tag {
             Tag::LandXml => &mut self.root_count,
+            Tag::CoordinateSystem => &mut self.coordinate_system_count,
             Tag::Units => &mut self.units_count,
             Tag::Metric => &mut self.metric_count,
             Tag::Surfaces => &mut self.surfaces_count,
@@ -970,6 +978,9 @@ impl<'a> StreamParser<'a> {
         };
         *counter = counter.saturating_add(1);
         if *counter > 1 {
+            if tag == Tag::CoordinateSystem {
+                return Err(self.coordinate_reference_failure());
+            }
             if matches!(tag, Tag::Units | Tag::Metric) {
                 return Err(self.unit_drift());
             }
@@ -983,6 +994,9 @@ impl<'a> StreamParser<'a> {
         tag: Tag,
         start: &BytesStart<'_>,
     ) -> Result<(), RoundTripFailure> {
+        if tag == Tag::CoordinateSystem {
+            return self.validate_coordinate_system_attributes(start);
+        }
         let required = match tag {
             Tag::LandXml => Some((b"version".as_slice(), "1.2")),
             Tag::Metric => Some((b"linearUnit".as_slice(), "meter")),
@@ -1048,6 +1062,45 @@ impl<'a> StreamParser<'a> {
         Ok(())
     }
 
+    fn validate_coordinate_system_attributes(
+        &mut self,
+        start: &BytesStart<'_>,
+    ) -> Result<(), RoundTripFailure> {
+        let mut name = None;
+        let mut horizontal = None;
+        let mut vertical = None;
+        let mut description = None;
+        for attribute in start.attributes() {
+            let attribute = attribute.map_err(|_| self.coordinate_reference_failure())?;
+            let key = attribute.key.as_ref();
+            if key == b"xmlns" || key.starts_with(b"xmlns:") || key.contains(&b':') {
+                continue;
+            }
+            let value = attribute
+                .normalized_value(XmlVersion::Implicit1_0)
+                .map_err(|_| self.coordinate_reference_failure())?
+                .into_owned();
+            let target = match key {
+                b"name" => &mut name,
+                b"horizontalCoordinateSystemName" => &mut horizontal,
+                b"verticalDatum" => &mut vertical,
+                b"desc" => &mut description,
+                _ => return Err(self.coordinate_reference_failure()),
+            };
+            if target.replace(value).is_some() {
+                return Err(self.coordinate_reference_failure());
+            }
+        }
+        self.spatial_reference_profile = Some(structured_spatial_profile(
+            self.side,
+            name.as_deref(),
+            horizontal.as_deref(),
+            vertical.as_deref(),
+            description.as_deref(),
+        )?);
+        Ok(())
+    }
+
     fn finish_point(&mut self) -> Result<(), RoundTripFailure> {
         let mut values = self.simple_text.split_whitespace();
         let northing = parse_number(self.side, values.next())?;
@@ -1095,6 +1148,7 @@ impl<'a> StreamParser<'a> {
             faces,
             surface_name: self.surface_name,
             ignored_top_level_sections: self.ignored_sections.into_boxed_slice(),
+            spatial_reference_profile: self.spatial_reference_profile,
         })
     }
 
@@ -1154,6 +1208,16 @@ impl<'a> StreamParser<'a> {
             ),
         )
     }
+
+    fn coordinate_reference_failure(&self) -> RoundTripFailure {
+        RoundTripFailure::semantic(
+            RoundTripReason::CoordinateReferenceUnsupported,
+            format_args!(
+                "{} CoordinateSystem is missing, ambiguous, or unsupported",
+                self.side
+            ),
+        )
+    }
 }
 
 fn retain_semantic_failure(
@@ -1208,7 +1272,8 @@ fn required_retained_model_bytes(limits: RoundTripLimits) -> u64 {
     let fixed = (3 * STREAM_BUFFER_BYTES
         + 32 * size_of::<Tag>()
         + 2 * 16 * size_of::<[usize; 3]>()
-        + 4 * size_of::<Box<str>>()) as u64;
+        + 4 * size_of::<Box<str>>()
+        + 2 * size_of::<Option<point_contracts::SpatialReferenceProfile>>()) as u64;
     point_peak.saturating_add(face_peak).saturating_add(fixed)
 }
 
@@ -1221,6 +1286,7 @@ fn check_cancelled(control: &OperationControl) -> Result<(), RoundTripFailure> {
 fn tag(local: &[u8]) -> Option<Tag> {
     match local {
         b"LandXML" => Some(Tag::LandXml),
+        b"CoordinateSystem" => Some(Tag::CoordinateSystem),
         b"Units" => Some(Tag::Units),
         b"Metric" => Some(Tag::Metric),
         b"Project" => Some(Tag::Project),
@@ -1373,6 +1439,45 @@ mod tests {
         .expect("an absent surface name remains non-semantic");
 
         assert!(matches!(evaluation, RoundTripEvaluation::Passed(_)));
+    }
+
+    #[test]
+    fn streaming_reader_compares_structured_coordinate_system_facts() {
+        let directory = Directory::new();
+        let reference = directory.path.join("reference-spatial.xml");
+        let returned = directory.path.join("returned-spatial.xml");
+        let coordinate_system = "<CoordinateSystem name=\"EPSG:32647+EPSG:5703\" horizontalCoordinateSystemName=\"EPSG:32647\" verticalDatum=\"EPSG:5703\" desc=\"axes=easting,northing,elevation; horizontalUnit=metre; verticalUnit=metre; provenance=callerDeclaration\"/>";
+        let reference_xml = xml("1", "2", "3", "1 2 3").replacen(
+            "<Units>",
+            &format!("{coordinate_system}<Units>"),
+            1,
+        );
+        fs::write(&reference, &reference_xml).unwrap();
+        fs::write(&returned, &reference_xml).unwrap();
+        let evaluation = evaluate_streaming_round_trip(
+            &reference,
+            &returned,
+            RoundTripDeclaration::new("generated", "test", "metric").unwrap(),
+            RoundTripTolerances::new(0.0, 0.0).unwrap(),
+            RoundTripLimits::full_v07_export(),
+        )
+        .expect("matching structured references parse");
+        assert!(matches!(evaluation, RoundTripEvaluation::Passed(_)));
+
+        fs::write(&returned, reference_xml.replace("EPSG:5703", "EPSG:5702")).unwrap();
+        let evaluation = evaluate_streaming_round_trip(
+            &reference,
+            &returned,
+            RoundTripDeclaration::new("generated", "test", "metric").unwrap(),
+            RoundTripTolerances::new(f64::MAX, f64::MAX).unwrap(),
+            RoundTripLimits::full_v07_export(),
+        )
+        .expect("reference drift is a semantic evaluation");
+        assert!(matches!(
+            evaluation,
+            RoundTripEvaluation::Failed(ref mismatch)
+                if mismatch.reason() == RoundTripReason::CoordinateReferenceUnsupported
+        ));
     }
 
     #[test]

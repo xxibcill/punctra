@@ -5,8 +5,10 @@ professional inspection View repository implementation is complete while
 field, partner-validation, adoption-publication, and support evidence remain
 outstanding; the v0.11 exact interactive review technical slice is complete
 and repository-verified while field activation and independent-adoption
-evidence remain outstanding; broader selection, terrain, and product terms
-remain deferred
+evidence remain outstanding; the v0.12 explicit spatial-reference and library-
+packaging repository slice is complete while its production-corpus,
+downstream, adoption, and support evidence remains outstanding; broader
+selection, terrain, and product terms remain deferred
 
 Punctra v0.11 builds on the reusable render engine, renderer-neutral View
 planner, and verified Source path described in the accepted [v0.1 renderer
@@ -62,6 +64,14 @@ commit, immediate-head Revert, Revision Audit/Edit Footprint, and uncertain-
 Operation reconciliation retain their existing Workspace meanings. Polygon,
 brush, visible-only, and occlusion selection, arbitrary Attribute/position
 editing, general UI, and automatic recovery are not accepted meanings.
+The accepted [v0.12 Explicit Spatial Reference and Package Publication
+design](docs/design/explicit-spatial-reference-v0.12.md) fixes one complete
+projected survey-coordinate profile and its provenance. The structured profile
+may be decoded from complete verified Source metadata or declared by a caller;
+neither provenance is downstream acceptance. Metre, international foot, and US
+survey foot can be represented, while the current Terrain, QA, and LandXML path
+supports metre/metre only and performs no transformation. Opaque WKT and
+unknown references remain explicit rather than guessed.
 
 ## Artifact
 
@@ -101,7 +111,11 @@ _Avoid:_ Pick Hit, sampled display Point, current Point without a Revision
 
 ## Coordinate Reference
 
-The declared horizontal reference, vertical reference, axis order, and units needed to interpret positions. A Coordinate Reference may explicitly be unknown; it is never guessed.
+The declared horizontal reference, vertical reference, axis order, units, and
+provenance needed to interpret positions. The v0.12 structured profile uses
+nonzero EPSG identities and easting/northing/elevation axes while exact Source
+scale/offset retains coordinate precision. A Coordinate Reference may instead
+be opaque WKT or explicitly unknown; it is never guessed.
 
 _Avoid:_ projection when referring to the whole reference, assumed CRS
 

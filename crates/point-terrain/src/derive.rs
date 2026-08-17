@@ -834,7 +834,10 @@ fn artifact_hash(
     hasher.update(provenance.revision().as_bytes());
     hasher.update(recipe_hash.as_bytes());
     hash_transform(&mut hasher, transform);
-    if let Some(wkt) = coordinate_reference.as_wkt() {
+    if let Some(profile) = coordinate_reference.spatial_profile() {
+        hasher.update(&u64::MAX.to_le_bytes());
+        hasher.update(&profile.canonical_bytes());
+    } else if let Some(wkt) = coordinate_reference.as_wkt() {
         hasher.update(&u64::try_from(wkt.len()).unwrap_or(u64::MAX).to_le_bytes());
         hasher.update(wkt.as_bytes());
     } else {

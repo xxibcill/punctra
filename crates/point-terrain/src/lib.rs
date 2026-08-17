@@ -3,6 +3,9 @@
 //! The crate consumes one immutable Workspace Snapshot, derives one complete
 //! in-memory 2.5D Terrain Surface, evaluates detached Check Points, and creates
 //! the narrow metric-metre `LandXML` deliverable accepted for Punctra v0.6.
+//! A complete v0.12 structured Source profile is propagated and must declare
+//! easting/northing/elevation metre coordinates; the explicit assertion in the
+//! example is retained only for legacy unknown-reference workflows.
 //!
 //! # Example
 //!

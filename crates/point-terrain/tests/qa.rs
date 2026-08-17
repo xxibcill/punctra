@@ -13,7 +13,10 @@ use std::{
 };
 
 use foundation_runtime::ProgressPhase;
-use point_contracts::PositionTransform;
+use point_contracts::{
+    CoordinateReference, LinearUnit, PositionTransform, SpatialAxes, SpatialReferenceProfile,
+    SpatialReferenceProvenance,
+};
 use point_terrain::{
     CheckPoint, CheckPointId, CheckPointLimits, CheckPointOutcome, SurfaceFaceId, SurfaceVertexId,
     TerrainError, TerrainSurface,
@@ -69,6 +72,41 @@ fn assert_close(actual: f64, expected: f64) {
         (actual - expected).abs() <= 1.0e-12,
         "expected {expected}, found {actual}"
     );
+}
+
+#[test]
+fn structured_non_metre_profile_is_rejected_before_qa() {
+    let profile = SpatialReferenceProfile::new(
+        2_230,
+        5_703,
+        SpatialAxes::EastingNorthingElevation,
+        LinearUnit::UsSurveyFoot,
+        LinearUnit::UsSurveyFoot,
+        SpatialReferenceProvenance::CallerDeclaration,
+    )
+    .unwrap();
+    let fixture = TerrainFixture::with_reference(
+        "qa-foot-reference",
+        CoordinateReference::profile(profile),
+        vec![[0, 0, 0], [10, 0, 10], [0, 10, 20]],
+        vec![2; 3],
+    );
+    let surface = derive_surface(fixture.snapshot(), 2);
+
+    let error = surface
+        .check_points(
+            [check_point(1, [1.0, 1.0, 1.0])],
+            CheckPointLimits::default(),
+        )
+        .blocking_wait()
+        .expect_err("QA does not silently label foot residuals as metres");
+    assert!(matches!(
+        error,
+        TerrainError::InvalidArgument {
+            argument: "Check Point spatial reference",
+            ..
+        }
+    ));
 }
 
 #[test]

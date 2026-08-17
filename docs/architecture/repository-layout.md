@@ -2,7 +2,8 @@
 
 Status: frozen through the completed v0.9 repository trust and version-1
 compatibility candidate, with the v0.10 professional inspection View and
-repository-verified v0.11 exact-review technical slice; later crates are
+repository-verified v0.11 exact-review technical slice plus the v0.12 explicit
+spatial-reference and package-publication repository slice; later crates are
 created only with accepted behavior and a caller
 
 The repository is one Cargo workspace. Each current crate is independently
@@ -304,6 +305,7 @@ PUNCTRA_REQUIRE_GPU=1 cargo test -p renderer-demo --test display_gpu
 test -f docs/guides/first-las-laz.md
 ruby -rjson -e 'JSON.parse(File.read(ARGV.fetch(0)))' \
   docs/guides/field-corpus.example.json
+scripts/verify-packages.rb
 git diff --check
 ~~~
 
@@ -426,6 +428,11 @@ Cargo semantic versions, persisted schema versions, deterministic algorithm
 versions, and LandXML/journal/report format versions are separate axes. A Cargo
 `0.9` version does not imply Workspace disk schema or terrain algorithm version
 9.
+
+The v0.12 public libraries are one `0.12.0-alpha.1` package set with exact
+inter-Punctra registry requirements and local development paths. Their empty
+default features, dependency roles, MSRV, publication order, and pre-v1 policy
+are documented in the [library packaging guide](../guides/library-packaging.md).
 
 - Unknown persisted major versions fail explicitly.
 - Identity and persisted schema values remain opaque outside their owner.

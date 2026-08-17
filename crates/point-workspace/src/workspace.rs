@@ -8,8 +8,8 @@ use std::task::{Context, Poll};
 use blake3::Hasher;
 use foundation_runtime::{CancellationToken, Job, OperationControl, OperationHandle};
 use point_contracts::{
-    AttributeDataType, AttributeDefinition, AttributeId, ContentHash, MAX_ATTRIBUTE_NAME_BYTES,
-    PointBatch, PointId, SourceId,
+    AttributeDataType, AttributeDefinition, AttributeId, ContentHash, CoordinateReference,
+    MAX_ATTRIBUTE_NAME_BYTES, PointBatch, PointId, SourceId,
 };
 use point_index::PreparedIndex;
 use point_source::Source;
@@ -2092,12 +2092,25 @@ fn source_contract(source: &Source, classification: &AttributeDefinition) -> [u8
     for value in transform.offset().into_iter().chain(transform.scale()) {
         hasher.update(&value.to_bits().to_le_bytes());
     }
+    hash_coordinate_reference(&mut hasher, source.metadata().coordinate_reference());
     let definition = persisted_attribute_definition(classification);
     hasher.update(&definition.id.to_le_bytes());
     hasher.update(&definition.name_len.to_le_bytes());
     hasher.update(&definition.name[..classification.name().len()]);
     hasher.update(&[definition.data_type]);
     *hasher.finalize().as_bytes()
+}
+
+fn hash_coordinate_reference(hasher: &mut Hasher, reference: &CoordinateReference) {
+    if let Some(profile) = reference.spatial_profile() {
+        hasher.update(b"structured-spatial-profile-v1");
+        hasher.update(&profile.canonical_bytes());
+    } else if let Some(wkt) = reference.as_wkt() {
+        hasher.update(b"opaque-coordinate-reference-wkt-v1");
+        let length = u64::try_from(wkt.len()).expect("bounded Coordinate Reference fits u64");
+        hasher.update(&length.to_le_bytes());
+        hasher.update(wkt.as_bytes());
+    }
 }
 
 fn persisted_attribute_definition(
@@ -2216,6 +2229,51 @@ mod tests {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[test]
+    fn source_contract_hash_binds_structured_and_opaque_reference_semantics() {
+        use point_contracts::{
+            LinearUnit, SpatialAxes, SpatialReferenceProfile, SpatialReferenceProvenance,
+        };
+
+        let structured = CoordinateReference::profile(
+            SpatialReferenceProfile::new(
+                32_647,
+                5_703,
+                SpatialAxes::EastingNorthingElevation,
+                LinearUnit::Metre,
+                LinearUnit::Metre,
+                SpatialReferenceProvenance::SourceMetadata,
+            )
+            .unwrap(),
+        );
+        let caller_structured = CoordinateReference::profile(
+            SpatialReferenceProfile::new(
+                32_647,
+                5_703,
+                SpatialAxes::EastingNorthingElevation,
+                LinearUnit::Metre,
+                LinearUnit::Metre,
+                SpatialReferenceProvenance::CallerDeclaration,
+            )
+            .unwrap(),
+        );
+        let wkt = CoordinateReference::wkt("PROJCRS[\"fixture\"]").unwrap();
+
+        let digest = |reference: &CoordinateReference| {
+            let mut hasher = Hasher::new();
+            hash_coordinate_reference(&mut hasher, reference);
+            *hasher.finalize().as_bytes()
+        };
+        assert_ne!(digest(&structured), digest(&caller_structured));
+        assert_ne!(digest(&structured), digest(&wkt));
+        assert_ne!(digest(&wkt), digest(&CoordinateReference::Unknown));
+        assert_eq!(
+            digest(&CoordinateReference::Unknown),
+            *Hasher::new().finalize().as_bytes(),
+            "unknown Sources retain their frozen v1 contract digest input"
+        );
     }
 
     #[test]

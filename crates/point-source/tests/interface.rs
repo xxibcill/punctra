@@ -7,8 +7,9 @@ use std::sync::{Arc, Barrier, Mutex};
 use foundation_runtime::{OperationReporter, ProgressPhase, ProgressSnapshot, RuntimeError};
 use point_contracts::{
     AttributeColumn, AttributeColumns, AttributeDataType, AttributeDefinition, AttributeId,
-    AttributeSchema, AttributeValues, ContentHash, CoordinateReference, PointBatch,
-    PositionTransform, QuantizedPositions, SourceId, SourceMetadata, WorldBounds,
+    AttributeSchema, AttributeValues, ContentHash, CoordinateReference, LinearUnit, PointBatch,
+    PositionTransform, QuantizedPositions, SourceId, SourceMetadata, SpatialAxes,
+    SpatialReferenceProfile, SpatialReferenceProvenance, WorldBounds,
 };
 use point_source::adapter::{
     AdapterContract, AdapterRead, AdapterReadRequest, AdapterVerified, CandidateAdapter,
@@ -207,6 +208,10 @@ impl Fixture {
 }
 
 fn fixture() -> Fixture {
+    fixture_with_reference(CoordinateReference::Unknown)
+}
+
+fn fixture_with_reference(coordinate_reference: CoordinateReference) -> Fixture {
     let transform = PositionTransform::new([1_000.0, 2_000.0, 10.0], [0.01, 0.01, 0.01]).unwrap();
     let intensity = AttributeDefinition::new(
         AttributeId::new(1).unwrap(),
@@ -223,7 +228,7 @@ fn fixture() -> Fixture {
     let metadata = SourceMetadata::new(
         8,
         transform,
-        CoordinateReference::Unknown,
+        coordinate_reference,
         schema,
         Some(world_bounds),
         "memory",
@@ -933,6 +938,46 @@ fn source_record_deserialization_enforces_all_adapter_owned_bounds() {
         ),
     );
     assert!(serde_json::from_value::<point_source::SourceRecord>(oversized_token).is_err());
+}
+
+#[test]
+fn source_record_round_trip_and_reopen_preserve_structured_reference_facts() {
+    let profile = SpatialReferenceProfile::new(
+        32_647,
+        5_703,
+        SpatialAxes::EastingNorthingElevation,
+        LinearUnit::Metre,
+        LinearUnit::Metre,
+        SpatialReferenceProvenance::CallerDeclaration,
+    )
+    .unwrap();
+    let original = fixture_with_reference(CoordinateReference::profile(profile));
+    let source = original
+        .candidate(61, FastBehavior::Match)
+        .open(OpenOptions::identify())
+        .blocking_wait()
+        .unwrap();
+    let encoded = serde_json::to_vec(source.record()).unwrap();
+    let record: point_source::SourceRecord = serde_json::from_slice(&encoded).unwrap();
+    assert_eq!(
+        record.metadata().coordinate_reference().spatial_profile(),
+        Some(profile)
+    );
+
+    let matching = fixture_with_reference(CoordinateReference::profile(profile));
+    let reopened = matching
+        .candidate(61, FastBehavior::Match)
+        .open(OpenOptions::match_record(
+            record,
+            VerificationPolicy::FastOnly,
+        ))
+        .blocking_wait()
+        .unwrap();
+    assert_eq!(reopened.identity(), source.identity());
+    assert_eq!(
+        reopened.metadata().coordinate_reference().spatial_profile(),
+        Some(profile)
+    );
 }
 
 #[test]

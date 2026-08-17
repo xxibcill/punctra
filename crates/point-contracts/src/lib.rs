@@ -4,6 +4,11 @@
 //! callers. It performs no input/output, decoding, scheduling, Workspace, View,
 //! or GPU work.
 //!
+//! The v0.12 coordinate values represent one complete projected survey profile
+//! with explicit horizontal and vertical EPSG identities, axis meaning, linear
+//! units, and provenance. They do not perform authority lookup or coordinate
+//! transformation.
+//!
 //! # Interface classification
 //!
 //! The documented public values and validation errors are a **v1-candidate
@@ -64,6 +69,9 @@ pub const MAX_ATTRIBUTE_DEFINITIONS: usize = 4_096;
 /// One MiB leaves ample room for compound reference-system definitions without
 /// allowing one metadata string to grow without limit.
 pub const MAX_COORDINATE_REFERENCE_WKT_BYTES: usize = 1024 * 1024;
+
+/// Bytes in the stable v1 canonical representation of a structured spatial profile.
+pub const SPATIAL_REFERENCE_PROFILE_CANONICAL_BYTES: usize = 16;
 
 /// Maximum UTF-8 bytes in one metadata namespace.
 pub const MAX_METADATA_NAMESPACE_BYTES: usize = 256;
@@ -1934,6 +1942,215 @@ fn attribute_payload_bytes(columns: &[AttributeColumn]) -> Result<u64, ContractE
     })
 }
 
+/// Explicit linear unit of one coordinate axis family.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+pub enum LinearUnit {
+    /// SI metre (EPSG unit code 9001).
+    Metre,
+    /// International foot, exactly 0.3048 metres (EPSG unit code 9002).
+    InternationalFoot,
+    /// US survey foot, exactly 1200/3937 metres (EPSG unit code 9003).
+    UsSurveyFoot,
+}
+
+impl LinearUnit {
+    /// Returns the EPSG unit code used by LAS `GeoTIFF` metadata.
+    #[must_use]
+    pub const fn epsg_code(self) -> u32 {
+        match self {
+            Self::Metre => 9001,
+            Self::InternationalFoot => 9002,
+            Self::UsSurveyFoot => 9003,
+        }
+    }
+
+    const fn canonical_code(self) -> u8 {
+        match self {
+            Self::Metre => 1,
+            Self::InternationalFoot => 2,
+            Self::UsSurveyFoot => 3,
+        }
+    }
+}
+
+/// Meaning and order of the three authoritative Source position axes.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+pub enum SpatialAxes {
+    /// X is easting, Y is northing, and Z is elevation.
+    EastingNorthingElevation,
+}
+
+impl SpatialAxes {
+    const fn canonical_code(self) -> u8 {
+        match self {
+            Self::EastingNorthingElevation => 1,
+        }
+    }
+}
+
+/// Origin of a complete structured spatial-reference declaration.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+pub enum SpatialReferenceProvenance {
+    /// A verified Source adapter decoded the profile from format metadata.
+    SourceMetadata,
+    /// A caller supplied the complete profile explicitly.
+    CallerDeclaration,
+}
+
+impl SpatialReferenceProvenance {
+    const fn canonical_code(self) -> u8 {
+        match self {
+            Self::SourceMetadata => 1,
+            Self::CallerDeclaration => 2,
+        }
+    }
+}
+
+/// Complete projected survey-coordinate profile used at authoritative boundaries.
+///
+/// Reference identities are EPSG codes. This value does not perform an
+/// authority lookup or coordinate transformation.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[serde(try_from = "SpatialReferenceProfileUnchecked")]
+pub struct SpatialReferenceProfile {
+    horizontal_epsg: u32,
+    vertical_epsg: u32,
+    axes: SpatialAxes,
+    horizontal_unit: LinearUnit,
+    vertical_unit: LinearUnit,
+    provenance: SpatialReferenceProvenance,
+}
+
+#[derive(Deserialize)]
+struct SpatialReferenceProfileUnchecked {
+    horizontal_epsg: u32,
+    vertical_epsg: u32,
+    axes: SpatialAxes,
+    horizontal_unit: LinearUnit,
+    vertical_unit: LinearUnit,
+    provenance: SpatialReferenceProvenance,
+}
+
+impl SpatialReferenceProfile {
+    /// Creates a complete explicit projected survey-coordinate profile.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when either EPSG identity is zero. Punctra does not
+    /// treat the EPSG user-defined sentinel as an authority identity.
+    pub const fn new(
+        horizontal_epsg: u32,
+        vertical_epsg: u32,
+        axes: SpatialAxes,
+        horizontal_unit: LinearUnit,
+        vertical_unit: LinearUnit,
+        provenance: SpatialReferenceProvenance,
+    ) -> Result<Self, ContractError> {
+        if horizontal_epsg == 0 || horizontal_epsg == 32_767 {
+            return Err(ContractError::InvalidHorizontalEpsg {
+                value: horizontal_epsg,
+            });
+        }
+        if vertical_epsg == 0 || vertical_epsg == 32_767 {
+            return Err(ContractError::InvalidVerticalEpsg {
+                value: vertical_epsg,
+            });
+        }
+        Ok(Self {
+            horizontal_epsg,
+            vertical_epsg,
+            axes,
+            horizontal_unit,
+            vertical_unit,
+            provenance,
+        })
+    }
+
+    /// Returns the projected horizontal EPSG identity.
+    #[must_use]
+    pub const fn horizontal_epsg(self) -> u32 {
+        self.horizontal_epsg
+    }
+
+    /// Returns the vertical EPSG identity.
+    #[must_use]
+    pub const fn vertical_epsg(self) -> u32 {
+        self.vertical_epsg
+    }
+
+    /// Returns the authoritative axis meaning and order.
+    #[must_use]
+    pub const fn axes(self) -> SpatialAxes {
+        self.axes
+    }
+
+    /// Returns the horizontal coordinate unit.
+    #[must_use]
+    pub const fn horizontal_unit(self) -> LinearUnit {
+        self.horizontal_unit
+    }
+
+    /// Returns the elevation unit.
+    #[must_use]
+    pub const fn vertical_unit(self) -> LinearUnit {
+        self.vertical_unit
+    }
+
+    /// Returns where the complete profile was declared.
+    #[must_use]
+    pub const fn provenance(self) -> SpatialReferenceProvenance {
+        self.provenance
+    }
+
+    /// Reports whether the v0.12 terrain, QA, and export path supports this profile.
+    #[must_use]
+    pub const fn is_supported_metric_survey(self) -> bool {
+        matches!(self.axes, SpatialAxes::EastingNorthingElevation)
+            && matches!(self.horizontal_unit, LinearUnit::Metre)
+            && matches!(self.vertical_unit, LinearUnit::Metre)
+    }
+
+    /// Returns the stable fixed-width v1 bytes used by authoritative hashes.
+    #[must_use]
+    pub const fn canonical_bytes(self) -> [u8; SPATIAL_REFERENCE_PROFILE_CANONICAL_BYTES] {
+        let horizontal = self.horizontal_epsg.to_le_bytes();
+        let vertical = self.vertical_epsg.to_le_bytes();
+        [
+            1,
+            0,
+            0,
+            0,
+            horizontal[0],
+            horizontal[1],
+            horizontal[2],
+            horizontal[3],
+            vertical[0],
+            vertical[1],
+            vertical[2],
+            vertical[3],
+            self.axes.canonical_code(),
+            self.horizontal_unit.canonical_code(),
+            self.vertical_unit.canonical_code(),
+            self.provenance.canonical_code(),
+        ]
+    }
+}
+
+impl TryFrom<SpatialReferenceProfileUnchecked> for SpatialReferenceProfile {
+    type Error = ContractError;
+
+    fn try_from(value: SpatialReferenceProfileUnchecked) -> Result<Self, Self::Error> {
+        Self::new(
+            value.horizontal_epsg,
+            value.vertical_epsg,
+            value.axes,
+            value.horizontal_unit,
+            value.vertical_unit,
+            value.provenance,
+        )
+    }
+}
+
 /// Declared Coordinate Reference of Source positions.
 ///
 /// The representation is opaque so every WKT value passes through the same
@@ -1946,12 +2163,14 @@ pub struct CoordinateReference(CoordinateReferenceValue);
 enum CoordinateReferenceValue {
     Unknown,
     Wkt(String),
+    Profile(SpatialReferenceProfile),
 }
 
 #[derive(Deserialize)]
 enum CoordinateReferenceUnchecked {
     Unknown,
     Wkt(BoundedText<MAX_COORDINATE_REFERENCE_WKT_BYTES>),
+    Profile(SpatialReferenceProfile),
 }
 
 impl CoordinateReference {
@@ -1979,12 +2198,27 @@ impl CoordinateReference {
         Ok(Self(CoordinateReferenceValue::Wkt(value)))
     }
 
-    /// Returns the well-known text, or `None` when explicitly unknown.
+    /// Creates a complete structured Coordinate Reference profile.
+    #[must_use]
+    pub const fn profile(value: SpatialReferenceProfile) -> Self {
+        Self(CoordinateReferenceValue::Profile(value))
+    }
+
+    /// Returns the well-known text, or `None` for unknown or structured metadata.
     #[must_use]
     pub fn as_wkt(&self) -> Option<&str> {
         match &self.0 {
-            CoordinateReferenceValue::Unknown => None,
             CoordinateReferenceValue::Wkt(value) => Some(value),
+            CoordinateReferenceValue::Unknown | CoordinateReferenceValue::Profile(_) => None,
+        }
+    }
+
+    /// Returns the structured profile, or `None` for unknown or opaque WKT metadata.
+    #[must_use]
+    pub const fn spatial_profile(&self) -> Option<SpatialReferenceProfile> {
+        match self.0 {
+            CoordinateReferenceValue::Profile(value) => Some(value),
+            CoordinateReferenceValue::Unknown | CoordinateReferenceValue::Wkt(_) => None,
         }
     }
 
@@ -2005,6 +2239,7 @@ impl<'de> Deserialize<'de> for CoordinateReference {
             CoordinateReferenceUnchecked::Wkt(value) => {
                 Self::wkt(value.into_string()).map_err(serde::de::Error::custom)
             }
+            CoordinateReferenceUnchecked::Profile(value) => Ok(Self::profile(value)),
         }
     }
 }
@@ -2903,6 +3138,18 @@ pub enum ContractError {
         actual_bytes: usize,
         /// Maximum accepted UTF-8 byte count.
         max_bytes: usize,
+    },
+    /// A horizontal EPSG identity was zero or the user-defined sentinel.
+    #[error("horizontal EPSG identity {value} must be a nonzero authority code")]
+    InvalidHorizontalEpsg {
+        /// Rejected EPSG value.
+        value: u32,
+    },
+    /// A vertical EPSG identity was zero or the user-defined sentinel.
+    #[error("vertical EPSG identity {value} must be a nonzero authority code")]
+    InvalidVerticalEpsg {
+        /// Rejected EPSG value.
+        value: u32,
     },
     /// A metadata namespace was empty or whitespace-only.
     #[error("metadata namespace must not be empty")]

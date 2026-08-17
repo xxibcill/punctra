@@ -9,7 +9,10 @@ use std::{
 };
 
 use blake3::Hasher;
-use point_contracts::ContentHash;
+use point_contracts::{
+    ContentHash, CoordinateReference, LinearUnit, SpatialAxes, SpatialReferenceProfile,
+    SpatialReferenceProvenance,
+};
 use point_terrain::{
     LandXmlDisposition, LandXmlLimits, LandXmlOptions, TerrainError, TerrainSurface,
 };
@@ -150,6 +153,102 @@ fn source_coordinates_require_the_explicit_metric_metre_assertion() {
     ));
     assert!(!target.exists());
     output.assert_stages_are_safe();
+}
+
+#[test]
+fn structured_metric_profile_is_exported_without_a_legacy_unit_assertion() {
+    let profile = SpatialReferenceProfile::new(
+        32_647,
+        5_703,
+        SpatialAxes::EastingNorthingElevation,
+        LinearUnit::Metre,
+        LinearUnit::Metre,
+        SpatialReferenceProvenance::SourceMetadata,
+    )
+    .unwrap();
+    let fixture = TerrainFixture::with_reference(
+        "landxml-structured-reference",
+        CoordinateReference::profile(profile),
+        vec![[0, 0, 0], [10, 0, 10], [10, 10, 30], [0, 10, 20]],
+        vec![GROUND; 4],
+    );
+    let surface = derive_surface(fixture.snapshot(), GROUND);
+    assert_eq!(
+        surface.descriptor().spatial_reference_profile(),
+        Some(profile)
+    );
+    let output = TemporaryOutput::new("structured-reference");
+    let target = output.path("terrain.xml");
+    let options = LandXmlOptions::metric_metres("Ground", "2026-08-17", "00:00:00Z").unwrap();
+
+    surface
+        .export_landxml(&target, options, LandXmlLimits::default())
+        .blocking_wait()
+        .expect("structured metre profile exports without a legacy assertion");
+    let xml = fs::read_to_string(&target).unwrap();
+    let document = Document::parse(&xml).unwrap();
+    let root = document.root_element();
+    let coordinate_system = root
+        .children()
+        .find(|node| node.has_tag_name((LANDXML_NAMESPACE, "CoordinateSystem")))
+        .expect("structured export declares CoordinateSystem");
+    assert_eq!(
+        coordinate_system.attribute("name"),
+        Some("EPSG:32647+EPSG:5703")
+    );
+    assert_eq!(
+        coordinate_system.attribute("horizontalCoordinateSystemName"),
+        Some("EPSG:32647")
+    );
+    assert_eq!(
+        coordinate_system.attribute("verticalDatum"),
+        Some("EPSG:5703")
+    );
+    assert_eq!(
+        coordinate_system
+            .next_siblings()
+            .skip(1)
+            .find(roxmltree::Node::is_element)
+            .map(|node| node.tag_name().name()),
+        Some("Units")
+    );
+}
+
+#[test]
+fn structured_non_metre_profile_fails_before_export() {
+    let profile = SpatialReferenceProfile::new(
+        2_230,
+        5_703,
+        SpatialAxes::EastingNorthingElevation,
+        LinearUnit::UsSurveyFoot,
+        LinearUnit::UsSurveyFoot,
+        SpatialReferenceProvenance::CallerDeclaration,
+    )
+    .unwrap();
+    let fixture = TerrainFixture::with_reference(
+        "landxml-foot-reference",
+        CoordinateReference::profile(profile),
+        vec![[0, 0, 0], [10, 0, 10], [0, 10, 20]],
+        vec![GROUND; 3],
+    );
+    let surface = derive_surface(fixture.snapshot(), GROUND);
+    let output = TemporaryOutput::new("foot-reference");
+    let target = output.path("terrain.xml");
+
+    let error = surface
+        .export_landxml(
+            &target,
+            asserted_options("Ground"),
+            LandXmlLimits::default(),
+        )
+        .blocking_wait()
+        .expect_err("a legacy assertion cannot override structured foot units");
+    assert!(matches!(
+        error,
+        TerrainError::UnsupportedMetricExport { reason }
+            if reason.as_str().contains("non-metre units")
+    ));
+    assert!(!target.exists());
 }
 
 #[test]

@@ -10,6 +10,7 @@ use std::{
 use blake3::Hasher;
 use foundation_runtime::{Job, OperationControl, ProgressPhase, ProgressSnapshot};
 use point_contracts::ContentHash;
+use point_contracts::SpatialReferenceProvenance;
 
 use crate::{
     LandXmlDisposition, LandXmlJob, LandXmlLimits, LandXmlReceipt, TerrainError, TerrainSurface,
@@ -1015,10 +1016,18 @@ fn validate_export(
         surface.descriptor().face_count(),
         limits.max_faces(),
     )?;
-    if !options.coordinates_are_metric_metres_asserted() {
-        return Err(TerrainError::unsupported_metric_export(
-            "Source coordinates require an explicit metric-metre assertion",
-        ));
+    match surface.descriptor().spatial_reference_profile() {
+        Some(profile) if !profile.is_supported_metric_survey() => {
+            return Err(TerrainError::unsupported_metric_export(
+                "the structured spatial profile requires unsupported axes or non-metre units",
+            ));
+        }
+        None if !options.coordinates_are_metric_metres_asserted() => {
+            return Err(TerrainError::unsupported_metric_export(
+                "Source coordinates require an explicit metric-metre assertion",
+            ));
+        }
+        Some(_) | None => {}
     }
     let escaped_name_bytes = escaped_len(options.surface_name())?;
     check_token_len("LandXML Surface name token", escaped_name_bytes, limits)?;
@@ -1034,7 +1043,7 @@ fn write_document(
     total_elements: u64,
     total_progress: u64,
 ) -> Result<(), TerrainError> {
-    write_header(writer, options, limits)?;
+    write_header(writer, surface, options, limits)?;
     write_vertices(writer, surface, limits, control, total_progress)?;
     write_token(writer, "        </Pnts>\n        <Faces>\n", limits)?;
     write_faces(writer, surface, limits, control, total_progress)?;
@@ -1052,6 +1061,7 @@ fn write_document(
 
 fn write_header(
     writer: &mut impl Write,
+    surface: &TerrainSurface,
     options: &LandXmlOptions,
     limits: LandXmlLimits,
 ) -> Result<(), TerrainError> {
@@ -1071,6 +1081,26 @@ fn write_header(
     )
     .map_err(|_| TerrainError::numeric("LandXML root token exceeded its stack bound"))?;
     write_token(writer, root.as_str(), limits)?;
+    if let Some(profile) = surface.descriptor().spatial_reference_profile() {
+        let provenance = match profile.provenance() {
+            SpatialReferenceProvenance::SourceMetadata => "sourceMetadata",
+            SpatialReferenceProvenance::CallerDeclaration => "callerDeclaration",
+        };
+        let mut coordinate_system = StackToken::new();
+        writeln!(
+            coordinate_system,
+            "  <CoordinateSystem name=\"EPSG:{}+EPSG:{}\" horizontalCoordinateSystemName=\"EPSG:{}\" verticalDatum=\"EPSG:{}\" desc=\"axes=easting,northing,elevation; horizontalUnit=metre; verticalUnit=metre; provenance={}\"/>",
+            profile.horizontal_epsg(),
+            profile.vertical_epsg(),
+            profile.horizontal_epsg(),
+            profile.vertical_epsg(),
+            provenance,
+        )
+        .map_err(|_| {
+            TerrainError::numeric("LandXML CoordinateSystem token exceeded its stack bound")
+        })?;
+        write_token(writer, coordinate_system.as_str(), limits)?;
+    }
     write_token(writer, "  <Units>\n", limits)?;
     write_token(
         writer,
