@@ -561,8 +561,7 @@ fn select_target_cut(
             continue;
         }
         let candidate_node = &hierarchy.nodes[candidate.index];
-        if !candidate.was_refined
-            && candidate_node.status == NodeStatus::Missing
+        if candidate_node.status == NodeStatus::Missing
             && !has_visible_coverage(hierarchy, candidate.index)
             && target_is_requestable_in_current_cut(
                 hierarchy,
@@ -573,54 +572,160 @@ fn select_target_cut(
         {
             continue;
         }
-        target_cut.remove(&candidate.index);
-        let visible_children = hierarchy.children[candidate.index]
-            .iter()
-            .copied()
-            .filter(|child| hierarchy.node_projections[*child].visible)
-            .collect::<Vec<_>>();
-        target_cut.extend(visible_children.iter().copied());
-        let candidate_was_transition_target = missing_transition_targets.remove(&candidate.index);
-        let added_transition_targets = visible_children
-            .iter()
-            .copied()
-            .filter(|child| hierarchy.nodes[*child].status == NodeStatus::Missing)
-            .filter(|child| missing_transition_targets.insert(*child))
-            .collect::<Vec<_>>();
+        let expansion = expand_candidate_and_replay_history(
+            hierarchy,
+            previous_refinements,
+            config,
+            candidate,
+            &mut target_cut,
+            &mut missing_transition_targets,
+            &mut refinements,
+        );
 
-        if !candidate.was_refined
-            && !transition_targets_fit_budget(
+        if !transition_targets_fit_budget(
+            hierarchy,
+            &target_cut,
+            &missing_transition_targets,
+            budget,
+        )? {
+            expansion.rollback(
                 hierarchy,
-                &target_cut,
-                &missing_transition_targets,
-                budget,
-            )?
-        {
-            for child in &visible_children {
-                target_cut.remove(child);
-            }
-            for child in added_transition_targets {
-                missing_transition_targets.remove(&child);
-            }
-            target_cut.insert(candidate.index);
-            if candidate_was_transition_target {
-                missing_transition_targets.insert(candidate.index);
-            }
+                &mut target_cut,
+                &mut missing_transition_targets,
+                &mut refinements,
+            );
             continue;
         }
 
-        refinements.insert(candidate.key);
-        for child in visible_children {
-            push_candidate(
-                &mut candidates,
-                hierarchy,
-                previous_refinements,
-                config,
-                child,
-            );
+        for candidate in expansion.next_candidates {
+            candidates.push(candidate);
         }
     }
     Ok((target_cut, refinements))
+}
+
+#[derive(Debug)]
+struct RefinementExpansion {
+    changes: Vec<RefinementChange>,
+    next_candidates: Vec<RefinementCandidate>,
+}
+
+impl RefinementExpansion {
+    fn rollback(
+        self,
+        hierarchy: &ProjectedHierarchy,
+        target_cut: &mut BTreeSet<usize>,
+        missing_transition_targets: &mut BTreeSet<usize>,
+        refinements: &mut BTreeSet<NodeKey>,
+    ) {
+        for change in self.changes.into_iter().rev() {
+            refinements.remove(&hierarchy.nodes[change.candidate_index].key);
+            change.rollback(hierarchy, target_cut, missing_transition_targets);
+        }
+    }
+}
+
+#[derive(Debug)]
+struct RefinementChange {
+    candidate_index: usize,
+    candidate_was_transition_target: bool,
+}
+
+impl RefinementChange {
+    fn rollback(
+        self,
+        hierarchy: &ProjectedHierarchy,
+        target_cut: &mut BTreeSet<usize>,
+        missing_transition_targets: &mut BTreeSet<usize>,
+    ) {
+        for child in hierarchy.children[self.candidate_index]
+            .iter()
+            .copied()
+            .filter(|child| hierarchy.node_projections[*child].visible)
+        {
+            target_cut.remove(&child);
+            missing_transition_targets.remove(&child);
+        }
+        target_cut.insert(self.candidate_index);
+        if self.candidate_was_transition_target {
+            missing_transition_targets.insert(self.candidate_index);
+        }
+    }
+}
+
+fn expand_candidate_and_replay_history(
+    hierarchy: &ProjectedHierarchy,
+    previous_refinements: &BTreeSet<NodeKey>,
+    config: crate::PlannerConfig,
+    candidate: RefinementCandidate,
+    target_cut: &mut BTreeSet<usize>,
+    missing_transition_targets: &mut BTreeSet<usize>,
+    refinements: &mut BTreeSet<NodeKey>,
+) -> RefinementExpansion {
+    let mut replay_candidates = BinaryHeap::from([candidate]);
+    let mut changes = Vec::new();
+    let mut next_candidates = Vec::new();
+
+    while let Some(candidate) = replay_candidates.pop() {
+        if !target_cut.contains(&candidate.index) {
+            continue;
+        }
+        let change = apply_refinement(
+            hierarchy,
+            candidate.index,
+            target_cut,
+            missing_transition_targets,
+        );
+        let inserted = refinements.insert(candidate.key);
+        debug_assert!(inserted, "a target-cut candidate is refined at most once");
+        for child in hierarchy.children[candidate.index]
+            .iter()
+            .copied()
+            .filter(|child| hierarchy.node_projections[*child].visible)
+        {
+            if let Some(child_candidate) =
+                refinement_candidate(hierarchy, previous_refinements, config, child)
+            {
+                if child_candidate.was_refined {
+                    replay_candidates.push(child_candidate);
+                } else {
+                    next_candidates.push(child_candidate);
+                }
+            }
+        }
+        changes.push(change);
+    }
+
+    RefinementExpansion {
+        changes,
+        next_candidates,
+    }
+}
+
+fn apply_refinement(
+    hierarchy: &ProjectedHierarchy,
+    candidate_index: usize,
+    target_cut: &mut BTreeSet<usize>,
+    missing_transition_targets: &mut BTreeSet<usize>,
+) -> RefinementChange {
+    target_cut.remove(&candidate_index);
+    let candidate_was_transition_target = missing_transition_targets.remove(&candidate_index);
+    for child in hierarchy.children[candidate_index]
+        .iter()
+        .copied()
+        .filter(|child| hierarchy.node_projections[*child].visible)
+    {
+        let inserted = target_cut.insert(child);
+        debug_assert!(inserted, "hierarchy children have one target-cut parent");
+        if hierarchy.nodes[child].status == NodeStatus::Missing {
+            let inserted = missing_transition_targets.insert(child);
+            debug_assert!(inserted, "new target children are new transition targets");
+        }
+    }
+    RefinementChange {
+        candidate_index,
+        candidate_was_transition_target,
+    }
 }
 
 fn push_candidate(
@@ -630,6 +735,17 @@ fn push_candidate(
     config: crate::PlannerConfig,
     index: usize,
 ) {
+    if let Some(candidate) = refinement_candidate(hierarchy, previous_refinements, config, index) {
+        candidates.push(candidate);
+    }
+}
+
+fn refinement_candidate(
+    hierarchy: &ProjectedHierarchy,
+    previous_refinements: &BTreeSet<NodeKey>,
+    config: crate::PlannerConfig,
+    index: usize,
+) -> Option<RefinementCandidate> {
     let node = &hierarchy.nodes[index];
     let has_coverage = has_visible_coverage(hierarchy, index);
     let has_visible_children = hierarchy.children[index]
@@ -643,12 +759,14 @@ fn push_candidate(
             config,
         )
     {
-        candidates.push(RefinementCandidate {
+        Some(RefinementCandidate {
             index,
             key: node.key,
             screen_error: hierarchy.node_projections[index].screen_error,
             was_refined: previous_refinements.contains(&node.key),
-        });
+        })
+    } else {
+        None
     }
 }
 

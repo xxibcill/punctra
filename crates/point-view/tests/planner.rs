@@ -1257,6 +1257,89 @@ fn refinement_history_replays_past_retired_ancestors() {
 }
 
 #[test]
+fn camera_movement_rolls_back_replay_when_new_coverage_exceeds_budget() {
+    let generation = generation(9, 5);
+    let mut planner = planner(2.0, 0.25);
+    let narrow_nodes = [
+        node(
+            1,
+            None,
+            bounds([-1.0, -1.0, -11.0], [3.0, 1.0, -9.0]),
+            1.0,
+            1,
+            1,
+            1,
+            resident(1),
+        ),
+        node(
+            2,
+            Some(1),
+            bounds([-1.0, -1.0, -11.0], [0.0, 1.0, -9.0]),
+            0.0,
+            1,
+            1,
+            2,
+            NodeStatus::Missing,
+        ),
+        node(
+            3,
+            Some(1),
+            bounds([1.5, -1.0, -11.0], [3.0, 1.0, -9.0]),
+            0.0,
+            2,
+            2,
+            3,
+            NodeStatus::Missing,
+        ),
+    ];
+    let budget = PlanningBudget::new(2, 2, 2);
+
+    let narrow = planner
+        .plan(
+            &orthographic_camera(2.0),
+            viewport(100, 100),
+            AvailableNodes::new(generation, &narrow_nodes),
+            budget,
+        )
+        .unwrap();
+    assert_eq!(request_keys(&narrow), vec![node_key(2)]);
+
+    let moved_nodes = [
+        narrow_nodes[0].with_status(NodeStatus::Missing),
+        narrow_nodes[1].with_status(resident(2)),
+        narrow_nodes[2],
+    ];
+    let recovering = planner
+        .plan(
+            &orthographic_camera(8.0),
+            viewport(100, 100),
+            AvailableNodes::new(generation, &moved_nodes),
+            budget,
+        )
+        .unwrap();
+    assert_eq!(demanded_keys(&recovering), vec![node_key(1)]);
+    assert_eq!(request_keys(&recovering), vec![node_key(1)]);
+    assert_eq!(retained_keys(&recovering), vec![node_key(2)]);
+
+    let recovered_nodes = [
+        moved_nodes[0].with_status(resident(3)),
+        moved_nodes[1],
+        moved_nodes[2],
+    ];
+    let quiet = planner
+        .plan(
+            &orthographic_camera(8.0),
+            viewport(100, 100),
+            AvailableNodes::new(generation, &recovered_nodes),
+            budget,
+        )
+        .unwrap();
+    assert!(quiet.demanded_nodes().is_empty());
+    assert!(quiet.requests().is_empty());
+    assert_eq!(retained_keys(&quiet), vec![node_key(1)]);
+}
+
+#[test]
 fn demand_includes_missing_and_requested_targets_in_planner_priority_order() {
     let generation = generation(9, 1);
     let nodes = [
