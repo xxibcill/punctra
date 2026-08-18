@@ -1135,8 +1135,8 @@ fn parse_geotiff_profile(bytes: &[u8]) -> Option<SpatialReferenceProfile> {
         geotiff_epsg_identity(horizontal_epsg?)?,
         geotiff_epsg_identity(vertical_epsg?)?,
         SpatialAxes::EastingNorthingElevation,
-        linear_unit(horizontal_unit?)?,
-        linear_unit(vertical_unit?)?,
+        LinearUnit::from_epsg_code(u32::from(horizontal_unit?))?,
+        LinearUnit::from_epsg_code(u32::from(vertical_unit?))?,
         SpatialReferenceProvenance::SourceMetadata,
     )
     .ok()
@@ -1144,17 +1144,6 @@ fn parse_geotiff_profile(bytes: &[u8]) -> Option<SpatialReferenceProfile> {
 
 fn geotiff_epsg_identity(value: u16) -> Option<u32> {
     (value != GEOTIFF_USER_DEFINED).then(|| u32::from(value))
-}
-
-fn linear_unit(value: u16) -> Option<LinearUnit> {
-    let epsg_code = u32::from(value);
-    [
-        LinearUnit::Metre,
-        LinearUnit::InternationalFoot,
-        LinearUnit::UsSurveyFoot,
-    ]
-    .into_iter()
-    .find(|unit| unit.epsg_code() == epsg_code)
 }
 
 fn metadata_records(
