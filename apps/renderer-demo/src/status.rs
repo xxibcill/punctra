@@ -13,6 +13,12 @@ pub(crate) enum StreamStatus {
     LoadsPaused,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum SelectionAction {
+    Clear,
+    ReopenAndResolve,
+}
+
 impl StreamStatus {
     pub(crate) const fn from_facts(
         scene: SceneMetrics,
@@ -55,7 +61,8 @@ pub(crate) struct StatusSnapshot {
     pub(crate) scene: SceneMetrics,
     pub(crate) drawn_points: u64,
     pub(crate) selected: Option<ReviewStatus>,
-    pub(crate) clear_selection_available: bool,
+    pub(crate) selected_points: u64,
+    pub(crate) selection_action: Option<SelectionAction>,
     pub(crate) resident_highlights: u64,
     pub(crate) orientation: &'static str,
     pub(crate) scale_world_units: f64,
@@ -64,7 +71,7 @@ pub(crate) struct StatusSnapshot {
 
 impl StatusSnapshot {
     pub(crate) fn lines(self) -> Vec<String> {
-        let (selection_state, selected_points) = selection(self.selected);
+        let selection_state = selection(self.selected);
         let mut lines = vec![
             format!("PUNCTRA {} | VIEW", env!("CARGO_PKG_VERSION")),
             format!(
@@ -83,10 +90,10 @@ impl StatusSnapshot {
             ),
             format!(
                 "SELECTED {} | RESIDENT LOCATORS {}",
-                compact(selected_points),
+                compact(self.selected_points),
                 compact(self.resident_highlights)
             ),
-            selection_line(selection_state, self.clear_selection_available),
+            selection_line(selection_state, self.selection_action),
             format!(
                 "NORTH {} | SCALE 100PX = {}",
                 self.orientation,
@@ -122,23 +129,26 @@ fn coverage_line(scene: SceneMetrics) -> String {
     }
 }
 
-fn selection(status: Option<ReviewStatus>) -> (&'static str, u64) {
+fn selection(status: Option<ReviewStatus>) -> &'static str {
     match status {
-        None => ("DISABLED", 0),
-        Some(ReviewStatus::Selected { points, .. }) => ("EXACT", points),
-        Some(ReviewStatus::SelectionStale { points, .. }) => ("STALE - RERUN OR CLEAR", points),
-        Some(ReviewStatus::ProvisionalPick | ReviewStatus::ConfirmingPick) => ("CONFIRMING", 0),
-        Some(ReviewStatus::SelectingScreen) => ("SELECTING", 0),
-        Some(ReviewStatus::Failed | ReviewStatus::Indeterminate) => ("FAILED", 0),
-        Some(_) => ("READY", 0),
+        None => "DISABLED",
+        Some(ReviewStatus::Selected { .. }) => "EXACT",
+        Some(ReviewStatus::SelectionStale { .. }) => "STALE - RERUN OR CLEAR",
+        Some(ReviewStatus::ProvisionalPick | ReviewStatus::ConfirmingPick) => "CONFIRMING",
+        Some(ReviewStatus::SelectingScreen) => "SELECTING",
+        Some(ReviewStatus::Indeterminate) => "INDETERMINATE",
+        Some(ReviewStatus::Failed) => "FAILED",
+        Some(_) => "READY",
     }
 }
 
-fn selection_line(selection_state: &str, clear_selection_available: bool) -> String {
-    if clear_selection_available {
-        format!("SELECTION {selection_state} | X CLEAR")
-    } else {
-        format!("SELECTION {selection_state}")
+fn selection_line(selection_state: &str, action: Option<SelectionAction>) -> String {
+    match action {
+        Some(SelectionAction::Clear) => format!("SELECTION {selection_state} | X CLEAR"),
+        Some(SelectionAction::ReopenAndResolve) => {
+            format!("SELECTION {selection_state} | REOPEN RESOLVE")
+        }
+        None => format!("SELECTION {selection_state}"),
     }
 }
 
@@ -197,10 +207,17 @@ mod tests {
     use super::*;
 
     fn snapshot(status: Option<ReviewStatus>) -> StatusSnapshot {
-        let clear_selection_available = matches!(
+        let selected_points = match status {
+            Some(
+                ReviewStatus::Selected { points, .. } | ReviewStatus::SelectionStale { points, .. },
+            ) => points,
+            _ => 0,
+        };
+        let selection_action = matches!(
             status,
             Some(ReviewStatus::Selected { .. } | ReviewStatus::SelectionStale { .. })
-        );
+        )
+        .then_some(SelectionAction::Clear);
         StatusSnapshot {
             display: DisplayMode::Classification,
             projection: ProjectionMode::Orthographic,
@@ -214,7 +231,8 @@ mod tests {
             },
             drawn_points: 600_000,
             selected: status,
-            clear_selection_available,
+            selected_points,
+            selection_action,
             resident_highlights: 42,
             orientation: "UP",
             scale_world_units: 125.25,
@@ -252,6 +270,38 @@ mod tests {
 
         assert!(lines.iter().any(|line| line.contains("STALE")));
         assert!(lines.iter().any(|line| line.contains("RERUN OR CLEAR")));
+    }
+
+    #[test]
+    fn failed_selection_preserves_its_exact_count_and_clear_action() {
+        let mut failed = snapshot(Some(ReviewStatus::Failed));
+        failed.selected_points = 75;
+        failed.selection_action = Some(SelectionAction::Clear);
+
+        let lines = failed.lines();
+
+        assert!(lines.iter().any(|line| line.contains("SELECTED 75")));
+        assert!(
+            lines
+                .iter()
+                .any(|line| line == "SELECTION FAILED | X CLEAR")
+        );
+    }
+
+    #[test]
+    fn indeterminate_selection_preserves_count_and_reopen_action() {
+        let mut indeterminate = snapshot(Some(ReviewStatus::Indeterminate));
+        indeterminate.selected_points = 75;
+        indeterminate.selection_action = Some(SelectionAction::ReopenAndResolve);
+
+        let lines = indeterminate.lines();
+
+        assert!(lines.iter().any(|line| line.contains("SELECTED 75")));
+        assert!(
+            lines
+                .iter()
+                .any(|line| line == "SELECTION INDETERMINATE | REOPEN RESOLVE")
+        );
     }
 
     #[test]

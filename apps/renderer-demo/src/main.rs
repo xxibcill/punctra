@@ -44,10 +44,10 @@ use render_wgpu::{
 use renderer_demo::display::{DisplayIndexPolicy, DisplayMode};
 use review::{
     CaptureView, ClassificationEdit, MutationDisposition, ReviewCapture, ReviewOptions,
-    ReviewSession, ReviewStatus,
+    ReviewRecovery, ReviewSession, ReviewStatus,
 };
 use scene::{Scene, SceneMetrics};
-use status::{StatusSnapshot, StreamStatus};
+use status::{SelectionAction, StatusSnapshot, StreamStatus};
 use status_overlay::StatusOverlay;
 use synthetic::{RESIDENT_BATCH_BUDGET, RESIDENT_BYTE_BUDGET, RESIDENT_POINT_BUDGET};
 use winit::{
@@ -904,6 +904,7 @@ struct Graphics {
     planner: ViewPlanner,
     scene: Scene,
     review: Option<ReviewSession>,
+    review_recovery: Option<ReviewRecovery>,
     camera: OrbitCamera,
     camera_reset_radius: f64,
     style: PointStyle,
@@ -1034,6 +1035,7 @@ impl Graphics {
             planner,
             scene,
             review,
+            review_recovery: None,
             camera: OrbitCamera::new(camera_target, camera_reset_radius)
                 .with_projection(projection),
             camera_reset_radius,
@@ -1126,11 +1128,27 @@ impl Graphics {
         report: FrameReport,
     ) -> DemoResult<Option<ReviewStatus>> {
         let scene = self.scene.metrics();
-        let review_status = self.review.as_ref().map(ReviewSession::status);
-        let clear_selection_available = self
+        let active_review_status = self.review.as_ref().map(ReviewSession::status);
+        let review_status =
+            active_review_status.or(self.review_recovery.map(|_| ReviewStatus::Indeterminate));
+        let selected_points = self.review.as_ref().map_or_else(
+            || {
+                self.review_recovery
+                    .map_or(0, ReviewRecovery::selected_points)
+            },
+            ReviewSession::selected_points,
+        );
+        let selection_action = if self.review_recovery.is_some() {
+            Some(SelectionAction::ReopenAndResolve)
+        } else if self
             .review
             .as_ref()
-            .is_some_and(ReviewSession::has_selection);
+            .is_some_and(ReviewSession::has_selection)
+        {
+            Some(SelectionAction::Clear)
+        } else {
+            None
+        };
         let cursor_world = self
             .input
             .cursor
@@ -1155,7 +1173,8 @@ impl Graphics {
             scene,
             drawn_points: report.drawn_points(),
             selected: review_status,
-            clear_selection_available,
+            selected_points,
+            selection_action,
             resident_highlights: self.renderer.resident_highlight_points(),
             orientation: self
                 .camera
@@ -1511,17 +1530,21 @@ impl Graphics {
     }
 
     fn finish_interactive_mutation(&mut self, disposition: MutationDisposition) {
-        if ReviewSession::close_if_indeterminate(&mut self.review, disposition) {
+        if let Some(recovery) = ReviewSession::close_if_indeterminate(&mut self.review, disposition)
+        {
+            self.review_recovery = Some(recovery);
             self.pending_pick = None;
             self.latest_recorded_frame = None;
         }
     }
 
     fn clear_exact_selection(&mut self) -> DemoResult<()> {
-        let Some(review) = self.review.as_mut() else {
-            return Ok(());
-        };
-        review.clear_selection();
+        if let Some(review) = self.review.as_mut() {
+            review.clear_selection();
+        }
+        if let Some(recovery) = self.review_recovery.as_mut() {
+            recovery.clear_selection();
+        }
         self.highlights_enabled = false;
         self.renderer
             .apply(&RenderUpdate::SetHighlights {
