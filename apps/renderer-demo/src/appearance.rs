@@ -2,10 +2,12 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use point_view::{AvailableNode, NodeKey, NodeStatus, RetainedNode, ViewPlan};
 use render_protocol::{
-    BatchKey, BatchVersion, PresentationWeight, RenderLimits, RenderUpdate, ViewGenerationKey,
-    Viewport,
+    BatchKey, BatchVersion, PresentationWeight, RenderLimits, RenderUpdate, UpdateReport,
+    ViewGenerationKey, Viewport,
 };
-use render_wgpu::{EyeDomeLighting, RendererConfig};
+use render_wgpu::{EyeDomeLighting, RendererConfig, RendererError, WgpuRenderer};
+
+use crate::scene::Scene;
 
 pub(crate) const CROSS_FADE_PRESENTED_FRAMES: u8 = 8;
 pub(crate) const MIN_POINT_SIZE_PIXELS: f32 = 1.0;
@@ -60,6 +62,18 @@ impl TransitionAction {
             Self::Retire(batch) => Some(batch),
         }
     }
+}
+
+pub(crate) fn apply_transition_action(
+    renderer: &mut WgpuRenderer,
+    scene: &mut Scene,
+    action: TransitionAction,
+) -> Result<UpdateReport, RendererError> {
+    let report = renderer.apply(&action.render_update())?;
+    if let Some(batch) = action.retiring_batch() {
+        scene.mark_retired(batch.key, batch.expected_version);
+    }
+    Ok(report)
 }
 
 #[derive(Clone, Debug)]

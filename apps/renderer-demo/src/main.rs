@@ -21,7 +21,7 @@ use std::{
 };
 
 use appearance::{
-    DensityTransitions, REFERENCE_POINT_SIZE_PIXELS, TransitionAction,
+    DensityTransitions, REFERENCE_POINT_SIZE_PIXELS, TransitionAction, apply_transition_action,
     projected_density_point_size, renderer_appearance_config,
 };
 use diagnostic::{ViewFailure, ViewPhase, classify_protocol_failure, classify_renderer_failure};
@@ -1372,12 +1372,8 @@ impl Graphics {
 
     fn apply_transition_actions(&mut self, actions: Vec<TransitionAction>) -> DemoResult<()> {
         for action in actions {
-            self.renderer
-                .apply(&action.render_update())
+            apply_transition_action(&mut self.renderer, &mut self.scene, action)
                 .map_err(|error| renderer_failure(ViewPhase::GpuUpload, error))?;
-            if let Some(batch) = action.retiring_batch() {
-                self.scene.mark_retired(batch.key, batch.expected_version);
-            }
         }
         Ok(())
     }

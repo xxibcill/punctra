@@ -20,7 +20,7 @@ use serde::{
 use crate::{
     PLANNING_BUDGET, VIEW_GENERATION,
     appearance::{
-        DensityTransitions, REFERENCE_POINT_SIZE_PIXELS, TransitionAction,
+        DensityTransitions, REFERENCE_POINT_SIZE_PIXELS, TransitionAction, apply_transition_action,
         projected_density_point_size, renderer_appearance_config,
     },
     diagnostic::{ViewFailure, ViewFailureCode, ViewPhase, classify_renderer_failure},
@@ -763,16 +763,11 @@ fn apply_transition_actions(
     let mut activity = TransitionActivity::default();
     for action in actions {
         let retiring = action.retiring_batch();
-        let report = runtime
-            .renderer
-            .apply(&action.render_update())
+        let report = apply_transition_action(runtime.renderer, runtime.scene, action)
             .map_err(|error| classify_renderer_failure(ViewPhase::GpuUpload, error))?;
         runtime.evidence.observe_resident(report.resident());
-        if let Some(batch) = retiring {
+        if retiring.is_some() {
             activity.retired = activity.retired.saturating_add(1);
-            runtime
-                .scene
-                .mark_retired(batch.key, batch.expected_version);
         } else {
             activity.presentations = activity.presentations.saturating_add(1);
         }
