@@ -91,6 +91,18 @@ impl ActiveTransition {
                 .iter()
                 .any(|replacement| replacement.key == key)
     }
+
+    fn presentation_weight(&self, key: BatchKey) -> Option<PresentationWeight> {
+        if self.retiring.key == key {
+            return Some(weight_for_step(
+                CROSS_FADE_PRESENTED_FRAMES.saturating_sub(self.presented_frames),
+            ));
+        }
+        self.replacements
+            .iter()
+            .any(|replacement| replacement.key == key)
+            .then(|| weight_for_step(self.presented_frames))
+    }
 }
 
 #[derive(Default)]
@@ -222,6 +234,36 @@ impl DensityTransitions {
 
     pub(crate) fn blocks_new_residency(&self) -> bool {
         self.is_active()
+    }
+
+    pub(crate) fn display_density_point_count(&self, scene: &Scene) -> u64 {
+        if self.active.is_empty() && self.pending_replacements.is_empty() {
+            return scene.metrics().resident_points;
+        }
+        let hierarchy = scene.planning_nodes();
+        self.display_density_point_count_in(hierarchy.as_slice())
+    }
+
+    fn display_density_point_count_in(&self, hierarchy: &[AvailableNode]) -> u64 {
+        let weighted_points = hierarchy
+            .iter()
+            .filter(|node| matches!(node.status(), NodeStatus::Resident { .. }))
+            .map(|node| {
+                u128::from(node.point_count())
+                    * u128::from(self.presentation_weight(node.batch_key()).get())
+            })
+            .fold(0_u128, u128::saturating_add);
+        rounded_weighted_point_count(weighted_points)
+    }
+
+    fn presentation_weight(&self, key: BatchKey) -> PresentationWeight {
+        if self.pending_replacements.contains(&key) {
+            return PresentationWeight::TRANSPARENT;
+        }
+        self.active
+            .values()
+            .find_map(|transition| transition.presentation_weight(key))
+            .unwrap_or(PresentationWeight::OPAQUE)
     }
 
     fn reconcile_pending_replacements(
@@ -407,6 +449,12 @@ fn weight_for_step(step: u8) -> PresentationWeight {
     PresentationWeight::new(u8::try_from(value).expect("an eighth weight fits in u8"))
 }
 
+fn rounded_weighted_point_count(numerator: u128) -> u64 {
+    let denominator = u128::from(u8::MAX);
+    let rounded = (numerator + denominator / 2) / denominator;
+    u64::try_from(rounded).unwrap_or(u64::MAX)
+}
+
 #[cfg(test)]
 mod tests {
     use point_view::AxisAlignedBox;
@@ -427,17 +475,32 @@ mod tests {
     }
 
     fn node(key: u64, parent: Option<u64>) -> AvailableNode {
+        node_with_status(key, parent, 1, NodeStatus::Missing)
+    }
+
+    fn node_with_status(
+        key: u64,
+        parent: Option<u64>,
+        point_count: u64,
+        status: NodeStatus,
+    ) -> AvailableNode {
         AvailableNode::new(
             node_key(key),
             parent.map(node_key),
             AxisAlignedBox::new([0.0; 3], [1.0; 3]).unwrap(),
             1.0,
-            1,
+            point_count,
             1,
             BatchKey::new(key),
-            NodeStatus::Missing,
+            status,
         )
         .unwrap()
+    }
+
+    fn resident(version: u64) -> NodeStatus {
+        NodeStatus::Resident {
+            version: BatchVersion::new(version),
+        }
     }
 
     #[test]
@@ -514,6 +577,42 @@ mod tests {
                 weight: PresentationWeight::TRANSPARENT,
             })
         );
+    }
+
+    #[test]
+    fn display_density_tracks_only_the_presented_cross_fade_weight() {
+        let mut hierarchy = [
+            node_with_status(1, None, 100, resident(1)),
+            node_with_status(2, Some(1), 80, resident(1)),
+            node_with_status(3, Some(1), 120, resident(1)),
+        ];
+        let mut transitions = DensityTransitions {
+            pending_replacements: [BatchKey::new(2), BatchKey::new(3)].into_iter().collect(),
+            ..DensityTransitions::default()
+        };
+        assert_eq!(transitions.display_density_point_count_in(&hierarchy), 100);
+
+        transitions.pending_replacements.clear();
+        transitions.active.insert(
+            BatchKey::new(1),
+            ActiveTransition {
+                retiring: batch(1),
+                replacements: vec![batch(2), batch(3)],
+                presented_frames: 0,
+            },
+        );
+        assert_eq!(transitions.display_density_point_count_in(&hierarchy), 100);
+
+        transitions.advance_presented_frame();
+        let first_fade_density = transitions.display_density_point_count_in(&hierarchy);
+        assert!(first_fade_density > 100);
+        assert!(first_fade_density < 200);
+
+        for _ in 1..CROSS_FADE_PRESENTED_FRAMES {
+            transitions.advance_presented_frame();
+        }
+        hierarchy[0] = hierarchy[0].with_status(NodeStatus::Missing);
+        assert_eq!(transitions.display_density_point_count_in(&hierarchy), 200);
     }
 
     #[test]

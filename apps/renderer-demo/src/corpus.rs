@@ -678,8 +678,12 @@ fn run_trace_frame(runtime: &mut TraceRuntime<'_>) -> Result<FrameEvidence, View
         })?;
     let accepted_batch = accept_next_batch(runtime, &mut transition_activity)?;
     let submitted = std::time::Instant::now();
-    let point_size =
-        projected_density_point_size(viewport, runtime.scene.metrics().resident_points);
+    let point_size = projected_density_point_size(
+        viewport,
+        runtime
+            .density_transitions
+            .display_density_point_count(runtime.scene),
+    );
     let default_style = PointStyle::default();
     let reference_style = PointStyle::new(
         REFERENCE_POINT_SIZE_PIXELS,

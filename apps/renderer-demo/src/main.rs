@@ -1078,8 +1078,11 @@ impl Graphics {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("punctra renderer demo frame"),
             });
-        let point_size =
-            projected_density_point_size(viewport, self.scene.metrics().resident_points);
+        let point_size = projected_density_point_size(
+            viewport,
+            self.density_transitions
+                .display_density_point_count(&self.scene),
+        );
         let style = self
             .style
             .with_display_size_pixels(point_size)
