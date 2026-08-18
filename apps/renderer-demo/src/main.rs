@@ -20,7 +20,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-use appearance::{DensityTransitions, TransitionAction, projected_spacing_point_size};
+use appearance::{
+    DensityTransitions, REFERENCE_POINT_SIZE_PIXELS, TransitionAction, projected_spacing_point_size,
+};
 use diagnostic::{ViewFailure, ViewPhase, classify_protocol_failure, classify_renderer_failure};
 use orbit_camera::{OrbitCamera, ProjectionMode};
 use point_contracts::SourceMetadata;
@@ -1013,8 +1015,12 @@ impl Graphics {
         );
         let camera_target = scene.camera_target();
         let camera_reset_radius = scene.camera_radius();
-        let style = PointStyle::new(2.4, [1.0, 0.24, 0.06], [0.008, 0.012, 0.02, 1.0])
-            .map_err(|error| internal_failure(ViewPhase::GpuSetup, error))?;
+        let style = PointStyle::new(
+            REFERENCE_POINT_SIZE_PIXELS,
+            [1.0, 0.24, 0.06],
+            [0.008, 0.012, 0.02, 1.0],
+        )
+        .map_err(|error| internal_failure(ViewPhase::GpuSetup, error))?;
         let status_overlay = StatusOverlay::new(&device, surface_config.format);
 
         println!("View phase: gpu-setup (complete)");

@@ -6,6 +6,7 @@ use render_protocol::{BatchKey, BatchVersion, PresentationWeight, ViewGeneration
 pub(crate) const CROSS_FADE_PRESENTED_FRAMES: u8 = 8;
 pub(crate) const MIN_POINT_SIZE_PIXELS: f32 = 1.0;
 pub(crate) const MAX_POINT_SIZE_PIXELS: f32 = 4.0;
+pub(crate) const REFERENCE_POINT_SIZE_PIXELS: f32 = 2.4;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct ConditionalBatch {
@@ -262,3 +263,6 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod gpu_tests;

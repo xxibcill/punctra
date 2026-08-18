@@ -19,7 +19,10 @@ use serde::{
 
 use crate::{
     PLANNING_BUDGET, VIEW_GENERATION,
-    appearance::{DensityTransitions, TransitionAction, projected_spacing_point_size},
+    appearance::{
+        DensityTransitions, REFERENCE_POINT_SIZE_PIXELS, TransitionAction,
+        projected_spacing_point_size,
+    },
     diagnostic::{ViewFailure, ViewFailureCode, ViewPhase, classify_renderer_failure},
     orbit_camera::{OrbitCamera, ProjectionMode},
     real_cloud::{
@@ -694,7 +697,13 @@ fn run_trace_frame(runtime: &mut TraceRuntime<'_>) -> Result<FrameEvidence, View
     let submitted = std::time::Instant::now();
     let point_size =
         projected_spacing_point_size(viewport, runtime.scene.metrics().resident_points);
-    let reference_style = PointStyle::default();
+    let default_style = PointStyle::default();
+    let reference_style = PointStyle::new(
+        REFERENCE_POINT_SIZE_PIXELS,
+        default_style.highlight_color(),
+        default_style.clear_color(),
+    )
+    .map_err(|error| ViewFailure::internal(ViewPhase::Rendering, error))?;
     let style = reference_style
         .with_display_size_pixels(point_size)
         .map_err(|error| ViewFailure::internal(ViewPhase::Rendering, error))?;
