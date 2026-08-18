@@ -96,6 +96,11 @@ cargo test -p terrain-demo --test process
 cargo test -p renderer-demo --test headless_smoke
 PUNCTRA_REQUIRE_GPU=1 cargo test -p renderer-demo --test headless_smoke \
   corpus_success_binds_trace_inputs_and_separate_resource_measurements -- --exact
+PUNCTRA_REQUIRE_GPU=1 cargo test -p renderer-demo --bin renderer-demo \
+  appearance::gpu_tests
+PUNCTRA_REQUIRE_GPU=1 cargo test -p renderer-demo --test headless_smoke \
+  corpus_pre_v0_13_repository_lane_records_settlement_and_the_declared_matrix \
+  -- --exact
 PUNCTRA_REQUIRE_GPU=1 cargo test -p render-wgpu --test offscreen
 PUNCTRA_REQUIRE_GPU=1 cargo test -p renderer-demo --test planner
 PUNCTRA_REQUIRE_GPU=1 cargo test -p renderer-demo --test display_gpu

@@ -466,7 +466,7 @@ fn corpus_success_binds_trace_inputs_and_separate_resource_measurements() {
 }
 
 #[test]
-fn corpus_pre_v0_13_qualification_records_settlement_and_the_complete_matrix() {
+fn corpus_pre_v0_13_repository_lane_records_settlement_and_the_declared_matrix() {
     let directory = TestDirectory::new().unwrap();
     let source = directory.path().join("qualification-fixture.las");
     let manifest = directory.path().join("qualification-manifest.json");
