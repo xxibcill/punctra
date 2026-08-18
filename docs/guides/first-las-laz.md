@@ -64,11 +64,14 @@ The available controls are:
 - Space: pause or resume new node materialization; and
 - Escape: exit.
 
-The title separates LOD demand, candidates, issued requests, retention,
-retirement, queue/staging facts, and resident nodes. It labels resident
-Coverage as `Sampled`, `Complete`, or a mix. Pausing prevents new requests from
-being issued; it does not turn the current partial display into an exact
-result.
+The on-canvas panel labels resident Coverage as `Sampled`, `Complete`, or a
+mix alongside the display, projection, loading state, Point counts, selection,
+orientation, scale, cursor, and palette facts. The compact title contains only
+the package-derived View name/version. Detailed LOD demand, candidates, issued
+requests, retention, retirement, queue/staging, resident-node, timing, and
+resource facts are printed as a separate terminal transcript. Pausing prevents
+new requests from being issued; it does not turn the current partial display
+into an exact result.
 
 ## 4. Try Source Attributes
 
@@ -159,8 +162,10 @@ all five display modes in both projections, and the complete bounded
 known-feature outcome set. The runner then ignores the short fixed-frame
 observation count as a stopping condition: every pose must settle within
 `settlement_frame_ceiling` and remain quiet for 300 rendered frames. A report
-records failures and `artifact_confounded`/`not_observed` outcomes; it does not
-turn them into acceptance.
+records manifest outcomes under `declared_known_feature_outcomes` and reports
+their counts with `declared_*` keys. Its explicit
+`declared_known_feature_outcomes_verified: false` nonclaim prevents those
+inputs from being mistaken for observed acceptance.
 
 This local runner is a reproducible measurement path, not evidence of a
 production corpus, professional preference, terrain capacity, partner

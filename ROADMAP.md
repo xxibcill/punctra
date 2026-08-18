@@ -339,7 +339,8 @@ Repository exit gates:
 Priority: **P2**
 
 Implementation status: **Complete — the primary state is rendered on-canvas;
-the window title remains the separate bounded engineering transcript.**
+the compact title uses package metadata and the bounded engineering transcript
+is printed separately to standard output.**
 
 Implemented scope:
 
@@ -357,7 +358,7 @@ Implemented scope:
   48-column bound, and a two-level physical scale that fits the 640-by-480
   logical minimum at 200% interface scaling; and
 - detailed planner, queue, staging, resource, frame, upload, Coverage, and
-  review facts remain in the title transcript.
+  review facts remain in the standard-output transcript.
 
 Likely scope:
 
@@ -413,7 +414,8 @@ Implemented scope:
 - the private no-replace report records first visible Coverage, settlement
   frame/time, quiet-window completion, resident/peak/transient resources,
   cumulative uploads and lifecycle work, adapter/backend/depth-cue state,
-  known-feature outcomes, and bounded failures; and
+  declared known-feature inputs, their explicit unverified nonclaim, and
+  bounded failures; and
 - a generated LAS GPU process acceptance proves this lane across the ten mode/
   projection combinations without claiming that generated data is a permitted
   field corpus or human interpretation evidence.
@@ -453,10 +455,10 @@ CRS guessing, or a general desktop product UI.
 
 ## Release sequence
 
-The only Active repository implementation track after the completed v0.9,
-repository-implemented v0.10 View, completed v0.11 technical slice, and bounded
-v0.12 repository slice is the pre-v0.13 renderer quality checkpoint.
-Eight provisional Candidate themes, v0.13 through v0.20, follow it.
+There is no Active repository implementation track after the completed v0.9,
+repository-implemented v0.10 View, completed v0.11 technical slice, bounded
+v0.12 repository slice, and completed pre-v0.13 renderer quality checkpoint.
+Eight provisional Candidate themes, v0.13 through v0.20, may follow it.
 This is a planning sequence, not a requirement to publish every number or to
 publish v1 after v0.20. Candidates may be narrowed, split, merged, reordered,
 or stopped before becoming Active.

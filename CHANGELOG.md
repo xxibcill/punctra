@@ -6,20 +6,21 @@ All notable changes to Punctra are documented here. The project follows
 ## Unreleased - 0.12.0-alpha.1
 
 - Completed the repository implementation of the private pre-v0.13 field
-  qualification lane. Opt-in manifests require the five-mode/two-projection
-  matrix, five projects from three firms, permissions, and known-feature
-  outcomes; every pose must settle within a bounded ceiling and remain quiet
-  for 300 rendered frames. Reports now retain settlement, cumulative lifecycle,
-  transient-resource, adaptive-appearance, depth-cue/fallback, and feature
-  outcome facts while continuing to make explicit nonclaims. Permitted field
-  execution and human interpretation evidence remain outstanding.
+  evidence lane. Opt-in manifests require the five-mode/two-projection
+  matrix, five projects from three firms, permissions, and declared known-
+  feature outcomes; every pose must settle within a bounded ceiling and remain
+  quiet for 300 rendered frames. Reports now retain settlement, cumulative lifecycle,
+  transient-resource, adaptive-appearance, depth-cue/fallback, and declared
+  feature-outcome inputs while explicitly stating that those inputs were not
+  verified by viewing operations. Permitted field execution and human
+  interpretation evidence remain outstanding.
 - Added a bounded on-canvas inspection status panel with package-derived View
   version, display/projection/loading state, truthful display Coverage and
   Point counts, exact-selection and resident-locator state, clear/recovery
   actions, north orientation, target-plane scale and cursor coordinates, and
-  mode-specific palette meaning. The detailed engineering transcript remains
-  available in the title, and the required panel fits the minimum window at
-  200% interface scaling.
+  mode-specific palette meaning. The detailed engineering transcript is
+  printed to standard output while the title stays compact, and the required
+  panel fits the minimum window at 200% interface scaling.
 - Added a bounded renderer appearance policy: projected-density-aware 1–4
   physical-pixel splats, exact eight-presented-frame parent/child color
   transitions, and optional eye-dome lighting with an explicit unenhanced

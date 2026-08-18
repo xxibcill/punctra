@@ -469,10 +469,14 @@ inspection or make the GPU authoritative.
   continue.
 - Escape exits.
 
-The window title distinguishes LOD demand, load candidates, actually issued
-requests, retained/retired nodes, queue/staging facts, and requested/resident
-nodes. It names Sampled versus Complete resident Coverage and labels the
-projection and paused/streaming/steady state; none is called Query completion.
+The on-canvas status names display mode, projection, loading state, Sampled
+versus Complete resident Coverage, Source/drawn/resident Point counts,
+selection state, orientation, scale, cursor coordinates, and palette meaning;
+none is called Query completion. The compact window title contains only the
+package-derived View name and version. A separate engineering transcript on
+standard output distinguishes LOD demand, load candidates, actually issued
+requests, retained/retired nodes, queue/staging facts, requested/resident
+nodes, and detailed timing/resource facts.
 The synthetic hierarchy represents more than 10 million logical Points; both
 paths keep renderer residency at fixed point, byte, and batch limits. The real
 path additionally reports Full verification, index disposition and reuse,
@@ -497,8 +501,10 @@ five permitted projects from three firms, all five display modes in both
 projections, and every known-feature category; each pose must settle within the
 declared ceiling and remain unchanged for 300 additional rendered frames. The
 report records settlement frame/time, the quiet window, adaptive appearance,
-depth-cue/fallback state, transient textures, cumulative uploads, and declared
-known-feature outcomes. Reports omit Source/index paths and opaque
+depth-cue/fallback state, transient textures, cumulative uploads, and manifest-
+declared known-feature outcomes. Those inputs and their summary counts use
+`declared_*` report keys, and an explicit false nonclaim says they were not
+verified by viewing operations. Reports omit Source/index paths and opaque
 project/firm identifiers, publish without replacement, and encode explicit
 false nonclaims for production-corpus completion, partner acceptance,
 professional preference, terrain capacity, and human-time savings. They may
@@ -515,7 +521,8 @@ placeholder entry cannot honestly satisfy the ten-combination matrix. Set it
 true only in a private complete manifest; `known_feature_outcomes` accepts
 `located`, `artifact_confounded`, or `not_observed` for the bounded terrain
 break, vegetation, building, scan-pattern, intensity, and classification
-categories. A generated repository run proves the lane, not field outcomes.
+categories. In the report these become `declared_known_feature_outcomes`; a
+generated repository run proves the lane, not field outcomes.
 
 ## v0.4 benchmark evidence
 
