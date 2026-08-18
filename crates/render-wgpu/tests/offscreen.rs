@@ -408,6 +408,16 @@ fn assert_eye_dome_paths(gpu: &GpuContext) {
     );
     let repeated = subject.render(&frame);
     assert_eq!(repeated.image.pixel(CENTER), rendered.image.pixel(CENTER));
+    assert!(
+        subject
+            .pick_and_wait(&repeated.recorded_frame, CENTER)
+            .is_some()
+    );
+    let after_pick = subject.render(&frame);
+    assert_eq!(
+        after_pick.report.transient_texture_bytes(),
+        u64::from(VIEWPORT[0]) * u64::from(VIEWPORT[1]) * 12
+    );
 
     let resized_viewport = [80, 64];
     let resized = subject.render(&standard_frame(

@@ -168,7 +168,8 @@ impl FrameReport {
         self.encoding_time
     }
 
-    /// Returns exact owned transient color/depth texture bytes for this frame.
+    /// Returns the exact bytes of renderer-owned transient color, depth, and
+    /// pick textures retained when this frame was recorded.
     #[must_use]
     pub const fn transient_texture_bytes(self) -> u64 {
         self.transient_texture_bytes
@@ -405,7 +406,7 @@ impl WgpuRenderer {
         )?;
 
         let clear = frame.style().clear_color();
-        let transient_texture_bytes = if self.depth_cue_status == DepthCueStatus::Active {
+        if self.depth_cue_status == DepthCueStatus::Active {
             let edl_pipeline = self
                 .pipelines
                 .edl
@@ -428,9 +429,6 @@ impl WgpuRenderer {
                 &batches,
             );
             record_eye_dome_pass(encoder, target, edl_pipeline, edl_bind_group);
-            u64::from(viewport.width())
-                .saturating_mul(u64::from(viewport.height()))
-                .saturating_mul(8)
         } else {
             let depth = self.targets.depth(&self.device, viewport);
             record_point_pass(
@@ -442,10 +440,8 @@ impl WgpuRenderer {
                 &self.camera_bind_group,
                 &batches,
             );
-            u64::from(viewport.width())
-                .saturating_mul(u64::from(viewport.height()))
-                .saturating_mul(4)
-        };
+        }
+        let transient_texture_bytes = self.targets.transient_texture_bytes();
 
         let report = FrameReport {
             view_generation: active_view_generation,

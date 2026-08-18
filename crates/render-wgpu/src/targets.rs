@@ -49,6 +49,12 @@ impl RenderTargets {
         (&targets.depth, color, bind_group)
     }
 
+    pub(crate) fn transient_texture_bytes(&self) -> u64 {
+        self.current
+            .as_ref()
+            .map_or(0, ViewportTargets::transient_texture_bytes)
+    }
+
     fn for_viewport(&mut self, device: &wgpu::Device, viewport: Viewport) -> &mut ViewportTargets {
         let matches = self
             .current
@@ -79,9 +85,21 @@ struct ViewportTargets {
     edl_bind_group: Option<wgpu::BindGroup>,
 }
 
+impl ViewportTargets {
+    fn transient_texture_bytes(&self) -> u64 {
+        self.edl_color
+            .as_ref()
+            .map_or(0, ColorTarget::byte_size)
+            .checked_add(self.pick.as_ref().map_or(0, PickTarget::byte_size))
+            .and_then(|optional_bytes| optional_bytes.checked_add(self.depth.byte_size()))
+            .expect("validated GPU target extents fit exact u64 accounting")
+    }
+}
+
 pub(crate) struct DepthTarget {
     _texture: wgpu::Texture,
     view: wgpu::TextureView,
+    byte_size: u64,
 }
 
 impl DepthTarget {
@@ -100,17 +118,23 @@ impl DepthTarget {
         Self {
             _texture: texture,
             view,
+            byte_size: texture_byte_size(viewport, DEPTH_FORMAT),
         }
     }
 
     pub(crate) const fn view(&self) -> &wgpu::TextureView {
         &self.view
     }
+
+    const fn byte_size(&self) -> u64 {
+        self.byte_size
+    }
 }
 
 pub(crate) struct ColorTarget {
     _texture: wgpu::Texture,
     view: wgpu::TextureView,
+    byte_size: u64,
 }
 
 impl ColorTarget {
@@ -125,17 +149,23 @@ impl ColorTarget {
         Self {
             _texture: texture,
             view,
+            byte_size: texture_byte_size(viewport, format),
         }
     }
 
     pub(crate) const fn view(&self) -> &wgpu::TextureView {
         &self.view
     }
+
+    const fn byte_size(&self) -> u64 {
+        self.byte_size
+    }
 }
 
 pub(crate) struct PickTarget {
     texture: wgpu::Texture,
     view: wgpu::TextureView,
+    byte_size: u64,
 }
 
 impl PickTarget {
@@ -147,7 +177,11 @@ impl PickTarget {
             PICK_FORMAT,
             wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
         );
-        Self { texture, view }
+        Self {
+            texture,
+            view,
+            byte_size: texture_byte_size(viewport, PICK_FORMAT),
+        }
     }
 
     pub(crate) const fn texture(&self) -> &wgpu::Texture {
@@ -156,6 +190,10 @@ impl PickTarget {
 
     pub(crate) const fn view(&self) -> &wgpu::TextureView {
         &self.view
+    }
+
+    const fn byte_size(&self) -> u64 {
+        self.byte_size
     }
 }
 
@@ -213,4 +251,15 @@ const fn texture_extent(viewport: Viewport) -> wgpu::Extent3d {
         height: viewport.height(),
         depth_or_array_layers: 1,
     }
+}
+
+fn texture_byte_size(viewport: Viewport, format: wgpu::TextureFormat) -> u64 {
+    let (block_width, block_height) = format.block_dimensions();
+    let block_bytes = format
+        .block_copy_size(None)
+        .expect("renderer-owned target formats have exact texel-block sizes");
+    u64::from(viewport.width().div_ceil(block_width))
+        .checked_mul(u64::from(viewport.height().div_ceil(block_height)))
+        .and_then(|blocks| blocks.checked_mul(u64::from(block_bytes)))
+        .expect("validated GPU target extents fit exact u64 accounting")
 }
