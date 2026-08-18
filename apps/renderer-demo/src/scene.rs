@@ -294,7 +294,7 @@ mod tests {
             .as_render_camera()
             .unwrap();
         let viewport = Viewport::new(2_560, 1_664).unwrap();
-        let (mut planner, mut renderer) = runtime();
+        let (mut planner, mut renderer) = reset_convergence_runtime();
 
         settle_and_observe(
             &mut scene,
@@ -314,7 +314,7 @@ mod tests {
         let mut scene = Scene::synthetic(VIEW_GENERATION).unwrap();
         let mut orbit = OrbitCamera::new(scene.camera_target(), scene.camera_radius());
         let mut viewport = Viewport::new(1_280, 800).unwrap();
-        let (mut planner, mut renderer) = runtime();
+        let (mut planner, mut renderer) = reset_convergence_runtime();
 
         settle_and_observe(
             &mut scene,
@@ -417,7 +417,7 @@ mod tests {
         );
     }
 
-    fn runtime() -> (ViewPlanner, RenderStateModel) {
+    fn reset_convergence_runtime() -> (ViewPlanner, RenderStateModel) {
         let planner = ViewPlanner::new(PlannerConfig::new(2.0, 0.25).unwrap());
         let mut renderer = RenderStateModel::new(RenderLimits::new(
             RESIDENT_BYTE_BUDGET,
