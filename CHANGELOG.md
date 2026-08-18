@@ -5,6 +5,13 @@ All notable changes to Punctra are documented here. The project follows
 
 ## Unreleased - 0.12.0-alpha.1
 
+- Activated the bounded pre-v0.13 renderer-quality corrective design. The
+  public View planner now reconstructs still-valid refinement history before
+  considering new refinements and budgets only still-demanded in-flight work;
+  the synchronous private Scene bridge admits one new request per pump. The
+  investigated 2560-by-1664 physical-pixel synthetic View now settles within
+  the accepted 1,024-frame ceiling and remains unchanged for a 300-frame
+  observation window instead of alternating coarse and fine request cuts.
 - Added one explicit projected survey-coordinate profile with horizontal and
   vertical EPSG identities, easting/northing/elevation axes, separate linear
   units, provenance, bounded serialization, and canonical hash bytes. Opaque

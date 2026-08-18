@@ -30,6 +30,10 @@ for request in plan.requests() {
 data, in-flight requests, renderer residency, and scheduling remain host-owned
 and are reported back in the next immutable node snapshot.
 
+Within one generation, still-valid hysteresis history is replayed before new
+refinements are considered. Replaying an accepted refined topology does not
+temporarily turn already-retired intermediate ancestors back into load targets.
+
 `ViewPlan` contains:
 
 - missing nodes to request, ordered by descending visual priority with a stable
@@ -65,8 +69,10 @@ in descending screen-space error order with a stable node-key tie break.
 
 Every node declares its point and byte cost and represents one render batch.
 The planner checks point, byte, and batch limits independently before emitting
-a request. It reserves costs for already requested work as well as newly
-requested work.
+a request. It reserves costs for still-demanded requested work as well as newly
+requested work. Requested work absent from the selected cut is excluded from
+the post-reconciliation plan because `demanded_nodes()` directs the host to
+cancel it before admitting replacement work.
 
 A refinement must fit its transition footprint, not only its final footprint.
 Until all visible replacement descendants are resident, that footprint
@@ -111,8 +117,8 @@ Planning rejects malformed hierarchy snapshots before updating hysteresis:
 
 An empty hierarchy produces no requests, retained nodes, or retirements. A
 fully culled hierarchy produces no requests or retention; resident batches are
-returned as conditional retirements, while already requested work remains in
-the reported resource usage.
+returned as conditional retirements and stale requested work is absent from
+the post-reconciliation resource usage.
 
 ## Demo and verification
 

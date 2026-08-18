@@ -36,7 +36,8 @@ pub(super) fn plan(
         budget,
         available_nodes.view_generation,
     )?;
-    let resource_usage = actual_resource_usage(&hierarchy, &retained_mask, &requests)?;
+    let resource_usage =
+        planned_resource_usage(&hierarchy, &retained_mask, &demanded_nodes, &requests)?;
     let retained = retained_nodes(&hierarchy, &retained_mask, available_nodes.view_generation);
     let retirements = retirements(&hierarchy, &retained_mask, available_nodes.view_generation);
 
@@ -490,11 +491,13 @@ struct RefinementCandidate {
     index: usize,
     key: NodeKey,
     screen_error: f64,
+    was_refined: bool,
 }
 
 impl PartialEq for RefinementCandidate {
     fn eq(&self, other: &Self) -> bool {
         self.index == other.index
+            && self.was_refined == other.was_refined
             && self.screen_error.total_cmp(&other.screen_error) == Ordering::Equal
     }
 }
@@ -509,9 +512,14 @@ impl PartialOrd for RefinementCandidate {
 
 impl Ord for RefinementCandidate {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.screen_error
-            .total_cmp(&other.screen_error)
-            .then_with(|| other.key.cmp(&self.key))
+        // Reconstruct the last accepted topology before spending budget on a
+        // new refinement. Intermediate ancestors may already be retired and
+        // must not become transient load targets while history is replayed.
+        self.was_refined.cmp(&other.was_refined).then_with(|| {
+            self.screen_error
+                .total_cmp(&other.screen_error)
+                .then_with(|| other.key.cmp(&self.key))
+        })
     }
 }
 
@@ -553,7 +561,8 @@ fn select_target_cut(
             continue;
         }
         let candidate_node = &hierarchy.nodes[candidate.index];
-        if candidate_node.status == NodeStatus::Missing
+        if !candidate.was_refined
+            && candidate_node.status == NodeStatus::Missing
             && !has_visible_coverage(hierarchy, candidate.index)
             && target_is_requestable_in_current_cut(
                 hierarchy,
@@ -579,12 +588,14 @@ fn select_target_cut(
             .filter(|child| missing_transition_targets.insert(*child))
             .collect::<Vec<_>>();
 
-        if !transition_targets_fit_budget(
-            hierarchy,
-            &target_cut,
-            &missing_transition_targets,
-            budget,
-        )? {
+        if !candidate.was_refined
+            && !transition_targets_fit_budget(
+                hierarchy,
+                &target_cut,
+                &missing_transition_targets,
+                budget,
+            )?
+        {
             for child in &visible_children {
                 target_cut.remove(child);
             }
@@ -636,6 +647,7 @@ fn push_candidate(
             index,
             key: node.key,
             screen_error: hierarchy.node_projections[index].screen_error,
+            was_refined: previous_refinements.contains(&node.key),
         });
     }
 }
@@ -804,7 +816,13 @@ fn select_request_indices(
     retained_mask: &[bool],
     budget: PlanningBudget,
 ) -> Result<Option<Vec<usize>>, PlanError> {
-    let mut current_usage = reserved_resource_usage(hierarchy, retained_mask)?;
+    let mut resource_mask = retained_mask.to_vec();
+    for index in target_cut.iter().copied() {
+        if hierarchy.nodes[index].status == NodeStatus::Requested {
+            resource_mask[index] = true;
+        }
+    }
+    let mut current_usage = accounted_resource_usage(hierarchy, &resource_mask)?;
     if !current_usage.fits_within(budget) {
         return Ok(None);
     }
@@ -854,31 +872,35 @@ fn request_screen_error(hierarchy: &ProjectedHierarchy, index: usize) -> f64 {
     hierarchy.node_projections[priority_source].screen_error
 }
 
-fn actual_resource_usage(
+fn planned_resource_usage(
     hierarchy: &ProjectedHierarchy,
     retained_mask: &[bool],
+    demanded_nodes: &[NodeKey],
     requests: &[NodeRequest],
 ) -> Result<ResourceUsage, PlanError> {
+    let demanded_keys = demanded_nodes.iter().copied().collect::<BTreeSet<_>>();
     let request_keys = requests
         .iter()
         .map(|request| request.node_key)
         .collect::<BTreeSet<_>>();
     let mut resource_mask = retained_mask.to_vec();
     for (index, node) in hierarchy.nodes.iter().enumerate() {
-        if request_keys.contains(&node.key) {
+        if request_keys.contains(&node.key)
+            || (node.status == NodeStatus::Requested && demanded_keys.contains(&node.key))
+        {
             resource_mask[index] = true;
         }
     }
-    reserved_resource_usage(hierarchy, &resource_mask)
+    accounted_resource_usage(hierarchy, &resource_mask)
 }
 
-fn reserved_resource_usage(
+fn accounted_resource_usage(
     hierarchy: &ProjectedHierarchy,
     resource_mask: &[bool],
 ) -> Result<ResourceUsage, PlanError> {
     let mut usage = ResourceUsage::default();
     for (node, included) in hierarchy.nodes.iter().zip(resource_mask) {
-        if !included && node.status != NodeStatus::Requested {
+        if !included {
             continue;
         }
         add_node_usage(&mut usage, node)?;

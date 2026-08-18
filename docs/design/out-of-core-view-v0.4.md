@@ -270,8 +270,8 @@ For each pump, the private bridge:
    `ViewPlanner`;
 2. removes queued Requested nodes absent from `demanded_nodes()` and marks them
    Missing;
-3. enqueues new `requests()` in planner priority order within queue and host
-   reservation limits;
+3. admits at most one new `requests()` entry in planner priority order within
+   queue and host reservation limits, matching the synchronous one-batch pump;
 4. materializes at most the caller's bounded Point/byte/action allowance;
 5. waits for the exact node-read summary before constructing one complete
    renderer Point Batch;

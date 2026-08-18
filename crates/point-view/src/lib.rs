@@ -338,7 +338,8 @@ impl PlanningBudget {
     }
 }
 
-/// Resource accounting for retained, requested, and newly requested batches.
+/// Resource accounting for retained, still-demanded in-flight, and newly
+/// requested batches after stale host work is cancelled.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct ResourceUsage {
     point_count: u64,
@@ -544,7 +545,8 @@ impl ViewPlan {
         &self.retirements
     }
 
-    /// Returns the conservative resource footprint used for budget decisions.
+    /// Returns the conservative post-reconciliation resource footprint used
+    /// for budget decisions.
     #[must_use]
     pub const fn resource_usage(&self) -> ResourceUsage {
         self.resource_usage

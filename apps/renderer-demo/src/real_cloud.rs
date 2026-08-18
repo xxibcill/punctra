@@ -12,7 +12,7 @@ use render_protocol::{
 
 use crate::{
     diagnostic::{ViewFailure, ViewPhase},
-    scene::{SceneMetrics, SceneResult},
+    scene::{SceneMetrics, SceneResult, new_requests_for_next_pump},
 };
 use renderer_demo::display::{DisplayMode, PointColorizer};
 
@@ -177,7 +177,11 @@ impl RealCloudScene {
         demanded_nodes: &[NodeKey],
         requests: &[NodeRequest],
     ) -> SceneResult<u64> {
-        self.reconcile_requests_with_budget(demanded_nodes, requests, QUEUE_BUDGET)
+        self.reconcile_requests_with_budget(
+            demanded_nodes,
+            new_requests_for_next_pump(requests),
+            QUEUE_BUDGET,
+        )
     }
 
     fn reconcile_requests_with_budget(
