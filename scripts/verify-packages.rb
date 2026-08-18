@@ -3,6 +3,7 @@
 
 require "json"
 require "open3"
+require "tmpdir"
 
 EXPECTED_LIBRARY_COUNT = 12
 EXPECTED_APPLICATION_COUNT = 2
@@ -104,10 +105,41 @@ applications.each do |package|
   assert!(manifest.match?(/^publish = false$/), "#{name}: publish = false is not explicit")
 end
 
-package_arguments = ["cargo", "package", "--workspace"]
+package_arguments = ["cargo", "package", "--workspace", "--no-verify"]
 applications.each do |package|
   package_arguments.concat(["--exclude", package.fetch("name")])
 end
 package_arguments << "--allow-dirty" if ENV["PUNCTRA_PACKAGE_ALLOW_DIRTY"] == "1"
+package_root = File.join(root, "target", "package")
 system(*package_arguments, exception: true)
+
+Dir.mktmpdir("punctra-package-verification-") do |verification_root|
+  members = libraries.map do |package|
+    name = package.fetch("name")
+    member = "#{name}-#{version}"
+    archive = File.join(package_root, "#{member}.crate")
+    system("tar", "-xzf", archive, "-C", verification_root, exception: true)
+    member
+  end
+  patches = libraries.map do |package|
+    name = package.fetch("name")
+    %(#{name} = { path = #{("./#{name}-#{version}").dump} })
+  end
+  verifier = <<~TOML
+    [workspace]
+    resolver = "3"
+    members = #{JSON.generate(members)}
+
+    [patch.crates-io]
+    #{patches.join("\n")}
+  TOML
+  File.write(File.join(verification_root, "Cargo.toml"), verifier)
+  verification_target = File.join(root, "target", "package-verification")
+  system(
+    { "CARGO_TARGET_DIR" => verification_target },
+    "cargo", "check", "--workspace", "--all-features",
+    chdir: verification_root,
+    exception: true,
+  )
+end
 puts "verified #{libraries.length} publishable library packages at #{version}"

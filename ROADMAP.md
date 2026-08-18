@@ -26,9 +26,10 @@ bounded repository slice without claiming the outstanding production-corpus,
 downstream, adoption, or support gates. No later repository release is Active.
 The [2026-08-18 renderer quality
 investigation](docs/reviews/render-quality-investigation-2026-08-18.md) records
-one pre-v0.13 corrective checkpoint with status **Active** under its
-[accepted corrective design](docs/design/renderer-quality-corrective-pre-v0.13.md).
-It does not reopen the accepted v0.10–v0.12 scopes. v0.13 through v0.20 remain
+one pre-v0.13 corrective checkpoint now **Complete and repository-verified**
+under its [implemented corrective design](docs/design/renderer-quality-corrective-pre-v0.13.md).
+Its permitted field execution remains outstanding. It does not reopen the
+accepted v0.10–v0.12 scopes. v0.13 through v0.20 remain
 uncommitted Candidate themes; each needs evidence and an accepted design before
 implementation.
 
@@ -92,8 +93,9 @@ release can be Complete while every product gate remains outstanding.
 
 Status: **v0.12 explicit spatial reference and library packaging Complete for
 the bounded repository slice; pre-v0.13 renderer quality remediation is
-Active; production-corpus activation, downstream observation, independent
-adoption, and inherited v0.9 support qualification outstanding**
+Complete and repository-verified; permitted field execution,
+production-corpus activation, downstream observation, independent adoption,
+and inherited v0.9 support qualification outstanding**
 
 The [implemented v0.5 design](docs/design/durable-document-core-v0.5.md) places
 exact classification selection, temporary Point Sets, sparse Revisions, and
@@ -181,8 +183,9 @@ any later repository release.
 
 ## Pre-v0.13 renderer quality corrective checkpoint
 
-Status: **Active — generated convergence gates complete; LOD-legibility work
-is next**
+Status: **Complete — repository implementation and generated/local GPU
+verification complete; permitted real-cloud field execution remains
+outstanding**
 
 The [2026-08-18 local renderer quality
 investigation](docs/reviews/render-quality-investigation-2026-08-18.md) found a
@@ -200,14 +203,13 @@ palette context, and an ambiguous `v0.11` View title in a
 `0.12.0-alpha.1` workspace. Focused local GPU acceptance still passed for
 depth, circular splats, picking, highlighting, projection, large-world
 precision, atomic updates, display mappings, and progressive Coverage. The
-corrective work must preserve those contracts rather than disguising the host
-churn with visual effects.
+completed corrective work preserves those contracts rather than disguising the
+host churn with visual effects.
 
 This checkpoint is ordered before any new View-dependent product claim or
 approved public screenshot. It does not have to delay unrelated headless
-evidence collection, but v0.10 cannot become Field-qualified and the v0.17
-desktop host cannot become Active while the P1 convergence and LOD-legibility
-gates remain open.
+evidence collection, but v0.10 cannot become Field-qualified until the
+remaining permitted-source and human-interpretation gates are satisfied.
 
 ### Corrective outcome
 
@@ -217,7 +219,7 @@ professional to distinguish real features from display and LOD artifacts. GPU
 presentation remains disposable; exact Point, selection, Edit, terrain, QA,
 and export authority remains on the CPU paths already defined.
 
-### Accepted activation decision
+### Implemented activation decision
 
 The
 [accepted corrective design](docs/design/renderer-quality-corrective-pre-v0.13.md):
@@ -870,8 +872,8 @@ metric, and no benchmark or customer dataset is published without permission.
 
 ### v0.10 — Field qualification and professional inspection View
 
-Status: **Complete — repository implementation complete; pre-v0.13 renderer
-quality remediation, field qualification, and adoption publication
+Status: **Complete — repository implementation and pre-v0.13 renderer-quality
+remediation complete; field qualification and adoption publication
 outstanding**
 
 Accepted outcome: qualify Source opening and viewing on representative field
@@ -905,11 +907,12 @@ Accepted scope:
 The completed accepted scope above remains historically accurate. The later
 [renderer quality
 investigation](docs/reviews/render-quality-investigation-2026-08-18.md) found
-that the default stationary synthetic View does not settle and that its LOD
-density, depth, status, spatial context, and selection feedback are not yet
-strong enough for a professional-inspection claim. Those findings are tracked
-by the pre-v0.13 Exploring checkpoint rather than retroactively relabeled as
-v0.10 acceptance.
+that the default stationary synthetic View did not settle and that its LOD
+density, depth, status, spatial context, and selection feedback were not yet
+strong enough for a professional-inspection claim. Those findings were
+remediated by the completed pre-v0.13 checkpoint rather than retroactively
+relabeled as v0.10 acceptance. The missing permitted-source and human-
+observation evidence remains a v0.10 field gate.
 
 Before field qualification or an approved representative screenshot:
 
@@ -1330,8 +1333,8 @@ v0.20 theme is by itself a reason to publish v1.
 | Renderer and planning foundations | v0.1–v0.2 | Complete; repository-verified | Reusable bounded display engine and adaptive View planner. |
 | Source, document, terrain, and workflow baseline | v0.3–v0.7 | Complete; repository-verified only | Headless technical path from verified LAS/LAZ to one narrow resumable terrain deliverable; field and product evidence remains separate. |
 | Qualifier and trust baseline | v0.8–v0.9 | Complete; repository-verified only | Close inherited qualification gates and harden only the existing narrow repository compatibility surface. |
-| Field inspection and exact correction | v0.10–v0.11 | v0.10 repository implementation complete; v0.11 repository-verified; renderer-quality, field, and adoption exits outstanding | Qualify representative Sources and connect a professional View to CPU-authoritative review and reversible correction. |
-| Renderer quality corrective checkpoint | pre-v0.13 | Exploring; investigation recorded, design and implementation not accepted | Make stationary LOD converge, remove misleading density/depth artifacts, expose truthful context/status/selection, and validate the settled View on permitted Sources. |
+| Field inspection and exact correction | v0.10–v0.11 | Repository implementation complete; renderer quality corrected; field and adoption exits outstanding | Qualify representative Sources and connect a professional View to CPU-authoritative review and reversible correction. |
+| Renderer quality corrective checkpoint | pre-v0.13 | Complete; repository-verified only, with permitted field execution outstanding | Stationary LOD converges, bounded density/depth treatments and truthful inspection context are implemented, and the private permitted-source lane records settled evidence without manufacturing field claims. |
 | Spatial contract and production terrain | v0.12–v0.13 | v0.12 bounded repository contract complete; external spatial qualification and v0.13 remain Candidate | Make reference semantics explicit before persisting a bounded production-scale Surface. |
 | Terrain acceptance tooling | v0.14–v0.15 | Candidate | Add exact QA and only the constraints earned by field evidence. |
 | Downstream and partner product | v0.16–v0.18 | Candidate | Qualify one named downstream profile, then package and validate one narrow partner workflow. |
