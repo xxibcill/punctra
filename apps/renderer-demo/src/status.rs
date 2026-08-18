@@ -3,6 +3,7 @@ use renderer_demo::display::DisplayMode;
 use crate::{orbit_camera::ProjectionMode, review::ReviewStatus, scene::SceneMetrics};
 
 pub(crate) const MAX_STATUS_COLUMNS: usize = 48;
+pub(crate) const MAX_STATUS_LINES: usize = 10;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum StreamStatus {
@@ -64,7 +65,7 @@ impl StatusSnapshot {
     pub(crate) fn lines(self) -> Vec<String> {
         let (selection_state, selected_points) = selection(self.selected);
         let mut lines = vec![
-            format!("PUNCTRA {} | VIEW PRE-V0.13", env!("CARGO_PKG_VERSION")),
+            format!("PUNCTRA {} | VIEW", env!("CARGO_PKG_VERSION")),
             format!(
                 "{} | {} | {}",
                 self.display,
@@ -92,8 +93,8 @@ impl StatusSnapshot {
             ),
             cursor_line(self.cursor_world),
             palette_line(self.display).to_owned(),
-            "H LOCATORS | SPACE LOADS | P PROJECTION".to_owned(),
         ];
+        debug_assert_eq!(lines.len(), MAX_STATUS_LINES);
         for line in &mut lines {
             line.make_ascii_uppercase();
             if line.len() > MAX_STATUS_COLUMNS {
@@ -212,6 +213,7 @@ mod tests {
         .lines();
 
         assert!(lines.iter().all(|line| line.len() <= MAX_STATUS_COLUMNS));
+        assert_eq!(lines.len(), MAX_STATUS_LINES);
         assert!(lines.iter().any(|line| line.contains("PUNCTRA")));
         assert!(lines.iter().any(|line| line.contains("COVERAGE")));
         assert!(lines.iter().any(|line| line.contains("QUERY COMPLETION")));
@@ -219,6 +221,7 @@ mod tests {
         assert!(lines.iter().any(|line| line.contains("X CLEAR")));
         assert!(lines.iter().any(|line| line.contains("CURSOR X")));
         assert!(lines.iter().any(|line| line.contains("PALETTE")));
+        assert!(!lines.iter().any(|line| line.contains("H LOCATORS")));
     }
 
     #[test]
@@ -237,7 +240,7 @@ mod tests {
     fn package_version_has_one_truthful_source() {
         let first = snapshot(None).lines().remove(0);
         assert!(first.contains(&env!("CARGO_PKG_VERSION").to_ascii_uppercase()));
-        assert!(!first.contains("V0.11"));
+        assert!(!first.contains("PRE-V0.13"));
     }
 
     #[test]

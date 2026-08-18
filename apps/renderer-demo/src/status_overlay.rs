@@ -243,6 +243,8 @@ fn glyph(character: char) -> [u8; 7] {
 
 #[cfg(test)]
 mod tests {
+    use crate::status::{MAX_STATUS_COLUMNS, MAX_STATUS_LINES};
+
     use super::*;
 
     #[test]
@@ -254,8 +256,9 @@ mod tests {
 
     #[test]
     fn two_hundred_percent_panel_fits_the_minimum_physical_window() {
-        let width = 48 * GLYPH_ADVANCE * 4 + PANEL_MARGIN * 2;
-        let height = 11 * LINE_ADVANCE * 4 + PANEL_MARGIN * 2;
+        let width =
+            u32::try_from(MAX_STATUS_COLUMNS).unwrap() * GLYPH_ADVANCE * 4 + PANEL_MARGIN * 2;
+        let height = u32::try_from(MAX_STATUS_LINES).unwrap() * LINE_ADVANCE * 4 + PANEL_MARGIN * 2;
         assert!(width <= 1_280);
         assert!(height <= 960);
     }

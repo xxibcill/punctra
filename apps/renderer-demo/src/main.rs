@@ -58,7 +58,7 @@ use winit::{
     window::{Window, WindowId},
 };
 
-const BASE_TITLE: &str = concat!("Punctra ", env!("CARGO_PKG_VERSION"), " View pre-v0.13");
+const BASE_TITLE: &str = concat!("Punctra ", env!("CARGO_PKG_VERSION"), " View");
 const INITIAL_WIDTH: f64 = 1_280.0;
 const INITIAL_HEIGHT: f64 = 800.0;
 const TRANSCRIPT_REFRESH_INTERVAL: Duration = Duration::from_millis(500);
@@ -2269,6 +2269,7 @@ mod tests {
 
         assert_eq!(title, BASE_TITLE);
         assert!(title.len() <= 64);
+        assert!(!title.contains("pre-v0.13"));
         assert!(!title.contains("COVERAGE"));
         assert!(!title.contains("LOD"));
     }
