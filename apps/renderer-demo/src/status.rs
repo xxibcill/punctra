@@ -6,17 +6,42 @@ pub(crate) const MAX_STATUS_COLUMNS: usize = 48;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum StreamStatus {
-    Streaming,
+    Loading,
+    Settling,
     Steady,
-    Paused,
+    LoadsPaused,
 }
 
 impl StreamStatus {
+    pub(crate) const fn from_facts(
+        scene: SceneMetrics,
+        loads_paused: bool,
+        planned_work: bool,
+        transition_active: bool,
+    ) -> Self {
+        if loads_paused {
+            return Self::LoadsPaused;
+        }
+        let pending_work = planned_work
+            || transition_active
+            || scene.queued_batches > 0
+            || scene.requested_nodes > 0
+            || scene.staged_points > 0;
+        if scene.resident_batches == 0 && (scene.logical_points > 0 || pending_work) {
+            Self::Loading
+        } else if pending_work {
+            Self::Settling
+        } else {
+            Self::Steady
+        }
+    }
+
     const fn label(self) -> &'static str {
         match self {
-            Self::Streaming => "STREAMING",
+            Self::Loading => "LOADING",
+            Self::Settling => "SETTLING",
             Self::Steady => "STEADY",
-            Self::Paused => "LOADS PAUSED",
+            Self::LoadsPaused => "LOADS PAUSED",
         }
     }
 }
@@ -200,5 +225,40 @@ mod tests {
         let first = snapshot(None).lines().remove(0);
         assert!(first.contains(&env!("CARGO_PKG_VERSION").to_ascii_uppercase()));
         assert!(!first.contains("V0.11"));
+    }
+
+    #[test]
+    fn stream_state_distinguishes_loading_settling_steady_and_paused() {
+        let loading = SceneMetrics {
+            logical_points: 1_000,
+            ..SceneMetrics::default()
+        };
+        assert_eq!(
+            StreamStatus::from_facts(loading, false, false, false),
+            StreamStatus::Loading
+        );
+
+        let resident = SceneMetrics {
+            logical_points: 1_000,
+            resident_batches: 1,
+            resident_points: 100,
+            ..SceneMetrics::default()
+        };
+        assert_eq!(
+            StreamStatus::from_facts(resident, false, true, false),
+            StreamStatus::Settling
+        );
+        assert_eq!(
+            StreamStatus::from_facts(resident, false, false, true),
+            StreamStatus::Settling
+        );
+        assert_eq!(
+            StreamStatus::from_facts(resident, false, false, false),
+            StreamStatus::Steady
+        );
+        assert_eq!(
+            StreamStatus::from_facts(loading, true, true, true),
+            StreamStatus::LoadsPaused
+        );
     }
 }

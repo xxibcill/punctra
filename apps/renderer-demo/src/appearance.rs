@@ -136,8 +136,7 @@ impl DensityTransitions {
         actions
     }
 
-    #[cfg(test)]
-    fn is_active(&self) -> bool {
+    pub(crate) fn is_active(&self) -> bool {
         !self.active.is_empty()
     }
 }

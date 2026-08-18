@@ -1145,7 +1145,11 @@ impl Graphics {
         let status = StatusSnapshot {
             display: self.display_mode,
             projection: self.camera.projection(),
-            stream: self.metrics.stream_status(scene, self.loads_paused),
+            stream: self.metrics.stream_status(
+                scene,
+                self.loads_paused,
+                self.density_transitions.is_active(),
+            ),
             scene,
             drawn_points: report.drawn_points(),
             selected: review_status,
@@ -1775,14 +1779,18 @@ impl Metrics {
         self.latest_plan = facts;
     }
 
-    const fn stream_status(&self, scene: SceneMetrics, loads_paused: bool) -> StreamStatus {
-        if loads_paused {
-            StreamStatus::Paused
-        } else if scene.queued_batches > 0 || self.latest_plan.issued > 0 {
-            StreamStatus::Streaming
-        } else {
-            StreamStatus::Steady
-        }
+    const fn stream_status(
+        &self,
+        scene: SceneMetrics,
+        loads_paused: bool,
+        transition_active: bool,
+    ) -> StreamStatus {
+        StreamStatus::from_facts(
+            scene,
+            loads_paused,
+            self.latest_plan.has_stream_work(),
+            transition_active,
+        )
     }
 
     fn update_title(
@@ -1877,6 +1885,10 @@ impl PlanFacts {
             retirements: count(plan.retirements().len()),
             usage: plan.resource_usage(),
         }
+    }
+
+    const fn has_stream_work(self) -> bool {
+        self.load_candidates > 0 || self.issued > 0 || self.retirements > 0
     }
 }
 
