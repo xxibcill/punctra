@@ -336,6 +336,27 @@ Repository exit gates:
 
 Priority: **P2**
 
+Implementation status: **Complete — the primary state is rendered on-canvas;
+the window title remains the separate bounded engineering transcript.**
+
+Implemented scope:
+
+- an application-private bitmap-glyph overlay renders package-derived View
+  version, display mode, projection, streaming state, truthful sampled/
+  complete display Coverage, Source/drawn/resident Point counts, and explicit
+  non-Query-completion wording;
+- exact selection state and count, resident locator count, stale/failure
+  recovery wording, and the `X` clear action remain visible without relying on
+  highlight color;
+- north orientation, a 100-physical-pixel target-plane scale, cursor
+  target-plane world coordinates, and a mode-specific palette legend are
+  included in the primary panel;
+- the panel uses an ASCII 5-by-7 glyph atlas, an opaque contrast backing, a
+  48-column bound, and a two-level physical scale that fits the 640-by-480
+  logical minimum at 200% interface scaling; and
+- detailed planner, queue, staging, resource, frame, upload, Coverage, and
+  review facts remain in the title transcript.
+
 Likely scope:
 
 - replace the single diagnostic title dump with a compact primary on-canvas

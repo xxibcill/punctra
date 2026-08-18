@@ -5,6 +5,13 @@ All notable changes to Punctra are documented here. The project follows
 
 ## Unreleased - 0.12.0-alpha.1
 
+- Added a bounded on-canvas inspection status panel with package-derived View
+  version, display/projection/loading state, truthful display Coverage and
+  Point counts, exact-selection and resident-locator state, clear/recovery
+  actions, north orientation, target-plane scale and cursor coordinates, and
+  mode-specific palette meaning. The detailed engineering transcript remains
+  available in the title, and the required panel fits the minimum window at
+  200% interface scaling.
 - Added a bounded renderer appearance policy: projected-density-aware 1–4
   physical-pixel splats, exact eight-presented-frame parent/child color
   transitions, and optional eye-dome lighting with an explicit unenhanced

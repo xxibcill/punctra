@@ -7,6 +7,8 @@ mod orbit_camera;
 mod real_cloud;
 mod review;
 mod scene;
+mod status;
+mod status_overlay;
 mod synthetic;
 
 use std::{
@@ -42,6 +44,8 @@ use review::{
     ReviewSession, ReviewStatus,
 };
 use scene::{Scene, SceneMetrics};
+use status::{StatusSnapshot, StreamStatus};
+use status_overlay::StatusOverlay;
 use synthetic::{RESIDENT_BATCH_BUDGET, RESIDENT_BYTE_BUDGET, RESIDENT_POINT_BUDGET};
 use winit::{
     application::ApplicationHandler,
@@ -52,7 +56,7 @@ use winit::{
     window::{Window, WindowId},
 };
 
-const BASE_TITLE: &str = "Punctra exact interactive review View v0.11";
+const BASE_TITLE: &str = concat!("Punctra ", env!("CARGO_PKG_VERSION"), " View pre-v0.13");
 const INITIAL_WIDTH: f64 = 1_280.0;
 const INITIAL_HEIGHT: f64 = 800.0;
 const TITLE_REFRESH_INTERVAL: Duration = Duration::from_millis(500);
@@ -666,7 +670,7 @@ fn run_main() -> DemoResult<()> {
     let event_loop =
         EventLoop::new().map_err(|error| internal_failure(ViewPhase::GpuSetup, error))?;
     event_loop.set_control_flow(ControlFlow::Wait);
-    let mut app = DemoApp::new(scene, review, command.projection);
+    let mut app = DemoApp::new(scene, review, command.projection, command.display_mode);
     event_loop
         .run_app(&mut app)
         .map_err(|error| internal_failure(ViewPhase::Rendering, error))?;
@@ -680,16 +684,23 @@ struct DemoApp {
     scene: Option<Scene>,
     review: Option<ReviewSession>,
     projection: ProjectionMode,
+    display_mode: DisplayMode,
     graphics: Option<Graphics>,
     failure: Option<ViewFailure>,
 }
 
 impl DemoApp {
-    const fn new(scene: Scene, review: Option<ReviewSession>, projection: ProjectionMode) -> Self {
+    const fn new(
+        scene: Scene,
+        review: Option<ReviewSession>,
+        projection: ProjectionMode,
+        display_mode: DisplayMode,
+    ) -> Self {
         Self {
             scene: Some(scene),
             review,
             projection,
+            display_mode,
             graphics: None,
             failure: None,
         }
@@ -699,6 +710,7 @@ impl DemoApp {
         let attributes = Window::default_attributes()
             .with_title(initial_title())
             .with_inner_size(LogicalSize::new(INITIAL_WIDTH, INITIAL_HEIGHT))
+            .with_min_inner_size(LogicalSize::new(640.0, 480.0))
             .with_visible(false);
         let window = Arc::new(event_loop.create_window(attributes)?);
         let instance =
@@ -716,6 +728,7 @@ impl DemoApp {
             scene,
             review,
             self.projection,
+            self.display_mode,
         ))?;
         graphics.window.set_visible(true);
         graphics.window.request_redraw();
@@ -883,6 +896,8 @@ struct Graphics {
     surface_config: wgpu::SurfaceConfiguration,
     presentation: PresentationState,
     renderer: WgpuRenderer,
+    status_overlay: StatusOverlay,
+    display_mode: DisplayMode,
     planner: ViewPlanner,
     scene: Scene,
     review: Option<ReviewSession>,
@@ -909,6 +924,29 @@ struct PendingPick {
     capture: ReviewCapture,
 }
 
+fn create_renderer(
+    device: &wgpu::Device,
+    format: wgpu::TextureFormat,
+    limits: RenderLimits,
+) -> DemoResult<WgpuRenderer> {
+    let depth_cue = EyeDomeLighting::new(1.25, 1)
+        .map_err(|error| internal_failure(ViewPhase::GpuSetup, error))?;
+    let mut renderer = WgpuRenderer::new(
+        device,
+        RendererConfig::new(format, limits).with_eye_dome_lighting(depth_cue),
+    )
+    .map_err(|error| ViewFailure::gpu(ViewPhase::GpuSetup, error))?;
+    if renderer.depth_cue_status() == DepthCueStatus::UnsupportedFallback {
+        println!("GPU depth cue: unsupported; using the unenhanced render path");
+    }
+    renderer
+        .apply(&RenderUpdate::Reset {
+            view_generation: VIEW_GENERATION,
+        })
+        .map_err(|error| renderer_failure(ViewPhase::GpuSetup, error))?;
+    Ok(renderer)
+}
+
 impl Graphics {
     async fn new(
         instance: wgpu::Instance,
@@ -916,6 +954,7 @@ impl Graphics {
         scene: Scene,
         review: Option<ReviewSession>,
         projection: ProjectionMode,
+        display_mode: DisplayMode,
     ) -> DemoResult<Self> {
         let surface = instance
             .create_surface(Arc::clone(&window))
@@ -967,22 +1006,7 @@ impl Graphics {
             RESIDENT_BATCH_BUDGET,
         )
         .with_max_highlight_points(review::MAX_HIGHLIGHT_POINTS);
-        let depth_cue = EyeDomeLighting::new(1.25, 1)
-            .map_err(|error| internal_failure(ViewPhase::GpuSetup, error))?;
-        let mut renderer = WgpuRenderer::new(
-            &device,
-            RendererConfig::new(surface_config.format, limits).with_eye_dome_lighting(depth_cue),
-        )
-        .map_err(|error| ViewFailure::gpu(ViewPhase::GpuSetup, error))?;
-        if renderer.depth_cue_status() == DepthCueStatus::UnsupportedFallback {
-            println!("GPU depth cue: unsupported; using the unenhanced render path");
-        }
-        let reset = RenderUpdate::Reset {
-            view_generation: VIEW_GENERATION,
-        };
-        renderer
-            .apply(&reset)
-            .map_err(|error| renderer_failure(ViewPhase::GpuSetup, error))?;
+        let renderer = create_renderer(&device, surface_config.format, limits)?;
         let planner = ViewPlanner::new(
             PlannerConfig::new(2.0, 0.25)
                 .map_err(|error| internal_failure(ViewPhase::GpuSetup, error))?,
@@ -991,6 +1015,7 @@ impl Graphics {
         let camera_reset_radius = scene.camera_radius();
         let style = PointStyle::new(2.4, [1.0, 0.24, 0.06], [0.008, 0.012, 0.02, 1.0])
             .map_err(|error| internal_failure(ViewPhase::GpuSetup, error))?;
+        let status_overlay = StatusOverlay::new(&device, surface_config.format);
 
         println!("View phase: gpu-setup (complete)");
         Ok(Self {
@@ -1002,6 +1027,8 @@ impl Graphics {
             surface_config,
             presentation: PresentationState::new(surface_configured),
             renderer,
+            status_overlay,
+            display_mode,
             planner,
             scene,
             review,
@@ -1062,6 +1089,8 @@ impl Graphics {
             .renderer
             .render(&mut encoder, &target, &frame)
             .map_err(|error| renderer_failure(ViewPhase::Rendering, error))?;
+        let review_status =
+            self.record_status_overlay(&mut encoder, &target, recorded_frame.report())?;
         self.queue.submit([encoder.finish()]);
         self.window.pre_present_notify();
         self.queue.present(surface_texture);
@@ -1077,7 +1106,6 @@ impl Graphics {
             recorded: recorded_frame,
             interaction_generation: self.interaction_generation,
         });
-        let review_status = self.review.as_ref().map(ReviewSession::status);
         self.metrics.update_title(
             &self.window,
             self.scene.metrics(),
@@ -1087,6 +1115,55 @@ impl Graphics {
             review_status,
         );
         Ok(())
+    }
+
+    fn record_status_overlay(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        target: &wgpu::TextureView,
+        report: FrameReport,
+    ) -> DemoResult<Option<ReviewStatus>> {
+        let scene = self.scene.metrics();
+        let review_status = self.review.as_ref().map(ReviewSession::status);
+        let cursor_world = self
+            .input
+            .cursor
+            .map(|position| [position.x, position.y])
+            .map(|pixel| {
+                self.camera.target_plane_world(
+                    pixel,
+                    [self.surface_config.width, self.surface_config.height],
+                )
+            })
+            .transpose()
+            .map_err(|error| internal_failure(ViewPhase::Rendering, error))?
+            .flatten();
+        let status = StatusSnapshot {
+            display: self.display_mode,
+            projection: self.camera.projection(),
+            stream: self.metrics.stream_status(scene, self.loads_paused),
+            scene,
+            drawn_points: report.drawn_points(),
+            selected: review_status,
+            resident_highlights: self.renderer.resident_highlight_points(),
+            orientation: self
+                .camera
+                .north_orientation()
+                .map_err(|error| internal_failure(ViewPhase::Rendering, error))?,
+            scale_world_units: self
+                .camera
+                .world_units_for_pixels(100, self.surface_config.height),
+            cursor_world,
+        };
+        self.status_overlay.render(
+            &self.device,
+            encoder,
+            target,
+            [self.surface_config.width, self.surface_config.height],
+            self.window.scale_factor(),
+            &status.lines(),
+        );
+        Ok(review_status)
     }
 
     fn poll_review_work(&mut self) -> DemoResult<()> {
@@ -1692,6 +1769,16 @@ impl Metrics {
 
     fn record_plan(&mut self, facts: PlanFacts) {
         self.latest_plan = facts;
+    }
+
+    const fn stream_status(&self, scene: SceneMetrics, loads_paused: bool) -> StreamStatus {
+        if loads_paused {
+            StreamStatus::Paused
+        } else if scene.queued_batches > 0 || self.latest_plan.issued > 0 {
+            StreamStatus::Streaming
+        } else {
+            StreamStatus::Steady
+        }
     }
 
     fn update_title(

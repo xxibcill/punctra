@@ -243,6 +243,7 @@ fn assert_raster_and_pick_semantics(gpu: &GpuContext) {
         view_generation,
         point_ids: vec![near_id],
     });
+    assert_eq!(subject.renderer.resident_highlight_points(), 1);
     let highlighted = subject.render(&frame);
     assert_pixel(highlighted.image.pixel(CENTER), GREEN);
 
@@ -259,6 +260,7 @@ fn assert_raster_and_pick_semantics(gpu: &GpuContext) {
         view_generation,
         point_ids: vec![transparent_id],
     });
+    assert_eq!(subject.renderer.resident_highlight_points(), 1);
     let transparent_highlighted = subject.render(&frame);
     assert_pixel(transparent_highlighted.image.pixel(CENTER), RED);
     let visible_hit = subject

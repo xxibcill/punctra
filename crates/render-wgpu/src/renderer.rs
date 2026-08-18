@@ -289,6 +289,26 @@ impl WgpuRenderer {
         self.depth_cue_status
     }
 
+    /// Returns the number of resident Points currently carrying the highlight
+    /// locator flag. This is presentation state only and does not imply exact
+    /// selection completeness.
+    #[must_use]
+    pub fn resident_highlight_points(&self) -> u64 {
+        self.batches
+            .values()
+            .map(|batch| {
+                u64::try_from(
+                    batch
+                        .gpu_points
+                        .iter()
+                        .filter(|point| point.flags & crate::gpu::HIGHLIGHTED_FLAG != 0)
+                        .count(),
+                )
+                .unwrap_or(u64::MAX)
+            })
+            .fold(0_u64, u64::saturating_add)
+    }
+
     /// Applies one complete renderer-neutral update atomically.
     ///
     /// Point data is copied before this method returns. The caller may release
