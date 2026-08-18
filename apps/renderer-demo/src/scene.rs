@@ -12,10 +12,6 @@ pub(crate) type SceneResult<T> = Result<T, Box<dyn Error>>;
 
 const NEW_REQUESTS_PER_PUMP: usize = 1;
 
-pub(crate) fn new_requests_for_next_pump(requests: &[NodeRequest]) -> &[NodeRequest] {
-    &requests[..requests.len().min(NEW_REQUESTS_PER_PUMP)]
-}
-
 pub(crate) enum PlanningNodes<'scene> {
     Synthetic(Vec<AvailableNode>),
     Real(&'scene [AvailableNode]),
@@ -215,7 +211,8 @@ impl Scene {
         demanded_nodes: &[NodeKey],
         requests: &[NodeRequest],
     ) -> SceneResult<u64> {
-        self.0.reconcile_requests(demanded_nodes, requests)
+        let admitted_requests = &requests[..requests.len().min(NEW_REQUESTS_PER_PUMP)];
+        self.0.reconcile_requests(demanded_nodes, admitted_requests)
     }
 
     pub(crate) fn next_batch(&mut self) -> SceneResult<Option<PointBatch>> {

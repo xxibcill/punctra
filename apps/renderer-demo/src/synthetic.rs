@@ -6,8 +6,6 @@ use render_protocol::{
     RenderPoint, SourceId, ViewGenerationKey,
 };
 
-use crate::scene::new_requests_for_next_pump;
-
 pub(crate) const RESIDENT_POINT_BUDGET: u64 = 600_000;
 pub(crate) const RESIDENT_BYTE_BUDGET: u64 = RESIDENT_POINT_BUDGET * ESTIMATED_GPU_BYTES_PER_POINT;
 pub(crate) const RESIDENT_BATCH_BUDGET: u64 = 640;
@@ -111,7 +109,6 @@ impl SyntheticScene {
         demanded_nodes: &[NodeKey],
         requests: &[NodeRequest],
     ) -> u64 {
-        let requests = new_requests_for_next_pump(requests);
         let previously_queued = self.pending.drain(..).collect::<BTreeSet<_>>();
         let newly_requested = requests
             .iter()
