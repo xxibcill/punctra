@@ -5,6 +5,14 @@ All notable changes to Punctra are documented here. The project follows
 
 ## Unreleased - 0.12.0-alpha.1
 
+- Completed the repository implementation of the private pre-v0.13 field
+  qualification lane. Opt-in manifests require the five-mode/two-projection
+  matrix, five projects from three firms, permissions, and known-feature
+  outcomes; every pose must settle within a bounded ceiling and remain quiet
+  for 300 rendered frames. Reports now retain settlement, cumulative lifecycle,
+  transient-resource, adaptive-appearance, depth-cue/fallback, and feature
+  outcome facts while continuing to make explicit nonclaims. Permitted field
+  execution and human interpretation evidence remain outstanding.
 - Added a bounded on-canvas inspection status panel with package-derived View
   version, display/projection/loading state, truthful display Coverage and
   Point counts, exact-selection and resident-locator state, clear/recovery

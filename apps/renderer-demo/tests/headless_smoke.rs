@@ -465,6 +465,90 @@ fn corpus_success_binds_trace_inputs_and_separate_resource_measurements() {
     assert_eq!(entry["trace"][1]["input"]["zoom_lines"], 1.5);
 }
 
+#[test]
+fn corpus_pre_v0_13_qualification_records_settlement_and_the_complete_matrix() {
+    let directory = TestDirectory::new().unwrap();
+    let source = directory.path().join("qualification-fixture.las");
+    let manifest = directory.path().join("qualification-manifest.json");
+    let report_path = directory.path().join("qualification-report.json");
+    write_las(&source).unwrap();
+    let displays = ["neutral", "elevation", "rgb", "intensity", "classification"];
+    let projections = ["perspective", "orthographic"];
+    let mut entries = Vec::new();
+    for (display_index, display) in displays.into_iter().enumerate() {
+        for (projection_index, projection) in projections.into_iter().enumerate() {
+            let index = display_index * projections.len() + projection_index;
+            entries.push(serde_json::json!({
+                "id": format!("entry-{index}"),
+                "project_id": format!("project-{}", index % 5),
+                "firm_id": format!("firm-{}", index % 3),
+                "source_path": source,
+                "index_path": directory.path().join(format!("qualification-{index}.pidx")),
+                "inspect_permission": true,
+                "measure_permission": true,
+                "display": display,
+                "projection": projection,
+                "known_feature_outcomes": if index == 0 {
+                    serde_json::json!([
+                        {"kind":"terrain_break","result":"not_observed"},
+                        {"kind":"vegetation","result":"not_observed"},
+                        {"kind":"building","result":"not_observed"},
+                        {"kind":"scan_pattern_variation","result":"not_observed"},
+                        {"kind":"low_intensity","result":"not_observed"},
+                        {"kind":"high_intensity","result":"not_observed"},
+                        {"kind":"representative_classification","result":"not_observed"}
+                    ])
+                } else {
+                    serde_json::json!([])
+                },
+                "trace": []
+            }));
+        }
+    }
+    let manifest_value = serde_json::json!({
+        "schema": "punctra.renderer-demo.field-corpus.v1",
+        "corpus_id": "generated-pre-v0.13-lane",
+        "machine": {
+            "label": "generated-test-machine",
+            "operating_system": std::env::consts::OS,
+            "filesystem": "temporary-test-directory",
+            "gpu_expectation": "local-adapter-or-explicit-skip"
+        },
+        "pre_v0_13_qualification": true,
+        "settlement_frame_ceiling": 64,
+        "entries": entries
+    });
+    fs::write(&manifest, serde_json::to_vec(&manifest_value).unwrap()).unwrap();
+
+    let output = run_corpus(&manifest, &report_path);
+    if !output.status.success()
+        && String::from_utf8_lossy(&output.stderr).contains("PVIEW_GPU")
+        && std::env::var_os("PUNCTRA_REQUIRE_GPU").is_none()
+    {
+        return;
+    }
+    assert!(output.status.success(), "{}", diagnostics(&output));
+    let report: serde_json::Value =
+        serde_json::from_slice(&fs::read(report_path).unwrap()).unwrap();
+    assert_eq!(report["summary"]["pre_v0_13_qualification"], true);
+    assert_eq!(
+        report["summary"]["display_projection_matrix_complete"],
+        true
+    );
+    assert_eq!(report["summary"]["known_feature_located_count"], 0);
+    assert_eq!(report["summary"]["known_feature_issue_count"], 7);
+    assert_eq!(report["summary"]["quiet_observation_frames"], 300);
+    assert_eq!(report["entries"].as_array().unwrap().len(), 10);
+    for entry in report["entries"].as_array().unwrap() {
+        let trace = &entry["trace"][0];
+        assert!(trace["settlement_frame"].as_u64().unwrap() <= 64);
+        assert_eq!(trace["quiet_observation_frames"], 300);
+        assert_eq!(trace["quiet_window_complete"], true);
+        assert!(trace["completed_frame_count"].as_u64().unwrap() >= 301);
+        assert!(trace["peak_transient_texture_bytes"].as_u64().unwrap() <= 8 * 640 * 480);
+    }
+}
+
 fn run_smoke(source: &Path, index: &Path) -> std::process::Output {
     Command::new(env!("CARGO_BIN_EXE_renderer-demo"))
         .args(["--smoke"])

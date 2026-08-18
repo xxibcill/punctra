@@ -7,6 +7,8 @@
     "filesystem": "replace-with-the-index-filesystem",
     "gpu_expectation": "replace-with-the-expected-local-wgpu-adapter"
   },
+  "pre_v0_13_qualification": false,
+  "settlement_frame_ceiling": 1024,
   "entries": [
     {
       "id": "opaque-source-001",
@@ -18,6 +20,12 @@
       "measure_permission": true,
       "display": "elevation",
       "projection": "perspective",
+      "known_feature_outcomes": [
+        {
+          "kind": "terrain_break",
+          "result": "located"
+        }
+      ],
       "initial_frame_count": 3,
       "trace": [
         {

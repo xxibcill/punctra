@@ -391,6 +391,31 @@ Repository exit gates:
 
 Priority: **P2; field evidence remains separate from repository closure**
 
+Implementation status: **Repository lane complete — permitted field execution
+and human interpretation evidence remain outstanding and cannot be created by
+repository tests.**
+
+Implemented scope:
+
+- the bounded private manifest can opt into `pre_v0_13_qualification`, which
+  requires five projects from three firms, all five display modes in both
+  projections, explicit inspect/measure permission, and the complete declared
+  known-feature category matrix;
+- every initial or navigated pose must converge within a caller-declared ceiling
+  no greater than 1,024 rendered frames, then retain identical node/resource
+  state with no planner, host, upload, transition, or retirement work for 300
+  additional rendered frames;
+- the real-cloud lane exercises the adaptive physical-pixel Point policy,
+  eight-frame density transition, and optional EDL/fallback path rather than a
+  separate legacy presentation path;
+- the private no-replace report records first visible Coverage, settlement
+  frame/time, quiet-window completion, resident/peak/transient resources,
+  cumulative uploads and lifecycle work, adapter/backend/depth-cue state,
+  known-feature outcomes, and bounded failures; and
+- a generated LAS GPU process acceptance proves this lane across the ten mode/
+  projection combinations without claiming that generated data is a permitted
+  field corpus or human interpretation evidence.
+
 Likely scope:
 
 - run the settled View on permitted LAS/LAZ Sources that contain known terrain

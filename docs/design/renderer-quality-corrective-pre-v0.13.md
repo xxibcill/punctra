@@ -1,6 +1,7 @@
 # Renderer Quality Corrective Design (pre-v0.13)
 
-Status: accepted implementation scope
+Status: repository implementation complete; permitted field execution remains
+outstanding
 
 This design is authoritative for the bounded pre-v0.13 renderer-quality
 checkpoint. It responds to the
@@ -133,6 +134,14 @@ peak resources, cumulative lifecycle work, known-feature outcomes, and
 failures. Source material, paths, reports, screenshots, identities, and
 benchmark claims remain private unless their owner grants the required
 permission.
+
+The implemented opt-in manifest validates the complete five-display by
+two-projection matrix, five projects from three firms, explicit inspect/measure
+permission, a bounded settlement ceiling, and outcomes for the fixed known-
+feature categories. The local runner exercises the same adaptive Point size,
+eight-frame density transition, and EDL/fallback path as the interactive View.
+A generated LAS process acceptance proves this repository lane and records
+`not_observed` for field-only feature outcomes; it is not field evidence.
 
 Repository acceptance, field qualification, partner validation, downstream
 acceptance, adoption, and support qualification remain distinct claims.

@@ -153,6 +153,15 @@ existing or resumable index rather than deleting or mislabeling it.
 Use a new report target for a new timed run; a different existing report is
 never overwritten.
 
+For the pre-v0.13 field lane, set `pre_v0_13_qualification` to `true` only in a
+private manifest containing at least five permitted projects from three firms,
+all five display modes in both projections, and the complete bounded
+known-feature outcome set. The runner then ignores the short fixed-frame
+observation count as a stopping condition: every pose must settle within
+`settlement_frame_ceiling` and remain quiet for 300 rendered frames. A report
+records failures and `artifact_confounded`/`not_observed` outcomes; it does not
+turn them into acceptance.
+
 This local runner is a reproducible measurement path, not evidence of a
 production corpus, professional preference, terrain capacity, partner
 acceptance, downstream interoperability, or human-time savings.
