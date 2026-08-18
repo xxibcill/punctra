@@ -1,6 +1,6 @@
 //! GPU acceptance coverage on an available headless adapter.
 
-use std::sync::mpsc;
+use std::{sync::mpsc, time::Duration};
 
 #[path = "../../../tests/support/gpu.rs"]
 mod gpu_support;
@@ -31,6 +31,7 @@ const CYAN: [u8; 4] = [0, 255, 255, 255];
 const TRANSPARENT: [u8; 4] = [255, 255, 255, 0];
 const TWO_POINT_BYTES: u64 = 2 * POINT_BYTES;
 const TEST_SOURCE: SourceId = SourceId::new([0x55; 32]);
+const MAX_PICK_COMPLETION_TIME: Duration = Duration::from_secs(2);
 
 #[test]
 fn lifecycle_updates_are_atomic_in_gpu_state() {
@@ -820,12 +821,16 @@ impl<'gpu> OffscreenRenderer<'gpu> {
         pixel: [u32; 2],
     ) -> Option<PickHit> {
         let (mut ticket, commands) = self.encode_pick(recorded_frame, pixel);
-        self.gpu.queue.submit([commands]);
-        self.gpu.wait();
-        let PickPoll::Ready(hit) = ticket.poll().expect("the submitted pick should resolve") else {
-            panic!("a fully polled pick should not remain pending");
-        };
-        hit
+        let submission = self.gpu.queue.submit([commands]);
+        self.gpu.wait_for_submission(
+            &submission,
+            MAX_PICK_COMPLETION_TIME,
+            "offscreen pick",
+            || match ticket.poll().expect("the submitted pick should resolve") {
+                PickPoll::Ready(hit) => Some(hit),
+                PickPoll::Pending => None,
+            },
+        )
     }
 
     fn encoder(&self, label: &'static str) -> wgpu::CommandEncoder {

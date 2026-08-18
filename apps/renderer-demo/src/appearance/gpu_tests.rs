@@ -34,6 +34,7 @@ const SOURCE: SourceId = SourceId::new([0xa7; 32]);
 const GENERATION: ViewGenerationKey = ViewGenerationKey::new(ViewId::new(93), 1);
 const MAX_FIXED_VIEW_ENCODING_TIME: Duration = Duration::from_secs(1);
 const MAX_FIXED_VIEW_FRAME_TIME: Duration = Duration::from_secs(2);
+const MAX_FIXED_VIEW_PICK_TIME: Duration = Duration::from_secs(2);
 
 #[test]
 fn fixed_view_adaptive_sizing_improves_coverage_without_hiding_a_source_hole() {
@@ -352,12 +353,16 @@ impl<'gpu> ImageHarness<'gpu> {
             .renderer
             .pick(&mut encoder, recorded, PickRequest::new(pixel))
             .unwrap();
-        self.gpu.queue.submit([encoder.finish()]);
-        self.gpu.wait();
-        let PickPoll::Ready(hit) = ticket.poll().unwrap() else {
-            panic!("a fully polled fixed-view pick should be ready");
-        };
-        hit
+        let submission = self.gpu.queue.submit([encoder.finish()]);
+        self.gpu.wait_for_submission(
+            &submission,
+            MAX_FIXED_VIEW_PICK_TIME,
+            "fixed-view pick",
+            || match ticket.poll().unwrap() {
+                PickPoll::Ready(hit) => Some(hit),
+                PickPoll::Pending => None,
+            },
+        )
     }
 
     fn encoder(&self, label: &'static str) -> wgpu::CommandEncoder {

@@ -1,6 +1,10 @@
 //! Shared headless GPU setup for workspace acceptance tests.
 
-use std::{env, sync::OnceLock};
+use std::{
+    env,
+    sync::OnceLock,
+    time::{Duration, Instant},
+};
 
 static GPU: OnceLock<Option<GpuContext>> = OnceLock::new();
 
@@ -14,6 +18,37 @@ impl GpuContext {
         self.device
             .poll(wgpu::PollType::wait_indefinitely())
             .expect("headless device polling should succeed");
+    }
+
+    #[allow(
+        dead_code,
+        reason = "the shared path module is compiled by GPU tests that only need wait"
+    )]
+    pub(super) fn wait_for_submission<T>(
+        &self,
+        submission: &wgpu::SubmissionIndex,
+        timeout: Duration,
+        label: &str,
+        mut poll: impl FnMut() -> Option<T>,
+    ) -> T {
+        let deadline = Instant::now() + timeout;
+        loop {
+            if let Some(result) = poll() {
+                return result;
+            }
+            let now = Instant::now();
+            assert!(
+                now < deadline,
+                "{label} did not complete within {timeout:?}"
+            );
+            self.device
+                .poll(wgpu::PollType::Wait {
+                    submission_index: Some(submission.clone()),
+                    timeout: Some(deadline.saturating_duration_since(now)),
+                })
+                .unwrap_or_else(|error| panic!("{label} device polling failed: {error}"));
+            std::thread::sleep(Duration::from_millis(1));
+        }
     }
 }
 
