@@ -21,7 +21,7 @@ use crate::{
     PLANNING_BUDGET, VIEW_GENERATION,
     appearance::{
         DensityTransitions, REFERENCE_POINT_SIZE_PIXELS, TransitionAction,
-        projected_density_point_size,
+        projected_density_point_size, renderer_appearance_config,
     },
     diagnostic::{ViewFailure, ViewFailureCode, ViewPhase, classify_renderer_failure},
     orbit_camera::{OrbitCamera, ProjectionMode},
@@ -37,9 +37,7 @@ use point_index::{
 };
 use point_view::{AvailableNodes, PlannerConfig, ViewPlanner};
 use render_protocol::{RenderLimits, RenderUpdate, ResidentStats, ViewGenerationKey, Viewport};
-use render_wgpu::{
-    DepthCueStatus, EyeDomeLighting, Frame, PointStyle, RendererConfig, WgpuRenderer,
-};
+use render_wgpu::{DepthCueStatus, Frame, PointStyle, RendererConfig, WgpuRenderer};
 use renderer_demo::display::DisplayMode;
 
 const MANIFEST_SCHEMA: &str = "punctra.renderer-demo.field-corpus.v1";
@@ -135,11 +133,9 @@ fn run_with_gpu(
             crate::synthetic::RESIDENT_POINT_BUDGET,
             crate::synthetic::RESIDENT_BATCH_BUDGET,
         );
-        let depth_cue = EyeDomeLighting::new(1.25, 1).map_err(ViewFailure::corpus_gpu)?;
         WgpuRenderer::new(
             &gpu.device,
-            RendererConfig::new(wgpu::TextureFormat::Rgba8Unorm, limits)
-                .with_eye_dome_lighting(depth_cue),
+            renderer_appearance_config(wgpu::TextureFormat::Rgba8Unorm, limits),
         )
         .map_err(ViewFailure::corpus_gpu)
     })

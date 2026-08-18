@@ -21,7 +21,8 @@ use std::{
 };
 
 use appearance::{
-    DensityTransitions, REFERENCE_POINT_SIZE_PIXELS, TransitionAction, projected_density_point_size,
+    DensityTransitions, REFERENCE_POINT_SIZE_PIXELS, TransitionAction,
+    projected_density_point_size, renderer_appearance_config,
 };
 use diagnostic::{ViewFailure, ViewPhase, classify_protocol_failure, classify_renderer_failure};
 use orbit_camera::{OrbitCamera, ProjectionMode};
@@ -37,8 +38,8 @@ use render_protocol::{
     ViewId, Viewport,
 };
 use render_wgpu::{
-    Camera, DepthCueStatus, EyeDomeLighting, Frame, FrameReport, PickPoll, PickRequest, PickTicket,
-    PointStyle, RecordedFrame, RendererConfig, RendererError, WgpuRenderer,
+    Camera, DepthCueStatus, Frame, FrameReport, PickPoll, PickRequest, PickTicket, PointStyle,
+    RecordedFrame, RendererError, WgpuRenderer,
 };
 use renderer_demo::display::{DisplayIndexPolicy, DisplayMode};
 use review::{
@@ -931,13 +932,8 @@ fn create_renderer(
     format: wgpu::TextureFormat,
     limits: RenderLimits,
 ) -> DemoResult<WgpuRenderer> {
-    let depth_cue = EyeDomeLighting::new(1.25, 1)
-        .map_err(|error| internal_failure(ViewPhase::GpuSetup, error))?;
-    let mut renderer = WgpuRenderer::new(
-        device,
-        RendererConfig::new(format, limits).with_eye_dome_lighting(depth_cue),
-    )
-    .map_err(|error| ViewFailure::gpu(ViewPhase::GpuSetup, error))?;
+    let mut renderer = WgpuRenderer::new(device, renderer_appearance_config(format, limits))
+        .map_err(|error| ViewFailure::gpu(ViewPhase::GpuSetup, error))?;
     if renderer.depth_cue_status() == DepthCueStatus::UnsupportedFallback {
         println!("GPU depth cue: unsupported; using the unenhanced render path");
     }
