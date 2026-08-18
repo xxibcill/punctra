@@ -1355,27 +1355,11 @@ impl Graphics {
 
     fn apply_transition_actions(&mut self, actions: Vec<TransitionAction>) -> DemoResult<()> {
         for action in actions {
-            match action {
-                TransitionAction::Present { batch, weight } => {
-                    self.renderer
-                        .apply(&RenderUpdate::SetBatchPresentation {
-                            view_generation: batch.view_generation,
-                            key: batch.key,
-                            expected_version: batch.expected_version,
-                            weight,
-                        })
-                        .map_err(|error| renderer_failure(ViewPhase::GpuUpload, error))?;
-                }
-                TransitionAction::Retire(batch) => {
-                    self.renderer
-                        .apply(&RenderUpdate::Remove {
-                            view_generation: batch.view_generation,
-                            key: batch.key,
-                            expected_version: batch.expected_version,
-                        })
-                        .map_err(|error| renderer_failure(ViewPhase::GpuUpload, error))?;
-                    self.scene.mark_retired(batch.key, batch.expected_version);
-                }
+            self.renderer
+                .apply(&action.render_update())
+                .map_err(|error| renderer_failure(ViewPhase::GpuUpload, error))?;
+            if let Some(batch) = action.retiring_batch() {
+                self.scene.mark_retired(batch.key, batch.expected_version);
             }
         }
         Ok(())

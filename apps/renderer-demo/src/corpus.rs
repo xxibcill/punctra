@@ -742,39 +742,19 @@ fn apply_transition_actions(
 ) -> Result<TransitionActivity, ViewFailure> {
     let mut activity = TransitionActivity::default();
     for action in actions {
-        let retiring = match action {
-            TransitionAction::Present { batch, weight } => {
-                let report = runtime
-                    .renderer
-                    .apply(&RenderUpdate::SetBatchPresentation {
-                        view_generation: batch.view_generation,
-                        key: batch.key,
-                        expected_version: batch.expected_version,
-                        weight,
-                    })
-                    .map_err(|error| classify_renderer_failure(ViewPhase::GpuUpload, error))?;
-                runtime.evidence.observe_resident(report.resident());
-                activity.presentations = activity.presentations.saturating_add(1);
-                None
-            }
-            TransitionAction::Retire(batch) => {
-                let report = runtime
-                    .renderer
-                    .apply(&RenderUpdate::Remove {
-                        view_generation: batch.view_generation,
-                        key: batch.key,
-                        expected_version: batch.expected_version,
-                    })
-                    .map_err(|error| classify_renderer_failure(ViewPhase::GpuUpload, error))?;
-                runtime.evidence.observe_resident(report.resident());
-                activity.retired = activity.retired.saturating_add(1);
-                Some(batch)
-            }
-        };
+        let retiring = action.retiring_batch();
+        let report = runtime
+            .renderer
+            .apply(&action.render_update())
+            .map_err(|error| classify_renderer_failure(ViewPhase::GpuUpload, error))?;
+        runtime.evidence.observe_resident(report.resident());
         if let Some(batch) = retiring {
+            activity.retired = activity.retired.saturating_add(1);
             runtime
                 .scene
                 .mark_retired(batch.key, batch.expected_version);
+        } else {
+            activity.presentations = activity.presentations.saturating_add(1);
         }
     }
     Ok(activity)

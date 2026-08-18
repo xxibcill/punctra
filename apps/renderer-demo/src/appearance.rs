@@ -1,7 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use point_view::{AvailableNode, NodeKey, RetainedNode, ViewPlan};
-use render_protocol::{BatchKey, BatchVersion, PresentationWeight, ViewGenerationKey, Viewport};
+use render_protocol::{
+    BatchKey, BatchVersion, PresentationWeight, RenderUpdate, ViewGenerationKey, Viewport,
+};
 
 pub(crate) const CROSS_FADE_PRESENTED_FRAMES: u8 = 8;
 pub(crate) const MIN_POINT_SIZE_PIXELS: f32 = 1.0;
@@ -22,6 +24,31 @@ pub(crate) enum TransitionAction {
         weight: PresentationWeight,
     },
     Retire(ConditionalBatch),
+}
+
+impl TransitionAction {
+    pub(crate) fn render_update(self) -> RenderUpdate {
+        match self {
+            Self::Present { batch, weight } => RenderUpdate::SetBatchPresentation {
+                view_generation: batch.view_generation,
+                key: batch.key,
+                expected_version: batch.expected_version,
+                weight,
+            },
+            Self::Retire(batch) => RenderUpdate::Remove {
+                view_generation: batch.view_generation,
+                key: batch.key,
+                expected_version: batch.expected_version,
+            },
+        }
+    }
+
+    pub(crate) const fn retiring_batch(self) -> Option<ConditionalBatch> {
+        match self {
+            Self::Present { .. } => None,
+            Self::Retire(batch) => Some(batch),
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -248,6 +275,37 @@ mod tests {
             weight: PresentationWeight::OPAQUE,
         }));
         assert!(final_actions.contains(&TransitionAction::Retire(retiring)));
+    }
+
+    #[test]
+    fn transition_actions_own_their_protocol_mapping() {
+        let conditional = batch(7);
+        let weight = PresentationWeight::new(91);
+        let presentation = TransitionAction::Present {
+            batch: conditional,
+            weight,
+        };
+        assert_eq!(
+            presentation.render_update(),
+            RenderUpdate::SetBatchPresentation {
+                view_generation: conditional.view_generation,
+                key: conditional.key,
+                expected_version: conditional.expected_version,
+                weight,
+            }
+        );
+        assert_eq!(presentation.retiring_batch(), None);
+
+        let retirement = TransitionAction::Retire(conditional);
+        assert_eq!(
+            retirement.render_update(),
+            RenderUpdate::Remove {
+                view_generation: conditional.view_generation,
+                key: conditional.key,
+                expected_version: conditional.expected_version,
+            }
+        );
+        assert_eq!(retirement.retiring_batch(), Some(conditional));
     }
 
     #[test]
