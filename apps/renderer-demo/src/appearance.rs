@@ -69,6 +69,16 @@ struct ActiveTransition {
     presented_frames: u8,
 }
 
+impl ActiveTransition {
+    fn controls(&self, key: BatchKey) -> bool {
+        self.retiring.key == key
+            || self
+                .replacements
+                .iter()
+                .any(|replacement| replacement.key == key)
+    }
+}
+
 #[derive(Default)]
 pub(crate) struct DensityTransitions {
     active: BTreeMap<BatchKey, ActiveTransition>,
@@ -117,6 +127,9 @@ impl DensityTransitions {
                 expected_version: retirement.expected_version(),
             };
             let replacements = replacement_batches(hierarchy, plan.retained_nodes(), retiring.key);
+            if !self.transition_is_disjoint(retiring, &replacements) {
+                continue;
+            }
             if replacements.is_empty() {
                 actions.push(TransitionAction::Retire(retiring));
                 continue;
@@ -226,6 +239,19 @@ impl DensityTransitions {
         }
         self.pending_replacements = next;
         actions
+    }
+
+    fn transition_is_disjoint(
+        &self,
+        retiring: ConditionalBatch,
+        replacements: &[ConditionalBatch],
+    ) -> bool {
+        self.active.values().all(|active| {
+            !active.controls(retiring.key)
+                && replacements
+                    .iter()
+                    .all(|replacement| !active.controls(replacement.key))
+        })
     }
 }
 
@@ -457,6 +483,23 @@ mod tests {
                 weight: PresentationWeight::TRANSPARENT,
             })
         );
+    }
+
+    #[test]
+    fn nested_transition_waits_for_its_ancestor_transition() {
+        let mut transitions = DensityTransitions::default();
+        transitions.active.insert(
+            BatchKey::new(1),
+            ActiveTransition {
+                retiring: batch(1),
+                replacements: vec![batch(2)],
+                presented_frames: 3,
+            },
+        );
+
+        assert!(!transitions.transition_is_disjoint(batch(2), &[batch(3)]));
+        assert!(!transitions.transition_is_disjoint(batch(4), &[batch(2)]));
+        assert!(transitions.transition_is_disjoint(batch(4), &[batch(5)]));
     }
 
     #[test]
