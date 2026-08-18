@@ -530,16 +530,22 @@ fn corpus_pre_v0_13_qualification_records_settlement_and_the_complete_matrix() {
     assert!(output.status.success(), "{}", diagnostics(&output));
     let report: serde_json::Value =
         serde_json::from_slice(&fs::read(report_path).unwrap()).unwrap();
-    assert_eq!(report["summary"]["pre_v0_13_qualification"], true);
+    assert_eq!(report["summary"]["pre_v0_13_repository_lane_enabled"], true);
     assert_eq!(
-        report["summary"]["display_projection_matrix_complete"],
+        report["summary"]["declared_display_projection_matrix_complete"],
         true
     );
-    assert_eq!(report["summary"]["known_feature_located_count"], 0);
-    assert_eq!(report["summary"]["known_feature_issue_count"], 7);
-    assert_eq!(report["summary"]["quiet_observation_frames"], 300);
+    assert_eq!(report["summary"]["declared_known_feature_located_count"], 0);
+    assert_eq!(report["summary"]["declared_known_feature_issue_count"], 7);
+    assert_eq!(report["summary"]["required_quiet_observation_frames"], 300);
+    assert_eq!(
+        report["nonclaims"]["declared_known_feature_outcomes_verified"],
+        false
+    );
     assert_eq!(report["entries"].as_array().unwrap().len(), 10);
     for entry in report["entries"].as_array().unwrap() {
+        assert!(entry.get("known_feature_outcomes").is_none());
+        assert!(entry["declared_known_feature_outcomes"].is_array());
         let trace = &entry["trace"][0];
         assert!(trace["settlement_frame"].as_u64().unwrap() <= 64);
         assert!(trace["peak_issued_nodes_per_frame"].as_u64().unwrap() <= 1);

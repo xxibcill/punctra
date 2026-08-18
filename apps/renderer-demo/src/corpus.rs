@@ -1261,7 +1261,7 @@ impl EntryEvidence {
             index: self.index,
             display,
             projection,
-            known_feature_outcomes,
+            declared_known_feature_outcomes: known_feature_outcomes,
             declared_initial_frame_count: initial_frame_count,
             declared_trace,
             measurements: self.measurements,
@@ -1326,8 +1326,8 @@ fn report_summary(
 ) -> ReportSummary {
     ReportSummary {
         entry_count: u64::try_from(entries.len()).unwrap_or(u64::MAX),
-        distinct_project_count,
-        distinct_firm_count,
+        declared_distinct_project_count: distinct_project_count,
+        declared_distinct_firm_count: distinct_firm_count,
         passed_count: u64::try_from(
             entries
                 .iter()
@@ -1349,18 +1349,21 @@ fn report_summary(
                 .count(),
         )
         .unwrap_or(u64::MAX),
-        pre_v0_13_qualification,
-        settlement_frame_ceiling: u64::from(settlement_frame_ceiling),
-        quiet_observation_frames: if pre_v0_13_qualification {
+        pre_v0_13_repository_lane_enabled: pre_v0_13_qualification,
+        declared_settlement_frame_ceiling: u64::from(settlement_frame_ceiling),
+        required_quiet_observation_frames: if pre_v0_13_qualification {
             u64::from(SETTLED_OBSERVATION_FRAMES)
         } else {
             0
         },
-        display_projection_matrix_complete,
-        known_feature_located_count: known_feature_count(entries, KnownFeatureResult::Located),
-        known_feature_issue_count: entries
+        declared_display_projection_matrix_complete: display_projection_matrix_complete,
+        declared_known_feature_located_count: declared_known_feature_count(
+            entries,
+            KnownFeatureResult::Located,
+        ),
+        declared_known_feature_issue_count: entries
             .iter()
-            .flat_map(|entry| &entry.known_feature_outcomes)
+            .flat_map(|entry| &entry.declared_known_feature_outcomes)
             .filter(|outcome| outcome.result != KnownFeatureResult::Located)
             .count()
             .try_into()
@@ -1368,11 +1371,11 @@ fn report_summary(
     }
 }
 
-fn known_feature_count(entries: &[EntryReport], result: KnownFeatureResult) -> u64 {
+fn declared_known_feature_count(entries: &[EntryReport], result: KnownFeatureResult) -> u64 {
     u64::try_from(
         entries
             .iter()
-            .flat_map(|entry| &entry.known_feature_outcomes)
+            .flat_map(|entry| &entry.declared_known_feature_outcomes)
             .filter(|outcome| outcome.result == result)
             .count(),
     )
@@ -2303,17 +2306,17 @@ pub(crate) struct ReportMachine {
 #[allow(clippy::struct_field_names)]
 pub(crate) struct ReportSummary {
     pub(crate) entry_count: u64,
-    pub(crate) distinct_project_count: u64,
-    pub(crate) distinct_firm_count: u64,
+    pub(crate) declared_distinct_project_count: u64,
+    pub(crate) declared_distinct_firm_count: u64,
     pub(crate) passed_count: u64,
     pub(crate) failed_count: u64,
     pub(crate) resource_limited_count: u64,
-    pub(crate) pre_v0_13_qualification: bool,
-    pub(crate) settlement_frame_ceiling: u64,
-    pub(crate) quiet_observation_frames: u64,
-    pub(crate) display_projection_matrix_complete: bool,
-    pub(crate) known_feature_located_count: u64,
-    pub(crate) known_feature_issue_count: u64,
+    pub(crate) pre_v0_13_repository_lane_enabled: bool,
+    pub(crate) declared_settlement_frame_ceiling: u64,
+    pub(crate) required_quiet_observation_frames: u64,
+    pub(crate) declared_display_projection_matrix_complete: bool,
+    pub(crate) declared_known_feature_located_count: u64,
+    pub(crate) declared_known_feature_issue_count: u64,
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq)]
@@ -2325,7 +2328,7 @@ pub(crate) struct EntryReport {
     pub(crate) index: IndexEvidence,
     pub(crate) display: DisplayChoice,
     pub(crate) projection: ProjectionChoice,
-    pub(crate) known_feature_outcomes: Vec<KnownFeatureOutcome>,
+    pub(crate) declared_known_feature_outcomes: Vec<KnownFeatureOutcome>,
     pub(crate) declared_initial_frame_count: u32,
     pub(crate) declared_trace: Vec<TraceStep>,
     #[serde(flatten)]
@@ -2469,6 +2472,7 @@ struct ReportNonclaims {
     production_corpus_complete: bool,
     partner_acceptance_evaluated: bool,
     professional_preference_evaluated: bool,
+    declared_known_feature_outcomes_verified: bool,
     terrain_resource_envelope_evaluated: bool,
     human_time_savings_evaluated: bool,
 }
@@ -3425,17 +3429,17 @@ mod tests {
             },
             ReportSummary {
                 entry_count: 1,
-                distinct_project_count: 1,
-                distinct_firm_count: 1,
+                declared_distinct_project_count: 1,
+                declared_distinct_firm_count: 1,
                 passed_count: 1,
                 failed_count: 0,
                 resource_limited_count: 0,
-                pre_v0_13_qualification: false,
-                settlement_frame_ceiling: u64::from(DEFAULT_SETTLEMENT_FRAME_CEILING),
-                quiet_observation_frames: 0,
-                display_projection_matrix_complete: false,
-                known_feature_located_count: 0,
-                known_feature_issue_count: 0,
+                pre_v0_13_repository_lane_enabled: false,
+                declared_settlement_frame_ceiling: u64::from(DEFAULT_SETTLEMENT_FRAME_CEILING),
+                required_quiet_observation_frames: 0,
+                declared_display_projection_matrix_complete: false,
+                declared_known_feature_located_count: 0,
+                declared_known_feature_issue_count: 0,
             },
             vec![fixture_entry()],
         );
@@ -3449,6 +3453,7 @@ mod tests {
         assert!(!encoded.contains("verified_source_snapshot_bytes"));
         assert!(!encoded.contains("peak_total_temporary_disk_bytes"));
         assert!(encoded.contains("\"production_corpus_complete\":false"));
+        assert!(encoded.contains("\"declared_known_feature_outcomes_verified\":false"));
 
         let directory = tempfile::tempdir().unwrap();
         let target = directory.path().join("report.json");
@@ -3479,17 +3484,17 @@ mod tests {
             },
             ReportSummary {
                 entry_count: 1,
-                distinct_project_count: 1,
-                distinct_firm_count: 1,
+                declared_distinct_project_count: 1,
+                declared_distinct_firm_count: 1,
                 passed_count: 1,
                 failed_count: 0,
                 resource_limited_count: 0,
-                pre_v0_13_qualification: false,
-                settlement_frame_ceiling: u64::from(DEFAULT_SETTLEMENT_FRAME_CEILING),
-                quiet_observation_frames: 0,
-                display_projection_matrix_complete: false,
-                known_feature_located_count: 0,
-                known_feature_issue_count: 0,
+                pre_v0_13_repository_lane_enabled: false,
+                declared_settlement_frame_ceiling: u64::from(DEFAULT_SETTLEMENT_FRAME_CEILING),
+                required_quiet_observation_frames: 0,
+                declared_display_projection_matrix_complete: false,
+                declared_known_feature_located_count: 0,
+                declared_known_feature_issue_count: 0,
             },
             vec![fixture_entry()],
         );
@@ -3620,7 +3625,7 @@ mod tests {
             },
             display: DisplayChoice::Elevation,
             projection: ProjectionChoice::Orthographic,
-            known_feature_outcomes: Vec::new(),
+            declared_known_feature_outcomes: Vec::new(),
             declared_initial_frame_count: 2,
             declared_trace: vec![TraceStep {
                 orbit_horizontal_pixels: 1.0,
