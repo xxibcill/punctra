@@ -1,4 +1,8 @@
-use std::sync::mpsc;
+use std::{
+    collections::BTreeMap,
+    sync::mpsc,
+    time::{Duration, Instant},
+};
 
 #[path = "../../../../tests/support/gpu.rs"]
 mod gpu_support;
@@ -28,6 +32,8 @@ const GREEN: [u8; 4] = [0, 255, 0, 255];
 const BLUE: [u8; 4] = [0, 0, 255, 255];
 const SOURCE: SourceId = SourceId::new([0xa7; 32]);
 const GENERATION: ViewGenerationKey = ViewGenerationKey::new(ViewId::new(93), 1);
+const MAX_FIXED_VIEW_ENCODING_TIME: Duration = Duration::from_secs(1);
+const MAX_FIXED_VIEW_FRAME_TIME: Duration = Duration::from_secs(2);
 
 #[test]
 fn fixed_view_adaptive_sizing_improves_coverage_without_hiding_a_source_hole() {
@@ -51,95 +57,99 @@ fn assert_adaptive_sizing_image(gpu: &GpuContext) {
     let adaptive_style = reference_style
         .with_display_size_pixels(adaptive_size)
         .unwrap();
-    let reference = subject.render(reference_style);
-    let adaptive = subject.render(adaptive_style);
+    for projection in FixedProjection::ALL {
+        let reference = subject.render(reference_style, projection);
+        let adaptive = subject.render(adaptive_style, projection);
 
-    let reference_coverage = reference.image.visible_pixel_count();
-    let adaptive_coverage = adaptive.image.visible_pixel_count();
-    assert!(
-        adaptive_coverage > reference_coverage + reference_coverage / 2,
-        "adaptive coverage {adaptive_coverage} should materially exceed the 2.4 px reference {reference_coverage}"
-    );
-    assert_eq!(reference.image.pixel(CENTER), BLACK);
-    assert_eq!(adaptive.image.pixel(CENTER), BLACK);
+        let reference_coverage = reference.image.visible_pixel_count();
+        let adaptive_coverage = adaptive.image.visible_pixel_count();
+        assert!(
+            adaptive_coverage > reference_coverage + reference_coverage / 2,
+            "{projection:?} adaptive coverage {adaptive_coverage} should materially exceed the 2.4 px reference {reference_coverage}"
+        );
+        assert_eq!(reference.image.pixel(CENTER), BLACK);
+        assert_eq!(adaptive.image.pixel(CENTER), BLACK);
 
-    let stable_pick_pixel = [24, CENTER[1]];
-    assert_eq!(
-        subject
-            .pick(&reference.recorded, stable_pick_pixel)
-            .map(PickHit::point),
-        Some(known_point)
-    );
-    assert_eq!(
-        subject
-            .pick(&adaptive.recorded, stable_pick_pixel)
-            .map(PickHit::point),
-        Some(known_point)
-    );
-    let visual_only_pixel = reference
-        .image
-        .first_pixel_where(&adaptive.image, |reference, adaptive| {
-            reference == BLACK && adaptive != BLACK
-        })
-        .expect("adaptive sizing should add visible coverage around a fixed sample");
-    assert_eq!(subject.pick(&reference.recorded, visual_only_pixel), None);
-    assert_eq!(subject.pick(&adaptive.recorded, visual_only_pixel), None);
+        let stable_pick_pixel = [24, CENTER[1]];
+        assert_eq!(
+            subject
+                .pick(&reference.recorded, stable_pick_pixel)
+                .map(PickHit::point),
+            Some(known_point)
+        );
+        assert_eq!(
+            subject
+                .pick(&adaptive.recorded, stable_pick_pixel)
+                .map(PickHit::point),
+            Some(known_point)
+        );
+        let visual_only_pixel = reference
+            .image
+            .first_pixel_where(&adaptive.image, |reference, adaptive| {
+                reference == BLACK && adaptive != BLACK
+            })
+            .expect("adaptive sizing should add visible coverage around a fixed sample");
+        assert_eq!(subject.pick(&reference.recorded, visual_only_pixel), None);
+        assert_eq!(subject.pick(&adaptive.recorded, visual_only_pixel), None);
 
-    assert_frame_ceiling(reference.report, point_count, 1);
-    assert_frame_ceiling(adaptive.report, point_count, 1);
+        assert_frame_ceiling(&reference, point_count, 1);
+        assert_frame_ceiling(&adaptive, point_count, 1);
+    }
 }
 
 fn assert_cross_fade_images(gpu: &GpuContext) {
-    let mut subject = ImageHarness::new(gpu, 3, 3);
     let parent = point_id(201);
     let child = point_id(202);
-    subject.upsert(1, 1, vec![point([0.0; 3], RED, parent)]);
-    subject.upsert(2, 1, vec![point([0.0; 3], RED, child)]);
-    subject.upsert(3, 1, vec![point([0.0, 1.0, 0.0], BLUE, point_id(203))]);
-    subject.present(2, PresentationWeight::TRANSPARENT);
+    for projection in FixedProjection::ALL {
+        let mut subject = ImageHarness::new(gpu, 3, 3);
+        subject.upsert(1, 1, vec![point([0.0; 3], RED, parent)]);
+        subject.upsert(2, 1, vec![point([0.02, 0.0, 0.0], RED, child)]);
+        subject.upsert(3, 1, vec![point([0.0, 1.0, 0.0], BLUE, point_id(203))]);
+        subject.present(2, PresentationWeight::TRANSPARENT);
+        let mut previous_red = None;
+        for step in 0..=CROSS_FADE_PRESENTED_FRAMES {
+            if step > 0 {
+                subject.present(2, weight_for_step(step));
+                subject.present(
+                    1,
+                    weight_for_step(CROSS_FADE_PRESENTED_FRAMES.saturating_sub(step)),
+                );
+            }
+            if step == CROSS_FADE_PRESENTED_FRAMES {
+                subject.remove(1, 1);
+            }
 
-    let style = point_style(REFERENCE_POINT_SIZE_PIXELS)
-        .with_display_size_pixels(4.0)
-        .unwrap();
-    let mut previous_red = None;
-    for step in 0..=CROSS_FADE_PRESENTED_FRAMES {
-        if step > 0 {
-            subject.present(2, weight_for_step(step));
-            subject.present(
-                1,
-                weight_for_step(CROSS_FADE_PRESENTED_FRAMES.saturating_sub(step)),
-            );
-        }
-        if step == CROSS_FADE_PRESENTED_FRAMES {
-            subject.remove(1, 1);
-        }
-
-        let rendered = subject.render(style);
-        let center = rendered.image.pixel(CENTER);
-        assert!(
-            center[0] >= 180 && center[1] <= 1 && center[2] <= 1,
-            "cross-fade frame {step} produced a hole or exposed the farther blue point: {center:?}"
-        );
-        if let Some(previous) = previous_red {
+            let point_size = projected_spacing_point_size(viewport(), subject.resident_points());
+            let style = point_style(REFERENCE_POINT_SIZE_PIXELS)
+                .with_display_size_pixels(point_size)
+                .unwrap();
+            let rendered = subject.render(style, projection);
+            let center = rendered.image.pixel(CENTER);
             assert!(
-                center[0].abs_diff(previous) <= 40,
-                "cross-fade frame {step} changed red intensity from {previous} to {}",
-                center[0]
+                center[0] >= 180 && center[1] <= 1 && center[2] <= 1,
+                "{projection:?} cross-fade frame {step} produced a hole or exposed the farther blue point: {center:?}"
             );
-        }
-        previous_red = Some(center[0]);
-        let hit = subject
-            .pick(&rendered.recorded, CENTER)
-            .expect("the fixed center coverage should remain pickable");
-        assert_eq!(hit.point(), child);
-        assert_eq!(hit.batch(), BatchKey::new(2));
+            if let Some(previous) = previous_red {
+                assert!(
+                    center[0].abs_diff(previous) <= 40,
+                    "{projection:?} cross-fade frame {step} changed red intensity from {previous} to {}",
+                    center[0]
+                );
+            }
+            previous_red = Some(center[0]);
+            let hit = subject
+                .pick(&rendered.recorded, CENTER)
+                .expect("the fixed center coverage should remain pickable");
+            assert_eq!(hit.point(), child);
+            assert_eq!(hit.batch(), BatchKey::new(2));
 
-        let expected_points = if step == CROSS_FADE_PRESENTED_FRAMES {
-            2
-        } else {
-            3
-        };
-        assert_frame_ceiling(rendered.report, expected_points, expected_points);
+            let expected_points = if step == CROSS_FADE_PRESENTED_FRAMES {
+                2
+            } else {
+                3
+            };
+            assert_frame_ceiling(&rendered, expected_points, expected_points);
+        }
     }
 }
 
@@ -182,18 +192,22 @@ fn viewport() -> Viewport {
     Viewport::new(VIEWPORT[0], VIEWPORT[1]).unwrap()
 }
 
-fn assert_frame_ceiling(report: FrameReport, points: u64, batches: u64) {
+fn assert_frame_ceiling(rendered: &RenderedImage, points: u64, batches: u64) {
+    let report = rendered.report;
     assert_eq!(report.drawn_points(), points);
     assert_eq!(report.draw_calls(), batches);
     assert_eq!(report.resident_bytes(), points * POINT_BYTES);
     assert!(
         report.transient_texture_bytes() <= 8 * u64::from(VIEWPORT[0]) * u64::from(VIEWPORT[1])
     );
+    assert!(report.encoding_time() <= MAX_FIXED_VIEW_ENCODING_TIME);
+    assert!(rendered.frame_time <= MAX_FIXED_VIEW_FRAME_TIME);
 }
 
 struct ImageHarness<'gpu> {
     gpu: &'gpu GpuContext,
     renderer: WgpuRenderer,
+    batch_points: BTreeMap<BatchKey, u64>,
 }
 
 impl<'gpu> ImageHarness<'gpu> {
@@ -206,13 +220,19 @@ impl<'gpu> ImageHarness<'gpu> {
                 view_generation: GENERATION,
             })
             .unwrap();
-        Self { gpu, renderer }
+        Self {
+            gpu,
+            renderer,
+            batch_points: BTreeMap::new(),
+        }
     }
 
     fn upsert(&mut self, key: u64, version: u64, points: Vec<RenderPoint>) {
+        let point_count = u64::try_from(points.len()).unwrap();
+        let key = BatchKey::new(key);
         let batch = PointBatch::new(
             GENERATION,
-            BatchKey::new(key),
+            key,
             BatchVersion::new(version),
             [0.0; 3],
             points,
@@ -221,6 +241,7 @@ impl<'gpu> ImageHarness<'gpu> {
         self.renderer
             .apply(&RenderUpdate::Upsert { batch })
             .unwrap();
+        self.batch_points.insert(key, point_count);
     }
 
     fn present(&mut self, key: u64, weight: PresentationWeight) {
@@ -235,21 +256,28 @@ impl<'gpu> ImageHarness<'gpu> {
     }
 
     fn remove(&mut self, key: u64, version: u64) {
+        let key = BatchKey::new(key);
         self.renderer
             .apply(&RenderUpdate::Remove {
                 view_generation: GENERATION,
-                key: BatchKey::new(key),
+                key,
                 expected_version: BatchVersion::new(version),
             })
             .unwrap();
+        self.batch_points.remove(&key);
     }
 
-    fn render(&mut self, style: PointStyle) -> RenderedImage {
+    fn resident_points(&self) -> u64 {
+        self.batch_points.values().copied().sum()
+    }
+
+    fn render(&mut self, style: PointStyle, projection: FixedProjection) -> RenderedImage {
+        let frame_started = Instant::now();
         let target = ColorTarget::new(&self.gpu.device);
         let mut encoder = self.encoder("renderer-demo fixed-view image encoder");
         let recorded = self
             .renderer
-            .render(&mut encoder, &target.view, &frame(style))
+            .render(&mut encoder, &target.view, &frame(style, projection))
             .unwrap();
         let report = recorded.report();
         target.encode_copy(&mut encoder);
@@ -261,6 +289,7 @@ impl<'gpu> ImageHarness<'gpu> {
             image,
             recorded,
             report,
+            frame_time: frame_started.elapsed(),
         }
     }
 
@@ -289,11 +318,38 @@ struct RenderedImage {
     image: Image,
     recorded: RecordedFrame,
     report: FrameReport,
+    frame_time: Duration,
 }
 
-fn frame(style: PointStyle) -> Frame {
-    let camera =
-        Camera::orthographic([0.0, -5.0, 0.0], [0.0; 3], [0.0, 0.0, 1.0], 4.0, 0.1, 100.0).unwrap();
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum FixedProjection {
+    Perspective,
+    Orthographic,
+}
+
+impl FixedProjection {
+    const ALL: [Self; 2] = [Self::Perspective, Self::Orthographic];
+
+    fn camera(self) -> Camera {
+        match self {
+            Self::Perspective => Camera::perspective(
+                [0.0, -5.0, 0.0],
+                [0.0; 3],
+                [0.0, 0.0, 1.0],
+                0.761_012_73,
+                0.1,
+                100.0,
+            ),
+            Self::Orthographic => {
+                Camera::orthographic([0.0, -5.0, 0.0], [0.0; 3], [0.0, 0.0, 1.0], 4.0, 0.1, 100.0)
+            }
+        }
+        .unwrap()
+    }
+}
+
+fn frame(style: PointStyle, projection: FixedProjection) -> Frame {
+    let camera = projection.camera();
     Frame::new(GENERATION, camera, viewport())
         .unwrap()
         .with_style(style)
