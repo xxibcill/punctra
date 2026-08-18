@@ -31,19 +31,22 @@ impl RenderTargets {
         (&targets.depth, pick)
     }
 
-    pub(crate) fn depth_and_edl_color(
+    pub(crate) fn eye_dome(
         &mut self,
         device: &wgpu::Device,
         viewport: Viewport,
-    ) -> (&DepthTarget, &ColorTarget) {
+        layout: &wgpu::BindGroupLayout,
+        uniform: &wgpu::Buffer,
+    ) -> (&DepthTarget, &ColorTarget, &wgpu::BindGroup) {
         let targets = self.for_viewport(device, viewport);
-        (
-            &targets.depth,
-            targets
-                .edl_color
-                .as_ref()
-                .expect("EDL targets are configured when the renderer enables EDL"),
-        )
+        let color = targets
+            .edl_color
+            .as_ref()
+            .expect("EDL targets are configured when the renderer enables EDL");
+        let bind_group = targets.edl_bind_group.get_or_insert_with(|| {
+            eye_dome_bind_group(device, layout, color, &targets.depth, uniform)
+        });
+        (&targets.depth, color, bind_group)
     }
 
     fn for_viewport(&mut self, device: &wgpu::Device, viewport: Viewport) -> &mut ViewportTargets {
@@ -59,6 +62,7 @@ impl RenderTargets {
                 edl_color: self
                     .edl_color_format
                     .map(|format| ColorTarget::new(device, viewport, format)),
+                edl_bind_group: None,
             });
         }
         self.current
@@ -72,6 +76,7 @@ struct ViewportTargets {
     depth: DepthTarget,
     pick: Option<PickTarget>,
     edl_color: Option<ColorTarget>,
+    edl_bind_group: Option<wgpu::BindGroup>,
 }
 
 pub(crate) struct DepthTarget {
@@ -152,6 +157,33 @@ impl PickTarget {
     pub(crate) const fn view(&self) -> &wgpu::TextureView {
         &self.view
     }
+}
+
+fn eye_dome_bind_group(
+    device: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+    color: &ColorTarget,
+    depth: &DepthTarget,
+    uniform: &wgpu::Buffer,
+) -> wgpu::BindGroup {
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("punctra eye-dome bind group"),
+        layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(color.view()),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::TextureView(depth.view()),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: uniform.as_entire_binding(),
+            },
+        ],
+    })
 }
 
 fn create_target(

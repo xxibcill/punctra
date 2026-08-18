@@ -21,7 +21,7 @@ use crate::{
         PickTicket,
     },
     pipeline::{DEPTH_FORMAT, PointPipelines},
-    targets::{ColorTarget, DepthTarget, PickTarget, RenderTargets},
+    targets::{DepthTarget, PickTarget, RenderTargets},
 };
 
 /// Immutable construction options for a [`WgpuRenderer`].
@@ -415,7 +415,9 @@ impl WgpuRenderer {
                 .edl_uniform_buffer
                 .as_ref()
                 .ok_or(RendererError::DepthCueResourcesUnavailable)?;
-            let (depth, color) = self.targets.depth_and_edl_color(&self.device, viewport);
+            let (depth, color, edl_bind_group) =
+                self.targets
+                    .eye_dome(&self.device, viewport, &edl_pipeline.layout, edl_uniform);
             record_point_pass(
                 encoder,
                 color.view(),
@@ -425,15 +427,7 @@ impl WgpuRenderer {
                 &self.camera_bind_group,
                 &batches,
             );
-            record_eye_dome_pass(
-                &self.device,
-                encoder,
-                target,
-                color,
-                depth,
-                edl_pipeline,
-                edl_uniform,
-            );
+            record_eye_dome_pass(encoder, target, edl_pipeline, edl_bind_group);
             u64::from(viewport.width())
                 .saturating_mul(u64::from(viewport.height()))
                 .saturating_mul(8)
@@ -878,32 +872,11 @@ fn record_point_pass(
 }
 
 fn record_eye_dome_pass(
-    device: &wgpu::Device,
     encoder: &mut wgpu::CommandEncoder,
     target: &wgpu::TextureView,
-    color: &ColorTarget,
-    depth: &DepthTarget,
     pipeline: &crate::pipeline::EdlPipeline,
-    uniform: &wgpu::Buffer,
+    bind_group: &wgpu::BindGroup,
 ) {
-    let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("punctra eye-dome bind group"),
-        layout: &pipeline.layout,
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: wgpu::BindingResource::TextureView(color.view()),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: wgpu::BindingResource::TextureView(depth.view()),
-            },
-            wgpu::BindGroupEntry {
-                binding: 2,
-                resource: uniform.as_entire_binding(),
-            },
-        ],
-    });
     let color_attachments = [Some(wgpu::RenderPassColorAttachment {
         view: target,
         depth_slice: None,
@@ -922,7 +895,7 @@ fn record_eye_dome_pass(
         multiview_mask: None,
     });
     pass.set_pipeline(&pipeline.pipeline);
-    pass.set_bind_group(0, &bind_group, &[]);
+    pass.set_bind_group(0, bind_group, &[]);
     pass.draw(0..3, 0..1);
 }
 

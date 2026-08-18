@@ -394,7 +394,8 @@ fn assert_eye_dome_paths(gpu: &GpuContext) {
             vec![point([0.0; 3], RED, 1_001)],
         ),
     });
-    let rendered = subject.render(&standard_frame(view_generation, VIEWPORT, 18.0, GREEN));
+    let frame = standard_frame(view_generation, VIEWPORT, 18.0, GREEN);
+    let rendered = subject.render(&frame);
     assert_eq!(
         rendered.report.transient_texture_bytes(),
         u64::from(VIEWPORT[0]) * u64::from(VIEWPORT[1]) * 8
@@ -403,6 +404,20 @@ fn assert_eye_dome_paths(gpu: &GpuContext) {
     assert!(
         edge[0] < 200 && edge[0] > 0,
         "eye-dome edge should be visibly but tolerantly darkened: {edge:?}"
+    );
+    let repeated = subject.render(&frame);
+    assert_eq!(repeated.image.pixel(CENTER), rendered.image.pixel(CENTER));
+
+    let resized_viewport = [80, 64];
+    let resized = subject.render(&standard_frame(
+        view_generation,
+        resized_viewport,
+        18.0,
+        GREEN,
+    ));
+    assert_eq!(
+        resized.report.transient_texture_bytes(),
+        u64::from(resized_viewport[0]) * u64::from(resized_viewport[1]) * 8
     );
 
     let fallback = WgpuRenderer::new(
