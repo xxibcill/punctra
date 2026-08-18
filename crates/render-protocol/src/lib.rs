@@ -299,6 +299,18 @@ pub enum RenderUpdate {
         /// The version the caller expects to be resident.
         expected_version: BatchVersion,
     },
+    /// Changes color presentation for one exact resident batch without changing
+    /// depth or pick coverage.
+    SetBatchPresentation {
+        /// The view generation the presentation update belongs to.
+        view_generation: ViewGenerationKey,
+        /// The resident batch to update.
+        key: BatchKey,
+        /// The version the caller expects to be resident.
+        expected_version: BatchVersion,
+        /// The color-only presentation weight.
+        weight: PresentationWeight,
+    },
     /// Replaces the complete set of highlighted caller point identities.
     SetHighlights {
         /// The view generation the highlight set belongs to.
@@ -315,6 +327,9 @@ impl RenderUpdate {
         match self {
             Self::Reset { view_generation }
             | Self::Remove {
+                view_generation, ..
+            }
+            | Self::SetBatchPresentation {
                 view_generation, ..
             }
             | Self::SetHighlights {
@@ -340,8 +355,47 @@ pub enum UpdateEffect<'update> {
         /// The accepted key to remove.
         key: BatchKey,
     },
+    /// Apply one color-only presentation weight to an exact resident batch.
+    BatchPresentationSet {
+        /// The accepted resident batch key.
+        key: BatchKey,
+        /// The accepted color presentation weight.
+        weight: PresentationWeight,
+    },
     /// Replace renderer highlighting from the state model's accepted set.
     HighlightsSet,
+}
+
+/// An exact color-only batch presentation weight.
+///
+/// `0` is transparent and `255` is opaque. The weight never affects depth or
+/// pick coverage.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub struct PresentationWeight(u8);
+
+impl PresentationWeight {
+    /// Fully transparent color presentation.
+    pub const TRANSPARENT: Self = Self(0);
+    /// Fully opaque color presentation.
+    pub const OPAQUE: Self = Self(u8::MAX);
+
+    /// Creates a weight from its exact eight-bit representation.
+    #[must_use]
+    pub const fn new(value: u8) -> Self {
+        Self(value)
+    }
+
+    /// Returns the exact eight-bit representation.
+    #[must_use]
+    pub const fn get(self) -> u8 {
+        self.0
+    }
+
+    /// Returns the normalized shader value.
+    #[must_use]
+    pub fn as_unit_f32(self) -> f32 {
+        f32::from(self.0) / f32::from(u8::MAX)
+    }
 }
 
 /// Hard protocol residency limits selected by the caller.
@@ -462,6 +516,8 @@ pub enum UpdateKind {
     BatchReplaced,
     /// A resident batch was removed.
     BatchRemoved,
+    /// A resident batch's color presentation weight changed.
+    BatchPresentationSet,
     /// The complete highlight set changed.
     HighlightsSet,
 }
@@ -653,6 +709,18 @@ impl RenderStateModel {
             } => (
                 self.apply_remove(*view_generation, *key, *expected_version)?,
                 UpdateEffect::BatchRemoved { key: *key },
+            ),
+            RenderUpdate::SetBatchPresentation {
+                view_generation,
+                key,
+                expected_version,
+                weight,
+            } => (
+                self.apply_batch_presentation(*view_generation, *key, *expected_version)?,
+                UpdateEffect::BatchPresentationSet {
+                    key: *key,
+                    weight: *weight,
+                },
             ),
             RenderUpdate::SetHighlights {
                 view_generation,
@@ -861,6 +929,28 @@ impl RenderStateModel {
 
         self.highlights = next_highlights;
         Ok(self.report(UpdateKind::HighlightsSet, 0, 0, 0, 0))
+    }
+
+    fn apply_batch_presentation(
+        &self,
+        view_generation: ViewGenerationKey,
+        key: BatchKey,
+        expected_version: BatchVersion,
+    ) -> Result<UpdateReport, ProtocolError> {
+        self.require_active_view_generation(view_generation)?;
+        let resident = self
+            .batches
+            .get(&key)
+            .copied()
+            .ok_or(ProtocolError::BatchNotResident { key })?;
+        if resident.version != expected_version {
+            return Err(ProtocolError::BatchVersionMismatch {
+                key,
+                resident: resident.version,
+                expected: expected_version,
+            });
+        }
+        Ok(self.report(UpdateKind::BatchPresentationSet, 0, 0, 0, 0))
     }
 
     fn require_active_view_generation(

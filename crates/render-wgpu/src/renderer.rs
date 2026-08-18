@@ -7,28 +7,29 @@ use std::{
 
 use bytemuck::Zeroable;
 use render_protocol::{
-    BatchKey, PointBatch, PointId, ProtocolError, RenderLimits, RenderStateModel, RenderUpdate,
-    UpdateEffect, UpdateReport, ViewGenerationKey, Viewport,
+    BatchKey, PointBatch, PointId, PresentationWeight, ProtocolError, RenderLimits,
+    RenderStateModel, RenderUpdate, UpdateEffect, UpdateReport, ViewGenerationKey, Viewport,
 };
 use thiserror::Error;
 use wgpu::util::DeviceExt;
 
 use crate::{
     Frame,
-    gpu::{BatchUniform, CameraUniform, GpuPoint},
+    gpu::{BatchUniform, CameraUniform, EdlUniform, GpuPoint},
     pick::{
         PICK_READBACK_ROW_BYTES, PICK_TOKEN_BYTES, PickError, PickRecord, PickRequest, PickTable,
         PickTicket,
     },
-    pipeline::PointPipelines,
-    targets::{DepthTarget, PickTarget, RenderTargets},
+    pipeline::{DEPTH_FORMAT, PointPipelines},
+    targets::{ColorTarget, DepthTarget, PickTarget, RenderTargets},
 };
 
 /// Immutable construction options for a [`WgpuRenderer`].
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RendererConfig {
     color_format: wgpu::TextureFormat,
     limits: RenderLimits,
+    eye_dome_lighting: Option<EyeDomeLighting>,
 }
 
 impl RendererConfig {
@@ -38,7 +39,16 @@ impl RendererConfig {
         Self {
             color_format,
             limits,
+            eye_dome_lighting: None,
         }
+    }
+
+    /// Enables bounded eye-dome lighting when the target and device support
+    /// the required four-byte color and sampleable depth textures.
+    #[must_use]
+    pub const fn with_eye_dome_lighting(mut self, config: EyeDomeLighting) -> Self {
+        self.eye_dome_lighting = Some(config);
+        self
     }
 
     /// Returns the target color format used to compile the point pipeline.
@@ -54,6 +64,68 @@ impl RendererConfig {
     }
 }
 
+/// Bounded eye-dome lighting controls.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EyeDomeLighting {
+    strength: f32,
+    radius_pixels: u32,
+}
+
+impl EyeDomeLighting {
+    /// Creates a depth cue with strength in `(0, 10]` and a radius from one to
+    /// eight physical pixels.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DepthCueError`] when either bound is violated.
+    pub fn new(strength: f32, radius_pixels: u32) -> Result<Self, DepthCueError> {
+        if !strength.is_finite() || strength <= 0.0 || strength > 10.0 {
+            return Err(DepthCueError::InvalidStrength);
+        }
+        if !(1..=8).contains(&radius_pixels) {
+            return Err(DepthCueError::InvalidRadius);
+        }
+        Ok(Self {
+            strength,
+            radius_pixels,
+        })
+    }
+
+    /// Returns the bounded depth-discontinuity strength.
+    #[must_use]
+    pub const fn strength(self) -> f32 {
+        self.strength
+    }
+
+    /// Returns the physical-pixel neighbor radius.
+    #[must_use]
+    pub const fn radius_pixels(self) -> u32 {
+        self.radius_pixels
+    }
+}
+
+/// An invalid eye-dome lighting configuration.
+#[derive(Clone, Copy, Debug, Eq, Error, PartialEq)]
+pub enum DepthCueError {
+    /// Strength was non-finite, non-positive, or above ten.
+    #[error("eye-dome strength must be finite and inside (0, 10]")]
+    InvalidStrength,
+    /// Radius was outside one through eight physical pixels.
+    #[error("eye-dome radius must be inside 1..=8 physical pixels")]
+    InvalidRadius,
+}
+
+/// Runtime disposition of the optional eye-dome lighting path.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DepthCueStatus {
+    /// The caller explicitly left the depth cue disabled.
+    Disabled,
+    /// Eye-dome lighting is active.
+    Active,
+    /// The caller enabled it, but the renderer safely uses the unenhanced path.
+    UnsupportedFallback,
+}
+
 /// Observable work encoded for one frame.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FrameReport {
@@ -62,6 +134,7 @@ pub struct FrameReport {
     draw_calls: u64,
     resident_bytes: u64,
     encoding_time: Duration,
+    transient_texture_bytes: u64,
 }
 
 impl FrameReport {
@@ -93,6 +166,12 @@ impl FrameReport {
     #[must_use]
     pub const fn encoding_time(self) -> Duration {
         self.encoding_time
+    }
+
+    /// Returns exact owned transient color/depth texture bytes for this frame.
+    #[must_use]
+    pub const fn transient_texture_bytes(self) -> u64 {
+        self.transient_texture_bytes
     }
 }
 
@@ -131,6 +210,8 @@ pub struct WgpuRenderer {
     batches: BTreeMap<BatchKey, GpuBatch>,
     targets: RenderTargets,
     pick_table: Option<Arc<PickTable>>,
+    depth_cue_status: DepthCueStatus,
+    edl_uniform_buffer: Option<wgpu::Buffer>,
 }
 
 impl WgpuRenderer {
@@ -157,7 +238,9 @@ impl WgpuRenderer {
             return Err(RendererError::InvalidColorFormat(config.color_format));
         }
 
-        let pipelines = PointPipelines::new(device, config.color_format);
+        let depth_cue_status = depth_cue_status(device, config);
+        let edl_active = depth_cue_status == DepthCueStatus::Active;
+        let pipelines = PointPipelines::new(device, config.color_format, edl_active);
         let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("punctra camera uniform"),
             contents: bytemuck::bytes_of(&CameraUniform::zeroed()),
@@ -169,6 +252,20 @@ impl WgpuRenderer {
             &camera_buffer,
             "punctra camera bind group",
         );
+        let edl_uniform_buffer = match (edl_active, config.eye_dome_lighting) {
+            (true, Some(cue)) => Some(device.create_buffer_init(
+                &wgpu::util::BufferInitDescriptor {
+                    label: Some("punctra eye-dome uniform"),
+                    contents: bytemuck::bytes_of(&EdlUniform {
+                        strength: cue.strength(),
+                        radius_pixels: cue.radius_pixels(),
+                        _padding: [0; 2],
+                    }),
+                    usage: wgpu::BufferUsages::UNIFORM,
+                },
+            )),
+            _ => None,
+        };
 
         Ok(Self {
             identity: Arc::new(RendererIdentity),
@@ -178,9 +275,18 @@ impl WgpuRenderer {
             camera_buffer,
             camera_bind_group,
             batches: BTreeMap::new(),
-            targets: RenderTargets::default(),
+            targets: RenderTargets::new(edl_active.then_some(config.color_format)),
             pick_table: None,
+            depth_cue_status,
+            edl_uniform_buffer,
         })
+    }
+
+    /// Returns whether the requested eye-dome path is disabled, active, or
+    /// using its explicit unenhanced fallback.
+    #[must_use]
+    pub const fn depth_cue_status(&self) -> DepthCueStatus {
+        self.depth_cue_status
     }
 
     /// Applies one complete renderer-neutral update atomically.
@@ -219,6 +325,13 @@ impl WgpuRenderer {
             }
             UpdateEffect::BatchRemoved { key } => {
                 self.batches.remove(&key);
+            }
+            UpdateEffect::BatchPresentationSet { key, weight } => {
+                let batch = self
+                    .batches
+                    .get_mut(&key)
+                    .ok_or(RendererError::GpuBatchMissing { key })?;
+                batch.presentation_weight = weight;
             }
             UpdateEffect::HighlightsSet => {
                 let highlights = highlights(&next_state);
@@ -267,46 +380,53 @@ impl WgpuRenderer {
         self.record_frame_uniforms(encoder, frame, &batches)?;
 
         let clear = frame.style().clear_color();
-        let color_attachment = Some(wgpu::RenderPassColorAttachment {
-            view: target,
-            depth_slice: None,
-            resolve_target: None,
-            ops: wgpu::Operations {
-                load: wgpu::LoadOp::Clear(wgpu::Color {
-                    r: clear[0],
-                    g: clear[1],
-                    b: clear[2],
-                    a: clear[3],
-                }),
-                store: wgpu::StoreOp::Store,
-            },
-        });
-        let color_attachments = [color_attachment];
-        let depth = self.targets.depth(&self.device, viewport);
-
-        {
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("punctra point pass"),
-                color_attachments: &color_attachments,
-                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: depth.view(),
-                    depth_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(1.0),
-                        store: wgpu::StoreOp::Store,
-                    }),
-                    stencil_ops: None,
-                }),
-                timestamp_writes: None,
-                occlusion_query_set: None,
-                multiview_mask: None,
-            });
-            record_point_batches(
-                &mut pass,
+        let transient_texture_bytes = if self.depth_cue_status == DepthCueStatus::Active {
+            let edl_pipeline = self
+                .pipelines
+                .edl
+                .as_ref()
+                .ok_or(RendererError::DepthCueResourcesUnavailable)?;
+            let edl_uniform = self
+                .edl_uniform_buffer
+                .as_ref()
+                .ok_or(RendererError::DepthCueResourcesUnavailable)?;
+            let (depth, color) = self.targets.depth_and_edl_color(&self.device, viewport);
+            record_point_pass(
+                encoder,
+                color.view(),
+                depth,
+                clear,
                 &self.pipelines.draw,
                 &self.camera_bind_group,
-                batches.iter(),
+                &batches,
             );
-        }
+            record_eye_dome_pass(
+                &self.device,
+                encoder,
+                target,
+                color,
+                depth,
+                edl_pipeline,
+                edl_uniform,
+            );
+            u64::from(viewport.width())
+                .saturating_mul(u64::from(viewport.height()))
+                .saturating_mul(8)
+        } else {
+            let depth = self.targets.depth(&self.device, viewport);
+            record_point_pass(
+                encoder,
+                target,
+                depth,
+                clear,
+                &self.pipelines.draw,
+                &self.camera_bind_group,
+                &batches,
+            );
+            u64::from(viewport.width())
+                .saturating_mul(u64::from(viewport.height()))
+                .saturating_mul(4)
+        };
 
         let report = FrameReport {
             view_generation: active_view_generation,
@@ -314,6 +434,7 @@ impl WgpuRenderer {
             draw_calls: snapshot.resident().batch_count(),
             resident_bytes: snapshot.resident().estimated_gpu_bytes(),
             encoding_time: started_at.elapsed(),
+            transient_texture_bytes,
         };
         Ok(RecordedFrame {
             renderer: Arc::clone(&self.identity),
@@ -516,6 +637,8 @@ impl WgpuRenderer {
             }
             let uniform = BatchUniform {
                 origin_from_camera: [offset[0], offset[1], offset[2], 0.0],
+                presentation_weight: batch.presentation_weight.as_unit_f32(),
+                _presentation_padding: [0.0; 3],
             };
             let source_offset =
                 wgpu::BufferAddress::try_from(upload_bytes.len()).map_err(|_| {
@@ -555,6 +678,7 @@ struct RecordedBatch {
     vertex_buffer: wgpu::Buffer,
     uniform_buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
+    presentation_weight: PresentationWeight,
 }
 
 impl RecordedBatch {
@@ -566,6 +690,7 @@ impl RecordedBatch {
             vertex_buffer: batch.vertex_buffer.clone(),
             uniform_buffer: batch.uniform_buffer.clone(),
             bind_group: batch.bind_group.clone(),
+            presentation_weight: batch.presentation_weight,
         }
     }
 }
@@ -578,6 +703,7 @@ struct GpuBatch {
     vertex_buffer: wgpu::Buffer,
     uniform_buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
+    presentation_weight: PresentationWeight,
 }
 
 impl GpuBatch {
@@ -641,6 +767,7 @@ impl GpuBatch {
             vertex_buffer,
             uniform_buffer,
             bind_group,
+            presentation_weight: PresentationWeight::OPAQUE,
         })
     }
 
@@ -672,12 +799,135 @@ fn record_point_batches<'pass>(
     }
 }
 
+fn record_point_pass(
+    encoder: &mut wgpu::CommandEncoder,
+    target: &wgpu::TextureView,
+    depth: &DepthTarget,
+    clear: [f64; 4],
+    pipeline: &wgpu::RenderPipeline,
+    camera_bind_group: &wgpu::BindGroup,
+    batches: &[RecordedBatch],
+) {
+    let color_attachments = [Some(wgpu::RenderPassColorAttachment {
+        view: target,
+        depth_slice: None,
+        resolve_target: None,
+        ops: wgpu::Operations {
+            load: wgpu::LoadOp::Clear(wgpu::Color {
+                r: clear[0],
+                g: clear[1],
+                b: clear[2],
+                a: clear[3],
+            }),
+            store: wgpu::StoreOp::Store,
+        },
+    })];
+    let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+        label: Some("punctra point pass"),
+        color_attachments: &color_attachments,
+        depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+            view: depth.view(),
+            depth_ops: Some(wgpu::Operations {
+                load: wgpu::LoadOp::Clear(1.0),
+                store: wgpu::StoreOp::Store,
+            }),
+            stencil_ops: None,
+        }),
+        timestamp_writes: None,
+        occlusion_query_set: None,
+        multiview_mask: None,
+    });
+    pass.set_pipeline(pipeline);
+    pass.set_bind_group(0, camera_bind_group, &[]);
+    for batch in batches {
+        pass.set_bind_group(1, &batch.bind_group, &[]);
+        pass.set_vertex_buffer(0, batch.vertex_buffer.slice(..));
+        pass.draw(0..6, 0..batch.point_count);
+    }
+}
+
+fn record_eye_dome_pass(
+    device: &wgpu::Device,
+    encoder: &mut wgpu::CommandEncoder,
+    target: &wgpu::TextureView,
+    color: &ColorTarget,
+    depth: &DepthTarget,
+    pipeline: &crate::pipeline::EdlPipeline,
+    uniform: &wgpu::Buffer,
+) {
+    let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("punctra eye-dome bind group"),
+        layout: &pipeline.layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(color.view()),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::TextureView(depth.view()),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: uniform.as_entire_binding(),
+            },
+        ],
+    });
+    let color_attachments = [Some(wgpu::RenderPassColorAttachment {
+        view: target,
+        depth_slice: None,
+        resolve_target: None,
+        ops: wgpu::Operations {
+            load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+            store: wgpu::StoreOp::Store,
+        },
+    })];
+    let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+        label: Some("punctra eye-dome pass"),
+        color_attachments: &color_attachments,
+        depth_stencil_attachment: None,
+        timestamp_writes: None,
+        occlusion_query_set: None,
+        multiview_mask: None,
+    });
+    pass.set_pipeline(&pipeline.pipeline);
+    pass.set_bind_group(0, &bind_group, &[]);
+    pass.draw(0..3, 0..1);
+}
+
 fn point_buffer(device: &wgpu::Device, points: &[GpuPoint]) -> wgpu::Buffer {
     device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("punctra point batch"),
         contents: bytemuck::cast_slice(points),
         usage: wgpu::BufferUsages::VERTEX,
     })
+}
+
+fn depth_cue_status(device: &wgpu::Device, config: RendererConfig) -> DepthCueStatus {
+    if config.eye_dome_lighting.is_none() {
+        return DepthCueStatus::Disabled;
+    }
+    let color_is_four_bytes = matches!(
+        config.color_format,
+        wgpu::TextureFormat::Rgba8Unorm
+            | wgpu::TextureFormat::Rgba8UnormSrgb
+            | wgpu::TextureFormat::Bgra8Unorm
+            | wgpu::TextureFormat::Bgra8UnormSrgb
+    );
+    let color_sampleable = config
+        .color_format
+        .guaranteed_format_features(device.features())
+        .allowed_usages
+        .contains(wgpu::TextureUsages::TEXTURE_BINDING);
+    let depth_sampleable = DEPTH_FORMAT
+        .guaranteed_format_features(device.features())
+        .allowed_usages
+        .contains(wgpu::TextureUsages::TEXTURE_BINDING);
+    if color_is_four_bytes && color_sampleable && depth_sampleable {
+        DepthCueStatus::Active
+    } else {
+        DepthCueStatus::UnsupportedFallback
+    }
 }
 
 /// An error returned by renderer construction, update, or frame recording.
@@ -755,6 +1005,15 @@ pub enum RendererError {
     /// Internal generation pick metadata was unexpectedly absent.
     #[error("active View generation has no pick metadata")]
     PickMetadataUnavailable,
+    /// Protocol and GPU batch maps unexpectedly diverged.
+    #[error("resident protocol batch {key:?} is missing from GPU state")]
+    GpuBatchMissing {
+        /// The missing resident batch.
+        key: BatchKey,
+    },
+    /// Active eye-dome state unexpectedly lacked its fixed resources.
+    #[error("active eye-dome lighting resources are unavailable")]
+    DepthCueResourcesUnavailable,
     /// A batch origin is too far from the camera to fit the display model.
     #[error("batch {key:?} origin axis {axis} is outside finite f32 camera-relative range")]
     BatchOriginOutOfRange {

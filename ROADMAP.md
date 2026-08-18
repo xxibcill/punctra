@@ -279,8 +279,26 @@ Repository exit gates:
 
 Priority: **P1 for false tile/feature impressions; P2 for depth enhancement**
 
-Implementation status: **Next — density-transition and optional depth-cue
-policies are accepted by the corrective design but not implemented.**
+Implementation status: **Complete — repository implementation and local GPU
+acceptance are present. Field image qualification remains part of workstream
+D and is not implied by these generated regressions.**
+
+Implemented scope:
+
+- the private host derives a projected-spacing Point diameter from the current
+  physical viewport and drawn Point count, clamped deterministically to
+  1–4 physical pixels;
+- parent retirement is held behind an exact eight-presented-frame color-only
+  cross-fade to its resident descendants, then remains version-conditional;
+- presentation weight affects only color coverage: depth and provisional pick
+  identity continue to use the source Point alpha and geometry;
+- optional four-neighbour eye-dome lighting uses one sampleable color target
+  plus the existing sampleable depth target, for at most eight transient bytes
+  per physical pixel; unsupported target formats select the correct unenhanced
+  fallback; and
+- protocol state-model tests cover conditional presentation changes, while
+  forced local GPU tests cover pick independence, bounded EDL allocation, the
+  enhanced path, and the unsupported-format fallback.
 
 Likely scope:
 

@@ -147,4 +147,7 @@ pub use pick::{PickError, PickHit, PickPoll, PickRequest, PickTicket};
 pub use render_protocol::{
     Camera, CameraBasis, CameraError, CameraProjection, Viewport, ViewportError,
 };
-pub use renderer::{FrameReport, RecordedFrame, RendererConfig, RendererError, WgpuRenderer};
+pub use renderer::{
+    DepthCueError, DepthCueStatus, EyeDomeLighting, FrameReport, RecordedFrame, RendererConfig,
+    RendererError, WgpuRenderer,
+};

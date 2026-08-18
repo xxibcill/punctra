@@ -9,6 +9,10 @@ struct CameraUniform {
 
 struct BatchUniform {
     origin_from_camera: vec4<f32>,
+    presentation_weight: f32,
+    _presentation_padding_0: f32,
+    _presentation_padding_1: f32,
+    _presentation_padding_2: f32,
 }
 
 @group(0) @binding(0)
@@ -29,6 +33,7 @@ struct VertexOutput {
     @location(0) color: vec4<f32>,
     @location(1) corner: vec2<f32>,
     @location(2) @interpolate(flat) pick_token: u32,
+    @location(3) @interpolate(flat) source_alpha: f32,
 }
 
 const HIGHLIGHTED: u32 = 1u;
@@ -62,14 +67,16 @@ fn point_vertex(input: VertexInput, @builtin(vertex_index) vertex_index: u32) ->
         input.color.a,
     );
     output.color = select(input.color, highlighted_color, (input.flags & HIGHLIGHTED) != 0u);
+    output.color.a *= batch.presentation_weight;
     output.corner = corner;
     output.pick_token = input.pick_token;
+    output.source_alpha = input.color.a;
     return output;
 }
 
 @fragment
 fn point_fragment(input: VertexOutput) -> @location(0) vec4<f32> {
-    if !splat_is_visible(input) {
+    if input.color.a <= 0.0 || !inside_splat(input.corner) {
         discard;
     }
     return input.color;
@@ -77,12 +84,12 @@ fn point_fragment(input: VertexOutput) -> @location(0) vec4<f32> {
 
 @fragment
 fn pick_fragment(input: VertexOutput) -> @location(0) u32 {
-    if !splat_is_visible(input) {
+    if input.source_alpha <= 0.0 || !inside_splat(input.corner) {
         discard;
     }
     return input.pick_token;
 }
 
-fn splat_is_visible(input: VertexOutput) -> bool {
-    return input.color.a > 0.0 && dot(input.corner, input.corner) <= 1.0;
+fn inside_splat(corner: vec2<f32>) -> bool {
+    return dot(corner, corner) <= 1.0;
 }

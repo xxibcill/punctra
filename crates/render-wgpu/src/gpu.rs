@@ -17,6 +17,16 @@ pub(crate) struct CameraUniform {
 #[derive(Clone, Copy, Debug, Pod, Zeroable)]
 pub(crate) struct BatchUniform {
     pub(crate) origin_from_camera: [f32; 4],
+    pub(crate) presentation_weight: f32,
+    pub(crate) _presentation_padding: [f32; 3],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Pod, Zeroable)]
+pub(crate) struct EdlUniform {
+    pub(crate) strength: f32,
+    pub(crate) radius_pixels: u32,
+    pub(crate) _padding: [u32; 2],
 }
 
 #[repr(C)]

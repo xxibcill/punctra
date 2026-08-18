@@ -2,12 +2,19 @@ use render_protocol::Viewport;
 
 use crate::pipeline::{DEPTH_FORMAT, PICK_FORMAT};
 
-#[derive(Default)]
 pub(crate) struct RenderTargets {
+    edl_color_format: Option<wgpu::TextureFormat>,
     current: Option<ViewportTargets>,
 }
 
 impl RenderTargets {
+    pub(crate) const fn new(edl_color_format: Option<wgpu::TextureFormat>) -> Self {
+        Self {
+            edl_color_format,
+            current: None,
+        }
+    }
+
     pub(crate) fn depth(&mut self, device: &wgpu::Device, viewport: Viewport) -> &DepthTarget {
         &self.for_viewport(device, viewport).depth
     }
@@ -24,6 +31,21 @@ impl RenderTargets {
         (&targets.depth, pick)
     }
 
+    pub(crate) fn depth_and_edl_color(
+        &mut self,
+        device: &wgpu::Device,
+        viewport: Viewport,
+    ) -> (&DepthTarget, &ColorTarget) {
+        let targets = self.for_viewport(device, viewport);
+        (
+            &targets.depth,
+            targets
+                .edl_color
+                .as_ref()
+                .expect("EDL targets are configured when the renderer enables EDL"),
+        )
+    }
+
     fn for_viewport(&mut self, device: &wgpu::Device, viewport: Viewport) -> &mut ViewportTargets {
         let matches = self
             .current
@@ -32,8 +54,11 @@ impl RenderTargets {
         if !matches {
             self.current = Some(ViewportTargets {
                 viewport,
-                depth: DepthTarget::new(device, viewport),
+                depth: DepthTarget::new(device, viewport, self.edl_color_format.is_some()),
                 pick: None,
+                edl_color: self
+                    .edl_color_format
+                    .map(|format| ColorTarget::new(device, viewport, format)),
             });
         }
         self.current
@@ -46,6 +71,7 @@ struct ViewportTargets {
     viewport: Viewport,
     depth: DepthTarget,
     pick: Option<PickTarget>,
+    edl_color: Option<ColorTarget>,
 }
 
 pub(crate) struct DepthTarget {
@@ -54,13 +80,42 @@ pub(crate) struct DepthTarget {
 }
 
 impl DepthTarget {
-    fn new(device: &wgpu::Device, viewport: Viewport) -> Self {
+    fn new(device: &wgpu::Device, viewport: Viewport, sampleable: bool) -> Self {
+        let mut usage = wgpu::TextureUsages::RENDER_ATTACHMENT;
+        if sampleable {
+            usage |= wgpu::TextureUsages::TEXTURE_BINDING;
+        }
         let (texture, view) = create_target(
             device,
             viewport,
             "punctra depth texture",
             DEPTH_FORMAT,
-            wgpu::TextureUsages::RENDER_ATTACHMENT,
+            usage,
+        );
+        Self {
+            _texture: texture,
+            view,
+        }
+    }
+
+    pub(crate) const fn view(&self) -> &wgpu::TextureView {
+        &self.view
+    }
+}
+
+pub(crate) struct ColorTarget {
+    _texture: wgpu::Texture,
+    view: wgpu::TextureView,
+}
+
+impl ColorTarget {
+    fn new(device: &wgpu::Device, viewport: Viewport, format: wgpu::TextureFormat) -> Self {
+        let (texture, view) = create_target(
+            device,
+            viewport,
+            "punctra eye-dome color texture",
+            format,
+            wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
         );
         Self {
             _texture: texture,

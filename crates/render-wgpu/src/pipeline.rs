@@ -1,4 +1,4 @@
-use crate::gpu::{BatchUniform, CameraUniform, GpuPoint};
+use crate::gpu::{BatchUniform, CameraUniform, EdlUniform, GpuPoint};
 
 pub(crate) const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 pub(crate) const PICK_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::R32Uint;
@@ -8,10 +8,20 @@ pub(crate) struct PointPipelines {
     pub(crate) batch_layout: wgpu::BindGroupLayout,
     pub(crate) draw: wgpu::RenderPipeline,
     pub(crate) pick: wgpu::RenderPipeline,
+    pub(crate) edl: Option<EdlPipeline>,
+}
+
+pub(crate) struct EdlPipeline {
+    pub(crate) layout: wgpu::BindGroupLayout,
+    pub(crate) pipeline: wgpu::RenderPipeline,
 }
 
 impl PointPipelines {
-    pub(crate) fn new(device: &wgpu::Device, color_format: wgpu::TextureFormat) -> Self {
+    pub(crate) fn new(
+        device: &wgpu::Device,
+        color_format: wgpu::TextureFormat,
+        enable_edl: bool,
+    ) -> Self {
         let camera_layout = uniform_layout::<CameraUniform>(device, "punctra camera layout");
         let batch_layout = uniform_layout::<BatchUniform>(device, "punctra batch layout");
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -53,13 +63,91 @@ impl PointPipelines {
             "pick_fragment",
             "punctra pick pipeline",
         );
+        let edl = enable_edl.then(|| EdlPipeline::new(device, color_format));
 
         Self {
             camera_layout,
             batch_layout,
             draw,
             pick,
+            edl,
         }
+    }
+}
+
+impl EdlPipeline {
+    fn new(device: &wgpu::Device, color_format: wgpu::TextureFormat) -> Self {
+        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("punctra eye-dome bind group layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Depth,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: wgpu::BufferSize::new(size_of::<EdlUniform>() as u64),
+                    },
+                    count: None,
+                },
+            ],
+        });
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("punctra eye-dome pipeline layout"),
+            bind_group_layouts: &[Some(&layout)],
+            immediate_size: 0,
+        });
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("punctra eye-dome shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("eye_dome.wgsl").into()),
+        });
+        let targets = [Some(wgpu::ColorTargetState {
+            format: color_format,
+            blend: None,
+            write_mask: wgpu::ColorWrites::ALL,
+        })];
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("punctra eye-dome pipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("fullscreen_vertex"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[],
+            },
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("eye_dome_fragment"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &targets,
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
+        Self { layout, pipeline }
     }
 }
 

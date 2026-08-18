@@ -7,12 +7,13 @@ mod gpu_support;
 
 use render_protocol::{
     BatchKey, BatchVersion, ESTIMATED_GPU_BYTES_PER_POINT as POINT_BYTES, PointBatch, PointId,
-    ProtocolError, RenderLimits, RenderPoint, RenderUpdate, ResidentResource, SourceId, UpdateKind,
-    UpdateReport, ViewGenerationKey, ViewId, Viewport,
+    PresentationWeight, ProtocolError, RenderLimits, RenderPoint, RenderUpdate, ResidentResource,
+    SourceId, UpdateKind, UpdateReport, ViewGenerationKey, ViewId, Viewport,
 };
 use render_wgpu::{
-    Camera, Frame, FrameReport, PickError, PickHit, PickPoll, PickRequest, PickTicket, PointStyle,
-    RecordedFrame, RendererConfig, RendererError, WgpuRenderer,
+    Camera, DepthCueStatus, EyeDomeLighting, Frame, FrameReport, PickError, PickHit, PickPoll,
+    PickRequest, PickTicket, PointStyle, RecordedFrame, RendererConfig, RendererError,
+    WgpuRenderer,
 };
 
 use gpu_support::{GpuContext, with_gpu};
@@ -79,6 +80,16 @@ fn recorded_frames_keep_replaced_batch_data_and_identity() {
 #[test]
 fn recorded_frames_are_bound_to_the_renderer_that_created_them() {
     with_gpu(assert_foreign_recorded_frame_rejected);
+}
+
+#[test]
+fn presentation_weight_changes_color_but_not_pick_coverage() {
+    with_gpu(assert_presentation_weight_is_color_only);
+}
+
+#[test]
+fn eye_dome_lighting_has_bounded_active_and_fallback_paths() {
+    with_gpu(assert_eye_dome_paths);
 }
 
 fn assert_lifecycle_updates_are_atomic(gpu: &GpuContext) {
@@ -284,6 +295,76 @@ fn assert_highlight_alpha_preservation(gpu: &GpuContext) {
         .pick_and_wait(&rendered.recorded_frame, CENTER)
         .expect("highlighting must preserve a source-visible point for picking");
     assert_hit(hit, view_generation, 1, 1, point_id);
+}
+
+fn assert_presentation_weight_is_color_only(gpu: &GpuContext) {
+    let mut subject = OffscreenRenderer::new(gpu, roomy_limits());
+    let view_generation = ViewGenerationKey::new(ViewId::new(9), 1);
+    let identity = point_id(901);
+    subject.apply(&RenderUpdate::Reset { view_generation });
+    subject.apply(&RenderUpdate::Upsert {
+        batch: batch(
+            view_generation,
+            1,
+            1,
+            WORLD_ORIGIN,
+            vec![point([0.0; 3], RED, identity.ordinal())],
+        ),
+    });
+    subject.apply(&RenderUpdate::SetBatchPresentation {
+        view_generation,
+        key: BatchKey::new(1),
+        expected_version: BatchVersion::new(1),
+        weight: PresentationWeight::TRANSPARENT,
+    });
+
+    let frame = standard_frame(view_generation, VIEWPORT, 18.0, GREEN);
+    let rendered = subject.render(&frame);
+    assert_pixel(rendered.image.pixel(CENTER), BLACK);
+    let hit = subject
+        .pick_and_wait(&rendered.recorded_frame, CENTER)
+        .expect("transparent presentation must preserve source pick coverage");
+    assert_hit(hit, view_generation, 1, 1, identity);
+}
+
+fn assert_eye_dome_paths(gpu: &GpuContext) {
+    let cue = EyeDomeLighting::new(1.25, 1).unwrap();
+    let config = RendererConfig::new(FORMAT, roomy_limits()).with_eye_dome_lighting(cue);
+    let mut subject = OffscreenRenderer::with_config(gpu, config);
+    assert_eq!(subject.renderer.depth_cue_status(), DepthCueStatus::Active);
+
+    let view_generation = ViewGenerationKey::new(ViewId::new(10), 1);
+    subject.apply(&RenderUpdate::Reset { view_generation });
+    subject.apply(&RenderUpdate::Upsert {
+        batch: batch(
+            view_generation,
+            1,
+            1,
+            WORLD_ORIGIN,
+            vec![point([0.0; 3], RED, 1_001)],
+        ),
+    });
+    let rendered = subject.render(&standard_frame(view_generation, VIEWPORT, 18.0, GREEN));
+    assert_eq!(
+        rendered.report.transient_texture_bytes(),
+        u64::from(VIEWPORT[0]) * u64::from(VIEWPORT[1]) * 8
+    );
+    let edge = rendered.image.pixel([CENTER[0] + 8, CENTER[1]]);
+    assert!(
+        edge[0] < 200 && edge[0] > 0,
+        "eye-dome edge should be visibly but tolerantly darkened: {edge:?}"
+    );
+
+    let fallback = WgpuRenderer::new(
+        &gpu.device,
+        RendererConfig::new(wgpu::TextureFormat::Rgba16Float, roomy_limits())
+            .with_eye_dome_lighting(cue),
+    )
+    .expect("the blendable fallback format should remain a valid renderer target");
+    assert_eq!(
+        fallback.depth_cue_status(),
+        DepthCueStatus::UnsupportedFallback
+    );
 }
 
 fn assert_large_world_precision(gpu: &GpuContext) {
@@ -574,7 +655,11 @@ struct OffscreenRenderer<'gpu> {
 
 impl<'gpu> OffscreenRenderer<'gpu> {
     fn new(gpu: &'gpu GpuContext, limits: RenderLimits) -> Self {
-        let renderer = WgpuRenderer::new(&gpu.device, RendererConfig::new(FORMAT, limits))
+        Self::with_config(gpu, RendererConfig::new(FORMAT, limits))
+    }
+
+    fn with_config(gpu: &'gpu GpuContext, config: RendererConfig) -> Self {
+        let renderer = WgpuRenderer::new(&gpu.device, config)
             .expect("the renderer should attach to the test device");
         Self { gpu, renderer }
     }

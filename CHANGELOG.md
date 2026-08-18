@@ -5,6 +5,12 @@ All notable changes to Punctra are documented here. The project follows
 
 ## Unreleased - 0.12.0-alpha.1
 
+- Added a bounded renderer appearance policy: projected-density-aware 1–4
+  physical-pixel splats, exact eight-presented-frame parent/child color
+  transitions, and optional eye-dome lighting with an explicit unenhanced
+  fallback. Presentation weight and depth enhancement do not change Point
+  position, depth coverage, or provisional pick identity, and enhanced
+  rendering is capped at eight transient texture bytes per physical pixel.
 - Activated the bounded pre-v0.13 renderer-quality corrective design. The
   public View planner now reconstructs still-valid refinement history before
   considering new refinements and budgets only still-demanded in-flight work;

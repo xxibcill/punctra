@@ -1,5 +1,6 @@
 //! Interactive progressive renderer for the synthetic fixture or one LAS/LAZ Source.
 
+mod appearance;
 mod corpus;
 mod diagnostic;
 mod orbit_camera;
@@ -17,6 +18,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use appearance::{DensityTransitions, TransitionAction, projected_spacing_point_size};
 use diagnostic::{ViewFailure, ViewPhase, classify_protocol_failure, classify_renderer_failure};
 use orbit_camera::{OrbitCamera, ProjectionMode};
 use point_contracts::SourceMetadata;
@@ -31,8 +33,8 @@ use render_protocol::{
     ViewId, Viewport,
 };
 use render_wgpu::{
-    Camera, Frame, FrameReport, PickPoll, PickRequest, PickTicket, PointStyle, RecordedFrame,
-    RendererConfig, RendererError, WgpuRenderer,
+    Camera, DepthCueStatus, EyeDomeLighting, Frame, FrameReport, PickPoll, PickRequest, PickTicket,
+    PointStyle, RecordedFrame, RendererConfig, RendererError, WgpuRenderer,
 };
 use renderer_demo::display::{DisplayIndexPolicy, DisplayMode};
 use review::{
@@ -887,6 +889,7 @@ struct Graphics {
     camera: OrbitCamera,
     camera_reset_radius: f64,
     style: PointStyle,
+    density_transitions: DensityTransitions,
     input: PointerInput,
     loads_paused: bool,
     highlights_enabled: bool,
@@ -964,9 +967,16 @@ impl Graphics {
             RESIDENT_BATCH_BUDGET,
         )
         .with_max_highlight_points(review::MAX_HIGHLIGHT_POINTS);
-        let mut renderer =
-            WgpuRenderer::new(&device, RendererConfig::new(surface_config.format, limits))
-                .map_err(|error| ViewFailure::gpu(ViewPhase::GpuSetup, error))?;
+        let depth_cue = EyeDomeLighting::new(1.25, 1)
+            .map_err(|error| internal_failure(ViewPhase::GpuSetup, error))?;
+        let mut renderer = WgpuRenderer::new(
+            &device,
+            RendererConfig::new(surface_config.format, limits).with_eye_dome_lighting(depth_cue),
+        )
+        .map_err(|error| ViewFailure::gpu(ViewPhase::GpuSetup, error))?;
+        if renderer.depth_cue_status() == DepthCueStatus::UnsupportedFallback {
+            println!("GPU depth cue: unsupported; using the unenhanced render path");
+        }
         let reset = RenderUpdate::Reset {
             view_generation: VIEW_GENERATION,
         };
@@ -999,6 +1009,7 @@ impl Graphics {
                 .with_projection(projection),
             camera_reset_radius,
             style,
+            density_transitions: DensityTransitions::default(),
             input: PointerInput::default(),
             loads_paused: false,
             highlights_enabled: false,
@@ -1036,9 +1047,17 @@ impl Graphics {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("punctra renderer demo frame"),
             });
+        let point_size =
+            projected_spacing_point_size(viewport, self.scene.metrics().resident_points);
+        let style = PointStyle::new(
+            point_size,
+            self.style.highlight_color(),
+            self.style.clear_color(),
+        )
+        .map_err(|error| internal_failure(ViewPhase::Rendering, error))?;
         let frame = Frame::new(VIEW_GENERATION, camera, viewport)
             .map_err(|error| internal_failure(ViewPhase::Rendering, error))?
-            .with_style(self.style);
+            .with_style(style);
         let recorded_frame = self
             .renderer
             .render(&mut encoder, &target, &frame)
@@ -1046,6 +1065,8 @@ impl Graphics {
         self.queue.submit([encoder.finish()]);
         self.window.pre_present_notify();
         self.queue.present(surface_texture);
+        let transition_actions = self.density_transitions.advance_presented_frame();
+        self.apply_transition_actions(transition_actions)?;
         if reconfigure_after_present {
             self.configure_surface();
         }
@@ -1216,26 +1237,23 @@ impl Graphics {
     }
 
     fn plan_view(&mut self, camera: &Camera, viewport: Viewport) -> DemoResult<()> {
-        let plan = {
+        let (hierarchy, plan) = {
             let planning_nodes = self.scene.planning_nodes();
-            self.planner
+            let hierarchy = planning_nodes.as_slice().to_vec();
+            let plan = self
+                .planner
                 .plan(
                     camera,
                     viewport,
                     AvailableNodes::new(VIEW_GENERATION, planning_nodes.as_slice()),
                     PLANNING_BUDGET,
                 )
-                .map_err(|error| internal_failure(ViewPhase::Planning, error))?
+                .map_err(|error| internal_failure(ViewPhase::Planning, error))?;
+            (hierarchy, plan)
         };
 
-        for retirement in plan.retirements().iter().copied() {
-            let update = retirement.render_update();
-            self.renderer
-                .apply(&update)
-                .map_err(|error| renderer_failure(ViewPhase::GpuUpload, error))?;
-            self.scene
-                .mark_retired(retirement.batch_key(), retirement.expected_version());
-        }
+        let transition_actions = self.density_transitions.reconcile(&hierarchy, &plan);
+        self.apply_transition_actions(transition_actions)?;
         let requests = if self.loads_paused {
             &[][..]
         } else {
@@ -1247,6 +1265,34 @@ impl Graphics {
             .map_err(|error| preserve_failure_or_internal(ViewPhase::Planning, error))?;
         self.metrics
             .record_plan(PlanFacts::from_plan(&plan, issued));
+        Ok(())
+    }
+
+    fn apply_transition_actions(&mut self, actions: Vec<TransitionAction>) -> DemoResult<()> {
+        for action in actions {
+            match action {
+                TransitionAction::Present { batch, weight } => {
+                    self.renderer
+                        .apply(&RenderUpdate::SetBatchPresentation {
+                            view_generation: batch.view_generation,
+                            key: batch.key,
+                            expected_version: batch.expected_version,
+                            weight,
+                        })
+                        .map_err(|error| renderer_failure(ViewPhase::GpuUpload, error))?;
+                }
+                TransitionAction::Retire(batch) => {
+                    self.renderer
+                        .apply(&RenderUpdate::Remove {
+                            view_generation: batch.view_generation,
+                            key: batch.key,
+                            expected_version: batch.expected_version,
+                        })
+                        .map_err(|error| renderer_failure(ViewPhase::GpuUpload, error))?;
+                    self.scene.mark_retired(batch.key, batch.expected_version);
+                }
+            }
+        }
         Ok(())
     }
 
