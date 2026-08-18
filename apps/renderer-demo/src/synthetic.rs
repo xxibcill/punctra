@@ -114,16 +114,25 @@ impl SyntheticScene {
             .iter()
             .map(|request| request.node())
             .collect::<BTreeSet<_>>();
-        let mut retained_requests = BTreeSet::new();
+        let retained_requests = demanded_nodes
+            .iter()
+            .copied()
+            .filter(|key| previously_queued.contains(key))
+            .collect::<BTreeSet<_>>();
+        for key in previously_queued.difference(&retained_requests).copied() {
+            let node = &mut self.nodes[node_index(key)].node;
+            if node.status() == NodeStatus::Requested {
+                *node = node.with_status(NodeStatus::Missing);
+                self.cancelled_requests = self.cancelled_requests.saturating_add(1);
+            }
+        }
+
         let mut issued = 0_u64;
         for key in demanded_nodes.iter().copied() {
             let was_queued = previously_queued.contains(&key);
             let was_requested_now = newly_requested.contains(&key);
             if !was_queued && !was_requested_now {
                 continue;
-            }
-            if was_queued {
-                retained_requests.insert(key);
             }
             let node = &mut self.nodes[node_index(key)].node;
             if node.status() == NodeStatus::Missing && was_requested_now {
@@ -132,13 +141,6 @@ impl SyntheticScene {
             }
             if node.status() == NodeStatus::Requested && (was_queued || was_requested_now) {
                 self.pending.push_back(key);
-            }
-        }
-        for key in previously_queued.difference(&retained_requests).copied() {
-            let node = &mut self.nodes[node_index(key)].node;
-            if node.status() == NodeStatus::Requested {
-                *node = node.with_status(NodeStatus::Missing);
-                self.cancelled_requests = self.cancelled_requests.saturating_add(1);
             }
         }
         issued
@@ -481,6 +483,24 @@ mod tests {
         assert_eq!(second.version(), BatchVersion::new(2));
         assert_eq!(scene.status_facts().resident_batches, 1);
         assert_eq!(scene.pending_batches(), 0);
+    }
+
+    #[test]
+    fn camera_stale_work_is_cancelled_before_the_queue_is_rebuilt() {
+        let mut scene = SyntheticScene::new(view_generation()).unwrap();
+        let stale = scene.nodes[0].node;
+        let retained = scene.nodes[1].node;
+        scene.nodes[0].node = stale.with_status(NodeStatus::Requested);
+        scene.nodes[1].node = retained.with_status(NodeStatus::Requested);
+        scene.pending.extend([stale.key(), retained.key()]);
+
+        let issued = scene.reconcile_requests(&[retained.key()], &[]);
+
+        assert_eq!(issued, 0);
+        assert_eq!(scene.nodes[0].node.status(), NodeStatus::Missing);
+        assert_eq!(scene.nodes[1].node.status(), NodeStatus::Requested);
+        assert_eq!(scene.pending, VecDeque::from([retained.key()]));
+        assert_eq!(scene.cancelled_requests(), 1);
     }
 
     #[test]
