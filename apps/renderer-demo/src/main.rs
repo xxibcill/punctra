@@ -1289,7 +1289,7 @@ impl Graphics {
     }
 
     fn stream_next_batch(&mut self) -> DemoResult<()> {
-        if self.loads_paused {
+        if self.loads_paused || self.density_transitions.blocks_new_residency() {
             return Ok(());
         }
         let Some(batch) = self
@@ -1341,9 +1341,14 @@ impl Graphics {
 
         let transition_actions = self.density_transitions.reconcile(&hierarchy, &plan);
         self.apply_transition_actions(transition_actions)?;
+        let requests = if self.density_transitions.blocks_new_residency() {
+            &[]
+        } else {
+            plan.requests()
+        };
         let issued = self
             .scene
-            .reconcile_requests(plan.demanded_nodes(), plan.requests())
+            .reconcile_requests(plan.demanded_nodes(), requests)
             .map_err(|error| preserve_failure_or_internal(ViewPhase::Planning, error))?;
         self.metrics
             .record_plan(PlanFacts::from_plan(&plan, issued));

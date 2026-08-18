@@ -177,6 +177,10 @@ impl DensityTransitions {
     pub(crate) fn is_active(&self) -> bool {
         !self.active.is_empty()
     }
+
+    pub(crate) fn blocks_new_residency(&self) -> bool {
+        self.is_active()
+    }
 }
 
 pub(crate) fn projected_density_point_size(viewport: Viewport, drawn_points: u64) -> f32 {
@@ -286,6 +290,26 @@ mod tests {
             weight: PresentationWeight::OPAQUE,
         }));
         assert!(final_actions.contains(&TransitionAction::Retire(retiring)));
+    }
+
+    #[test]
+    fn active_cross_fade_blocks_new_residency_until_retirement() {
+        let retiring = batch(1);
+        let mut transitions = DensityTransitions::default();
+        transitions.active.insert(
+            retiring.key,
+            ActiveTransition {
+                retiring,
+                replacements: vec![batch(2)],
+                presented_frames: 0,
+            },
+        );
+
+        assert!(transitions.blocks_new_residency());
+        for _ in 0..CROSS_FADE_PRESENTED_FRAMES {
+            transitions.advance_presented_frame();
+        }
+        assert!(!transitions.blocks_new_residency());
     }
 
     #[test]

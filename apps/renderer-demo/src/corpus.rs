@@ -665,17 +665,23 @@ fn run_trace_frame(runtime: &mut TraceRuntime<'_>) -> Result<FrameEvidence, View
     };
     let transition_actions = runtime.density_transitions.reconcile(&hierarchy, &plan);
     let mut transition_activity = apply_transition_actions(runtime, transition_actions)?;
+    let requests = if runtime.density_transitions.blocks_new_residency() {
+        &[]
+    } else {
+        plan.requests()
+    };
     let issued = runtime
         .scene
-        .reconcile_requests(plan.demanded_nodes(), plan.requests())
+        .reconcile_requests(plan.demanded_nodes(), requests)
         .map_err(|error| {
             preserve_scene_failure(error, ViewPhase::Planning, "request reconciliation")
         })?;
     let mut accepted_batch = false;
-    if let Some(batch) = runtime
-        .scene
-        .next_batch()
-        .map_err(|error| preserve_scene_failure(error, ViewPhase::NodeRead, "node read"))?
+    if !runtime.density_transitions.blocks_new_residency()
+        && let Some(batch) = runtime
+            .scene
+            .next_batch()
+            .map_err(|error| preserve_scene_failure(error, ViewPhase::NodeRead, "node read"))?
     {
         let key = batch.key();
         let version = batch.version();
