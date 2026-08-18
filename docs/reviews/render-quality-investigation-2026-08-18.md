@@ -3,14 +3,17 @@
 Status: local investigation complete; bounded corrective design accepted and
 convergence remediation implemented in the working tree
 
-Repository state: `main` at `87b8476`, workspace version `0.12.0-alpha.1`
+Baseline repository state: `main` at `87b8476`, workspace version
+`0.12.0-alpha.1`
 
 ## Purpose
 
-This document records a local inspection of Punctra's current rendered output,
-the evidence collected during that inspection, and the quality gaps that must
-be closed before the View can be described as a professionally legible and
-settled inspection experience.
+This document records the pre-remediation local inspection of Punctra's
+rendered output, the evidence collected during that inspection, and the quality
+gaps that were required to close before the repository View could be described
+as a professionally legible and settled inspection experience. Present-tense
+findings below describe that historical baseline unless a completion note says
+otherwise.
 
 The investigation distinguishes three different questions:
 
@@ -71,11 +74,12 @@ Observed results:
 | display mapping GPU acceptance | 1 passed | Accepted CPU display bytes survive GPU upload and drawing |
 | renderer headless smoke | 12 passed | Synthetic and LAS/LAZ bridge behavior, diagnostics, recipes, and exact-review smoke |
 
-The focused checks provide strong evidence for the narrow contracts they
-exercise. They do not currently prove that a stationary multi-frame View
-converges or that its point-density transitions are visually inconspicuous.
+The focused baseline checks provided strong evidence for the narrow contracts
+they exercised. At that point they did not prove that a stationary multi-frame
+View converged or that its point-density transitions were visually
+inconspicuous.
 
-## Executive assessment
+## Baseline executive assessment
 
 | Dimension | Assessment | Summary |
 |---|---:|---|
@@ -83,13 +87,14 @@ converges or that its point-density transitions are visually inconspicuous.
 | Performance on the observed adapter | 8/10 | High reported frame rate and very low encode/upload intervals, but continuous churn invalidates a simple efficiency conclusion |
 | Point-cloud legibility | 6/10 | Dense and immediately recognizable, with visible grid, moiré, and LOD-tile discontinuities |
 | Professional inspection readiness | 5/10 | Missing depth enhancement, legend, scale, orientation, coordinate readout, and clear interaction feedback |
-| Overall current render quality | 6.5/10 | Technically credible alpha inspection host; not yet a settled professional View |
+| Overall baseline render quality | 6.5/10 | Technically credible alpha inspection host; not yet a settled professional View |
 
-The current result is best described as a strong technical renderer presented
-through an alpha-grade inspection host. The core GPU path is substantially
-more mature than the visual communication and host convergence behavior.
+The baseline result was best described as a strong technical renderer
+presented through an alpha-grade inspection host. The core GPU path was
+substantially more mature than the visual communication and host convergence
+behavior.
 
-## What the current result looks like
+## What the baseline result looked like
 
 The default frame uses a nearly black, subtly blue background. A dense point
 surface fills approximately the lower two-thirds of the window and leaves a
@@ -128,7 +133,7 @@ What works:
 - source alpha is preserved when highlighting; and
 - GPU picking uses the same circular coverage rule as drawing.
 
-What remains weak:
+What remained weak at the baseline:
 
 - one fixed diameter cannot match both sparse and dense projected spacing;
 - overlapping dense samples brighten regions and emphasize tile boundaries;
@@ -137,9 +142,9 @@ What remains weak:
 - there is no user or host policy for point-size adjustment by scene,
   projection, density, or workstation.
 
-A later design should compare projected-density-aware point size, bounded
-parent/child transition treatment, and their interaction with deterministic
-picking. It must not blur or invent authoritative geometry.
+The accepted corrective design selected projected-density-aware point size,
+bounded parent/child transition treatment, and their interaction with
+deterministic picking without blurring or inventing authoritative geometry.
 
 ## Depth and surface readability
 
@@ -307,11 +312,11 @@ projection switching, resizing, refinement, coarsening, pause/resume, and reset
 also reconverged in the focused acceptance.
 
 This is a generated CPU host/planner lifecycle result using the renderer state
-model. After the correction, forced local GPU acceptance re-passed all ten
+model. After the correction, forced local GPU acceptance passed the documented
 `render-wgpu` offscreen cases, the planner-to-renderer Coverage transition, the
 display-mapping handoff, the GPU corpus process case, and the third-party host
-example on the expected local adapter. These results do not supersede the
-remaining image-quality work, real-cloud observation, field qualification, or
+example on the expected local adapter. The completed repository image-quality
+work does not supersede real-cloud observation, field qualification, or
 workstation support evidence.
 
 ## LOD transition quality
@@ -356,7 +361,7 @@ nonresident result.
 
 ## Spatial and inspection context
 
-The current canvas omits:
+The baseline canvas omitted:
 
 - axis or north/orientation indicator;
 - scale bar;
@@ -373,19 +378,19 @@ A professional cannot determine orientation, distance, palette meaning, or
 whether a subtle feature is authoritative, sampled, unsettled, or purely a
 display artifact from the canvas alone.
 
-The first corrective slice should add only context required to interpret the
-existing narrow View. General CAD authoring, broad measurement tooling, and a
-complete desktop UI remain separate later decisions.
+The completed corrective slice added only the context required to interpret
+the existing narrow View. General CAD authoring, broad measurement tooling,
+and a complete desktop UI remain separate later decisions.
 
 ## Status presentation and cognitive load
 
-The window title carries logical/resident Points, bytes, draw calls, frame and
+The baseline window title carried logical/resident Points, bytes, draw calls, frame and
 upload timing, LOD demand, candidates, issue/retention/retirement, queue and
 staging facts, node states, Coverage, projection, review, streaming, and
 highlight state. The operating system truncates the title well before the
 facts most users need.
 
-This creates several problems:
+This created several problems:
 
 - advanced diagnostics compete with the primary View;
 - important state is present but not visible;
@@ -394,7 +399,7 @@ This creates several problems:
 - sampled, complete, authored, streaming, and settled distinctions are too
   difficult to parse quickly.
 
-A compact on-canvas status layer should show only:
+The implemented compact on-canvas status layer shows only:
 
 - display mode and projection;
 - loading state and truthful Coverage;
@@ -403,9 +408,8 @@ A compact on-canvas status layer should show only:
 - one actionable failure or warning.
 
 Detailed planner, queue, staging, cancellation, retirement, memory, and timing
-facts should move to an expandable diagnostics view or structured report. The
-title should retain only a stable product/view name and one short high-level
-state if required by platform conventions.
+facts now use the separate diagnostic transcript. The title retains the stable
+package-derived View name and version.
 
 The hard-coded title identifies the View as `v0.11` while the workspace is
 `0.12.0-alpha.1`. If `v0.11` refers to the exact-review feature slice, the
@@ -414,7 +418,7 @@ version from one source of truth.
 
 ## Usability health assessment
 
-This score applies only to the private demo host.
+This historical score applies only to the pre-remediation private demo host.
 
 | Heuristic | Score | Main gap |
 |---|---:|---|
@@ -428,14 +432,14 @@ This score applies only to the private demo host.
 | Aesthetic and minimalist design | 2/4 | Clean canvas; overloaded title and missing hierarchy |
 | Error recovery | 3/4 | Structured diagnostics and one safe action are implemented |
 | Help and documentation | 2/4 | Good guide, little contextual help in the View |
-| **Total** | **24/40** | **Acceptable technical host; significant inspection UX work remains** |
+| **Total** | **24/40** | **Acceptable technical host; significant inspection UX work remained at the baseline** |
 
 The cognitive-load checklist has five failures: chunking, grouping, minimal
 visible choices, recognition/working-memory support, and progressive
 disclosure. The cloud itself has a clear focus; the status and interaction
 model do not.
 
-## Prioritized findings
+## Baseline prioritized findings
 
 ### P1 — Stationary demand does not converge
 
@@ -503,7 +507,10 @@ weakens diagnostic provenance.
 
 Required outcome: one truthful package/view-feature version convention.
 
-## Recommended remediation order
+## Historical remediation order
+
+The repository corrective slice completed this order. The list remains as the
+investigation's decision trail, not as unfinished implementation work.
 
 1. Diagnose and stop stationary planner/host churn before assessing final
    image quality.
@@ -517,9 +524,9 @@ Required outcome: one truthful package/view-feature version convention.
 6. Re-run generated local acceptance, then conduct permitted real-cloud trials
    without converting those observations into unsupported field claims.
 
-## Required evidence before closing the investigation
+## Repository closure evidence
 
-Repository closure requires:
+The completed repository slice records:
 
 - a checked-in deterministic stationary-view regression that reaches `steady`
   within the design's declared frame ceiling;
@@ -562,7 +569,9 @@ The findings do not justify:
 ## Roadmap disposition
 
 The corresponding work is tracked in `ROADMAP.md` as the **pre-v0.13 renderer
-quality corrective checkpoint** with status **Exploring**. It is not an Active
-release and does not authorize implementation until a short accepted design
-selects the exact convergence contract, visual treatment, host context, public
-seams, non-goals, and local verification gates.
+quality corrective checkpoint** with status **Complete — repository
+implementation and generated/local GPU verification complete; permitted field
+execution outstanding**. The accepted corrective design authorized and bounds
+the implemented convergence contract, visual treatment, host context, public
+seams, non-goals, and local verification gates. Field closure remains a
+separate permissioned activity and is not inferred here.
