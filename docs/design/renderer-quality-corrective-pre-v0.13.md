@@ -82,11 +82,16 @@ already admitted by the planner, and ends in the same deterministic child-only
 cut. Opacity affects color presentation only: depth ordering, pick coverage,
 Point Identity, Coverage truth, and exact selection do not depend on it.
 
-If implementation requires per-batch presentation weight, the only permitted
-public addition is one generation- and expected-version-conditional batch
-presentation update in `render-protocol`, implemented by `render-wgpu`. It
-must have a real `renderer-demo` caller and direct state-model/GPU tests before
-acceptance; no general material, shader, or plugin interface is authorized.
+The only permitted public appearance additions are:
+
+- one generation- and expected-version-conditional batch presentation update
+  in `render-protocol`, implemented by `render-wgpu`; and
+- one `PointStyle` display-diameter override in `render-wgpu` that affects only
+  the color pass and preserves the existing nominal diameter for picking.
+
+Each addition must have a real `renderer-demo` caller and direct state-model or
+GPU tests before acceptance. No general material, shader, or plugin interface
+is authorized.
 
 Point diameter remains in physical pixels. Fixed views will compare the
 existing 2.4-pixel reference with a bounded projected-density-aware policy
