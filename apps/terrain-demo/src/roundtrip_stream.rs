@@ -876,17 +876,21 @@ impl<'a> StreamParser<'a> {
             ResolveResult::Unbound => &[][..],
             ResolveResult::Unknown(_) => return Err(self.xml_invalid("unknown XML prefix")),
         };
+        let is_coordinate_system = start.local_name().as_ref() == b"CoordinateSystem";
         if namespace == XINCLUDE_NAMESPACE {
             return Err(self.unsupported("XInclude is unsupported"));
         }
         if self.metadata_depth != 0 {
-            if start.local_name().as_ref() == b"CoordinateSystem" {
+            if is_coordinate_system {
                 return Err(self.coordinate_reference_failure());
             }
             self.metadata_depth += 1;
             return Ok(());
         }
         if namespace != LANDXML_NAMESPACE {
+            if is_coordinate_system {
+                return Err(self.coordinate_reference_failure());
+            }
             if matches!(self.stack.last(), Some(Tag::Units | Tag::Metric)) {
                 return Err(self.unit_drift());
             }
@@ -1515,6 +1519,35 @@ mod tests {
             RoundTripLimits::full_v07_export(),
         )
         .expect("nested reference metadata is a semantic evaluation");
+        assert!(matches!(
+            evaluation,
+            RoundTripEvaluation::Failed(ref mismatch)
+                if mismatch.reason() == RoundTripReason::CoordinateReferenceUnsupported
+        ));
+    }
+
+    #[test]
+    fn streaming_reader_classifies_foreign_coordinate_system_element() {
+        let directory = Directory::new();
+        let reference = directory.path.join("reference-foreign-spatial.xml");
+        let returned = directory.path.join("returned-foreign-spatial.xml");
+        let reference_xml = xml("1", "2", "3", "1 2 3");
+        let returned_xml = reference_xml.replacen(
+            "<Units>",
+            "<vendor:CoordinateSystem xmlns:vendor=\"urn:vendor:reference\"/><Units>",
+            1,
+        );
+        fs::write(&reference, reference_xml).unwrap();
+        fs::write(&returned, returned_xml).unwrap();
+
+        let evaluation = evaluate_streaming_round_trip(
+            &reference,
+            &returned,
+            RoundTripDeclaration::new("generated", "test", "metric").unwrap(),
+            RoundTripTolerances::new(f64::MAX, f64::MAX).unwrap(),
+            RoundTripLimits::full_v07_export(),
+        )
+        .expect("foreign reference metadata is a semantic evaluation");
         assert!(matches!(
             evaluation,
             RoundTripEvaluation::Failed(ref mismatch)
