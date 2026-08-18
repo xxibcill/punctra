@@ -149,11 +149,11 @@ fn cursor_line(cursor: Option<[f64; 3]>) -> String {
 
 const fn palette_line(display: DisplayMode) -> &'static str {
     match display {
-        DisplayMode::Neutral => "PALETTE NEUTRAL SOURCE-ALPHA",
-        DisplayMode::Elevation => "PALETTE ELEVATION LOW > MID > HIGH",
-        DisplayMode::Rgb => "PALETTE RAW SOURCE RGB",
-        DisplayMode::Intensity => "PALETTE INTENSITY LOW > HIGH",
-        DisplayMode::Classification => "PALETTE LAS CLASSIFICATION",
+        DisplayMode::Neutral => "PALETTE FIXED #BECDDC | SOURCE ALPHA",
+        DisplayMode::Elevation => "PALETTE Z LOW #440154 MID #21918C HI #FDE725",
+        DisplayMode::Rgb => "PALETTE U16 RGB 0..65535 -> RGB 0..255",
+        DisplayMode::Intensity => "PALETTE U16 0 #000000 > 65535 #FFFFFF",
+        DisplayMode::Classification => "PALETTE CLASS 2 #8B5F39 | 5 #146E14 | 6 #DC4646",
     }
 }
 
@@ -179,7 +179,11 @@ fn compact_decimal(value: f64) -> String {
 
 #[cfg(test)]
 mod tests {
+    use point_contracts::WorldBounds;
     use point_workspace::RevisionId;
+    use renderer_demo::display::{
+        NEUTRAL_COLOR, PointColorizer, classification_color, intensity_color,
+    };
 
     use super::*;
 
@@ -241,6 +245,52 @@ mod tests {
         let first = snapshot(None).lines().remove(0);
         assert!(first.contains(&env!("CARGO_PKG_VERSION").to_ascii_uppercase()));
         assert!(!first.contains("PRE-V0.13"));
+    }
+
+    #[test]
+    fn palette_legends_map_source_values_and_classes_to_display_colors() {
+        let cases = [
+            (DisplayMode::Neutral, "PALETTE FIXED #BECDDC | SOURCE ALPHA"),
+            (
+                DisplayMode::Elevation,
+                "PALETTE Z LOW #440154 MID #21918C HI #FDE725",
+            ),
+            (DisplayMode::Rgb, "PALETTE U16 RGB 0..65535 -> RGB 0..255"),
+            (
+                DisplayMode::Intensity,
+                "PALETTE U16 0 #000000 > 65535 #FFFFFF",
+            ),
+            (
+                DisplayMode::Classification,
+                "PALETTE CLASS 2 #8B5F39 | 5 #146E14 | 6 #DC4646",
+            ),
+        ];
+
+        for (display, expected) in cases {
+            assert_eq!(palette_line(display), expected);
+            assert!(expected.len() <= MAX_STATUS_COLUMNS);
+        }
+
+        assert_eq!(NEUTRAL_COLOR, [0xbe, 0xcd, 0xdc, 0xff]);
+        let bounds = WorldBounds::new([0.0; 3], [1.0, 1.0, 100.0]).unwrap();
+        let elevation = PointColorizer::for_source(DisplayMode::Elevation, Some(bounds));
+        assert_eq!(
+            elevation.color(0.0, None).unwrap(),
+            [0x44, 0x01, 0x54, 0xff]
+        );
+        assert_eq!(
+            elevation.color(50.0, None).unwrap(),
+            [0x21, 0x91, 0x8c, 0xff]
+        );
+        assert_eq!(
+            elevation.color(100.0, None).unwrap(),
+            [0xfd, 0xe7, 0x25, 0xff]
+        );
+        assert_eq!(intensity_color(0), [0x00, 0x00, 0x00, 0xff]);
+        assert_eq!(intensity_color(u16::MAX), [0xff; 4]);
+        assert_eq!(classification_color(2), [0x8b, 0x5f, 0x39, 0xff]);
+        assert_eq!(classification_color(5), [0x14, 0x6e, 0x14, 0xff]);
+        assert_eq!(classification_color(6), [0xdc, 0x46, 0x46, 0xff]);
     }
 
     #[test]
