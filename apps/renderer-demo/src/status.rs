@@ -55,6 +55,7 @@ pub(crate) struct StatusSnapshot {
     pub(crate) scene: SceneMetrics,
     pub(crate) drawn_points: u64,
     pub(crate) selected: Option<ReviewStatus>,
+    pub(crate) clear_selection_available: bool,
     pub(crate) resident_highlights: u64,
     pub(crate) orientation: &'static str,
     pub(crate) scale_world_units: f64,
@@ -85,7 +86,7 @@ impl StatusSnapshot {
                 compact(selected_points),
                 compact(self.resident_highlights)
             ),
-            format!("SELECTION {selection_state} | X CLEAR"),
+            selection_line(selection_state, self.clear_selection_available),
             format!(
                 "NORTH {} | SCALE 100PX = {}",
                 self.orientation,
@@ -128,8 +129,16 @@ fn selection(status: Option<ReviewStatus>) -> (&'static str, u64) {
         Some(ReviewStatus::SelectionStale { points, .. }) => ("STALE - RERUN OR CLEAR", points),
         Some(ReviewStatus::ProvisionalPick | ReviewStatus::ConfirmingPick) => ("CONFIRMING", 0),
         Some(ReviewStatus::SelectingScreen) => ("SELECTING", 0),
-        Some(ReviewStatus::Failed | ReviewStatus::Indeterminate) => ("FAILED - X CLEAR", 0),
+        Some(ReviewStatus::Failed | ReviewStatus::Indeterminate) => ("FAILED", 0),
         Some(_) => ("READY", 0),
+    }
+}
+
+fn selection_line(selection_state: &str, clear_selection_available: bool) -> String {
+    if clear_selection_available {
+        format!("SELECTION {selection_state} | X CLEAR")
+    } else {
+        format!("SELECTION {selection_state}")
     }
 }
 
@@ -188,6 +197,10 @@ mod tests {
     use super::*;
 
     fn snapshot(status: Option<ReviewStatus>) -> StatusSnapshot {
+        let clear_selection_available = matches!(
+            status,
+            Some(ReviewStatus::Selected { .. } | ReviewStatus::SelectionStale { .. })
+        );
         StatusSnapshot {
             display: DisplayMode::Classification,
             projection: ProjectionMode::Orthographic,
@@ -201,6 +214,7 @@ mod tests {
             },
             drawn_points: 600_000,
             selected: status,
+            clear_selection_available,
             resident_highlights: 42,
             orientation: "UP",
             scale_world_units: 125.25,
@@ -245,6 +259,18 @@ mod tests {
         let first = snapshot(None).lines().remove(0);
         assert!(first.contains(&env!("CARGO_PKG_VERSION").to_ascii_uppercase()));
         assert!(!first.contains("PRE-V0.13"));
+    }
+
+    #[test]
+    fn disabled_selection_does_not_advertise_clear_action() {
+        let lines = snapshot(None).lines();
+        let selection = lines
+            .iter()
+            .find(|line| line.starts_with("SELECTION"))
+            .unwrap();
+
+        assert_eq!(selection, "SELECTION DISABLED");
+        assert!(!lines.iter().any(|line| line.contains("X CLEAR")));
     }
 
     #[test]

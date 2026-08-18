@@ -277,6 +277,7 @@ mod tests {
                 },
                 drawn_points: 6_000,
                 selected: None,
+                clear_selection_available: false,
                 resident_highlights: 0,
                 orientation: "UP",
                 scale_world_units: 125.25,

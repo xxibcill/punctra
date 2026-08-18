@@ -1127,6 +1127,10 @@ impl Graphics {
     ) -> DemoResult<Option<ReviewStatus>> {
         let scene = self.scene.metrics();
         let review_status = self.review.as_ref().map(ReviewSession::status);
+        let clear_selection_available = self
+            .review
+            .as_ref()
+            .is_some_and(ReviewSession::has_selection);
         let cursor_world = self
             .input
             .cursor
@@ -1151,6 +1155,7 @@ impl Graphics {
             scene,
             drawn_points: report.drawn_points(),
             selected: review_status,
+            clear_selection_available,
             resident_highlights: self.renderer.resident_highlight_points(),
             orientation: self
                 .camera

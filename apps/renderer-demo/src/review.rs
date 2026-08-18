@@ -443,6 +443,10 @@ impl ReviewSession {
         self.pending.is_some()
     }
 
+    pub(crate) const fn has_selection(&self) -> bool {
+        self.selected.is_some()
+    }
+
     pub(crate) const fn has_classification_edit(&self) -> bool {
         self.options.classification_edit.is_some()
     }
