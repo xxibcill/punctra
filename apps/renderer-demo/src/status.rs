@@ -36,7 +36,7 @@ impl StreamStatus {
         }
     }
 
-    const fn label(self) -> &'static str {
+    pub(crate) const fn label(self) -> &'static str {
         match self {
             Self::Loading => "LOADING",
             Self::Settling => "SETTLING",

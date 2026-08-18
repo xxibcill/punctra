@@ -61,7 +61,7 @@ use winit::{
 const BASE_TITLE: &str = concat!("Punctra ", env!("CARGO_PKG_VERSION"), " View pre-v0.13");
 const INITIAL_WIDTH: f64 = 1_280.0;
 const INITIAL_HEIGHT: f64 = 800.0;
-const TITLE_REFRESH_INTERVAL: Duration = Duration::from_millis(500);
+const TRANSCRIPT_REFRESH_INTERVAL: Duration = Duration::from_millis(500);
 const VIEW_GENERATION: ViewGenerationKey = ViewGenerationKey::new(ViewId::new(1), 1);
 const PLANNING_BUDGET: PlanningBudget = PlanningBudget::new(
     RESIDENT_POINT_BUDGET,
@@ -1110,10 +1110,10 @@ impl Graphics {
             recorded: recorded_frame,
             interaction_generation: self.interaction_generation,
         });
-        self.metrics.update_title(
-            &self.window,
+        self.metrics.emit_diagnostic_transcript(
             self.scene.metrics(),
             self.loads_paused,
+            self.density_transitions.is_active(),
             self.highlights_enabled,
             self.camera.projection(),
             review_status,
@@ -1793,17 +1793,17 @@ impl Metrics {
         )
     }
 
-    fn update_title(
+    fn emit_diagnostic_transcript(
         &mut self,
-        window: &Window,
         scene: SceneMetrics,
         loads_paused: bool,
+        transition_active: bool,
         highlights_enabled: bool,
         projection: ProjectionMode,
         review_status: Option<ReviewStatus>,
     ) {
         let interval = self.interval_started.elapsed();
-        if interval < TITLE_REFRESH_INTERVAL {
+        if interval < TRANSCRIPT_REFRESH_INTERVAL {
             return;
         }
         let Some(report) = self.latest_report else {
@@ -1811,19 +1811,15 @@ impl Metrics {
         };
 
         let frames_per_second = f64::from(self.interval_frames) / interval.as_secs_f64();
-        let stream_state = if loads_paused {
-            "loads-paused"
-        } else if scene.queued_batches > 0 || self.latest_plan.issued > 0 {
-            "streaming"
-        } else {
-            "steady"
-        };
+        let stream_state = self
+            .stream_status(scene, loads_paused, transition_active)
+            .label();
         let highlight_state = if highlights_enabled { "on" } else { "off" };
         let review_state =
             review_status.map_or_else(|| "review:disabled".to_owned(), ReviewStatus::title);
         let coverage_state = coverage_state(scene);
-        let title = format!(
-            "{BASE_TITLE} | {} logical | {} / {} pts | {} MiB resident | {} MiB uploaded | \
+        let transcript = format!(
+            "View diagnostics | {} logical | {} / {} pts | {} MiB resident | {} MiB uploaded | \
              {} draws | \
              {:.0} fps | frame {:.2} ms | encode {:.2} ms | upload {:.2} ms | \
              LOD {} demanded / {} candidates / {} issued / {} retained / {} retired-now | \
@@ -1858,7 +1854,7 @@ impl Metrics {
             scene.rejected_batches,
             scene.cancelled_requests,
         );
-        window.set_title(&title);
+        println!("{transcript}");
         self.interval_started = Instant::now();
         self.interval_frames = 0;
     }
@@ -1913,8 +1909,8 @@ fn coverage_state(scene: SceneMetrics) -> String {
     )
 }
 
-fn initial_title() -> String {
-    format!("{BASE_TITLE} | {}", coverage_state(SceneMetrics::default()))
+const fn initial_title() -> &'static str {
+    BASE_TITLE
 }
 
 fn has_area(size: PhysicalSize<u32>) -> bool {
@@ -2265,12 +2261,16 @@ mod tests {
         assert!(authored.contains("Complete 0 batches"));
         assert!(authored.contains("authored fixture presentation 1 batches / 32 pts"));
         assert!(authored.contains("not Query completion"));
+    }
 
-        let initial = initial_title();
-        assert!(initial.starts_with(BASE_TITLE));
-        assert!(initial.contains("Sampled 0 batches"));
-        assert!(initial.contains("Complete 0 batches"));
-        assert!(initial.contains("not Query completion"));
+    #[test]
+    fn window_title_stays_compact_and_leaves_diagnostics_to_the_transcript() {
+        let title = initial_title();
+
+        assert_eq!(title, BASE_TITLE);
+        assert!(title.len() <= 64);
+        assert!(!title.contains("COVERAGE"));
+        assert!(!title.contains("LOD"));
     }
 
     #[test]
