@@ -43,6 +43,14 @@ impl fmt::Display for ProjectionMode {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum NorthOrientation {
+    Up,
+    Down,
+    Right,
+    Left,
+}
+
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct OrbitCamera {
     home_target: [f64; 3],
@@ -185,16 +193,20 @@ impl OrbitCamera {
         self.vertical_world_height() * f64::from(pixels) / f64::from(viewport_height)
     }
 
-    pub(crate) fn north_orientation(self) -> Result<&'static str, CameraError> {
+    pub(crate) fn north_orientation(self) -> Result<NorthOrientation, CameraError> {
         let basis = self.as_render_camera()?.world_basis();
         let right = basis.right()[1];
         let up = basis.up()[1];
         Ok(if up.abs() >= right.abs() {
-            if up >= 0.0 { "UP" } else { "DOWN" }
+            if up >= 0.0 {
+                NorthOrientation::Up
+            } else {
+                NorthOrientation::Down
+            }
         } else if right >= 0.0 {
-            "RIGHT"
+            NorthOrientation::Right
         } else {
-            "LEFT"
+            NorthOrientation::Left
         })
     }
 
@@ -267,7 +279,10 @@ mod tests {
         assert!(camera.world_units_for_pixels(100, 800) > 0.0);
         assert!(matches!(
             camera.north_orientation().unwrap(),
-            "UP" | "DOWN" | "LEFT" | "RIGHT"
+            NorthOrientation::Up
+                | NorthOrientation::Down
+                | NorthOrientation::Left
+                | NorthOrientation::Right
         ));
         assert_eq!(
             camera

@@ -248,7 +248,7 @@ mod tests {
     use renderer_demo::display::DisplayMode;
 
     use crate::{
-        orbit_camera::ProjectionMode,
+        orbit_camera::{NorthOrientation, ProjectionMode},
         scene::SceneMetrics,
         status::{MAX_STATUS_COLUMNS, MAX_STATUS_LINES, StatusSnapshot, StreamStatus},
     };
@@ -280,7 +280,7 @@ mod tests {
                 selected_points: 0,
                 selection_action: None,
                 resident_highlights: 0,
-                orientation: "UP",
+                orientation: NorthOrientation::Up,
                 scale_world_units: 125.25,
                 cursor_world: Some([-6_378_137.25, 13_756_432.5, 120.0]),
             }

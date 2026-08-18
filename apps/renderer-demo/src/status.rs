@@ -1,6 +1,10 @@
 use renderer_demo::display::DisplayMode;
 
-use crate::{orbit_camera::ProjectionMode, review::ReviewStatus, scene::SceneMetrics};
+use crate::{
+    orbit_camera::{NorthOrientation, ProjectionMode},
+    review::ReviewStatus,
+    scene::SceneMetrics,
+};
 
 pub(crate) const MAX_STATUS_COLUMNS: usize = 48;
 pub(crate) const MAX_STATUS_LINES: usize = 10;
@@ -64,7 +68,7 @@ pub(crate) struct StatusSnapshot {
     pub(crate) selected_points: u64,
     pub(crate) selection_action: Option<SelectionAction>,
     pub(crate) resident_highlights: u64,
-    pub(crate) orientation: &'static str,
+    pub(crate) orientation: NorthOrientation,
     pub(crate) scale_world_units: f64,
     pub(crate) cursor_world: Option<[f64; 3]>,
 }
@@ -96,7 +100,7 @@ impl StatusSnapshot {
             selection_line(selection_state, self.selection_action),
             format!(
                 "NORTH {} | SCALE 100PX = {}",
-                self.orientation,
+                orientation_label(self.orientation),
                 compact_decimal(self.scale_world_units)
             ),
             cursor_line(self.cursor_world),
@@ -149,6 +153,15 @@ fn selection_line(selection_state: &str, action: Option<SelectionAction>) -> Str
             format!("SELECTION {selection_state} | REOPEN RESOLVE")
         }
         None => format!("SELECTION {selection_state}"),
+    }
+}
+
+const fn orientation_label(orientation: NorthOrientation) -> &'static str {
+    match orientation {
+        NorthOrientation::Up => "UP",
+        NorthOrientation::Down => "DOWN",
+        NorthOrientation::Right => "RIGHT",
+        NorthOrientation::Left => "LEFT",
     }
 }
 
@@ -234,7 +247,7 @@ mod tests {
             selected_points,
             selection_action,
             resident_highlights: 42,
-            orientation: "UP",
+            orientation: NorthOrientation::Up,
             scale_world_units: 125.25,
             cursor_world: Some([6_378_137.25, 13_756_432.5, 120.0]),
         }
