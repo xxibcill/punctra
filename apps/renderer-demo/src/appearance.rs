@@ -105,6 +105,7 @@ impl DensityTransitions {
         hierarchy: &[AvailableNode],
         plan: &ViewPlan,
     ) -> Vec<TransitionAction> {
+        let hierarchy = HierarchyIndex::new(hierarchy);
         let planned_retirements = plan
             .retirements()
             .iter()
@@ -129,7 +130,7 @@ impl DensityTransitions {
                 false
             }
         });
-        actions.extend(self.reconcile_pending_replacements(hierarchy, plan));
+        actions.extend(self.reconcile_pending_replacements(&hierarchy, plan));
 
         for retirement in plan.retirements().iter().copied() {
             if self.active.contains_key(&retirement.batch_key()) {
@@ -140,7 +141,7 @@ impl DensityTransitions {
                 key: retirement.batch_key(),
                 expected_version: retirement.expected_version(),
             };
-            let replacements = replacement_batches(hierarchy, plan.retained_nodes(), retiring.key);
+            let replacements = replacement_batches(&hierarchy, plan.retained_nodes(), retiring.key);
             if !self.transition_is_disjoint(retiring, &replacements) {
                 continue;
             }
@@ -225,7 +226,7 @@ impl DensityTransitions {
 
     fn reconcile_pending_replacements(
         &mut self,
-        hierarchy: &[AvailableNode],
+        hierarchy: &HierarchyIndex<'_>,
         plan: &ViewPlan,
     ) -> Vec<TransitionAction> {
         let retained = plan
@@ -283,15 +284,10 @@ pub(crate) fn projected_density_point_size(viewport: Viewport, drawn_points: u64
 }
 
 fn replacement_batches(
-    hierarchy: &[AvailableNode],
+    hierarchy: &HierarchyIndex<'_>,
     retained: &[RetainedNode],
     retiring_batch: BatchKey,
 ) -> Vec<ConditionalBatch> {
-    let nodes_by_key = hierarchy
-        .iter()
-        .copied()
-        .map(|node| (node.key(), node))
-        .collect::<BTreeMap<_, _>>();
     let Some(retiring_node) = hierarchy
         .iter()
         .find(|node| node.batch_key() == retiring_batch)
@@ -302,7 +298,7 @@ fn replacement_batches(
     retained
         .iter()
         .copied()
-        .filter(|retained| is_descendant(retained.node_key(), retiring_node, &nodes_by_key))
+        .filter(|retained| hierarchy.is_descendant(retained.node_key(), retiring_node))
         .map(|retained| ConditionalBatch {
             view_generation: retained.view_generation(),
             key: retained.batch_key(),
@@ -312,18 +308,13 @@ fn replacement_batches(
 }
 
 fn pending_replacement_batches(
-    hierarchy: &[AvailableNode],
+    hierarchy: &HierarchyIndex<'_>,
     retained: &BTreeSet<NodeKey>,
     demanded: &[NodeKey],
 ) -> BTreeSet<BatchKey> {
-    let nodes = hierarchy
-        .iter()
-        .copied()
-        .map(|node| (node.key(), node))
-        .collect::<BTreeMap<_, _>>();
     let fallback_ancestors = demanded
         .iter()
-        .filter_map(|node| nearest_retained_ancestor(*node, retained, &nodes))
+        .filter_map(|node| hierarchy.nearest_retained_ancestor(*node, retained))
         .collect::<BTreeSet<_>>();
     let demanded = demanded.iter().copied().collect::<BTreeSet<_>>();
 
@@ -333,29 +324,14 @@ fn pending_replacement_batches(
         .filter(|node| {
             fallback_ancestors
                 .iter()
-                .any(|ancestor| is_descendant(node.key(), *ancestor, &nodes))
+                .any(|ancestor| hierarchy.is_descendant(node.key(), *ancestor))
         })
         .map(|node| node.batch_key())
         .collect()
 }
 
-fn nearest_retained_ancestor(
-    node: NodeKey,
-    retained: &BTreeSet<NodeKey>,
-    nodes: &BTreeMap<NodeKey, AvailableNode>,
-) -> Option<NodeKey> {
-    let mut parent = nodes.get(&node).and_then(|node| node.parent());
-    while let Some(candidate) = parent {
-        if retained.contains(&candidate) {
-            return Some(candidate);
-        }
-        parent = nodes.get(&candidate).and_then(|node| node.parent());
-    }
-    None
-}
-
 fn resident_batch(
-    hierarchy: &[AvailableNode],
+    hierarchy: &HierarchyIndex<'_>,
     plan: &ViewPlan,
     key: BatchKey,
 ) -> Option<ConditionalBatch> {
@@ -370,18 +346,58 @@ fn resident_batch(
     })
 }
 
-fn is_descendant(
-    mut candidate: NodeKey,
-    ancestor: NodeKey,
-    nodes: &BTreeMap<NodeKey, AvailableNode>,
-) -> bool {
-    while let Some(parent) = nodes.get(&candidate).and_then(|node| node.parent()) {
-        if parent == ancestor {
-            return true;
+struct HierarchyIndex<'a> {
+    hierarchy: &'a [AvailableNode],
+    nodes_by_key: BTreeMap<NodeKey, AvailableNode>,
+}
+
+impl<'a> HierarchyIndex<'a> {
+    fn new(hierarchy: &'a [AvailableNode]) -> Self {
+        Self {
+            hierarchy,
+            nodes_by_key: hierarchy
+                .iter()
+                .copied()
+                .map(|node| (node.key(), node))
+                .collect(),
         }
-        candidate = parent;
     }
-    false
+
+    fn iter(&self) -> impl Iterator<Item = &AvailableNode> {
+        self.hierarchy.iter()
+    }
+
+    fn nearest_retained_ancestor(
+        &self,
+        node: NodeKey,
+        retained: &BTreeSet<NodeKey>,
+    ) -> Option<NodeKey> {
+        let mut parent = self.nodes_by_key.get(&node).and_then(|node| node.parent());
+        while let Some(candidate) = parent {
+            if retained.contains(&candidate) {
+                return Some(candidate);
+            }
+            parent = self
+                .nodes_by_key
+                .get(&candidate)
+                .and_then(|node| node.parent());
+        }
+        None
+    }
+
+    fn is_descendant(&self, mut candidate: NodeKey, ancestor: NodeKey) -> bool {
+        while let Some(parent) = self
+            .nodes_by_key
+            .get(&candidate)
+            .and_then(|node| node.parent())
+        {
+            if parent == ancestor {
+                return true;
+            }
+            candidate = parent;
+        }
+        false
+    }
 }
 
 fn weight_for_step(step: u8) -> PresentationWeight {
@@ -480,6 +496,7 @@ mod tests {
     fn incomplete_replacement_coverage_stays_transparent() {
         let hierarchy = [node(1, None), node(2, Some(1)), node(3, Some(1))];
         let retained = [node_key(1), node_key(2)].into_iter().collect();
+        let hierarchy = HierarchyIndex::new(&hierarchy);
         let pending = pending_replacement_batches(&hierarchy, &retained, &[node_key(3)]);
         assert_eq!(
             pending,
