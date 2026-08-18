@@ -237,20 +237,64 @@ fn glyph(character: char) -> [u8; 7] {
         '/' => [1, 2, 2, 4, 8, 8, 16],
         '|' => [4, 4, 4, 4, 4, 4, 4],
         '>' => [16, 8, 4, 2, 4, 8, 16],
+        '#' => [10, 31, 10, 10, 31, 10, 0],
+        '=' => [0, 31, 0, 31, 0, 0, 0],
         _ => [0; 7],
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::status::{MAX_STATUS_COLUMNS, MAX_STATUS_LINES};
+    use renderer_demo::display::DisplayMode;
+
+    use crate::{
+        orbit_camera::ProjectionMode,
+        scene::SceneMetrics,
+        status::{MAX_STATUS_COLUMNS, MAX_STATUS_LINES, StatusSnapshot, StreamStatus},
+    };
 
     use super::*;
 
     #[test]
-    fn required_status_alphabet_has_visible_glyphs() {
-        for character in "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-.:/|>".chars() {
-            assert_ne!(glyph(character), [0; 7]);
+    fn generated_status_characters_have_visible_glyphs() {
+        for display in [
+            DisplayMode::Neutral,
+            DisplayMode::Elevation,
+            DisplayMode::Rgb,
+            DisplayMode::Intensity,
+            DisplayMode::Classification,
+        ] {
+            let lines = StatusSnapshot {
+                display,
+                projection: ProjectionMode::Orthographic,
+                stream: StreamStatus::Steady,
+                scene: SceneMetrics {
+                    logical_points: 12_345,
+                    resident_points: 6_789,
+                    sampled_resident_batches: 7,
+                    complete_resident_batches: 3,
+                    ..SceneMetrics::default()
+                },
+                drawn_points: 6_000,
+                selected: None,
+                resident_highlights: 0,
+                orientation: "UP",
+                scale_world_units: 125.25,
+                cursor_world: Some([-6_378_137.25, 13_756_432.5, 120.0]),
+            }
+            .lines();
+
+            for character in lines
+                .iter()
+                .flat_map(|line| line.chars())
+                .filter(|character| !character.is_whitespace())
+            {
+                assert_ne!(
+                    glyph(character),
+                    [0; 7],
+                    "status output has no glyph for {character:?}"
+                );
+            }
         }
     }
 
