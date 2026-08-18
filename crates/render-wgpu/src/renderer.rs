@@ -896,13 +896,7 @@ fn record_point_pass(
         occlusion_query_set: None,
         multiview_mask: None,
     });
-    pass.set_pipeline(pipeline);
-    pass.set_bind_group(0, camera_bind_group, &[]);
-    for batch in batches {
-        pass.set_bind_group(1, &batch.bind_group, &[]);
-        pass.set_vertex_buffer(0, batch.vertex_buffer.slice(..));
-        pass.draw(0..6, 0..batch.point_count);
-    }
+    record_point_batches(&mut pass, pipeline, camera_bind_group, batches);
 }
 
 fn record_eye_dome_pass(
