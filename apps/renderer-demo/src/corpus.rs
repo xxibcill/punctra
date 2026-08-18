@@ -37,7 +37,7 @@ use point_index::{
 };
 use point_view::{AvailableNodes, PlannerConfig, ViewPlanner};
 use render_protocol::{RenderLimits, RenderUpdate, ResidentStats, ViewGenerationKey, Viewport};
-use render_wgpu::{DepthCueStatus, Frame, PointStyle, RendererConfig, WgpuRenderer};
+use render_wgpu::{DepthCueStatus, Frame, PointStyle, WgpuRenderer};
 use renderer_demo::display::DisplayMode;
 
 const MANIFEST_SCHEMA: &str = "punctra.renderer-demo.field-corpus.v1";
@@ -2990,7 +2990,7 @@ mod tests {
         );
         let mut renderer = WgpuRenderer::new(
             &device,
-            RendererConfig::new(wgpu::TextureFormat::Rgba8Unorm, limits),
+            render_wgpu::RendererConfig::new(wgpu::TextureFormat::Rgba8Unorm, limits),
         )
         .unwrap();
         let first = corpus_view_generation(0);
