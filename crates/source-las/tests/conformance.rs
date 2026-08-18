@@ -595,6 +595,7 @@ fn user_defined_or_non_projected_geotiff_facts_remain_unknown() {
     ];
     for (label, key, value) in [
         ("user-defined-horizontal", 3072, 32_767),
+        ("user-defined-vertical", 4096, 32_767),
         ("non-projected-model", 1024, 2),
     ] {
         let entries = complete.map(|entry| {

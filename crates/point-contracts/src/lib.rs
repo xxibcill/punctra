@@ -2037,14 +2037,8 @@ pub struct SpatialReferenceProfile {
 struct EpsgCode(u32);
 
 impl EpsgCode {
-    const USER_DEFINED: u32 = 32_767;
-
     const fn new(value: u32) -> Option<Self> {
-        if value == 0 || value == Self::USER_DEFINED {
-            None
-        } else {
-            Some(Self(value))
-        }
+        if value == 0 { None } else { Some(Self(value)) }
     }
 
     const fn get(self) -> u32 {
@@ -2067,8 +2061,7 @@ impl SpatialReferenceProfile {
     ///
     /// # Errors
     ///
-    /// Returns an error when either EPSG identity is zero. Punctra does not
-    /// treat the EPSG user-defined sentinel as an authority identity.
+    /// Returns an error when either EPSG identity is zero.
     pub const fn new(
         horizontal_epsg: u32,
         vertical_epsg: u32,
@@ -3170,13 +3163,13 @@ pub enum ContractError {
         /// Maximum accepted UTF-8 byte count.
         max_bytes: usize,
     },
-    /// A horizontal EPSG identity was zero or the user-defined sentinel.
+    /// A horizontal EPSG identity was zero.
     #[error("horizontal EPSG identity {value} must be a nonzero authority code")]
     InvalidHorizontalEpsg {
         /// Rejected EPSG value.
         value: u32,
     },
-    /// A vertical EPSG identity was zero or the user-defined sentinel.
+    /// A vertical EPSG identity was zero.
     #[error("vertical EPSG identity {value} must be a nonzero authority code")]
     InvalidVerticalEpsg {
         /// Rejected EPSG value.

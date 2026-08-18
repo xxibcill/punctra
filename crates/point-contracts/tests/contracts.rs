@@ -328,16 +328,31 @@ fn structured_spatial_profile_is_explicit_bounded_and_canonical() {
         ),
         Err(ContractError::InvalidHorizontalEpsg { value: 0 })
     );
+    let caller_profile = SpatialReferenceProfile::new(
+        32_767,
+        32_767,
+        SpatialAxes::EastingNorthingElevation,
+        LinearUnit::Metre,
+        LinearUnit::Metre,
+        SpatialReferenceProvenance::CallerDeclaration,
+    )
+    .expect("caller declarations accept every nonzero EPSG identity");
+    assert_eq!(caller_profile.horizontal_epsg(), 32_767);
+    assert_eq!(caller_profile.vertical_epsg(), 32_767);
     assert_eq!(
-        SpatialReferenceProfile::new(
-            32_647,
-            32_767,
-            SpatialAxes::EastingNorthingElevation,
-            LinearUnit::Metre,
-            LinearUnit::Metre,
-            SpatialReferenceProvenance::CallerDeclaration,
-        ),
-        Err(ContractError::InvalidVerticalEpsg { value: 32_767 })
+        serde_json::from_value::<CoordinateReference>(json!({
+            "Profile": {
+                "horizontal_epsg": 32767,
+                "vertical_epsg": 32767,
+                "axes": "EastingNorthingElevation",
+                "horizontal_unit": "Metre",
+                "vertical_unit": "Metre",
+                "provenance": "CallerDeclaration"
+            }
+        }))
+        .unwrap()
+        .spatial_profile(),
+        Some(caller_profile)
     );
     assert!(
         serde_json::from_value::<CoordinateReference>(json!({

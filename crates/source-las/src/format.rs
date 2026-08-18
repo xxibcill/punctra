@@ -1066,6 +1066,7 @@ const GEOTIFF_DIRECTORY_VERSION: u16 = 1;
 const GEOTIFF_KEY_REVISION: u16 = 1;
 const GEOTIFF_MINOR_REVISION: u16 = 0;
 const GEOTIFF_MODEL_TYPE_PROJECTED: u16 = 1;
+const GEOTIFF_USER_DEFINED: u16 = 32_767;
 const GT_MODEL_TYPE_KEY: u16 = 1024;
 const PROJECTED_CS_TYPE_KEY: u16 = 3072;
 const PROJECTED_LINEAR_UNITS_KEY: u16 = 3076;
@@ -1131,14 +1132,18 @@ fn parse_geotiff_profile(bytes: &[u8]) -> Option<SpatialReferenceProfile> {
         return None;
     }
     SpatialReferenceProfile::new(
-        u32::from(horizontal_epsg?),
-        u32::from(vertical_epsg?),
+        geotiff_epsg_identity(horizontal_epsg?)?,
+        geotiff_epsg_identity(vertical_epsg?)?,
         SpatialAxes::EastingNorthingElevation,
         linear_unit(horizontal_unit?)?,
         linear_unit(vertical_unit?)?,
         SpatialReferenceProvenance::SourceMetadata,
     )
     .ok()
+}
+
+fn geotiff_epsg_identity(value: u16) -> Option<u32> {
+    (value != GEOTIFF_USER_DEFINED).then(|| u32::from(value))
 }
 
 fn linear_unit(value: u16) -> Option<LinearUnit> {
