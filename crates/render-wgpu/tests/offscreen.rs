@@ -337,7 +337,7 @@ fn assert_presentation_weight_is_color_only(gpu: &GpuContext) {
 
     let frame = standard_frame(view_generation, VIEWPORT, 18.0, GREEN);
     let rendered = subject.render(&frame);
-    assert_pixel(rendered.image.pixel(CENTER), BLACK);
+    assert_pixel(rendered.image.pixel(CENTER), BLUE);
     let hit = subject
         .pick_and_wait(&rendered.recorded_frame, CENTER)
         .expect("transparent presentation must preserve source pick coverage");

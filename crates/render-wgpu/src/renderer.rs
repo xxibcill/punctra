@@ -389,7 +389,7 @@ impl WgpuRenderer {
         let snapshot = self.state.snapshot();
         let active_view_generation =
             self.require_active_view_generation(frame.view_generation())?;
-        let batches = self.recorded_batches();
+        let batches = self.recorded_batches(frame.camera());
         let pick_table = Arc::clone(
             self.pick_table
                 .as_ref()
@@ -518,11 +518,18 @@ impl WgpuRenderer {
         ))
     }
 
-    fn recorded_batches(&self) -> Box<[RecordedBatch]> {
-        self.batches
+    fn recorded_batches(&self, camera: render_protocol::Camera) -> Box<[RecordedBatch]> {
+        let mut batches = self
+            .batches
             .iter()
             .map(|(key, batch)| RecordedBatch::new(*key, batch))
-            .collect()
+            .collect::<Vec<_>>();
+        batches.sort_by(|left, right| {
+            view_depth(right.world_center, camera)
+                .total_cmp(&view_depth(left.world_center, camera))
+                .then_with(|| left.key.cmp(&right.key))
+        });
+        batches.into_boxed_slice()
     }
 
     fn require_active_view_generation(
@@ -699,6 +706,7 @@ impl WgpuRenderer {
 struct RecordedBatch {
     key: BatchKey,
     world_origin: [f64; 3],
+    world_center: [f64; 3],
     point_count: u32,
     vertex_buffer: wgpu::Buffer,
     uniform_buffer: wgpu::Buffer,
@@ -711,6 +719,7 @@ impl RecordedBatch {
         Self {
             key,
             world_origin: batch.world_origin,
+            world_center: batch.world_center,
             point_count: batch.point_count,
             vertex_buffer: batch.vertex_buffer.clone(),
             uniform_buffer: batch.uniform_buffer.clone(),
@@ -722,6 +731,7 @@ impl RecordedBatch {
 
 struct GpuBatch {
     world_origin: [f64; 3],
+    world_center: [f64; 3],
     point_count: u32,
     point_ids: Vec<PointId>,
     gpu_points: Vec<GpuPoint>,
@@ -784,8 +794,10 @@ impl GpuBatch {
             "punctra batch bind group",
         );
 
+        let world_origin = batch.world_origin();
         Ok(Self {
-            world_origin: batch.world_origin(),
+            world_origin,
+            world_center: batch_world_center(world_origin, &gpu_points),
             point_count,
             point_ids,
             gpu_points,
@@ -807,6 +819,28 @@ impl GpuBatch {
             self.vertex_buffer = point_buffer(device, &self.gpu_points);
         }
     }
+}
+
+fn batch_world_center(world_origin: [f64; 3], points: &[GpuPoint]) -> [f64; 3] {
+    let mut minimum = points[0].position;
+    let mut maximum = points[0].position;
+    for point in &points[1..] {
+        for axis in 0..3 {
+            minimum[axis] = minimum[axis].min(point.position[axis]);
+            maximum[axis] = maximum[axis].max(point.position[axis]);
+        }
+    }
+    std::array::from_fn(|axis| {
+        world_origin[axis] + (f64::from(minimum[axis]) + f64::from(maximum[axis])) * 0.5
+    })
+}
+
+fn view_depth(world_position: [f64; 3], camera: render_protocol::Camera) -> f64 {
+    let eye = camera.eye();
+    let forward = camera.world_basis().forward();
+    (0..3)
+        .map(|axis| (world_position[axis] - eye[axis]) * forward[axis])
+        .sum()
 }
 
 fn record_point_batches<'pass>(

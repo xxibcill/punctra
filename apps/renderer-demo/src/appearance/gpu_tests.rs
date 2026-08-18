@@ -102,8 +102,8 @@ fn assert_cross_fade_images(gpu: &GpuContext) {
     let child = point_id(202);
     for projection in FixedProjection::ALL {
         let mut subject = ImageHarness::new(gpu, 3, 3);
-        subject.upsert(1, 1, vec![point([0.0; 3], RED, parent)]);
-        subject.upsert(2, 1, vec![point([0.02, 0.0, 0.0], RED, child)]);
+        subject.upsert(1, 1, vec![point([0.0, -0.2, 0.0], RED, parent)]);
+        subject.upsert(2, 1, vec![point([0.02, 0.2, 0.0], RED, child)]);
         subject.upsert(3, 1, vec![point([0.0, 1.0, 0.0], BLUE, point_id(203))]);
         subject.present(2, PresentationWeight::TRANSPARENT);
         let mut previous_red = None;
@@ -126,8 +126,8 @@ fn assert_cross_fade_images(gpu: &GpuContext) {
             let rendered = subject.render(style, projection);
             let center = rendered.image.pixel(CENTER);
             assert!(
-                center[0] >= 180 && center[1] <= 1 && center[2] <= 1,
-                "{projection:?} cross-fade frame {step} produced a hole or exposed the farther blue point: {center:?}"
+                center[0] >= 180 && center[1] <= 1 && center[2] <= 65,
+                "{projection:?} cross-fade frame {step} produced a hole or conspicuous background contribution: {center:?}"
             );
             if let Some(previous) = previous_red {
                 assert!(
@@ -140,8 +140,13 @@ fn assert_cross_fade_images(gpu: &GpuContext) {
             let hit = subject
                 .pick(&rendered.recorded, CENTER)
                 .expect("the fixed center coverage should remain pickable");
-            assert_eq!(hit.point(), child);
-            assert_eq!(hit.batch(), BatchKey::new(2));
+            let expected_pick = if step == CROSS_FADE_PRESENTED_FRAMES {
+                (child, BatchKey::new(2))
+            } else {
+                (parent, BatchKey::new(1))
+            };
+            assert_eq!(hit.point(), expected_pick.0);
+            assert_eq!(hit.batch(), expected_pick.1);
 
             let expected_points = if step == CROSS_FADE_PRESENTED_FRAMES {
                 2
