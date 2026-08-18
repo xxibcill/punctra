@@ -639,8 +639,8 @@ support qualification remain outstanding.
 
 ### v0.12 local verification record
 
-On 2026-08-17, the complete authoritative local sequence passed against exact
-local implementation commit `0ff6a137d718c803bff82dfe3adfd6fc7bf229ac` on
+On 2026-08-18, the complete authoritative local sequence passed against exact
+local implementation commit `9b09380e0899c4d41b9c43cd075822429ed89616` on
 `codex/explicit-spatial-reference-v0.12`. This record was added afterward as a
 documentation-only successor, not used as a moving qualification target. The
 reference environment was an Apple M5 Pro (`Mac17,9`), 24 GiB, arm64, macOS
@@ -659,8 +659,10 @@ reproduced their existing bytes and semantics.
 The spatial-reference additions passed bounded value/wire/canonical-byte tests;
 complete, missing, duplicate, indirect, unsupported-unit, user-defined,
 unsupported-version, malformed, and WKT-conflicting GeoTIFF fixtures; exact
-Source Record and Workspace reopen tests; structured Terrain/QA/LandXML
-success/rejection tests; and DOM/streaming reference comparison before numeric
+Source Record and Workspace reopen tests; fail-closed Workspace and Terrain
+reference hashing; public Terrain metre/metre enforcement before row
+consumption; structured Terrain/QA/LandXML success/rejection tests; and
+DOM/streaming reference classification and comparison before numeric
 tolerances. No untracked example file was assigned an inferred reference.
 
 The package gate inspected metadata and archive content for all twelve public
@@ -671,7 +673,7 @@ package was uploaded.
 
 All nine default benchmark commands exited successfully and their declared
 resource ceilings passed. The durable workflow run used the unique local
-baseline `qualification-v012-0ff6a13-1786978339`. Other Criterion commands may
+baseline `qualification-v012-9b09380-20260818`. Other Criterion commands may
 display comparisons against workstation-local historical baselines; those
 labels are not a same-machine A/B/A attribution and no v0.12 performance claim
 is made from them.
