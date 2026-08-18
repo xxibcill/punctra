@@ -359,12 +359,12 @@ mod tests {
         );
 
         orbit.orbit(-80.0, 20.0);
-        for _ in 0..16 {
-            let activity = harness.pump_frame(&orbit.as_render_camera().unwrap(), viewport, true);
-            assert_eq!(activity.issued, 0);
-            assert_eq!(activity.uploaded, 0);
-            assert!(harness.scene.metrics().resident_points > 0);
-        }
+        harness.observe_paused(
+            &orbit.as_render_camera().unwrap(),
+            viewport,
+            SETTLED_OBSERVATION_FRAMES,
+            "paused View",
+        );
         harness.settle_and_observe(
             &orbit.as_render_camera().unwrap(),
             viewport,
@@ -449,12 +449,39 @@ mod tests {
             }
         }
 
+        fn observe_paused(
+            &mut self,
+            camera: &render_protocol::Camera,
+            viewport: Viewport,
+            observation_frames: u64,
+            context: &str,
+        ) {
+            let settled_metrics = self.scene.metrics();
+            let settled_nodes = self.scene.planning_nodes().as_slice().to_vec();
+            let settled_renderer = self.renderer.snapshot();
+            assert!(settled_metrics.resident_points > 0);
+
+            for observation_frame in 1..=observation_frames {
+                let activity = self.pump_frame(camera, viewport, true);
+                assert!(
+                    activity.is_quiet(),
+                    "{context} frame {observation_frame} produced work: {activity:?}"
+                );
+                assert_eq!(self.scene.metrics(), settled_metrics);
+                assert_eq!(self.scene.planning_nodes().as_slice(), settled_nodes);
+                assert_eq!(self.renderer.snapshot(), settled_renderer);
+            }
+        }
+
         fn pump_frame(
             &mut self,
             camera: &render_protocol::Camera,
             viewport: Viewport,
             loads_paused: bool,
         ) -> FrameActivity {
+            if loads_paused {
+                return FrameActivity::default();
+            }
             let plan = {
                 let nodes = self.scene.planning_nodes();
                 self.planner
@@ -478,22 +505,14 @@ mod tests {
                 self.scene
                     .mark_retired(retirement.batch_key(), retirement.expected_version());
             }
-            let requests = if loads_paused {
-                &[][..]
-            } else {
-                plan.requests()
-            };
             let issued = self
                 .scene
-                .reconcile_requests(plan.demanded_nodes(), requests)
+                .reconcile_requests(plan.demanded_nodes(), plan.requests())
                 .unwrap();
             assert!(
                 issued <= u64::try_from(NEW_REQUESTS_PER_PUMP).unwrap(),
                 "a Scene pump admitted {issued} new requests"
             );
-            if loads_paused {
-                return FrameActivity { issued, ..activity };
-            }
             let Some(batch) = self.scene.next_batch().unwrap() else {
                 return FrameActivity { issued, ..activity };
             };

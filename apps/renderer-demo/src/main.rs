@@ -1098,8 +1098,10 @@ impl Graphics {
         self.queue.submit([encoder.finish()]);
         self.window.pre_present_notify();
         self.queue.present(surface_texture);
-        let transition_actions = self.density_transitions.advance_presented_frame();
-        self.apply_transition_actions(transition_actions)?;
+        if !self.loads_paused {
+            let transition_actions = self.density_transitions.advance_presented_frame();
+            self.apply_transition_actions(transition_actions)?;
+        }
         if reconfigure_after_present {
             self.configure_surface();
         }
@@ -1322,6 +1324,10 @@ impl Graphics {
     }
 
     fn plan_view(&mut self, camera: &Camera, viewport: Viewport) -> DemoResult<()> {
+        if self.loads_paused {
+            self.metrics.record_plan(PlanFacts::default());
+            return Ok(());
+        }
         let (hierarchy, plan) = {
             let planning_nodes = self.scene.planning_nodes();
             let hierarchy = planning_nodes.as_slice().to_vec();
@@ -1339,14 +1345,9 @@ impl Graphics {
 
         let transition_actions = self.density_transitions.reconcile(&hierarchy, &plan);
         self.apply_transition_actions(transition_actions)?;
-        let requests = if self.loads_paused {
-            &[][..]
-        } else {
-            plan.requests()
-        };
         let issued = self
             .scene
-            .reconcile_requests(plan.demanded_nodes(), requests)
+            .reconcile_requests(plan.demanded_nodes(), plan.requests())
             .map_err(|error| preserve_failure_or_internal(ViewPhase::Planning, error))?;
         self.metrics
             .record_plan(PlanFacts::from_plan(&plan, issued));
@@ -2177,7 +2178,7 @@ mod tests {
     }
 
     #[test]
-    fn paused_plan_facts_never_report_unissued_requests() {
+    fn paused_plan_facts_report_no_planner_work() {
         let scene = SyntheticScene::new(VIEW_GENERATION).unwrap();
         let nodes = scene.planning_nodes();
         let camera = OrbitCamera::new(SCENE_TARGET, SCENE_RADIUS)
@@ -2194,11 +2195,14 @@ mod tests {
         assert!(!plan.requests().is_empty());
 
         let running = PlanFacts::from_plan(&plan, 1);
-        let paused = PlanFacts::from_plan(&plan, 0);
+        let paused = PlanFacts::default();
 
         assert_eq!(running.issued, running.load_candidates);
-        assert_eq!(paused.load_candidates, running.load_candidates);
+        assert_eq!(paused.demanded, 0);
+        assert_eq!(paused.load_candidates, 0);
         assert_eq!(paused.issued, 0);
+        assert_eq!(paused.retirements, 0);
+        assert!(!paused.has_stream_work());
     }
 
     #[test]

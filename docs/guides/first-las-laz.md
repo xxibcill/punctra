@@ -61,7 +61,8 @@ The available controls are:
   target-plane scale;
 - `R`: reset the camera while keeping the selected projection;
 - `H`: toggle stable-identity highlight coloring;
-- Space: pause or resume new node materialization; and
+- Space: freeze or resume planner, request, materialization, and retirement
+  work while keeping the current resident display visible; and
 - Escape: exit.
 
 The on-canvas panel labels resident Coverage as `Sampled`, `Complete`, or a
@@ -69,9 +70,9 @@ mix alongside the display, projection, loading state, Point counts, selection,
 orientation, scale, cursor, and palette facts. The compact title contains only
 the package-derived View name/version. Detailed LOD demand, candidates, issued
 requests, retention, retirement, queue/staging, resident-node, timing, and
-resource facts are printed as a separate terminal transcript. Pausing prevents
-new requests from being issued; it does not turn the current partial display
-into an exact result.
+resource facts are printed as a separate terminal transcript. Pausing freezes
+View lifecycle work; it does not turn the current partial display into an exact
+result.
 
 ## 4. Try Source Attributes
 

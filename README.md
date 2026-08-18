@@ -464,9 +464,9 @@ inspection or make the GPU authoritative.
 - Left-drag orbits, middle-drag pans, and the mouse wheel zooms.
 - `P` toggles perspective/orthographic projection without changing the
   target-plane scale.
-- `R` resets the camera, `H` toggles stable-ID highlights, and Space pauses or
-  resumes new node materialization while planning and safe retirement
-  continue.
+- `R` resets the camera, `H` toggles stable-ID highlights, and Space freezes or
+  resumes planner, request, materialization, and retirement work while keeping
+  the current resident display visible.
 - Escape exits.
 
 The on-canvas status names display mode, projection, loading state, Sampled
