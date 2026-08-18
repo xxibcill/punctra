@@ -126,35 +126,6 @@ fn target_path_is_checked_before_export_or_ensure_copies_it() {
 }
 
 #[test]
-fn missing_structured_reference_fails_closed() {
-    let fixture = TerrainFixture::with_reference(
-        "landxml-reference",
-        CoordinateReference::Unknown,
-        vec![[0, 0, 0], [10, 0, 10], [10, 10, 30], [0, 10, 20]],
-        vec![GROUND; 4],
-    );
-    let surface = derive_surface(fixture.snapshot(), GROUND);
-    assert!(surface.descriptor().coordinate_reference().is_unknown());
-    let output = TemporaryOutput::new("reference");
-    let target = output.path("terrain.xml");
-    let options = LandXmlOptions::metric_metres("Ground", "2026-08-10", "12:34:56Z").unwrap();
-
-    let error = surface
-        .export_landxml(&target, options, LandXmlLimits::default())
-        .blocking_wait()
-        .expect_err("unknown reference is not guessed");
-
-    assert!(matches!(
-        error,
-        TerrainError::UnsupportedMetricExport { reason }
-            if reason.as_str()
-                == "Source coordinates require a complete supported structured spatial profile"
-    ));
-    assert!(!target.exists());
-    output.assert_stages_are_safe();
-}
-
-#[test]
 fn structured_metric_profile_is_exported_with_coordinate_system() {
     let profile = SpatialReferenceProfile::new(
         32_647,
@@ -211,39 +182,6 @@ fn structured_metric_profile_is_exported_with_coordinate_system() {
             .map(|node| node.tag_name().name()),
         Some("Units")
     );
-}
-
-#[test]
-fn structured_non_metre_profile_fails_before_export() {
-    let profile = SpatialReferenceProfile::new(
-        2_230,
-        5_703,
-        SpatialAxes::EastingNorthingElevation,
-        LinearUnit::UsSurveyFoot,
-        LinearUnit::UsSurveyFoot,
-        SpatialReferenceProvenance::CallerDeclaration,
-    )
-    .unwrap();
-    let fixture = TerrainFixture::with_reference(
-        "landxml-foot-reference",
-        CoordinateReference::profile(profile),
-        vec![[0, 0, 0], [10, 0, 10], [0, 10, 20]],
-        vec![GROUND; 3],
-    );
-    let surface = derive_surface(fixture.snapshot(), GROUND);
-    let output = TemporaryOutput::new("foot-reference");
-    let target = output.path("terrain.xml");
-
-    let error = surface
-        .export_landxml(&target, options("Ground"), LandXmlLimits::default())
-        .blocking_wait()
-        .expect_err("structured foot units are unsupported");
-    assert!(matches!(
-        error,
-        TerrainError::UnsupportedMetricExport { reason }
-            if reason.as_str().contains("non-metre units")
-    ));
-    assert!(!target.exists());
 }
 
 #[test]

@@ -155,6 +155,7 @@ fn run(
     }
     .classification_is(recipe.ground_classification());
     let mut rows = snapshot.point_rows(query, limits.point_rows())?;
+    validate_spatial_reference(rows.source_metadata().coordinate_reference())?;
     let transform = rows.source_metadata().position_transform();
     let coordinate_reference_bytes = rows
         .source_metadata()
@@ -362,6 +363,20 @@ fn run(
     };
     context.control.complete_progress(context.work.used)?;
     Ok(surface)
+}
+
+fn validate_spatial_reference(reference: &CoordinateReference) -> Result<(), TerrainError> {
+    match reference.spatial_profile() {
+        Some(profile) if profile.is_supported_metric_survey() => Ok(()),
+        Some(_) => Err(TerrainError::invalid(
+            "Terrain spatial reference",
+            "the structured spatial profile requires unsupported axes or non-metre units",
+        )),
+        None => Err(TerrainError::invalid(
+            "Terrain spatial reference",
+            "an unknown or opaque Coordinate Reference cannot establish the supported metre survey profile",
+        )),
+    }
 }
 
 fn pull_rows(

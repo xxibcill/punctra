@@ -353,6 +353,22 @@ impl TerrainSurface {
     pub fn faces(&self) -> &[SurfaceFace] {
         &self.inner.faces
     }
+
+    #[cfg(test)]
+    pub(crate) fn with_coordinate_reference_for_test(
+        &self,
+        coordinate_reference: CoordinateReference,
+    ) -> Self {
+        let mut descriptor = self.inner.descriptor.clone();
+        descriptor.coordinate_reference = coordinate_reference;
+        Self {
+            inner: Arc::new(SurfaceData {
+                descriptor,
+                vertices: self.inner.vertices.clone(),
+                faces: self.inner.faces.clone(),
+            }),
+        }
+    }
 }
 
 impl std::fmt::Debug for TerrainSurface {

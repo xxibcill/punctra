@@ -2,7 +2,10 @@
 
 mod support;
 
-use point_contracts::WorldBounds;
+use point_contracts::{
+    CoordinateReference, LinearUnit, SpatialAxes, SpatialReferenceProfile,
+    SpatialReferenceProvenance, WorldBounds,
+};
 use point_terrain::{ALGORITHM_VERSION, TerrainError, TerrainLimits, TerrainRecipe};
 use point_workspace::{CommitLimits, CommitRequest};
 
@@ -10,6 +13,48 @@ use support::{
     TerrainFixture, committed, derive_surface, derive_with, operation,
     terrain_limits_with_row_batch,
 };
+
+#[test]
+fn derivation_rejects_unsupported_spatial_references() {
+    let feet = SpatialReferenceProfile::new(
+        2_230,
+        5_703,
+        SpatialAxes::EastingNorthingElevation,
+        LinearUnit::UsSurveyFoot,
+        LinearUnit::UsSurveyFoot,
+        SpatialReferenceProvenance::CallerDeclaration,
+    )
+    .unwrap();
+    for (label, reference) in [
+        ("unknown", CoordinateReference::Unknown),
+        (
+            "opaque-wkt",
+            CoordinateReference::wkt("LOCAL_CS[\"opaque\"]").unwrap(),
+        ),
+        ("feet", CoordinateReference::profile(feet)),
+    ] {
+        let fixture = TerrainFixture::with_reference(
+            &format!("derive-{label}-reference"),
+            reference,
+            vec![[0, 0, 0], [10, 0, 10], [0, 10, 20]],
+            vec![2; 3],
+        );
+
+        let error = derive_with(
+            fixture.snapshot(),
+            TerrainRecipe::new(2),
+            TerrainLimits::default(),
+        )
+        .expect_err("Terrain requires the supported metre survey profile");
+        assert!(matches!(
+            error,
+            TerrainError::InvalidArgument {
+                argument: "Terrain spatial reference",
+                ..
+            }
+        ));
+    }
+}
 
 #[test]
 fn three_point_plane_publishes_exact_canonical_surface_facts() {

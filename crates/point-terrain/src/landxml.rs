@@ -2439,6 +2439,41 @@ mod tests {
     }
 
     #[test]
+    fn non_metre_profile_cannot_be_exported() {
+        let coordinate_reference = CoordinateReference::profile(
+            SpatialReferenceProfile::new(
+                2_230,
+                5_703,
+                SpatialAxes::EastingNorthingElevation,
+                LinearUnit::UsSurveyFoot,
+                LinearUnit::UsSurveyFoot,
+                SpatialReferenceProvenance::CallerDeclaration,
+            )
+            .expect("fixture spatial profile is valid"),
+        );
+        let fixture =
+            ExportFixture::with_coordinate_reference("non-metre-profile", coordinate_reference);
+        let target = fixture.path("feet.xml");
+
+        let failure = publish(
+            &fixture.surface,
+            &target,
+            &options(),
+            LandXmlLimits::default(),
+            &OperationControl::new(),
+            &ProductionPublicationHook,
+        )
+        .expect_err("structured foot units are unsupported");
+        assert!(matches!(
+            failure,
+            TerrainError::UnsupportedMetricExport { reason }
+                if reason.as_str().contains("non-metre units")
+        ));
+        assert!(!target.exists());
+        fixture.assert_stages_are_safe();
+    }
+
+    #[test]
     fn ensure_reconciles_an_exact_create_race_and_rejects_a_conflicting_race() {
         let fixture = ExportFixture::new("create-race");
         let seed = fixture.path("seed.xml");
@@ -3143,7 +3178,7 @@ mod tests {
             let transform =
                 PositionTransform::new([0.0; 3], [1.0; 3]).expect("fixture transform is valid");
             let memory =
-                MemorySource::from_columns(transform, coordinate_reference, ticks, columns)
+                MemorySource::from_columns(transform, supported_reference(), ticks, columns)
                     .expect("fixture Source is valid");
             let source = source_memory::open(memory)
                 .blocking_wait()
@@ -3169,7 +3204,8 @@ mod tests {
                 TerrainLimits::default(),
             )
             .blocking_wait()
-            .expect("fixture Terrain derives");
+            .expect("fixture Terrain derives")
+            .with_coordinate_reference_for_test(coordinate_reference);
             Self { directory, surface }
         }
 
