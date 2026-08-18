@@ -71,10 +71,7 @@ impl StatusSnapshot {
                 self.projection,
                 self.stream.label()
             ),
-            format!(
-                "COVERAGE SAMPLED {} / COMPLETE {}",
-                self.scene.sampled_resident_batches, self.scene.complete_resident_batches
-            ),
+            coverage_line(self.scene),
             "QUERY COMPLETION NOT IMPLIED".to_owned(),
             format!(
                 "SOURCE {} | DRAWN {} | RESIDENT {}",
@@ -104,6 +101,22 @@ impl StatusSnapshot {
             }
         }
         lines
+    }
+}
+
+fn coverage_line(scene: SceneMetrics) -> String {
+    if scene.authored_resident_batches > 0 {
+        format!(
+            "COVERAGE SAMPLED {} COMPLETE {} AUTHORED {}",
+            scene.sampled_resident_batches,
+            scene.complete_resident_batches,
+            scene.authored_resident_batches
+        )
+    } else {
+        format!(
+            "COVERAGE SAMPLED {} / COMPLETE {}",
+            scene.sampled_resident_batches, scene.complete_resident_batches
+        )
     }
 }
 
@@ -260,5 +273,22 @@ mod tests {
             StreamStatus::from_facts(loading, true, true, true),
             StreamStatus::LoadsPaused
         );
+    }
+
+    #[test]
+    fn authored_fixture_coverage_is_named_in_the_primary_status() {
+        let mut authored = snapshot(None);
+        authored.scene.authored_resident_batches = 583;
+        authored.scene.authored_resident_points = 596_992;
+
+        let lines = authored.lines();
+        let coverage = lines
+            .iter()
+            .find(|line| line.starts_with("COVERAGE"))
+            .unwrap();
+        assert!(coverage.contains("SAMPLED 7"));
+        assert!(coverage.contains("COMPLETE 3"));
+        assert!(coverage.contains("AUTHORED 583"));
+        assert!(coverage.len() <= MAX_STATUS_COLUMNS);
     }
 }
