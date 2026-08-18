@@ -1311,6 +1311,16 @@ impl Graphics {
                 return Err(renderer_failure(ViewPhase::GpuUpload, error));
             }
         };
+        if let Some(action) =
+            self.density_transitions
+                .uploaded_batch_presentation(appearance::ConditionalBatch {
+                    view_generation: VIEW_GENERATION,
+                    key: batch_key,
+                    expected_version: batch_version,
+                })
+        {
+            self.apply_transition_actions(vec![action])?;
+        }
         self.scene.mark_resident(batch_key, batch_version);
         if self.highlights_enabled {
             self.apply_highlights()?;

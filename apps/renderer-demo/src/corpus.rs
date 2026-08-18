@@ -676,28 +676,7 @@ fn run_trace_frame(runtime: &mut TraceRuntime<'_>) -> Result<FrameEvidence, View
         .map_err(|error| {
             preserve_scene_failure(error, ViewPhase::Planning, "request reconciliation")
         })?;
-    let mut accepted_batch = false;
-    if !runtime.density_transitions.blocks_new_residency()
-        && let Some(batch) = runtime
-            .scene
-            .next_batch()
-            .map_err(|error| preserve_scene_failure(error, ViewPhase::NodeRead, "node read"))?
-    {
-        let key = batch.key();
-        let version = batch.version();
-        match runtime.renderer.apply(&RenderUpdate::Upsert { batch }) {
-            Ok(update) => {
-                runtime.evidence.observe_resident(update.resident());
-                runtime.evidence.observe_upload(update);
-                runtime.scene.mark_resident(key, version);
-                accepted_batch = true;
-            }
-            Err(error) => {
-                runtime.scene.mark_rejected(key, version);
-                return Err(classify_renderer_failure(ViewPhase::GpuUpload, error));
-            }
-        }
-    }
+    let accepted_batch = accept_next_batch(runtime, &mut transition_activity)?;
     let submitted = std::time::Instant::now();
     let point_size =
         projected_density_point_size(viewport, runtime.scene.metrics().resident_points);
@@ -737,6 +716,44 @@ fn run_trace_frame(runtime: &mut TraceRuntime<'_>) -> Result<FrameEvidence, View
         frame_report,
         submitted_frame_nanoseconds: elapsed_nanoseconds(submitted.elapsed()),
     })
+}
+
+fn accept_next_batch(
+    runtime: &mut TraceRuntime<'_>,
+    transition_activity: &mut TransitionActivity,
+) -> Result<bool, ViewFailure> {
+    if runtime.density_transitions.blocks_new_residency() {
+        return Ok(false);
+    }
+    let Some(batch) = runtime
+        .scene
+        .next_batch()
+        .map_err(|error| preserve_scene_failure(error, ViewPhase::NodeRead, "node read"))?
+    else {
+        return Ok(false);
+    };
+    let key = batch.key();
+    let version = batch.version();
+    let update = match runtime.renderer.apply(&RenderUpdate::Upsert { batch }) {
+        Ok(update) => update,
+        Err(error) => {
+            runtime.scene.mark_rejected(key, version);
+            return Err(classify_renderer_failure(ViewPhase::GpuUpload, error));
+        }
+    };
+    runtime.evidence.observe_resident(update.resident());
+    runtime.evidence.observe_upload(update);
+    if let Some(action) = runtime.density_transitions.uploaded_batch_presentation(
+        crate::appearance::ConditionalBatch {
+            view_generation: runtime.view_generation,
+            key,
+            expected_version: version,
+        },
+    ) {
+        transition_activity.add(apply_transition_actions(runtime, vec![action])?);
+    }
+    runtime.scene.mark_resident(key, version);
+    Ok(true)
 }
 
 fn apply_transition_actions(

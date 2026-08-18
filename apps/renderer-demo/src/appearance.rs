@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use point_view::{AvailableNode, NodeKey, RetainedNode, ViewPlan};
+use point_view::{AvailableNode, NodeKey, NodeStatus, RetainedNode, ViewPlan};
 use render_protocol::{
     BatchKey, BatchVersion, PresentationWeight, RenderLimits, RenderUpdate, ViewGenerationKey,
     Viewport,
@@ -72,6 +72,7 @@ struct ActiveTransition {
 #[derive(Default)]
 pub(crate) struct DensityTransitions {
     active: BTreeMap<BatchKey, ActiveTransition>,
+    pending_replacements: BTreeSet<BatchKey>,
 }
 
 impl DensityTransitions {
@@ -104,6 +105,7 @@ impl DensityTransitions {
                 false
             }
         });
+        actions.extend(self.reconcile_pending_replacements(hierarchy, plan));
 
         for retirement in plan.retirements().iter().copied() {
             if self.active.contains_key(&retirement.batch_key()) {
@@ -144,6 +146,18 @@ impl DensityTransitions {
         actions
     }
 
+    pub(crate) fn uploaded_batch_presentation(
+        &self,
+        batch: ConditionalBatch,
+    ) -> Option<TransitionAction> {
+        self.pending_replacements
+            .contains(&batch.key)
+            .then_some(TransitionAction::Present {
+                batch,
+                weight: PresentationWeight::TRANSPARENT,
+            })
+    }
+
     pub(crate) fn advance_presented_frame(&mut self) -> Vec<TransitionAction> {
         let mut actions = Vec::new();
         let mut completed = Vec::new();
@@ -180,6 +194,38 @@ impl DensityTransitions {
 
     pub(crate) fn blocks_new_residency(&self) -> bool {
         self.is_active()
+    }
+
+    fn reconcile_pending_replacements(
+        &mut self,
+        hierarchy: &[AvailableNode],
+        plan: &ViewPlan,
+    ) -> Vec<TransitionAction> {
+        let retained = plan
+            .retained_nodes()
+            .iter()
+            .map(|node| node.node_key())
+            .collect();
+        let next = pending_replacement_batches(hierarchy, &retained, plan.demanded_nodes());
+        let mut actions = Vec::new();
+        for key in self.pending_replacements.difference(&next) {
+            if let Some(batch) = resident_batch(hierarchy, plan, *key) {
+                actions.push(TransitionAction::Present {
+                    batch,
+                    weight: PresentationWeight::OPAQUE,
+                });
+            }
+        }
+        for key in next.difference(&self.pending_replacements) {
+            if let Some(batch) = resident_batch(hierarchy, plan, *key) {
+                actions.push(TransitionAction::Present {
+                    batch,
+                    weight: PresentationWeight::TRANSPARENT,
+                });
+            }
+        }
+        self.pending_replacements = next;
+        actions
     }
 }
 
@@ -225,6 +271,65 @@ fn replacement_batches(
         .collect()
 }
 
+fn pending_replacement_batches(
+    hierarchy: &[AvailableNode],
+    retained: &BTreeSet<NodeKey>,
+    demanded: &[NodeKey],
+) -> BTreeSet<BatchKey> {
+    let nodes = hierarchy
+        .iter()
+        .copied()
+        .map(|node| (node.key(), node))
+        .collect::<BTreeMap<_, _>>();
+    let fallback_ancestors = demanded
+        .iter()
+        .filter_map(|node| nearest_retained_ancestor(*node, retained, &nodes))
+        .collect::<BTreeSet<_>>();
+    let demanded = demanded.iter().copied().collect::<BTreeSet<_>>();
+
+    hierarchy
+        .iter()
+        .filter(|node| retained.contains(&node.key()) || demanded.contains(&node.key()))
+        .filter(|node| {
+            fallback_ancestors
+                .iter()
+                .any(|ancestor| is_descendant(node.key(), *ancestor, &nodes))
+        })
+        .map(|node| node.batch_key())
+        .collect()
+}
+
+fn nearest_retained_ancestor(
+    node: NodeKey,
+    retained: &BTreeSet<NodeKey>,
+    nodes: &BTreeMap<NodeKey, AvailableNode>,
+) -> Option<NodeKey> {
+    let mut parent = nodes.get(&node).and_then(|node| node.parent());
+    while let Some(candidate) = parent {
+        if retained.contains(&candidate) {
+            return Some(candidate);
+        }
+        parent = nodes.get(&candidate).and_then(|node| node.parent());
+    }
+    None
+}
+
+fn resident_batch(
+    hierarchy: &[AvailableNode],
+    plan: &ViewPlan,
+    key: BatchKey,
+) -> Option<ConditionalBatch> {
+    let node = hierarchy.iter().find(|node| node.batch_key() == key)?;
+    let NodeStatus::Resident { version } = node.status() else {
+        return None;
+    };
+    Some(ConditionalBatch {
+        view_generation: plan.view_generation(),
+        key,
+        expected_version: version,
+    })
+}
+
 fn is_descendant(
     mut candidate: NodeKey,
     ancestor: NodeKey,
@@ -248,6 +353,7 @@ fn weight_for_step(step: u8) -> PresentationWeight {
 
 #[cfg(test)]
 mod tests {
+    use point_view::AxisAlignedBox;
     use render_protocol::{BatchKey, BatchVersion, ViewGenerationKey, ViewId};
 
     use super::*;
@@ -258,6 +364,24 @@ mod tests {
             key: BatchKey::new(key),
             expected_version: BatchVersion::new(1),
         }
+    }
+
+    fn node_key(key: u64) -> NodeKey {
+        NodeKey::new(key).unwrap()
+    }
+
+    fn node(key: u64, parent: Option<u64>) -> AvailableNode {
+        AvailableNode::new(
+            node_key(key),
+            parent.map(node_key),
+            AxisAlignedBox::new([0.0; 3], [1.0; 3]).unwrap(),
+            1.0,
+            1,
+            1,
+            BatchKey::new(key),
+            NodeStatus::Missing,
+        )
+        .unwrap()
     }
 
     #[test]
@@ -310,6 +434,29 @@ mod tests {
             transitions.advance_presented_frame();
         }
         assert!(!transitions.blocks_new_residency());
+    }
+
+    #[test]
+    fn incomplete_replacement_coverage_stays_transparent() {
+        let hierarchy = [node(1, None), node(2, Some(1)), node(3, Some(1))];
+        let retained = [node_key(1), node_key(2)].into_iter().collect();
+        let pending = pending_replacement_batches(&hierarchy, &retained, &[node_key(3)]);
+        assert_eq!(
+            pending,
+            [BatchKey::new(2), BatchKey::new(3)].into_iter().collect()
+        );
+
+        let transitions = DensityTransitions {
+            pending_replacements: pending,
+            ..DensityTransitions::default()
+        };
+        assert_eq!(
+            transitions.uploaded_batch_presentation(batch(3)),
+            Some(TransitionAction::Present {
+                batch: batch(3),
+                weight: PresentationWeight::TRANSPARENT,
+            })
+        );
     }
 
     #[test]
