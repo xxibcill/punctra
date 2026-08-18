@@ -137,7 +137,7 @@ What remains weak:
 - there is no user or host policy for point-size adjustment by scene,
   projection, density, or workstation.
 
-A later design should compare projected-spacing-aware point size, bounded
+A later design should compare projected-density-aware point size, bounded
 parent/child transition treatment, and their interaction with deterministic
 picking. It must not blur or invent authoritative geometry.
 

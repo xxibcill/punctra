@@ -89,7 +89,7 @@ must have a real `renderer-demo` caller and direct state-model/GPU tests before
 acceptance; no general material, shader, or plugin interface is authorized.
 
 Point diameter remains in physical pixels. Fixed views will compare the
-existing 2.4-pixel reference with a bounded projected-spacing-aware policy
+existing 2.4-pixel reference with a bounded projected-density-aware policy
 clamped to 1.0 through 4.0 physical pixels. The adaptive policy is accepted
 only if it reduces settled density discontinuities without hiding holes,
 changing pick coverage, or exceeding the recorded frame/resource ceilings.

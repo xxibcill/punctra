@@ -21,7 +21,7 @@ use std::{
 };
 
 use appearance::{
-    DensityTransitions, REFERENCE_POINT_SIZE_PIXELS, TransitionAction, projected_spacing_point_size,
+    DensityTransitions, REFERENCE_POINT_SIZE_PIXELS, TransitionAction, projected_density_point_size,
 };
 use diagnostic::{ViewFailure, ViewPhase, classify_protocol_failure, classify_renderer_failure};
 use orbit_camera::{OrbitCamera, ProjectionMode};
@@ -1081,7 +1081,7 @@ impl Graphics {
                 label: Some("punctra renderer demo frame"),
             });
         let point_size =
-            projected_spacing_point_size(viewport, self.scene.metrics().resident_points);
+            projected_density_point_size(viewport, self.scene.metrics().resident_points);
         let style = self
             .style
             .with_display_size_pixels(point_size)

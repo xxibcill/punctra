@@ -168,7 +168,7 @@ impl DensityTransitions {
     }
 }
 
-pub(crate) fn projected_spacing_point_size(viewport: Viewport, drawn_points: u64) -> f32 {
+pub(crate) fn projected_density_point_size(viewport: Viewport, drawn_points: u64) -> f32 {
     if drawn_points == 0 {
         return MAX_POINT_SIZE_PIXELS;
     }
@@ -309,14 +309,14 @@ mod tests {
     }
 
     #[test]
-    fn projected_spacing_policy_is_bounded_and_density_sensitive() {
+    fn projected_density_policy_is_bounded_and_density_sensitive() {
         let viewport = Viewport::new(2_560, 1_664).unwrap();
-        assert!((projected_spacing_point_size(viewport, 0) - 4.0).abs() < f32::EPSILON);
-        assert!((projected_spacing_point_size(viewport, 1) - 4.0).abs() < f32::EPSILON);
-        assert!((projected_spacing_point_size(viewport, u64::MAX) - 1.0).abs() < f32::EPSILON);
+        assert!((projected_density_point_size(viewport, 0) - 4.0).abs() < f32::EPSILON);
+        assert!((projected_density_point_size(viewport, 1) - 4.0).abs() < f32::EPSILON);
+        assert!((projected_density_point_size(viewport, u64::MAX) - 1.0).abs() < f32::EPSILON);
         assert!(
-            projected_spacing_point_size(viewport, 100_000)
-                > projected_spacing_point_size(viewport, 600_000)
+            projected_density_point_size(viewport, 100_000)
+                > projected_density_point_size(viewport, 600_000)
         );
     }
 }

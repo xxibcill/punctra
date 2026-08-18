@@ -21,7 +21,7 @@ use crate::{
     PLANNING_BUDGET, VIEW_GENERATION,
     appearance::{
         DensityTransitions, REFERENCE_POINT_SIZE_PIXELS, TransitionAction,
-        projected_spacing_point_size,
+        projected_density_point_size,
     },
     diagnostic::{ViewFailure, ViewFailureCode, ViewPhase, classify_renderer_failure},
     orbit_camera::{OrbitCamera, ProjectionMode},
@@ -697,7 +697,7 @@ fn run_trace_frame(runtime: &mut TraceRuntime<'_>) -> Result<FrameEvidence, View
     }
     let submitted = std::time::Instant::now();
     let point_size =
-        projected_spacing_point_size(viewport, runtime.scene.metrics().resident_points);
+        projected_density_point_size(viewport, runtime.scene.metrics().resident_points);
     let default_style = PointStyle::default();
     let reference_style = PointStyle::new(
         REFERENCE_POINT_SIZE_PIXELS,

@@ -18,7 +18,7 @@ use render_wgpu::{
 };
 
 use super::{
-    CROSS_FADE_PRESENTED_FRAMES, REFERENCE_POINT_SIZE_PIXELS, projected_spacing_point_size,
+    CROSS_FADE_PRESENTED_FRAMES, REFERENCE_POINT_SIZE_PIXELS, projected_density_point_size,
     weight_for_step,
 };
 use gpu_support::{GpuContext, with_gpu};
@@ -41,6 +41,11 @@ fn fixed_view_adaptive_sizing_improves_coverage_without_hiding_a_source_hole() {
 }
 
 #[test]
+fn fixed_view_density_policy_reduces_a_sparse_dense_boundary_discontinuity() {
+    with_gpu(assert_mixed_density_boundary);
+}
+
+#[test]
 fn fixed_view_cross_fade_has_no_hole_or_conspicuous_frame_discontinuity() {
     with_gpu(assert_cross_fade_images);
 }
@@ -52,7 +57,7 @@ fn assert_adaptive_sizing_image(gpu: &GpuContext) {
     subject.upsert(1, 1, points);
 
     let reference_style = point_style(REFERENCE_POINT_SIZE_PIXELS);
-    let adaptive_size = projected_spacing_point_size(viewport(), point_count);
+    let adaptive_size = projected_density_point_size(viewport(), point_count);
     assert_eq!(adaptive_size.to_bits(), 4.0_f32.to_bits());
     let adaptive_style = reference_style
         .with_display_size_pixels(adaptive_size)
@@ -97,6 +102,30 @@ fn assert_adaptive_sizing_image(gpu: &GpuContext) {
     }
 }
 
+fn assert_mixed_density_boundary(gpu: &GpuContext) {
+    let points = mixed_density_boundary();
+    let point_count = u64::try_from(points.len()).unwrap();
+    let mut subject = ImageHarness::new(gpu, point_count, 1);
+    subject.upsert(1, 1, points);
+
+    let reference_style = point_style(REFERENCE_POINT_SIZE_PIXELS);
+    let adaptive_style = reference_style
+        .with_display_size_pixels(projected_density_point_size(viewport(), point_count))
+        .unwrap();
+    for projection in FixedProjection::ALL {
+        let reference = subject.render(reference_style, projection);
+        let adaptive = subject.render(adaptive_style, projection);
+        let reference_gap = reference.image.longest_background_run(36..58, CENTER[1]);
+        let adaptive_gap = adaptive.image.longest_background_run(36..58, CENTER[1]);
+        assert!(
+            adaptive_gap < reference_gap,
+            "{projection:?} adaptive mixed-density boundary gap {adaptive_gap} should be smaller than the 2.4 px reference gap {reference_gap}"
+        );
+        assert_frame_ceiling(&reference, point_count, 1);
+        assert_frame_ceiling(&adaptive, point_count, 1);
+    }
+}
+
 fn assert_cross_fade_images(gpu: &GpuContext) {
     let parent = point_id(201);
     let child = point_id(202);
@@ -119,7 +148,7 @@ fn assert_cross_fade_images(gpu: &GpuContext) {
                 subject.remove(1, 1);
             }
 
-            let point_size = projected_spacing_point_size(viewport(), subject.resident_points());
+            let point_size = projected_density_point_size(viewport(), subject.resident_points());
             let style = point_style(REFERENCE_POINT_SIZE_PIXELS)
                 .with_display_size_pixels(point_size)
                 .unwrap();
@@ -179,6 +208,25 @@ fn grid_with_center_hole() -> (Vec<RenderPoint>, PointId) {
         points,
         known_point.expect("the fixed grid should contain the known pick sample"),
     )
+}
+
+fn mixed_density_boundary() -> Vec<RenderPoint> {
+    let mut points = Vec::new();
+    for z in -3..=3 {
+        for x in [-1.5, -1.0, -0.5, -0.25] {
+            let identity = point_id(u64::try_from(points.len()).unwrap().saturating_add(1));
+            #[allow(clippy::cast_precision_loss)]
+            points.push(point([x, 0.0, z as f32 * 0.5], GREEN, identity));
+        }
+    }
+    for z in -6..=6 {
+        for x in [0.125, 0.375, 0.625, 0.875, 1.125, 1.375] {
+            let identity = point_id(u64::try_from(points.len()).unwrap().saturating_add(1));
+            #[allow(clippy::cast_precision_loss)]
+            points.push(point([x, 0.0, z as f32 * 0.25], GREEN, identity));
+        }
+    }
+    points
 }
 
 fn point(position: [f32; 3], color: [u8; 4], identity: PointId) -> RenderPoint {
@@ -460,6 +508,20 @@ impl Image {
             }
         }
         count
+    }
+
+    fn longest_background_run(&self, columns: std::ops::Range<u32>, row: u32) -> u32 {
+        let mut longest = 0;
+        let mut current = 0;
+        for x in columns {
+            if self.pixel([x, row]) == BLACK {
+                current += 1;
+                longest = longest.max(current);
+            } else {
+                current = 0;
+            }
+        }
+        longest
     }
 
     fn first_pixel_where(
