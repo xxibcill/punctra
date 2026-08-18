@@ -1076,12 +1076,10 @@ impl Graphics {
             });
         let point_size =
             projected_spacing_point_size(viewport, self.scene.metrics().resident_points);
-        let style = PointStyle::new(
-            point_size,
-            self.style.highlight_color(),
-            self.style.clear_color(),
-        )
-        .map_err(|error| internal_failure(ViewPhase::Rendering, error))?;
+        let style = self
+            .style
+            .with_display_size_pixels(point_size)
+            .map_err(|error| internal_failure(ViewPhase::Rendering, error))?;
         let frame = Frame::new(VIEW_GENERATION, camera, viewport)
             .map_err(|error| internal_failure(ViewPhase::Rendering, error))?
             .with_style(style);

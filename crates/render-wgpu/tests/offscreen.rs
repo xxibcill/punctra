@@ -88,6 +88,11 @@ fn presentation_weight_changes_color_but_not_pick_coverage() {
 }
 
 #[test]
+fn display_size_changes_color_coverage_but_not_pick_coverage() {
+    with_gpu(assert_display_size_is_color_only);
+}
+
+#[test]
 fn eye_dome_lighting_has_bounded_active_and_fallback_paths() {
     with_gpu(assert_eye_dome_paths);
 }
@@ -302,7 +307,8 @@ fn assert_highlight_alpha_preservation(gpu: &GpuContext) {
 fn assert_presentation_weight_is_color_only(gpu: &GpuContext) {
     let mut subject = OffscreenRenderer::new(gpu, roomy_limits());
     let view_generation = ViewGenerationKey::new(ViewId::new(9), 1);
-    let identity = point_id(901);
+    let near_identity = point_id(901);
+    let far_identity = point_id(902);
     subject.apply(&RenderUpdate::Reset { view_generation });
     subject.apply(&RenderUpdate::Upsert {
         batch: batch(
@@ -310,7 +316,16 @@ fn assert_presentation_weight_is_color_only(gpu: &GpuContext) {
             1,
             1,
             WORLD_ORIGIN,
-            vec![point([0.0; 3], RED, identity.ordinal())],
+            vec![point([0.0, -1.0, 0.0], RED, near_identity.ordinal())],
+        ),
+    });
+    subject.apply(&RenderUpdate::Upsert {
+        batch: batch(
+            view_generation,
+            2,
+            1,
+            WORLD_ORIGIN,
+            vec![point([0.0, 1.0, 0.0], BLUE, far_identity.ordinal())],
         ),
     });
     subject.apply(&RenderUpdate::SetBatchPresentation {
@@ -326,7 +341,40 @@ fn assert_presentation_weight_is_color_only(gpu: &GpuContext) {
     let hit = subject
         .pick_and_wait(&rendered.recorded_frame, CENTER)
         .expect("transparent presentation must preserve source pick coverage");
-    assert_hit(hit, view_generation, 1, 1, identity);
+    assert_hit(hit, view_generation, 1, 1, near_identity);
+}
+
+fn assert_display_size_is_color_only(gpu: &GpuContext) {
+    let mut subject = OffscreenRenderer::new(gpu, roomy_limits());
+    let view_generation = ViewGenerationKey::new(ViewId::new(10), 1);
+    let identity = point_id(1_001);
+    subject.apply(&RenderUpdate::Reset { view_generation });
+    subject.apply(&RenderUpdate::Upsert {
+        batch: batch(
+            view_generation,
+            1,
+            1,
+            WORLD_ORIGIN,
+            vec![point([0.0; 3], RED, identity.ordinal())],
+        ),
+    });
+
+    let style = PointStyle::new(2.4, [1.0; 3], [0.0, 0.0, 0.0, 1.0])
+        .unwrap()
+        .with_display_size_pixels(18.0)
+        .unwrap();
+    let frame = frame_with_style(view_generation, VIEWPORT, style);
+    let rendered = subject.render(&frame);
+    let visual_only_pixel = [CENTER[0] + 5, CENTER[1]];
+    assert_pixel(rendered.image.pixel(visual_only_pixel), RED);
+    assert_eq!(
+        subject.pick_and_wait(&rendered.recorded_frame, visual_only_pixel),
+        None
+    );
+    let center_hit = subject
+        .pick_and_wait(&rendered.recorded_frame, CENTER)
+        .expect("the nominal pick footprint should still cover the point center");
+    assert_hit(center_hit, view_generation, 1, 1, identity);
 }
 
 fn assert_eye_dome_paths(gpu: &GpuContext) {

@@ -76,7 +76,7 @@ fn point_vertex(input: VertexInput, @builtin(vertex_index) vertex_index: u32) ->
 
 @fragment
 fn point_fragment(input: VertexOutput) -> @location(0) vec4<f32> {
-    if input.color.a <= 0.0 || !inside_splat(input.corner) {
+    if input.source_alpha <= 0.0 || !inside_splat(input.corner) {
         discard;
     }
     return input.color;

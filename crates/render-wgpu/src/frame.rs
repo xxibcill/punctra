@@ -7,10 +7,13 @@ use thiserror::Error;
 /// The default style uses a 3.0-physical-pixel point diameter, the linear RGB
 /// highlight color `[1.0, 0.8, 0.1]`, and the linear RGBA clear color
 /// `[0.015, 0.02, 0.03, 1.0]`. Highlighting replaces only source RGB and
-/// preserves each point's source alpha for drawing and picking.
+/// preserves each point's source alpha for drawing and picking. A caller may
+/// override the displayed diameter without changing the nominal diameter used
+/// for picking.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PointStyle {
     default_size_pixels: f32,
+    display_size_pixels: f32,
     highlight_color: [f32; 3],
     clear_color: [f64; 4],
 }
@@ -27,23 +30,46 @@ impl PointStyle {
         highlight_color: [f32; 3],
         clear_color: [f64; 4],
     ) -> Result<Self, FrameError> {
-        if !default_size_pixels.is_finite() || default_size_pixels <= 0.0 {
-            return Err(FrameError::InvalidPointSize(default_size_pixels));
-        }
+        validate_point_size(default_size_pixels)?;
         validate_color("highlight", &highlight_color)?;
         validate_color("clear", &clear_color)?;
 
         Ok(Self {
             default_size_pixels,
+            display_size_pixels: default_size_pixels,
             highlight_color,
             clear_color,
         })
     }
 
-    /// Returns the diameter used for every point in the frame.
+    /// Overrides the physical-pixel diameter used only by the color pass.
+    ///
+    /// Picking continues to use [`Self::default_size_pixels`], keeping visual
+    /// presentation changes out of hit testing.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`FrameError`] when the display point size is not positive and
+    /// finite.
+    pub fn with_display_size_pixels(
+        mut self,
+        display_size_pixels: f32,
+    ) -> Result<Self, FrameError> {
+        validate_point_size(display_size_pixels)?;
+        self.display_size_pixels = display_size_pixels;
+        Ok(self)
+    }
+
+    /// Returns the nominal diameter used for picking.
     #[must_use]
     pub const fn default_size_pixels(self) -> f32 {
         self.default_size_pixels
+    }
+
+    /// Returns the diameter used by the color pass.
+    #[must_use]
+    pub const fn display_size_pixels(self) -> f32 {
+        self.display_size_pixels
     }
 
     /// Returns the linear RGB highlight color.
@@ -63,6 +89,7 @@ impl Default for PointStyle {
     fn default() -> Self {
         Self {
             default_size_pixels: 3.0,
+            display_size_pixels: 3.0,
             highlight_color: [1.0, 0.8, 0.1],
             clear_color: [0.015, 0.02, 0.03, 1.0],
         }
@@ -153,8 +180,8 @@ pub enum FrameError {
         /// The viewport whose aspect ratio made the projection non-finite.
         viewport: [u32; 2],
     },
-    /// The default point diameter is not positive and finite.
-    #[error("default point size must be positive and finite, got {0}")]
+    /// A point diameter is not positive and finite.
+    #[error("point size must be positive and finite, got {0}")]
     InvalidPointSize(f32),
     /// A color channel is outside the finite inclusive unit interval.
     #[error("{name} color channel {channel} must be finite and inside [0, 1]")]
@@ -164,6 +191,14 @@ pub enum FrameError {
         /// Zero-based RGBA channel.
         channel: usize,
     },
+}
+
+fn validate_point_size(size_pixels: f32) -> Result<(), FrameError> {
+    if size_pixels.is_finite() && size_pixels > 0.0 {
+        Ok(())
+    } else {
+        Err(FrameError::InvalidPointSize(size_pixels))
+    }
 }
 
 fn validate_color<T, const N: usize>(name: &'static str, color: &[T; N]) -> Result<(), FrameError>
@@ -211,6 +246,21 @@ mod tests {
                 channel: 1,
             })
         );
+    }
+
+    #[test]
+    fn display_size_override_preserves_nominal_pick_size() {
+        let style = PointStyle::new(2.4, [1.0; 3], [0.0; 4])
+            .unwrap()
+            .with_display_size_pixels(4.0)
+            .unwrap();
+
+        assert_eq!(style.default_size_pixels().to_bits(), 2.4_f32.to_bits());
+        assert_eq!(style.display_size_pixels().to_bits(), 4.0_f32.to_bits());
+        assert!(matches!(
+            style.with_display_size_pixels(f32::NAN),
+            Err(FrameError::InvalidPointSize(value)) if value.is_nan()
+        ));
     }
 
     #[test]

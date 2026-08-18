@@ -397,7 +397,12 @@ impl WgpuRenderer {
         );
 
         let viewport = frame.viewport();
-        self.record_frame_uniforms(encoder, frame, &batches)?;
+        self.record_frame_uniforms(
+            encoder,
+            frame,
+            frame.style().display_size_pixels(),
+            &batches,
+        )?;
 
         let clear = frame.style().clear_color();
         let transient_texture_bytes = if self.depth_cue_status == DepthCueStatus::Active {
@@ -494,7 +499,12 @@ impl WgpuRenderer {
             });
         }
 
-        self.record_frame_uniforms(encoder, &frame, &recorded_frame.batches)?;
+        self.record_frame_uniforms(
+            encoder,
+            &frame,
+            frame.style().default_size_pixels(),
+            &recorded_frame.batches,
+        )?;
         let (depth, pick_target) = self.targets.depth_and_pick(&self.device, viewport);
         Self::record_pick_pass(
             encoder,
@@ -628,6 +638,7 @@ impl WgpuRenderer {
         &self,
         encoder: &mut wgpu::CommandEncoder,
         frame: &Frame,
+        point_size_pixels: f32,
         batches: &[RecordedBatch],
     ) -> Result<(), RendererError> {
         let staging =
@@ -639,7 +650,7 @@ impl WgpuRenderer {
         let camera_uniform = CameraUniform {
             view_projection: frame.view_projection().to_cols_array_2d(),
             viewport_size: viewport_f32,
-            default_point_size: style.default_size_pixels(),
+            default_point_size: point_size_pixels,
             _padding: 0.0,
             highlight_color: style.highlight_color(),
             _highlight_padding: 0.0,
