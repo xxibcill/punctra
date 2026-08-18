@@ -53,7 +53,13 @@ projected-reference profile, strict complete GeoTIFF decoding, reference-bound
 Workspace/Terrain behavior, metre-only QA/LandXML propagation, strict
 round-trip comparison, and the local path documented in the [library
 packaging guide](docs/guides/library-packaging.md). It adds no coordinate
-transformation or CRS guessing. Apart from the explicit v0.8 reader exception,
+transformation or CRS guessing. The accepted [pre-v0.13 renderer-quality
+corrective scope](docs/design/renderer-quality-corrective-pre-v0.13.md) permits
+only its enumerated renderer additions: conditional batch presentation, the
+display-diameter override, bounded eye-dome configuration and disposition, and
+read-only transient-texture and resident-highlight observations required by the
+private `renderer-demo` host. It does not authorize a general material, shader,
+plugin, or host-UI interface. Apart from the explicit v0.8 reader exception,
 external format decoding belongs only in accepted Source adapter crates.
 Networking, polygon/brush/visible-only/occlusion selection, arbitrary
 Attribute or position edits, constrained or persistent terrain, general

@@ -82,12 +82,18 @@ already admitted by the planner, and ends in the same deterministic child-only
 cut. Opacity affects color presentation only: depth ordering, pick coverage,
 Point Identity, Coverage truth, and exact selection do not depend on it.
 
-The only permitted public appearance additions are:
+The only permitted public renderer appearance and observation additions are:
 
 - one generation- and expected-version-conditional batch presentation update
-  in `render-protocol`, implemented by `render-wgpu`; and
+  in `render-protocol`, implemented by `render-wgpu`;
 - one `PointStyle` display-diameter override in `render-wgpu` that affects only
-  the color pass and preserves the existing nominal diameter for picking.
+  the color pass and preserves the existing nominal diameter for picking;
+- bounded eye-dome configuration, validation error, and disabled/active/fallback
+  status types used by `renderer-demo` to select and report the optional depth
+  cue; and
+- read-only observations for exact owned transient texture bytes and the number
+  of resident highlighted Points, used by the private host to enforce resource
+  ceilings and distinguish exact selection from locator presentation.
 
 Each addition must have a real `renderer-demo` caller and direct state-model or
 GPU tests before acceptance. No general material, shader, or plugin interface
