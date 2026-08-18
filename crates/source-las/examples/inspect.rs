@@ -115,9 +115,20 @@ fn print_verified_source(source: &Source, open_seconds: f64) {
         }
         None => println!("  bounds: none (empty Source)"),
     }
-    match metadata.coordinate_reference().as_wkt() {
-        Some(wkt) => println!("  Coordinate Reference WKT: {wkt:?}"),
-        None => println!("  Coordinate Reference: explicitly unknown"),
+    if let Some(profile) = metadata.coordinate_reference().spatial_profile() {
+        println!(
+            "  Spatial Reference: horizontal EPSG:{}, vertical EPSG:{}, {:?}, {:?}/{:?}, {:?}",
+            profile.horizontal_epsg(),
+            profile.vertical_epsg(),
+            profile.axes(),
+            profile.horizontal_unit(),
+            profile.vertical_unit(),
+            profile.provenance(),
+        );
+    } else if let Some(wkt) = metadata.coordinate_reference().as_wkt() {
+        println!("  Coordinate Reference WKT: {wkt:?}");
+    } else {
+        println!("  Coordinate Reference: explicitly unknown");
     }
 
     println!("\nAttribute schema ({})", metadata.attributes().len());

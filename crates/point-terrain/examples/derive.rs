@@ -8,7 +8,8 @@ use std::{
 
 use point_contracts::{
     AttributeColumn, AttributeColumns, AttributeDataType, AttributeDefinition, AttributeId,
-    AttributeValues, CoordinateReference, PositionTransform,
+    AttributeValues, CoordinateReference, LinearUnit, PositionTransform, SpatialAxes,
+    SpatialReferenceProfile, SpatialReferenceProvenance,
 };
 use point_index::{PrepareLimits, prepare};
 use point_terrain::{
@@ -69,8 +70,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let target = directory.path().join("terrain.xml");
     let options =
-        LandXmlOptions::metric_metres("Punctra Terrain Example", "2026-08-10", "12:34:56Z")?
-            .assert_coordinates_are_metric_metres();
+        LandXmlOptions::metric_metres("Punctra Terrain Example", "2026-08-10", "12:34:56Z")?;
     let receipt = surface
         .export_landxml(&target, options, LandXmlLimits::default())
         .blocking_wait()?;
@@ -129,7 +129,14 @@ fn memory_fixture() -> Result<MemorySource, Box<dyn std::error::Error>> {
     let attributes = AttributeColumns::new(vec![column], point_count)?;
     Ok(MemorySource::from_columns(
         PositionTransform::new([0.0; 3], [1.0, 1.0, 0.01])?,
-        CoordinateReference::Unknown,
+        CoordinateReference::profile(SpatialReferenceProfile::new(
+            32_647,
+            5_703,
+            SpatialAxes::EastingNorthingElevation,
+            LinearUnit::Metre,
+            LinearUnit::Metre,
+            SpatialReferenceProvenance::CallerDeclaration,
+        )?),
         ticks,
         attributes,
     )?)

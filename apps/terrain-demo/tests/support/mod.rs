@@ -10,7 +10,7 @@ use std::{
 };
 
 use las::{
-    Builder, Point, Transform, Vector, Writer,
+    Builder, Point, Transform, Vector, Vlr, Writer,
     point::{Classification, Format},
 };
 use serde_json::{Value, json};
@@ -98,8 +98,55 @@ impl Drop for RevisionDirectoryBlocker {
 
 /// Writes equivalent generated LAS or LAZ meaning according to `path`'s extension.
 pub fn write_las_family_fixture(path: &Path, point_count: usize) -> io::Result<()> {
+    write_las_family_fixture_with_profile(path, point_count)
+}
+
+/// Writes a generated LAS or LAZ fixture without projection metadata.
+pub fn write_las_family_fixture_without_profile(path: &Path, point_count: usize) -> io::Result<()> {
+    write_las_family_fixture_with_vlrs(path, point_count, Vec::new())
+}
+
+/// Writes a generated LAS or LAZ fixture with one complete metric projected profile.
+pub fn write_las_family_fixture_with_profile(path: &Path, point_count: usize) -> io::Result<()> {
+    let entries = [
+        (1_024, 0, 1, 1),
+        (3_072, 0, 1, 32_647),
+        (3_076, 0, 1, 9_001),
+        (4_096, 0, 1, 5_703),
+        (4_099, 0, 1, 9_001),
+    ];
+    let count = u16::try_from(entries.len()).expect("generated GeoKey count fits u16");
+    let data = [1, 1, 0, count]
+        .into_iter()
+        .chain(
+            entries
+                .into_iter()
+                .flat_map(|(key, location, value_count, value)| {
+                    [key, location, value_count, value]
+                }),
+        )
+        .flat_map(u16::to_le_bytes)
+        .collect();
+    write_las_family_fixture_with_vlrs(
+        path,
+        point_count,
+        vec![Vlr {
+            user_id: "LASF_Projection".to_owned(),
+            record_id: 34_735,
+            description: "complete metric GeoKey directory".to_owned(),
+            data,
+        }],
+    )
+}
+
+fn write_las_family_fixture_with_vlrs(
+    path: &Path,
+    point_count: usize,
+    vlrs: Vec<Vlr>,
+) -> io::Result<()> {
     let mut builder = Builder::from((1, 4));
     builder.point_format = Format::new(0).map_err(io::Error::other)?;
+    builder.vlrs = vlrs;
     builder.transforms = Vector {
         x: Transform {
             scale: 0.01,

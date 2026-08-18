@@ -4,9 +4,11 @@ Status: v0.1 through the narrow v0.9 repository trust and version-1
 compatibility-candidate slice Complete; the v0.10 professional inspection View
 repository implementation is complete with field/adoption publication
 outstanding; the v0.11 exact-review technical slice is repository-verified
-with field-activation and independent-adoption evidence outstanding; broader
-terrain, export, external interoperability evidence, and product layers remain
-deferred
+with field-activation and independent-adoption evidence outstanding; the v0.12
+explicit spatial-reference and packaging repository slice is complete with
+production-corpus, downstream, adoption, and support evidence outstanding;
+broader terrain, export, external interoperability evidence, and product
+layers remain deferred
 
 The accepted versioned designs are authoritative:
 
@@ -21,6 +23,7 @@ The accepted versioned designs are authoritative:
 - [v0.9 Repository Trust and v1 Candidate](../design/trust-v1-candidate-v0.9.md)
 - [v0.10 Field Qualification and Professional Inspection View](../design/field-inspection-view-v0.10.md)
 - [v0.11 Exact Interactive Review and Ground Correction](../design/exact-interactive-review-v0.11.md)
+- [v0.12 Explicit Spatial Reference and Package Publication](../design/explicit-spatial-reference-v0.12.md)
 
 The current foundation is headless and embeddable. It reads immutable Sources,
 prepares a complete rebuildable Spatial Index, resolves progressive display,
@@ -284,3 +287,4 @@ external product-readiness claim.
 - [Verification strategy](testing.md)
 - [Architectural decisions](../adr/README.md)
 - [First LAS/LAZ guide](../guides/first-las-laz.md)
+- [Library packaging and compatibility](../guides/library-packaging.md)

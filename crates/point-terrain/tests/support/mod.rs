@@ -13,7 +13,8 @@ use std::{
 
 use point_contracts::{
     AttributeColumn, AttributeColumns, AttributeDataType, AttributeDefinition, AttributeId,
-    AttributeValues, CoordinateReference, PointId, PositionTransform,
+    AttributeValues, CoordinateReference, LinearUnit, PointId, PositionTransform, SpatialAxes,
+    SpatialReferenceProfile, SpatialReferenceProvenance,
 };
 use point_index::{PrepareLimits, prepare};
 use point_terrain::{TerrainError, TerrainLimits, TerrainRecipe, TerrainSurface};
@@ -44,16 +45,43 @@ impl TerrainFixture {
         ticks: Vec<[i64; 3]>,
         classifications: Vec<u8>,
     ) -> Self {
+        Self::with_transform_and_reference(
+            label,
+            transform,
+            supported_reference(),
+            ticks,
+            classifications,
+        )
+    }
+
+    pub fn with_reference(
+        label: &str,
+        coordinate_reference: CoordinateReference,
+        ticks: Vec<[i64; 3]>,
+        classifications: Vec<u8>,
+    ) -> Self {
+        Self::with_transform_and_reference(
+            label,
+            identity_transform(),
+            coordinate_reference,
+            ticks,
+            classifications,
+        )
+    }
+
+    fn with_transform_and_reference(
+        label: &str,
+        transform: PositionTransform,
+        coordinate_reference: CoordinateReference,
+        ticks: Vec<[i64; 3]>,
+        classifications: Vec<u8>,
+    ) -> Self {
         assert_eq!(ticks.len(), classifications.len());
         let temporary = TemporaryFixture::new(label);
         let attributes = classification_columns(classifications.clone(), ticks.len());
-        let memory = MemorySource::from_columns(
-            transform,
-            CoordinateReference::Unknown,
-            ticks.clone(),
-            attributes,
-        )
-        .expect("Terrain fixture memory Source is valid");
+        let memory =
+            MemorySource::from_columns(transform, coordinate_reference, ticks.clone(), attributes)
+                .expect("Terrain fixture memory Source is valid");
         let source = source_memory::open(memory)
             .blocking_wait()
             .expect("Terrain fixture Source opens");
@@ -105,6 +133,20 @@ impl TerrainFixture {
             .blocking_wait()
             .expect("Terrain fixture Edit target materializes")
     }
+}
+
+pub fn supported_reference() -> CoordinateReference {
+    CoordinateReference::profile(
+        SpatialReferenceProfile::new(
+            32_647,
+            5_703,
+            SpatialAxes::EastingNorthingElevation,
+            LinearUnit::Metre,
+            LinearUnit::Metre,
+            SpatialReferenceProvenance::CallerDeclaration,
+        )
+        .expect("fixture spatial profile is valid"),
+    )
 }
 
 pub fn classification_attribute() -> AttributeId {

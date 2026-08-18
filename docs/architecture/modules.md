@@ -2,8 +2,9 @@
 
 Status: frozen module ownership through the completed v0.9 repository trust and
 version-1 compatibility candidate, with the v0.10 professional inspection View
-and repository-verified v0.11 exact-review technical slice; external evidence
-gates and broader terrain/export modules remain outstanding
+and repository-verified v0.11 exact-review technical slice plus the v0.12
+explicit spatial-reference and package-publication repository slice; external
+evidence gates and broader terrain/export modules remain outstanding
 
 This is the ownership map for implemented crates. Each crate has one public
 job. Several private files may cooperate behind one deep interface; private
@@ -34,9 +35,8 @@ limits, and recovery modes are frozen in the
 
 `source-copc`, constrained or persisted terrain, general LandXML, general
 application UI, bindings, and remote storage are not implemented modules in
-v0.11. Display and correction workflow policy remain private to
-`renderer-demo`; v0.11 does not add a public display-policy or mutation-facade
-crate.
+v0.12. Display and correction workflow policy remain private to
+`renderer-demo`; v0.12 adds no public display-policy or mutation-facade crate.
 
 ## 1. point-contracts
 
@@ -75,8 +75,9 @@ conformance behavior. Adapters alone own format decoding.
 `source-memory` proves the seam with deterministic canonical columns and opt-in
 fault fixtures. `source-las` supports LAS record formats 0–10 and LAZ formats
 0–8 while preserving exact ticks, supported Attributes, ordered VLR/EVLR
-metadata, Coordinate Reference WKT, and Source order. LAZ formats 9 and 10 are
-explicitly unsupported until WavePacket14 can be decoded exactly.
+metadata, opaque Coordinate Reference WKT, strict complete direct GeoTIFF
+profiles, and Source order. LAZ formats 9 and 10 are explicitly unsupported
+until WavePacket14 can be decoded exactly.
 
 No Source crate owns a Workspace, Spatial Index, View, renderer, or Source
 rewrite.
@@ -254,8 +255,10 @@ supported deliverable.
 `Snapshot::point_rows`, deterministic robust unconstrained 2.5D triangulation,
 canonical `SurfaceVertex` and `SurfaceFace` values, immutable descriptor and
 resource facts, detached Check Point QA, and the private metric-metre LandXML
-1.2 encoder. Its private derivation, triangulation, QA, and XML files do not
-form adapter seams.
+1.2 encoder. A supported structured v0.12 profile is retained in the descriptor
+and emitted as one LandXML `CoordinateSystem`; structured non-metre profiles
+fail before QA/export. Its private derivation, triangulation, QA, and XML files
+do not form adapter seams.
 
 Primary shape:
 
@@ -378,8 +381,9 @@ The application Full-verifies the supported LAS/LAZ Source, prepares or opens
 its Spatial Index, opens the caller-created Workspace, resolves or commits the
 recorded classification correction, audits the resulting Revision, derives
 the baseline and changed class-2 Surfaces, evaluates detached QA, and ensures
-the supported LandXML and canonical report. The opaque Coordinate Reference
-requires the caller's explicit metric-metre assertion.
+the supported LandXML and canonical report. A structured Source must carry the
+supported metre/metre survey profile. Unknown, opaque WKT, and unsupported
+structured references fail closed on current start and resume paths.
 
 The Workflow never creates a Workspace. The caller creates one through the
 public `point-workspace` lifecycle, supplies the current head as the baseline,

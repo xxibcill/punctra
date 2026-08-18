@@ -61,9 +61,13 @@
 //! Regular VLR payloads are preserved in order under namespace `las.vlr` and
 //! EVLR payloads under `las.evlr`. Their canonical metadata name is
 //! `user_id:record_id:description`; the payload is the exact record data. One
-//! non-empty UTF-8 `LASF_Projection` record 2112 is exposed as WKT. Missing,
-//! empty, invalid, or ambiguous WKT remains explicitly unknown while the raw
-//! metadata records stay available.
+//! non-empty UTF-8 `LASF_Projection` record 2112 is exposed as opaque WKT. When
+//! WKT is absent, exactly one `GeoTIFF` key directory can publish a structured
+//! projected profile only if model type, horizontal and vertical EPSG
+//! identities, and both recognized linear units are complete direct values.
+//! Duplicate, indirect, malformed, missing, user-defined, or unsupported facts
+//! remain explicitly unknown. Raw metadata records stay available unchanged;
+//! no reference is guessed and no coordinate is transformed.
 //!
 //! # Verification
 //!

@@ -1,7 +1,7 @@
 # Punctra Roadmap
 
 Status: living guidance
-Last reviewed: 2026-08-13
+Last reviewed: 2026-08-17
 
 This roadmap communicates direction, not a delivery promise. It has no fixed
 dates. Candidate releases may be split, merged, reordered, renamed, or skipped
@@ -19,10 +19,13 @@ has a complete repository implementation without claiming that its field or
 adoption-publication gates are satisfied. The [v0.11 Exact Interactive Review
 and Ground Correction design](docs/design/exact-interactive-review-v0.11.md) is
 complete and repository-verified for its bounded technical slice without
-claiming external field-activation or independent-adoption evidence. No later
-repository release is Active. v0.12 through v0.20 remain
-uncommitted Candidate themes; each needs evidence and an accepted design before
-implementation.
+claiming external field-activation or independent-adoption evidence. The
+[v0.12 Explicit Spatial Reference and Package Publication
+design](docs/design/explicit-spatial-reference-v0.12.md) is complete for its
+bounded repository slice without claiming the outstanding production-corpus,
+downstream, adoption, or support gates. No later repository release is Active.
+v0.13 through v0.20 remain uncommitted Candidate themes; each needs evidence
+and an accepted design before implementation.
 
 ## Working direction
 
@@ -80,9 +83,10 @@ release can be Complete while every product gate remains outstanding.
 
 ## Scope and evidence checkpoint
 
-Status: **v0.11 exact interactive review Complete and repository-verified;
-field activation, independent adoption, and inherited v0.9 support
-qualification outstanding**
+Status: **v0.12 explicit spatial reference and library packaging Complete for
+the bounded repository slice; production-corpus activation, downstream
+observation, independent adoption, and inherited v0.9 support qualification
+outstanding**
 
 The [implemented v0.5 design](docs/design/durable-document-core-v0.5.md) places
 exact classification selection, temporary Point Sets, sparse Revisions, and
@@ -171,11 +175,11 @@ any later repository release.
 ## Release sequence
 
 There is no Active repository implementation track after the completed v0.9,
-repository-implemented v0.10 View, and completed v0.11 technical slice. Nine
-provisional Candidate themes, v0.12 through v0.20, follow it. This is a planning
-sequence, not a requirement to publish every number or to publish v1 after
-v0.20. Candidates may be narrowed, split, merged, reordered, or stopped before
-becoming Active.
+repository-implemented v0.10 View, completed v0.11 technical slice, and bounded
+v0.12 repository slice. Eight provisional Candidate themes, v0.13 through
+v0.20, follow it. This is a planning sequence, not a requirement to publish
+every number or to publish v1 after v0.20. Candidates may be narrowed, split,
+merged, reordered, or stopped before becoming Active.
 
 ### v0.1 — Renderer foundation
 
@@ -697,34 +701,52 @@ public integration path. Neither is supplied by repository completion.
 
 ### v0.12 — Explicit spatial-reference contract
 
-Status: **Candidate**
+Status: **Complete for the bounded repository slice; external activation and
+acceptance evidence outstanding**
 
-Candidate outcome: support the coordinate, linear-unit, and vertical-reference
-profile selected by field evidence without silent assumptions.
+Repository outcome: one explicit projected survey-coordinate profile now
+retains horizontal and vertical EPSG identities,
+easting/northing/elevation axes, separate units, precision through exact Source
+scale/offset, and provenance without silent assumptions. Complete direct
+GeoTIFF metadata can supply it; Workspace reopen, Terrain identity, QA,
+LandXML, and round-trip comparison preserve or reject it deterministically.
+The supported Terrain/QA/export profile is metre/metre and no transformation is
+performed. All public libraries also have the locally exercised package/docs.rs
+path required by the v0.12 adoption track.
 
 Activation gate:
 
 - the production corpus identifies one recurring profile that the existing
   metric-metre path cannot represent correctly.
 
-Likely scope:
+This external activation gate remains unsatisfied. The maintainer activated a
+bounded fail-closed repository contract and generated-fixture path; no
+untracked example was assigned a missing reference and no field-qualified
+profile or transformation is claimed.
+
+Implemented repository scope:
 
 - explicit horizontal reference, vertical reference, axis, unit, precision,
   and provenance metadata at every authoritative boundary;
-- one evidence-selected transformation path only if required by the workflow;
-- deterministic conversion and tolerance rules shared by Query, terrain, QA,
-  and export; and
+- deterministic metre-only tolerance and export rules shared by terrain, QA,
+  and export, without conversion; and
 - clear rejection of missing, ambiguous, unsupported, or contradictory
   metadata.
 
-Candidate exit evidence:
+Repository exit evidence:
 
-- published support fixtures match independent reference coordinates and
-  control-point calculations within declared tolerances;
+- generated support fixtures exercise complete and malformed GeoTIFF metadata,
+  frozen reopen compatibility, structured reference identity, and axis/unit
+  rejection;
 - reopen, Revision, Surface, QA, and export retain the same explicit reference
-  identity and conversion provenance;
+  identity and declaration provenance;
 - unit and axis drift fail closed; and
-- no fixture or product path depends on automatic CRS or datum guessing.
+- no fixture or repository path depends on automatic CRS or datum guessing.
+
+Independent reference-coordinate/control-point comparison, a permitted
+production corpus, downstream application observation, publication, adoption,
+partner validation, and support qualification remain external exits rather
+than repository claims.
 
 ### v0.13 — Persistent production-scale terrain
 
@@ -1003,11 +1025,11 @@ v0.20 theme is by itself a reason to publish v1.
 | Source, document, terrain, and workflow baseline | v0.3–v0.7 | Complete; repository-verified only | Headless technical path from verified LAS/LAZ to one narrow resumable terrain deliverable; field and product evidence remains separate. |
 | Qualifier and trust baseline | v0.8–v0.9 | Complete; repository-verified only | Close inherited qualification gates and harden only the existing narrow repository compatibility surface. |
 | Field inspection and exact correction | v0.10–v0.11 | v0.10 repository implementation complete; v0.11 repository-verified; field/adoption exits outstanding | Qualify representative Sources and connect a professional View to CPU-authoritative review and reversible correction. |
-| Spatial contract and production terrain | v0.12–v0.13 | Candidate | Make reference semantics explicit before persisting a bounded production-scale Surface. |
+| Spatial contract and production terrain | v0.12–v0.13 | v0.12 bounded repository contract complete; external spatial qualification and v0.13 remain Candidate | Make reference semantics explicit before persisting a bounded production-scale Surface. |
 | Terrain acceptance tooling | v0.14–v0.15 | Candidate | Add exact QA and only the constraints earned by field evidence. |
 | Downstream and partner product | v0.16–v0.18 | Candidate | Qualify one named downstream profile, then package and validate one narrow partner workflow. |
 | Product v1 qualification | v0.19–v1.0 | Candidate | Freeze, support-qualify, soak, and explicitly decide whether the maintained scope deserves v1. |
-| Open-source library adoption | v0.10–v0.20 | v0.11 public example repository-verified; independent adoption outstanding; later work remains Candidate | Progress from an accurate public story and first-file quickstart to independent adoption, contributor readiness, stable integration guidance, and an evidence-backed funding path. |
+| Open-source library adoption | v0.10–v0.20 | v0.12 local package/docs.rs path complete; registry publication and independent adoption outstanding; later work remains Candidate | Progress from an accurate public story and first-file quickstart to independent adoption, contributor readiness, stable integration guidance, and an evidence-backed funding path. |
 
 ## Deferred until evidence changes
 

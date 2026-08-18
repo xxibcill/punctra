@@ -119,6 +119,28 @@ adoption evidence gates. No permitted production correction workflow,
 independent adopter, professional time saving, reduced rework, partner
 acceptance, or product efficacy is claimed.
 
+Version 0.12.0-alpha.1 implements the bounded repository track of the
+[Explicit Spatial Reference and Package Publication
+design](docs/design/explicit-spatial-reference-v0.12.md). A structured
+Coordinate Reference now carries horizontal and vertical EPSG identities,
+easting/northing/elevation axes, horizontal and vertical linear units, and
+provenance through verified Source metadata, Source Records, Workspace
+lineage, Terrain descriptors, detached QA, and LandXML. `source-las` publishes
+that profile only from one complete direct GeoTIFF key directory; ambiguity,
+indirection, missing facts, unsupported values, and opaque WKT fail closed
+without guessing. The Terrain/QA/export path supports metre/metre only and
+does no coordinate transformation. Frozen unknown-reference workflow facts
+remain readable by the private legacy reconciliation verifier, but current
+start, resume, QA, and LandXML write paths require the supported profile.
+
+The same release defines the local crates.io/docs.rs path for all twelve public
+libraries. They use versioned local/registry dependencies, Rust 1.90, empty
+default features, dual-license and repository metadata, and clean package
+verification documented in the [library packaging
+guide](docs/guides/library-packaging.md). The applications remain private and
+no registry publication, external adoption, production corpus, downstream
+execution, or partner acceptance is claimed.
+
 To try the implemented View safely, follow the five-minute [first LAS/LAZ
 guide](docs/guides/first-las-laz.md). It separates position-only disk-v1 and
 attributed disk-v2 caches and explains what progressive Coverage does and does
@@ -289,9 +311,8 @@ the nonzero Run and Workspace Operation identities and the expected baseline
 Revision before invoking the command. Both the Workspace and `RUN_ROOT` must
 already exist. `terrain-demo` opens but never creates the Workspace; an absent
 Workspace fails with `PWF_INVALID_REQUEST` before Run creation or Workspace
-mutation. The Source must already use metric metres, and the required
-`--assert-unknown-crs-metric` flag is an explicit caller assertion, not CRS
-inference:
+mutation. The Source must carry the supported structured metre/metre profile;
+Unknown, opaque WKT, and unsupported profiles fail closed:
 
 ```bash
 cargo run --release -p terrain-demo -- start \
@@ -300,7 +321,6 @@ cargo run --release -p terrain-demo -- start \
   --baseline "$BASELINE_REVISION_HEX" \
   --exclude-ground-ordinal 4 \
   --date 2026-08-10 --time 00:00:00Z \
-  --assert-unknown-crs-metric \
   survey.laz survey.laz.pidx survey.pcw run-root
 ```
 

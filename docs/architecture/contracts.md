@@ -2,7 +2,8 @@
 
 Status: frozen through the completed v0.9 repository trust and version-1
 compatibility candidate, with the v0.10 professional inspection View and
-repository-verified v0.11 exact-review technical slice; external evidence and
+repository-verified v0.11 exact-review technical slice plus the v0.12 explicit
+spatial-reference and packaging repository slice; external evidence and
 broader terrain, export, and product contracts remain outstanding
 
 The versioned designs in [`docs/design`](../design) control exact release
@@ -92,6 +93,14 @@ Coordinate Reference may explicitly be unknown. No module guesses a CRS,
 vertical reference, axis order, or units.
 
 ## Source contract
+
+One Source carries exactly one Coordinate Reference: explicitly unknown,
+bounded opaque WKT, or a complete `SpatialReferenceProfile`. The structured
+profile binds horizontal and vertical EPSG identities,
+easting/northing/elevation axes, separate linear units, and declaration
+provenance. Exact Source scale and offset remain the coordinate precision
+contract. Adapters may publish the profile only from complete verified facts;
+missing or contradictory facts are never inferred.
 
 `point-source` exposes one verified opaque `Source` with immutable metadata and
 bounded read operations. A read request contains normalized half-open Source
@@ -354,6 +363,9 @@ same effective geometry.
 
 `TerrainSurface::check_points` accepts finite, uniquely identified detached
 observations already expressed in the Surface coordinate system and units.
+The Coordinate Reference must be the supported easting/northing/elevation
+metre/metre profile; a structured foot profile and every unstructured
+reference fail before evaluation.
 Closed face boundaries are covered; a point outside the convex hull produces
 an explicit `CheckPointOutcome::Gap`. For coverage, residual is observed Z
 minus interpolated Surface Z. Results preserve caller order and statistics use
@@ -365,9 +377,10 @@ breach publishes no partial `CheckPointReport`.
 `TerrainSurface::export_landxml` privately encodes one deterministic UTF-8
 LandXML 1.2 metric-metre TIN with explicit caller-supplied date/time, one
 Surface, consecutive point IDs, and canonical faces. Coordinates are written
-as northing, easting, elevation. The caller must explicitly assert that Source
-units are metres because the declared-or-unknown Coordinate Reference remains
-opaque to the exporter. No unit or CRS transformation occurs.
+as northing, easting, elevation. A supported structured profile emits one
+matching `CoordinateSystem`. An unsupported or unstructured reference fails;
+no caller assertion can override the Source contract. No unit or CRS
+transformation occurs.
 
 Export stages and syncs a per-attempt bounded sibling file, reopens and
 verifies it, then publishes an independent descriptor-bound copy with atomic

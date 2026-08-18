@@ -84,6 +84,14 @@ pub fn fixture_rows(point_count: usize) -> (Vec<[i64; 3]>, Vec<u8>) {
 }
 
 pub fn open_source(ticks: Vec<[i64; 3]>, classifications: Vec<u8>) -> Source {
+    open_source_with_reference(ticks, classifications, CoordinateReference::Unknown)
+}
+
+pub fn open_source_with_reference(
+    ticks: Vec<[i64; 3]>,
+    classifications: Vec<u8>,
+    coordinate_reference: CoordinateReference,
+) -> Source {
     assert_eq!(ticks.len(), classifications.len());
     let definition = AttributeDefinition::new(
         classification_attribute(),
@@ -95,9 +103,8 @@ pub fn open_source(ticks: Vec<[i64; 3]>, classifications: Vec<u8>) -> Source {
         .expect("fixture classification column is valid");
     let columns = AttributeColumns::new(vec![column], ticks.len())
         .expect("fixture Attribute columns are row-aligned");
-    let input =
-        MemorySource::from_columns(transform(), CoordinateReference::Unknown, ticks, columns)
-            .expect("fixture memory Source is valid");
+    let input = MemorySource::from_columns(transform(), coordinate_reference, ticks, columns)
+        .expect("fixture memory Source is valid");
     source_memory::open(input)
         .blocking_wait()
         .expect("fixture Source opens")

@@ -199,8 +199,7 @@ impl BenchFixture {
                 .expect("finite gap Check Point"),
             ],
             LandXmlOptions::metric_metres("Punctra Generated Benchmark", "2026-08-10", "00:00:00Z")
-                .expect("valid benchmark LandXML options")
-                .assert_coordinates_are_metric_metres(),
+                .expect("valid benchmark LandXML options"),
         )
         .expect("construct benchmark workflow Intent");
         Self {

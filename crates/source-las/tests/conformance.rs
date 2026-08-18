@@ -11,8 +11,9 @@ use las::raw::point::ScanAngle;
 use las::{Builder, Color, Point, Transform, Vector, Vlr, Writer};
 use point_contracts::{
     AttributeColumn, AttributeColumns, AttributeDataType, AttributeDefinition, AttributeId,
-    AttributeSchema, AttributeValues, CoordinateReference, MAX_METADATA_RECORDS, MetadataRecord,
-    PointBatch, PositionTransform, SourceMetadata, WorldBounds,
+    AttributeSchema, AttributeValues, CoordinateReference, LinearUnit, MAX_METADATA_RECORDS,
+    MetadataRecord, PointBatch, PositionTransform, SourceMetadata, SpatialAxes,
+    SpatialReferenceProfile, SpatialReferenceProvenance, WorldBounds,
 };
 use point_source::{
     AttributeSelection, OpenOptions, ReadBudget, ReadLimit, ReadRequest, Source, SourceError,
@@ -387,6 +388,324 @@ fn every_raw_duplicate_wkt_record_makes_the_coordinate_reference_unknown() {
         assert_eq!(projection_records[1].namespace(), "las.evlr");
         assert_eq!(projection_records[1].payload(), second_payload);
     }
+}
+
+#[test]
+fn complete_direct_geotiff_keys_publish_one_structured_profile() {
+    let fixtures = FixtureSet::new();
+    let path = fixtures.directory.join("structured-geotiff.las");
+    let payload = geotiff_directory(&[
+        (1024, 0, 1, 1),
+        (3072, 0, 1, 32_647),
+        (3076, 0, 1, 9_001),
+        (4096, 0, 1, 5_703),
+        (4099, 0, 1, 9_001),
+    ]);
+    write_las_fixture_with_metadata(
+        &path,
+        &fixture_rows(),
+        vec![vlr(
+            "LASF_Projection",
+            34735,
+            "complete GeoKey directory",
+            payload.clone(),
+        )],
+        Vec::new(),
+    );
+
+    let source = open_file(&path).blocking_wait().unwrap();
+    let expected = SpatialReferenceProfile::new(
+        32_647,
+        5_703,
+        SpatialAxes::EastingNorthingElevation,
+        LinearUnit::Metre,
+        LinearUnit::Metre,
+        SpatialReferenceProvenance::SourceMetadata,
+    )
+    .unwrap();
+    assert_eq!(
+        source.metadata().coordinate_reference().spatial_profile(),
+        Some(expected)
+    );
+    assert_eq!(
+        source.metadata().metadata_records()[0].payload(),
+        payload,
+        "structured decoding must not replace the raw GeoTIFF record"
+    );
+}
+
+#[test]
+fn every_recognized_geotiff_linear_unit_is_preserved_without_conversion() {
+    let fixtures = FixtureSet::new();
+    for (code, expected) in [
+        (9_001, LinearUnit::Metre),
+        (9_002, LinearUnit::InternationalFoot),
+        (9_003, LinearUnit::UsSurveyFoot),
+    ] {
+        let path = fixtures.directory.join(format!("geotiff-unit-{code}.las"));
+        write_las_fixture_with_metadata(
+            &path,
+            &fixture_rows(),
+            vec![vlr(
+                "LASF_Projection",
+                34735,
+                "complete GeoKey directory",
+                geotiff_directory(&[
+                    (1024, 0, 1, 1),
+                    (3072, 0, 1, 32_647),
+                    (3076, 0, 1, code),
+                    (4096, 0, 1, 5_703),
+                    (4099, 0, 1, code),
+                ]),
+            )],
+            Vec::new(),
+        );
+
+        let profile = open_file(&path)
+            .blocking_wait()
+            .unwrap()
+            .metadata()
+            .coordinate_reference()
+            .spatial_profile()
+            .unwrap();
+        assert_eq!(profile.horizontal_unit(), expected);
+        assert_eq!(profile.vertical_unit(), expected);
+    }
+}
+
+#[test]
+fn geotiff_profile_decoding_fails_closed_without_guessing() {
+    let fixtures = FixtureSet::new();
+    let complete = [
+        (1024, 0, 1, 1),
+        (3072, 0, 1, 32_647),
+        (3076, 0, 1, 9_001),
+        (4096, 0, 1, 5_703),
+        (4099, 0, 1, 9_001),
+    ];
+    let cases = [
+        ("missing-vertical", complete[..4].to_vec()),
+        (
+            "duplicate-horizontal",
+            complete
+                .iter()
+                .copied()
+                .chain([(3072, 0, 1, 32_647)])
+                .collect(),
+        ),
+        (
+            "indirect-unit",
+            complete
+                .iter()
+                .copied()
+                .map(|entry| {
+                    if entry.0 == 3076 {
+                        (entry.0, 34736, entry.2, entry.3)
+                    } else {
+                        entry
+                    }
+                })
+                .collect(),
+        ),
+        (
+            "unsupported-unit",
+            complete
+                .iter()
+                .copied()
+                .map(|entry| {
+                    if entry.0 == 4099 {
+                        (entry.0, entry.1, entry.2, 9_012)
+                    } else {
+                        entry
+                    }
+                })
+                .collect(),
+        ),
+    ];
+
+    for (label, entries) in cases {
+        assert_unknown_geotiff_profile(&fixtures, label, &entries);
+    }
+
+    let path = fixtures.directory.join("wkt-geotiff-conflict.las");
+    write_las_fixture_with_metadata(
+        &path,
+        &fixture_rows(),
+        vec![
+            vlr("LASF_Projection", 2112, "WKT", wkt_payload()),
+            vlr(
+                "LASF_Projection",
+                34735,
+                "GeoTIFF",
+                geotiff_directory(&complete),
+            ),
+        ],
+        Vec::new(),
+    );
+    let source = open_file(&path).blocking_wait().unwrap();
+    assert_eq!(source.metadata().coordinate_reference().as_wkt(), Some(WKT));
+    assert_eq!(
+        source.metadata().coordinate_reference().spatial_profile(),
+        None
+    );
+}
+
+#[test]
+fn duplicate_or_indirect_unrecognized_geotiff_keys_fail_closed() {
+    let fixtures = FixtureSet::new();
+    let complete = [
+        (1024, 0, 1, 1),
+        (3072, 0, 1, 32_647),
+        (3076, 0, 1, 9_001),
+        (4096, 0, 1, 5_703),
+        (4099, 0, 1, 9_001),
+    ];
+    let cases = [
+        (
+            "duplicate-unrecognized-key",
+            complete
+                .iter()
+                .copied()
+                .chain([(2_048, 0, 1, 4_326), (2_048, 0, 1, 4_326)])
+                .collect::<Vec<_>>(),
+        ),
+        (
+            "indirect-unrecognized-key",
+            complete
+                .iter()
+                .copied()
+                .chain([(2_048, 34_736, 1, 0)])
+                .collect(),
+        ),
+    ];
+    for (label, entries) in cases {
+        assert_unknown_geotiff_profile(&fixtures, label, &entries);
+    }
+}
+
+#[test]
+fn user_defined_or_non_projected_geotiff_facts_remain_unknown() {
+    let fixtures = FixtureSet::new();
+    let complete = [
+        (1024, 0, 1, 1),
+        (3072, 0, 1, 32_647),
+        (3076, 0, 1, 9_001),
+        (4096, 0, 1, 5_703),
+        (4099, 0, 1, 9_001),
+    ];
+    for (label, key, value) in [
+        ("user-defined-horizontal", 3072, 32_767),
+        ("user-defined-vertical", 4096, 32_767),
+        ("non-projected-model", 1024, 2),
+    ] {
+        let entries = complete.map(|entry| {
+            if entry.0 == key {
+                (entry.0, entry.1, entry.2, value)
+            } else {
+                entry
+            }
+        });
+        let path = fixtures.directory.join(format!("{label}.las"));
+        write_las_fixture_with_metadata(
+            &path,
+            &fixture_rows(),
+            vec![vlr(
+                "LASF_Projection",
+                34735,
+                label,
+                geotiff_directory(&entries),
+            )],
+            Vec::new(),
+        );
+        assert!(
+            open_file(&path)
+                .blocking_wait()
+                .unwrap()
+                .metadata()
+                .coordinate_reference()
+                .is_unknown(),
+            "{label} must remain explicitly unknown"
+        );
+    }
+}
+
+#[test]
+fn malformed_or_duplicate_geotiff_directories_remain_unknown() {
+    let fixtures = FixtureSet::new();
+    let complete = [
+        (1024, 0, 1, 1),
+        (3072, 0, 1, 32_647),
+        (3076, 0, 1, 9_001),
+        (4096, 0, 1, 5_703),
+        (4099, 0, 1, 9_001),
+    ];
+    let malformed_path = fixtures.directory.join("odd-geotiff-payload.las");
+    write_las_fixture_with_metadata(
+        &malformed_path,
+        &fixture_rows(),
+        vec![vlr("LASF_Projection", 34735, "odd byte count", vec![1])],
+        Vec::new(),
+    );
+    assert!(
+        open_file(&malformed_path)
+            .blocking_wait()
+            .unwrap()
+            .metadata()
+            .coordinate_reference()
+            .is_unknown()
+    );
+
+    let version_path = fixtures.directory.join("unsupported-geotiff-version.las");
+    let mut unsupported_version = geotiff_directory(&complete);
+    unsupported_version[..2].copy_from_slice(&2_u16.to_le_bytes());
+    write_las_fixture_with_metadata(
+        &version_path,
+        &fixture_rows(),
+        vec![vlr(
+            "LASF_Projection",
+            34735,
+            "unsupported directory version",
+            unsupported_version,
+        )],
+        Vec::new(),
+    );
+    assert!(
+        open_file(&version_path)
+            .blocking_wait()
+            .unwrap()
+            .metadata()
+            .coordinate_reference()
+            .is_unknown()
+    );
+
+    let duplicate_path = fixtures.directory.join("duplicate-geotiff-directories.las");
+    write_las_fixture_with_metadata(
+        &duplicate_path,
+        &fixture_rows(),
+        vec![
+            vlr(
+                "LASF_Projection",
+                34735,
+                "first directory",
+                geotiff_directory(&complete),
+            ),
+            vlr(
+                "LASF_Projection",
+                34735,
+                "second directory",
+                geotiff_directory(&complete),
+            ),
+        ],
+        Vec::new(),
+    );
+    assert!(
+        open_file(&duplicate_path)
+            .blocking_wait()
+            .unwrap()
+            .metadata()
+            .coordinate_reference()
+            .is_unknown()
+    );
 }
 
 #[test]
@@ -1115,6 +1434,43 @@ fn wkt_payload() -> Vec<u8> {
     let mut payload = WKT.as_bytes().to_vec();
     payload.push(0);
     payload
+}
+
+fn geotiff_directory(entries: &[(u16, u16, u16, u16)]) -> Vec<u8> {
+    let count = u16::try_from(entries.len()).unwrap();
+    [1, 1, 0, count]
+        .into_iter()
+        .chain(
+            entries
+                .iter()
+                .flat_map(|entry| [entry.0, entry.1, entry.2, entry.3]),
+        )
+        .flat_map(u16::to_le_bytes)
+        .collect()
+}
+
+fn assert_unknown_geotiff_profile(
+    fixtures: &FixtureSet,
+    label: &str,
+    entries: &[(u16, u16, u16, u16)],
+) {
+    let path = fixtures.directory.join(format!("{label}.las"));
+    write_las_fixture_with_metadata(
+        &path,
+        &fixture_rows(),
+        vec![vlr(
+            "LASF_Projection",
+            34_735,
+            label,
+            geotiff_directory(entries),
+        )],
+        Vec::new(),
+    );
+    let source = open_file(&path).blocking_wait().unwrap();
+    assert!(
+        source.metadata().coordinate_reference().is_unknown(),
+        "{label} must remain explicitly unknown"
+    );
 }
 
 fn unique_temp_directory() -> PathBuf {

@@ -44,7 +44,6 @@ Required start/resume options:
   --exclude-ground-ordinal N     exact Source ordinal; repeat for a nonempty set
   --date YYYY-MM-DD              deterministic LandXML document date
   --time HH:MM:SSZ               deterministic LandXML UTC document time
-  --assert-unknown-crs-metric    assert Source coordinates are metric metres
 
 Optional:
   --check-point ID,X,Y,Z         detached QA point; repeatable
@@ -223,7 +222,6 @@ fn parse(arguments: impl IntoIterator<Item = OsString>) -> Result<Command, Workf
     let mut time = None;
     let mut surface_name = None;
     let mut non_ground = None;
-    let mut assert_unknown = None;
     let mut paths = Vec::new();
     reserve(&mut ordinals, MAX_ORDINALS, "Ground ordinal storage")?;
     reserve(&mut check_points, MAX_CHECK_POINTS, "Check Point storage")?;
@@ -294,9 +292,6 @@ fn parse(arguments: impl IntoIterator<Item = OsString>) -> Result<Command, Workf
                     "--non-ground-classification",
                 )?;
             }
-            Some("--assert-unknown-crs-metric") => {
-                set_once(&mut assert_unknown, (), "--assert-unknown-crs-metric")?;
-            }
             Some(value) if value.starts_with('-') => {
                 return Err(invalid("unknown option; use --help for usage"));
             }
@@ -311,7 +306,7 @@ fn parse(arguments: impl IntoIterator<Item = OsString>) -> Result<Command, Workf
     let [source, spatial_index, workspace, run_root]: [PathBuf; 4] = paths
         .try_into()
         .map_err(|_| invalid("start/resume requires SOURCE INDEX WORKSPACE RUN_ROOT"))?;
-    let mut landxml = LandXmlOptions::metric_metres(
+    let landxml = LandXmlOptions::metric_metres(
         surface_name
             .as_ref()
             .map_or(Ok(DEFAULT_SURFACE_NAME), |value| {
@@ -327,9 +322,6 @@ fn parse(arguments: impl IntoIterator<Item = OsString>) -> Result<Command, Workf
         )?,
     )
     .map_err(|error| invalid(error.to_string()))?;
-    if assert_unknown.is_some() {
-        landxml = landxml.assert_coordinates_are_metric_metres();
-    }
     let run = WorkflowRunId::new(run.ok_or_else(|| invalid("missing --run-id"))?)
         .ok_or_else(|| invalid("Run ID must be nonzero"))?;
     let operation =

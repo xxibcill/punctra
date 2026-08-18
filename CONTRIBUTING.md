@@ -46,7 +46,14 @@ also permits bounded Point Set entry/identity iteration, an explicit renderer
 highlight-input ceiling, and the public `render-wgpu` `third_party_host`
 example. Durable correction reuses caller-owned Operation Identities and the
 existing Workspace commit, immediate-head Revert, Audit/Edit Footprint, and
-Operation-resolution seams. Apart from the explicit v0.8 reader exception,
+Operation-resolution seams. The accepted [v0.12 Explicit Spatial Reference and
+Package Publication
+scope](docs/design/explicit-spatial-reference-v0.12.md) adds one structured
+projected-reference profile, strict complete GeoTIFF decoding, reference-bound
+Workspace/Terrain behavior, metre-only QA/LandXML propagation, strict
+round-trip comparison, and the local path documented in the [library
+packaging guide](docs/guides/library-packaging.md). It adds no coordinate
+transformation or CRS guessing. Apart from the explicit v0.8 reader exception,
 external format decoding belongs only in accepted Source adapter crates.
 Networking, polygon/brush/visible-only/occlusion selection, arbitrary
 Attribute or position edits, constrained or persistent terrain, general
@@ -62,6 +69,7 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace --all-features
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps
+scripts/verify-packages.rb
 cargo fmt --manifest-path fuzz/Cargo.toml --all --check
 cargo check --manifest-path fuzz/Cargo.toml --bin index_persistence
 cargo test --manifest-path fuzz/Cargo.toml --lib
@@ -93,6 +101,7 @@ PUNCTRA_REQUIRE_GPU=1 cargo test -p renderer-demo --test planner
 PUNCTRA_REQUIRE_GPU=1 cargo test -p renderer-demo --test display_gpu
 PUNCTRA_REQUIRE_GPU=1 cargo run -p render-wgpu --example third_party_host
 test -f docs/guides/first-las-laz.md
+test -f docs/guides/library-packaging.md
 ruby -rjson -e 'JSON.parse(File.read(ARGV.fetch(0)))' \
   docs/guides/field-corpus.example.json
 git diff --check
@@ -200,7 +209,6 @@ cargo run --release -p terrain-demo -- start \
   --run-id "$RUN_ID_HEX" --operation-id "$OPERATION_ID_HEX" \
   --baseline "$BASELINE_REVISION_HEX" --exclude-ground-ordinal 4 \
   --date 2026-08-10 --time 00:00:00Z \
-  --assert-unknown-crs-metric \
   path/to/source.laz path/to/source.pidx path/to/workspace.pcw path/to/run-root
 cargo run --release -p terrain-demo -- inspect path/to/run-root
 cargo run --release -p terrain-demo -- verify-round-trip \
@@ -281,10 +289,11 @@ command and request with `resume` in place of `start`. At least one repeated
 be in the baseline class-2 Ground Input. Optional detached observations use
 repeated `--check-point ID,X,Y,Z` arguments.
 
-`terrain-demo` requires metric-metre coordinates and performs no
-transformation. The caller must pass `--assert-unknown-crs-metric` only when
-that unit assertion is independently known to be true; the application cannot
-infer units from the opaque Coordinate Reference.
+`terrain-demo` requires the complete supported structured metre/metre profile
+and performs no transformation. Unknown, opaque WKT, and unsupported profiles
+fail closed. The frozen legacy assertion field remains readable only by the
+private legacy reconciliation verifier; no current CLI or public writer can
+set it.
 
 The durable v0.7 command replaces the v0.6 one-shot
 `--exercise-correction-revert` grammar. It still validates the correction

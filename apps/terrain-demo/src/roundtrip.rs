@@ -3,6 +3,9 @@
 use std::{collections::BTreeMap, error::Error, fmt, path::Path};
 
 use foundation_runtime::OperationControl;
+use point_contracts::{
+    LinearUnit, SpatialAxes, SpatialReferenceProfile, SpatialReferenceProvenance,
+};
 use quick_xml::events::{BytesDecl, BytesStart, Event};
 use roxmltree::{Document, Node, ParsingOptions};
 
@@ -1140,7 +1143,12 @@ fn parse_landxml_document(
     if unqualified_attribute(root, "version") != Some("1.2") {
         return Err(schema_error(side, "LandXML version must be 1.2"));
     }
+    reject_misplaced_coordinate_system(side, root)?;
     validate_root_children(side, root)?;
+    let spatial_reference_profile = element_children(root)
+        .find(|node| node.has_tag_name((LANDXML_NAMESPACE, "CoordinateSystem")))
+        .map(|node| parse_coordinate_system(side, node))
+        .transpose()?;
     let units = unique_child(side, root, "Units").map_err(|_| {
         RoundTripFailure::semantic(
             RoundTripReason::UnitDrift,
@@ -1152,6 +1160,7 @@ fn parse_landxml_document(
     validate_allowed_children(side, surfaces, &["Surface"])?;
     let surface = unique_child(side, surfaces, "Surface")?;
     let mut parsed = validate_surface(side, surface, limits)?;
+    parsed.spatial_reference_profile = spatial_reference_profile;
     parsed.ignored_top_level_sections = element_children(root)
         .filter(|node| {
             node.has_tag_name((LANDXML_NAMESPACE, "Project"))
@@ -1163,19 +1172,127 @@ fn parse_landxml_document(
     Ok(parsed)
 }
 
-fn validate_root_children(side: InputSide, root: Node<'_, '_>) -> Result<(), RoundTripFailure> {
-    if element_children(root).any(|node| node.has_tag_name((LANDXML_NAMESPACE, "CoordinateSystem")))
-    {
-        return Err(RoundTripFailure::semantic(
-            RoundTripReason::CoordinateReferenceUnsupported,
-            format_args!("{side} CoordinateSystem semantics are unsupported"),
-        ));
+fn reject_misplaced_coordinate_system(
+    side: InputSide,
+    root: Node<'_, '_>,
+) -> Result<(), RoundTripFailure> {
+    let has_misplaced_reference = root.descendants().filter(Node::is_element).any(|node| {
+        node.tag_name().name() == "CoordinateSystem"
+            && (node.parent() != Some(root)
+                || node.tag_name().namespace() != Some(LANDXML_NAMESPACE))
+    });
+    if has_misplaced_reference {
+        Err(coordinate_reference_failure(side))
+    } else {
+        Ok(())
     }
-    validate_allowed_children(side, root, &["Units", "Project", "Application", "Surfaces"])?;
+}
+
+fn validate_root_children(side: InputSide, root: Node<'_, '_>) -> Result<(), RoundTripFailure> {
+    validate_allowed_children(
+        side,
+        root,
+        &[
+            "CoordinateSystem",
+            "Units",
+            "Project",
+            "Application",
+            "Surfaces",
+        ],
+    )?;
     unique_child(side, root, "Surfaces")?;
+    at_most_one_child(side, root, "CoordinateSystem")
+        .map_err(|_| coordinate_reference_failure(side))?;
     at_most_one_child(side, root, "Project")?;
     at_most_one_child(side, root, "Application")?;
     Ok(())
+}
+
+fn parse_coordinate_system(
+    side: InputSide,
+    node: Node<'_, '_>,
+) -> Result<SpatialReferenceProfile, RoundTripFailure> {
+    validate_allowed_children(side, node, &[]).map_err(|_| coordinate_reference_failure(side))?;
+    let mut attributes = CoordinateSystemAttributes::default();
+    for attribute in node.attributes() {
+        if attribute.namespace().is_some()
+            || attributes
+                .insert(attribute.name(), attribute.value())
+                .is_err()
+        {
+            return Err(coordinate_reference_failure(side));
+        }
+    }
+    attributes.spatial_profile(side)
+}
+
+#[derive(Default)]
+pub(crate) struct CoordinateSystemAttributes {
+    name: Option<Box<str>>,
+    horizontal: Option<Box<str>>,
+    vertical: Option<Box<str>>,
+    description: Option<Box<str>>,
+}
+
+impl CoordinateSystemAttributes {
+    pub(crate) fn insert(&mut self, name: &str, value: &str) -> Result<(), ()> {
+        let target = match name {
+            "name" => &mut self.name,
+            "horizontalCoordinateSystemName" => &mut self.horizontal,
+            "verticalDatum" => &mut self.vertical,
+            "desc" => &mut self.description,
+            _ => return Err(()),
+        };
+        if target.replace(value.into()).is_some() {
+            return Err(());
+        }
+        Ok(())
+    }
+
+    pub(crate) fn spatial_profile(
+        &self,
+        side: InputSide,
+    ) -> Result<SpatialReferenceProfile, RoundTripFailure> {
+        let horizontal = parse_epsg_label(self.horizontal.as_deref())
+            .ok_or_else(|| coordinate_reference_failure(side))?;
+        let vertical = parse_epsg_label(self.vertical.as_deref())
+            .ok_or_else(|| coordinate_reference_failure(side))?;
+        let expected_name = format!("EPSG:{horizontal}+EPSG:{vertical}");
+        if self.name.as_deref() != Some(expected_name.as_str()) {
+            return Err(coordinate_reference_failure(side));
+        }
+        let provenance = match self.description.as_deref() {
+            Some(
+                "axes=easting,northing,elevation; horizontalUnit=metre; verticalUnit=metre; provenance=sourceMetadata",
+            ) => SpatialReferenceProvenance::SourceMetadata,
+            Some(
+                "axes=easting,northing,elevation; horizontalUnit=metre; verticalUnit=metre; provenance=callerDeclaration",
+            ) => SpatialReferenceProvenance::CallerDeclaration,
+            _ => return Err(coordinate_reference_failure(side)),
+        };
+        SpatialReferenceProfile::new(
+            horizontal,
+            vertical,
+            SpatialAxes::EastingNorthingElevation,
+            LinearUnit::Metre,
+            LinearUnit::Metre,
+            provenance,
+        )
+        .map_err(|_| coordinate_reference_failure(side))
+    }
+}
+
+fn parse_epsg_label(value: Option<&str>) -> Option<u32> {
+    let value = value?.strip_prefix("EPSG:")?;
+    let parsed = value.parse::<u32>().ok()?;
+    (value == parsed.to_string()).then_some(parsed)
+}
+
+fn coordinate_reference_failure(side: InputSide) -> RoundTripFailure {
+    RoundTripFailure::semantic(
+        RoundTripReason::CoordinateReferenceUnsupported,
+        format_args!("{side} CoordinateSystem is missing, ambiguous, or unsupported"),
+    )
 }
 
 fn validate_metric_units(side: InputSide, units: Node<'_, '_>) -> Result<(), RoundTripFailure> {
@@ -1220,6 +1337,7 @@ fn validate_surface(
             .filter(|name| !name.is_empty())
             .map(|name| name.to_owned().into_boxed_str()),
         ignored_top_level_sections: Box::new([]),
+        spatial_reference_profile: None,
     })
 }
 
@@ -1476,6 +1594,12 @@ fn compare_surfaces(
     control: Option<&OperationControl>,
 ) -> Result<ComparisonFacts, RoundTripFailure> {
     check_round_trip_cancelled(control)?;
+    if reference.spatial_reference_profile != returned.spatial_reference_profile {
+        return Err(RoundTripFailure::semantic(
+            RoundTripReason::CoordinateReferenceUnsupported,
+            "REFERENCE and RETURNED CoordinateSystem facts differ",
+        ));
+    }
     if reference.points.len() != returned.points.len() {
         return Err(RoundTripFailure::semantic(
             RoundTripReason::PointCountDrift,
@@ -1987,6 +2111,132 @@ mod tests {
         assert_eq!(report.declared_settings_profile(), "metric-tin-v1");
         assert_eq!(report.tolerances().horizontal_metres().to_bits(), 0);
         assert!(report.comparison_count() >= report.vertex_count());
+    }
+
+    #[test]
+    fn structured_coordinate_system_must_match_before_coordinate_tolerances() {
+        let fixture = Fixture::new("structured-coordinate-system");
+        let legacy = landxml(REFERENCE_POINTS, REFERENCE_FACES, false);
+        let coordinate_system = "<CoordinateSystem name=\"EPSG:32647+EPSG:5703\" horizontalCoordinateSystemName=\"EPSG:32647\" verticalDatum=\"EPSG:5703\" desc=\"axes=easting,northing,elevation; horizontalUnit=metre; verticalUnit=metre; provenance=sourceMetadata\"/>";
+        let reference_xml = legacy.replacen(
+            "<Application",
+            &format!("{coordinate_system}\n<Application"),
+            1,
+        );
+        let (reference, identical) = fixture.write_pair(&reference_xml, &reference_xml);
+        verify(
+            &reference,
+            &identical,
+            tolerances(0.0, 0.0),
+            default_limits(),
+        )
+        .expect("identical structured references pass");
+
+        let unsupported = [
+            (
+                "horizontal-drift.xml",
+                reference_xml.replace("EPSG:32647", "EPSG:32648"),
+            ),
+            (
+                "vertical-drift.xml",
+                reference_xml.replace("EPSG:5703", "EPSG:5702"),
+            ),
+            (
+                "axis-drift.xml",
+                reference_xml.replace(
+                    "axes=easting,northing,elevation",
+                    "axes=northing,easting,elevation",
+                ),
+            ),
+            (
+                "unit-drift.xml",
+                reference_xml.replace("horizontalUnit=metre", "horizontalUnit=foot"),
+            ),
+            (
+                "provenance-drift.xml",
+                reference_xml.replace("provenance=sourceMetadata", "provenance=callerDeclaration"),
+            ),
+            (
+                "missing-reference.xml",
+                reference_xml.replace(coordinate_system, ""),
+            ),
+            (
+                "foreign-reference-attribute.xml",
+                reference_xml.replace(
+                    "<CoordinateSystem ",
+                    "<CoordinateSystem xmlns:vendor=\"urn:vendor:reference\" vendor:epoch=\"2020.0\" ",
+                ),
+            ),
+        ];
+        for (name, returned_xml) in unsupported {
+            let returned = fixture.write(name, &returned_xml);
+            let error = verify(
+                &reference,
+                &returned,
+                tolerances(f64::MAX, f64::MAX),
+                default_limits(),
+            )
+            .expect_err("reference drift fails before permissive coordinate tolerances");
+            assert_eq!(
+                error.reason(),
+                Some(RoundTripReason::CoordinateReferenceUnsupported),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn nested_coordinate_system_is_not_ignored_as_legacy_metadata() {
+        let fixture = Fixture::new("nested-coordinate-system");
+        let legacy = landxml(REFERENCE_POINTS, REFERENCE_FACES, false);
+        let nested = legacy.replace(
+            "<Application name=\"Declared elsewhere\" version=\"ignored\"/>",
+            "<Application name=\"Declared elsewhere\" version=\"ignored\"><CoordinateSystem name=\"EPSG:32647+EPSG:5703\" horizontalCoordinateSystemName=\"EPSG:32647\" verticalDatum=\"EPSG:5703\" desc=\"axes=easting,northing,elevation; horizontalUnit=metre; verticalUnit=metre; provenance=sourceMetadata\"/></Application>",
+        );
+        assert_ne!(nested, legacy);
+        let (reference, returned) = fixture.write_pair(&legacy, &nested);
+
+        let error = verify(
+            &reference,
+            &returned,
+            tolerances(f64::MAX, f64::MAX),
+            default_limits(),
+        )
+        .expect_err("nested reference metadata must not pass as a legacy file");
+        assert_eq!(
+            error.reason(),
+            Some(RoundTripReason::CoordinateReferenceUnsupported)
+        );
+    }
+
+    #[test]
+    fn duplicate_coordinate_system_is_a_coordinate_reference_failure() {
+        let fixture = Fixture::new("duplicate-coordinate-system");
+        let legacy = landxml(REFERENCE_POINTS, REFERENCE_FACES, false);
+        let coordinate_system = "<CoordinateSystem name=\"EPSG:32647+EPSG:5703\" horizontalCoordinateSystemName=\"EPSG:32647\" verticalDatum=\"EPSG:5703\" desc=\"axes=easting,northing,elevation; horizontalUnit=metre; verticalUnit=metre; provenance=sourceMetadata\"/>";
+        let reference_xml = legacy.replacen(
+            "<Application",
+            &format!("{coordinate_system}\n<Application"),
+            1,
+        );
+        let returned_xml = reference_xml.replacen(
+            coordinate_system,
+            &format!("{coordinate_system}\n{coordinate_system}"),
+            1,
+        );
+        let (reference, returned) = fixture.write_pair(&reference_xml, &returned_xml);
+
+        let error = verify(
+            &reference,
+            &returned,
+            tolerances(f64::MAX, f64::MAX),
+            default_limits(),
+        )
+        .expect_err("duplicate reference metadata must fail as a coordinate reference");
+        assert_eq!(
+            error.reason(),
+            Some(RoundTripReason::CoordinateReferenceUnsupported)
+        );
     }
 
     #[test]

@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::fs::{File, Metadata};
 use std::io::{BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
@@ -9,9 +10,10 @@ use las::point::Format;
 use laz::laszip::ChunkTable;
 use point_contracts::{
     AttributeDataType, AttributeDefinition, AttributeId, AttributeSchema, ContentHash,
-    CoordinateReference, MAX_COORDINATE_REFERENCE_WKT_BYTES, MAX_METADATA_RECORD_PAYLOAD_BYTES,
-    MAX_METADATA_RECORDS, MAX_SOURCE_METADATA_PAYLOAD_BYTES, MetadataRecord, PositionTransform,
-    SourceMetadata, WorldBounds,
+    CoordinateReference, LinearUnit, MAX_COORDINATE_REFERENCE_WKT_BYTES,
+    MAX_METADATA_RECORD_PAYLOAD_BYTES, MAX_METADATA_RECORDS, MAX_SOURCE_METADATA_PAYLOAD_BYTES,
+    MetadataRecord, PositionTransform, SourceMetadata, SpatialAxes, SpatialReferenceProfile,
+    SpatialReferenceProvenance, WorldBounds,
 };
 use point_source::adapter::FullVerification;
 use point_source::{SourceDiagnostic, SourceError};
@@ -1028,24 +1030,120 @@ fn coordinate_reference(
     regular: &[RawVlr],
     extended: &[RawVlr],
 ) -> Result<CoordinateReference, SourceError> {
-    let mut candidates = regular
+    let mut wkt_candidates = regular
         .iter()
         .chain(extended)
         .filter(|record| record.user_id == "LASF_Projection" && record.record_id == 2112);
-    let Some(record) = candidates.next() else {
+    if let Some(record) = wkt_candidates.next() {
+        if wkt_candidates.next().is_some() {
+            return Ok(CoordinateReference::Unknown);
+        }
+        let Ok(wkt) = std::str::from_utf8(&record.data) else {
+            return Ok(CoordinateReference::Unknown);
+        };
+        let wkt = wkt.trim_end_matches('\0').trim();
+        if wkt.is_empty() || wkt.len() > MAX_COORDINATE_REFERENCE_WKT_BYTES {
+            return Ok(CoordinateReference::Unknown);
+        }
+        return CoordinateReference::wkt(wkt.to_owned()).map_err(contract_error);
+    }
+
+    let mut key_directories = regular
+        .iter()
+        .chain(extended)
+        .filter(|record| record.user_id == "LASF_Projection" && record.record_id == 34735);
+    let Some(directory) = key_directories.next() else {
         return Ok(CoordinateReference::Unknown);
     };
-    if candidates.next().is_some() {
+    if key_directories.next().is_some() {
         return Ok(CoordinateReference::Unknown);
     }
-    let Ok(wkt) = std::str::from_utf8(&record.data) else {
-        return Ok(CoordinateReference::Unknown);
+    Ok(parse_geotiff_profile(&directory.data)
+        .map_or(CoordinateReference::Unknown, CoordinateReference::profile))
+}
+
+const GEOTIFF_DIRECTORY_VERSION: u16 = 1;
+const GEOTIFF_KEY_REVISION: u16 = 1;
+const GEOTIFF_MINOR_REVISION: u16 = 0;
+const GEOTIFF_MODEL_TYPE_PROJECTED: u16 = 1;
+const GEOTIFF_USER_DEFINED: u16 = 32_767;
+const GT_MODEL_TYPE_KEY: u16 = 1024;
+const PROJECTED_CS_TYPE_KEY: u16 = 3072;
+const PROJECTED_LINEAR_UNITS_KEY: u16 = 3076;
+const VERTICAL_CS_TYPE_KEY: u16 = 4096;
+const VERTICAL_UNITS_KEY: u16 = 4099;
+
+fn parse_geotiff_profile(bytes: &[u8]) -> Option<SpatialReferenceProfile> {
+    let words = bytes
+        .chunks_exact(2)
+        .map(|word| u16::from_le_bytes([word[0], word[1]]))
+        .collect::<Vec<_>>();
+    if !bytes.chunks_exact(2).remainder().is_empty() || words.len() < 4 {
+        return None;
+    }
+    let [version, revision, minor, key_count] = words[..4] else {
+        return None;
     };
-    let wkt = wkt.trim_end_matches('\0').trim();
-    if wkt.is_empty() || wkt.len() > MAX_COORDINATE_REFERENCE_WKT_BYTES {
-        return Ok(CoordinateReference::Unknown);
+    if version != GEOTIFF_DIRECTORY_VERSION
+        || revision != GEOTIFF_KEY_REVISION
+        || minor != GEOTIFF_MINOR_REVISION
+    {
+        return None;
     }
-    CoordinateReference::wkt(wkt.to_owned()).map_err(contract_error)
+    let key_count = usize::from(key_count);
+    if words.len() != 4_usize.checked_add(key_count.checked_mul(4)?)? {
+        return None;
+    }
+
+    let mut model_type = None;
+    let mut horizontal_epsg = None;
+    let mut horizontal_unit = None;
+    let mut vertical_epsg = None;
+    let mut vertical_unit = None;
+    let mut seen_keys = BTreeSet::new();
+    for entry in words[4..].chunks_exact(4) {
+        let [key, location, count, value] = entry else {
+            return None;
+        };
+        if !seen_keys.insert(*key) || *location != 0 || *count != 1 {
+            return None;
+        }
+        if !matches!(
+            *key,
+            GT_MODEL_TYPE_KEY
+                | PROJECTED_CS_TYPE_KEY
+                | PROJECTED_LINEAR_UNITS_KEY
+                | VERTICAL_CS_TYPE_KEY
+                | VERTICAL_UNITS_KEY
+        ) {
+            continue;
+        }
+        let target = match *key {
+            GT_MODEL_TYPE_KEY => &mut model_type,
+            PROJECTED_CS_TYPE_KEY => &mut horizontal_epsg,
+            PROJECTED_LINEAR_UNITS_KEY => &mut horizontal_unit,
+            VERTICAL_CS_TYPE_KEY => &mut vertical_epsg,
+            VERTICAL_UNITS_KEY => &mut vertical_unit,
+            _ => unreachable!(),
+        };
+        *target = Some(*value);
+    }
+    if model_type != Some(GEOTIFF_MODEL_TYPE_PROJECTED) {
+        return None;
+    }
+    SpatialReferenceProfile::new(
+        geotiff_epsg_identity(horizontal_epsg?)?,
+        geotiff_epsg_identity(vertical_epsg?)?,
+        SpatialAxes::EastingNorthingElevation,
+        LinearUnit::from_epsg_code(u32::from(horizontal_unit?))?,
+        LinearUnit::from_epsg_code(u32::from(vertical_unit?))?,
+        SpatialReferenceProvenance::SourceMetadata,
+    )
+    .ok()
+}
+
+fn geotiff_epsg_identity(value: u16) -> Option<u32> {
+    (value != GEOTIFF_USER_DEFINED).then(|| u32::from(value))
 }
 
 fn metadata_records(

@@ -3,6 +3,9 @@
 //! The crate consumes one immutable Workspace Snapshot, derives one complete
 //! in-memory 2.5D Terrain Surface, evaluates detached Check Points, and creates
 //! the narrow metric-metre `LandXML` deliverable accepted for Punctra v0.6.
+//! A complete v0.12 structured Source profile is propagated and must declare
+//! easting/northing/elevation metre coordinates. Unstructured references fail
+//! closed on every current QA and `LandXML` write path.
 //!
 //! # Example
 //!
@@ -22,8 +25,7 @@
 //!     "Existing Ground",
 //!     "2026-08-10",
 //!     "00:00:00Z",
-//! )?
-//! .assert_coordinates_are_metric_metres();
+//! )?;
 //! let receipt = surface
 //!     .ensure_landxml("existing-ground.xml", options, LandXmlLimits::default())
 //!     .blocking_wait()?;

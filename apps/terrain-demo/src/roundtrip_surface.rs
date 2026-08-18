@@ -3,6 +3,7 @@
 use std::collections::BTreeMap;
 
 use num_bigint::BigInt;
+use point_contracts::SpatialReferenceProfile;
 use robust::{Coord, orient2d};
 
 use crate::roundtrip::{InputSide, RoundTripFailure, RoundTripLimits, RoundTripReason};
@@ -91,6 +92,7 @@ pub(crate) struct ParsedSurface {
     pub(crate) faces: Vec<Triangle>,
     pub(crate) surface_name: Option<Box<str>>,
     pub(crate) ignored_top_level_sections: Box<[Box<str>]>,
+    pub(crate) spatial_reference_profile: Option<SpatialReferenceProfile>,
 }
 
 pub(crate) struct SemanticSurfaceBuilder {

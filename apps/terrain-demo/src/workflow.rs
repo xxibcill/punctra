@@ -12,7 +12,7 @@ use std::{
 
 use blake3::Hasher;
 use foundation_runtime::{Job, OperationControl};
-use point_contracts::{ContentHash, PointId, WorldBounds};
+use point_contracts::{ContentHash, CoordinateReference, PointId, WorldBounds};
 use point_index::{IndexError, PrepareLimits};
 use point_source::SourceError;
 use point_terrain::{
@@ -164,12 +164,6 @@ impl WorkflowRunIntent {
         check_points: impl IntoIterator<Item = CheckPoint>,
         landxml: LandXmlOptions,
     ) -> Result<Self, WorkflowFailure> {
-        if !landxml.coordinates_are_metric_metres_asserted() {
-            return Err(WorkflowFailure::invalid(
-                WorkflowStage::Validate,
-                "LandXML requires an explicit metric-metre coordinate assertion",
-            ));
-        }
         let mut ordinals = collect_bounded(
             correction_ordinals,
             MAX_INTENT_ORDINALS,
@@ -610,6 +604,10 @@ fn run(
     verify_run_binding(&lock, &witness)
         .map_err(|error| io_failure(WorkflowStage::Source, error, base_context(request)))?;
     let source_id = source.identity();
+    validate_source_reference(
+        source.metadata().coordinate_reference(),
+        base_context(request),
+    )?;
     if let Some(journal) = resumed_journal.as_ref()
         && journal.intent().source != source_id.into_bytes()
     {
@@ -1444,6 +1442,25 @@ fn validate_ground_ordinals(
     Ok(())
 }
 
+fn validate_source_reference(
+    reference: &CoordinateReference,
+    context: FailureContext,
+) -> Result<(), WorkflowFailure> {
+    match reference.spatial_profile() {
+        Some(profile) if profile.is_supported_metric_survey() => Ok(()),
+        Some(_) => Err(WorkflowFailure::invalid_with_context(
+            WorkflowStage::Source,
+            context,
+            "the structured spatial profile requires unsupported axes or non-metre units",
+        )),
+        None => Err(WorkflowFailure::invalid_with_context(
+            WorkflowStage::Source,
+            context,
+            "an unknown or opaque Coordinate Reference cannot establish the supported metre survey profile",
+        )),
+    }
+}
+
 fn durable_intent(
     request: &WorkflowRunIntent,
     source: [u8; 32],
@@ -1472,7 +1489,7 @@ fn durable_intent(
         request.landxml.surface_name().into(),
         request.landxml.document_date().into(),
         request.landxml.document_time().into(),
-        request.landxml.coordinates_are_metric_metres_asserted(),
+        false,
         bindings,
         limits,
     )
@@ -1504,7 +1521,6 @@ fn validate_supplied_intent(
         || durable.document_date.as_ref() != supplied.landxml.document_date()
         || durable.document_time.as_ref() != supplied.landxml.document_time()
         || durable.coordinates_are_metric_metres_asserted
-            != supplied.landxml.coordinates_are_metric_metres_asserted()
         || durable.path_bindings != path_bindings
     {
         return Err(WorkflowFailure::new(
@@ -3433,8 +3449,7 @@ mod tests {
             TerrainRecipe::new(2),
             [],
             LandXmlOptions::metric_metres("Ground", "2026-08-12", "00:00:00Z")
-                .expect("valid deterministic LandXML options")
-                .assert_coordinates_are_metric_metres(),
+                .expect("valid deterministic LandXML options"),
         )
         .expect("create Workflow intent");
         let durable = DurableIntent::new(
@@ -3471,24 +3486,48 @@ mod tests {
     }
 
     #[test]
-    fn workflow_intent_requires_metric_coordinates_before_run_creation() {
-        let failure = WorkflowRunIntent::new(
-            WorkflowRunId::new([1; 16]).expect("nonzero Run identity"),
-            test_operation(2),
-            RevisionId::from_bytes([3; 32]).expect("nonzero Revision identity"),
-            [4],
-            1,
-            point_terrain::TerrainRecipe::new(2),
-            [],
-            point_terrain::LandXmlOptions::metric_metres("Ground", "2026-08-12", "00:00:00Z")
-                .expect("valid deterministic LandXML options"),
-        )
-        .expect_err("an unasserted metric request must fail before Run creation");
+    fn workflow_reference_policy_requires_the_supported_profile() {
+        use point_contracts::{
+            CoordinateReference, LinearUnit, SpatialAxes, SpatialReferenceProfile,
+            SpatialReferenceProvenance,
+        };
 
-        assert_eq!(failure.code(), "PWF_INVALID_REQUEST");
-        assert_eq!(failure.stage(), "validate");
-        assert_eq!(failure.certainty(), "pre_publication");
-        assert!(failure.to_string().contains("metric-metre"));
+        let metric_profile = CoordinateReference::profile(
+            SpatialReferenceProfile::new(
+                32_647,
+                5_703,
+                SpatialAxes::EastingNorthingElevation,
+                LinearUnit::Metre,
+                LinearUnit::Metre,
+                SpatialReferenceProvenance::SourceMetadata,
+            )
+            .unwrap(),
+        );
+        assert!(validate_source_reference(&metric_profile, FailureContext::default()).is_ok());
+
+        let feet_profile = CoordinateReference::profile(
+            SpatialReferenceProfile::new(
+                2_230,
+                5_703,
+                SpatialAxes::EastingNorthingElevation,
+                LinearUnit::UsSurveyFoot,
+                LinearUnit::UsSurveyFoot,
+                SpatialReferenceProvenance::SourceMetadata,
+            )
+            .unwrap(),
+        );
+        assert!(validate_source_reference(&feet_profile, FailureContext::default()).is_err());
+        assert!(
+            validate_source_reference(&CoordinateReference::Unknown, FailureContext::default())
+                .is_err()
+        );
+        assert!(
+            validate_source_reference(
+                &CoordinateReference::wkt("LOCAL_CS[\"opaque\"]").unwrap(),
+                FailureContext::default()
+            )
+            .is_err()
+        );
     }
 
     #[test]
