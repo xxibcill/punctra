@@ -306,8 +306,6 @@ mod tests {
 
     #[test]
     fn view_state_changes_reconverge_without_stale_work() {
-        const TRANSITION_OBSERVATION_FRAMES: u64 = 16;
-
         let scene = Scene::synthetic(VIEW_GENERATION).unwrap();
         let mut orbit = OrbitCamera::new(scene.camera_target(), scene.camera_radius());
         let mut viewport = Viewport::new(1_280, 800).unwrap();
@@ -316,7 +314,7 @@ mod tests {
         harness.settle_and_observe(
             &orbit.as_render_camera().unwrap(),
             viewport,
-            TRANSITION_OBSERVATION_FRAMES,
+            SETTLED_OBSERVATION_FRAMES,
             "initial View",
         );
 
@@ -324,7 +322,7 @@ mod tests {
         harness.settle_and_observe(
             &orbit.as_render_camera().unwrap(),
             viewport,
-            TRANSITION_OBSERVATION_FRAMES,
+            SETTLED_OBSERVATION_FRAMES,
             "moved camera",
         );
 
@@ -332,7 +330,7 @@ mod tests {
         harness.settle_and_observe(
             &orbit.as_render_camera().unwrap(),
             viewport,
-            TRANSITION_OBSERVATION_FRAMES,
+            SETTLED_OBSERVATION_FRAMES,
             "projection switch",
         );
 
@@ -340,7 +338,7 @@ mod tests {
         harness.settle_and_observe(
             &orbit.as_render_camera().unwrap(),
             viewport,
-            TRANSITION_OBSERVATION_FRAMES,
+            SETTLED_OBSERVATION_FRAMES,
             "resized View",
         );
 
@@ -348,7 +346,7 @@ mod tests {
         harness.settle_and_observe(
             &orbit.as_render_camera().unwrap(),
             viewport,
-            TRANSITION_OBSERVATION_FRAMES,
+            SETTLED_OBSERVATION_FRAMES,
             "refined View",
         );
 
@@ -356,7 +354,7 @@ mod tests {
         harness.settle_and_observe(
             &orbit.as_render_camera().unwrap(),
             viewport,
-            TRANSITION_OBSERVATION_FRAMES,
+            SETTLED_OBSERVATION_FRAMES,
             "coarsened View",
         );
 
@@ -370,7 +368,7 @@ mod tests {
         harness.settle_and_observe(
             &orbit.as_render_camera().unwrap(),
             viewport,
-            TRANSITION_OBSERVATION_FRAMES,
+            SETTLED_OBSERVATION_FRAMES,
             "resumed View",
         );
 
@@ -378,7 +376,7 @@ mod tests {
         harness.settle_and_observe(
             &orbit.as_render_camera().unwrap(),
             viewport,
-            TRANSITION_OBSERVATION_FRAMES,
+            SETTLED_OBSERVATION_FRAMES,
             "reset View",
         );
     }
