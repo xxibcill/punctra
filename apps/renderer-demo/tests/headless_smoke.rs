@@ -548,6 +548,8 @@ fn corpus_pre_v0_13_repository_lane_records_settlement_and_the_declared_matrix()
         assert!(entry["declared_known_feature_outcomes"].is_array());
         let trace = &entry["trace"][0];
         assert!(trace["settlement_frame"].as_u64().unwrap() <= 64);
+        assert!(trace["settlement_pose_nanoseconds"].as_u64().is_some());
+        assert!(trace.get("settlement_nanoseconds").is_none());
         assert!(trace["peak_issued_nodes_per_frame"].as_u64().unwrap() <= 1);
         assert_eq!(trace["quiet_observation_frames"], 300);
         assert_eq!(trace["quiet_window_complete"], true);

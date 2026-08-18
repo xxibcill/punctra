@@ -129,8 +129,8 @@ The displayed version comes from workspace package metadata through
 
 After A and the P1 portion of B pass, permitted LAS/LAZ Sources exercise all
 five display modes and both projections. Records include time to first visible
-Coverage, settlement frame and time, the 300-frame quiet window, resident and
-peak resources, cumulative lifecycle work, manifest-declared known-feature
+Coverage, pose-relative settlement frame and time, the 300-frame quiet window,
+resident and peak resources, cumulative lifecycle work, manifest-declared known-feature
 outcomes, and failures. Report keys label those declarations explicitly and a
 false nonclaim states that viewing operations did not verify them. Source
 material, paths, reports, screenshots, identities, and

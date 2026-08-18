@@ -162,9 +162,11 @@ private manifest containing at least five permitted projects from three firms,
 all five display modes in both projections, and the complete bounded
 known-feature outcome set. The runner then ignores the short fixed-frame
 observation count as a stopping condition: every pose must settle within
-`settlement_frame_ceiling` and remain quiet for 300 rendered frames. A report
-records manifest outcomes under `declared_known_feature_outcomes` and reports
-their counts with `declared_*` keys. Its explicit
+`settlement_frame_ceiling` and remain quiet for 300 rendered frames. Each trace
+records `settlement_pose_nanoseconds` from the start of that pose, rather than
+from the start of the entry. A report records manifest outcomes under
+`declared_known_feature_outcomes` and reports their counts with `declared_*`
+keys. Its explicit
 `declared_known_feature_outcomes_verified: false` nonclaim prevents those
 inputs from being mistaken for observed acceptance.
 

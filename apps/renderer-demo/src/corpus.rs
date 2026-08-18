@@ -583,6 +583,7 @@ fn run_settled_trace_step(
     mut runtime: TraceRuntime<'_>,
     settlement_frame_ceiling: u32,
 ) -> Result<TraceReport, ViewFailure> {
+    let pose_started = Instant::now();
     let mut pose = PoseEvidence::default();
     let mut settlement = None;
     for frame_index in 1..=settlement_frame_ceiling {
@@ -590,7 +591,7 @@ fn run_settled_trace_step(
         runtime.evidence.observe_scene(runtime.scene.metrics());
         pose.observe(frame);
         if frame.is_quiet() && runtime.scene.metrics().queued_batches == 0 {
-            settlement = Some((frame_index, runtime.view_started.elapsed()));
+            settlement = Some((frame_index, pose_started.elapsed()));
             break;
         }
     }
@@ -626,7 +627,7 @@ fn run_settled_trace_step(
         runtime.scene.metrics(),
         SettlementEvidence {
             settlement_frame: Some(u64::from(settlement_frame)),
-            settlement_nanoseconds: Some(elapsed_nanoseconds(settlement_time)),
+            settlement_pose_nanoseconds: Some(elapsed_nanoseconds(settlement_time)),
             quiet_observation_frames: u64::from(SETTLED_OBSERVATION_FRAMES),
             quiet_window_complete: true,
         },
@@ -871,7 +872,7 @@ impl PoseEvidence {
             peak_transient_texture_bytes: self.peak_transient_texture_bytes,
             submitted_frame_nanoseconds: self.submitted_frame_nanoseconds,
             settlement_frame: settlement.settlement_frame,
-            settlement_nanoseconds: settlement.settlement_nanoseconds,
+            settlement_pose_nanoseconds: settlement.settlement_pose_nanoseconds,
             quiet_observation_frames: settlement.quiet_observation_frames,
             quiet_window_complete: settlement.quiet_window_complete,
         }
@@ -881,7 +882,7 @@ impl PoseEvidence {
 #[derive(Clone, Copy, Debug, Default)]
 struct SettlementEvidence {
     settlement_frame: Option<u64>,
-    settlement_nanoseconds: Option<u64>,
+    settlement_pose_nanoseconds: Option<u64>,
     quiet_observation_frames: u64,
     quiet_window_complete: bool,
 }
@@ -2350,7 +2351,7 @@ pub(crate) struct TraceReport {
     pub(crate) peak_transient_texture_bytes: u64,
     pub(crate) submitted_frame_nanoseconds: u64,
     pub(crate) settlement_frame: Option<u64>,
-    pub(crate) settlement_nanoseconds: Option<u64>,
+    pub(crate) settlement_pose_nanoseconds: Option<u64>,
     pub(crate) quiet_observation_frames: u64,
     pub(crate) quiet_window_complete: bool,
 }
@@ -3663,7 +3664,7 @@ mod tests {
                 peak_transient_texture_bytes: 8 * 640 * 480,
                 submitted_frame_nanoseconds: 6,
                 settlement_frame: None,
-                settlement_nanoseconds: None,
+                settlement_pose_nanoseconds: None,
                 quiet_observation_frames: 0,
                 quiet_window_complete: false,
             }],
