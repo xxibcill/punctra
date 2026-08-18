@@ -542,6 +542,7 @@ fn corpus_pre_v0_13_qualification_records_settlement_and_the_complete_matrix() {
     for entry in report["entries"].as_array().unwrap() {
         let trace = &entry["trace"][0];
         assert!(trace["settlement_frame"].as_u64().unwrap() <= 64);
+        assert!(trace["peak_issued_nodes_per_frame"].as_u64().unwrap() <= 1);
         assert_eq!(trace["quiet_observation_frames"], 300);
         assert_eq!(trace["quiet_window_complete"], true);
         assert!(trace["completed_frame_count"].as_u64().unwrap() >= 301);

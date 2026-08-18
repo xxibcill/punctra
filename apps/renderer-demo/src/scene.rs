@@ -489,6 +489,10 @@ mod tests {
                 .scene
                 .reconcile_requests(plan.demanded_nodes(), requests)
                 .unwrap();
+            assert!(
+                issued <= u64::try_from(NEW_REQUESTS_PER_PUMP).unwrap(),
+                "a Scene pump admitted {issued} new requests"
+            );
             if loads_paused {
                 return FrameActivity { issued, ..activity };
             }

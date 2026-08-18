@@ -29,7 +29,7 @@ use crate::{
         HIERARCHY_BYTE_BUDGET, QUEUED_HOST_BYTE_BUDGET, QUEUED_NODE_BUDGET, RealCloudScene,
         STAGING_BYTE_BUDGET, STAGING_POINT_BUDGET,
     },
-    scene::SceneMetrics,
+    scene::{Scene, SceneMetrics},
 };
 use point_index::{
     NodeReadBudget, PrepareDisposition, PrepareLimits, PreparedIndex, prepare_fresh_with_recipe,
@@ -474,8 +474,9 @@ fn run_prepared_entry(
     evidence: &mut EntryEvidence,
 ) -> Result<(), ViewFailure> {
     let view_started = Instant::now();
-    let mut scene = RealCloudScene::new(runtime.view_generation, prepared, display_mode)
+    let real_scene = RealCloudScene::new(runtime.view_generation, prepared, display_mode)
         .map_err(|error| preserve_scene_failure(error, ViewPhase::Hierarchy, "hierarchy setup"))?;
+    let mut scene = Scene::real(real_scene);
     evidence.observe_scene(scene.metrics());
     let projection = projection_mode(entry.projection());
     let mut camera =
@@ -602,14 +603,14 @@ fn run_settled_trace_step(
         ));
     };
     let settled_metrics = runtime.scene.metrics();
-    let settled_nodes = runtime.scene.planning_nodes().to_vec();
+    let settled_nodes = runtime.scene.planning_nodes().as_slice().to_vec();
     for observation_frame in 1..=SETTLED_OBSERVATION_FRAMES {
         let frame = run_trace_frame(&mut runtime)?;
         runtime.evidence.observe_scene(runtime.scene.metrics());
         pose.observe(frame);
         if !frame.is_quiet()
             || runtime.scene.metrics() != settled_metrics
-            || runtime.scene.planning_nodes() != settled_nodes
+            || runtime.scene.planning_nodes().as_slice() != settled_nodes
         {
             return Err(ViewFailure::internal(
                 ViewPhase::Rendering,
@@ -633,7 +634,7 @@ fn run_settled_trace_step(
 }
 
 struct TraceRuntime<'run> {
-    scene: &'run mut RealCloudScene,
+    scene: &'run mut Scene,
     camera: &'run mut OrbitCamera,
     planner: &'run mut ViewPlanner,
     renderer: &'run mut WgpuRenderer,
@@ -653,13 +654,13 @@ fn run_trace_frame(runtime: &mut TraceRuntime<'_>) -> Result<FrameEvidence, View
         .map_err(|error| ViewFailure::internal(ViewPhase::Planning, error))?;
     let (hierarchy, plan) = {
         let nodes = runtime.scene.planning_nodes();
-        let hierarchy = nodes.to_vec();
+        let hierarchy = nodes.as_slice().to_vec();
         let plan = runtime
             .planner
             .plan(
                 &render_camera,
                 viewport,
-                AvailableNodes::new(runtime.view_generation, nodes),
+                AvailableNodes::new(runtime.view_generation, nodes.as_slice()),
                 PLANNING_BUDGET,
             )
             .map_err(|error| ViewFailure::internal(ViewPhase::Planning, error))?;
@@ -819,6 +820,7 @@ impl FrameEvidence {
 struct PoseEvidence {
     completed_frames: u64,
     peak_demanded_nodes: u64,
+    peak_issued_nodes_per_frame: u64,
     issued_nodes: u64,
     retired_nodes: u64,
     presentation_updates: u64,
@@ -835,6 +837,7 @@ impl PoseEvidence {
     fn observe(&mut self, frame: FrameEvidence) {
         self.completed_frames = self.completed_frames.saturating_add(1);
         self.peak_demanded_nodes = self.peak_demanded_nodes.max(frame.demanded_nodes);
+        self.peak_issued_nodes_per_frame = self.peak_issued_nodes_per_frame.max(frame.issued_nodes);
         self.issued_nodes = self.issued_nodes.saturating_add(frame.issued_nodes);
         self.retired_nodes = self.retired_nodes.saturating_add(frame.retired_nodes);
         self.presentation_updates = self
@@ -874,6 +877,7 @@ impl PoseEvidence {
             requested_frame_count: u64::from(input.frame_count),
             completed_frame_count: self.completed_frames,
             peak_demanded_nodes: self.peak_demanded_nodes,
+            peak_issued_nodes_per_frame: self.peak_issued_nodes_per_frame,
             issued_nodes: self.issued_nodes,
             retired_nodes: self.retired_nodes,
             presentation_updates: self.presentation_updates,
@@ -2349,6 +2353,7 @@ pub(crate) struct TraceReport {
     pub(crate) requested_frame_count: u64,
     pub(crate) completed_frame_count: u64,
     pub(crate) peak_demanded_nodes: u64,
+    pub(crate) peak_issued_nodes_per_frame: u64,
     pub(crate) issued_nodes: u64,
     pub(crate) retired_nodes: u64,
     pub(crate) presentation_updates: u64,
@@ -3659,6 +3664,7 @@ mod tests {
                 requested_frame_count: 2,
                 completed_frame_count: 2,
                 peak_demanded_nodes: 1,
+                peak_issued_nodes_per_frame: 1,
                 issued_nodes: 1,
                 retired_nodes: 0,
                 presentation_updates: 0,
