@@ -1,0 +1,171 @@
+{
+  "algorithm_version": 1,
+  "disk_version": 1,
+  "files": [
+    {
+      "blake3": "39d8f1decc8999f590d6dbefb3ea96748550a55dceea0a8ffdcf75a55f6c9b6c",
+      "byte_length": 936,
+      "path": "bounded-six-point.pterr",
+      "role": "complete",
+      "semantic_facts": {
+        "artifact_hash": "5680cdd1765d9f950cd7d2c0429a0e668cbe9a701e0a459fc8986e30e92ca1f0",
+        "bounds": {
+          "maximum": [
+            400002.5,
+            1500002.5,
+            10.6
+          ],
+          "minimum": [
+            400000.0,
+            1500000.0,
+            10.0
+          ]
+        },
+        "face_count": 6,
+        "geometry_hash": "7f5f08f59b22d96b4b47477f9d44ada99a321f937fac0e8a0865b5d98872bc3a",
+        "hull_vertex_count": 4,
+        "input_hash": "2e87d01015b87e5d93a8d9a0a409f36e44caa9f63ff614550163d80b4505c238",
+        "input_point_count": 6,
+        "recipe_hash": "8306b53b31c0f1bccd1ddb17d45be09ab652e1a6bd1e19ec25cbc5363bbe2b7d",
+        "topology_hash": "fb8c17a2984dbb0cf0d87444c9f9b66e28c2ffbbfa4e3aca2bef9f362e33d63e",
+        "vertex_count": 6
+      }
+    },
+    {
+      "blake3": "49b24812750cac6cf3f54f074ad8f9eea877a9f61fe6fd3c98871e66a9d5d2ef",
+      "byte_length": 608,
+      "path": "bounded-six-point.pterr.surface-work-v1",
+      "role": "resumable-input",
+      "semantic_facts": {
+        "durable_input_points": 6,
+        "rebuild_equals_complete": true,
+        "resume_disposition": "resumed_input",
+        "source_points_read": 0
+      }
+    },
+    {
+      "blake3": "b116198600aa5f5f9403925c26c576c24b2e634cb88cf65db767ec3d1fa5c161",
+      "byte_length": 1252,
+      "path": "workspace/manifest.pwm",
+      "role": "snapshot-binding",
+      "semantic_facts": {
+        "revision": "0e37dff4a9502d0d1dc4567d6d599b67232b8e4646bb7d99c0626a039c61b213",
+        "source": "55ac5993c191ad69af6bba3282e0376bbd6a3d8cd639bb9906fb2cbf194f8803",
+        "workspace": "0a1d38f09738b17ac8f8a2d672d49ec0"
+      }
+    }
+  ],
+  "owner": "point-terrain",
+  "path_base": "manifest_directory",
+  "recipe": {
+    "bounds": {
+      "maximum": [
+        400004.0,
+        1500004.0,
+        20.0
+      ],
+      "minimum": [
+        399999.0,
+        1499999.0,
+        0.0
+      ]
+    },
+    "ground_classification": 2
+  },
+  "schema": "punctra.point-terrain.fixture-manifest.v1",
+  "snapshot": {
+    "revision": "0e37dff4a9502d0d1dc4567d6d599b67232b8e4646bb7d99c0626a039c61b213",
+    "source": "55ac5993c191ad69af6bba3282e0376bbd6a3d8cd639bb9906fb2cbf194f8803",
+    "workspace": "0a1d38f09738b17ac8f8a2d672d49ec0"
+  },
+  "source": {
+    "classification_attribute": 301,
+    "classification_values": [
+      2,
+      2,
+      2,
+      2,
+      2,
+      2
+    ],
+    "coordinate_reference": {
+      "axes": "easting_northing_elevation",
+      "horizontal_epsg": 32647,
+      "horizontal_unit": "metre",
+      "provenance": "caller_declaration",
+      "vertical_epsg": 5703,
+      "vertical_unit": "metre"
+    },
+    "generator": "fixed supported-profile MemorySource in tests/v1_fixtures.rs",
+    "identity": "55ac5993c191ad69af6bba3282e0376bbd6a3d8cd639bb9906fb2cbf194f8803",
+    "point_count": 6,
+    "point_ticks": [
+      [
+        0,
+        0,
+        0
+      ],
+      [
+        10,
+        0,
+        2
+      ],
+      [
+        10,
+        10,
+        4
+      ],
+      [
+        0,
+        10,
+        6
+      ],
+      [
+        5,
+        5,
+        3
+      ],
+      [
+        3,
+        7,
+        4
+      ]
+    ],
+    "position_transform": {
+      "offset": [
+        400000.0,
+        1500000.0,
+        10.0
+      ],
+      "scale": [
+        0.25,
+        0.25,
+        0.1
+      ]
+    }
+  },
+  "support_class": "rebuildable",
+  "surface": {
+    "artifact_hash": "5680cdd1765d9f950cd7d2c0429a0e668cbe9a701e0a459fc8986e30e92ca1f0",
+    "bounds": {
+      "maximum": [
+        400002.5,
+        1500002.5,
+        10.6
+      ],
+      "minimum": [
+        400000.0,
+        1500000.0,
+        10.0
+      ]
+    },
+    "face_count": 6,
+    "geometry_hash": "7f5f08f59b22d96b4b47477f9d44ada99a321f937fac0e8a0865b5d98872bc3a",
+    "hull_vertex_count": 4,
+    "input_hash": "2e87d01015b87e5d93a8d9a0a409f36e44caa9f63ff614550163d80b4505c238",
+    "input_point_count": 6,
+    "recipe_hash": "8306b53b31c0f1bccd1ddb17d45be09ab652e1a6bd1e19ec25cbc5363bbe2b7d",
+    "topology_hash": "fb8c17a2984dbb0cf0d87444c9f9b66e28c2ffbbfa4e3aca2bef9f362e33d63e",
+    "vertex_count": 6
+  }
+}

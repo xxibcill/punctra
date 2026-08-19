@@ -7,8 +7,10 @@ outstanding; the v0.11 exact-review technical slice is repository-verified
 with field-activation and independent-adoption evidence outstanding; the v0.12
 explicit spatial-reference and packaging repository slice is complete with
 production-corpus, downstream, adoption, and support evidence outstanding;
-broader terrain, export, external interoperability evidence, and product
-layers remain deferred
+the v0.13 bounded persistent-terrain repository slice is accepted and Active
+with production scale, true out-of-core adoption, partner, and support evidence
+outstanding; broader terrain, export, external interoperability evidence, and
+product layers remain deferred
 
 The accepted versioned designs are authoritative:
 
@@ -24,6 +26,7 @@ The accepted versioned designs are authoritative:
 - [v0.10 Field Qualification and Professional Inspection View](../design/field-inspection-view-v0.10.md)
 - [v0.11 Exact Interactive Review and Ground Correction](../design/exact-interactive-review-v0.11.md)
 - [v0.12 Explicit Spatial Reference and Package Publication](../design/explicit-spatial-reference-v0.12.md)
+- [v0.13 Persistent Bounded-AOI Terrain](../design/persistent-production-scale-terrain-v0.13.md)
 
 The current foundation is headless and embeddable. It reads immutable Sources,
 prepares a complete rebuildable Spatial Index, resolves progressive display,
@@ -32,8 +35,11 @@ document Edit, and derives one narrow CPU-authoritative in-memory Terrain
 Surface with detached QA and a metric-metre LandXML deliverable. The headless
 `terrain-demo` application can run that path through one durable, resumable,
 audited Workflow Run without turning orchestration policy into another
-foundation crate. A crate exists only when its behavior, direct tests, and a
-caller exist.
+foundation crate. The active v0.13 scope adds a separate rebuildable disk-v1
+Surface preparation/reopen path for one explicit AOI while preserving legacy
+in-memory Derivation and Run-v1. Its topology phase still retains the complete
+AOI in memory. A crate exists only when its behavior, direct tests, and a caller
+exist.
 
 The frozen [v0.9 public interface review](v0.9-interface-review.md) classifies
 reusable, adapter-author, test-support, and private application surfaces. The
@@ -131,7 +137,9 @@ buffers, Workspace journal frames, spill files, or GPU buffers.
   owns no GPU, window, Workspace persistence, or mutation policy.
 - `point-terrain` owns Ground Input normalization, robust triangulation,
   canonical `SurfaceVertex`/`SurfaceFace` values, detached Check Point QA, and
-  the private LandXML encoder and exact-target reconciliation.
+  the private LandXML encoder and exact-target reconciliation. It also owns the
+  Surface disk-v1 target/work/stage family, including validation, resume,
+  no-replace publication, and conservative offline-cleanup rules.
 - `terrain-demo` owns its Run lock, eight-frame journal, cross-module recovery
   policy, Surface Change Envelope, canonical report, read-only Complete-Run
   qualifier, canonical Round-Trip Evidence, and structured actions.
@@ -157,18 +165,21 @@ unimplemented.
 ### Durable and rebuildable state stay distinct
 
 Source bytes and immutable Workspace Revision files are authoritative. The
-Spatial Index, in-memory `TerrainSurface`, and all View/GPU state are
-rebuildable or disposable. A LandXML file is a caller-requested Export, not
-Workspace state. Deleting an index, Surface, or display state never deletes an
-Edit.
+Spatial Index, in-memory `TerrainSurface`, prepared Surface disk-v1 family, and
+all View/GPU state are rebuildable or disposable. A LandXML file is a caller-
+requested Export, not Workspace state. Deleting an index, Surface, or display
+state never deletes an Edit. After Surface publication, the verified stage and
+any work sibling remain because identity-conditioned unlink is not portable;
+an uninspected work sibling is not trusted, and removal is optional owner-
+controlled offline maintenance.
 
 ### Limits are part of correctness
 
 Source reads, index operations, selection, Point-row iteration, Point-ID
-iteration, Workspace open/commit, Terrain Derivation, QA, and LandXML export
-each have explicit hard ceilings. A limit failure cannot downgrade an exact
-result to partial Coverage or publish a partial Surface, report, or durable
-value.
+iteration, Workspace open/commit, Terrain Derivation and preparation, file-
+backed Surface streams, QA, and LandXML export each have explicit hard ceilings.
+A limit failure cannot downgrade an exact result to partial Coverage or publish
+a partial Surface, report, or durable value.
 
 ### Seams must be earned
 
@@ -178,7 +189,8 @@ integration, and public interface tests. The `point-review` seam is proven by
 public interface tests and the private renderer host that composes it with an
 existing Workspace. The `point-terrain` seam is proven by
 its public example, package benchmark, interface/resource/topology/QA/LandXML
-tests, and `terrain-demo` process caller. COPC, constrained or persisted
+tests, and `terrain-demo` process caller. v0.13 accepts only the bounded-AOI
+persistent Surface path described above. COPC, constrained or true out-of-core
 terrain, general LandXML, remote reads, polygon/brush/visible-only selection,
 general Edits, and application UI remain deferred until an accepted design and
 caller earn them.
@@ -234,7 +246,7 @@ Operation states with the original identity. It opens but never creates the
 Workspace; an absent Workspace is `PWF_INVALID_REQUEST` before Run creation or
 Workspace mutation.
 
-## Scope boundary after v0.9
+## Current bounded scope
 
 Implemented document and terrain behavior is deliberately narrow:
 
@@ -247,6 +259,9 @@ Implemented document and terrain behavior is deliberately narrow:
 - one exact, ordered, classification-aware Snapshot Point-row pull stream;
 - one-worker unconstrained 2.5D TIN Derivation with immutable in-memory
   `TerrainSurface` output;
+- one accepted explicit-AOI preparation path for a rebuildable checksummed
+  disk-v1 Surface with input/final checkpoints, warm reopen, and bounded
+  file-backed vertex/face streams;
 - bounded detached Check Point residual QA;
 - one private metric-metre LandXML 1.2 points/faces subset with create-new and
   exact-existing reconciliation;
@@ -261,10 +276,10 @@ Implemented document and terrain behavior is deliberately narrow:
 
 General predicate languages, position or other Attribute Edits, named Point
 Sets, branches, merge, compaction, multiple Sources, Breaklines, constrained or
-persistent terrain, general export/import, networking, autosave policy, and
-product UI remain outside v0.9. Licensed-data, partner, named downstream-
-application, above-500-million-Point, and human-workflow evidence also remains
-outstanding.
+true out-of-core terrain, general export/import, networking, autosave policy,
+and product UI remain outside accepted scope. Licensed-data, partner, named
+downstream-application, above-500-million-Point, and human-workflow evidence
+also remains outstanding.
 
 The implemented v0.8 design adds private `terrain-demo` semantic LandXML
 comparison, read-only Complete-Run binding, full-export-ceiling streaming, and a
@@ -288,3 +303,4 @@ external product-readiness claim.
 - [Architectural decisions](../adr/README.md)
 - [First LAS/LAZ guide](../guides/first-las-laz.md)
 - [Library packaging and compatibility](../guides/library-packaging.md)
+- [Persistent bounded-AOI terrain guide](../guides/persistent-terrain.md)

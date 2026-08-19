@@ -1,4 +1,4 @@
-//! Public-composition benchmark for derivation, detached QA, and `LandXML`.
+//! Public-composition benchmark for derivation, persistence, detached QA, and `LandXML`.
 //!
 //! The manageable default is 10,000 Points. Set
 //! `PUNCTRA_TERRAIN_BENCH_POINTS` to a positive count up to 1,000,000; the
@@ -20,14 +20,16 @@ use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use point_contracts::{
     AttributeColumn, AttributeColumns, AttributeDataType, AttributeDefinition, AttributeId,
     AttributeValues, CoordinateReference, LinearUnit, PositionTransform, SpatialAxes,
-    SpatialReferenceProfile, SpatialReferenceProvenance,
+    SpatialReferenceProfile, SpatialReferenceProvenance, WorldBounds,
 };
 use point_index::{PrepareLimits, prepare};
 use point_terrain::{
     CheckPoint, CheckPointId, CheckPointLimits, CheckPointReport, LandXmlLimits, LandXmlOptions,
-    LandXmlReceipt, TerrainDescriptor, TerrainLimits, TerrainRecipe, TerrainSurface,
+    LandXmlReceipt, PreparedTerrainSurface, SurfaceReadLimits, TerrainDescriptor, TerrainLimits,
+    TerrainPrepareDisposition, TerrainPrepareLimits, TerrainRecipe, TerrainSurface,
 };
 use point_workspace::{OpenLimits, Snapshot, Workspace, WorkspaceSchema, create};
+use serde_json::{Value, json};
 use source_memory::MemorySource;
 
 const POINT_COUNT_ENV: &str = "PUNCTRA_TERRAIN_BENCH_POINTS";
@@ -37,14 +39,21 @@ const MAXIMUM_POINT_COUNT: usize = 1_000_000;
 const CLASSIFICATION_ATTRIBUTE_ID: u32 = 301;
 const GROUND_CLASSIFICATION: u8 = 2;
 const QA_POINT_COUNT: u64 = 3;
+const PERSISTENT_STREAM_BATCH_RECORDS: u64 = 4_096;
+const PERSISTENT_STREAM_BATCH_PAYLOAD_BYTES: u64 = 1024 * 1024;
+const PERSISTENT_STREAM_VERIFY_BUFFER_BYTES: u64 = 128 * 1024;
+const PERSISTENT_STREAM_WORKING_BYTES: u64 = 2 * 1024 * 1024;
+const PERSISTENT_STREAM_WORK_UNITS: u64 = 100_000_000;
 
 fn benchmark_terrain(criterion: &mut Criterion) {
     let fixture = Fixture::new(configured_point_count());
     let terrain_limits = TerrainLimits::default();
+    let prepare_limits = TerrainPrepareLimits::default();
     let qa_limits = CheckPointLimits::default();
     let landxml_limits = LandXmlLimits::default();
+    let recipe = fixture.recipe();
     let derive_started = Instant::now();
-    let baseline = derive_surface(fixture.snapshot(), terrain_limits);
+    let baseline = derive_surface(fixture.snapshot(), recipe, terrain_limits);
     let derive_elapsed_us = derive_started.elapsed().as_micros();
     let expected_descriptor = baseline.descriptor().clone();
     assert_surface(
@@ -78,6 +87,9 @@ fn benchmark_terrain(criterion: &mut Criterion) {
     );
     fs::remove_file(&baseline_target).expect("remove baseline LandXML output");
 
+    let persistent = PersistentEvidence::new(&fixture, &baseline, recipe, prepare_limits);
+    report_persistent_resource_facts(&persistent, prepare_limits);
+
     report_resource_facts(
         &expected_descriptor,
         &expected_qa,
@@ -91,7 +103,21 @@ fn benchmark_terrain(criterion: &mut Criterion) {
             landxml: landxml_elapsed_us,
         },
     );
-    benchmark_derivation(criterion, &fixture, &expected_descriptor, terrain_limits);
+    benchmark_derivation(
+        criterion,
+        &fixture,
+        &expected_descriptor,
+        recipe,
+        terrain_limits,
+    );
+    benchmark_persistence(
+        criterion,
+        &fixture,
+        &persistent.target,
+        &expected_descriptor,
+        recipe,
+        prepare_limits,
+    );
     benchmark_qa(criterion, &baseline, &check_points, &expected_qa, qa_limits);
     benchmark_landxml(
         criterion,
@@ -103,10 +129,69 @@ fn benchmark_terrain(criterion: &mut Criterion) {
     );
 }
 
+struct PersistentEvidence {
+    cold: PreparedTerrainSurface,
+    warm: PreparedTerrainSurface,
+    target: PathBuf,
+    cold_elapsed_us: u128,
+    warm_elapsed_us: u128,
+    stream_elapsed_us: u128,
+    stream_limits: SurfaceReadLimits,
+    stream_facts: StreamFacts,
+}
+
+impl PersistentEvidence {
+    fn new(
+        fixture: &Fixture,
+        legacy: &TerrainSurface,
+        recipe: TerrainRecipe,
+        limits: TerrainPrepareLimits,
+    ) -> Self {
+        let target = fixture.next_surface_target();
+        let cold_started = Instant::now();
+        let cold = prepare_surface(fixture.snapshot(), &target, recipe, limits);
+        let cold_elapsed_us = cold_started.elapsed().as_micros();
+        assert_prepared_descriptor(&cold, legacy.descriptor(), TerrainPrepareDisposition::Built);
+
+        let warm_started = Instant::now();
+        let warm = prepare_surface(fixture.snapshot(), &target, recipe, limits);
+        let warm_elapsed_us = warm_started.elapsed().as_micros();
+        assert_prepared_descriptor(
+            &warm,
+            legacy.descriptor(),
+            TerrainPrepareDisposition::Opened,
+        );
+
+        let stream_limits = SurfaceReadLimits::new(
+            PERSISTENT_STREAM_BATCH_RECORDS,
+            PERSISTENT_STREAM_BATCH_PAYLOAD_BYTES,
+            PERSISTENT_STREAM_VERIFY_BUFFER_BYTES,
+            PERSISTENT_STREAM_WORKING_BYTES,
+            PERSISTENT_STREAM_WORK_UNITS,
+        );
+        let stream_started = Instant::now();
+        let stream_facts = assert_prepared_records(&cold, legacy, stream_limits);
+        let warm_stream_facts = assert_prepared_records(&warm, legacy, stream_limits);
+        let stream_elapsed_us = stream_started.elapsed().as_micros();
+        assert_eq!(warm_stream_facts, stream_facts);
+        Self {
+            cold,
+            warm,
+            target,
+            cold_elapsed_us,
+            warm_elapsed_us,
+            stream_elapsed_us,
+            stream_limits,
+            stream_facts,
+        }
+    }
+}
+
 fn benchmark_derivation(
     criterion: &mut Criterion,
     fixture: &Fixture,
     expected: &TerrainDescriptor,
+    recipe: TerrainRecipe,
     limits: TerrainLimits,
 ) {
     let mut group = criterion.benchmark_group("point_terrain/derive");
@@ -117,12 +202,75 @@ fn benchmark_derivation(
         .throughput(Throughput::Elements(fixture.point_count));
     group.bench_function("complete_snapshot", |bencher| {
         bencher.iter(|| {
-            let surface = derive_surface(fixture.snapshot(), limits);
+            let surface = derive_surface(fixture.snapshot(), recipe, limits);
             assert_surface(&surface, expected, limits, fixture.point_count);
             black_box(surface)
         });
     });
     group.finish();
+}
+
+fn benchmark_persistence(
+    criterion: &mut Criterion,
+    fixture: &Fixture,
+    warm_target: &Path,
+    expected: &TerrainDescriptor,
+    recipe: TerrainRecipe,
+    limits: TerrainPrepareLimits,
+) {
+    let mut group = criterion.benchmark_group("point_terrain/persistent_surface");
+    group
+        .sample_size(10)
+        .warm_up_time(Duration::from_millis(500))
+        .measurement_time(Duration::from_secs(3))
+        .throughput(Throughput::Elements(fixture.point_count));
+    group.bench_function("cold_prepare", |bencher| {
+        bencher.iter_custom(|iterations| {
+            let mut measured = Duration::ZERO;
+            for _ in 0..iterations {
+                let target = fixture.next_surface_target();
+                let started = Instant::now();
+                let surface = prepare_surface(fixture.snapshot(), &target, recipe, limits);
+                measured = measured.saturating_add(started.elapsed());
+                assert_prepared_descriptor(&surface, expected, TerrainPrepareDisposition::Built);
+                black_box(&surface);
+                drop(surface);
+                remove_persistent_surface_family(&target);
+            }
+            measured
+        });
+    });
+    group.bench_function("warm_open", |bencher| {
+        bencher.iter(|| {
+            let surface = prepare_surface(fixture.snapshot(), warm_target, recipe, limits);
+            assert_prepared_descriptor(&surface, expected, TerrainPrepareDisposition::Opened);
+            black_box(surface)
+        });
+    });
+    group.finish();
+}
+
+fn remove_persistent_surface_family(target: &Path) {
+    for path in [
+        target.to_path_buf(),
+        persistent_surface_sibling(target, ".surface-work-v1"),
+        persistent_surface_sibling(target, ".surface-stage-v1"),
+    ] {
+        match fs::remove_file(&path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => panic!("remove measured persistent Surface family: {error}"),
+        }
+    }
+}
+
+fn persistent_surface_sibling(target: &Path, suffix: &str) -> PathBuf {
+    let mut name = target
+        .file_name()
+        .expect("persistent Surface target has a file name")
+        .to_os_string();
+    name.push(suffix);
+    target.with_file_name(name)
 }
 
 fn benchmark_qa(
@@ -180,10 +328,103 @@ fn benchmark_landxml(
     group.finish();
 }
 
-fn derive_surface(snapshot: Snapshot, limits: TerrainLimits) -> TerrainSurface {
-    point_terrain::derive(snapshot, TerrainRecipe::new(GROUND_CLASSIFICATION), limits)
+fn derive_surface(
+    snapshot: Snapshot,
+    recipe: TerrainRecipe,
+    limits: TerrainLimits,
+) -> TerrainSurface {
+    point_terrain::derive(snapshot, recipe, limits)
         .blocking_wait()
         .expect("benchmark Terrain Derivation succeeds")
+}
+
+fn prepare_surface(
+    snapshot: Snapshot,
+    target: &Path,
+    recipe: TerrainRecipe,
+    limits: TerrainPrepareLimits,
+) -> PreparedTerrainSurface {
+    point_terrain::prepare(snapshot, target, recipe, limits)
+        .blocking_wait()
+        .expect("benchmark persistent Surface preparation succeeds")
+}
+
+fn assert_prepared_descriptor(
+    surface: &PreparedTerrainSurface,
+    expected: &TerrainDescriptor,
+    disposition: TerrainPrepareDisposition,
+) {
+    let descriptor = surface.descriptor();
+    assert_eq!(surface.report().disposition(), disposition);
+    assert_eq!(descriptor.algorithm_version(), expected.algorithm_version());
+    assert_eq!(descriptor.snapshot(), expected.snapshot());
+    assert_eq!(descriptor.recipe(), expected.recipe());
+    assert_eq!(descriptor.recipe_hash(), expected.recipe_hash());
+    assert_eq!(
+        descriptor.position_transform(),
+        expected.position_transform()
+    );
+    assert_eq!(
+        descriptor.coordinate_reference(),
+        expected.coordinate_reference()
+    );
+    assert_eq!(descriptor.input_hash(), expected.input_hash());
+    assert_eq!(descriptor.geometry_hash(), expected.geometry_hash());
+    assert_eq!(descriptor.topology_hash(), expected.topology_hash());
+    assert_eq!(descriptor.artifact_hash(), expected.artifact_hash());
+    assert_eq!(descriptor.input_point_count(), expected.input_point_count());
+    assert_eq!(descriptor.vertex_count(), expected.vertex_count());
+    assert_eq!(descriptor.face_count(), expected.face_count());
+    assert_eq!(descriptor.hull_vertex_count(), expected.hull_vertex_count());
+    assert_eq!(descriptor.bounds(), expected.bounds());
+}
+
+fn assert_prepared_records(
+    surface: &PreparedTerrainSurface,
+    legacy: &TerrainSurface,
+    limits: SurfaceReadLimits,
+) -> StreamFacts {
+    let mut vertex_offset = 0_usize;
+    let mut vertex_batches = 0_u64;
+    for batch in surface
+        .vertex_batches(limits)
+        .expect("open benchmark vertex stream")
+    {
+        let batch = batch.expect("read benchmark vertices");
+        let next_offset = vertex_offset
+            .checked_add(batch.len())
+            .expect("benchmark vertex offset does not overflow");
+        assert_eq!(
+            batch.as_slice(),
+            &legacy.vertices()[vertex_offset..next_offset]
+        );
+        vertex_offset = next_offset;
+        vertex_batches = vertex_batches.saturating_add(1);
+    }
+    assert_eq!(vertex_offset, legacy.vertices().len());
+
+    let mut face_offset = 0_usize;
+    let mut face_batches = 0_u64;
+    for batch in surface
+        .face_batches(limits)
+        .expect("open benchmark face stream")
+    {
+        let batch = batch.expect("read benchmark faces");
+        let next_offset = face_offset
+            .checked_add(batch.len())
+            .expect("benchmark face offset does not overflow");
+        assert_eq!(batch.as_slice(), &legacy.faces()[face_offset..next_offset]);
+        face_offset = next_offset;
+        face_batches = face_batches.saturating_add(1);
+    }
+    assert_eq!(face_offset, legacy.faces().len());
+
+    StreamFacts {
+        vertices: u64::try_from(vertex_offset).expect("benchmark vertex count fits u64"),
+        vertex_batches,
+        faces: u64::try_from(face_offset).expect("benchmark face count fits u64"),
+        face_batches,
+    }
 }
 
 fn evaluate_check_points(
@@ -367,6 +608,131 @@ fn report_resource_facts(
     );
 }
 
+fn report_persistent_resource_facts(evidence: &PersistentEvidence, limits: TerrainPrepareLimits) {
+    let cold = &evidence.cold;
+    let warm = &evidence.warm;
+    let descriptor = cold.descriptor();
+    let aoi = descriptor
+        .recipe()
+        .bounds()
+        .expect("persistent benchmark Recipe has an explicit AOI");
+    let derivation_limits = limits.derivation();
+    let report = json!({
+        "schema": "punctra.point-terrain.persistence-resource-facts.v1",
+        "package_version": env!("CARGO_PKG_VERSION"),
+        "machine": machine_name(),
+        "os": std::env::consts::OS,
+        "arch": std::env::consts::ARCH,
+        "generated_fixture": true,
+        "surface": {
+            "algorithm_version": descriptor.algorithm_version(),
+            "surface_disk_version": point_terrain::SURFACE_DISK_VERSION,
+            "ground_classification": descriptor.recipe().ground_classification(),
+            "aoi": {
+                "min": aoi.min(),
+                "max": aoi.max(),
+            },
+            "input_points": descriptor.input_point_count(),
+            "vertices": descriptor.vertex_count(),
+            "faces": descriptor.face_count(),
+            "hull_vertices": descriptor.hull_vertex_count(),
+            "recipe_hash": descriptor.recipe_hash().to_string(),
+            "input_hash": descriptor.input_hash().to_string(),
+            "geometry_hash": descriptor.geometry_hash().to_string(),
+            "topology_hash": descriptor.topology_hash().to_string(),
+            "artifact_hash": descriptor.artifact_hash().to_string(),
+        },
+        "cold": persistent_prepare_report(cold.report(), evidence.cold_elapsed_us),
+        "warm": persistent_prepare_report(warm.report(), evidence.warm_elapsed_us),
+        "streams": {
+            "elapsed_us": u64::try_from(evidence.stream_elapsed_us).unwrap_or(u64::MAX),
+            "max_batch_records": evidence.stream_limits.max_batch_records(),
+            "max_batch_payload_bytes": evidence.stream_limits.max_batch_payload_bytes(),
+            "max_verify_buffer_bytes": evidence.stream_limits.max_verify_buffer_bytes(),
+            "max_working_bytes": evidence.stream_limits.max_working_bytes(),
+            "max_work_units": evidence.stream_limits.max_work_units(),
+            "vertices": {
+                "records": evidence.stream_facts.vertices,
+                "batches": evidence.stream_facts.vertex_batches,
+            },
+            "faces": {
+                "records": evidence.stream_facts.faces,
+                "batches": evidence.stream_facts.face_batches,
+            },
+            "exactly_equal_to_legacy_derive": true,
+        },
+        "limits": {
+            "max_work_bytes": limits.max_work_bytes(),
+            "max_artifact_bytes": limits.max_artifact_bytes(),
+            "max_temporary_bytes": limits.max_temporary_bytes(),
+            "max_verify_buffer_bytes": limits.max_verify_buffer_bytes(),
+            "max_retained_handle_bytes": limits.max_retained_handle_bytes(),
+            "max_path_bytes": limits.max_path_bytes(),
+            "derivation": {
+                "max_input_points": derivation_limits.max_input_points(),
+                "max_faces": derivation_limits.max_faces(),
+                "max_working_bytes": derivation_limits.max_working_bytes(),
+                "max_surface_bytes": derivation_limits.max_surface_bytes(),
+                "max_work_units": derivation_limits.max_work_units(),
+            },
+        },
+        "unavailable_observations": {
+            "surface_work_checkpoint_bytes": Value::Null,
+            "surface_stage_bytes": Value::Null,
+            "worker_heap_bytes": Value::Null,
+            "process_peak_resident_bytes": Value::Null,
+            "allocated_filesystem_blocks": Value::Null,
+            "field_accuracy": Value::Null,
+        },
+        "claims": {
+            "production_data": false,
+            "out_of_core_triangulation": false,
+            "field_qualified": false,
+            "partner_validated": false,
+            "support_qualified": false,
+            "extrapolated_beyond_measured_scale": false,
+        },
+    });
+    eprintln!(
+        "PUNCTRA_TERRAIN_PERSISTENCE_RESOURCE_FACTS={}",
+        serde_json::to_string(&report).expect("serialize persistent Terrain resource facts")
+    );
+}
+
+fn persistent_prepare_report(
+    report: point_terrain::TerrainPrepareReport,
+    elapsed_us: u128,
+) -> Value {
+    json!({
+        "disposition": terrain_disposition(report.disposition()),
+        "elapsed_us": u64::try_from(elapsed_us).unwrap_or(u64::MAX),
+        "artifact_bytes": report.artifact_bytes(),
+        "reused_input_points": report.reused_input_points(),
+        "source_points_read": report.source_points_read(),
+        "peak_temporary_disk_bytes": report.peak_temporary_disk_bytes(),
+        "accounted_handle_bytes": report.accounted_handle_bytes(),
+        "accounted_peak_working_bytes": report.accounted_peak_working_bytes(),
+        "topology_steps": report.topology_steps(),
+    })
+}
+
+const fn terrain_disposition(disposition: TerrainPrepareDisposition) -> &'static str {
+    match disposition {
+        TerrainPrepareDisposition::Opened => "opened",
+        TerrainPrepareDisposition::Built => "built",
+        TerrainPrepareDisposition::ResumedInput => "resumed_input",
+        TerrainPrepareDisposition::ResumedPublication => "resumed_publication",
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct StreamFacts {
+    vertices: u64,
+    vertex_batches: u64,
+    faces: u64,
+    face_batches: u64,
+}
+
 #[derive(Clone, Copy)]
 struct EvidenceTimings {
     derive: u128,
@@ -468,6 +834,22 @@ impl Fixture {
         self.directory
             .path()
             .join(format!("terrain-{sequence}.xml"))
+    }
+
+    fn next_surface_target(&self) -> PathBuf {
+        let sequence = self.next_export.fetch_add(1, Ordering::Relaxed);
+        self.directory
+            .path()
+            .join(format!("terrain-{sequence}.pterr"))
+    }
+
+    fn recipe(&self) -> TerrainRecipe {
+        let width = integer_ceil_sqrt(usize::try_from(self.point_count).expect("count fits usize"));
+        let maximum = f64::from(u32::try_from(width).expect("benchmark width fits u32"));
+        TerrainRecipe::new(GROUND_CLASSIFICATION).within(
+            WorldBounds::new([-1.0, -1.0, -1_000.0], [maximum, maximum, 1_000.0])
+                .expect("benchmark AOI is valid"),
+        )
     }
 }
 

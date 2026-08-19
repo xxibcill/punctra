@@ -18,15 +18,26 @@ use crate::{
 const CANCEL_STRIDE: u64 = 1_024;
 const PROGRESS_STRIDE: u64 = 4_096;
 const MAX_EXACT_F64_INTEGER: i128 = 1_i128 << 53;
-const GEOMETRY_HASH_DOMAIN: &[u8] = b"punctra-terrain-geometry-v1";
-const TOPOLOGY_HASH_DOMAIN: &[u8] = b"punctra-terrain-topology-v1";
+pub(crate) const GEOMETRY_HASH_DOMAIN: &[u8] = b"punctra-terrain-geometry-v1";
+pub(crate) const TOPOLOGY_HASH_DOMAIN: &[u8] = b"punctra-terrain-topology-v1";
 const RECIPE_HASH_DOMAIN: &[u8] = b"punctra-terrain-recipe-v1";
 const ARTIFACT_HASH_DOMAIN: &[u8] = b"punctra-terrain-artifact-v1";
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-struct InputVertex {
-    ticks: [i64; 3],
-    point: PointId,
+pub(crate) struct InputVertex {
+    pub(crate) ticks: [i64; 3],
+    pub(crate) point: PointId,
+}
+
+pub(crate) struct CollectedTerrainInput {
+    pub(crate) snapshot: point_workspace::SnapshotProvenance,
+    pub(crate) recipe: TerrainRecipe,
+    pub(crate) transform: PositionTransform,
+    pub(crate) coordinate_reference: CoordinateReference,
+    pub(crate) input_hash: ContentHash,
+    pub(crate) vertices: Vec<InputVertex>,
+    pub(crate) attempt_work: u64,
+    pub(crate) attempt_peak_working_bytes: u64,
 }
 
 #[derive(Default)]
@@ -42,6 +53,14 @@ impl WorkMeter {
             used: 0,
             next_cancel: CANCEL_STRIDE,
             next_progress: PROGRESS_STRIDE,
+        }
+    }
+
+    const fn resume(used: u64) -> Self {
+        Self {
+            used,
+            next_cancel: used.saturating_add(CANCEL_STRIDE),
+            next_progress: used.saturating_add(PROGRESS_STRIDE),
         }
     }
 
@@ -86,6 +105,10 @@ impl MemoryMeter {
         Self { baseline, peak: 0 }
     }
 
+    const fn resume(baseline: u64, peak: u64) -> Self {
+        Self { baseline, peak }
+    }
+
     fn require(
         &mut self,
         required: u64,
@@ -118,6 +141,21 @@ impl<'a> DerivationContext<'a> {
         }
     }
 
+    fn resume(
+        limits: TerrainLimits,
+        baseline_bytes: u64,
+        used_work: u64,
+        peak_working_bytes: u64,
+        control: &'a OperationControl,
+    ) -> Self {
+        Self {
+            limits,
+            work: WorkMeter::resume(used_work),
+            memory: MemoryMeter::resume(baseline_bytes, peak_working_bytes),
+            control,
+        }
+    }
+
     fn charge(&mut self, amount: u64) -> Result<(), TerrainError> {
         self.work
             .charge(amount, self.limits.max_work_units(), self.control)
@@ -141,6 +179,16 @@ fn run(
     limits: TerrainLimits,
     control: &OperationControl,
 ) -> Result<TerrainSurface, TerrainError> {
+    let input = collect_input(snapshot, recipe, limits, control)?;
+    derive_collected(input, limits, control)
+}
+
+pub(crate) fn collect_input(
+    snapshot: &Snapshot,
+    recipe: TerrainRecipe,
+    limits: TerrainLimits,
+    control: &OperationControl,
+) -> Result<CollectedTerrainInput, TerrainError> {
     control.check_cancelled()?;
     if limits.point_rows().max_working_bytes() > limits.max_working_bytes() {
         return Err(TerrainError::resource(
@@ -171,7 +219,7 @@ fn run(
     }
     let coordinate_reference = rows.source_metadata().coordinate_reference().clone();
     let mut context = DerivationContext::new(limits, coordinate_reference_bytes, control);
-    let mut input = Vec::new();
+    let mut vertices = Vec::new();
 
     while let Some(batch) = pull_rows(&mut rows, control)? {
         for ((&ordinal, &ticks), &classification) in batch
@@ -182,8 +230,8 @@ fn run(
         {
             context.charge(1)?;
             validate_ground_row(recipe, transform, ticks, classification)?;
-            reserve_input(&mut input, &mut context)?;
-            input.push(InputVertex {
+            reserve_input(&mut vertices, &mut context)?;
+            vertices.push(InputVertex {
                 ticks,
                 point: PointId::new(batch.source(), ordinal),
             });
@@ -197,12 +245,53 @@ fn run(
             summary.exact_count(),
         )
     };
-    if input_point_count != u64::try_from(input.len()).unwrap_or(u64::MAX) {
+    if input_point_count != u64::try_from(vertices.len()).unwrap_or(u64::MAX) {
         return Err(TerrainError::topology(
             "Snapshot Point terminal count differs from retained Ground Input",
         ));
     }
     drop(rows);
+
+    Ok(CollectedTerrainInput {
+        snapshot: snapshot_provenance,
+        recipe,
+        transform,
+        coordinate_reference,
+        input_hash,
+        vertices,
+        attempt_work: context.work.used,
+        attempt_peak_working_bytes: context.memory.peak,
+    })
+}
+
+#[allow(clippy::too_many_lines)]
+pub(crate) fn derive_collected(
+    collected: CollectedTerrainInput,
+    limits: TerrainLimits,
+    control: &OperationControl,
+) -> Result<TerrainSurface, TerrainError> {
+    let CollectedTerrainInput {
+        snapshot: snapshot_provenance,
+        recipe,
+        transform,
+        coordinate_reference,
+        input_hash,
+        vertices: mut input,
+        attempt_work,
+        attempt_peak_working_bytes,
+    } = collected;
+    let input_point_count = u64::try_from(input.len()).unwrap_or(u64::MAX);
+    let coordinate_reference_bytes = coordinate_reference
+        .as_wkt()
+        .map_or(0, |wkt| u64::try_from(wkt.len()).unwrap_or(u64::MAX));
+    let retained_input = vector_bytes::<InputVertex>(input.capacity());
+    let mut context = DerivationContext::resume(
+        limits,
+        coordinate_reference_bytes,
+        attempt_work,
+        attempt_peak_working_bytes.max(retained_input.saturating_add(coordinate_reference_bytes)),
+        control,
+    );
 
     if input.len() < 3 {
         return Err(TerrainError::InsufficientGroundInput {
@@ -368,12 +457,10 @@ fn run(
 fn validate_spatial_reference(reference: &CoordinateReference) -> Result<(), TerrainError> {
     match reference.spatial_profile() {
         Some(profile) if profile.is_supported_metric_survey() => Ok(()),
-        Some(_) => Err(TerrainError::invalid(
-            "Terrain spatial reference",
+        Some(_) => Err(TerrainError::unsupported_spatial_reference(
             "the structured spatial profile requires unsupported axes or non-metre units",
         )),
-        None => Err(TerrainError::invalid(
-            "Terrain spatial reference",
+        None => Err(TerrainError::unsupported_spatial_reference(
             "an unknown or opaque Coordinate Reference cannot establish the supported metre survey profile",
         )),
     }
@@ -774,7 +861,7 @@ fn map_triangulation_error(error: &TriangulationFailure) -> TerrainError {
     }
 }
 
-fn hull_vertex_count(vertices: usize, faces: usize) -> Result<u64, TerrainError> {
+pub(crate) fn hull_vertex_count(vertices: usize, faces: usize) -> Result<u64, TerrainError> {
     let vertices = u64::try_from(vertices).unwrap_or(u64::MAX);
     let faces = u64::try_from(faces).unwrap_or(u64::MAX);
     vertices
@@ -833,7 +920,7 @@ fn surface_hashes(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn artifact_hash(
+pub(crate) fn artifact_hash(
     provenance: point_workspace::SnapshotProvenance,
     recipe_hash: ContentHash,
     transform: PositionTransform,
@@ -866,7 +953,7 @@ fn artifact_hash(
     ContentHash::new(*hasher.finalize().as_bytes())
 }
 
-fn recipe_hash(recipe: TerrainRecipe) -> ContentHash {
+pub(crate) fn recipe_hash(recipe: TerrainRecipe) -> ContentHash {
     let mut hasher = domain_hasher(RECIPE_HASH_DOMAIN);
     hasher.update(&crate::ALGORITHM_VERSION.to_le_bytes());
     hasher.update(&[recipe.ground_classification()]);
@@ -884,17 +971,17 @@ fn recipe_hash(recipe: TerrainRecipe) -> ContentHash {
     ContentHash::new(*hasher.finalize().as_bytes())
 }
 
-fn hash_transform(hasher: &mut Hasher, transform: PositionTransform) {
+pub(crate) fn hash_transform(hasher: &mut Hasher, transform: PositionTransform) {
     for value in transform.offset().into_iter().chain(transform.scale()) {
-        hasher.update(&canonical_f64_bits(value).to_le_bytes());
+        hasher.update(&value.to_bits().to_le_bytes());
     }
 }
 
-fn canonical_f64_bits(value: f64) -> u64 {
+pub(crate) fn canonical_f64_bits(value: f64) -> u64 {
     if value == 0.0 { 0 } else { value.to_bits() }
 }
 
-fn domain_hasher(domain: &[u8]) -> Hasher {
+pub(crate) fn domain_hasher(domain: &[u8]) -> Hasher {
     let mut hasher = Hasher::new();
     hasher.update(
         &u64::try_from(domain.len())

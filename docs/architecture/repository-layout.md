@@ -3,7 +3,8 @@
 Status: frozen through the completed v0.9 repository trust and version-1
 compatibility candidate, with the v0.10 professional inspection View and
 repository-verified v0.11 exact-review technical slice plus the v0.12 explicit
-spatial-reference and package-publication repository slice; later crates are
+spatial-reference and package-publication repository slice; the v0.13 bounded
+persistent-terrain addition remains inside `point-terrain`; later crates are
 created only with accepted behavior and a caller
 
 The repository is one Cargo workspace. Each current crate is independently
@@ -168,16 +169,25 @@ crates/
       landxml.rs
       limits.rs
       model.rs
+      numeric.rs
+      persistence.rs
       qa.rs
+      sort.rs
       triangulation.rs
-    examples/derive.rs
+    examples/
+      derive.rs
+      persistent_surface.rs
     benches/terrain.rs
     tests/
+      fixtures/v1/
       interface.rs
       landxml.rs
+      persistence.rs
       qa.rs
       resource.rs
+      support/mod.rs
       topology.rs
+      v1_fixtures.rs
 
   render-protocol/
     src/
@@ -363,13 +373,18 @@ derive(Snapshot, TerrainRecipe, TerrainLimits) -> TerrainSurface
 TerrainSurface -> descriptor/vertices/faces
 TerrainSurface -> check_points -> CheckPointReport
 TerrainSurface -> export_landxml/ensure_landxml -> LandXmlReceipt
+prepare(Snapshot, target, explicit-AOI recipe, TerrainPrepareLimits) -> TerrainPrepareJob
+TerrainPrepareJob::blocking_wait() -> Result<PreparedTerrainSurface, TerrainError>
+PreparedTerrainSurface -> SurfaceArtifactDescriptor/TerrainPrepareReport/bounded streams
 ~~~
 
 Private behavior includes exact row ingestion, normalized predicate inputs,
 robust triangulation and canonicalization, topology validation, deterministic
 point location and compensated QA statistics, XML encoding, durable create-new
-publication, and operation-specific limits. No triangulator, point-locator, or
-exporter registry is public.
+publication, Surface disk/work encoding, resume/reopen validation, and
+operation-specific limits. No triangulator, page-store, filesystem,
+point-locator, or exporter registry is public. Persistent preparation retains
+the existing full-AOI in-memory triangulator and one topology worker.
 
 ## Persisted directories
 
@@ -387,6 +402,10 @@ survey.inspection-v2.pidx       # complete rebuildable attributed artifact
 survey.inspection-v2.pidx.work  # retained rebuildable/resumable v2 cache when present
 survey.inspection-v2.pidx.samples.<pid>.<sequence>
                               # owned disposable v2 construction temporary
+
+existing-ground.pterr                  # caller-named complete rebuildable Surface disk-v1
+existing-ground.pterr.surface-work-v1  # input checkpoint path; verified before resume
+existing-ground.pterr.surface-stage-v1 # retained verified publication-stage alias
 
 survey.pcw/
   manifest.pwm               # point-workspace schema and lineage
@@ -411,12 +430,18 @@ evidence/
 Ownership rules:
 
 - only `point-index` interprets `.pidx` and its sidecars;
+- only `point-terrain` interprets a Surface disk-v1 target and its recognized
+  work/stage family; the filename suffix itself is not semantic. Publication
+  retains the verified stage and any work sibling because no portable unlink
+  can be conditioned on the verified open inode; an uninspected work sibling
+  is not trusted;
 - only `point-workspace` interprets the Workspace directory;
 - the Source remains outside the Workspace and is never rewritten;
 - a Point Set spill is temporary, per-attempt bounded, retained as private
   debris, and ignored by recovery;
-- `TerrainSurface`, View, and GPU state are not persisted as authoritative
-  document data; LandXML, `audit.json`, and Round-Trip Evidence are
+- a prepared Terrain Surface is rebuildable Snapshot-bound data, never
+  authoritative Workspace or Run-v1 state; View and GPU state remain
+  disposable, while LandXML, `audit.json`, and Round-Trip Evidence are
   caller-requested deliverables;
   and
 - only `terrain-demo` interprets `run.pwf`; unknown Run-root children are never
@@ -429,10 +454,11 @@ versions, and LandXML/journal/report format versions are separate axes. A Cargo
 `0.9` version does not imply Workspace disk schema or terrain algorithm version
 9.
 
-The v0.12 public libraries are one `0.12.0-alpha.1` package set with exact
-inter-Punctra registry requirements and local development paths. Their empty
-default features, dependency roles, MSRV, publication order, and pre-v1 policy
-are documented in the [library packaging guide](../guides/library-packaging.md).
+The active v0.13 work advances all public libraries as one
+`0.13.0-alpha.1` package set with exact inter-Punctra registry requirements and
+local development paths. Their empty default features, dependency roles, MSRV,
+publication order, and pre-v1 policy are documented in the [library packaging
+guide](../guides/library-packaging.md).
 
 - Unknown persisted major versions fail explicitly.
 - Identity and persisted schema values remain opaque outside their owner.
@@ -442,16 +468,18 @@ are documented in the [library packaging guide](../guides/library-packaging.md).
 - Golden fixtures are required before a persisted compatibility promise or a
   second persisted version is accepted.
 
-v0.9 keeps every persisted schema at version 1 and does not invent a
+v0.9 keeps every then-existing persisted schema at version 1 and does not invent a
 migration solely to exercise migration machinery. Source Record version 1,
 Spatial Index disk/recipe version 1, Workspace disk/semantic version 1,
 Terrain algorithm version 1, Workflow journal version 1, and the supported
 LandXML/report subsets evolve independently of Cargo versions. Frozen fixtures
-must precede any future second persisted version.
+must precede any future second persisted version. v0.13 adds the first Surface
+disk/work version 1 without changing Terrain algorithm meaning or any frozen
+Run-v1 byte.
 
 ## Implementation order
 
-Completed vertical slices are:
+Completed vertical slices, followed by the single Active slice, are:
 
 1. render protocol and wgpu engine;
 2. adaptive View planning;
@@ -464,11 +492,15 @@ Completed vertical slices are:
    private durable application Workflow Run with canonical report; and
 8. strict read-only Complete-Run qualification, full-ceiling streaming,
    canonical Round-Trip Evidence, frozen version-1 fixtures, and the reviewed
-   support/recovery surface.
+   support/recovery surface; and
+9. **Active:** one accepted explicit-AOI, resumable, rebuildable Surface
+   disk-v1 path with bounded file-backed streams while full-AOI topology
+   remains memory-resident.
 
 Any later accepted slice may add only terrain or workflow behavior earned by
-its real caller and evidence. COPC, general LandXML, UI, bindings, and other
-adapters remain deferred until their own evidence and designs exist.
+its real caller and evidence. True out-of-core/constrained terrain, COPC,
+general LandXML, UI, bindings, and other adapters remain deferred until their
+own evidence and designs exist.
 
 ## Definition of ready for a crate
 

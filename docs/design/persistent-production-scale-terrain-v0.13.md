@@ -67,12 +67,13 @@ prepare(snapshot, target, recipe, limits) -> TerrainPrepareJob
 ```
 
 `recipe` uses the existing ground-classification meaning and must contain an
-explicit finite inclusive `WorldBounds` AOI. The operation has exactly three
+explicit finite inclusive `WorldBounds` AOI. The operation has exactly four
 successful dispositions:
 
 1. open a compatible complete target;
-2. resume compatible verified work; or
-3. build when neither compatible complete nor work state exists.
+2. publish a compatible verified final stage;
+3. resume topology from compatible verified input work; or
+4. build when the complete target, stage, and work paths are all absent.
 
 The result is a file-backed prepared Surface. Its semantic descriptor is
 separate from the attempt report. Cold, resumed, and warm attempts may have
@@ -130,10 +131,11 @@ format. Its private fixed-endian disk-v1 encoding binds:
 - section record widths, lengths, offsets, and checksums.
 
 Vertex and face records retain the existing identities and canonical order.
-Checksummed blocks permit bounded stream verification, and a whole-file
-checksum protects the complete encoding. Open rejects unknown versions,
-truncation, checksum mismatch, impossible counts or offsets, invalid ordering,
-invalid face references, and disagreement between descriptor and body.
+Checksummed blocks permit bounded stream verification, and a checksum stored in
+the footer covers every byte preceding that footer. Open rejects unknown
+versions, truncation, checksum mismatch, impossible counts or offsets, invalid
+ordering, invalid face references, and disagreement between descriptor and
+body.
 
 A complete Artifact is owner-local rebuildable data. Frozen disk-v1 fixtures
 therefore promise exact read compatibility or an explicit unsupported-version
@@ -154,20 +156,32 @@ reread the Source. Cancellation or failure during topology work publishes no
 Surface and retains only verified owner-local work. Resume from checkpoint 2
 revalidates the entire staged encoding before attempting publication.
 
-A torn final work record may be discarded only when the valid checksummed
-prefix and exclusive ownership prove that it is an incomplete suffix.
-Interior corruption, an incompatible header, an unknown version, or an
-unproven path is preserved and rejected. The implementation never guesses that
-an arbitrary sibling file belongs to the current request.
+A torn or truncated work file, interior corruption, an incompatible header, an
+unknown version, or an unproven path is preserved and rejected. The
+implementation never guesses that an arbitrary sibling file belongs to the
+current request or uses a check-then-unlink cleanup that could delete a racing
+replacement.
 
 Publication uses an owned stage, file synchronization, descriptor-bound
 no-replace target creation, parent-directory synchronization, reopen, complete
 verification, and path/identity revalidation before success is acknowledged.
-Pre-publication failure is retryable and proves no target was published. A
-failure after the no-replace commit boundary is reported as indeterminate with
-the expected complete checksum so a retry can reconcile it. Existing regular
+Pre-publication failure proves that this attempt published no target. Recovery
+is state-specific: an absent or complete verified checkpoint permits retry of
+the same request, while a torn or truncated checkpoint requires a fresh target
+family or explicit offline owner-controlled cleanup. A failure after the
+no-replace commit boundary is reported as indeterminate with the expected
+complete-payload/footer checksum so a retry can reconcile it. Existing regular
 files, symlinks, directories, devices, FIFOs, racing paths, and changed paths
 are never replaced or deleted.
+
+After acknowledged publication, the verified stage and any work sibling remain
+recognized owner-local pathnames. `ResumedPublication` does not inspect or
+trust an arbitrary work sibling. There is no portable unlink operation
+conditioned on the verified open inode, so preparation retains the stage and
+any work pathname instead of risking deletion of a racing replacement. The
+complete target takes precedence on later warm opens; optional removal is an
+explicit offline caller action only when no related handle, job, or process is
+live.
 
 ## Staleness and rebuild decisions
 
@@ -267,7 +281,7 @@ Repository completion requires:
   rejection without modification;
 - frozen complete/work disk-v1 fixtures and manifest checks;
 - truncation, interior corruption, torn suffix, unknown version, invalid
-  counts/offsets/order/references, and whole-file checksum faults;
+  counts/offsets/order/references, and complete-payload/footer checksum faults;
 - cancellation and injected create/write/sync/link/readback/disk-exhaustion
   faults at every durable boundary, including publication certainty;
 - inclusive and just-over coverage for every independent resource ceiling;

@@ -1,7 +1,7 @@
 # Punctra Roadmap
 
 Status: living guidance
-Last reviewed: 2026-08-18
+Last reviewed: 2026-08-19
 
 This roadmap communicates direction, not a delivery promise. It has no fixed
 dates. Candidate releases may be split, merged, reordered, renamed, or skipped
@@ -23,15 +23,19 @@ claiming external field-activation or independent-adoption evidence. The
 [v0.12 Explicit Spatial Reference and Package Publication
 design](docs/design/explicit-spatial-reference-v0.12.md) is complete for its
 bounded repository slice without claiming the outstanding production-corpus,
-downstream, adoption, or support gates. No later repository release is Active.
+downstream, adoption, or support gates. The [v0.13 Persistent Bounded-AOI
+Terrain design](docs/design/persistent-production-scale-terrain-v0.13.md) is
+accepted and **Active** for one bounded repository implementation. Its full-AOI
+triangulator remains memory-resident; field activation, production scale, true
+out-of-core adoption, partner validation, and support qualification remain
+outstanding.
 The [2026-08-18 renderer quality
 investigation](docs/reviews/render-quality-investigation-2026-08-18.md) records
 one pre-v0.13 corrective checkpoint now **Complete and repository-verified**
 under its [implemented corrective design](docs/design/renderer-quality-corrective-pre-v0.13.md).
 Its permitted field execution remains outstanding. It does not reopen the
-accepted v0.10–v0.12 scopes. v0.13 through v0.20 remain
-uncommitted Candidate themes; each needs evidence and an accepted design before
-implementation.
+accepted v0.10–v0.12 scopes. v0.14 through v0.20 remain uncommitted Candidate
+themes; each needs evidence and an accepted design before implementation.
 
 ## Working direction
 
@@ -91,11 +95,11 @@ release can be Complete while every product gate remains outstanding.
 
 ## Scope and evidence checkpoint
 
-Status: **v0.12 explicit spatial reference and library packaging Complete for
-the bounded repository slice; pre-v0.13 renderer quality remediation is
-Complete and repository-verified; permitted field execution,
-production-corpus activation, downstream observation, independent adoption,
-and inherited v0.9 support qualification outstanding**
+Status: **v0.13 bounded persistent-terrain repository implementation Active;
+v0.12 and the pre-v0.13 renderer correction are repository-complete; field
+activation, production-scale terrain evidence, true out-of-core adoption,
+downstream observation, independent adoption, partner validation, and inherited
+v0.9 support qualification outstanding**
 
 The [implemented v0.5 design](docs/design/durable-document-core-v0.5.md) places
 exact classification selection, temporary Point Sets, sparse Revisions, and
@@ -455,10 +459,11 @@ CRS guessing, or a general desktop product UI.
 
 ## Release sequence
 
-There is no Active repository implementation track after the completed v0.9,
-repository-implemented v0.10 View, completed v0.11 technical slice, bounded
-v0.12 repository slice, and completed pre-v0.13 renderer quality checkpoint.
-Eight provisional Candidate themes, v0.13 through v0.20, may follow it.
+The accepted v0.13 bounded persistent-terrain repository slice is the single
+Active implementation track after the completed v0.9, repository-implemented
+v0.10 View, completed v0.11 technical slice, bounded v0.12 repository slice,
+and completed pre-v0.13 renderer quality checkpoint. Seven provisional
+Candidate themes, v0.14 through v0.20, may follow it.
 This is a planning sequence, not a requirement to publish every number or to
 publish v1 after v0.20. Candidates may be narrowed, split, merged, reordered,
 or stopped before becoming Active.
@@ -871,6 +876,9 @@ Adoption evidence is counted conservatively. Stars, downloads, praise, generated
 examples, and maintainer-run integrations are useful signals but do not equal
 independent production use. No release is delayed merely to reach a vanity
 metric, and no benchmark or customer dataset is published without permission.
+The active v0.13 repository design deliberately uses full-AOI resident
+triangulation; its generated persistent-terrain example therefore does not
+satisfy v0.13's true out-of-core adoption requirement in the table above.
 
 ### v0.10 — Field qualification and professional inspection View
 
@@ -1061,33 +1069,56 @@ than repository claims.
 
 ### v0.13 — Persistent production-scale terrain
 
-Status: **Candidate**
+Status: **Active — accepted bounded repository scope; field activation and
+production-scale evidence outstanding**
 
-Candidate outcome: replace v0.6's single-worker in-memory Surface with a
-bounded, durable terrain path for the field-qualified scale envelope.
+Accepted repository outcome: add one durable, resumable Surface preparation
+path for an explicit inclusive AOI without changing v0.6's exact Ground Input
+or canonical full-AOI topology meaning. The prepared handle reopens a
+checksummed disk-v1 Artifact and streams bounded canonical vertices/faces;
+legacy in-memory `derive` remains available.
 
 Activation gate:
 
 - field measurements establish the required AOI size, ground-Point count,
   latency, memory, temporary storage, and supported workstation classes.
 
-Likely scope:
+The maintainer activated the bounded repository implementation on 2026-08-19.
+That decision does not satisfy the external gate above. The accepted design is
+the [v0.13 Persistent Bounded-AOI Terrain
+design](docs/design/persistent-production-scale-terrain-v0.13.md).
 
-- explicit AOIs and deterministic bounded-memory or out-of-core Derivation;
-- checksummed persistent Surface Artifacts with Snapshot, spatial-reference,
-  algorithm-version, and provenance bindings;
-- resumable work, safe publication, reopen, stale-artifact detection, and
-  explicit rebuild decisions; and
-- bounded parallel execution only where supported worker counts reproduce a
-  canonical result.
+Accepted repository scope:
 
-Candidate exit evidence:
+- one explicit inclusive `WorldBounds` AOI and the existing single-worker,
+  deterministic full-AOI triangulator under hard memory limits;
+- complete verified Ground-Input and final-stage checkpoints, resume, safe
+  no-replace publication, warm reopen, stale binding detection, and explicit
+  rebuild decisions; after publication the verified stage and any work sibling
+  remain because identity-conditioned unlink is not portable;
+- one immutable checksummed Surface disk-v1 Artifact bound to Snapshot,
+  Recipe/AOI, transform, spatial reference, algorithm, and canonical hashes;
+- a file-backed prepared handle with separately bounded ordered vertex and face
+  streams and attempt/resource facts; and
+- a reproducible generated example and report that separate Source
+  verification, indexing, cold/resumed/warm Terrain work, and unmeasured phases.
 
-- uninterrupted, resumed, and supported-worker runs reproduce canonical
-  topology and descriptors;
+Repository exit gates:
+
+- the persistent and legacy paths reproduce the same canonical small-fixture
+  topology, descriptors, and hashes;
+- uninterrupted, resumed, differently batched, and warm-opened runs preserve
+  canonical Artifact meaning and complete bytes;
 - fault fixtures cover truncation, corruption, cancellation, disk exhaustion,
   checkpoint boundaries, and publication certainty;
-- retained and temporary storage remain within declared hard limits; and
+- retained memory, staged/work bytes, final Artifact bytes, stream buffers, and
+  temporary storage remain within independent hard limits; and
+- the complete local verification sequence passes from one exact commit.
+
+External exits remain separate:
+
+- true external-memory/out-of-core triangulation and the corresponding
+  open-source adoption exit remain outstanding; and
 - at least two above-500-million-Point Source projects from unrelated firms
   complete their declared terrain AOIs and pass their accepted accuracy
   baselines; benchmarks publish that measured envelope without extrapolating
@@ -1337,7 +1368,7 @@ v0.20 theme is by itself a reason to publish v1.
 | Qualifier and trust baseline | v0.8–v0.9 | Complete; repository-verified only | Close inherited qualification gates and harden only the existing narrow repository compatibility surface. |
 | Field inspection and exact correction | v0.10–v0.11 | Repository implementation complete; renderer quality corrected; field and adoption exits outstanding | Qualify representative Sources and connect a professional View to CPU-authoritative review and reversible correction. |
 | Renderer quality corrective checkpoint | pre-v0.13 | Complete; repository-verified only, with permitted field execution outstanding | Stationary LOD converges, bounded density/depth treatments and truthful inspection context are implemented, and the private permitted-source lane records settled evidence without manufacturing field claims. |
-| Spatial contract and production terrain | v0.12–v0.13 | v0.12 bounded repository contract complete; external spatial qualification and v0.13 remain Candidate | Make reference semantics explicit before persisting a bounded production-scale Surface. |
+| Spatial contract and production terrain | v0.12–v0.13 | v0.12 bounded repository contract complete; v0.13 bounded persistent-terrain implementation Active; external spatial, production-scale, and out-of-core exits outstanding | Make reference semantics explicit, then persist one bounded-AOI Surface without confusing repository durability with field-scale qualification. |
 | Terrain acceptance tooling | v0.14–v0.15 | Candidate | Add exact QA and only the constraints earned by field evidence. |
 | Downstream and partner product | v0.16–v0.18 | Candidate | Qualify one named downstream profile, then package and validate one narrow partner workflow. |
 | Product v1 qualification | v0.19–v1.0 | Candidate | Freeze, support-qualify, soak, and explicitly decide whether the maintained scope deserves v1. |

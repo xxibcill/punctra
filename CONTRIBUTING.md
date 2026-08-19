@@ -59,10 +59,18 @@ only its enumerated renderer additions: conditional batch presentation, the
 display-diameter override, bounded eye-dome configuration and disposition, and
 read-only transient-texture and resident-highlight observations required by the
 private `renderer-demo` host. It does not authorize a general material, shader,
-plugin, or host-UI interface. Apart from the explicit v0.8 reader exception,
+plugin, or host-UI interface. The accepted [v0.13 Persistent Bounded-AOI
+Terrain scope](docs/design/persistent-production-scale-terrain-v0.13.md) permits
+one explicit-inclusive-AOI preparation operation in `point-terrain`, complete
+verified-input and final-stage checkpoints, checksummed disk-v1 Surface
+publication/reopen, stale detection, and bounded file-backed vertex/face
+streams. It preserves legacy `derive`, the existing canonical single-worker
+full-AOI triangulator, and frozen Workflow Run-v1. It does not authorize true
+out-of-core, tiled, parallel, constrained, or production-qualified terrain.
+Apart from the explicit v0.8 reader exception,
 external format decoding belongs only in accepted Source adapter crates.
 Networking, polygon/brush/visible-only/occlusion selection, arbitrary
-Attribute or position edits, constrained or persistent terrain, general
+Attribute or position edits, constrained or true out-of-core terrain, general
 export, Source rewriting, automatic recovery, and general host UI remain in
 callers or future projects unless the scope is explicitly revised.
 
@@ -77,7 +85,9 @@ cargo test --workspace --all-features
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps
 scripts/verify-packages.rb
 cargo fmt --manifest-path fuzz/Cargo.toml --all --check
+cargo clippy --manifest-path fuzz/Cargo.toml --all-targets -- -D warnings
 cargo check --manifest-path fuzz/Cargo.toml --bin index_persistence
+cargo check --manifest-path fuzz/Cargo.toml --bin terrain_persistence
 cargo test --manifest-path fuzz/Cargo.toml --lib
 cargo bench -p point-view --bench planner
 cargo bench -p source-memory --bench read
@@ -95,7 +105,9 @@ cargo test -p point-workspace --all-features
 cargo test -p point-review --test interface
 cargo test -p render-protocol --test state_model
 cargo run -p point-terrain --example derive
+cargo run -p point-terrain --example persistent_surface
 cargo test -p point-terrain --all-features
+cargo test -p point-terrain --test persistence
 cargo test -p terrain-demo --lib --all-features
 cargo test -p terrain-demo --test workflow
 cargo test -p terrain-demo --test process
@@ -113,6 +125,7 @@ PUNCTRA_REQUIRE_GPU=1 cargo test -p renderer-demo --test display_gpu
 PUNCTRA_REQUIRE_GPU=1 cargo run -p render-wgpu --example third_party_host
 test -f docs/guides/first-las-laz.md
 test -f docs/guides/library-packaging.md
+test -f docs/guides/persistent-terrain.md
 ruby -rjson -e 'JSON.parse(File.read(ARGV.fetch(0)))' \
   docs/guides/field-corpus.example.json
 git diff --check
@@ -127,6 +140,8 @@ PUNCTRA_POINT_WORKSPACE_BENCH_POINTS=10000000 \
   cargo bench -p point-workspace --bench document
 PUNCTRA_TERRAIN_BENCH_POINTS=100000 \
   cargo bench -p point-terrain --bench terrain
+PUNCTRA_PERSISTENT_TERRAIN_EXAMPLE_POINTS=100000 \
+  cargo run -p point-terrain --example persistent_surface
 PUNCTRA_TERRAIN_WORKFLOW_BENCH_POINTS=100000 \
   cargo bench -p terrain-demo --bench journal -- \
   --save-baseline "qualification-$$-$(date +%s)"
@@ -139,6 +154,12 @@ Points; its intended scales are 10,000, 100,000, and 1,000,000. The default is
 10,000. Its descriptor and QA byte facts are algorithm accounting. A null
 `worker_heap_measurement` means that no observed worker-heap measurement is
 claimed.
+
+The persistent-Surface example accepts generated sizes from 3 through
+1,000,000 Points and defaults to 10,000. It reports cold, verified-input resume,
+warm-open, and bounded-stream facts. Direct stage bytes, worker heap, process
+resident memory, allocated filesystem blocks, QA, LandXML, View, and field
+accuracy remain explicit null observations rather than inferred values.
 
 The Workflow benchmark accepts exactly 10,000, 100,000, or 1,000,000 generated
 Points. It measures cold start, committed-Edit resume, Retryable-intent resume,
@@ -322,12 +343,14 @@ Required local qualification sets `PUNCTRA_REQUIRE_GPU=1`, making a missing
 adapter fail. Run all verification locally; the repository does not use hosted
 CI.
 
-The stable fuzz-crate test runs the checked-in short corpus through the same
-bounded harness as libFuzzer. Longer local campaigns may use `cargo-fuzz` and a
-nightly toolchain:
+The stable fuzz-crate tests run the checked-in short index corpus and generated
+valid terrain artifact/work seeds through the same bounded harnesses as
+libFuzzer. Longer local campaigns may use `cargo-fuzz` and a nightly toolchain:
 
 ```bash
 cargo +nightly fuzz run index_persistence fuzz/corpus/index_persistence -- \
+    -max_len=262144 -timeout=5
+cargo +nightly fuzz run terrain_persistence -- \
     -max_len=262144 -timeout=5
 ```
 

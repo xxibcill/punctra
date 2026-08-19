@@ -85,6 +85,166 @@ impl Default for TerrainLimits {
     }
 }
 
+/// Hard ceilings for durable Terrain Surface preparation.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct TerrainPrepareLimits {
+    derivation: TerrainLimits,
+    max_work_bytes: u64,
+    max_artifact_bytes: u64,
+    max_temporary_bytes: u64,
+    max_verify_buffer_bytes: u64,
+    max_retained_handle_bytes: u64,
+    max_path_bytes: u64,
+}
+
+impl TerrainPrepareLimits {
+    /// Creates explicit derivation, storage, verification, handle, and path ceilings.
+    #[must_use]
+    #[allow(clippy::too_many_arguments)]
+    pub const fn new(
+        derivation: TerrainLimits,
+        max_work_bytes: u64,
+        max_artifact_bytes: u64,
+        max_temporary_bytes: u64,
+        max_verify_buffer_bytes: u64,
+        max_retained_handle_bytes: u64,
+        max_path_bytes: u64,
+    ) -> Self {
+        Self {
+            derivation,
+            max_work_bytes,
+            max_artifact_bytes,
+            max_temporary_bytes,
+            max_verify_buffer_bytes,
+            max_retained_handle_bytes,
+            max_path_bytes,
+        }
+    }
+
+    /// Returns the in-memory AOI derivation ceilings.
+    #[must_use]
+    pub const fn derivation(self) -> TerrainLimits {
+        self.derivation
+    }
+
+    /// Returns the maximum complete input-checkpoint bytes.
+    #[must_use]
+    pub const fn max_work_bytes(self) -> u64 {
+        self.max_work_bytes
+    }
+
+    /// Returns the maximum complete Surface artifact bytes.
+    #[must_use]
+    pub const fn max_artifact_bytes(self) -> u64 {
+        self.max_artifact_bytes
+    }
+
+    /// Returns the maximum cumulative work-plus-stage bytes owned by an attempt.
+    #[must_use]
+    pub const fn max_temporary_bytes(self) -> u64 {
+        self.max_temporary_bytes
+    }
+
+    /// Returns the maximum checksum-verification buffer bytes.
+    #[must_use]
+    pub const fn max_verify_buffer_bytes(self) -> u64 {
+        self.max_verify_buffer_bytes
+    }
+
+    /// Returns the maximum retained file-backed handle and metadata bytes.
+    #[must_use]
+    pub const fn max_retained_handle_bytes(self) -> u64 {
+        self.max_retained_handle_bytes
+    }
+
+    /// Returns the maximum encoded bytes in each retained target or sibling path.
+    #[must_use]
+    pub const fn max_path_bytes(self) -> u64 {
+        self.max_path_bytes
+    }
+}
+
+impl Default for TerrainPrepareLimits {
+    fn default() -> Self {
+        Self::new(
+            TerrainLimits::default(),
+            512 * MIB,
+            2 * GIB,
+            3 * GIB,
+            MIB,
+            MIB,
+            16 * 1024,
+        )
+    }
+}
+
+/// Hard ceilings for one bounded file-backed Surface record stream.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[allow(clippy::struct_field_names)]
+pub struct SurfaceReadLimits {
+    max_batch_records: u64,
+    max_batch_payload_bytes: u64,
+    max_verify_buffer_bytes: u64,
+    max_working_bytes: u64,
+    max_work_units: u64,
+}
+
+impl SurfaceReadLimits {
+    /// Creates independent batch, verification, working-memory, and work ceilings.
+    #[must_use]
+    pub const fn new(
+        max_batch_records: u64,
+        max_batch_payload_bytes: u64,
+        max_verify_buffer_bytes: u64,
+        max_working_bytes: u64,
+        max_work_units: u64,
+    ) -> Self {
+        Self {
+            max_batch_records,
+            max_batch_payload_bytes,
+            max_verify_buffer_bytes,
+            max_working_bytes,
+            max_work_units,
+        }
+    }
+
+    /// Returns the maximum records yielded by one batch.
+    #[must_use]
+    pub const fn max_batch_records(self) -> u64 {
+        self.max_batch_records
+    }
+
+    /// Returns the maximum retained decoded bytes yielded by one batch.
+    #[must_use]
+    pub const fn max_batch_payload_bytes(self) -> u64 {
+        self.max_batch_payload_bytes
+    }
+
+    /// Returns the maximum block-verification read-buffer bytes.
+    #[must_use]
+    pub const fn max_verify_buffer_bytes(self) -> u64 {
+        self.max_verify_buffer_bytes
+    }
+
+    /// Returns the maximum simultaneous verification-buffer and decoded-batch bytes.
+    #[must_use]
+    pub const fn max_working_bytes(self) -> u64 {
+        self.max_working_bytes
+    }
+
+    /// Returns the maximum decoded-plus-verified record work units.
+    #[must_use]
+    pub const fn max_work_units(self) -> u64 {
+        self.max_work_units
+    }
+}
+
+impl Default for SurfaceReadLimits {
+    fn default() -> Self {
+        Self::new(4_096, MIB, 128 * 1024, 8 * MIB, 100_000_000)
+    }
+}
+
 /// Hard ceilings for one detached Check Point evaluation.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[allow(clippy::struct_field_names)]

@@ -2457,7 +2457,8 @@ fn terrain_failure(
         | point_terrain::TerrainError::InsufficientGroundInput { .. }
         | point_terrain::TerrainError::DuplicateHorizontalPosition { .. }
         | point_terrain::TerrainError::CollinearGroundInput
-        | point_terrain::TerrainError::UnsupportedNumericRange { .. }) => WorkflowFailure::new(
+        | point_terrain::TerrainError::UnsupportedNumericRange { .. }
+        | point_terrain::TerrainError::UnsupportedSpatialReference { .. }) => WorkflowFailure::new(
             FailureCode::InvalidRequest,
             stage,
             Certainty::PrePublication,
@@ -3212,6 +3213,26 @@ mod tests {
         assert_eq!(failure.certainty(), "pre_publication");
         assert!(failure.diagnostic().contains("terrain-input.bin"));
         assert!(failure.diagnostic().contains("injected terrain I/O"));
+    }
+
+    #[test]
+    fn unsupported_terrain_spatial_reference_is_an_invalid_request() {
+        let failure = terrain_failure(
+            WorkflowStage::Terrain,
+            point_terrain::TerrainError::UnsupportedSpatialReference {
+                reason: point_terrain::TerrainDiagnostic::new("unsupported fixture profile"),
+            },
+            &OperationControl::new(),
+            FailureContext::default(),
+        );
+
+        assert_eq!(failure.code(), "PWF_INVALID_REQUEST");
+        assert_eq!(failure.stage(), "terrain-derivation");
+        assert_eq!(failure.certainty(), "pre_publication");
+        assert_eq!(
+            failure.recovery_action(),
+            "correct the invalid request and start a new Run"
+        );
     }
 
     #[test]

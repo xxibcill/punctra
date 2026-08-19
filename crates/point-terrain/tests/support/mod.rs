@@ -31,7 +31,7 @@ pub struct TerrainFixture {
     workspace: Workspace,
     ticks: Vec<[i64; 3]>,
     classifications: Vec<u8>,
-    _temporary: TemporaryFixture,
+    temporary: TemporaryFixture,
 }
 
 impl TerrainFixture {
@@ -100,7 +100,7 @@ impl TerrainFixture {
             workspace,
             ticks,
             classifications,
-            _temporary: temporary,
+            temporary,
         }
     }
 
@@ -122,6 +122,10 @@ impl TerrainFixture {
 
     pub fn point(&self, ordinal: u64) -> PointId {
         PointId::new(self.workspace.source(), ordinal)
+    }
+
+    pub fn terrain_path(&self, name: &str) -> PathBuf {
+        self.temporary.directory.join(name)
     }
 
     pub fn select_ordinals(&self, snapshot: &Snapshot, ordinals: &[u64]) -> PointSet {

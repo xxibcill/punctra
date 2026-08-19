@@ -25,13 +25,22 @@ fn derivation_rejects_unsupported_spatial_references() {
         SpatialReferenceProvenance::CallerDeclaration,
     )
     .unwrap();
-    for (label, reference) in [
-        ("unknown", CoordinateReference::Unknown),
+    for (label, reference, expected_reason) in [
+        (
+            "unknown",
+            CoordinateReference::Unknown,
+            "an unknown or opaque Coordinate Reference cannot establish the supported metre survey profile",
+        ),
         (
             "opaque-wkt",
             CoordinateReference::wkt("LOCAL_CS[\"opaque\"]").unwrap(),
+            "an unknown or opaque Coordinate Reference cannot establish the supported metre survey profile",
         ),
-        ("feet", CoordinateReference::profile(feet)),
+        (
+            "feet",
+            CoordinateReference::profile(feet),
+            "the structured spatial profile requires unsupported axes or non-metre units",
+        ),
     ] {
         let fixture = TerrainFixture::with_reference(
             &format!("derive-{label}-reference"),
@@ -46,13 +55,10 @@ fn derivation_rejects_unsupported_spatial_references() {
             TerrainLimits::default(),
         )
         .expect_err("Terrain requires the supported metre survey profile");
-        assert!(matches!(
-            error,
-            TerrainError::InvalidArgument {
-                argument: "Terrain spatial reference",
-                ..
-            }
-        ));
+        let TerrainError::UnsupportedSpatialReference { reason } = error else {
+            panic!("unsupported Terrain spatial references need a structured error, got {error:?}");
+        };
+        assert_eq!(reason.as_str(), expected_reason);
     }
 }
 

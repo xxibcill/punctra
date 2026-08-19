@@ -3,8 +3,9 @@
 Status: frozen through the completed v0.9 repository trust and version-1
 compatibility candidate, with the v0.10 professional inspection View and
 repository-verified v0.11 exact-review technical slice plus the v0.12 explicit
-spatial-reference and packaging repository slice; external evidence and
-broader terrain, export, and product contracts remain outstanding
+spatial-reference and packaging repository slice, with the v0.13 bounded
+persistent-terrain contract accepted and Active; external evidence and broader
+terrain, export, and product contracts remain outstanding
 
 The versioned designs in [`docs/design`](../design) control exact release
 scope. This document summarizes the invariants that cross current crate seams.
@@ -359,6 +360,54 @@ facts. Equal Snapshot meaning and Recipe produce equal geometry and topology;
 Revision provenance remains distinct even after an Edit and Revert restore the
 same effective geometry.
 
+The accepted v0.13 `point-terrain::prepare` contract returns one
+`TerrainPrepareJob` whose success is `PreparedTerrainSurface`; it requires an
+explicit inclusive AOI, `TerrainPrepareLimits`, and one caller-owned target.
+Its four attempt dispositions distinguish opening a compatible complete target,
+publishing a compatible final stage, resuming topology from compatible input
+work, and building when the complete target, stage, and work paths are absent.
+Complete verified Ground Input and a complete final Surface stage are the only
+durable resume checkpoints. Sorting and the existing canonical triangulator may
+rerun after input recovery, but Source rows are not reread after the verified
+input checkpoint.
+
+Surface disk-v1 is an immutable rebuildable Artifact, not Workspace authority
+or Workflow Run-v1 state. It binds Snapshot/Source/Workspace/Revision,
+Recipe/AOI, transform, spatial reference, algorithm, counts, bounds, and
+canonical input/geometry/topology/Artifact hashes. Fixed 4,096-record checksum
+blocks protect work input, vertices, and faces; a checksum stored in the footer
+covers every byte preceding that footer. Open validates every
+binding, block directory, checksum, and structural fact before exposing a
+prepared handle, and bounded reads revalidate touched blocks before yielding
+canonical vertex/face records.
+
+Publication syncs and verifies an owned stage, creates the target without
+replacement, syncs the parent, and revalidates the published path before
+acknowledgement. Stale, incompatible, corrupt, symlinked, non-regular, and
+racing targets are preserved. Post-commit uncertainty carries the expected
+complete-payload/footer checksum for same-request reconciliation. A valid
+historical Artifact remains valid for its pinned Snapshot even when the
+Workspace head advances.
+
+Successful publication deliberately retains the verified final stage and any
+input-work pathname. The implementation holds identity witnesses for files it
+verified, but `ResumedPublication` does not inspect an arbitrary work sibling or
+make it trusted. No portable unlink can be conditioned on the verified open
+inode; a later check-then-unlink could remove a racing replacement. The
+complete target takes precedence during a warm open, and siblings may be
+removed only as explicit owner-controlled offline maintenance when no related
+handle, job, or process is live.
+
+The prepared handle retains bounded metadata and file access, not all vertices
+and faces. `SurfaceArtifactDescriptor` is semantic identity;
+`TerrainPrepareReport` and its `Built`/`ResumedInput`/`ResumedPublication`/
+`Opened` disposition describe only the attempt. `SurfaceReadLimits`
+independently bound batch records, decoded payload, checksum buffer, retained
+working bytes, and whole-stream work for `SurfaceVertexBatches` and
+`SurfaceFaceBatches`. The full-AOI single-worker triangulator still retains the
+complete AOI under hard memory
+limits; disk persistence is not a true external-memory topology algorithm.
+
 ## Detached Check Point QA contract
 
 `TerrainSurface::check_points` accepts finite, uniquely identified detached
@@ -567,6 +616,9 @@ publication. Separate ledgers cover:
   bytes, Revision bytes, and total durable bytes;
 - Ground Input rows, vertices/faces, topology work, overlapping working
   allocations, and retained Surface bytes;
+- persistent Terrain Point-row/input counts, full-AOI triangulation memory,
+  work/checkpoint/stage/Artifact bytes, checksum/read buffers, prepared-handle
+  metadata, stream records/payload/work, and cumulative temporary bytes;
 - detached Check Point inputs/results, location work, and report bytes;
 - LandXML vertices/faces, output/staging/token/buffer bytes, and publication
   work; and
@@ -611,10 +663,16 @@ application execution.
 bounded detail, and exactly one safe recovery action. Source, index,
 resource/cancellation, GPU, I/O, request, and internal failures remain distinct.
 
+Persistent Terrain errors additionally distinguish invalid or absent AOI,
+corrupt work, corrupt Artifact, unsupported disk/work version, stale binding,
+existing/conflicting target, and indeterminate Surface publication. None
+returns a partial prepared handle or silently rebuilds a valid mismatched file.
+
 ## Deferred contracts
 
-Breaklines, constrained or persisted terrain, general Attribute Point-row
-streams, general LandXML/import, migration beyond explicit index rebuild,
-multi-Source Workspaces, remote storage, polygon/brush/visible-only selection,
-and general Attribute or position correction require later accepted designs.
-Their vocabulary in the roadmap is not a current public API promise.
+Breaklines, constrained, tiled, true out-of-core, parallel, distributed, or GPU
+terrain, general Attribute Point-row streams, general LandXML/import, migration
+beyond explicit rebuild, multi-Source Workspaces, remote storage,
+polygon/brush/visible-only selection, and general Attribute or position
+correction require later accepted designs. Their vocabulary in the roadmap is
+not a current public API promise.

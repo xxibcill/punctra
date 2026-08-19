@@ -96,6 +96,13 @@ pub enum TerrainError {
         reason: TerrainDiagnostic,
     },
 
+    /// The Source coordinate contract cannot establish the supported Terrain profile.
+    #[error("unsupported Terrain spatial reference: {reason}")]
+    UnsupportedSpatialReference {
+        /// Bounded coordinate-assumption failure explanation.
+        reason: TerrainDiagnostic,
+    },
+
     /// The Surface coordinate contract does not support metric-metre export.
     #[error("unsupported metric-metre LandXML export: {reason}")]
     UnsupportedMetricExport {
@@ -128,6 +135,43 @@ pub enum TerrainError {
         /// Structured underlying failure.
         #[source]
         source: ContractError,
+    },
+
+    /// A durable Surface file belongs to different immutable terrain input.
+    #[error("stale {kind}: {binding} does not match at {path}")]
+    StaleSurfaceArtifact {
+        /// Stable complete-artifact or work-checkpoint category.
+        kind: &'static str,
+        /// Stable mismatched binding category.
+        binding: &'static str,
+        /// Bounded artifact path.
+        path: TerrainDiagnostic,
+    },
+
+    /// A durable Surface file fails structural or checksum validation.
+    #[error("corrupt {kind} at {path}: {reason}")]
+    CorruptSurfaceArtifact {
+        /// Stable complete-artifact or work-checkpoint category.
+        kind: &'static str,
+        /// Bounded artifact path.
+        path: TerrainDiagnostic,
+        /// Bounded validation failure.
+        reason: TerrainDiagnostic,
+    },
+
+    /// A durable Surface file uses an unsupported disk contract.
+    #[error(
+        "incompatible {kind} version at {path}: found {found_version}, supported {supported_version}"
+    )]
+    IncompatibleSurfaceArtifact {
+        /// Stable complete-artifact or work-checkpoint category.
+        kind: &'static str,
+        /// Bounded artifact path.
+        path: TerrainDiagnostic,
+        /// Version found on disk, or zero when the magic is unknown.
+        found_version: u32,
+        /// Exact version supported by this crate.
+        supported_version: u32,
     },
 
     /// An export target already exists and was not replaced.
@@ -179,6 +223,20 @@ pub enum TerrainError {
         source: Box<TerrainError>,
     },
 
+    /// Surface publication may have created the complete target.
+    #[error(
+        "Surface publication is indeterminate for expected complete checksum {expected_complete_checksum} at {path}: {source}"
+    )]
+    SurfacePublicationIndeterminate {
+        /// Bounded target path.
+        path: TerrainDiagnostic,
+        /// Expected complete-payload checksum stored in the Surface footer.
+        expected_complete_checksum: ContentHash,
+        /// Structured failure observed after the no-replace link.
+        #[source]
+        source: Box<TerrainError>,
+    },
+
     /// Cooperative cancellation was requested before result publication.
     #[error("terrain operation was cancelled")]
     Cancelled,
@@ -216,6 +274,12 @@ impl TerrainError {
         }
     }
 
+    pub(crate) fn unsupported_spatial_reference(reason: impl AsRef<str>) -> Self {
+        Self::UnsupportedSpatialReference {
+            reason: TerrainDiagnostic::new(reason),
+        }
+    }
+
     pub(crate) fn unsupported_metric_export(reason: impl AsRef<str>) -> Self {
         Self::UnsupportedMetricExport {
             reason: TerrainDiagnostic::new(reason),
@@ -239,6 +303,56 @@ impl TerrainError {
     pub(crate) fn export_indeterminate(expected_hash: ContentHash, source: TerrainError) -> Self {
         Self::ExportIndeterminate {
             expected_hash,
+            source: Box::new(source),
+        }
+    }
+
+    pub(crate) fn stale_surface(
+        kind: &'static str,
+        binding: &'static str,
+        path: impl fmt::Display,
+    ) -> Self {
+        Self::StaleSurfaceArtifact {
+            kind,
+            binding,
+            path: TerrainDiagnostic::new(path.to_string()),
+        }
+    }
+
+    pub(crate) fn corrupt_surface(
+        kind: &'static str,
+        path: impl fmt::Display,
+        reason: impl AsRef<str>,
+    ) -> Self {
+        Self::CorruptSurfaceArtifact {
+            kind,
+            path: TerrainDiagnostic::new(path.to_string()),
+            reason: TerrainDiagnostic::new(reason),
+        }
+    }
+
+    pub(crate) fn incompatible_surface(
+        kind: &'static str,
+        path: impl fmt::Display,
+        found_version: u32,
+        supported_version: u32,
+    ) -> Self {
+        Self::IncompatibleSurfaceArtifact {
+            kind,
+            path: TerrainDiagnostic::new(path.to_string()),
+            found_version,
+            supported_version,
+        }
+    }
+
+    pub(crate) fn surface_publication_indeterminate(
+        path: impl fmt::Display,
+        expected_complete_checksum: ContentHash,
+        source: TerrainError,
+    ) -> Self {
+        Self::SurfacePublicationIndeterminate {
+            path: TerrainDiagnostic::new(path.to_string()),
+            expected_complete_checksum,
             source: Box::new(source),
         }
     }

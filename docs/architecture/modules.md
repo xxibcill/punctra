@@ -4,7 +4,9 @@ Status: frozen module ownership through the completed v0.9 repository trust and
 version-1 compatibility candidate, with the v0.10 professional inspection View
 and repository-verified v0.11 exact-review technical slice plus the v0.12
 explicit spatial-reference and package-publication repository slice; external
-evidence gates and broader terrain/export modules remain outstanding
+evidence gates remain outstanding; the accepted v0.13 bounded persistent-
+terrain slice is Active without claiming production-scale or out-of-core
+qualification
 
 This is the ownership map for implemented crates. Each crate has one public
 job. Several private files may cooperate behind one deep interface; private
@@ -26,17 +28,18 @@ limits, and recovery modes are frozen in the
 | `point-index` | Prepare and query one rebuildable persistent spatial index. | Verified Source, target, limits | Complete `PreparedIndex`, candidates, display reads |
 | `point-workspace` | Make narrow exact classification selection/history durable and stream exact effective Point rows for one Source. | Complete index, schema, selection/row/commit requests | Workspace, Snapshot, Point rows, Point Set, commit/recovery outcomes |
 | `point-review` | Compose one pinned Snapshot with renderer-neutral screen or Point identity input for exact CPU review. | Snapshot, Camera, Viewport, rectangle or PointId, limits | Confirmed Point or exact spillable Point Set plus terminal facts |
-| `point-terrain` | Derive and evaluate the narrow Terrain Surface and encode or reconcile its supported deliverable. | Snapshot, Terrain Recipe, detached Check Points | `TerrainSurface`, QA report, LandXML receipt |
+| `point-terrain` | Derive/evaluate the narrow Terrain Surface and prepare one rebuildable bounded-AOI disk Artifact. | Snapshot, explicit Terrain Recipe/AOI, target, detached Check Points | In-memory or file-backed Terrain Surface, bounded vertex/face streams, prepare report, QA report, LandXML receipt |
 | `render-protocol` | Define generation-safe renderer-neutral point display state. | Camera and display values | Validated updates and frame values |
 | `point-view` | Plan one frozen View over a host-owned hierarchy without I/O. | Camera, viewport, hierarchy/residency, budget | Demand, requests, retention, retirements |
 | `render-wgpu` | Maintain and draw one wgpu representation of render-protocol state. | Render updates, frame, host target | Recorded commands, report, provisional picks |
 | `renderer-demo` | Exercise indexed LAS/LAZ View-to-render composition, exact review/correction, and local viewing measurement. | CLI, permitted corpus manifest, generated inputs, or an existing Workspace | Interactive demo, exact review outcome, GPU-free process smoke, or canonical Viewing Report |
 | `terrain-demo` | Own one recoverable headless LAS/LAZ-to-terrain Workflow Run and its private post-Run qualification. | Caller-owned paths, identities, baseline, correction/QA intent, limits, and returned LandXML declaration | Eight-frame journal, Revision, Terrain/QA evidence, LandXML/report, and separate Round-Trip Evidence |
 
-`source-copc`, constrained or persisted terrain, general LandXML, general
+`source-copc`, constrained or true out-of-core terrain, general LandXML, general
 application UI, bindings, and remote storage are not implemented modules in
-v0.12. Display and correction workflow policy remain private to
-`renderer-demo`; v0.12 adds no public display-policy or mutation-facade crate.
+the active v0.13 scope. Display and correction workflow policy remain private
+to `renderer-demo`; v0.13 adds no public display-policy or mutation-facade
+crate.
 
 ## 1. point-contracts
 
@@ -248,8 +251,8 @@ complete CPU scan without claiming production latency.
 
 ## 6. point-terrain
 
-**Job:** derive and evaluate the narrow Terrain Surface and encode its one
-supported deliverable.
+**Job:** derive and evaluate the narrow Terrain Surface, prepare/reopen its one
+bounded-AOI persistent representation, and encode its supported deliverable.
 
 `point-terrain` owns exact Ground Input ingestion through
 `Snapshot::point_rows`, deterministic robust unconstrained 2.5D triangulation,
@@ -260,11 +263,22 @@ and emitted as one LandXML `CoordinateSystem`; structured non-metre profiles
 fail before QA/export. Its private derivation, triangulation, QA, and XML files
 do not form adapter seams.
 
+The accepted v0.13 addition remains behind this owner. One `prepare` operation
+requires an explicit inclusive AOI, checkpoints complete verified Ground Input
+and final Surface staging, publishes an immutable checksummed disk-v1 Artifact
+without replacement, detects stale bindings, and returns a file-backed handle
+with bounded canonical vertex/face streams and a separate attempt report. The
+existing `derive` path and topology meaning remain unchanged. Preparation is
+bounded-memory: sorting/triangulation still retain the complete AOI and exactly
+one topology worker is supported. After publication, the verified stage and any
+work sibling remain because no portable unlink can be conditioned on the open
+owned file identity; an uninspected work sibling is not trusted.
+
 Primary shape:
 
 ~~~rust,ignore
 let surface = point_terrain::derive(
-    snapshot,
+    snapshot.clone(),
     TerrainRecipe::new(2),
     TerrainLimits::default(),
 ).blocking_wait()?;
@@ -275,11 +289,22 @@ let report = surface
 let receipt = surface
     .ensure_landxml(target, options, LandXmlLimits::default())
     .blocking_wait()?;
+
+let prepared: PreparedTerrainSurface = point_terrain::prepare(
+    snapshot,
+    "existing-ground.pterr",
+    TerrainRecipe::new(2).within(aoi),
+    TerrainPrepareLimits::default(),
+).blocking_wait()?;
+let descriptor: &SurfaceArtifactDescriptor = prepared.descriptor();
+let attempt: TerrainPrepareReport = prepared.report();
+let vertices: SurfaceVertexBatches =
+    prepared.vertex_batches(SurfaceReadLimits::default())?;
 ~~~
 
 It does not own Source/index discovery, Workspace edits, Breaklines,
-constrained topology, terrain persistence, coordinate transformation, general
-LandXML, rendering, or host recovery policy.
+constrained or true out-of-core topology, coordinate transformation, general
+LandXML, rendering, Workflow Run-v1 mutation, or host rebuild policy.
 
 **Independent proof:** package and documentation tests cover the public
 interface, robust topology/oracle agreement, degeneracy and every resource
@@ -435,9 +460,10 @@ classification Revision in place when a later phase fails.
 
 ## Deferred modules
 
-Future Breakline/constrained-terrain behavior, terrain persistence, general
-LandXML, desktop UI, bindings, or a COPC adapter require accepted versioned
-designs. The roadmap does not authorize empty crate scaffolding.
+Future Breakline/constrained-terrain behavior, true out-of-core or parallel
+terrain, general LandXML, desktop UI, bindings, or a COPC adapter require
+accepted versioned designs. The roadmap does not authorize empty crate
+scaffolding.
 
 ## Allowed dependency direction
 
@@ -480,8 +506,8 @@ The implemented reusable seams are:
 5. the one-deep-crate `point-workspace` document, exact Point-row, and Revision
    Audit interface;
 6. exact renderer-neutral Snapshot review in `point-review`;
-7. deterministic Terrain Derivation, QA, and supported deliverable ensure in
-   `point-terrain`;
+7. deterministic Terrain Derivation, bounded-AOI persistence/reopen, QA, and
+   supported deliverable ensure in `point-terrain`;
 8. generation-safe `render-protocol` values;
 9. deterministic `point-view` planning; and
 10. host-owned-lifecycle `render-wgpu` recording.
