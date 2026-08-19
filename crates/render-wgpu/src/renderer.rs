@@ -681,7 +681,7 @@ impl WgpuRenderer {
             }
             let uniform = BatchUniform {
                 origin_from_camera: [offset[0], offset[1], offset[2], 0.0],
-                presentation_weight: batch.presentation_weight.as_unit_f32(),
+                presentation_weight: normalized_presentation_weight(batch.presentation_weight),
                 _presentation_padding: [0.0; 3],
             };
             let source_offset =
@@ -853,6 +853,10 @@ fn view_depth(world_position: [f64; 3], camera: render_protocol::Camera) -> f64 
     (0..3)
         .map(|axis| (world_position[axis] - eye[axis]) * forward[axis])
         .sum()
+}
+
+fn normalized_presentation_weight(weight: PresentationWeight) -> f32 {
+    f32::from(weight.get()) / f32::from(u8::MAX)
 }
 
 fn record_point_batches<'pass>(

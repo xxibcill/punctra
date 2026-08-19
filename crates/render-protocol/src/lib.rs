@@ -390,12 +390,6 @@ impl PresentationWeight {
     pub const fn get(self) -> u8 {
         self.0
     }
-
-    /// Returns the normalized shader value.
-    #[must_use]
-    pub fn as_unit_f32(self) -> f32 {
-        f32::from(self.0) / f32::from(u8::MAX)
-    }
 }
 
 /// Hard protocol residency limits selected by the caller.
