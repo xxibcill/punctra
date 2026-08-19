@@ -30,7 +30,7 @@ use crate::{
         STAGING_BYTE_BUDGET, STAGING_POINT_BUDGET,
     },
     scene::{Scene, SceneMetrics},
-    view_pump::{self, TransitionActivity, ViewPumpError, ViewSpec},
+    view_pump::{TransitionActivity, ViewLifecycle, ViewPumpError, ViewSpec},
 };
 use point_index::{
     NodeReadBudget, PrepareDisposition, PrepareLimits, PreparedIndex, prepare_fresh_with_recipe,
@@ -650,28 +650,24 @@ fn run_trace_frame(runtime: &mut TraceRuntime<'_>) -> Result<FrameEvidence, View
         .camera
         .as_render_camera()
         .map_err(|error| ViewFailure::internal(ViewPhase::Planning, error))?;
-    let planned = view_pump::reconcile_view(
-        runtime.planner,
-        runtime.scene,
-        runtime.renderer,
-        runtime.density_transitions,
-        ViewSpec::new(
-            &render_camera,
-            viewport,
-            runtime.view_generation,
-            PLANNING_BUDGET,
-        ),
-    )
-    .map_err(classify_view_pump_failure)?;
+    let mut lifecycle =
+        ViewLifecycle::new(runtime.scene, runtime.renderer, runtime.density_transitions);
+    let planned = lifecycle
+        .reconcile_view(
+            runtime.planner,
+            ViewSpec::new(
+                &render_camera,
+                viewport,
+                runtime.view_generation,
+                PLANNING_BUDGET,
+            ),
+        )
+        .map_err(classify_view_pump_failure)?;
     let (plan, issued, mut transition_activity) = planned.into_parts();
     observe_transition_activity(runtime.evidence, &transition_activity);
-    let accepted = view_pump::accept_next_batch(
-        runtime.scene,
-        runtime.renderer,
-        runtime.density_transitions,
-        runtime.view_generation,
-    )
-    .map_err(classify_view_pump_failure)?;
+    let accepted = lifecycle
+        .accept_next_batch(runtime.view_generation)
+        .map_err(classify_view_pump_failure)?;
     let accepted_batch = accepted.is_some();
     if let Some(accepted) = accepted {
         let (upload, transitions) = accepted.into_parts();
@@ -681,12 +677,8 @@ fn run_trace_frame(runtime: &mut TraceRuntime<'_>) -> Result<FrameEvidence, View
         transition_activity.add(transitions);
     }
     let submitted = std::time::Instant::now();
-    let point_size = projected_density_point_size(
-        viewport,
-        runtime
-            .density_transitions
-            .display_density_point_count(runtime.scene),
-    );
+    let point_size =
+        projected_density_point_size(viewport, lifecycle.display_density_point_count());
     let default_style = PointStyle::default();
     let reference_style = PointStyle::new(
         REFERENCE_POINT_SIZE_PIXELS,
@@ -698,19 +690,16 @@ fn run_trace_frame(runtime: &mut TraceRuntime<'_>) -> Result<FrameEvidence, View
         .with_display_size_pixels(point_size)
         .map_err(|error| ViewFailure::internal(ViewPhase::Rendering, error))?;
     let frame_report = render_offscreen(
-        runtime.renderer,
+        lifecycle.renderer_mut(),
         runtime.gpu,
         runtime.view_generation,
         render_camera,
         viewport,
         style,
     )?;
-    let completed_transition = view_pump::advance_presented_frame(
-        runtime.renderer,
-        runtime.scene,
-        runtime.density_transitions,
-    )
-    .map_err(classify_view_pump_failure)?;
+    let completed_transition = lifecycle
+        .advance_presented_frame()
+        .map_err(classify_view_pump_failure)?;
     observe_transition_activity(runtime.evidence, &completed_transition);
     transition_activity.add(completed_transition);
     if frame_report.drawn_points() > 0 {

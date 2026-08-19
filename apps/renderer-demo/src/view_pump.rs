@@ -107,114 +107,133 @@ impl TransitionActivity {
     }
 }
 
-pub(crate) fn reconcile_view(
-    planner: &mut ViewPlanner,
-    scene: &mut Scene,
-    renderer: &mut WgpuRenderer,
-    density_transitions: &mut DensityTransitions,
-    view: ViewSpec<'_>,
-) -> Result<PlannedView, ViewPumpError> {
-    let (hierarchy, plan) = {
-        let planning_nodes = scene.planning_nodes();
-        let hierarchy = planning_nodes.as_slice().to_vec();
-        let plan = planner
-            .plan(
-                view.camera,
-                view.viewport,
-                AvailableNodes::new(view.view_generation, planning_nodes.as_slice()),
-                view.budget,
-            )
-            .map_err(ViewPumpError::Planning)?;
-        (hierarchy, plan)
-    };
-
-    let transitions = apply_transition_actions(
-        renderer,
-        scene,
-        density_transitions.reconcile(&hierarchy, &plan),
-    )?;
-    let requests = if density_transitions.blocks_new_residency() {
-        &[]
-    } else {
-        plan.requests()
-    };
-    let issued_requests = scene
-        .reconcile_requests(plan.demanded_nodes(), requests)
-        .map_err(ViewPumpError::RequestReconciliation)?;
-    Ok(PlannedView {
-        plan,
-        issued_requests,
-        transitions,
-    })
+pub(crate) struct ViewLifecycle<'state> {
+    scene: &'state mut Scene,
+    renderer: &'state mut WgpuRenderer,
+    density_transitions: &'state mut DensityTransitions,
 }
 
-pub(crate) fn accept_next_batch(
-    scene: &mut Scene,
-    renderer: &mut WgpuRenderer,
-    density_transitions: &mut DensityTransitions,
-    view_generation: ViewGenerationKey,
-) -> Result<Option<AcceptedBatch>, ViewPumpError> {
-    if density_transitions.blocks_new_residency() {
-        return Ok(None);
-    }
-    let Some(batch) = scene.next_batch().map_err(ViewPumpError::NodeRead)? else {
-        return Ok(None);
-    };
-
-    let key = batch.key();
-    let version = batch.version();
-    let upload = match renderer.apply(&render_protocol::RenderUpdate::Upsert { batch }) {
-        Ok(report) => report,
-        Err(error) => {
-            scene.mark_rejected(key, version);
-            return Err(ViewPumpError::Renderer(error));
+impl<'state> ViewLifecycle<'state> {
+    pub(crate) fn new(
+        scene: &'state mut Scene,
+        renderer: &'state mut WgpuRenderer,
+        density_transitions: &'state mut DensityTransitions,
+    ) -> Self {
+        Self {
+            scene,
+            renderer,
+            density_transitions,
         }
-    };
-    let transitions = density_transitions
-        .uploaded_batch_presentation(ConditionalBatch {
-            view_generation,
-            key,
-            expected_version: version,
-        })
-        .map_or_else(
-            || Ok(TransitionActivity::default()),
-            |action| apply_transition_actions(renderer, scene, vec![action]),
-        )?;
-    scene.mark_resident(key, version);
-    Ok(Some(AcceptedBatch {
-        upload,
-        transitions,
-    }))
-}
+    }
 
-pub(crate) fn advance_presented_frame(
-    renderer: &mut WgpuRenderer,
-    scene: &mut Scene,
-    density_transitions: &mut DensityTransitions,
-) -> Result<TransitionActivity, ViewPumpError> {
-    apply_transition_actions(
-        renderer,
-        scene,
-        density_transitions.advance_presented_frame(),
-    )
-}
+    pub(crate) fn reconcile_view(
+        &mut self,
+        planner: &mut ViewPlanner,
+        view: ViewSpec<'_>,
+    ) -> Result<PlannedView, ViewPumpError> {
+        let (hierarchy, plan) = {
+            let planning_nodes = self.scene.planning_nodes();
+            let hierarchy = planning_nodes.as_slice().to_vec();
+            let plan = planner
+                .plan(
+                    view.camera,
+                    view.viewport,
+                    AvailableNodes::new(view.view_generation, planning_nodes.as_slice()),
+                    view.budget,
+                )
+                .map_err(ViewPumpError::Planning)?;
+            (hierarchy, plan)
+        };
 
-fn apply_transition_actions(
-    renderer: &mut WgpuRenderer,
-    scene: &mut Scene,
-    actions: Vec<TransitionAction>,
-) -> Result<TransitionActivity, ViewPumpError> {
-    let mut activity = TransitionActivity::default();
-    for action in actions {
-        let retiring = action.retiring_batch().is_some();
-        let report =
-            apply_transition_action(renderer, scene, action).map_err(ViewPumpError::Renderer)?;
-        activity.reports.push(report);
-        if retiring {
-            activity.retired = activity.retired.saturating_add(1);
+        let actions = self.density_transitions.reconcile(&hierarchy, &plan);
+        let transitions = self.apply_transition_actions(actions)?;
+        let requests = if self.density_transitions.blocks_new_residency() {
+            &[]
         } else {
-            activity.presentations = activity.presentations.saturating_add(1);
-        }
+            plan.requests()
+        };
+        let issued_requests = self
+            .scene
+            .reconcile_requests(plan.demanded_nodes(), requests)
+            .map_err(ViewPumpError::RequestReconciliation)?;
+        Ok(PlannedView {
+            plan,
+            issued_requests,
+            transitions,
+        })
     }
-    Ok(activity)
+
+    pub(crate) fn accept_next_batch(
+        &mut self,
+        view_generation: ViewGenerationKey,
+    ) -> Result<Option<AcceptedBatch>, ViewPumpError> {
+        if self.density_transitions.blocks_new_residency() {
+            return Ok(None);
+        }
+        let Some(batch) = self.scene.next_batch().map_err(ViewPumpError::NodeRead)? else {
+            return Ok(None);
+        };
+
+        let key = batch.key();
+        let version = batch.version();
+        let upload = match self
+            .renderer
+            .apply(&render_protocol::RenderUpdate::Upsert { batch })
+        {
+            Ok(report) => report,
+            Err(error) => {
+                self.scene.mark_rejected(key, version);
+                return Err(ViewPumpError::Renderer(error));
+            }
+        };
+        let presentation = self
+            .density_transitions
+            .uploaded_batch_presentation(ConditionalBatch {
+                view_generation,
+                key,
+                expected_version: version,
+            });
+        let transitions = presentation.map_or_else(
+            || Ok(TransitionActivity::default()),
+            |action| self.apply_transition_actions(vec![action]),
+        )?;
+        self.scene.mark_resident(key, version);
+        Ok(Some(AcceptedBatch {
+            upload,
+            transitions,
+        }))
+    }
+
+    pub(crate) fn advance_presented_frame(&mut self) -> Result<TransitionActivity, ViewPumpError> {
+        let actions = self.density_transitions.advance_presented_frame();
+        self.apply_transition_actions(actions)
+    }
+
+    pub(crate) fn display_density_point_count(&self) -> u64 {
+        self.density_transitions
+            .display_density_point_count(self.scene)
+    }
+
+    pub(crate) fn renderer_mut(&mut self) -> &mut WgpuRenderer {
+        self.renderer
+    }
+
+    fn apply_transition_actions(
+        &mut self,
+        actions: Vec<TransitionAction>,
+    ) -> Result<TransitionActivity, ViewPumpError> {
+        let mut activity = TransitionActivity::default();
+        for action in actions {
+            let retiring = action.retiring_batch().is_some();
+            let report = apply_transition_action(self.renderer, self.scene, action)
+                .map_err(ViewPumpError::Renderer)?;
+            activity.reports.push(report);
+            if retiring {
+                activity.retired = activity.retired.saturating_add(1);
+            } else {
+                activity.presentations = activity.presentations.saturating_add(1);
+            }
+        }
+        Ok(activity)
+    }
 }

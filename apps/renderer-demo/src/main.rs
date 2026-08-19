@@ -51,7 +51,7 @@ use scene::{Scene, SceneMetrics};
 use status::{SelectionAction, StatusSnapshot, StreamStatus};
 use status_overlay::StatusOverlay;
 use synthetic::{RESIDENT_BATCH_BUDGET, RESIDENT_BYTE_BUDGET, RESIDENT_POINT_BUDGET};
-use view_pump::{ViewPumpError, ViewSpec};
+use view_pump::{ViewLifecycle, ViewPumpError, ViewSpec};
 use winit::{
     application::ApplicationHandler,
     dpi::{LogicalSize, PhysicalPosition, PhysicalSize},
@@ -1113,11 +1113,12 @@ impl Graphics {
         self.window.pre_present_notify();
         self.queue.present(surface_texture);
         if !self.loads_paused {
-            view_pump::advance_presented_frame(
-                &mut self.renderer,
+            ViewLifecycle::new(
                 &mut self.scene,
+                &mut self.renderer,
                 &mut self.density_transitions,
             )
+            .advance_presented_frame()
             .map_err(view_pump_failure)?;
         }
         if reconfigure_after_present {
@@ -1337,12 +1338,12 @@ impl Graphics {
             return Ok(());
         }
         let upload_started = Instant::now();
-        let Some(accepted) = view_pump::accept_next_batch(
+        let Some(accepted) = ViewLifecycle::new(
             &mut self.scene,
             &mut self.renderer,
             &mut self.density_transitions,
-            VIEW_GENERATION,
         )
+        .accept_next_batch(VIEW_GENERATION)
         .map_err(view_pump_failure)?
         else {
             return Ok(());
@@ -1360,11 +1361,13 @@ impl Graphics {
             self.metrics.record_plan(PlanFacts::default());
             return Ok(());
         }
-        let planned = view_pump::reconcile_view(
-            &mut self.planner,
+        let planned = ViewLifecycle::new(
             &mut self.scene,
             &mut self.renderer,
             &mut self.density_transitions,
+        )
+        .reconcile_view(
+            &mut self.planner,
             ViewSpec::new(camera, viewport, VIEW_GENERATION, PLANNING_BUDGET),
         )
         .map_err(view_pump_failure)?;
