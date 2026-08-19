@@ -2402,44 +2402,15 @@ fn decode_artifact_header(
     let mut decoder = Decoder::new(header, path, ARTIFACT_KIND);
     decoder.require_magic(*ARTIFACT_MAGIC, SURFACE_DISK_VERSION)?;
     decoder.require_version(SURFACE_DISK_VERSION)?;
-    let algorithm = decoder.u32()?;
-    if algorithm != crate::ALGORITHM_VERSION {
-        return Err(TerrainError::stale_surface(
-            ARTIFACT_KIND,
-            "terrain algorithm version",
-            path.display(),
-        ));
-    }
-    decoder.require_u64(ARTIFACT_HEADER_BYTES, "header length")?;
-    decoder.require_u64(file_bytes, "file length")?;
-    decoder.require_provenance(expected.snapshot)?;
-    let ground = decoder.u8()?;
-    let recipe_bounds = decoder.bounds()?;
-    let recipe = TerrainRecipe::new(ground).within(recipe_bounds);
-    let stored_recipe_hash = decoder.hash()?;
-    if stored_recipe_hash != expected.recipe_hash || recipe_hash(recipe) != expected.recipe_hash {
-        return Err(TerrainError::stale_surface(
-            ARTIFACT_KIND,
-            "Terrain Recipe",
-            path.display(),
-        ));
-    }
-    let transform = decoder.transform()?;
-    let profile = decoder.profile()?;
-    if !transform_bits_equal(transform, expected.transform) {
-        return Err(TerrainError::stale_surface(
-            ARTIFACT_KIND,
-            "position transform",
-            path.display(),
-        ));
-    }
-    if profile != expected.profile {
-        return Err(TerrainError::stale_surface(
-            ARTIFACT_KIND,
-            "spatial reference",
-            path.display(),
-        ));
-    }
+    let binding = decode_surface_binding(
+        &mut decoder,
+        expected,
+        file_bytes,
+        Some(ARTIFACT_HEADER_BYTES),
+    )?;
+    let transform = binding.transform;
+    let profile = binding.profile;
+    let stored_recipe_hash = binding.recipe_hash;
     let coordinate_reference = CoordinateReference::profile(profile);
     let input_hash = decoder.hash()?;
     let geometry_hash = decoder.hash()?;
@@ -2601,43 +2572,9 @@ fn decode_work_header(
     let mut decoder = Decoder::new(header, path, WORK_KIND);
     decoder.require_magic(*WORK_MAGIC, WORK_DISK_VERSION)?;
     decoder.require_version(WORK_DISK_VERSION)?;
-    let algorithm = decoder.u32()?;
-    if algorithm != crate::ALGORITHM_VERSION {
-        return Err(TerrainError::stale_surface(
-            WORK_KIND,
-            "terrain algorithm version",
-            path.display(),
-        ));
-    }
-    decoder.require_u64(file_bytes, "file length")?;
-    decoder.require_provenance(expected.snapshot)?;
-    let ground = decoder.u8()?;
-    let bounds = decoder.bounds()?;
-    let recipe = TerrainRecipe::new(ground).within(bounds);
-    let stored_recipe_hash = decoder.hash()?;
-    if stored_recipe_hash != expected.recipe_hash || recipe_hash(recipe) != expected.recipe_hash {
-        return Err(TerrainError::stale_surface(
-            WORK_KIND,
-            "Terrain Recipe",
-            path.display(),
-        ));
-    }
-    let transform = decoder.transform()?;
-    let profile = decoder.profile()?;
-    if !transform_bits_equal(transform, expected.transform) {
-        return Err(TerrainError::stale_surface(
-            WORK_KIND,
-            "position transform",
-            path.display(),
-        ));
-    }
-    if profile != expected.profile {
-        return Err(TerrainError::stale_surface(
-            WORK_KIND,
-            "spatial reference",
-            path.display(),
-        ));
-    }
+    let binding = decode_surface_binding(&mut decoder, expected, file_bytes, None)?;
+    let transform = binding.transform;
+    let profile = binding.profile;
     let input_hash = decoder.hash()?;
     let input_point_count = decoder.u64()?;
     let layout = WorkLayout {
@@ -2675,6 +2612,65 @@ fn decode_work_header(
         input_hash,
         input_point_count,
         layout: canonical_layout,
+    })
+}
+
+struct DecodedSurfaceBinding {
+    recipe_hash: ContentHash,
+    transform: PositionTransform,
+    profile: SpatialReferenceProfile,
+}
+
+fn decode_surface_binding(
+    decoder: &mut Decoder<'_>,
+    expected: ExpectedBinding,
+    file_bytes: u64,
+    encoded_header_bytes: Option<u64>,
+) -> Result<DecodedSurfaceBinding, TerrainError> {
+    let algorithm = decoder.u32()?;
+    if algorithm != crate::ALGORITHM_VERSION {
+        return Err(TerrainError::stale_surface(
+            decoder.kind,
+            "terrain algorithm version",
+            decoder.path.display(),
+        ));
+    }
+    if let Some(header_bytes) = encoded_header_bytes {
+        decoder.require_u64(header_bytes, "header length")?;
+    }
+    decoder.require_u64(file_bytes, "file length")?;
+    decoder.require_provenance(expected.snapshot)?;
+    let ground = decoder.u8()?;
+    let bounds = decoder.bounds()?;
+    let recipe = TerrainRecipe::new(ground).within(bounds);
+    let stored_recipe_hash = decoder.hash()?;
+    if stored_recipe_hash != expected.recipe_hash || recipe_hash(recipe) != expected.recipe_hash {
+        return Err(TerrainError::stale_surface(
+            decoder.kind,
+            "Terrain Recipe",
+            decoder.path.display(),
+        ));
+    }
+    let transform = decoder.transform()?;
+    let profile = decoder.profile()?;
+    if !transform_bits_equal(transform, expected.transform) {
+        return Err(TerrainError::stale_surface(
+            decoder.kind,
+            "position transform",
+            decoder.path.display(),
+        ));
+    }
+    if profile != expected.profile {
+        return Err(TerrainError::stale_surface(
+            decoder.kind,
+            "spatial reference",
+            decoder.path.display(),
+        ));
+    }
+    Ok(DecodedSurfaceBinding {
+        recipe_hash: stored_recipe_hash,
+        transform,
+        profile,
     })
 }
 
