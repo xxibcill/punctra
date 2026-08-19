@@ -50,8 +50,12 @@ observable dispositions:
 - `Built`: the complete target, final stage, and input work paths were absent;
 - `ResumedInput`: complete verified Ground Input was reused and topology reran;
 - `ResumedPublication`: a complete verified Surface stage was republished; and
-- `Opened`: a compatible complete target was validated without Snapshot row
-  consumption.
+- `Opened`: a compatible complete target supplied the result. It was either
+  present before the attempt, with no Snapshot row consumption, or won a
+  no-replace publication race after the attempt had already consumed rows.
+
+Use `source_points_read()` and `reused_input_points()` for attempt-specific
+work observations; do not infer either value from `Opened` alone.
 
 The `PreparedTerrainSurface` retains bounded metadata and access to the complete
 Artifact. It does not retain all vertices and faces or return unbounded slices.
