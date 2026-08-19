@@ -680,7 +680,8 @@ impl RenderStateModel {
     ///
     /// Returns [`ProtocolError`] when the update does not belong to a valid
     /// active generation, violates batch-version ordering, fails a conditional
-    /// removal, overflows accounting, or exceeds a hard residency limit.
+    /// removal or presentation update, overflows accounting, or exceeds a hard
+    /// residency limit.
     /// On success, the result pairs public accounting with the renderer work
     /// authorized by the accepted state transition.
     pub fn apply<'update>(
