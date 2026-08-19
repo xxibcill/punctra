@@ -8,6 +8,7 @@ use crate::{
 
 pub(crate) const MAX_STATUS_COLUMNS: usize = 48;
 pub(crate) const MAX_STATUS_LINES: usize = 10;
+const MAX_COMPACT_DECIMAL_COLUMNS: usize = 11;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum StreamStatus {
@@ -205,12 +206,21 @@ fn compact(value: u64) -> String {
 }
 
 fn compact_decimal(value: f64) -> String {
-    if value.abs() >= 10_000.0 {
+    let fixed = if value.abs() >= 10_000.0 {
         format!("{value:.0}")
     } else if value.abs() >= 100.0 {
         format!("{value:.1}")
     } else {
         format!("{value:.2}")
+    };
+    if fixed.len() <= MAX_COMPACT_DECIMAL_COLUMNS
+        && (value == 0.0 || value.abs() >= 0.005 || !value.is_finite())
+    {
+        fixed
+    } else {
+        let scientific = format!("{value:.3e}");
+        debug_assert!(scientific.len() <= MAX_COMPACT_DECIMAL_COLUMNS);
+        scientific
     }
 }
 
@@ -278,6 +288,30 @@ mod tests {
         assert!(lines.iter().any(|line| line.contains("CURSOR X")));
         assert!(lines.iter().any(|line| line.contains("PALETTE")));
         assert!(!lines.iter().any(|line| line.contains("H LOCATORS")));
+    }
+
+    #[test]
+    fn large_cursor_coordinates_retain_all_three_components() {
+        let mut large = snapshot(None);
+        large.cursor_world = Some([f64::MAX, -f64::MAX, f64::MIN_POSITIVE]);
+
+        let lines = large.lines();
+        let cursor = lines
+            .iter()
+            .find(|line| line.starts_with("CURSOR"))
+            .unwrap();
+        let expected = format!(
+            "CURSOR X {} Y {} Z {}",
+            compact_decimal(f64::MAX),
+            compact_decimal(-f64::MAX),
+            compact_decimal(f64::MIN_POSITIVE)
+        )
+        .to_ascii_uppercase();
+
+        assert_eq!(cursor, &expected);
+        assert!(cursor.len() <= MAX_STATUS_COLUMNS);
+        assert!(cursor.contains(" Y "));
+        assert!(cursor.contains(" Z "));
     }
 
     #[test]
