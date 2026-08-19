@@ -1,6 +1,6 @@
 //! GPU acceptance coverage on an available headless adapter.
 
-use std::{sync::mpsc, time::Duration};
+use std::time::Duration;
 
 #[path = "../../../tests/support/gpu.rs"]
 mod gpu_support;
@@ -16,7 +16,7 @@ use render_wgpu::{
     WgpuRenderer,
 };
 
-use gpu_support::{GpuContext, with_gpu};
+use gpu_support::{GpuContext, Rgba8Image as Image, Rgba8Target as ColorTarget, with_gpu};
 
 const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 const VIEWPORT: [u32; 2] = [64, 64];
@@ -795,7 +795,12 @@ impl<'gpu> OffscreenRenderer<'gpu> {
     }
 
     fn try_render(&mut self, frame: &Frame) -> Result<RenderedFrame, RendererError> {
-        let target = ColorTarget::new(&self.gpu.device, frame.viewport().dimensions());
+        let target = ColorTarget::new(
+            &self.gpu.device,
+            frame.viewport().dimensions(),
+            FORMAT,
+            "punctra acceptance color target",
+        );
         let mut encoder = self.encoder("punctra acceptance render encoder");
         let recorded_frame = self.renderer.render(&mut encoder, &target.view, frame)?;
         let report = recorded_frame.report();
@@ -816,9 +821,18 @@ impl<'gpu> OffscreenRenderer<'gpu> {
         first_frame: &Frame,
         second_frame: &Frame,
     ) -> (RenderedFrame, RenderedFrame) {
-        let first_target = ColorTarget::new(&self.gpu.device, first_frame.viewport().dimensions());
-        let second_target =
-            ColorTarget::new(&self.gpu.device, second_frame.viewport().dimensions());
+        let first_target = ColorTarget::new(
+            &self.gpu.device,
+            first_frame.viewport().dimensions(),
+            FORMAT,
+            "punctra first deferred color target",
+        );
+        let second_target = ColorTarget::new(
+            &self.gpu.device,
+            second_frame.viewport().dimensions(),
+            FORMAT,
+            "punctra second deferred color target",
+        );
         let mut encoder = self.encoder("punctra deferred frame acceptance encoder");
         let first_recorded_frame = self
             .renderer
@@ -894,123 +908,6 @@ struct RenderedFrame {
     recorded_frame: RecordedFrame,
     report: FrameReport,
     image: Image,
-}
-
-struct ColorTarget {
-    texture: wgpu::Texture,
-    view: wgpu::TextureView,
-    readback: wgpu::Buffer,
-    viewport: [u32; 2],
-    padded_bytes_per_row: u32,
-}
-
-impl ColorTarget {
-    fn new(device: &wgpu::Device, viewport: [u32; 2]) -> Self {
-        let padded_bytes_per_row = padded_bytes_per_row(viewport[0]);
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("punctra acceptance color target"),
-            size: extent(viewport),
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: FORMAT,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-            view_formats: &[],
-        });
-        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let readback = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("punctra acceptance color readback"),
-            size: u64::from(padded_bytes_per_row) * u64::from(viewport[1]),
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        });
-        Self {
-            texture,
-            view,
-            readback,
-            viewport,
-            padded_bytes_per_row,
-        }
-    }
-
-    fn encode_copy(&self, encoder: &mut wgpu::CommandEncoder) {
-        encoder.copy_texture_to_buffer(
-            wgpu::TexelCopyTextureInfo {
-                texture: &self.texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            wgpu::TexelCopyBufferInfo {
-                buffer: &self.readback,
-                layout: wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(self.padded_bytes_per_row),
-                    rows_per_image: Some(self.viewport[1]),
-                },
-            },
-            extent(self.viewport),
-        );
-    }
-
-    fn map_after_submit(
-        &self,
-        encoder: &mut wgpu::CommandEncoder,
-    ) -> mpsc::Receiver<Result<(), wgpu::BufferAsyncError>> {
-        let (sender, receiver) = mpsc::channel();
-        encoder.map_buffer_on_submit(&self.readback, wgpu::MapMode::Read, .., move |result| {
-            let _ = sender.send(result);
-        });
-        receiver
-    }
-
-    fn read(self, receiver: &mpsc::Receiver<Result<(), wgpu::BufferAsyncError>>) -> Image {
-        receiver
-            .recv()
-            .expect("the mapping callback should run")
-            .expect("the color readback should map");
-        let mapped = self
-            .readback
-            .get_mapped_range(..)
-            .expect("the mapped color range should be available");
-        let bytes = mapped.to_vec();
-        drop(mapped);
-        self.readback.unmap();
-        Image {
-            bytes,
-            viewport: self.viewport,
-            padded_bytes_per_row: self.padded_bytes_per_row,
-        }
-    }
-}
-
-struct Image {
-    bytes: Vec<u8>,
-    viewport: [u32; 2],
-    padded_bytes_per_row: u32,
-}
-
-impl Image {
-    fn pixel(&self, pixel: [u32; 2]) -> [u8; 4] {
-        assert!(pixel[0] < self.viewport[0] && pixel[1] < self.viewport[1]);
-        let offset = usize::try_from(pixel[1] * self.padded_bytes_per_row + pixel[0] * 4)
-            .expect("the tiny test image offset fits in usize");
-        self.bytes[offset..offset + 4]
-            .try_into()
-            .expect("an RGBA pixel has four bytes")
-    }
-
-    fn find_pixel(&self, predicate: fn([u8; 4]) -> bool) -> Option<[u32; 2]> {
-        for y in 0..self.viewport[1] {
-            for x in 0..self.viewport[0] {
-                let pixel = [x, y];
-                if predicate(self.pixel(pixel)) {
-                    return Some(pixel);
-                }
-            }
-        }
-        None
-    }
 }
 
 fn roomy_limits() -> RenderLimits {
@@ -1149,21 +1046,6 @@ fn rgba8_to_linear_rgb(color: [u8; 4]) -> [f32; 3] {
         f32::from(color[1]) / maximum,
         f32::from(color[2]) / maximum,
     ]
-}
-
-fn extent(viewport: [u32; 2]) -> wgpu::Extent3d {
-    wgpu::Extent3d {
-        width: viewport[0],
-        height: viewport[1],
-        depth_or_array_layers: 1,
-    }
-}
-
-fn padded_bytes_per_row(width: u32) -> u32 {
-    let unpadded = width
-        .checked_mul(4)
-        .expect("test row byte count should fit");
-    unpadded.div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT) * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT
 }
 
 fn assert_pixel(actual: [u8; 4], expected: [u8; 4]) {

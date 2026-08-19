@@ -1,6 +1,5 @@
 use std::{
     collections::BTreeMap,
-    sync::mpsc,
     time::{Duration, Instant},
 };
 
@@ -21,7 +20,7 @@ use super::{
     CROSS_FADE_PRESENTED_FRAMES, REFERENCE_POINT_SIZE_PIXELS, projected_density_point_size,
     weight_for_step,
 };
-use gpu_support::{GpuContext, with_gpu};
+use gpu_support::{GpuContext, Rgba8Image as Image, Rgba8Target as ColorTarget, with_gpu};
 
 const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 const VIEWPORT: [u32; 2] = [96, 96];
@@ -67,8 +66,8 @@ fn assert_adaptive_sizing_image(gpu: &GpuContext) {
         let reference = subject.render(reference_style, projection);
         let adaptive = subject.render(adaptive_style, projection);
 
-        let reference_coverage = reference.image.visible_pixel_count();
-        let adaptive_coverage = adaptive.image.visible_pixel_count();
+        let reference_coverage = reference.image.visible_pixel_count(BLACK);
+        let adaptive_coverage = adaptive.image.visible_pixel_count(BLACK);
         assert!(
             adaptive_coverage > reference_coverage + reference_coverage / 2,
             "{projection:?} adaptive coverage {adaptive_coverage} should materially exceed the 2.4 px reference {reference_coverage}"
@@ -116,8 +115,12 @@ fn assert_mixed_density_boundary(gpu: &GpuContext) {
     for projection in FixedProjection::ALL {
         let reference = subject.render(reference_style, projection);
         let adaptive = subject.render(adaptive_style, projection);
-        let reference_gap = reference.image.longest_background_run(36..58, CENTER[1]);
-        let adaptive_gap = adaptive.image.longest_background_run(36..58, CENTER[1]);
+        let reference_gap = reference
+            .image
+            .longest_background_run(36..58, CENTER[1], BLACK);
+        let adaptive_gap = adaptive
+            .image
+            .longest_background_run(36..58, CENTER[1], BLACK);
         assert!(
             adaptive_gap < reference_gap,
             "{projection:?} adaptive mixed-density boundary gap {adaptive_gap} should be smaller than the 2.4 px reference gap {reference_gap}"
@@ -327,7 +330,12 @@ impl<'gpu> ImageHarness<'gpu> {
 
     fn render(&mut self, style: PointStyle, projection: FixedProjection) -> RenderedImage {
         let frame_started = Instant::now();
-        let target = ColorTarget::new(&self.gpu.device);
+        let target = ColorTarget::new(
+            &self.gpu.device,
+            VIEWPORT,
+            FORMAT,
+            "renderer-demo fixed-view color target",
+        );
         let mut encoder = self.encoder("renderer-demo fixed-view image encoder");
         let recorded = self
             .renderer
@@ -411,153 +419,4 @@ fn frame(style: PointStyle, projection: FixedProjection) -> Frame {
     Frame::new(GENERATION, camera, viewport())
         .unwrap()
         .with_style(style)
-}
-
-struct ColorTarget {
-    texture: wgpu::Texture,
-    view: wgpu::TextureView,
-    readback: wgpu::Buffer,
-    padded_bytes_per_row: u32,
-}
-
-impl ColorTarget {
-    fn new(device: &wgpu::Device) -> Self {
-        let padded_bytes_per_row = padded_bytes_per_row();
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("renderer-demo fixed-view color target"),
-            size: extent(),
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: FORMAT,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-            view_formats: &[],
-        });
-        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let readback = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("renderer-demo fixed-view color readback"),
-            size: u64::from(padded_bytes_per_row) * u64::from(VIEWPORT[1]),
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        });
-        Self {
-            texture,
-            view,
-            readback,
-            padded_bytes_per_row,
-        }
-    }
-
-    fn encode_copy(&self, encoder: &mut wgpu::CommandEncoder) {
-        encoder.copy_texture_to_buffer(
-            wgpu::TexelCopyTextureInfo {
-                texture: &self.texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            wgpu::TexelCopyBufferInfo {
-                buffer: &self.readback,
-                layout: wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(self.padded_bytes_per_row),
-                    rows_per_image: Some(VIEWPORT[1]),
-                },
-            },
-            extent(),
-        );
-    }
-
-    fn map_after_submit(
-        &self,
-        encoder: &mut wgpu::CommandEncoder,
-    ) -> mpsc::Receiver<Result<(), wgpu::BufferAsyncError>> {
-        let (sender, receiver) = mpsc::channel();
-        encoder.map_buffer_on_submit(&self.readback, wgpu::MapMode::Read, .., move |result| {
-            let _ = sender.send(result);
-        });
-        receiver
-    }
-
-    fn read(self, receiver: &mpsc::Receiver<Result<(), wgpu::BufferAsyncError>>) -> Image {
-        receiver.recv().unwrap().unwrap();
-        let mapped = self.readback.get_mapped_range(..).unwrap();
-        let bytes = mapped.to_vec();
-        drop(mapped);
-        self.readback.unmap();
-        Image {
-            bytes,
-            padded_bytes_per_row: self.padded_bytes_per_row,
-        }
-    }
-}
-
-struct Image {
-    bytes: Vec<u8>,
-    padded_bytes_per_row: u32,
-}
-
-impl Image {
-    fn pixel(&self, pixel: [u32; 2]) -> [u8; 4] {
-        let offset = usize::try_from(pixel[1] * self.padded_bytes_per_row + pixel[0] * 4).unwrap();
-        self.bytes[offset..offset + 4].try_into().unwrap()
-    }
-
-    fn visible_pixel_count(&self) -> u64 {
-        let mut count = 0;
-        for y in 0..VIEWPORT[1] {
-            for x in 0..VIEWPORT[0] {
-                if self.pixel([x, y]) != BLACK {
-                    count += 1;
-                }
-            }
-        }
-        count
-    }
-
-    fn longest_background_run(&self, columns: std::ops::Range<u32>, row: u32) -> u32 {
-        let mut longest = 0;
-        let mut current = 0;
-        for x in columns {
-            if self.pixel([x, row]) == BLACK {
-                current += 1;
-                longest = longest.max(current);
-            } else {
-                current = 0;
-            }
-        }
-        longest
-    }
-
-    fn first_pixel_where(
-        &self,
-        other: &Self,
-        predicate: impl Fn([u8; 4], [u8; 4]) -> bool,
-    ) -> Option<[u32; 2]> {
-        for y in 0..VIEWPORT[1] {
-            for x in 0..VIEWPORT[0] {
-                let pixel = [x, y];
-                if predicate(self.pixel(pixel), other.pixel(pixel)) {
-                    return Some(pixel);
-                }
-            }
-        }
-        None
-    }
-}
-
-fn extent() -> wgpu::Extent3d {
-    wgpu::Extent3d {
-        width: VIEWPORT[0],
-        height: VIEWPORT[1],
-        depth_or_array_layers: 1,
-    }
-}
-
-fn padded_bytes_per_row() -> u32 {
-    VIEWPORT[0]
-        .checked_mul(4)
-        .unwrap()
-        .div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT)
-        * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT
 }
