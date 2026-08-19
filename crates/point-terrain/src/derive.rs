@@ -45,11 +45,11 @@ pub(crate) struct DerivedTerrain {
     pub(crate) work_units: u64,
 }
 
-#[derive(Default)]
 struct WorkMeter {
     used: u64,
     next_cancel: u64,
     next_progress: u64,
+    report_progress: bool,
 }
 
 impl WorkMeter {
@@ -58,14 +58,16 @@ impl WorkMeter {
             used: 0,
             next_cancel: CANCEL_STRIDE,
             next_progress: PROGRESS_STRIDE,
+            report_progress: true,
         }
     }
 
-    const fn resume(used: u64) -> Self {
+    const fn resume(used: u64, report_progress: bool) -> Self {
         Self {
             used,
             next_cancel: used.saturating_add(CANCEL_STRIDE),
             next_progress: used.saturating_add(PROGRESS_STRIDE),
+            report_progress,
         }
     }
 
@@ -88,7 +90,7 @@ impl WorkMeter {
             control.check_cancelled()?;
             self.next_cancel = self.used.saturating_add(CANCEL_STRIDE);
         }
-        if self.used >= self.next_progress {
+        if self.report_progress && self.used >= self.next_progress {
             control.report_progress(ProgressSnapshot::new(
                 ProgressPhase::RUNNING,
                 self.used,
@@ -151,11 +153,12 @@ impl<'a> DerivationContext<'a> {
         baseline_bytes: u64,
         used_work: u64,
         peak_working_bytes: u64,
+        report_progress: bool,
         control: &'a OperationControl,
     ) -> Self {
         Self {
             limits,
-            work: WorkMeter::resume(used_work),
+            work: WorkMeter::resume(used_work, report_progress),
             memory: MemoryMeter::resume(baseline_bytes, peak_working_bytes),
             control,
         }
@@ -304,6 +307,7 @@ pub(crate) fn derive_collected(
         coordinate_reference_bytes,
         attempt_work,
         attempt_peak_working_bytes.max(retained_input.saturating_add(coordinate_reference_bytes)),
+        true,
         control,
     );
 
@@ -468,6 +472,95 @@ pub(crate) fn derive_collected(
         surface,
         work_units: context.work.used,
     })
+}
+
+/// Recomputes the canonical topology digest from artifact vertices without
+/// publishing progress that could move a cold or resumed attempt backwards.
+pub(crate) fn canonical_topology_hash(
+    mut input: Vec<InputVertex>,
+    transform: PositionTransform,
+    limits: TerrainLimits,
+    control: &OperationControl,
+) -> Result<ContentHash, TerrainError> {
+    let input_point_count = u64::try_from(input.len()).unwrap_or(u64::MAX);
+    if input_point_count > limits.max_input_points() {
+        return Err(TerrainError::resource(
+            "Ground Input Points",
+            input_point_count,
+            limits.max_input_points(),
+        ));
+    }
+    if input_point_count > limits.max_vertices() {
+        return Err(TerrainError::resource(
+            "Terrain vertices",
+            input_point_count,
+            limits.max_vertices(),
+        ));
+    }
+    if input.len() < 3 {
+        return Err(TerrainError::InsufficientGroundInput {
+            actual: input_point_count,
+        });
+    }
+
+    let retained_input = vector_bytes::<InputVertex>(input.capacity());
+    let mut context = DerivationContext::resume(limits, 0, 0, retained_input, false, control);
+    merge_sort(&mut input, 0, &mut context)?;
+    validate_xy(&input, &mut context)?;
+    let retained_input = vector_bytes::<InputVertex>(input.capacity());
+    let (kernel, _) = normalize(&input, retained_input, transform, &mut context)?;
+    let vertex_count = input.len();
+    drop(input);
+
+    let retained_kernel = vector_bytes::<PlanarPoint>(kernel.capacity());
+    let triangulation = triangulate(
+        &kernel,
+        TriangulationLimits {
+            max_working_bytes: context
+                .limits
+                .max_working_bytes()
+                .saturating_sub(retained_kernel),
+            max_steps: context
+                .limits
+                .max_work_units()
+                .saturating_sub(context.work.used),
+        },
+        context.control,
+    )
+    .map_err(|error| map_triangulation_error(&error))?;
+    context.charge(triangulation.steps)?;
+    context.memory.require(
+        retained_kernel.saturating_add(triangulation.peak_working_bytes),
+        context.limits.max_working_bytes(),
+        "Terrain topology-validation working bytes",
+    )?;
+
+    let mut triangles = triangulation.triangles;
+    canonicalize_faces(
+        &mut triangles,
+        &kernel,
+        retained_kernel,
+        vertex_count,
+        &mut context,
+    )?;
+    let mut topology = domain_hasher(TOPOLOGY_HASH_DOMAIN);
+    topology.update(&input_point_count.to_le_bytes());
+    topology.update(
+        &u64::try_from(triangles.len())
+            .unwrap_or(u64::MAX)
+            .to_le_bytes(),
+    );
+    for (index, triangle) in triangles.iter().enumerate() {
+        context.charge(1)?;
+        let face_id = u32::try_from(index.saturating_add(1)).unwrap_or(u32::MAX);
+        topology.update(&face_id.to_le_bytes());
+        for vertex in triangle {
+            let vertex_id = u32::try_from(vertex.saturating_add(1)).unwrap_or(u32::MAX);
+            topology.update(&vertex_id.to_le_bytes());
+        }
+    }
+    context.control.check_cancelled()?;
+    Ok(ContentHash::new(*topology.finalize().as_bytes()))
 }
 
 fn validate_spatial_reference(reference: &CoordinateReference) -> Result<(), TerrainError> {

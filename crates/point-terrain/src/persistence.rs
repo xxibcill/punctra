@@ -25,8 +25,8 @@ use crate::{
     TerrainPrepareLimits, TerrainRecipe, TerrainSurface,
     derive::{
         CollectedTerrainInput, GEOMETRY_HASH_DOMAIN, InputVertex, TOPOLOGY_HASH_DOMAIN,
-        artifact_hash, canonical_f64_bits, collect_input, derive_collected, domain_hasher,
-        hash_transform, recipe_hash,
+        artifact_hash, canonical_f64_bits, canonical_topology_hash, collect_input,
+        derive_collected, domain_hasher, hash_transform, recipe_hash,
     },
 };
 
@@ -1462,7 +1462,7 @@ fn open_artifact(
         path,
         &decoded.descriptor,
         decoded.layout,
-        limits.derivation().max_working_bytes(),
+        limits.derivation(),
         control,
     )?;
     control.check_cancelled()?;
@@ -1975,7 +1975,7 @@ fn validate_artifact_payload(
     path: &Path,
     descriptor: &SurfaceArtifactDescriptor,
     layout: ArtifactLayout,
-    max_working_bytes: u64,
+    limits: crate::TerrainLimits,
     control: &OperationControl,
 ) -> Result<(), TerrainError> {
     file.seek(SeekFrom::Start(layout.vertex_offset))
@@ -1991,7 +1991,7 @@ fn validate_artifact_payload(
     let mut max_xy = [i64::MIN; 2];
     let mut previous_vertex: Option<([i64; 3], u64)> = None;
     let mut input_records =
-        allocate_artifact_input_records(descriptor.vertex_count, max_working_bytes)?;
+        allocate_artifact_input_records(descriptor.vertex_count, limits.max_working_bytes())?;
     for index in 0..descriptor.vertex_count {
         if index.is_multiple_of(RECORDS_PER_BLOCK) {
             control.check_cancelled()?;
@@ -2123,7 +2123,28 @@ fn validate_artifact_payload(
         ));
     }
     validate_artifact_input_hash(&mut input_records, descriptor, path)?;
+    let canonical_hash =
+        canonical_topology_hash(input_records, descriptor.transform, limits, control)
+            .map_err(|error| map_topology_validation_error(error, path))?;
+    if canonical_hash != descriptor.topology_hash {
+        return Err(TerrainError::corrupt_surface(
+            ARTIFACT_KIND,
+            path.display(),
+            "faces do not match the canonical Delaunay topology",
+        ));
+    }
     Ok(())
+}
+
+fn map_topology_validation_error(error: TerrainError, path: &Path) -> TerrainError {
+    match error {
+        limit @ (TerrainError::ResourceLimit { .. } | TerrainError::Cancelled) => limit,
+        _ => TerrainError::corrupt_surface(
+            ARTIFACT_KIND,
+            path.display(),
+            "canonical Delaunay topology could not be reproduced from the vertex records",
+        ),
+    }
 }
 
 fn allocate_artifact_input_records(
@@ -4498,6 +4519,8 @@ mod tests {
     const ARTIFACT_TRANSFORM_OFFSET: usize = 193;
     const ARTIFACT_PROFILE_HORIZONTAL_EPSG_OFFSET: usize = 245;
     const ARTIFACT_INPUT_HASH_OFFSET: usize = 257;
+    const ARTIFACT_GEOMETRY_HASH_OFFSET: usize = 289;
+    const ARTIFACT_TOPOLOGY_HASH_OFFSET: usize = 321;
     const ARTIFACT_HASH_OFFSET: usize = 353;
     const ARTIFACT_INPUT_COUNT_OFFSET: usize = 385;
     const ARTIFACT_VERTEX_COUNT_OFFSET: usize = 393;
@@ -4560,6 +4583,42 @@ mod tests {
         assert_corruption_reason(
             prepare_surface(snapshot, &target, recipe).unwrap_err(),
             "Snapshot Point content hash does not match canonical vertex records",
+        );
+        assert_eq!(fs::read(&target).unwrap(), bytes);
+    }
+
+    #[test]
+    fn checksum_consistent_alternate_delaunay_diagonal_is_rejected() {
+        let fixture = Fixture::with_ticks(
+            "artifact-alternate-diagonal",
+            vec![[0, 0, 0], [0, 10, 1], [10, 0, 2], [10, 10, 3]],
+        );
+        let target = fixture.path("surface.pterr");
+        let snapshot = fixture.workspace.head();
+        let recipe = fixture.recipe();
+        let prepared = prepare_surface(snapshot.clone(), &target, recipe).unwrap();
+        let descriptor = prepared.descriptor().clone();
+        let layout =
+            ArtifactLayout::new(descriptor.vertex_count(), descriptor.face_count()).unwrap();
+        assert_eq!(descriptor.vertex_count(), 4);
+        assert_eq!(descriptor.face_count(), 2);
+        drop(prepared);
+
+        let mut bytes = fs::read(&target).unwrap();
+        let face_offset = usize::try_from(layout.face_offset).unwrap();
+        for (index, face) in [[1_u32, 3, 2], [2, 3, 4]].into_iter().enumerate() {
+            let offset = face_offset + index * usize::try_from(FACE_RECORD_BYTES).unwrap();
+            for (vertex_index, vertex) in face.into_iter().enumerate() {
+                let start = offset + vertex_index * mem::size_of::<u32>();
+                bytes[start..start + mem::size_of::<u32>()].copy_from_slice(&vertex.to_le_bytes());
+            }
+        }
+        rewrite_artifact_semantic_hashes(&mut bytes, &descriptor, layout);
+        fs::write(&target, &bytes).unwrap();
+
+        assert_corruption_reason(
+            prepare_surface(snapshot, &target, recipe).unwrap_err(),
+            "faces do not match the canonical Delaunay topology",
         );
         assert_eq!(fs::read(&target).unwrap(), bytes);
     }
@@ -5879,6 +5938,58 @@ mod tests {
         rewrite_checksum(bytes, CHECKSUM_DOMAIN);
     }
 
+    fn rewrite_artifact_semantic_hashes(
+        bytes: &mut [u8],
+        descriptor: &SurfaceArtifactDescriptor,
+        layout: ArtifactLayout,
+    ) {
+        let mut geometry = domain_hasher(GEOMETRY_HASH_DOMAIN);
+        let mut topology = domain_hasher(TOPOLOGY_HASH_DOMAIN);
+        hash_transform(&mut geometry, descriptor.position_transform());
+        geometry.update(&descriptor.vertex_count().to_le_bytes());
+        topology.update(&descriptor.vertex_count().to_le_bytes());
+        let vertex_offset = usize::try_from(layout.vertex_offset).unwrap();
+        let vertex_record_bytes = usize::try_from(VERTEX_RECORD_BYTES).unwrap();
+        for index in 0..usize::try_from(descriptor.vertex_count()).unwrap() {
+            let start = vertex_offset + index * vertex_record_bytes;
+            let record = &bytes[start..start + vertex_record_bytes];
+            geometry.update(&u32::try_from(index + 1).unwrap().to_le_bytes());
+            geometry.update(descriptor.snapshot().source().as_bytes());
+            geometry.update(record);
+        }
+        geometry.update(&descriptor.face_count().to_le_bytes());
+        topology.update(&descriptor.face_count().to_le_bytes());
+        let face_offset = usize::try_from(layout.face_offset).unwrap();
+        let face_record_bytes = usize::try_from(FACE_RECORD_BYTES).unwrap();
+        for index in 0..usize::try_from(descriptor.face_count()).unwrap() {
+            let start = face_offset + index * face_record_bytes;
+            let record = &bytes[start..start + face_record_bytes];
+            let face_id = u32::try_from(index + 1).unwrap().to_le_bytes();
+            geometry.update(&face_id);
+            geometry.update(record);
+            topology.update(&face_id);
+            topology.update(record);
+        }
+        let geometry_hash = ContentHash::new(*geometry.finalize().as_bytes());
+        let topology_hash = ContentHash::new(*topology.finalize().as_bytes());
+        let semantic_hash = artifact_hash(
+            descriptor.snapshot(),
+            descriptor.recipe_hash(),
+            descriptor.position_transform(),
+            descriptor.coordinate_reference(),
+            descriptor.input_hash(),
+            geometry_hash,
+            topology_hash,
+        );
+        bytes[ARTIFACT_GEOMETRY_HASH_OFFSET..ARTIFACT_GEOMETRY_HASH_OFFSET + 32]
+            .copy_from_slice(geometry_hash.as_bytes());
+        bytes[ARTIFACT_TOPOLOGY_HASH_OFFSET..ARTIFACT_TOPOLOGY_HASH_OFFSET + 32]
+            .copy_from_slice(topology_hash.as_bytes());
+        bytes[ARTIFACT_HASH_OFFSET..ARTIFACT_HASH_OFFSET + 32]
+            .copy_from_slice(semantic_hash.as_bytes());
+        rewrite_artifact_record_checksums(bytes, layout);
+    }
+
     fn rewrite_work_record_checksums(bytes: &mut [u8], layout: WorkLayout) {
         rewrite_record_checksums(
             bytes,
@@ -6063,20 +6174,26 @@ mod tests {
 
     impl Fixture {
         fn new(label: &str) -> Self {
+            Self::with_ticks(
+                label,
+                vec![
+                    [0, 0, 0],
+                    [10, 0, 2],
+                    [10, 10, 4],
+                    [0, 10, 6],
+                    [5, 5, 3],
+                    [3, 7, 4],
+                ],
+            )
+        }
+
+        fn with_ticks(label: &str, ticks: Vec<[i64; 3]>) -> Self {
             let sequence = NEXT_FIXTURE.fetch_add(1, Ordering::Relaxed);
             let directory = std::env::temp_dir().join(format!(
                 "punctra-terrain-persistence-unit-{label}-{}-{sequence}",
                 std::process::id()
             ));
             fs::create_dir(&directory).unwrap();
-            let ticks = vec![
-                [0, 0, 0],
-                [10, 0, 2],
-                [10, 10, 4],
-                [0, 10, 6],
-                [5, 5, 3],
-                [3, 7, 4],
-            ];
             let point_count = u64::try_from(ticks.len()).unwrap();
             let attributes = classification_columns(vec![2; ticks.len()], ticks.len());
             let memory = MemorySource::from_columns(
