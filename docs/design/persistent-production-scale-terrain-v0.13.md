@@ -7,7 +7,7 @@ outstanding**
 
 This design is authoritative for the bounded Punctra v0.13 repository slice.
 Repository completion is recorded against implementation commit
-`d3ec202198650d1a9d3cdb929ecf4b8d5c6d94e9` in the
+`bb0f097e6829b68cd2b0796f114908ed2e5f877a` in the
 [v0.13 repository verification record](../releases/v0.13.0.md). The
 maintainer's request to continue with v0.13 activated this technical scope; it
 did not satisfy the roadmap's field activation gate. No permitted field
