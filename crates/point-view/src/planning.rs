@@ -100,6 +100,13 @@ impl ProjectedHierarchy {
             roots,
         })
     }
+
+    fn visible_children(&self, index: usize) -> impl Iterator<Item = usize> + '_ {
+        self.children[index]
+            .iter()
+            .copied()
+            .filter(|child| self.node_projections[*child].visible)
+    }
 }
 
 fn validate_unique_keys(nodes: &[AvailableNode]) -> Result<(), PlanError> {
@@ -638,11 +645,7 @@ impl RefinementChange {
         target_cut: &mut BTreeSet<usize>,
         missing_transition_targets: &mut BTreeSet<usize>,
     ) {
-        for child in hierarchy.children[self.candidate_index]
-            .iter()
-            .copied()
-            .filter(|child| hierarchy.node_projections[*child].visible)
-        {
+        for child in hierarchy.visible_children(self.candidate_index) {
             target_cut.remove(&child);
             missing_transition_targets.remove(&child);
         }
@@ -678,11 +681,7 @@ fn expand_candidate_and_replay_history(
         );
         let inserted = refinements.insert(candidate.key);
         debug_assert!(inserted, "a target-cut candidate is refined at most once");
-        for child in hierarchy.children[candidate.index]
-            .iter()
-            .copied()
-            .filter(|child| hierarchy.node_projections[*child].visible)
-        {
+        for child in hierarchy.visible_children(candidate.index) {
             if let Some(child_candidate) =
                 refinement_candidate(hierarchy, previous_refinements, config, child)
             {
@@ -710,11 +709,7 @@ fn apply_refinement(
 ) -> RefinementChange {
     target_cut.remove(&candidate_index);
     let candidate_was_transition_target = missing_transition_targets.remove(&candidate_index);
-    for child in hierarchy.children[candidate_index]
-        .iter()
-        .copied()
-        .filter(|child| hierarchy.node_projections[*child].visible)
-    {
+    for child in hierarchy.visible_children(candidate_index) {
         let inserted = target_cut.insert(child);
         debug_assert!(inserted, "hierarchy children have one target-cut parent");
         if hierarchy.nodes[child].status == NodeStatus::Missing {
@@ -748,9 +743,7 @@ fn refinement_candidate(
 ) -> Option<RefinementCandidate> {
     let node = &hierarchy.nodes[index];
     let has_coverage = has_visible_coverage(hierarchy, index);
-    let has_visible_children = hierarchy.children[index]
-        .iter()
-        .any(|child| hierarchy.node_projections[*child].visible);
+    let has_visible_children = hierarchy.visible_children(index).next().is_some();
     if (has_coverage || node.status == NodeStatus::Missing)
         && has_visible_children
         && exceeds_refinement_threshold(
