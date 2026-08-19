@@ -143,7 +143,7 @@ the faces in five; the final warm `Opened` attempt reports zero Snapshot Point
 reads and no triangulation observations.
 
 Those generated-fixture facts are recorded against implementation commit
-`bb0f097e6829b68cd2b0796f114908ed2e5f877a` in the [v0.13 repository
+`200f74dd09475673b9fc3e417e8b4e1c47a580d8` in the [v0.13 repository
 verification record](../releases/v0.13.0.md). They are not a latency or
 production claim. Per-invocation example elapsed times are intentionally not
 copied. Direct stage bytes, worker heap, process peak resident memory,

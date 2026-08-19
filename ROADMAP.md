@@ -1105,7 +1105,7 @@ Accepted repository scope:
   verification, indexing, cold/resumed/warm Terrain work, and unmeasured phases.
 
 Repository exit gates, completed at implementation commit
-`bb0f097e6829b68cd2b0796f114908ed2e5f877a` and recorded in the
+`200f74dd09475673b9fc3e417e8b4e1c47a580d8` and recorded in the
 [v0.13 verification record](docs/releases/v0.13.0.md):
 
 - the persistent and legacy paths reproduce the same canonical small-fixture
