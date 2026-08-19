@@ -12,8 +12,8 @@ use render_protocol::{
     ViewId, Viewport,
 };
 use render_wgpu::{
-    Camera, Frame, FrameReport, PickHit, PickPoll, PickRequest, PointStyle, RecordedFrame,
-    RendererConfig, WgpuRenderer,
+    Camera, EyeDomeLighting, Frame, FrameReport, PickHit, PickPoll, PickRequest, PointStyle,
+    RecordedFrame, RendererConfig, WgpuRenderer,
 };
 
 use super::{
@@ -47,7 +47,12 @@ fn fixed_view_density_policy_reduces_a_sparse_dense_boundary_discontinuity() {
 
 #[test]
 fn fixed_view_cross_fade_has_no_hole_or_conspicuous_frame_discontinuity() {
-    with_gpu(assert_cross_fade_images);
+    with_gpu(|gpu| assert_cross_fade_images(gpu, false));
+}
+
+#[test]
+fn fixed_view_eye_dome_cross_fade_has_no_hole_or_conspicuous_frame_discontinuity() {
+    with_gpu(|gpu| assert_cross_fade_images(gpu, true));
 }
 
 fn assert_adaptive_sizing_image(gpu: &GpuContext) {
@@ -130,11 +135,15 @@ fn assert_mixed_density_boundary(gpu: &GpuContext) {
     }
 }
 
-fn assert_cross_fade_images(gpu: &GpuContext) {
+fn assert_cross_fade_images(gpu: &GpuContext, eye_dome: bool) {
     let parent = point_id(201);
     let child = point_id(202);
     for projection in FixedProjection::ALL {
-        let mut subject = ImageHarness::new(gpu, 3, 3);
+        let mut subject = if eye_dome {
+            ImageHarness::with_eye_dome(gpu, 3, 3)
+        } else {
+            ImageHarness::new(gpu, 3, 3)
+        };
         subject.upsert(1, 1, vec![point([0.0, -0.2, 0.0], RED, parent)]);
         subject.upsert(2, 1, vec![point([0.02, 0.2, 0.0], RED, child)]);
         subject.upsert(3, 1, vec![point([0.0, 1.0, 0.0], BLUE, point_id(203))]);
@@ -186,7 +195,7 @@ fn assert_cross_fade_images(gpu: &GpuContext) {
             } else {
                 3
             };
-            assert_frame_ceiling(&rendered, expected_points, expected_points);
+            assert_cross_fade_frame_ceiling(&rendered, expected_points, expected_points, eye_dome);
         }
     }
 }
@@ -250,12 +259,32 @@ fn viewport() -> Viewport {
 }
 
 fn assert_frame_ceiling(rendered: &RenderedImage, points: u64, batches: u64) {
+    assert_frame_ceiling_with_transient_limit(rendered, points, batches, 8);
+}
+
+fn assert_cross_fade_frame_ceiling(
+    rendered: &RenderedImage,
+    points: u64,
+    batches: u64,
+    eye_dome: bool,
+) {
+    let transient_bytes_per_pixel = if eye_dome { 12 } else { 8 };
+    assert_frame_ceiling_with_transient_limit(rendered, points, batches, transient_bytes_per_pixel);
+}
+
+fn assert_frame_ceiling_with_transient_limit(
+    rendered: &RenderedImage,
+    points: u64,
+    batches: u64,
+    transient_bytes_per_pixel: u64,
+) {
     let report = rendered.report;
     assert_eq!(report.drawn_points(), points);
     assert_eq!(report.draw_calls(), batches);
     assert_eq!(report.resident_bytes(), points * POINT_BYTES);
     assert!(
-        report.transient_texture_bytes() <= 8 * u64::from(VIEWPORT[0]) * u64::from(VIEWPORT[1])
+        report.transient_texture_bytes()
+            <= transient_bytes_per_pixel * u64::from(VIEWPORT[0]) * u64::from(VIEWPORT[1])
     );
     assert!(report.encoding_time() <= MAX_FIXED_VIEW_ENCODING_TIME);
     assert!(rendered.frame_time <= MAX_FIXED_VIEW_FRAME_TIME);
@@ -269,8 +298,26 @@ struct ImageHarness<'gpu> {
 
 impl<'gpu> ImageHarness<'gpu> {
     fn new(gpu: &'gpu GpuContext, point_limit: u64, batch_limit: u64) -> Self {
+        Self::with_config(
+            gpu,
+            RendererConfig::new(
+                FORMAT,
+                RenderLimits::new(point_limit * POINT_BYTES, point_limit, batch_limit),
+            ),
+        )
+    }
+
+    fn with_eye_dome(gpu: &'gpu GpuContext, point_limit: u64, batch_limit: u64) -> Self {
         let limits = RenderLimits::new(point_limit * POINT_BYTES, point_limit, batch_limit);
-        let mut renderer = WgpuRenderer::new(&gpu.device, RendererConfig::new(FORMAT, limits))
+        let cue = EyeDomeLighting::new(1.25, 1).unwrap();
+        Self::with_config(
+            gpu,
+            RendererConfig::new(FORMAT, limits).with_eye_dome_lighting(cue),
+        )
+    }
+
+    fn with_config(gpu: &'gpu GpuContext, config: RendererConfig) -> Self {
+        let mut renderer = WgpuRenderer::new(&gpu.device, config)
             .expect("the fixed-view renderer should initialize");
         renderer
             .apply(&RenderUpdate::Reset {

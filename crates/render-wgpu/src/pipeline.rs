@@ -7,6 +7,7 @@ pub(crate) struct PointPipelines {
     pub(crate) camera_layout: wgpu::BindGroupLayout,
     pub(crate) batch_layout: wgpu::BindGroupLayout,
     pub(crate) draw: wgpu::RenderPipeline,
+    pub(crate) eye_dome_depth: Option<wgpu::RenderPipeline>,
     pub(crate) pick: wgpu::RenderPipeline,
 }
 
@@ -68,6 +69,17 @@ impl PointPipelines {
             draw_fragment,
             "punctra point pipeline",
         );
+        let eye_dome_depth = enable_edl.then(|| {
+            create_pipeline(
+                device,
+                &pipeline_layout,
+                &shader,
+                &vertex_buffers,
+                &[],
+                "eye_dome_depth_fragment",
+                "punctra eye-dome visibility depth pipeline",
+            )
+        });
         let pick = create_pipeline(
             device,
             &pipeline_layout,
@@ -81,6 +93,7 @@ impl PointPipelines {
             camera_layout,
             batch_layout,
             draw,
+            eye_dome_depth,
             pick,
         }
     }

@@ -427,10 +427,13 @@ impl WgpuRenderer {
         )?;
 
         let clear = frame.style().clear_color();
-        if let EyeDomeState::Active {
-            pipeline: edl_pipeline,
-            uniform_buffer: edl_uniform,
-        } = &self.eye_dome
+        if let (
+            EyeDomeState::Active {
+                pipeline: edl_pipeline,
+                uniform_buffer: edl_uniform,
+            },
+            Some(eye_dome_depth_pipeline),
+        ) = (&self.eye_dome, self.pipelines.eye_dome_depth.as_ref())
         {
             let (depth, color, edl_bind_group) =
                 self.targets
@@ -441,6 +444,13 @@ impl WgpuRenderer {
                 depth,
                 clear,
                 &self.pipelines.draw,
+                &self.camera_bind_group,
+                &batches,
+            );
+            record_eye_dome_depth_pass(
+                encoder,
+                depth,
+                eye_dome_depth_pipeline,
                 &self.camera_bind_group,
                 &batches,
             );
@@ -941,6 +951,31 @@ fn record_eye_dome_pass(
     pass.set_pipeline(&pipeline.pipeline);
     pass.set_bind_group(0, bind_group, &[]);
     pass.draw(0..3, 0..1);
+}
+
+fn record_eye_dome_depth_pass(
+    encoder: &mut wgpu::CommandEncoder,
+    depth: &DepthTarget,
+    pipeline: &wgpu::RenderPipeline,
+    camera_bind_group: &wgpu::BindGroup,
+    batches: &[RecordedBatch],
+) {
+    let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+        label: Some("punctra eye-dome visibility depth pass"),
+        color_attachments: &[],
+        depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+            view: depth.view(),
+            depth_ops: Some(wgpu::Operations {
+                load: wgpu::LoadOp::Clear(1.0),
+                store: wgpu::StoreOp::Store,
+            }),
+            stencil_ops: None,
+        }),
+        timestamp_writes: None,
+        occlusion_query_set: None,
+        multiview_mask: None,
+    });
+    record_point_batches(&mut pass, pipeline, camera_bind_group, batches);
 }
 
 fn point_buffer(device: &wgpu::Device, points: &[GpuPoint]) -> wgpu::Buffer {
