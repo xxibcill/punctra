@@ -610,81 +610,51 @@ enum StreamRecordKind {
 }
 
 impl StreamRecordKind {
-    const fn label(self) -> &'static str {
+    fn section(self, surface: &PreparedSurfaceData) -> SurfaceSectionSpec<'_> {
         match self {
-            Self::Vertex => "Surface vertices",
-            Self::Face => "Surface faces",
-        }
-    }
-
-    const fn record_bytes(self) -> u64 {
-        match self {
-            Self::Vertex => VERTEX_RECORD_BYTES,
-            Self::Face => FACE_RECORD_BYTES,
-        }
-    }
-
-    const fn batch_bytes_label(self) -> &'static str {
-        match self {
-            Self::Vertex => "Surface vertex batch bytes",
-            Self::Face => "Surface face batch bytes",
-        }
-    }
-
-    fn record_count(self, surface: &PreparedSurfaceData) -> u64 {
-        match self {
-            Self::Vertex => surface.descriptor.vertex_count,
-            Self::Face => surface.descriptor.face_count,
-        }
-    }
-
-    fn record_offset(self, surface: &PreparedSurfaceData) -> u64 {
-        match self {
-            Self::Vertex => surface.vertex_offset,
-            Self::Face => surface.face_offset,
-        }
-    }
-
-    fn directory_offset(self, surface: &PreparedSurfaceData) -> u64 {
-        match self {
-            Self::Vertex => surface.vertex_directory_offset,
-            Self::Face => surface.face_directory_offset,
-        }
-    }
-
-    const fn domain(self) -> &'static [u8] {
-        match self {
-            Self::Vertex => VERTEX_BLOCK_DOMAIN,
-            Self::Face => FACE_BLOCK_DOMAIN,
-        }
-    }
-
-    const fn boundary(self) -> StreamReadBoundary {
-        match self {
-            Self::Vertex => StreamReadBoundary::VertexRecordCaptured,
-            Self::Face => StreamReadBoundary::FaceRecordCaptured,
-        }
-    }
-
-    fn checksums(self, verified: &VerifiedBlockChecksums) -> &[[u8; 32]] {
-        match self {
-            Self::Vertex => &verified.vertices,
-            Self::Face => &verified.faces,
+            Self::Vertex => SurfaceSectionSpec {
+                label: "Surface vertices",
+                batch_bytes_label: "Surface vertex batch bytes",
+                record_bytes: VERTEX_RECORD_BYTES,
+                record_count: surface.descriptor.vertex_count,
+                record_offset: surface.vertex_offset,
+                directory_offset: surface.vertex_directory_offset,
+                domain: VERTEX_BLOCK_DOMAIN,
+                boundary: StreamReadBoundary::VertexRecordCaptured,
+                checksums: &surface.block_checksums.vertices,
+            },
+            Self::Face => SurfaceSectionSpec {
+                label: "Surface faces",
+                batch_bytes_label: "Surface face batch bytes",
+                record_bytes: FACE_RECORD_BYTES,
+                record_count: surface.descriptor.face_count,
+                record_offset: surface.face_offset,
+                directory_offset: surface.face_directory_offset,
+                domain: FACE_BLOCK_DOMAIN,
+                boundary: StreamReadBoundary::FaceRecordCaptured,
+                checksums: &surface.block_checksums.faces,
+            },
         }
     }
 }
 
-struct SurfaceBatchStream {
-    file: Arc<Mutex<File>>,
-    path: PathBuf,
-    opened_metadata: fs::Metadata,
-    kind: StreamRecordKind,
-    next_id: u64,
-    remaining: u64,
+struct SurfaceSectionSpec<'a> {
+    label: &'static str,
+    batch_bytes_label: &'static str,
+    record_bytes: u64,
     record_count: u64,
     record_offset: u64,
     directory_offset: u64,
-    block_checksums: Arc<VerifiedBlockChecksums>,
+    domain: &'static [u8],
+    boundary: StreamReadBoundary,
+    checksums: &'a [[u8; 32]],
+}
+
+struct SurfaceBatchStream {
+    surface: Arc<PreparedSurfaceData>,
+    kind: StreamRecordKind,
+    next_id: u64,
+    remaining: u64,
     verify_buffer: Vec<u8>,
     batch_records: u64,
     max_batch_payload_bytes: u64,
@@ -695,23 +665,22 @@ struct SurfaceBatchStream {
 
 impl SurfaceBatchStream {
     fn new<T>(
-        surface: &PreparedSurfaceData,
+        surface: &Arc<PreparedSurfaceData>,
         limits: SurfaceReadLimits,
         kind: StreamRecordKind,
     ) -> Result<Self, TerrainError> {
-        let record_count = kind.record_count(surface);
-        let plan = stream_plan::<T>(limits, kind.label(), kind.record_bytes(), record_count)?;
+        let section = kind.section(surface);
+        let plan = stream_plan::<T>(
+            limits,
+            section.label,
+            section.record_bytes,
+            section.record_count,
+        )?;
         Ok(Self {
-            file: Arc::clone(&surface.file),
-            path: surface.path.clone(),
-            opened_metadata: surface.opened_metadata.clone(),
+            surface: Arc::clone(surface),
             kind,
             next_id: 1,
-            remaining: record_count,
-            record_count,
-            record_offset: kind.record_offset(surface),
-            directory_offset: kind.directory_offset(surface),
-            block_checksums: Arc::clone(&surface.block_checksums),
+            remaining: section.record_count,
             verify_buffer: plan.verify_buffer,
             batch_records: plan.batch_records,
             max_batch_payload_bytes: limits.max_batch_payload_bytes(),
@@ -2959,7 +2928,9 @@ fn read_surface_batch<T>(
     count: u64,
     mut decode: impl FnMut(u64, &[u8], &Path) -> Result<T, TerrainError>,
 ) -> Result<Vec<T>, TerrainError> {
-    let batch_work = batch_work_units(stream.record_count, stream.next_id - 1, count)?;
+    let surface = Arc::clone(&stream.surface);
+    let section = stream.kind.section(&surface);
+    let batch_work = batch_work_units(section.record_count, stream.next_id - 1, count)?;
     let next_work = stream
         .used_work_units
         .checked_add(batch_work)
@@ -2973,37 +2944,36 @@ fn read_surface_batch<T>(
         stream.max_batch_payload_bytes,
         stream.max_working_bytes,
         stream.verify_buffer.capacity(),
-        stream.kind.batch_bytes_label(),
+        section.batch_bytes_label,
     )?;
-    let file = Arc::clone(&stream.file);
+    let file = Arc::clone(&surface.file);
     let mut file = file.lock().map_err(|_| {
         TerrainError::corrupt_surface(
             ARTIFACT_KIND,
-            stream.path.display(),
+            surface.path.display(),
             "verified artifact reader lock was poisoned",
         )
     })?;
     let first_record = stream.next_id - 1;
-    let kind = stream.kind;
-    let path = &stream.path;
+    let path = &surface.path;
     read_verified_records(
         &mut file,
-        &stream.opened_metadata,
+        &surface.opened_metadata,
         RecordBlockLayout {
-            record_offset: stream.record_offset,
-            record_count: stream.record_count,
-            record_bytes: kind.record_bytes(),
-            directory_offset: stream.directory_offset,
-            block_count: block_count(stream.record_count),
-            domain: kind.domain(),
+            record_offset: section.record_offset,
+            record_count: section.record_count,
+            record_bytes: section.record_bytes,
+            directory_offset: section.directory_offset,
+            block_count: block_count(section.record_count),
+            domain: section.domain,
         },
-        kind.checksums(&stream.block_checksums),
+        section.checksums,
         first_record,
         count,
         &mut stream.verify_buffer,
         path,
         ARTIFACT_KIND,
-        kind.boundary(),
+        section.boundary,
         |record_index, bytes| {
             result.push(decode(record_index, bytes, path)?);
             Ok(())
