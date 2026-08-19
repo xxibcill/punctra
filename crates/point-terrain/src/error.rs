@@ -174,6 +174,15 @@ pub enum TerrainError {
         supported_version: u32,
     },
 
+    /// An existing Surface target is not a recognized owned artifact.
+    #[error("existing path conflicts with the requested Surface target at {path}: {reason}")]
+    SurfaceTargetConflict {
+        /// Bounded target path.
+        path: TerrainDiagnostic,
+        /// Bounded explanation of why ownership could not be established.
+        reason: TerrainDiagnostic,
+    },
+
     /// An export target already exists and was not replaced.
     #[error("terrain export target already exists: {path}")]
     TargetExists {
@@ -342,6 +351,16 @@ impl TerrainError {
             path: TerrainDiagnostic::new(path.to_string()),
             found_version,
             supported_version,
+        }
+    }
+
+    pub(crate) fn surface_target_conflict(
+        path: impl fmt::Display,
+        reason: impl AsRef<str>,
+    ) -> Self {
+        Self::SurfaceTargetConflict {
+            path: TerrainDiagnostic::new(path.to_string()),
+            reason: TerrainDiagnostic::new(reason),
         }
     }
 

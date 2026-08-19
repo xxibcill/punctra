@@ -245,14 +245,27 @@ fn existing_symlink_target_is_rejected_without_touching_its_destination() {
         TerrainPrepareLimits::default(),
     )
     .expect_err("symbolic-link targets fail closed");
-    assert!(matches!(
-        error,
-        TerrainError::CorruptSurfaceArtifact {
-            kind: "Surface artifact",
-            ..
-        }
-    ));
+    assert!(matches!(error, TerrainError::SurfaceTargetConflict { .. }));
     assert_eq!(fs::read(&destination).unwrap(), original);
+}
+
+#[test]
+fn existing_unrecognized_regular_target_is_reported_as_a_conflict() {
+    let fixture = fixture("persistence-regular-target-conflict");
+    let target = fixture.terrain_path("surface.pterr");
+    let original = b"caller-owned regular file";
+    fs::write(&target, original).unwrap();
+
+    let error = prepare_surface(
+        fixture.snapshot(),
+        &target,
+        bounded_recipe(2),
+        TerrainPrepareLimits::default(),
+    )
+    .expect_err("an unrecognized regular target conflicts with Surface publication");
+
+    assert!(matches!(error, TerrainError::SurfaceTargetConflict { .. }));
+    assert_eq!(fs::read(&target).unwrap(), original);
 }
 
 #[test]

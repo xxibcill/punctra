@@ -839,6 +839,7 @@ fn run_prepare(
         let opened = open_artifact(
             &parent,
             target,
+            DurablePathProvenance::UnprovenTarget,
             expected,
             AttemptObservations::without_derivation(TerrainPrepareDisposition::Opened),
             limits,
@@ -867,6 +868,7 @@ fn run_prepare(
         let mut staged = open_artifact(
             &parent,
             &stage_path,
+            DurablePathProvenance::OwnerNamed,
             expected,
             AttemptObservations::without_derivation(TerrainPrepareDisposition::ResumedPublication),
             limits,
@@ -984,6 +986,7 @@ fn run_prepare(
     let staged = open_artifact(
         &parent,
         &stage_path,
+        DurablePathProvenance::OwnerNamed,
         expected,
         observations,
         limits,
@@ -1149,7 +1152,7 @@ fn open_work(
     maybe_injected_io(PersistenceBoundary::WorkReadback).map_err(|error| {
         TerrainError::io("reopen Surface work checkpoint", path.display(), error)
     })?;
-    let mut opened = open_regular_in(parent, path, WORK_KIND)?;
+    let mut opened = open_regular_in(parent, path, WORK_KIND, DurablePathProvenance::OwnerNamed)?;
     let verified = verified_file(
         &mut opened.file,
         path,
@@ -1405,12 +1408,14 @@ fn write_artifact_file(
 fn open_artifact(
     parent: &DirectoryWitness,
     path: &Path,
+    provenance: DurablePathProvenance,
     expected: ExpectedBinding,
     observations: AttemptObservations,
     limits: TerrainPrepareLimits,
     control: &OperationControl,
 ) -> Result<PreparedTerrainSurface, TerrainError> {
-    let mut opened = open_regular_in(parent, path, ARTIFACT_KIND)?;
+    let mut opened = open_regular_in(parent, path, ARTIFACT_KIND, provenance)?;
+    require_recognized_artifact_target(&mut opened.file, path, provenance)?;
     let verified = verified_file(
         &mut opened.file,
         path,
@@ -3785,6 +3790,21 @@ struct OpenedRegularFile {
     metadata: fs::Metadata,
 }
 
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum DurablePathProvenance {
+    OwnerNamed,
+    UnprovenTarget,
+}
+
+impl DurablePathProvenance {
+    fn invalid_path(self, kind: &'static str, path: &Path, reason: &'static str) -> TerrainError {
+        match self {
+            Self::OwnerNamed => TerrainError::corrupt_surface(kind, path.display(), reason),
+            Self::UnprovenTarget => TerrainError::surface_target_conflict(path.display(), reason),
+        }
+    }
+}
+
 impl OpenedRegularFile {
     fn verify_binding(&self, path: &Path, kind: &'static str) -> Result<(), TerrainError> {
         verify_opened_binding(&self.file, &self.metadata, path, kind)
@@ -3900,14 +3920,15 @@ fn open_regular_in(
     parent: &DirectoryWitness,
     path: &Path,
     kind: &'static str,
+    provenance: DurablePathProvenance,
 ) -> Result<OpenedRegularFile, TerrainError> {
     parent.verify()?;
     let metadata = fs::symlink_metadata(path)
         .map_err(|error| TerrainError::io("inspect durable Surface file", path.display(), error))?;
     if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
-        return Err(TerrainError::corrupt_surface(
+        return Err(provenance.invalid_path(
             kind,
-            path.display(),
+            path,
             "path is not a regular non-symbolic-link file",
         ));
     }
@@ -3919,6 +3940,37 @@ fn open_regular_in(
     opened.verify_binding(path, kind)?;
     parent.verify()?;
     Ok(opened)
+}
+
+fn require_recognized_artifact_target(
+    file: &mut File,
+    path: &Path,
+    provenance: DurablePathProvenance,
+) -> Result<(), TerrainError> {
+    if provenance == DurablePathProvenance::OwnerNamed {
+        return Ok(());
+    }
+    file.seek(SeekFrom::Start(0))
+        .map_err(|error| TerrainError::io("seek existing Surface target", path.display(), error))?;
+    let mut magic = [0_u8; ARTIFACT_MAGIC.len()];
+    match file.read_exact(&mut magic) {
+        Ok(()) if magic == *ARTIFACT_MAGIC => Ok(()),
+        Ok(()) => Err(TerrainError::surface_target_conflict(
+            path.display(),
+            "existing regular file is not a recognized Surface artifact",
+        )),
+        Err(error) if error.kind() == io::ErrorKind::UnexpectedEof => {
+            Err(TerrainError::surface_target_conflict(
+                path.display(),
+                "existing regular file is too short to be a Surface artifact",
+            ))
+        }
+        Err(error) => Err(TerrainError::io(
+            "read existing Surface target",
+            path.display(),
+            error,
+        )),
+    }
 }
 
 #[cfg(unix)]
@@ -4183,7 +4235,15 @@ fn reopen_published_artifact(
     maybe_injected_io(PersistenceBoundary::TargetReadback).map_err(|error| {
         TerrainError::io("reopen published Surface target", target.display(), error)
     })?;
-    let opened = open_artifact(parent, target, expected, observations, limits, control)?;
+    let opened = open_artifact(
+        parent,
+        target,
+        DurablePathProvenance::UnprovenTarget,
+        expected,
+        observations,
+        limits,
+        control,
+    )?;
     maybe_injected_io(PersistenceBoundary::TargetRevalidation).map_err(|error| {
         TerrainError::io(
             "revalidate published Surface target",
@@ -4225,7 +4285,13 @@ fn publish_stage(
                     ),
                 ));
             }
-            let opened = open_regular_in(parent, target, ARTIFACT_KIND).map_err(|error| {
+            let opened = open_regular_in(
+                parent,
+                target,
+                ARTIFACT_KIND,
+                DurablePathProvenance::UnprovenTarget,
+            )
+            .map_err(|error| {
                 TerrainError::surface_publication_indeterminate(
                     target.display(),
                     expected_complete_checksum,
@@ -4736,9 +4802,14 @@ mod tests {
             }
         });
 
-        let error = open_regular_in(&parent, &target, ARTIFACT_KIND)
-            .err()
-            .expect("a raced FIFO must be rejected");
+        let error = open_regular_in(
+            &parent,
+            &target,
+            ARTIFACT_KIND,
+            DurablePathProvenance::OwnerNamed,
+        )
+        .err()
+        .expect("a raced FIFO must be rejected");
 
         assert_open_race_consumed();
         assert_corruption_reason(
