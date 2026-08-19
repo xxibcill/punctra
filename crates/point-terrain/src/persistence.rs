@@ -890,6 +890,12 @@ fn run_prepare(
         limits,
         control,
     )?;
+    let source_points_read = if disposition == TerrainPrepareDisposition::Built {
+        surface.descriptor().input_point_count()
+    } else {
+        0
+    };
+    drop(surface);
     let peak_temporary_disk_bytes = retained_temporary_bytes
         .checked_add(written_stage.byte_len()?)
         .ok_or_else(|| {
@@ -899,11 +905,6 @@ fn run_prepare(
                 limits.max_temporary_bytes(),
             )
         })?;
-    let source_points_read = if disposition == TerrainPrepareDisposition::Built {
-        surface.descriptor().input_point_count()
-    } else {
-        0
-    };
     control.check_cancelled()?;
     maybe_injected_io(PersistenceBoundary::StageReadback).map_err(|error| {
         TerrainError::io(
