@@ -1164,6 +1164,37 @@ mod tests {
     use super::*;
 
     #[test]
+    fn eye_dome_lighting_accepts_exact_bounds() {
+        let minimum = EyeDomeLighting::new(f32::MIN_POSITIVE, 1).unwrap();
+        assert_eq!(minimum.strength().to_bits(), f32::MIN_POSITIVE.to_bits());
+        assert_eq!(minimum.radius_pixels(), 1);
+
+        let maximum = EyeDomeLighting::new(10.0, 8).unwrap();
+        assert_eq!(maximum.strength().to_bits(), 10.0_f32.to_bits());
+        assert_eq!(maximum.radius_pixels(), 8);
+    }
+
+    #[test]
+    fn eye_dome_lighting_rejects_invalid_strengths() {
+        for strength in [f32::NAN, f32::NEG_INFINITY, f32::INFINITY, -1.0, 0.0, 10.1] {
+            assert_eq!(
+                EyeDomeLighting::new(strength, 1),
+                Err(DepthCueError::InvalidStrength)
+            );
+        }
+    }
+
+    #[test]
+    fn eye_dome_lighting_rejects_invalid_radii() {
+        for radius_pixels in [0, 9, u32::MAX] {
+            assert_eq!(
+                EyeDomeLighting::new(1.0, radius_pixels),
+                Err(DepthCueError::InvalidRadius)
+            );
+        }
+    }
+
+    #[test]
     fn frame_uniform_staging_accepts_the_exact_device_limit() {
         let batch_count = 3;
         let camera_bytes = wgpu::BufferAddress::try_from(size_of::<CameraUniform>()).unwrap();
