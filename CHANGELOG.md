@@ -7,7 +7,7 @@ All notable changes to Punctra are documented here. The project follows
 
 - Completed and locally repository-verified the bounded [Persistent Bounded-AOI
   Terrain design](docs/design/persistent-production-scale-terrain-v0.13.md) at
-  implementation commit `200f74dd09475673b9fc3e417e8b4e1c47a580d8`; the
+  implementation commit `008a0d97fdfa23547609845b71c34b40d17d1894`; the
   exact environment, command outcomes, fixtures, and generated observations
   are in the [v0.13 verification record](docs/releases/v0.13.0.md). The scope
   preserves the exact single-worker full-AOI triangulator and legacy in-memory
