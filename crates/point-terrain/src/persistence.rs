@@ -292,6 +292,45 @@ impl TerrainPrepareReport {
     }
 }
 
+#[derive(Clone, Copy)]
+struct AttemptObservations {
+    disposition: TerrainPrepareDisposition,
+    reused_input_points: u64,
+    source_points_read: u64,
+    peak_temporary_disk_bytes: u64,
+    accounted_peak_working_bytes: Option<u64>,
+    topology_steps: Option<u64>,
+}
+
+impl AttemptObservations {
+    const fn without_derivation(disposition: TerrainPrepareDisposition) -> Self {
+        Self {
+            disposition,
+            reused_input_points: 0,
+            source_points_read: 0,
+            peak_temporary_disk_bytes: 0,
+            accounted_peak_working_bytes: None,
+            topology_steps: None,
+        }
+    }
+
+    const fn from_report(report: TerrainPrepareReport) -> Self {
+        Self {
+            disposition: report.disposition,
+            reused_input_points: report.reused_input_points,
+            source_points_read: report.source_points_read,
+            peak_temporary_disk_bytes: report.peak_temporary_disk_bytes,
+            accounted_peak_working_bytes: report.accounted_peak_working_bytes,
+            topology_steps: report.topology_steps,
+        }
+    }
+
+    const fn with_disposition(mut self, disposition: TerrainPrepareDisposition) -> Self {
+        self.disposition = disposition;
+        self
+    }
+}
+
 /// Immutable semantic facts bound into one disk-v1 Surface artifact.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SurfaceArtifactDescriptor {
@@ -748,12 +787,7 @@ fn run_prepare(
             &parent,
             target,
             expected,
-            TerrainPrepareDisposition::Opened,
-            0,
-            0,
-            0,
-            None,
-            None,
+            AttemptObservations::without_derivation(TerrainPrepareDisposition::Opened),
             limits,
             control,
         )?;
@@ -781,12 +815,7 @@ fn run_prepare(
             &parent,
             &stage_path,
             expected,
-            TerrainPrepareDisposition::ResumedPublication,
-            0,
-            0,
-            0,
-            None,
-            None,
+            AttemptObservations::without_derivation(TerrainPrepareDisposition::ResumedPublication),
             limits,
             control,
         )?;
@@ -799,44 +828,18 @@ fn run_prepare(
         staged.set_peak_temporary_disk_bytes(peak_temporary_disk_bytes);
         maybe_injected_cancellation(PersistenceBoundary::CancelAfterStage, control);
         control.check_cancelled()?;
-        let publication = publish_stage(&parent, &staged, target, control)?;
-        let result_disposition =
-            publication.result_disposition(TerrainPrepareDisposition::ResumedPublication);
-        let result = maybe_injected_io(PersistenceBoundary::TargetReadback)
-            .map_err(|error| {
-                TerrainError::io("reopen published Surface target", target.display(), error)
-            })
-            .and_then(|()| {
-                open_artifact(
-                    &parent,
-                    target,
-                    expected,
-                    result_disposition,
-                    0,
-                    0,
-                    peak_temporary_disk_bytes,
-                    None,
-                    None,
-                    limits,
-                    control,
-                )
-            })
-            .and_then(|opened| {
-                maybe_injected_io(PersistenceBoundary::TargetRevalidation).map_err(|error| {
-                    TerrainError::io(
-                        "revalidate published Surface target",
-                        target.display(),
-                        error,
-                    )
-                })?;
-                Ok(opened)
-            });
-        let result =
-            reconcile_publication(publication, target, staged.complete_checksum(), result)?;
-        if publication == PublicationOutcome::Existing {
-            parent.sync()?;
-        }
-        cleanup_after_publication(&parent, &staged, None);
+        let result = publish_verified_stage(
+            &parent,
+            &staged,
+            PublicationAttempt {
+                target,
+                expected,
+                observations: AttemptObservations::from_report(staged.report()),
+                work: None,
+                limits,
+            },
+            control,
+        )?;
         control.complete_progress(0)?;
         return Ok(result);
     }
@@ -917,16 +920,19 @@ fn run_prepare(
             error,
         )
     })?;
-    let staged = open_artifact(
-        &parent,
-        &stage_path,
-        expected,
+    let observations = AttemptObservations {
         disposition,
         reused_input_points,
         source_points_read,
         peak_temporary_disk_bytes,
-        Some(peak),
-        Some(topology_steps),
+        accounted_peak_working_bytes: Some(peak),
+        topology_steps: Some(topology_steps),
+    };
+    let staged = open_artifact(
+        &parent,
+        &stage_path,
+        expected,
+        observations,
         limits,
         control,
     )?;
@@ -939,42 +945,18 @@ fn run_prepare(
     }
     maybe_injected_cancellation(PersistenceBoundary::CancelAfterStage, control);
     control.check_cancelled()?;
-    let publication = publish_stage(&parent, &staged, target, control)?;
-    let result_disposition = publication.result_disposition(disposition);
-    let result = maybe_injected_io(PersistenceBoundary::TargetReadback)
-        .map_err(|error| {
-            TerrainError::io("reopen published Surface target", target.display(), error)
-        })
-        .and_then(|()| {
-            open_artifact(
-                &parent,
-                target,
-                expected,
-                result_disposition,
-                reused_input_points,
-                source_points_read,
-                peak_temporary_disk_bytes,
-                Some(peak),
-                Some(topology_steps),
-                limits,
-                control,
-            )
-        })
-        .and_then(|opened| {
-            maybe_injected_io(PersistenceBoundary::TargetRevalidation).map_err(|error| {
-                TerrainError::io(
-                    "revalidate published Surface target",
-                    target.display(),
-                    error,
-                )
-            })?;
-            Ok(opened)
-        });
-    let result = reconcile_publication(publication, target, staged.complete_checksum(), result)?;
-    if publication == PublicationOutcome::Existing {
-        parent.sync()?;
-    }
-    cleanup_after_publication(&parent, &staged, Some(work_witness));
+    let result = publish_verified_stage(
+        &parent,
+        &staged,
+        PublicationAttempt {
+            target,
+            expected,
+            observations,
+            work: Some(work_witness),
+            limits,
+        },
+        control,
+    )?;
     control.complete_progress(completion_work_units)?;
     Ok(result)
 }
@@ -1367,17 +1349,11 @@ fn write_artifact_file(
     sync_file(file, path)
 }
 
-#[allow(clippy::too_many_arguments)]
 fn open_artifact(
     parent: &DirectoryWitness,
     path: &Path,
     expected: ExpectedBinding,
-    disposition: TerrainPrepareDisposition,
-    reused_input_points: u64,
-    source_points_read: u64,
-    peak_temporary_disk_bytes: u64,
-    accounted_peak_working_bytes: Option<u64>,
-    topology_steps: Option<u64>,
+    observations: AttemptObservations,
     limits: TerrainPrepareLimits,
     control: &OperationControl,
 ) -> Result<PreparedTerrainSurface, TerrainError> {
@@ -1444,14 +1420,14 @@ fn open_artifact(
         limits.max_retained_handle_bytes(),
     )?;
     let report = TerrainPrepareReport::new(
-        disposition,
+        observations.disposition,
         verified.bytes,
-        reused_input_points,
-        source_points_read,
-        peak_temporary_disk_bytes,
+        observations.reused_input_points,
+        observations.source_points_read,
+        observations.peak_temporary_disk_bytes,
         accounted_handle_bytes,
-        accounted_peak_working_bytes,
-        topology_steps,
+        observations.accounted_peak_working_bytes,
+        observations.topology_steps,
     );
     Ok(PreparedTerrainSurface {
         inner: Arc::new(PreparedSurfaceData {
@@ -4069,6 +4045,68 @@ impl PublicationOutcome {
             Self::Existing => TerrainPrepareDisposition::Opened,
         }
     }
+}
+
+struct PublicationAttempt<'a> {
+    target: &'a Path,
+    expected: ExpectedBinding,
+    observations: AttemptObservations,
+    work: Option<OwnedPathWitness>,
+    limits: TerrainPrepareLimits,
+}
+
+fn publish_verified_stage(
+    parent: &DirectoryWitness,
+    stage: &PreparedTerrainSurface,
+    attempt: PublicationAttempt<'_>,
+    control: &OperationControl,
+) -> Result<PreparedTerrainSurface, TerrainError> {
+    let PublicationAttempt {
+        target,
+        expected,
+        observations,
+        work,
+        limits,
+    } = attempt;
+    let publication = publish_stage(parent, stage, target, control)?;
+    let target_observations =
+        observations.with_disposition(publication.result_disposition(observations.disposition));
+    let result = reopen_published_artifact(
+        parent,
+        target,
+        expected,
+        target_observations,
+        limits,
+        control,
+    );
+    let result = reconcile_publication(publication, target, stage.complete_checksum(), result)?;
+    if publication == PublicationOutcome::Existing {
+        parent.sync()?;
+    }
+    cleanup_after_publication(parent, stage, work);
+    Ok(result)
+}
+
+fn reopen_published_artifact(
+    parent: &DirectoryWitness,
+    target: &Path,
+    expected: ExpectedBinding,
+    observations: AttemptObservations,
+    limits: TerrainPrepareLimits,
+    control: &OperationControl,
+) -> Result<PreparedTerrainSurface, TerrainError> {
+    maybe_injected_io(PersistenceBoundary::TargetReadback).map_err(|error| {
+        TerrainError::io("reopen published Surface target", target.display(), error)
+    })?;
+    let opened = open_artifact(parent, target, expected, observations, limits, control)?;
+    maybe_injected_io(PersistenceBoundary::TargetRevalidation).map_err(|error| {
+        TerrainError::io(
+            "revalidate published Surface target",
+            target.display(),
+            error,
+        )
+    })?;
+    Ok(opened)
 }
 
 fn publish_stage(
