@@ -44,7 +44,7 @@ impl TerrainLimits {
         self.point_rows
     }
 
-    /// Returns the maximum exact Ground Input rows and retained vertices.
+    /// Returns the maximum exact Ground Input row count.
     #[must_use]
     pub const fn max_input_points(self) -> u64 {
         self.max_input_points
