@@ -103,14 +103,7 @@ fn preserve_failure_or_internal(phase: ViewPhase, error: Box<dyn Error>) -> Box<
 }
 
 fn view_pump_failure(error: ViewPumpError) -> Box<dyn Error> {
-    match error {
-        ViewPumpError::Planning(error) => internal_failure(ViewPhase::Planning, error),
-        ViewPumpError::RequestReconciliation(error) => {
-            preserve_failure_or_internal(ViewPhase::Planning, error)
-        }
-        ViewPumpError::NodeRead(error) => preserve_failure_or_internal(ViewPhase::NodeRead, error),
-        ViewPumpError::Renderer(error) => renderer_failure(ViewPhase::GpuUpload, error),
-    }
+    Box::new(error.into_view_failure())
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

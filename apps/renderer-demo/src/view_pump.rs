@@ -8,6 +8,7 @@ use render_wgpu::{Camera, RendererError, WgpuRenderer};
 
 use crate::{
     appearance::{ConditionalBatch, DensityTransitions, TransitionAction, apply_transition_action},
+    diagnostic::{ViewFailure, ViewPhase, classify_renderer_failure},
     scene::Scene,
 };
 
@@ -17,6 +18,30 @@ pub(crate) enum ViewPumpError {
     RequestReconciliation(Box<dyn Error>),
     NodeRead(Box<dyn Error>),
     Renderer(RendererError),
+}
+
+impl ViewPumpError {
+    pub(crate) fn into_view_failure(self) -> ViewFailure {
+        match self {
+            Self::Planning(error) => ViewFailure::internal(ViewPhase::Planning, error),
+            Self::RequestReconciliation(error) => {
+                preserve_view_failure(error, ViewPhase::Planning, "request reconciliation")
+            }
+            Self::NodeRead(error) => preserve_view_failure(error, ViewPhase::NodeRead, "node read"),
+            Self::Renderer(error) => classify_renderer_failure(ViewPhase::GpuUpload, error),
+        }
+    }
+}
+
+fn preserve_view_failure(
+    error: Box<dyn Error>,
+    phase: ViewPhase,
+    context: &'static str,
+) -> ViewFailure {
+    match error.downcast::<ViewFailure>() {
+        Ok(failure) => *failure,
+        Err(error) => ViewFailure::internal(phase, format_args!("{context} failed: {error}")),
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -235,5 +260,22 @@ impl<'state> ViewLifecycle<'state> {
             }
         }
         Ok(activity)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io;
+
+    use super::*;
+
+    #[test]
+    fn pump_errors_own_their_failure_phase() {
+        let request = ViewPumpError::RequestReconciliation(Box::new(io::Error::other("request")))
+            .into_view_failure();
+        let node = ViewPumpError::NodeRead(Box::new(io::Error::other("read"))).into_view_failure();
+
+        assert_eq!(request.phase(), ViewPhase::Planning);
+        assert_eq!(node.phase(), ViewPhase::NodeRead);
     }
 }

@@ -662,12 +662,12 @@ fn run_trace_frame(runtime: &mut TraceRuntime<'_>) -> Result<FrameEvidence, View
                 PLANNING_BUDGET,
             ),
         )
-        .map_err(classify_view_pump_failure)?;
+        .map_err(ViewPumpError::into_view_failure)?;
     let (plan, issued, mut transition_activity) = planned.into_parts();
     observe_transition_activity(runtime.evidence, &transition_activity);
     let accepted = lifecycle
         .accept_next_batch(runtime.view_generation)
-        .map_err(classify_view_pump_failure)?;
+        .map_err(ViewPumpError::into_view_failure)?;
     let accepted_batch = accepted.is_some();
     if let Some(accepted) = accepted {
         let (upload, transitions) = accepted.into_parts();
@@ -699,7 +699,7 @@ fn run_trace_frame(runtime: &mut TraceRuntime<'_>) -> Result<FrameEvidence, View
     )?;
     let completed_transition = lifecycle
         .advance_presented_frame()
-        .map_err(classify_view_pump_failure)?;
+        .map_err(ViewPumpError::into_view_failure)?;
     observe_transition_activity(runtime.evidence, &completed_transition);
     transition_activity.add(completed_transition);
     if frame_report.drawn_points() > 0 {
@@ -718,19 +718,6 @@ fn run_trace_frame(runtime: &mut TraceRuntime<'_>) -> Result<FrameEvidence, View
         frame_report,
         submitted_frame_nanoseconds: elapsed_nanoseconds(submitted.elapsed()),
     })
-}
-
-fn classify_view_pump_failure(error: ViewPumpError) -> ViewFailure {
-    match error {
-        ViewPumpError::Planning(error) => ViewFailure::internal(ViewPhase::Planning, error),
-        ViewPumpError::RequestReconciliation(error) => {
-            preserve_scene_failure(error, ViewPhase::Planning, "request reconciliation")
-        }
-        ViewPumpError::NodeRead(error) => {
-            preserve_scene_failure(error, ViewPhase::NodeRead, "node read")
-        }
-        ViewPumpError::Renderer(error) => classify_renderer_failure(ViewPhase::GpuUpload, error),
-    }
 }
 
 fn observe_transition_activity(evidence: &mut EntryEvidence, activity: &TransitionActivity) {
