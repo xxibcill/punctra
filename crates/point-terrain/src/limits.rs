@@ -149,7 +149,8 @@ impl TerrainPrepareLimits {
         self.max_artifact_bytes
     }
 
-    /// Returns the maximum cumulative work-plus-stage bytes owned by an attempt.
+    /// Returns the maximum cumulative private work, stage, and publication-copy
+    /// bytes owned by an attempt.
     #[must_use]
     pub const fn max_temporary_bytes(self) -> u64 {
         self.max_temporary_bytes

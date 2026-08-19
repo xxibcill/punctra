@@ -267,7 +267,8 @@ impl TerrainPrepareReport {
         self.source_points_read
     }
 
-    /// Returns peak logical bytes retained in owned work and staging files.
+    /// Returns peak logical bytes retained in owned work, staging, and private
+    /// publication-copy files.
     #[must_use]
     pub const fn peak_temporary_disk_bytes(self) -> u64 {
         self.peak_temporary_disk_bytes
@@ -327,6 +328,11 @@ impl AttemptObservations {
 
     const fn with_disposition(mut self, disposition: TerrainPrepareDisposition) -> Self {
         self.disposition = disposition;
+        self
+    }
+
+    const fn with_peak_temporary_disk_bytes(mut self, bytes: u64) -> Self {
+        self.peak_temporary_disk_bytes = bytes;
         self
     }
 }
@@ -4193,10 +4199,15 @@ fn publish_verified_stage(
     let PublicationAttempt {
         target,
         expected,
-        observations,
+        mut observations,
         work,
         limits,
     } = attempt;
+    observations = observations.with_peak_temporary_disk_bytes(publication_peak_temporary_bytes(
+        observations.peak_temporary_disk_bytes,
+        stage.report().artifact_bytes(),
+        limits.max_temporary_bytes(),
+    )?);
     let publication = publish_stage(parent, stage, target, limits, control)?;
     let target_observations =
         observations.with_disposition(publication.result_disposition(observations.disposition));
@@ -4214,6 +4225,31 @@ fn publish_verified_stage(
     }
     cleanup_after_publication(parent, stage, work);
     Ok(result)
+}
+
+fn publication_peak_temporary_bytes(
+    retained_bytes: u64,
+    artifact_bytes: u64,
+    max_temporary_bytes: u64,
+) -> Result<u64, TerrainError> {
+    #[cfg(target_os = "linux")]
+    let publication_copy_bytes = artifact_bytes;
+    #[cfg(not(target_os = "linux"))]
+    let publication_copy_bytes = {
+        let _ = artifact_bytes;
+        0
+    };
+    cumulative_temporary_bytes(retained_bytes, publication_copy_bytes, max_temporary_bytes)
+}
+
+fn cumulative_temporary_bytes(
+    retained_bytes: u64,
+    additional_bytes: u64,
+    max_temporary_bytes: u64,
+) -> Result<u64, TerrainError> {
+    let required = retained_bytes.saturating_add(additional_bytes);
+    require_within("Surface temporary bytes", required, max_temporary_bytes)?;
+    Ok(required)
 }
 
 fn reopen_published_artifact(
@@ -4921,10 +4957,15 @@ mod tests {
 
         assert!(work.is_file());
         assert!(stage.is_file());
-        assert_eq!(
-            prepared.report().peak_temporary_disk_bytes(),
-            fs::metadata(&work).unwrap().len() + fs::metadata(&stage).unwrap().len()
-        );
+        let named_temporary_bytes =
+            fs::metadata(&work).unwrap().len() + fs::metadata(&stage).unwrap().len();
+        let expected_peak = publication_peak_temporary_bytes(
+            named_temporary_bytes,
+            prepared.report().artifact_bytes(),
+            u64::MAX,
+        )
+        .unwrap();
+        assert_eq!(prepared.report().peak_temporary_disk_bytes(), expected_peak);
         let hidden_temporary_names: Vec<_> = fs::read_dir(&fixture.directory)
             .unwrap()
             .map(|entry| entry.unwrap().file_name())
@@ -4995,7 +5036,7 @@ mod tests {
     }
 
     #[test]
-    fn resumed_publication_accounts_only_the_verified_open_stage_inode() {
+    fn resumed_publication_accounts_for_each_live_private_artifact() {
         let fixture = Fixture::new("resumed-stage-accounting");
         let recipe = fixture.recipe();
         let baseline = fixture.path("baseline.pterr");
@@ -5005,6 +5046,8 @@ mod tests {
         let work = sibling_path(&target, ".surface-work-v1").unwrap();
         fs::copy(&baseline, &stage).unwrap();
         let stage_bytes = fs::metadata(&stage).unwrap().len();
+        let expected_peak =
+            publication_peak_temporary_bytes(stage_bytes, stage_bytes, u64::MAX).unwrap();
         let arbitrary_work = vec![0xA5; usize::try_from(stage_bytes + 1).unwrap()];
         fs::write(&work, &arbitrary_work).unwrap();
         let defaults = TerrainPrepareLimits::default();
@@ -5012,7 +5055,7 @@ mod tests {
             defaults.derivation(),
             defaults.max_work_bytes(),
             defaults.max_artifact_bytes(),
-            stage_bytes,
+            expected_peak,
             defaults.max_verify_buffer_bytes(),
             defaults.max_retained_handle_bytes(),
             defaults.max_path_bytes(),
@@ -5025,9 +5068,23 @@ mod tests {
             opened.report().disposition(),
             TerrainPrepareDisposition::ResumedPublication
         );
-        assert_eq!(opened.report().peak_temporary_disk_bytes(), stage_bytes);
+        assert_eq!(opened.report().peak_temporary_disk_bytes(), expected_peak);
         assert_eq!(fs::read(&work).unwrap(), arbitrary_work);
         assert_eq!(fs::read(&target).unwrap(), fs::read(&baseline).unwrap());
+    }
+
+    #[test]
+    fn publication_copy_respects_the_inclusive_temporary_byte_ceiling() {
+        assert_eq!(cumulative_temporary_bytes(13, 8, 21).unwrap(), 21);
+        let error = cumulative_temporary_bytes(13, 8, 20).unwrap_err();
+        assert!(matches!(
+            error,
+            TerrainError::ResourceLimit {
+                limit: "Surface temporary bytes",
+                required: 21,
+                allowed: 20,
+            }
+        ));
     }
 
     #[test]

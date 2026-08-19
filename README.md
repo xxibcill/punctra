@@ -350,7 +350,7 @@ cargo run -p point-terrain --example persistent_surface
 
 The example uses a caller-owned `.pterr` target and reports Source verification,
 indexing, Terrain cold/resumed/warm work, full-AOI triangulation memory,
-verified input-work bytes, cumulative work-plus-stage bytes, complete Artifact
+verified input-work bytes, cumulative private temporary bytes, complete Artifact
 bytes, and unmeasured phases separately. Its default 10,000-Point fixture
 reports a 10,000-vertex, 19,602-face Surface and asserts exact-byte
 input-checkpoint resume, complete bounded streams, and a zero-Snapshot-row warm
@@ -664,7 +664,7 @@ topology through cold preparation, verified-input resume, complete-stage
 publication, and warm reopen. The [exact-commit completion
 record](docs/releases/v0.13.0.md) reports Source verification, index
 preparation, Terrain cold/resumed/warm work, retained triangulation memory,
-verified work, cumulative work-plus-stage and Artifact bytes, stream buffers,
+verified work, cumulative private temporary and Artifact bytes, stream buffers,
 unmeasured phases, and local Criterion observations separately. Those
 generated facts are repository evidence, not production-resource or latency
 promises.

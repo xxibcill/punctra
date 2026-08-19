@@ -126,7 +126,7 @@ readable report separates:
 - Terrain cold/resumed/warm disposition and elapsed observations;
 - AOI Ground Input, vertex, face, and hull counts;
 - topology work and algorithm-accounted full-AOI triangulation memory;
-- verified Surface work, cumulative work-plus-stage, complete Artifact,
+- verified Surface work, cumulative private temporary, complete Artifact,
   retained-handle metadata, path ceiling, stream record and batch counts, and
   payload, verification-buffer, working-memory, and work-unit ceilings; and
 - direct stage bytes, QA, LandXML, View, worker heap, process resident memory,
@@ -135,7 +135,8 @@ readable report separates:
 The default invocation generates 10,000 Points. The current self-validating
 output reports 10,000 Ground Input Points and vertices, 19,602 faces, 396 hull
 vertices, 521,494 topology steps, a 320,480-byte verified input checkpoint, a
-556,088-byte Surface, and 876,568 peak logical work-plus-stage bytes. A forced
+556,088-byte Surface, and 876,568 peak logical private temporary bytes on the
+qualified macOS/APFS path. A forced
 one-byte Artifact ceiling leaves the checkpoint, then `ResumedInput` reuses all
 10,000 inputs with zero Snapshot Point reads and reproduces the cold Artifact
 bytes exactly. The bounded streams consume the vertices in three batches and
