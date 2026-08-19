@@ -1,0 +1,220 @@
+//! Shared planning, streaming, and density-transition lifecycle for one view.
+
+use std::error::Error;
+
+use point_view::{AvailableNodes, PlanError, PlanningBudget, ViewPlan, ViewPlanner};
+use render_protocol::{UpdateReport, ViewGenerationKey, Viewport};
+use render_wgpu::{Camera, RendererError, WgpuRenderer};
+
+use crate::{
+    appearance::{ConditionalBatch, DensityTransitions, TransitionAction, apply_transition_action},
+    scene::Scene,
+};
+
+#[derive(Debug)]
+pub(crate) enum ViewPumpError {
+    Planning(PlanError),
+    RequestReconciliation(Box<dyn Error>),
+    NodeRead(Box<dyn Error>),
+    Renderer(RendererError),
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ViewSpec<'view> {
+    camera: &'view Camera,
+    viewport: Viewport,
+    view_generation: ViewGenerationKey,
+    budget: PlanningBudget,
+}
+
+impl<'view> ViewSpec<'view> {
+    pub(crate) const fn new(
+        camera: &'view Camera,
+        viewport: Viewport,
+        view_generation: ViewGenerationKey,
+        budget: PlanningBudget,
+    ) -> Self {
+        Self {
+            camera,
+            viewport,
+            view_generation,
+            budget,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct PlannedView {
+    plan: ViewPlan,
+    issued_requests: u64,
+    transitions: TransitionActivity,
+}
+
+impl PlannedView {
+    pub(crate) fn plan(&self) -> &ViewPlan {
+        &self.plan
+    }
+
+    pub(crate) const fn issued_requests(&self) -> u64 {
+        self.issued_requests
+    }
+
+    pub(crate) fn into_parts(self) -> (ViewPlan, u64, TransitionActivity) {
+        (self.plan, self.issued_requests, self.transitions)
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct AcceptedBatch {
+    upload: UpdateReport,
+    transitions: TransitionActivity,
+}
+
+impl AcceptedBatch {
+    pub(crate) const fn upload(&self) -> UpdateReport {
+        self.upload
+    }
+
+    pub(crate) fn into_parts(self) -> (UpdateReport, TransitionActivity) {
+        (self.upload, self.transitions)
+    }
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct TransitionActivity {
+    reports: Vec<UpdateReport>,
+    presentations: u64,
+    retired: u64,
+}
+
+impl TransitionActivity {
+    pub(crate) fn reports(&self) -> &[UpdateReport] {
+        &self.reports
+    }
+
+    pub(crate) const fn presentations(&self) -> u64 {
+        self.presentations
+    }
+
+    pub(crate) const fn retired(&self) -> u64 {
+        self.retired
+    }
+
+    pub(crate) fn add(&mut self, other: Self) {
+        self.reports.extend(other.reports);
+        self.presentations = self.presentations.saturating_add(other.presentations);
+        self.retired = self.retired.saturating_add(other.retired);
+    }
+}
+
+pub(crate) fn reconcile_view(
+    planner: &mut ViewPlanner,
+    scene: &mut Scene,
+    renderer: &mut WgpuRenderer,
+    density_transitions: &mut DensityTransitions,
+    view: ViewSpec<'_>,
+) -> Result<PlannedView, ViewPumpError> {
+    let (hierarchy, plan) = {
+        let planning_nodes = scene.planning_nodes();
+        let hierarchy = planning_nodes.as_slice().to_vec();
+        let plan = planner
+            .plan(
+                view.camera,
+                view.viewport,
+                AvailableNodes::new(view.view_generation, planning_nodes.as_slice()),
+                view.budget,
+            )
+            .map_err(ViewPumpError::Planning)?;
+        (hierarchy, plan)
+    };
+
+    let transitions = apply_transition_actions(
+        renderer,
+        scene,
+        density_transitions.reconcile(&hierarchy, &plan),
+    )?;
+    let requests = if density_transitions.blocks_new_residency() {
+        &[]
+    } else {
+        plan.requests()
+    };
+    let issued_requests = scene
+        .reconcile_requests(plan.demanded_nodes(), requests)
+        .map_err(ViewPumpError::RequestReconciliation)?;
+    Ok(PlannedView {
+        plan,
+        issued_requests,
+        transitions,
+    })
+}
+
+pub(crate) fn accept_next_batch(
+    scene: &mut Scene,
+    renderer: &mut WgpuRenderer,
+    density_transitions: &mut DensityTransitions,
+    view_generation: ViewGenerationKey,
+) -> Result<Option<AcceptedBatch>, ViewPumpError> {
+    if density_transitions.blocks_new_residency() {
+        return Ok(None);
+    }
+    let Some(batch) = scene.next_batch().map_err(ViewPumpError::NodeRead)? else {
+        return Ok(None);
+    };
+
+    let key = batch.key();
+    let version = batch.version();
+    let upload = match renderer.apply(&render_protocol::RenderUpdate::Upsert { batch }) {
+        Ok(report) => report,
+        Err(error) => {
+            scene.mark_rejected(key, version);
+            return Err(ViewPumpError::Renderer(error));
+        }
+    };
+    let transitions = density_transitions
+        .uploaded_batch_presentation(ConditionalBatch {
+            view_generation,
+            key,
+            expected_version: version,
+        })
+        .map_or_else(
+            || Ok(TransitionActivity::default()),
+            |action| apply_transition_actions(renderer, scene, vec![action]),
+        )?;
+    scene.mark_resident(key, version);
+    Ok(Some(AcceptedBatch {
+        upload,
+        transitions,
+    }))
+}
+
+pub(crate) fn advance_presented_frame(
+    renderer: &mut WgpuRenderer,
+    scene: &mut Scene,
+    density_transitions: &mut DensityTransitions,
+) -> Result<TransitionActivity, ViewPumpError> {
+    apply_transition_actions(
+        renderer,
+        scene,
+        density_transitions.advance_presented_frame(),
+    )
+}
+
+fn apply_transition_actions(
+    renderer: &mut WgpuRenderer,
+    scene: &mut Scene,
+    actions: Vec<TransitionAction>,
+) -> Result<TransitionActivity, ViewPumpError> {
+    let mut activity = TransitionActivity::default();
+    for action in actions {
+        let retiring = action.retiring_batch().is_some();
+        let report =
+            apply_transition_action(renderer, scene, action).map_err(ViewPumpError::Renderer)?;
+        activity.reports.push(report);
+        if retiring {
+            activity.retired = activity.retired.saturating_add(1);
+        } else {
+            activity.presentations = activity.presentations.saturating_add(1);
+        }
+    }
+    Ok(activity)
+}

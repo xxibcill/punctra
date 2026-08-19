@@ -10,6 +10,7 @@ mod scene;
 mod status;
 mod status_overlay;
 mod synthetic;
+mod view_pump;
 
 use std::{
     error::Error,
@@ -21,8 +22,8 @@ use std::{
 };
 
 use appearance::{
-    DensityTransitions, REFERENCE_POINT_SIZE_PIXELS, TransitionAction, apply_transition_action,
-    projected_density_point_size, renderer_appearance_config,
+    DensityTransitions, REFERENCE_POINT_SIZE_PIXELS, projected_density_point_size,
+    renderer_appearance_config,
 };
 use diagnostic::{ViewFailure, ViewPhase, classify_protocol_failure, classify_renderer_failure};
 use orbit_camera::{OrbitCamera, ProjectionMode};
@@ -50,6 +51,7 @@ use scene::{Scene, SceneMetrics};
 use status::{SelectionAction, StatusSnapshot, StreamStatus};
 use status_overlay::StatusOverlay;
 use synthetic::{RESIDENT_BATCH_BUDGET, RESIDENT_BYTE_BUDGET, RESIDENT_POINT_BUDGET};
+use view_pump::{ViewPumpError, ViewSpec};
 use winit::{
     application::ApplicationHandler,
     dpi::{LogicalSize, PhysicalPosition, PhysicalSize},
@@ -97,6 +99,17 @@ fn preserve_failure_or_internal(phase: ViewPhase, error: Box<dyn Error>) -> Box<
         error
     } else {
         internal_failure(phase, error)
+    }
+}
+
+fn view_pump_failure(error: ViewPumpError) -> Box<dyn Error> {
+    match error {
+        ViewPumpError::Planning(error) => internal_failure(ViewPhase::Planning, error),
+        ViewPumpError::RequestReconciliation(error) => {
+            preserve_failure_or_internal(ViewPhase::Planning, error)
+        }
+        ViewPumpError::NodeRead(error) => preserve_failure_or_internal(ViewPhase::NodeRead, error),
+        ViewPumpError::Renderer(error) => renderer_failure(ViewPhase::GpuUpload, error),
     }
 }
 
@@ -1100,8 +1113,12 @@ impl Graphics {
         self.window.pre_present_notify();
         self.queue.present(surface_texture);
         if !self.loads_paused {
-            let transition_actions = self.density_transitions.advance_presented_frame();
-            self.apply_transition_actions(transition_actions)?;
+            view_pump::advance_presented_frame(
+                &mut self.renderer,
+                &mut self.scene,
+                &mut self.density_transitions,
+            )
+            .map_err(view_pump_failure)?;
         }
         if reconfigure_after_present {
             self.configure_surface();
@@ -1316,43 +1333,25 @@ impl Graphics {
     }
 
     fn stream_next_batch(&mut self) -> DemoResult<()> {
-        if self.loads_paused || self.density_transitions.blocks_new_residency() {
+        if self.loads_paused {
             return Ok(());
         }
-        let Some(batch) = self
-            .scene
-            .next_batch()
-            .map_err(|error| preserve_failure_or_internal(ViewPhase::NodeRead, error))?
+        let upload_started = Instant::now();
+        let Some(accepted) = view_pump::accept_next_batch(
+            &mut self.scene,
+            &mut self.renderer,
+            &mut self.density_transitions,
+            VIEW_GENERATION,
+        )
+        .map_err(view_pump_failure)?
         else {
             return Ok(());
         };
-
-        let batch_key = batch.key();
-        let batch_version = batch.version();
-        let update = RenderUpdate::Upsert { batch };
-        let upload_started = Instant::now();
-        let report = match self.renderer.apply(&update) {
-            Ok(report) => report,
-            Err(error) => {
-                self.scene.mark_rejected(batch_key, batch_version);
-                return Err(renderer_failure(ViewPhase::GpuUpload, error));
-            }
-        };
-        if let Some(action) =
-            self.density_transitions
-                .uploaded_batch_presentation(appearance::ConditionalBatch {
-                    view_generation: VIEW_GENERATION,
-                    key: batch_key,
-                    expected_version: batch_version,
-                })
-        {
-            self.apply_transition_actions(vec![action])?;
-        }
-        self.scene.mark_resident(batch_key, batch_version);
         if self.highlights_enabled {
             self.apply_highlights()?;
         }
-        self.metrics.record_upload(report, upload_started.elapsed());
+        self.metrics
+            .record_upload(accepted.upload(), upload_started.elapsed());
         Ok(())
     }
 
@@ -1361,42 +1360,18 @@ impl Graphics {
             self.metrics.record_plan(PlanFacts::default());
             return Ok(());
         }
-        let (hierarchy, plan) = {
-            let planning_nodes = self.scene.planning_nodes();
-            let hierarchy = planning_nodes.as_slice().to_vec();
-            let plan = self
-                .planner
-                .plan(
-                    camera,
-                    viewport,
-                    AvailableNodes::new(VIEW_GENERATION, planning_nodes.as_slice()),
-                    PLANNING_BUDGET,
-                )
-                .map_err(|error| internal_failure(ViewPhase::Planning, error))?;
-            (hierarchy, plan)
-        };
-
-        let transition_actions = self.density_transitions.reconcile(&hierarchy, &plan);
-        self.apply_transition_actions(transition_actions)?;
-        let requests = if self.density_transitions.blocks_new_residency() {
-            &[]
-        } else {
-            plan.requests()
-        };
-        let issued = self
-            .scene
-            .reconcile_requests(plan.demanded_nodes(), requests)
-            .map_err(|error| preserve_failure_or_internal(ViewPhase::Planning, error))?;
-        self.metrics
-            .record_plan(PlanFacts::from_plan(&plan, issued));
-        Ok(())
-    }
-
-    fn apply_transition_actions(&mut self, actions: Vec<TransitionAction>) -> DemoResult<()> {
-        for action in actions {
-            apply_transition_action(&mut self.renderer, &mut self.scene, action)
-                .map_err(|error| renderer_failure(ViewPhase::GpuUpload, error))?;
-        }
+        let planned = view_pump::reconcile_view(
+            &mut self.planner,
+            &mut self.scene,
+            &mut self.renderer,
+            &mut self.density_transitions,
+            ViewSpec::new(camera, viewport, VIEW_GENERATION, PLANNING_BUDGET),
+        )
+        .map_err(view_pump_failure)?;
+        self.metrics.record_plan(PlanFacts::from_plan(
+            planned.plan(),
+            planned.issued_requests(),
+        ));
         Ok(())
     }
 

@@ -20,8 +20,8 @@ use serde::{
 use crate::{
     PLANNING_BUDGET, VIEW_GENERATION,
     appearance::{
-        DensityTransitions, REFERENCE_POINT_SIZE_PIXELS, TransitionAction, apply_transition_action,
-        projected_density_point_size, renderer_appearance_config,
+        DensityTransitions, REFERENCE_POINT_SIZE_PIXELS, projected_density_point_size,
+        renderer_appearance_config,
     },
     diagnostic::{ViewFailure, ViewFailureCode, ViewPhase, classify_renderer_failure},
     orbit_camera::{OrbitCamera, ProjectionMode},
@@ -30,12 +30,13 @@ use crate::{
         STAGING_BYTE_BUDGET, STAGING_POINT_BUDGET,
     },
     scene::{Scene, SceneMetrics},
+    view_pump::{self, TransitionActivity, ViewPumpError, ViewSpec},
 };
 use point_index::{
     NodeReadBudget, PrepareDisposition, PrepareLimits, PreparedIndex, prepare_fresh_with_recipe,
     prepare_with_recipe,
 };
-use point_view::{AvailableNodes, PlannerConfig, ViewPlanner};
+use point_view::{PlannerConfig, ViewPlanner};
 use render_protocol::{RenderLimits, RenderUpdate, ResidentStats, ViewGenerationKey, Viewport};
 use render_wgpu::{DepthCueStatus, Frame, PointStyle, WgpuRenderer};
 use renderer_demo::display::DisplayMode;
@@ -649,34 +650,36 @@ fn run_trace_frame(runtime: &mut TraceRuntime<'_>) -> Result<FrameEvidence, View
         .camera
         .as_render_camera()
         .map_err(|error| ViewFailure::internal(ViewPhase::Planning, error))?;
-    let (hierarchy, plan) = {
-        let nodes = runtime.scene.planning_nodes();
-        let hierarchy = nodes.as_slice().to_vec();
-        let plan = runtime
-            .planner
-            .plan(
-                &render_camera,
-                viewport,
-                AvailableNodes::new(runtime.view_generation, nodes.as_slice()),
-                PLANNING_BUDGET,
-            )
-            .map_err(|error| ViewFailure::internal(ViewPhase::Planning, error))?;
-        (hierarchy, plan)
-    };
-    let transition_actions = runtime.density_transitions.reconcile(&hierarchy, &plan);
-    let mut transition_activity = apply_transition_actions(runtime, transition_actions)?;
-    let requests = if runtime.density_transitions.blocks_new_residency() {
-        &[]
-    } else {
-        plan.requests()
-    };
-    let issued = runtime
-        .scene
-        .reconcile_requests(plan.demanded_nodes(), requests)
-        .map_err(|error| {
-            preserve_scene_failure(error, ViewPhase::Planning, "request reconciliation")
-        })?;
-    let accepted_batch = accept_next_batch(runtime, &mut transition_activity)?;
+    let planned = view_pump::reconcile_view(
+        runtime.planner,
+        runtime.scene,
+        runtime.renderer,
+        runtime.density_transitions,
+        ViewSpec::new(
+            &render_camera,
+            viewport,
+            runtime.view_generation,
+            PLANNING_BUDGET,
+        ),
+    )
+    .map_err(classify_view_pump_failure)?;
+    let (plan, issued, mut transition_activity) = planned.into_parts();
+    observe_transition_activity(runtime.evidence, &transition_activity);
+    let accepted = view_pump::accept_next_batch(
+        runtime.scene,
+        runtime.renderer,
+        runtime.density_transitions,
+        runtime.view_generation,
+    )
+    .map_err(classify_view_pump_failure)?;
+    let accepted_batch = accepted.is_some();
+    if let Some(accepted) = accepted {
+        let (upload, transitions) = accepted.into_parts();
+        runtime.evidence.observe_resident(upload.resident());
+        runtime.evidence.observe_upload(upload);
+        observe_transition_activity(runtime.evidence, &transitions);
+        transition_activity.add(transitions);
+    }
     let submitted = std::time::Instant::now();
     let point_size = projected_density_point_size(
         viewport,
@@ -702,8 +705,14 @@ fn run_trace_frame(runtime: &mut TraceRuntime<'_>) -> Result<FrameEvidence, View
         viewport,
         style,
     )?;
-    let completed_transition = runtime.density_transitions.advance_presented_frame();
-    transition_activity.add(apply_transition_actions(runtime, completed_transition)?);
+    let completed_transition = view_pump::advance_presented_frame(
+        runtime.renderer,
+        runtime.scene,
+        runtime.density_transitions,
+    )
+    .map_err(classify_view_pump_failure)?;
+    observe_transition_activity(runtime.evidence, &completed_transition);
+    transition_activity.add(completed_transition);
     if frame_report.drawn_points() > 0 {
         runtime
             .evidence
@@ -714,81 +723,30 @@ fn run_trace_frame(runtime: &mut TraceRuntime<'_>) -> Result<FrameEvidence, View
         demanded_nodes: u64::try_from(plan.demanded_nodes().len()).unwrap_or(u64::MAX),
         requested_nodes: u64::try_from(plan.requests().len()).unwrap_or(u64::MAX),
         issued_nodes: issued,
-        retired_nodes: transition_activity.retired,
-        presentation_updates: transition_activity.presentations,
+        retired_nodes: transition_activity.retired(),
+        presentation_updates: transition_activity.presentations(),
         accepted_batch,
         frame_report,
         submitted_frame_nanoseconds: elapsed_nanoseconds(submitted.elapsed()),
     })
 }
 
-fn accept_next_batch(
-    runtime: &mut TraceRuntime<'_>,
-    transition_activity: &mut TransitionActivity,
-) -> Result<bool, ViewFailure> {
-    if runtime.density_transitions.blocks_new_residency() {
-        return Ok(false);
-    }
-    let Some(batch) = runtime
-        .scene
-        .next_batch()
-        .map_err(|error| preserve_scene_failure(error, ViewPhase::NodeRead, "node read"))?
-    else {
-        return Ok(false);
-    };
-    let key = batch.key();
-    let version = batch.version();
-    let update = match runtime.renderer.apply(&RenderUpdate::Upsert { batch }) {
-        Ok(update) => update,
-        Err(error) => {
-            runtime.scene.mark_rejected(key, version);
-            return Err(classify_renderer_failure(ViewPhase::GpuUpload, error));
+fn classify_view_pump_failure(error: ViewPumpError) -> ViewFailure {
+    match error {
+        ViewPumpError::Planning(error) => ViewFailure::internal(ViewPhase::Planning, error),
+        ViewPumpError::RequestReconciliation(error) => {
+            preserve_scene_failure(error, ViewPhase::Planning, "request reconciliation")
         }
-    };
-    runtime.evidence.observe_resident(update.resident());
-    runtime.evidence.observe_upload(update);
-    if let Some(action) = runtime.density_transitions.uploaded_batch_presentation(
-        crate::appearance::ConditionalBatch {
-            view_generation: runtime.view_generation,
-            key,
-            expected_version: version,
-        },
-    ) {
-        transition_activity.add(apply_transition_actions(runtime, vec![action])?);
-    }
-    runtime.scene.mark_resident(key, version);
-    Ok(true)
-}
-
-fn apply_transition_actions(
-    runtime: &mut TraceRuntime<'_>,
-    actions: Vec<TransitionAction>,
-) -> Result<TransitionActivity, ViewFailure> {
-    let mut activity = TransitionActivity::default();
-    for action in actions {
-        let retiring = action.retiring_batch();
-        let report = apply_transition_action(runtime.renderer, runtime.scene, action)
-            .map_err(|error| classify_renderer_failure(ViewPhase::GpuUpload, error))?;
-        runtime.evidence.observe_resident(report.resident());
-        if retiring.is_some() {
-            activity.retired = activity.retired.saturating_add(1);
-        } else {
-            activity.presentations = activity.presentations.saturating_add(1);
+        ViewPumpError::NodeRead(error) => {
+            preserve_scene_failure(error, ViewPhase::NodeRead, "node read")
         }
+        ViewPumpError::Renderer(error) => classify_renderer_failure(ViewPhase::GpuUpload, error),
     }
-    Ok(activity)
 }
 
-#[derive(Clone, Copy, Debug, Default)]
-struct TransitionActivity {
-    presentations: u64,
-    retired: u64,
-}
-
-impl TransitionActivity {
-    fn add(&mut self, other: Self) {
-        self.presentations = self.presentations.saturating_add(other.presentations);
-        self.retired = self.retired.saturating_add(other.retired);
+fn observe_transition_activity(evidence: &mut EntryEvidence, activity: &TransitionActivity) {
+    for report in activity.reports() {
+        evidence.observe_resident(report.resident());
     }
 }
 
