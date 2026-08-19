@@ -40,6 +40,11 @@ pub(crate) struct CollectedTerrainInput {
     pub(crate) attempt_peak_working_bytes: u64,
 }
 
+pub(crate) struct DerivedTerrain {
+    pub(crate) surface: TerrainSurface,
+    pub(crate) work_units: u64,
+}
+
 #[derive(Default)]
 struct WorkMeter {
     used: u64,
@@ -180,7 +185,9 @@ fn run(
     control: &OperationControl,
 ) -> Result<TerrainSurface, TerrainError> {
     let input = collect_input(snapshot, recipe, limits, control)?;
-    derive_collected(input, limits, control)
+    let derived = derive_collected(input, limits, control)?;
+    control.complete_progress(derived.work_units)?;
+    Ok(derived.surface)
 }
 
 pub(crate) fn collect_input(
@@ -269,7 +276,7 @@ pub(crate) fn derive_collected(
     collected: CollectedTerrainInput,
     limits: TerrainLimits,
     control: &OperationControl,
-) -> Result<TerrainSurface, TerrainError> {
+) -> Result<DerivedTerrain, TerrainError> {
     let CollectedTerrainInput {
         snapshot: snapshot_provenance,
         recipe,
@@ -457,8 +464,10 @@ pub(crate) fn derive_collected(
             faces,
         }),
     };
-    context.control.complete_progress(context.work.used)?;
-    Ok(surface)
+    Ok(DerivedTerrain {
+        surface,
+        work_units: context.work.used,
+    })
 }
 
 fn validate_spatial_reference(reference: &CoordinateReference) -> Result<(), TerrainError> {

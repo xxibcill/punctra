@@ -761,6 +761,7 @@ fn run_prepare(
             TerrainError::io("sync Surface parent directory", target.display(), error)
         })?;
         parent.sync()?;
+        control.complete_progress(0)?;
         return Ok(opened);
     }
 
@@ -836,6 +837,7 @@ fn run_prepare(
             parent.sync()?;
         }
         cleanup_after_publication(&parent, &staged, None);
+        control.complete_progress(0)?;
         return Ok(result);
     }
 
@@ -878,7 +880,9 @@ fn run_prepare(
 
     maybe_injected_cancellation(PersistenceBoundary::CancelAfterWork, control);
     control.check_cancelled()?;
-    let surface = derive_collected(input, limits.derivation(), control)?;
+    let derived = derive_collected(input, limits.derivation(), control)?;
+    let surface = derived.surface;
+    let completion_work_units = derived.work_units;
     let peak = surface.descriptor().accounted_peak_working_bytes();
     let topology_steps = surface.descriptor().topology_steps();
     let retained_temporary_bytes = work_witness.byte_len()?;
@@ -971,6 +975,7 @@ fn run_prepare(
         parent.sync()?;
     }
     cleanup_after_publication(&parent, &staged, Some(work_witness));
+    control.complete_progress(completion_work_units)?;
     Ok(result)
 }
 
@@ -5479,6 +5484,89 @@ mod tests {
             .report()
             .disposition(),
             TerrainPrepareDisposition::Opened
+        );
+    }
+
+    #[test]
+    fn prepare_progress_is_terminal_only_after_durable_success() {
+        let completed = Fixture::new("prepare-progress-completed");
+        let completed_target = completed.path("surface.pterr");
+        let cold_control = OperationControl::new();
+        let cold_handle = cold_control.handle();
+        let cold = run_prepare_direct(&completed, &completed_target, cold_control).unwrap();
+        assert_eq!(
+            cold.report().disposition(),
+            TerrainPrepareDisposition::Built
+        );
+        assert_eq!(
+            cold_handle.progress().phase(),
+            foundation_runtime::ProgressPhase::COMPLETE
+        );
+
+        let warm_control = OperationControl::new();
+        let warm_handle = warm_control.handle();
+        let warm = run_prepare_direct(&completed, &completed_target, warm_control).unwrap();
+        assert_eq!(
+            warm.report().disposition(),
+            TerrainPrepareDisposition::Opened
+        );
+        assert_eq!(
+            warm_handle.progress().phase(),
+            foundation_runtime::ProgressPhase::COMPLETE
+        );
+
+        let failed = Fixture::new("prepare-progress-failed");
+        let failed_target = failed.path("surface.pterr");
+        install_io_fault(PersistenceBoundary::StageCreate, io::ErrorKind::Other);
+        let failed_control = OperationControl::new();
+        let failed_handle = failed_control.handle();
+        assert!(matches!(
+            run_prepare_direct(&failed, &failed_target, failed_control),
+            Err(TerrainError::Io { .. })
+        ));
+        assert_io_fault_consumed();
+        assert_ne!(
+            failed_handle.progress().phase(),
+            foundation_runtime::ProgressPhase::COMPLETE
+        );
+
+        let resumed_control = OperationControl::new();
+        let resumed_handle = resumed_control.handle();
+        let resumed = run_prepare_direct(&failed, &failed_target, resumed_control).unwrap();
+        assert_eq!(
+            resumed.report().disposition(),
+            TerrainPrepareDisposition::ResumedInput
+        );
+        assert_eq!(
+            resumed_handle.progress().phase(),
+            foundation_runtime::ProgressPhase::COMPLETE
+        );
+
+        let staged = Fixture::new("prepare-progress-staged");
+        let staged_target = staged.path("surface.pterr");
+        install_io_fault(PersistenceBoundary::TargetLink, io::ErrorKind::Other);
+        let staged_failure_control = OperationControl::new();
+        let staged_failure_handle = staged_failure_control.handle();
+        assert!(matches!(
+            run_prepare_direct(&staged, &staged_target, staged_failure_control),
+            Err(TerrainError::Io { .. })
+        ));
+        assert_io_fault_consumed();
+        assert_ne!(
+            staged_failure_handle.progress().phase(),
+            foundation_runtime::ProgressPhase::COMPLETE
+        );
+
+        let publication_control = OperationControl::new();
+        let publication_handle = publication_control.handle();
+        let publication = run_prepare_direct(&staged, &staged_target, publication_control).unwrap();
+        assert_eq!(
+            publication.report().disposition(),
+            TerrainPrepareDisposition::ResumedPublication
+        );
+        assert_eq!(
+            publication_handle.progress().phase(),
+            foundation_runtime::ProgressPhase::COMPLETE
         );
     }
 
