@@ -20,7 +20,7 @@ use crate::{
         PICK_READBACK_ROW_BYTES, PICK_TOKEN_BYTES, PickError, PickRecord, PickRequest, PickTable,
         PickTicket,
     },
-    pipeline::{DEPTH_FORMAT, PointPipelines},
+    pipeline::{DEPTH_FORMAT, EdlPipeline, PointPipelines},
     targets::{DepthTarget, PickTarget, RenderTargets},
 };
 
@@ -211,8 +211,28 @@ pub struct WgpuRenderer {
     batches: BTreeMap<BatchKey, GpuBatch>,
     targets: RenderTargets,
     pick_table: Option<Arc<PickTable>>,
-    depth_cue_status: DepthCueStatus,
-    edl_uniform_buffer: Option<wgpu::Buffer>,
+    eye_dome: EyeDomeState,
+}
+
+enum EyeDomeState {
+    Inactive(DepthCueStatus),
+    Active {
+        pipeline: EdlPipeline,
+        uniform_buffer: wgpu::Buffer,
+    },
+}
+
+impl EyeDomeState {
+    const fn status(&self) -> DepthCueStatus {
+        match self {
+            Self::Inactive(status) => *status,
+            Self::Active { .. } => DepthCueStatus::Active,
+        }
+    }
+
+    const fn is_active(&self) -> bool {
+        matches!(self, Self::Active { .. })
+    }
 }
 
 impl WgpuRenderer {
@@ -239,8 +259,25 @@ impl WgpuRenderer {
             return Err(RendererError::InvalidColorFormat(config.color_format));
         }
 
-        let depth_cue_status = depth_cue_status(device, config);
-        let edl_active = depth_cue_status == DepthCueStatus::Active;
+        let eye_dome = match (depth_cue_status(device, config), config.eye_dome_lighting) {
+            (DepthCueStatus::Active, Some(cue)) => EyeDomeState::Active {
+                pipeline: EdlPipeline::new(device, config.color_format),
+                uniform_buffer: device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("punctra eye-dome uniform"),
+                    contents: bytemuck::bytes_of(&EdlUniform {
+                        strength: cue.strength(),
+                        radius_pixels: cue.radius_pixels(),
+                        _padding: [0; 2],
+                    }),
+                    usage: wgpu::BufferUsages::UNIFORM,
+                }),
+            },
+            (DepthCueStatus::Disabled, _) => EyeDomeState::Inactive(DepthCueStatus::Disabled),
+            (DepthCueStatus::UnsupportedFallback, _) | (DepthCueStatus::Active, None) => {
+                EyeDomeState::Inactive(DepthCueStatus::UnsupportedFallback)
+            }
+        };
+        let edl_active = eye_dome.is_active();
         let pipelines = PointPipelines::new(device, config.color_format, edl_active);
         let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("punctra camera uniform"),
@@ -253,21 +290,6 @@ impl WgpuRenderer {
             &camera_buffer,
             "punctra camera bind group",
         );
-        let edl_uniform_buffer = match (edl_active, config.eye_dome_lighting) {
-            (true, Some(cue)) => Some(device.create_buffer_init(
-                &wgpu::util::BufferInitDescriptor {
-                    label: Some("punctra eye-dome uniform"),
-                    contents: bytemuck::bytes_of(&EdlUniform {
-                        strength: cue.strength(),
-                        radius_pixels: cue.radius_pixels(),
-                        _padding: [0; 2],
-                    }),
-                    usage: wgpu::BufferUsages::UNIFORM,
-                },
-            )),
-            _ => None,
-        };
-
         Ok(Self {
             identity: Arc::new(RendererIdentity),
             device: device.clone(),
@@ -278,8 +300,7 @@ impl WgpuRenderer {
             batches: BTreeMap::new(),
             targets: RenderTargets::new(edl_active.then_some(config.color_format)),
             pick_table: None,
-            depth_cue_status,
-            edl_uniform_buffer,
+            eye_dome,
         })
     }
 
@@ -287,7 +308,7 @@ impl WgpuRenderer {
     /// using its explicit unenhanced fallback.
     #[must_use]
     pub const fn depth_cue_status(&self) -> DepthCueStatus {
-        self.depth_cue_status
+        self.eye_dome.status()
     }
 
     /// Returns the number of resident Points currently carrying the highlight
@@ -351,7 +372,7 @@ impl WgpuRenderer {
                 let batch = self
                     .batches
                     .get_mut(&key)
-                    .ok_or(RendererError::GpuBatchMissing { key })?;
+                    .ok_or(ProtocolError::BatchNotResident { key })?;
                 batch.presentation_weight = weight;
             }
             UpdateEffect::HighlightsSet => {
@@ -406,16 +427,11 @@ impl WgpuRenderer {
         )?;
 
         let clear = frame.style().clear_color();
-        if self.depth_cue_status == DepthCueStatus::Active {
-            let edl_pipeline = self
-                .pipelines
-                .edl
-                .as_ref()
-                .ok_or(RendererError::DepthCueResourcesUnavailable)?;
-            let edl_uniform = self
-                .edl_uniform_buffer
-                .as_ref()
-                .ok_or(RendererError::DepthCueResourcesUnavailable)?;
+        if let EyeDomeState::Active {
+            pipeline: edl_pipeline,
+            uniform_buffer: edl_uniform,
+        } = &self.eye_dome
+        {
             let (depth, color, edl_bind_group) =
                 self.targets
                     .eye_dome(&self.device, viewport, &edl_pipeline.layout, edl_uniform);
@@ -1033,15 +1049,6 @@ pub enum RendererError {
     /// Internal generation pick metadata was unexpectedly absent.
     #[error("active View generation has no pick metadata")]
     PickMetadataUnavailable,
-    /// Protocol and GPU batch maps unexpectedly diverged.
-    #[error("resident protocol batch {key:?} is missing from GPU state")]
-    GpuBatchMissing {
-        /// The missing resident batch.
-        key: BatchKey,
-    },
-    /// Active eye-dome state unexpectedly lacked its fixed resources.
-    #[error("active eye-dome lighting resources are unavailable")]
-    DepthCueResourcesUnavailable,
     /// A batch origin is too far from the camera to fit the display model.
     #[error("batch {key:?} origin axis {axis} is outside finite f32 camera-relative range")]
     BatchOriginOutOfRange {

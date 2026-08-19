@@ -8,7 +8,6 @@ pub(crate) struct PointPipelines {
     pub(crate) batch_layout: wgpu::BindGroupLayout,
     pub(crate) draw: wgpu::RenderPipeline,
     pub(crate) pick: wgpu::RenderPipeline,
-    pub(crate) edl: Option<EdlPipeline>,
 }
 
 pub(crate) struct EdlPipeline {
@@ -78,20 +77,17 @@ impl PointPipelines {
             "pick_fragment",
             "punctra pick pipeline",
         );
-        let edl = enable_edl.then(|| EdlPipeline::new(device, color_format));
-
         Self {
             camera_layout,
             batch_layout,
             draw,
             pick,
-            edl,
         }
     }
 }
 
 impl EdlPipeline {
-    fn new(device: &wgpu::Device, color_format: wgpu::TextureFormat) -> Self {
+    pub(crate) fn new(device: &wgpu::Device, color_format: wgpu::TextureFormat) -> Self {
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("punctra eye-dome bind group layout"),
             entries: &[
