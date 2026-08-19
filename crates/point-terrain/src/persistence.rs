@@ -422,6 +422,12 @@ struct PreparedSurfaceData {
     face_offset: u64,
     vertex_directory_offset: u64,
     face_directory_offset: u64,
+    block_checksums: Arc<VerifiedBlockChecksums>,
+}
+
+struct VerifiedBlockChecksums {
+    vertices: Vec<[u8; 32]>,
+    faces: Vec<[u8; 32]>,
 }
 
 /// Immutable file-backed disk-v1 Terrain Surface.
@@ -531,6 +537,7 @@ impl PreparedTerrainSurface {
             record_count: self.inner.descriptor.vertex_count,
             record_offset: self.inner.vertex_offset,
             directory_offset: self.inner.vertex_directory_offset,
+            block_checksums: Arc::clone(&self.inner.block_checksums),
             verify_buffer: plan.verify_buffer,
             batch_records: plan.batch_records,
             max_batch_payload_bytes: limits.max_batch_payload_bytes(),
@@ -565,6 +572,7 @@ impl PreparedTerrainSurface {
             record_count: self.inner.descriptor.face_count,
             record_offset: self.inner.face_offset,
             directory_offset: self.inner.face_directory_offset,
+            block_checksums: Arc::clone(&self.inner.block_checksums),
             verify_buffer: plan.verify_buffer,
             batch_records: plan.batch_records,
             max_batch_payload_bytes: limits.max_batch_payload_bytes(),
@@ -598,6 +606,7 @@ pub struct SurfaceVertexBatches {
     record_count: u64,
     record_offset: u64,
     directory_offset: u64,
+    block_checksums: Arc<VerifiedBlockChecksums>,
     verify_buffer: Vec<u8>,
     batch_records: u64,
     max_batch_payload_bytes: u64,
@@ -632,6 +641,7 @@ pub struct SurfaceFaceBatches {
     record_count: u64,
     record_offset: u64,
     directory_offset: u64,
+    block_checksums: Arc<VerifiedBlockChecksums>,
     verify_buffer: Vec<u8>,
     batch_records: u64,
     max_batch_payload_bytes: u64,
@@ -1122,6 +1132,7 @@ fn open_work(
         path,
         WORK_KIND,
         Some(control),
+        None,
     )?;
     require_within(
         "Ground Input Points",
@@ -1384,11 +1395,12 @@ fn open_artifact(
         decoded.descriptor.face_count,
         limits.derivation().max_faces(),
     )?;
-    validate_artifact_blocks(
+    let block_checksums = validate_artifact_blocks(
         &mut opened.file,
         decoded.layout,
         &decoded.descriptor,
         limits.max_verify_buffer_bytes(),
+        limits.max_retained_handle_bytes(),
         path,
         control,
     )?;
@@ -1403,7 +1415,11 @@ fn open_artifact(
     control.check_cancelled()?;
     opened.verify_binding(path, ARTIFACT_KIND)?;
     parent.verify()?;
-    let accounted_handle_bytes = accounted_retained_handle_bytes(path);
+    let accounted_handle_bytes = accounted_retained_handle_bytes(
+        path,
+        block_checksums.vertices.capacity(),
+        block_checksums.faces.capacity(),
+    );
     require_within(
         "Surface retained handle bytes",
         accounted_handle_bytes,
@@ -1431,6 +1447,7 @@ fn open_artifact(
             face_offset: decoded.layout.face_offset,
             vertex_directory_offset: decoded.layout.vertex_directory_offset,
             face_directory_offset: decoded.layout.face_directory_offset,
+            block_checksums: Arc::new(block_checksums),
         }),
     })
 }
@@ -1452,14 +1469,71 @@ fn check_verification_cancelled(control: Option<&OperationControl>) -> Result<()
     }
 }
 
+fn allocate_block_checksums(
+    layout: ArtifactLayout,
+    path: &Path,
+    max_retained_handle_bytes: u64,
+) -> Result<VerifiedBlockChecksums, TerrainError> {
+    let vertex_count = usize::try_from(layout.vertex_block_count).map_err(|_| {
+        TerrainError::resource(
+            "Surface retained handle bytes",
+            u64::MAX,
+            max_retained_handle_bytes,
+        )
+    })?;
+    let face_count = usize::try_from(layout.face_block_count).map_err(|_| {
+        TerrainError::resource(
+            "Surface retained handle bytes",
+            u64::MAX,
+            max_retained_handle_bytes,
+        )
+    })?;
+    let required = accounted_retained_handle_bytes(path, vertex_count, face_count);
+    require_within(
+        "Surface retained handle bytes",
+        required,
+        max_retained_handle_bytes,
+    )?;
+    let mut vertices = Vec::new();
+    vertices.try_reserve_exact(vertex_count).map_err(|_| {
+        TerrainError::resource(
+            "Surface retained handle bytes",
+            required,
+            max_retained_handle_bytes,
+        )
+    })?;
+    let mut faces = Vec::new();
+    faces.try_reserve_exact(face_count).map_err(|_| {
+        TerrainError::resource(
+            "Surface retained handle bytes",
+            required,
+            max_retained_handle_bytes,
+        )
+    })?;
+    let checksums = VerifiedBlockChecksums { vertices, faces };
+    let allocated = accounted_retained_handle_bytes(
+        path,
+        checksums.vertices.capacity(),
+        checksums.faces.capacity(),
+    );
+    require_within(
+        "Surface retained handle bytes",
+        allocated,
+        max_retained_handle_bytes,
+    )?;
+    Ok(checksums)
+}
+
 fn validate_artifact_blocks(
     file: &mut File,
     layout: ArtifactLayout,
     descriptor: &SurfaceArtifactDescriptor,
     max_verify_buffer_bytes: u64,
+    max_retained_handle_bytes: u64,
     path: &Path,
     control: &OperationControl,
-) -> Result<(), TerrainError> {
+) -> Result<VerifiedBlockChecksums, TerrainError> {
+    let mut checksums = allocate_block_checksums(layout, path, max_retained_handle_bytes)?;
     validate_record_blocks(
         file,
         RecordBlockLayout {
@@ -1474,6 +1548,7 @@ fn validate_artifact_blocks(
         path,
         ARTIFACT_KIND,
         Some(control),
+        Some(&mut checksums.vertices),
     )?;
     validate_record_blocks(
         file,
@@ -1489,7 +1564,9 @@ fn validate_artifact_blocks(
         path,
         ARTIFACT_KIND,
         Some(control),
-    )
+        Some(&mut checksums.faces),
+    )?;
+    Ok(checksums)
 }
 
 fn validate_record_blocks(
@@ -1499,6 +1576,7 @@ fn validate_record_blocks(
     path: &Path,
     kind: &'static str,
     control: Option<&OperationControl>,
+    mut captured_checksums: Option<&mut Vec<[u8; 32]>>,
 ) -> Result<(), TerrainError> {
     if layout.block_count != block_count(layout.record_count) {
         return Err(TerrainError::corrupt_surface(
@@ -1511,7 +1589,11 @@ fn validate_record_blocks(
     let mut buffer = verification_buffer(max_verify_buffer_bytes, max_block_bytes)?;
     for block_index in 0..layout.block_count {
         check_verification_cancelled(control)?;
-        verify_record_block(file, layout, block_index, &mut buffer, path, kind, control)?;
+        let expected =
+            verify_record_block(file, layout, block_index, &mut buffer, path, kind, control)?;
+        if let Some(checksums) = captured_checksums.as_deref_mut() {
+            checksums.push(expected);
+        }
     }
     Ok(())
 }
@@ -1525,6 +1607,7 @@ fn read_verified_records(
     file: &mut File,
     opened_metadata: &fs::Metadata,
     layout: RecordBlockLayout,
+    verified_checksums: &[[u8; 32]],
     first_record: u64,
     record_count: u64,
     buffer: &mut [u8],
@@ -1533,6 +1616,13 @@ fn read_verified_records(
     boundary: StreamReadBoundary,
     mut decode: impl FnMut(u64, &[u8]) -> Result<(), TerrainError>,
 ) -> Result<(), TerrainError> {
+    if usize::try_from(layout.block_count).ok() != Some(verified_checksums.len()) {
+        return Err(TerrainError::corrupt_surface(
+            kind,
+            path.display(),
+            "verified block checksum count does not match the artifact layout",
+        ));
+    }
     let end_record = first_record.checked_add(record_count).ok_or_else(|| {
         TerrainError::corrupt_surface(kind, path.display(), "batch record range overflows")
     })?;
@@ -1656,8 +1746,19 @@ fn read_verified_records(
             .map_err(|error| {
                 TerrainError::io("seek Surface block checksum", path.display(), error)
             })?;
-        let expected = read_exact_array::<32>(file, path, kind)?;
-        if expected != *hasher.finalize().as_bytes() {
+        let live_checksum = read_exact_array::<32>(file, path, kind)?;
+        let verified_checksum = verified_checksums
+            .get(usize::try_from(block_index).unwrap_or(usize::MAX))
+            .ok_or_else(|| {
+                TerrainError::corrupt_surface(
+                    kind,
+                    path.display(),
+                    "record block lies outside the verified checksum directory",
+                )
+            })?;
+        if live_checksum != *verified_checksum
+            || *verified_checksum != *hasher.finalize().as_bytes()
+        {
             return Err(TerrainError::corrupt_surface(
                 kind,
                 path.display(),
@@ -1702,7 +1803,7 @@ fn verify_record_block(
     path: &Path,
     kind: &'static str,
     control: Option<&OperationControl>,
-) -> Result<(), TerrainError> {
+) -> Result<[u8; 32], TerrainError> {
     let first_record = block_index.checked_mul(RECORDS_PER_BLOCK).ok_or_else(|| {
         TerrainError::corrupt_surface(kind, path.display(), "block index overflows")
     })?;
@@ -1754,7 +1855,7 @@ fn verify_record_block(
             "record block checksum does not match",
         ));
     }
-    Ok(())
+    Ok(expected)
 }
 
 fn verification_buffer(
@@ -2845,6 +2946,7 @@ fn read_vertex_batch(
             block_count: block_count(stream.record_count),
             domain: VERTEX_BLOCK_DOMAIN,
         },
+        &stream.block_checksums.vertices,
         first_record,
         count,
         &mut stream.verify_buffer,
@@ -2923,6 +3025,7 @@ fn read_face_batch(
             block_count: block_count(stream.record_count),
             domain: FACE_BLOCK_DOMAIN,
         },
+        &stream.block_checksums.faces,
         first_record,
         count,
         &mut stream.verify_buffer,
@@ -3652,13 +3755,22 @@ fn path_matches_file(
         && same_file_identity(&opened, &current))
 }
 
-fn accounted_retained_handle_bytes(path: &Path) -> u64 {
+fn accounted_retained_handle_bytes(
+    path: &Path,
+    vertex_block_capacity: usize,
+    face_block_capacity: usize,
+) -> u64 {
     let fixed = mem::size_of::<PreparedTerrainSurface>()
         .saturating_add(mem::size_of::<PreparedSurfaceData>())
         .saturating_add(mem::size_of::<Mutex<File>>())
-        .saturating_add(4_usize.saturating_mul(mem::size_of::<usize>()));
+        .saturating_add(mem::size_of::<VerifiedBlockChecksums>())
+        .saturating_add(6_usize.saturating_mul(mem::size_of::<usize>()));
+    let checksum_capacity = vertex_block_capacity
+        .saturating_add(face_block_capacity)
+        .saturating_mul(mem::size_of::<[u8; 32]>());
     u64::try_from(fixed)
         .unwrap_or(u64::MAX)
+        .saturating_add(u64::try_from(checksum_capacity).unwrap_or(u64::MAX))
         .saturating_add(path_encoded_bytes(path))
 }
 
@@ -4383,6 +4495,8 @@ mod tests {
             faces.descriptor().face_count(),
         )
         .unwrap();
+        let vertex_modified = fs::metadata(&vertex_target).unwrap().modified().unwrap();
+        let face_modified = fs::metadata(&face_target).unwrap().modified().unwrap();
 
         let mut vertex_bytes = fs::read(&vertex_target).unwrap();
         vertex_bytes[usize::try_from(layout.vertex_offset).unwrap()] ^= 0x80;
@@ -4395,9 +4509,21 @@ mod tests {
             VERTEX_BLOCK_DOMAIN,
         );
         fs::write(&vertex_target, vertex_bytes).unwrap();
+        OpenOptions::new()
+            .write(true)
+            .open(&vertex_target)
+            .unwrap()
+            .set_times(fs::FileTimes::new().set_modified(vertex_modified))
+            .unwrap();
 
         let mut face_bytes = fs::read(&face_target).unwrap();
-        face_bytes[usize::try_from(layout.face_offset).unwrap()] ^= 0x80;
+        let face_start = usize::try_from(layout.face_offset).unwrap();
+        for byte in 0..mem::size_of::<u32>() {
+            face_bytes.swap(
+                face_start + mem::size_of::<u32>() + byte,
+                face_start + 2 * mem::size_of::<u32>() + byte,
+            );
+        }
         rewrite_record_checksums(
             &mut face_bytes,
             layout.face_offset,
@@ -4407,6 +4533,12 @@ mod tests {
             FACE_BLOCK_DOMAIN,
         );
         fs::write(&face_target, face_bytes).unwrap();
+        OpenOptions::new()
+            .write(true)
+            .open(&face_target)
+            .unwrap()
+            .set_times(fs::FileTimes::new().set_modified(face_modified))
+            .unwrap();
 
         let vertex_error = vertices
             .vertex_batches(SurfaceReadLimits::default())
@@ -4420,14 +4552,8 @@ mod tests {
             .next()
             .unwrap()
             .unwrap_err();
-        assert_corruption_reason(
-            vertex_error,
-            "artifact file state changed after complete open verification",
-        );
-        assert_corruption_reason(
-            face_error,
-            "artifact file state changed after complete open verification",
-        );
+        assert_corruption_reason(vertex_error, "record block checksum does not match");
+        assert_corruption_reason(face_error, "record block checksum does not match");
     }
 
     #[cfg(unix)]
