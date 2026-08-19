@@ -25,7 +25,7 @@ use crate::{
 };
 
 /// Immutable construction options for a [`WgpuRenderer`].
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct RendererConfig {
     color_format: wgpu::TextureFormat,
     limits: RenderLimits,
@@ -70,6 +70,8 @@ pub struct EyeDomeLighting {
     strength: f32,
     radius_pixels: u32,
 }
+
+impl Eq for EyeDomeLighting {}
 
 impl EyeDomeLighting {
     /// Creates a depth cue with strength in `(0, 10]` and a radius from one to
@@ -1197,6 +1199,13 @@ fn validate_batch_buffer_size(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn assert_eq_implementation<T: Eq>() {}
+
+    #[test]
+    fn renderer_config_preserves_exact_equality() {
+        assert_eq_implementation::<RendererConfig>();
+    }
 
     #[test]
     fn eye_dome_lighting_accepts_exact_bounds() {
