@@ -1907,7 +1907,7 @@ impl PlanFacts {
     }
 
     const fn has_stream_work(self) -> bool {
-        self.load_candidates > 0 || self.issued > 0 || self.retirements > 0
+        self.demanded > 0 || self.load_candidates > 0 || self.issued > 0 || self.retirements > 0
     }
 }
 
@@ -2234,6 +2234,10 @@ mod tests {
 
         let running = PlanFacts::from_plan(&plan, 1);
         let paused = PlanFacts::default();
+        let demanded_only = PlanFacts {
+            demanded: 1,
+            ..PlanFacts::default()
+        };
 
         assert_eq!(running.issued, running.load_candidates);
         assert_eq!(paused.demanded, 0);
@@ -2241,6 +2245,7 @@ mod tests {
         assert_eq!(paused.issued, 0);
         assert_eq!(paused.retirements, 0);
         assert!(!paused.has_stream_work());
+        assert!(demanded_only.has_stream_work());
     }
 
     #[test]
