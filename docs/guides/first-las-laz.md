@@ -61,13 +61,17 @@ The available controls are:
   target-plane scale;
 - `R`: reset the camera while keeping the selected projection;
 - `H`: toggle stable-identity highlight coloring;
-- Space: pause or resume new node materialization; and
+- Space: freeze or resume planner, request, materialization, and retirement
+  work while keeping the current resident display visible; and
 - Escape: exit.
 
-The title separates LOD demand, candidates, issued requests, retention,
-retirement, queue/staging facts, and resident nodes. It labels resident
-Coverage as `Sampled`, `Complete`, or a mix. Pausing prevents new requests from
-being issued; it does not turn the current partial display into an exact
+The on-canvas panel labels resident Coverage as `Sampled`, `Complete`, or a
+mix alongside the display, projection, loading state, Point counts, selection,
+orientation, scale, cursor, and palette facts. The compact title contains only
+the package-derived View name/version. Detailed LOD demand, candidates, issued
+requests, retention, retirement, queue/staging, resident-node, timing, and
+resource facts are printed as a separate terminal transcript. Pausing freezes
+View lifecycle work; it does not turn the current partial display into an exact
 result.
 
 ## 4. Try Source Attributes
@@ -152,6 +156,19 @@ build, then records a separate immediate warm open. It preserves and rejects an
 existing or resumable index rather than deleting or mislabeling it.
 Use a new report target for a new timed run; a different existing report is
 never overwritten.
+
+For the pre-v0.13 field lane, set `pre_v0_13_qualification` to `true` only in a
+private manifest containing at least five permitted projects from three firms,
+all five display modes in both projections, and the complete bounded
+known-feature outcome set. The runner then ignores the short fixed-frame
+observation count as a stopping condition: every pose must settle within
+`settlement_frame_ceiling` and remain quiet for 300 rendered frames. Each trace
+records `settlement_pose_nanoseconds` from the start of that pose, rather than
+from the start of the entry. A report records manifest outcomes under
+`declared_known_feature_outcomes` and reports their counts with `declared_*`
+keys. Its explicit
+`declared_known_feature_outcomes_verified: false` nonclaim prevents those
+inputs from being mistaken for observed acceptance.
 
 This local runner is a reproducible measurement path, not evidence of a
 production corpus, professional preference, terrain capacity, partner

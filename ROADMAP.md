@@ -1,7 +1,7 @@
 # Punctra Roadmap
 
 Status: living guidance
-Last reviewed: 2026-08-17
+Last reviewed: 2026-08-18
 
 This roadmap communicates direction, not a delivery promise. It has no fixed
 dates. Candidate releases may be split, merged, reordered, renamed, or skipped
@@ -24,8 +24,14 @@ claiming external field-activation or independent-adoption evidence. The
 design](docs/design/explicit-spatial-reference-v0.12.md) is complete for its
 bounded repository slice without claiming the outstanding production-corpus,
 downstream, adoption, or support gates. No later repository release is Active.
-v0.13 through v0.20 remain uncommitted Candidate themes; each needs evidence
-and an accepted design before implementation.
+The [2026-08-18 renderer quality
+investigation](docs/reviews/render-quality-investigation-2026-08-18.md) records
+one pre-v0.13 corrective checkpoint now **Complete and repository-verified**
+under its [implemented corrective design](docs/design/renderer-quality-corrective-pre-v0.13.md).
+Its permitted field execution remains outstanding. It does not reopen the
+accepted v0.10–v0.12 scopes. v0.13 through v0.20 remain
+uncommitted Candidate themes; each needs evidence and an accepted design before
+implementation.
 
 ## Working direction
 
@@ -59,6 +65,8 @@ not sufficient product evidence.
 - Run all applicable verification locally as documented in
   [CONTRIBUTING.md](CONTRIBUTING.md), including GPU acceptance with
   `PUNCTRA_REQUIRE_GPU=1` when a GPU adapter is expected.
+- Treat a measured corrective checkpoint as evidence for a short design, not
+  as permission to silently broaden a completed release or public seam.
 - Let customer evidence narrow, reorder, pause, or end the product-facing work.
 
 Roadmap status labels are:
@@ -84,9 +92,10 @@ release can be Complete while every product gate remains outstanding.
 ## Scope and evidence checkpoint
 
 Status: **v0.12 explicit spatial reference and library packaging Complete for
-the bounded repository slice; production-corpus activation, downstream
-observation, independent adoption, and inherited v0.9 support qualification
-outstanding**
+the bounded repository slice; pre-v0.13 renderer quality remediation is
+Complete and repository-verified; permitted field execution,
+production-corpus activation, downstream observation, independent adoption,
+and inherited v0.9 support qualification outstanding**
 
 The [implemented v0.5 design](docs/design/durable-document-core-v0.5.md) places
 exact classification selection, temporary Point Sets, sparse Revisions, and
@@ -172,14 +181,287 @@ Production-data access, downstream observations, and paid-pilot evidence are
 long-lead work. Collection may proceed during v0.11 without silently expanding
 any later repository release.
 
+## Pre-v0.13 renderer quality corrective checkpoint
+
+Status: **Complete — repository implementation and generated/local GPU
+verification complete; permitted real-cloud field execution remains
+outstanding**
+
+The [2026-08-18 local renderer quality
+investigation](docs/reviews/render-quality-investigation-2026-08-18.md) found a
+strong narrow GPU contract and one major unresolved host/View behavior. On the
+default stationary 16.7-million-Point synthetic scene, approximately 120,000
+resident Points and 2.7 MiB of resident Point vertices remained effectively
+unchanged while cumulative uploads, retirements, and cancellations continued
+to grow. One ten-second observation added 44.3 MiB of uploads, 1,890 retired
+batches, and 441,315 cancelled requests without reaching `steady`.
+
+The same investigation found visible LOD-tile density transitions, grid/moiré
+artifacts, weak depth separation, overloaded truncated title telemetry,
+effectively invisible three-Point fixture highlighting, missing spatial and
+palette context, and an ambiguous `v0.11` View title in a
+`0.12.0-alpha.1` workspace. Focused local GPU acceptance still passed for
+depth, circular splats, picking, highlighting, projection, large-world
+precision, atomic updates, display mappings, and progressive Coverage. The
+completed corrective work preserves those contracts rather than disguising the
+host churn with visual effects.
+
+This checkpoint is ordered before any new View-dependent product claim or
+approved public screenshot. It does not have to delay unrelated headless
+evidence collection, but v0.10 cannot become Field-qualified until the
+remaining permitted-source and human-interpretation gates are satisfied.
+
+### Corrective outcome
+
+Make the existing progressive View converge, remain visually stable, and
+communicate enough depth, spatial meaning, Coverage, and selection state for a
+professional to distinguish real features from display and LOD artifacts. GPU
+presentation remains disposable; exact Point, selection, Edit, terrain, QA,
+and export authority remains on the CPU paths already defined.
+
+### Implemented activation decision
+
+The
+[accepted corrective design](docs/design/renderer-quality-corrective-pre-v0.13.md):
+
+- localizes the stationary churn to the owning planner/host/resource seam;
+- defines a deterministic stationary convergence contract and frame ceiling;
+- selects one point-density transition policy and one bounded optional depth
+  cue;
+- identifies the minimal inspection context and selection feedback owned by
+  the private host;
+- names any required public `point-view`, `render-protocol`, or `render-wgpu`
+  changes and rejects seams justified only by hypothetical callers; and
+- fixes local GPU, image, performance, and real-cloud observation gates without
+  claiming field suitability from generated fixtures.
+
+### Ordered workstream A — convergence and resource correctness
+
+Priority: **P1; complete before visual polish**
+
+Implementation status: **Complete for the generated repository convergence
+gates.** The exact investigated physical viewport settles at frame 780 under
+the accepted 1,024-frame ceiling, then remains unchanged for 300 frames. The
+focused movement, projection, reset, resize, pause/resume, refine, and coarsen
+cases reconverge. Relevant CPU, rustdoc, package, benchmark, and forced-GPU
+checks pass locally; this is not field or workstation qualification.
+
+Implemented scope:
+
+- reproduce the stationary churn in a deterministic multi-frame test before
+  changing planner or host behavior;
+- account for retained, resident, staged, queued, and in-flight work exactly at
+  the seam that owns each resource so a new plan cannot reserve the same
+  logical budget repeatedly;
+- retain demanded in-flight work across an unchanged camera/viewport instead
+  of cancelling and reissuing it;
+- prevent a one-batch-per-frame materializer from causing perpetual
+  parent/child refinement oscillation;
+- define truthful `streaming`, `steady`, `loads-paused`, and transition states;
+  and
+- preserve generation safety, atomic replacement, fallback Coverage,
+  deterministic request priority, and exact conditional retirement.
+
+Repository exit gates:
+
+- the default synthetic camera and viewport reach one deterministic
+  resident/in-flight cut within the accepted frame ceiling;
+- after the first `steady` frame, at least 300 additional stationary presented
+  frames produce zero new requests, uploads, cancellations, retirements, and
+  resident-set changes;
+- a camera move, projection switch, reset, resize, pause/resume, refine, and
+  coarsen each converge again without a Coverage hole or stale request;
+- queue, staging, and renderer limits hold throughout convergence and cannot be
+  bypassed by already requested work; and
+- the before/after investigation records the same generated fixture, viewport,
+  budgets, adapter/backend facts, convergence frame, cumulative work, and
+  settled observation window.
+
+### Ordered workstream B — LOD, point appearance, and depth legibility
+
+Priority: **P1 for false tile/feature impressions; P2 for depth enhancement**
+
+Implementation status: **Complete — repository implementation and local GPU
+acceptance are present. Field image qualification remains part of workstream
+D and is not implied by these generated regressions.**
+
+Implemented scope:
+
+- the private host derives a projected-spacing Point diameter from the current
+  physical viewport and drawn Point count, clamped deterministically to
+  1–4 physical pixels;
+- parent retirement is held behind an exact eight-presented-frame color-only
+  cross-fade to its resident descendants, then remains version-conditional;
+- presentation weight affects only color coverage: depth and provisional pick
+  identity continue to use the source Point alpha and geometry;
+- optional four-neighbour eye-dome lighting uses one sampleable color target
+  plus the existing sampleable depth target, for at most eight transient bytes
+  per physical pixel; unsupported target formats select the correct unenhanced
+  fallback; and
+- protocol state-model tests cover conditional presentation changes, while
+  forced local GPU tests cover pick independence, bounded EDL allocation, the
+  enhanced path, and the unsupported-format fallback.
+
+Likely scope:
+
+- choose a deterministic projected-spacing-aware Point-size policy or another
+  bounded treatment that works across perspective, orthographic, sparse, and
+  dense display without changing Point position or identity;
+- specify a short bounded parent/child visual transition or another treatment
+  that removes holes and reduces conspicuous density steps without keeping
+  unbounded duplicate Coverage;
+- add one optional bounded display-only depth cue, with eye-dome lighting as
+  the leading candidate, plus a capability/fallback path that preserves the
+  current correct unenhanced render;
+- retain raw neutral, elevation, RGB, intensity, and classification modes, and
+  keep any later tone/exposure control explicit, reversible, deterministic,
+  and presentation-only; and
+- select background and contrast defaults against fixed feature-location
+  trials rather than aesthetic preference alone.
+
+Repository exit gates:
+
+- tolerant local GPU image regressions cover circular Point shape, depth,
+  parent/child replacement, settled Coverage, projection, large-world origin,
+  highlight treatment, and the depth-cue fallback;
+- fixed generated views contain no missing tile, false platform caused by a
+  prolonged mixed-LOD cut, or density discontinuity above the accepted visual
+  tolerance after settlement;
+- pick coverage and Point Identity remain independent of decorative depth
+  enhancement;
+- the selected treatment remains within declared transient texture, retained
+  GPU byte, encode-time, and frame-time ceilings; and
+- reduced-motion and non-color-only interpretation do not depend on a pulsing
+  or palette-only cue.
+
+### Ordered workstream C — inspection context, status, and interaction feedback
+
+Priority: **P2**
+
+Implementation status: **Complete — the primary state is rendered on-canvas;
+the compact title uses package metadata and the bounded engineering transcript
+is printed separately to standard output.**
+
+Implemented scope:
+
+- an application-private bitmap-glyph overlay renders package-derived View
+  version, display mode, projection, streaming state, truthful sampled/
+  complete display Coverage, Source/drawn/resident Point counts, and explicit
+  non-Query-completion wording;
+- exact selection state and count, resident locator count, stale/failure
+  recovery wording, and the `X` clear action remain visible without relying on
+  highlight color;
+- north orientation, a 100-physical-pixel target-plane scale, cursor
+  target-plane world coordinates, and a mode-specific palette legend are
+  included in the primary panel;
+- the panel uses an ASCII 5-by-7 glyph atlas, an opaque contrast backing, a
+  48-column bound, and a two-level physical scale that fits the 640-by-480
+  logical minimum at 200% interface scaling; and
+- detailed planner, queue, staging, resource, frame, upload, Coverage, and
+  review facts remain in the standard-output transcript.
+
+Likely scope:
+
+- replace the single diagnostic title dump with a compact primary on-canvas
+  status layer and a separate expandable or structured diagnostics surface;
+- show display mode, projection, loading/steady state, truthful Coverage,
+  drawn/resident Point count, and selection state without truncation;
+- add the minimal workflow-earned orientation indicator, scale bar, cursor
+  world coordinate, and elevation/classification legend;
+- distinguish logical Source Points, drawn Points, resident Points, cumulative
+  uploads, and authoritative Query completion in wording and layout;
+- expose exact selection count, resident-highlight count, stale/nonresident
+  state, clear action, and one unmistakable locator treatment that does not
+  change exact CPU selection; and
+- derive the displayed package/View-feature version from one truthful source
+  instead of a stale hard-coded label.
+
+Repository exit gates:
+
+- sampled, complete, authored, streaming, steady, paused, stale, selected,
+  nonresident, failed, and recovered states each have a deterministic host
+  fixture or state-model test;
+- the primary state remains readable at the minimum supported window size and
+  200% interface scaling without truncating its required facts;
+- controls and state can be recognized from the window without depending on
+  console recall or color alone;
+- detailed diagnostics retain every current bounded planner/queue/staging/
+  resource fact for engineering evidence; and
+- the title/package/version convention is tested against the workspace release
+  metadata or an explicitly named feature-slice label.
+
+### Ordered workstream D — permitted real-cloud visual qualification
+
+Priority: **P2; field evidence remains separate from repository closure**
+
+Implementation status: **Repository lane complete — permitted field execution
+and human interpretation evidence remain outstanding and cannot be created by
+repository tests.**
+
+Implemented scope:
+
+- the bounded private manifest can opt into `pre_v0_13_qualification`, which
+  requires five projects from three firms, all five display modes in both
+  projections, explicit inspect/measure permission, and the complete declared
+  known-feature category matrix;
+- every initial or navigated pose must converge within a caller-declared ceiling
+  no greater than 1,024 rendered frames, then retain identical node/resource
+  state with no planner, host, upload, transition, or retirement work for 300
+  additional rendered frames;
+- the real-cloud lane exercises the adaptive physical-pixel Point policy,
+  eight-frame density transition, and optional EDL/fallback path rather than a
+  separate legacy presentation path;
+- the private no-replace report records first visible Coverage, settlement
+  frame/time, quiet-window completion, resident/peak/transient resources,
+  cumulative uploads and lifecycle work, adapter/backend/depth-cue state,
+  declared known-feature inputs, their explicit unverified nonclaim, and
+  bounded failures; and
+- a generated LAS GPU process acceptance proves this lane across the ten mode/
+  projection combinations without claiming that generated data is a permitted
+  field corpus or human interpretation evidence.
+
+Likely scope:
+
+- run the settled View on permitted LAS/LAZ Sources that contain known terrain
+  breaks, vegetation, buildings, scan-pattern variation, low/high intensity
+  ranges, and representative classifications;
+- exercise neutral, elevation, RGB, intensity, and classification modes in
+  both projections on declared workstation classes;
+- record time to first visible Coverage, time to settled View, resident and
+  peak resources, cumulative uploads, feature-location outcomes, and failures;
+- compare raw reference mappings with any explicit display-only tone controls;
+  and
+- collect user interpretation of sampled/complete, selected/stale, scale,
+  orientation, and palette meaning without publishing Source material or
+  screenshots absent permission.
+
+Field exit gates:
+
+- the existing v0.10 permitted corpus and known-feature requirements are met;
+- observed users locate declared features without mistaking LOD, grid, tone,
+  or depth-enhancement artifacts for Source geometry;
+- the declared workstation envelope reaches and retains settled Views under
+  the accepted resource ceilings; and
+- reports separate local repository acceptance from field, partner,
+  downstream, adoption, and support evidence.
+
+### Corrective non-goals
+
+This checkpoint does not authorize photorealism, meshes, texture streaming,
+globe/3D-Tiles work, rendering every Point simultaneously, GPU-authoritative
+geometry, general CAD/BIM authoring, an arbitrary shader/plugin framework,
+silent tone mapping, broad clipping/measurement/annotation tools, automatic
+CRS guessing, or a general desktop product UI.
+
 ## Release sequence
 
 There is no Active repository implementation track after the completed v0.9,
-repository-implemented v0.10 View, completed v0.11 technical slice, and bounded
-v0.12 repository slice. Eight provisional Candidate themes, v0.13 through
-v0.20, follow it. This is a planning sequence, not a requirement to publish
-every number or to publish v1 after v0.20. Candidates may be narrowed, split,
-merged, reordered, or stopped before becoming Active.
+repository-implemented v0.10 View, completed v0.11 technical slice, bounded
+v0.12 repository slice, and completed pre-v0.13 renderer quality checkpoint.
+Eight provisional Candidate themes, v0.13 through v0.20, may follow it.
+This is a planning sequence, not a requirement to publish every number or to
+publish v1 after v0.20. Candidates may be narrowed, split, merged, reordered,
+or stopped before becoming Active.
 
 ### v0.1 — Renderer foundation
 
@@ -545,6 +827,13 @@ Evidence of readiness:
 - Visual quality means a clear professional inspection View, not Cesium parity,
   photorealism, a globe, 3D Tiles, texture streaming, or rendering every Point
   simultaneously.
+- A fixed View must reach a declared settled cut before its frame rate, image,
+  feature visibility, or resource use is presented as representative. A high
+  refresh rate during perpetual request/upload/retirement churn is not a
+  successful viewing result.
+- Point-size, depth, tone, legend, locator, and status treatments remain
+  presentation-only. They never change Point Identity, exact position,
+  classification, selection membership, Coverage truth, or Query completion.
 - Coordinate systems, units, vertical references, transformations, downstream
   products, and settings are explicit supported profiles. Nothing is guessed.
 - Repository status and external evidence maturity are recorded separately.
@@ -566,7 +855,7 @@ releases; they do not expand a release's technical feature scope.
 
 | Release | Open-source adoption exit requirement |
 |---|---|
-| **v0.10** | Publish one accurate public description, repository topics and homepage, an approved screenshot or short demonstration, a reproducible viewing benchmark, and a five-minute “view your first LAS/LAZ Source” guide. Clearly separate current capabilities from roadmap claims. |
+| **v0.10** | Publish one accurate public description, repository topics and homepage, an approved screenshot or short demonstration, a reproducible settled-view benchmark, and a five-minute “view your first LAS/LAZ Source” guide. Close the pre-v0.13 P1 convergence/LOD gates before presenting a generated frame as representative, or disclose the exact unsettled limitation. Clearly separate current capabilities from roadmap claims. |
 | **v0.11** | Provide a minimal third-party renderer integration example that does not depend on demo-private state, plus focused rustdoc explaining host ownership, provisional GPU picks, exact CPU confirmation, and resource limits. |
 | **v0.12** | Define and exercise the crates.io/docs.rs packaging path for the supported library crates. Package metadata, licenses, minimum supported Rust version, feature flags, dependency roles, and pre-v1 compatibility expectations must be explicit. |
 | **v0.13** | Publish a reproducible out-of-core terrain example and resource report that distinguishes Source viewing, indexing, and full Terrain Derivation and does not extrapolate beyond measured data. |
@@ -585,8 +874,9 @@ metric, and no benchmark or customer dataset is published without permission.
 
 ### v0.10 — Field qualification and professional inspection View
 
-Status: **Active — repository implementation complete; field qualification and
-adoption publication outstanding**
+Status: **Complete — repository implementation and pre-v0.13 renderer-quality
+remediation complete; field qualification and adoption publication
+outstanding**
 
 Accepted outcome: qualify Source opening and viewing on representative field
 data while making known survey features clear enough for professional
@@ -615,6 +905,27 @@ Accepted scope:
 - actionable Source, index, GPU, and resource-limit diagnostics; and
 - a reproducible corpus runner for open, index, first-use, navigation,
   residency, memory, and disk measurements.
+
+The completed accepted scope above remains historically accurate. The later
+[renderer quality
+investigation](docs/reviews/render-quality-investigation-2026-08-18.md) found
+that the default stationary synthetic View did not settle and that its LOD
+density, depth, status, spatial context, and selection feedback were not yet
+strong enough for a professional-inspection claim. Those findings were
+remediated by the completed pre-v0.13 checkpoint rather than retroactively
+relabeled as v0.10 acceptance. The missing permitted-source and human-
+observation evidence remains a v0.10 field gate.
+
+Before field qualification or an approved representative screenshot:
+
+- close the P1 stationary convergence and visually conspicuous LOD-transition
+  gates;
+- record a settled generated before/after result under identical declared
+  inputs;
+- expose truthful settled/streaming/Coverage state without relying on a
+  truncated title; and
+- exercise the refined View on permitted real Sources before claiming feature
+  legibility or professional suitability.
 
 Field exit evidence:
 
@@ -1024,7 +1335,8 @@ v0.20 theme is by itself a reason to publish v1.
 | Renderer and planning foundations | v0.1–v0.2 | Complete; repository-verified | Reusable bounded display engine and adaptive View planner. |
 | Source, document, terrain, and workflow baseline | v0.3–v0.7 | Complete; repository-verified only | Headless technical path from verified LAS/LAZ to one narrow resumable terrain deliverable; field and product evidence remains separate. |
 | Qualifier and trust baseline | v0.8–v0.9 | Complete; repository-verified only | Close inherited qualification gates and harden only the existing narrow repository compatibility surface. |
-| Field inspection and exact correction | v0.10–v0.11 | v0.10 repository implementation complete; v0.11 repository-verified; field/adoption exits outstanding | Qualify representative Sources and connect a professional View to CPU-authoritative review and reversible correction. |
+| Field inspection and exact correction | v0.10–v0.11 | Repository implementation complete; renderer quality corrected; field and adoption exits outstanding | Qualify representative Sources and connect a professional View to CPU-authoritative review and reversible correction. |
+| Renderer quality corrective checkpoint | pre-v0.13 | Complete; repository-verified only, with permitted field execution outstanding | Stationary LOD converges, bounded density/depth treatments and truthful inspection context are implemented, and the private permitted-source lane records settled evidence without manufacturing field claims. |
 | Spatial contract and production terrain | v0.12–v0.13 | v0.12 bounded repository contract complete; external spatial qualification and v0.13 remain Candidate | Make reference semantics explicit before persisting a bounded production-scale Surface. |
 | Terrain acceptance tooling | v0.14–v0.15 | Candidate | Add exact QA and only the constraints earned by field evidence. |
 | Downstream and partner product | v0.16–v0.18 | Candidate | Qualify one named downstream profile, then package and validate one narrow partner workflow. |
@@ -1063,9 +1375,12 @@ direction. A roadmap update should:
 2. identify the single Active release, if one exists;
 3. move unsupported ideas to Deferred instead of leaving ambiguous promises;
 4. link the accepted design or ADR for newly Active scope; and
-5. record why a release was split, merged, reordered, or stopped; and
+5. record why a release was split, merged, reordered, or stopped;
 6. update open-source adoption evidence without treating popularity metrics as
-   product, correctness, or release acceptance.
+   product, correctness, or release acceptance; and
+7. link measured corrective investigations and carry their unresolved P1/P2
+   gates into the owning release or pre-release checkpoint without converting
+   local generated observations into field evidence.
 
 The broader candidate architecture is described in
 [docs/architecture](docs/architecture/README.md). It is a source of design

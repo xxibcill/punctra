@@ -1,4 +1,4 @@
-use crate::gpu::{BatchUniform, CameraUniform, GpuPoint};
+use crate::gpu::{BatchUniform, CameraUniform, EdlUniform, GpuPoint};
 
 pub(crate) const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 pub(crate) const PICK_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::R32Uint;
@@ -7,13 +7,34 @@ pub(crate) struct PointPipelines {
     pub(crate) camera_layout: wgpu::BindGroupLayout,
     pub(crate) batch_layout: wgpu::BindGroupLayout,
     pub(crate) draw: wgpu::RenderPipeline,
+    pub(crate) draw_translucent: wgpu::RenderPipeline,
+    pub(crate) eye_dome_depth: Option<wgpu::RenderPipeline>,
     pub(crate) pick: wgpu::RenderPipeline,
 }
 
+pub(crate) struct EdlPipeline {
+    pub(crate) layout: wgpu::BindGroupLayout,
+    pub(crate) pipeline: wgpu::RenderPipeline,
+}
+
 impl PointPipelines {
-    pub(crate) fn new(device: &wgpu::Device, color_format: wgpu::TextureFormat) -> Self {
-        let camera_layout = uniform_layout::<CameraUniform>(device, "punctra camera layout");
-        let batch_layout = uniform_layout::<BatchUniform>(device, "punctra batch layout");
+    pub(crate) fn new(
+        device: &wgpu::Device,
+        color_format: wgpu::TextureFormat,
+        enable_edl: bool,
+    ) -> Self {
+        let camera_layout = uniform_layout::<CameraUniform>(
+            device,
+            "punctra camera layout",
+            wgpu::ShaderStages::VERTEX,
+        );
+        let batch_visibility = if enable_edl {
+            wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT
+        } else {
+            wgpu::ShaderStages::VERTEX
+        };
+        let batch_layout =
+            uniform_layout::<BatchUniform>(device, "punctra batch layout", batch_visibility);
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("punctra point pipeline layout"),
             bind_group_layouts: &[Some(&camera_layout), Some(&batch_layout)],
@@ -35,40 +56,158 @@ impl PointPipelines {
             write_mask: wgpu::ColorWrites::ALL,
         })];
 
+        let draw_fragment = if enable_edl {
+            "eye_dome_point_fragment"
+        } else {
+            "point_fragment"
+        };
         let draw = create_pipeline(
             device,
             &pipeline_layout,
             &shader,
             &vertex_buffers,
-            &color_targets,
-            "point_fragment",
-            "punctra point pipeline",
+            PointPipelineDescriptor {
+                targets: &color_targets,
+                fragment_entry_point: draw_fragment,
+                depth_write_enabled: true,
+                label: "punctra point pipeline",
+            },
         );
+        let draw_translucent = create_pipeline(
+            device,
+            &pipeline_layout,
+            &shader,
+            &vertex_buffers,
+            PointPipelineDescriptor {
+                targets: &color_targets,
+                fragment_entry_point: draw_fragment,
+                depth_write_enabled: false,
+                label: "punctra translucent point pipeline",
+            },
+        );
+        let eye_dome_depth = enable_edl.then(|| {
+            create_pipeline(
+                device,
+                &pipeline_layout,
+                &shader,
+                &vertex_buffers,
+                PointPipelineDescriptor {
+                    targets: &[],
+                    fragment_entry_point: "eye_dome_depth_fragment",
+                    depth_write_enabled: true,
+                    label: "punctra eye-dome visibility depth pipeline",
+                },
+            )
+        });
         let pick = create_pipeline(
             device,
             &pipeline_layout,
             &shader,
             &vertex_buffers,
-            &pick_targets,
-            "pick_fragment",
-            "punctra pick pipeline",
+            PointPipelineDescriptor {
+                targets: &pick_targets,
+                fragment_entry_point: "pick_fragment",
+                depth_write_enabled: true,
+                label: "punctra pick pipeline",
+            },
         );
-
         Self {
             camera_layout,
             batch_layout,
             draw,
+            draw_translucent,
+            eye_dome_depth,
             pick,
         }
     }
 }
 
-fn uniform_layout<T>(device: &wgpu::Device, label: &'static str) -> wgpu::BindGroupLayout {
+impl EdlPipeline {
+    pub(crate) fn new(device: &wgpu::Device, color_format: wgpu::TextureFormat) -> Self {
+        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("punctra eye-dome bind group layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Depth,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: wgpu::BufferSize::new(size_of::<EdlUniform>() as u64),
+                    },
+                    count: None,
+                },
+            ],
+        });
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("punctra eye-dome pipeline layout"),
+            bind_group_layouts: &[Some(&layout)],
+            immediate_size: 0,
+        });
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("punctra eye-dome shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("eye_dome.wgsl").into()),
+        });
+        let targets = [Some(wgpu::ColorTargetState {
+            format: color_format,
+            blend: None,
+            write_mask: wgpu::ColorWrites::ALL,
+        })];
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("punctra eye-dome pipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("fullscreen_vertex"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[],
+            },
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("eye_dome_fragment"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &targets,
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
+        Self { layout, pipeline }
+    }
+}
+
+fn uniform_layout<T>(
+    device: &wgpu::Device,
+    label: &'static str,
+    visibility: wgpu::ShaderStages,
+) -> wgpu::BindGroupLayout {
     device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some(label),
         entries: &[wgpu::BindGroupLayoutEntry {
             binding: 0,
-            visibility: wgpu::ShaderStages::VERTEX,
+            visibility,
             ty: wgpu::BindingType::Buffer {
                 ty: wgpu::BufferBindingType::Uniform,
                 has_dynamic_offset: false,
@@ -79,17 +218,23 @@ fn uniform_layout<T>(device: &wgpu::Device, label: &'static str) -> wgpu::BindGr
     })
 }
 
+#[derive(Clone, Copy)]
+struct PointPipelineDescriptor<'targets> {
+    targets: &'targets [Option<wgpu::ColorTargetState>],
+    fragment_entry_point: &'static str,
+    depth_write_enabled: bool,
+    label: &'static str,
+}
+
 fn create_pipeline(
     device: &wgpu::Device,
     layout: &wgpu::PipelineLayout,
     shader: &wgpu::ShaderModule,
     vertex_buffers: &[Option<wgpu::VertexBufferLayout<'_>>],
-    targets: &[Option<wgpu::ColorTargetState>],
-    fragment_entry_point: &'static str,
-    label: &'static str,
+    descriptor: PointPipelineDescriptor<'_>,
 ) -> wgpu::RenderPipeline {
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: Some(label),
+        label: Some(descriptor.label),
         layout: Some(layout),
         vertex: wgpu::VertexState {
             module: shader,
@@ -104,7 +249,7 @@ fn create_pipeline(
         },
         depth_stencil: Some(wgpu::DepthStencilState {
             format: DEPTH_FORMAT,
-            depth_write_enabled: Some(true),
+            depth_write_enabled: Some(descriptor.depth_write_enabled),
             depth_compare: Some(wgpu::CompareFunction::LessEqual),
             stencil: wgpu::StencilState::default(),
             bias: wgpu::DepthBiasState::default(),
@@ -112,9 +257,9 @@ fn create_pipeline(
         multisample: wgpu::MultisampleState::default(),
         fragment: Some(wgpu::FragmentState {
             module: shader,
-            entry_point: Some(fragment_entry_point),
+            entry_point: Some(descriptor.fragment_entry_point),
             compilation_options: wgpu::PipelineCompilationOptions::default(),
-            targets,
+            targets: descriptor.targets,
         }),
         multiview_mask: None,
         cache: None,

@@ -1908,6 +1908,7 @@ name = "renderer-demo"
 version = "0.12.0-alpha.1"
 dependencies = [
  "allocation-counter",
+ "bytemuck",
  "criterion",
  "foundation-runtime",
  "las",

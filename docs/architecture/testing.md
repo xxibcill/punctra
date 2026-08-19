@@ -457,48 +457,11 @@ trip, paid-use, or human-time acceptance is inferred from this benchmark.
 
 ### Change qualification
 
-Run the authoritative sequence from [CONTRIBUTING.md](../../CONTRIBUTING.md):
-
-~~~bash
-cargo fmt --all --check
-cargo clippy --workspace --all-targets --all-features -- -D warnings
-cargo test --workspace --all-features
-RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps
-cargo fmt --manifest-path fuzz/Cargo.toml --all --check
-cargo check --manifest-path fuzz/Cargo.toml --bin index_persistence
-cargo test --manifest-path fuzz/Cargo.toml --lib
-cargo bench -p point-view --bench planner
-cargo bench -p source-memory --bench read
-cargo bench -p source-las --bench read
-cargo bench -p point-index --bench index
-cargo bench -p point-workspace --bench document
-cargo bench -p point-review --bench review
-cargo bench -p point-terrain --bench terrain
-cargo bench -p terrain-demo --bench journal -- \
-  --save-baseline "qualification-$$-$(date +%s)"
-cargo bench -p renderer-demo --bench viewing
-
-cargo run -p source-memory --example memory_source
-cargo run -p point-index --example direct_use
-PUNCTRA_REQUIRE_GPU=1 cargo run -p render-wgpu --example third_party_host
-cargo run --release -p point-workspace --example classify -- \
-  survey.laz survey.laz.pidx survey.pcw 6
-cargo test -p point-workspace --all-features
-cargo run -p point-terrain --example derive
-cargo test -p point-terrain --all-features
-cargo test -p terrain-demo --test workflow
-cargo test -p terrain-demo --test process
-cargo test -p renderer-demo --test headless_smoke
-PUNCTRA_REQUIRE_GPU=1 cargo test -p renderer-demo --test headless_smoke \
-  corpus_success_binds_trace_inputs_and_separate_resource_measurements -- --exact
-PUNCTRA_REQUIRE_GPU=1 cargo test -p render-wgpu --test offscreen
-PUNCTRA_REQUIRE_GPU=1 cargo test -p renderer-demo --test planner
-PUNCTRA_REQUIRE_GPU=1 cargo test -p renderer-demo --test display_gpu
-test -f docs/guides/first-las-laz.md
-ruby -rjson -e 'JSON.parse(File.read(ARGV.fetch(0)))' \
-  docs/guides/field-corpus.example.json
-git diff --check
-~~~
+Run the authoritative sequence directly from
+[CONTRIBUTING.md](../../CONTRIBUTING.md). That file is the single maintained
+command list; this architecture guide does not duplicate it. Required local GPU
+lanes use `PUNCTRA_REQUIRE_GPU=1`, including renderer appearance, corpus,
+offscreen, planner, display-mapping, and public-host acceptance.
 
 Opt-in larger generated Workspace runs use:
 

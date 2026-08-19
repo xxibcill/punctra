@@ -9,6 +9,7 @@ repository.workspace = true
 publish = false
 
 [dependencies]
+bytemuck.workspace = true
 foundation-runtime.workspace = true
 pollster.workspace = true
 point-contracts.workspace = true

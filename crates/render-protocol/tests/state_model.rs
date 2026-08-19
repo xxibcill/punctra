@@ -2,8 +2,8 @@
 
 use render_protocol::{
     BatchKey, BatchVersion, ESTIMATED_GPU_BYTES_PER_POINT as POINT_BYTES, PointBatch, PointId,
-    ProtocolError, RenderLimits, RenderPoint, RenderStateModel, RenderUpdate, ResidentResource,
-    SourceId, UpdateEffect, UpdateKind, ViewGenerationKey, ViewId,
+    PresentationWeight, ProtocolError, RenderLimits, RenderPoint, RenderStateModel, RenderUpdate,
+    ResidentResource, SourceId, UpdateEffect, UpdateKind, ViewGenerationKey, ViewId,
 };
 
 const TEST_SOURCE: SourceId = SourceId::new([0x22; 32]);
@@ -59,6 +59,20 @@ fn accepted_updates_describe_their_renderer_effects() {
         UpdateEffect::BatchUpserted { batch }
     );
 
+    let presentation = RenderUpdate::SetBatchPresentation {
+        view_generation,
+        key: BatchKey::new(7),
+        expected_version: BatchVersion::new(2),
+        weight: PresentationWeight::new(128),
+    };
+    assert_eq!(
+        state.apply(&presentation).unwrap().effect(),
+        UpdateEffect::BatchPresentationSet {
+            key: BatchKey::new(7),
+            weight: PresentationWeight::new(128),
+        }
+    );
+
     let highlights = RenderUpdate::SetHighlights {
         view_generation,
         point_ids: vec![point_id(10)],
@@ -79,6 +93,45 @@ fn accepted_updates_describe_their_renderer_effects() {
             key: BatchKey::new(7),
         }
     );
+}
+
+#[test]
+fn presentation_updates_are_generation_and_version_conditional() {
+    let view_generation = view_generation(12, 3);
+    let mut state = started_state(view_generation, RenderLimits::new(1_024, 32, 4));
+    state
+        .apply(&RenderUpdate::Upsert {
+            batch: batch(view_generation, 9, 4, &[1]),
+        })
+        .unwrap();
+    let before = state.snapshot();
+
+    assert_eq!(
+        state.apply(&RenderUpdate::SetBatchPresentation {
+            view_generation,
+            key: BatchKey::new(9),
+            expected_version: BatchVersion::new(3),
+            weight: PresentationWeight::TRANSPARENT,
+        }),
+        Err(ProtocolError::BatchVersionMismatch {
+            key: BatchKey::new(9),
+            resident: BatchVersion::new(4),
+            expected: BatchVersion::new(3),
+        })
+    );
+    assert_eq!(state.snapshot(), before);
+
+    let report = state
+        .apply(&RenderUpdate::SetBatchPresentation {
+            view_generation,
+            key: BatchKey::new(9),
+            expected_version: BatchVersion::new(4),
+            weight: PresentationWeight::TRANSPARENT,
+        })
+        .unwrap()
+        .report();
+    assert_eq!(report.kind(), UpdateKind::BatchPresentationSet);
+    assert_eq!(report.resident(), before.resident());
 }
 
 #[test]

@@ -53,7 +53,13 @@ projected-reference profile, strict complete GeoTIFF decoding, reference-bound
 Workspace/Terrain behavior, metre-only QA/LandXML propagation, strict
 round-trip comparison, and the local path documented in the [library
 packaging guide](docs/guides/library-packaging.md). It adds no coordinate
-transformation or CRS guessing. Apart from the explicit v0.8 reader exception,
+transformation or CRS guessing. The accepted [pre-v0.13 renderer-quality
+corrective scope](docs/design/renderer-quality-corrective-pre-v0.13.md) permits
+only its enumerated renderer additions: conditional batch presentation, the
+display-diameter override, bounded eye-dome configuration and disposition, and
+read-only transient-texture and resident-highlight observations required by the
+private `renderer-demo` host. It does not authorize a general material, shader,
+plugin, or host-UI interface. Apart from the explicit v0.8 reader exception,
 external format decoding belongs only in accepted Source adapter crates.
 Networking, polygon/brush/visible-only/occlusion selection, arbitrary
 Attribute or position edits, constrained or persistent terrain, general
@@ -96,6 +102,11 @@ cargo test -p terrain-demo --test process
 cargo test -p renderer-demo --test headless_smoke
 PUNCTRA_REQUIRE_GPU=1 cargo test -p renderer-demo --test headless_smoke \
   corpus_success_binds_trace_inputs_and_separate_resource_measurements -- --exact
+PUNCTRA_REQUIRE_GPU=1 cargo test -p renderer-demo --bin renderer-demo \
+  appearance::gpu_tests
+PUNCTRA_REQUIRE_GPU=1 cargo test -p renderer-demo --test headless_smoke \
+  corpus_pre_v0_13_repository_lane_records_settlement_and_the_declared_matrix \
+  -- --exact
 PUNCTRA_REQUIRE_GPU=1 cargo test -p render-wgpu --test offscreen
 PUNCTRA_REQUIRE_GPU=1 cargo test -p renderer-demo --test planner
 PUNCTRA_REQUIRE_GPU=1 cargo test -p renderer-demo --test display_gpu

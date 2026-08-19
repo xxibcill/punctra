@@ -19,21 +19,26 @@ use serde::{
 
 use crate::{
     PLANNING_BUDGET, VIEW_GENERATION,
+    appearance::{
+        DensityTransitions, REFERENCE_POINT_SIZE_PIXELS, projected_density_point_size,
+        renderer_appearance_config,
+    },
     diagnostic::{ViewFailure, ViewFailureCode, ViewPhase, classify_renderer_failure},
     orbit_camera::{OrbitCamera, ProjectionMode},
     real_cloud::{
         HIERARCHY_BYTE_BUDGET, QUEUED_HOST_BYTE_BUDGET, QUEUED_NODE_BUDGET, RealCloudScene,
         STAGING_BYTE_BUDGET, STAGING_POINT_BUDGET,
     },
-    scene::SceneMetrics,
+    scene::{Scene, SceneMetrics},
+    view_pump::{TransitionActivity, ViewLifecycle, ViewPumpError, ViewSpec},
 };
 use point_index::{
     NodeReadBudget, PrepareDisposition, PrepareLimits, PreparedIndex, prepare_fresh_with_recipe,
     prepare_with_recipe,
 };
-use point_view::{AvailableNodes, PlannerConfig, ViewPlanner};
+use point_view::{PlannerConfig, ViewPlanner};
 use render_protocol::{RenderLimits, RenderUpdate, ResidentStats, ViewGenerationKey, Viewport};
-use render_wgpu::{Frame, RendererConfig, WgpuRenderer};
+use render_wgpu::{DepthCueStatus, Frame, PointStyle, WgpuRenderer};
 use renderer_demo::display::DisplayMode;
 
 const MANIFEST_SCHEMA: &str = "punctra.renderer-demo.field-corpus.v1";
@@ -44,6 +49,10 @@ const MAX_ENTRIES: usize = 64;
 const MAX_TRACE_STEPS: usize = 128;
 const DEFAULT_FRAMES_PER_POSE: u32 = 8;
 const MAX_FRAMES_PER_POSE: u32 = 256;
+const DEFAULT_SETTLEMENT_FRAME_CEILING: u32 = 1_024;
+const MAX_SETTLEMENT_FRAME_CEILING: u32 = 1_024;
+const SETTLED_OBSERVATION_FRAMES: u32 = 300;
+const MAX_KNOWN_FEATURE_OUTCOMES: usize = 32;
 const MAX_ID_BYTES: usize = 128;
 const MAX_TEXT_BYTES: usize = 256;
 const MAX_PATH_BYTES: usize = 4 * 1024;
@@ -127,7 +136,7 @@ fn run_with_gpu(
         );
         WgpuRenderer::new(
             &gpu.device,
-            RendererConfig::new(wgpu::TextureFormat::Rgba8Unorm, limits),
+            renderer_appearance_config(wgpu::TextureFormat::Rgba8Unorm, limits),
         )
         .map_err(ViewFailure::corpus_gpu)
     })
@@ -163,11 +172,14 @@ fn run_prepared_corpus(
 ) -> Result<(), Box<dyn Error>> {
     let distinct_project_count = manifest.distinct_project_count();
     let distinct_firm_count = manifest.distinct_firm_count();
+    let display_projection_matrix_complete = manifest.display_projection_matrix_complete();
     let CorpusManifest {
         schema: _,
         corpus_id,
         machine,
         entries,
+        pre_v0_13_qualification,
+        settlement_frame_ceiling,
     } = manifest;
     let mut reports = Vec::new();
     reports.try_reserve_exact(entries.len()).map_err(|error| {
@@ -178,13 +190,28 @@ fn run_prepared_corpus(
     })?;
     let mut first_failure = None;
     for (entry_index, entry) in entries.into_iter().enumerate() {
-        let outcome = run_entry(entry, &gpu, renderer, corpus_view_generation(entry_index));
+        let outcome = run_entry(
+            entry,
+            &gpu,
+            renderer,
+            corpus_view_generation(entry_index),
+            pre_v0_13_qualification,
+            settlement_frame_ceiling,
+        );
         if first_failure.is_none() {
             first_failure = outcome.failure;
         }
         reports.push(outcome.report);
     }
-    let summary = report_summary(&reports, distinct_project_count, distinct_firm_count);
+    let summary = report_summary(
+        &reports,
+        distinct_project_count,
+        distinct_firm_count,
+        pre_v0_13_qualification,
+        settlement_frame_ceiling,
+        display_projection_matrix_complete,
+    );
+    let observed_depth_cue_status = depth_cue_status_name(renderer.depth_cue_status());
     let CorpusGpu {
         device: _,
         queue: _,
@@ -198,6 +225,7 @@ fn run_prepared_corpus(
         declared_gpu_expectation: machine.gpu_expectation,
         observed_gpu_adapter: name,
         observed_gpu_backend: backend,
+        observed_depth_cue_status,
     };
     let report = ViewingReport::new(corpus_id, machine, summary, reports);
     let bytes = report
@@ -324,6 +352,19 @@ struct EntryRun {
     failure: Option<ViewFailure>,
 }
 
+#[derive(Clone, Copy)]
+struct QualificationRun {
+    enabled: bool,
+    settlement_frame_ceiling: u32,
+}
+
+struct EntryRuntime<'run> {
+    gpu: &'run CorpusGpu,
+    renderer: &'run mut WgpuRenderer,
+    view_generation: ViewGenerationKey,
+    qualification: QualificationRun,
+}
+
 fn corpus_view_generation(entry_index: usize) -> ViewGenerationKey {
     let entry_offset = u64::try_from(entry_index).unwrap_or(u64::MAX);
     ViewGenerationKey::new(
@@ -337,18 +378,27 @@ fn run_entry(
     gpu: &CorpusGpu,
     renderer: &mut WgpuRenderer,
     view_generation: ViewGenerationKey,
+    pre_v0_13_qualification: bool,
+    settlement_frame_ceiling: u32,
 ) -> EntryRun {
     let mut evidence = EntryEvidence::new(&entry);
-    let failure = execute_entry(&entry, gpu, renderer, view_generation, &mut evidence).err();
+    let mut runtime = EntryRuntime {
+        gpu,
+        renderer,
+        view_generation,
+        qualification: QualificationRun {
+            enabled: pre_v0_13_qualification,
+            settlement_frame_ceiling,
+        },
+    };
+    let failure = execute_entry(&entry, &mut runtime, &mut evidence).err();
     let report = evidence.finish(entry, failure.as_ref());
     EntryRun { report, failure }
 }
 
 fn execute_entry(
     entry: &CorpusEntry,
-    gpu: &CorpusGpu,
-    renderer: &mut WgpuRenderer,
-    view_generation: ViewGenerationKey,
+    runtime: &mut EntryRuntime<'_>,
     evidence: &mut EntryEvidence,
 ) -> Result<(), ViewFailure> {
     let verification_started = Instant::now();
@@ -395,15 +445,7 @@ fn execute_entry(
     evidence.record_warm_open(warm_open_nanoseconds);
     drop(prepared);
 
-    run_prepared_entry(
-        entry,
-        gpu,
-        renderer,
-        view_generation,
-        warm,
-        display_mode,
-        evidence,
-    )
+    run_prepared_entry(entry, warm, display_mode, runtime, evidence)
 }
 
 fn require_cold_build(disposition: PrepareDisposition) -> Result<(), ViewFailure> {
@@ -423,16 +465,15 @@ fn require_cold_build(disposition: PrepareDisposition) -> Result<(), ViewFailure
 
 fn run_prepared_entry(
     entry: &CorpusEntry,
-    gpu: &CorpusGpu,
-    renderer: &mut WgpuRenderer,
-    view_generation: ViewGenerationKey,
     prepared: PreparedIndex,
     display_mode: DisplayMode,
+    runtime: &mut EntryRuntime<'_>,
     evidence: &mut EntryEvidence,
 ) -> Result<(), ViewFailure> {
     let view_started = Instant::now();
-    let mut scene = RealCloudScene::new(view_generation, prepared, display_mode)
+    let real_scene = RealCloudScene::new(runtime.view_generation, prepared, display_mode)
         .map_err(|error| preserve_scene_failure(error, ViewPhase::Hierarchy, "hierarchy setup"))?;
+    let mut scene = Scene::real(real_scene);
     evidence.observe_scene(scene.metrics());
     let projection = projection_mode(entry.projection());
     let mut camera =
@@ -441,8 +482,12 @@ fn run_prepared_entry(
         PlannerConfig::new(2.0, 0.25)
             .map_err(|error| ViewFailure::internal(ViewPhase::Planning, error))?,
     );
-    let reset = renderer
-        .apply(&RenderUpdate::Reset { view_generation })
+    let mut density_transitions = DensityTransitions::default();
+    let reset = runtime
+        .renderer
+        .apply(&RenderUpdate::Reset {
+            view_generation: runtime.view_generation,
+        })
         .map_err(|error| classify_renderer_failure(ViewPhase::GpuUpload, error))?;
     evidence.observe_resident(reset.resident());
 
@@ -463,12 +508,15 @@ fn run_prepared_entry(
             scene: &mut scene,
             camera: &mut camera,
             planner: &mut planner,
-            renderer,
-            gpu,
-            view_generation,
+            renderer: &mut *runtime.renderer,
+            gpu: runtime.gpu,
+            view_generation: runtime.view_generation,
             evidence,
             view_started: &view_started,
+            density_transitions: &mut density_transitions,
         },
+        runtime.qualification.enabled,
+        runtime.qualification.settlement_frame_ceiling,
     )?;
     evidence.trace.push(initial_report);
     for (index, step) in entry.trace().iter().copied().enumerate() {
@@ -488,12 +536,15 @@ fn run_prepared_entry(
                 scene: &mut scene,
                 camera: &mut camera,
                 planner: &mut planner,
-                renderer,
-                gpu,
-                view_generation,
+                renderer: &mut *runtime.renderer,
+                gpu: runtime.gpu,
+                view_generation: runtime.view_generation,
                 evidence,
                 view_started: &view_started,
+                density_transitions: &mut density_transitions,
             },
+            runtime.qualification.enabled,
+            runtime.qualification.settlement_frame_ceiling,
         )?;
         evidence.trace.push(report);
     }
@@ -507,7 +558,12 @@ fn run_trace_step(
     step: u64,
     input: TraceStep,
     mut runtime: TraceRuntime<'_>,
+    pre_v0_13_qualification: bool,
+    settlement_frame_ceiling: u32,
 ) -> Result<TraceReport, ViewFailure> {
+    if pre_v0_13_qualification {
+        return run_settled_trace_step(step, input, runtime, settlement_frame_ceiling);
+    }
     let mut pose = PoseEvidence::default();
     for _ in 0..input.frame_count {
         let frame = run_trace_frame(&mut runtime);
@@ -515,11 +571,68 @@ fn run_trace_step(
         pose.observe(frame?);
     }
     let metrics = runtime.scene.metrics();
-    Ok(pose.finish(step, input, metrics))
+    Ok(pose.finish(step, input, metrics, SettlementEvidence::default()))
+}
+
+fn run_settled_trace_step(
+    step: u64,
+    input: TraceStep,
+    mut runtime: TraceRuntime<'_>,
+    settlement_frame_ceiling: u32,
+) -> Result<TraceReport, ViewFailure> {
+    let pose_started = Instant::now();
+    let mut pose = PoseEvidence::default();
+    let mut settlement = None;
+    for frame_index in 1..=settlement_frame_ceiling {
+        let frame = run_trace_frame(&mut runtime)?;
+        runtime.evidence.observe_scene(runtime.scene.metrics());
+        pose.observe(frame);
+        if frame.is_quiet() && runtime.scene.metrics().queued_batches == 0 {
+            settlement = Some((frame_index, pose_started.elapsed()));
+            break;
+        }
+    }
+    let Some((settlement_frame, settlement_time)) = settlement else {
+        return Err(ViewFailure::internal(
+            ViewPhase::Rendering,
+            format_args!(
+                "corpus trace step {step} did not settle within {settlement_frame_ceiling} frames"
+            ),
+        ));
+    };
+    let settled_metrics = runtime.scene.metrics();
+    let settled_nodes = runtime.scene.planning_nodes().as_slice().to_vec();
+    for observation_frame in 1..=SETTLED_OBSERVATION_FRAMES {
+        let frame = run_trace_frame(&mut runtime)?;
+        runtime.evidence.observe_scene(runtime.scene.metrics());
+        pose.observe(frame);
+        if !frame.is_quiet()
+            || runtime.scene.metrics() != settled_metrics
+            || runtime.scene.planning_nodes().as_slice() != settled_nodes
+        {
+            return Err(ViewFailure::internal(
+                ViewPhase::Rendering,
+                format_args!(
+                    "corpus trace step {step} changed during quiet observation frame {observation_frame}"
+                ),
+            ));
+        }
+    }
+    Ok(pose.finish(
+        step,
+        input,
+        runtime.scene.metrics(),
+        SettlementEvidence {
+            settlement_frame: Some(u64::from(settlement_frame)),
+            settlement_pose_nanoseconds: Some(elapsed_nanoseconds(settlement_time)),
+            quiet_observation_frames: u64::from(SETTLED_OBSERVATION_FRAMES),
+            quiet_window_complete: true,
+        },
+    ))
 }
 
 struct TraceRuntime<'run> {
-    scene: &'run mut RealCloudScene,
+    scene: &'run mut Scene,
     camera: &'run mut OrbitCamera,
     planner: &'run mut ViewPlanner,
     renderer: &'run mut WgpuRenderer,
@@ -527,6 +640,7 @@ struct TraceRuntime<'run> {
     view_generation: ViewGenerationKey,
     evidence: &'run mut EntryEvidence,
     view_started: &'run Instant,
+    density_transitions: &'run mut DensityTransitions,
 }
 
 fn run_trace_frame(runtime: &mut TraceRuntime<'_>) -> Result<FrameEvidence, ViewFailure> {
@@ -536,62 +650,58 @@ fn run_trace_frame(runtime: &mut TraceRuntime<'_>) -> Result<FrameEvidence, View
         .camera
         .as_render_camera()
         .map_err(|error| ViewFailure::internal(ViewPhase::Planning, error))?;
-    let plan = {
-        let nodes = runtime.scene.planning_nodes();
-        runtime
-            .planner
-            .plan(
+    let mut lifecycle =
+        ViewLifecycle::new(runtime.scene, runtime.renderer, runtime.density_transitions);
+    let planned = lifecycle
+        .reconcile_view(
+            runtime.planner,
+            ViewSpec::new(
                 &render_camera,
                 viewport,
-                AvailableNodes::new(runtime.view_generation, nodes),
+                runtime.view_generation,
                 PLANNING_BUDGET,
-            )
-            .map_err(|error| ViewFailure::internal(ViewPhase::Planning, error))?
-    };
-    for retirement in plan.retirements().iter().copied() {
-        let update = runtime
-            .renderer
-            .apply(&retirement.render_update())
-            .map_err(|error| classify_renderer_failure(ViewPhase::GpuUpload, error))?;
-        runtime.evidence.observe_resident(update.resident());
-        runtime
-            .scene
-            .mark_retired(retirement.batch_key(), retirement.expected_version());
-    }
-    let issued = runtime
-        .scene
-        .reconcile_requests(plan.demanded_nodes(), plan.requests())
-        .map_err(|error| {
-            preserve_scene_failure(error, ViewPhase::Planning, "request reconciliation")
-        })?;
-    let mut accepted_batch = false;
-    if let Some(batch) = runtime
-        .scene
-        .next_batch()
-        .map_err(|error| preserve_scene_failure(error, ViewPhase::NodeRead, "node read"))?
-    {
-        let key = batch.key();
-        let version = batch.version();
-        match runtime.renderer.apply(&RenderUpdate::Upsert { batch }) {
-            Ok(update) => {
-                runtime.evidence.observe_resident(update.resident());
-                runtime.scene.mark_resident(key, version);
-                accepted_batch = true;
-            }
-            Err(error) => {
-                runtime.scene.mark_rejected(key, version);
-                return Err(classify_renderer_failure(ViewPhase::GpuUpload, error));
-            }
-        }
+            ),
+        )
+        .map_err(ViewPumpError::into_view_failure)?;
+    let (plan, issued, mut transition_activity) = planned.into_parts();
+    observe_transition_activity(runtime.evidence, &transition_activity);
+    let accepted = lifecycle
+        .accept_next_batch(runtime.view_generation)
+        .map_err(ViewPumpError::into_view_failure)?;
+    let accepted_batch = accepted.is_some();
+    if let Some(accepted) = accepted {
+        let (upload, transitions) = accepted.into_parts();
+        runtime.evidence.observe_resident(upload.resident());
+        runtime.evidence.observe_upload(upload);
+        observe_transition_activity(runtime.evidence, &transitions);
+        transition_activity.add(transitions);
     }
     let submitted = std::time::Instant::now();
+    let point_size =
+        projected_density_point_size(viewport, lifecycle.display_density_point_count());
+    let default_style = PointStyle::default();
+    let reference_style = PointStyle::new(
+        REFERENCE_POINT_SIZE_PIXELS,
+        default_style.highlight_color(),
+        default_style.clear_color(),
+    )
+    .map_err(|error| ViewFailure::internal(ViewPhase::Rendering, error))?;
+    let style = reference_style
+        .with_display_size_pixels(point_size)
+        .map_err(|error| ViewFailure::internal(ViewPhase::Rendering, error))?;
     let frame_report = render_offscreen(
-        runtime.renderer,
+        lifecycle.renderer_mut(),
         runtime.gpu,
         runtime.view_generation,
         render_camera,
         viewport,
+        style,
     )?;
+    let completed_transition = lifecycle
+        .advance_presented_frame()
+        .map_err(ViewPumpError::into_view_failure)?;
+    observe_transition_activity(runtime.evidence, &completed_transition);
+    transition_activity.add(completed_transition);
     if frame_report.drawn_points() > 0 {
         runtime
             .evidence
@@ -600,35 +710,59 @@ fn run_trace_frame(runtime: &mut TraceRuntime<'_>) -> Result<FrameEvidence, View
     runtime.evidence.observe_frame(frame_report);
     Ok(FrameEvidence {
         demanded_nodes: u64::try_from(plan.demanded_nodes().len()).unwrap_or(u64::MAX),
+        requested_nodes: u64::try_from(plan.requests().len()).unwrap_or(u64::MAX),
         issued_nodes: issued,
-        retired_nodes: u64::try_from(plan.retirements().len()).unwrap_or(u64::MAX),
+        retired_nodes: transition_activity.retired(),
+        presentation_updates: transition_activity.presentations(),
         accepted_batch,
         frame_report,
         submitted_frame_nanoseconds: elapsed_nanoseconds(submitted.elapsed()),
     })
 }
 
+fn observe_transition_activity(evidence: &mut EntryEvidence, activity: &TransitionActivity) {
+    for report in activity.reports() {
+        evidence.observe_resident(report.resident());
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 struct FrameEvidence {
     demanded_nodes: u64,
+    requested_nodes: u64,
     issued_nodes: u64,
     retired_nodes: u64,
+    presentation_updates: u64,
     accepted_batch: bool,
     frame_report: render_wgpu::FrameReport,
     submitted_frame_nanoseconds: u64,
+}
+
+impl FrameEvidence {
+    const fn is_quiet(self) -> bool {
+        self.demanded_nodes == 0
+            && self.requested_nodes == 0
+            && self.issued_nodes == 0
+            && self.retired_nodes == 0
+            && self.presentation_updates == 0
+            && !self.accepted_batch
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default)]
 struct PoseEvidence {
     completed_frames: u64,
     peak_demanded_nodes: u64,
+    peak_issued_nodes_per_frame: u64,
     issued_nodes: u64,
     retired_nodes: u64,
+    presentation_updates: u64,
     accepted_batches: u64,
     final_drawn_points: u64,
     peak_resident_batches: u64,
     peak_resident_points: u64,
     peak_resident_bytes: u64,
+    peak_transient_texture_bytes: u64,
     submitted_frame_nanoseconds: u64,
 }
 
@@ -636,8 +770,12 @@ impl PoseEvidence {
     fn observe(&mut self, frame: FrameEvidence) {
         self.completed_frames = self.completed_frames.saturating_add(1);
         self.peak_demanded_nodes = self.peak_demanded_nodes.max(frame.demanded_nodes);
+        self.peak_issued_nodes_per_frame = self.peak_issued_nodes_per_frame.max(frame.issued_nodes);
         self.issued_nodes = self.issued_nodes.saturating_add(frame.issued_nodes);
         self.retired_nodes = self.retired_nodes.saturating_add(frame.retired_nodes);
+        self.presentation_updates = self
+            .presentation_updates
+            .saturating_add(frame.presentation_updates);
         self.accepted_batches = self
             .accepted_batches
             .saturating_add(u64::from(frame.accepted_batch));
@@ -651,20 +789,31 @@ impl PoseEvidence {
         self.peak_resident_bytes = self
             .peak_resident_bytes
             .max(frame.frame_report.resident_bytes());
+        self.peak_transient_texture_bytes = self
+            .peak_transient_texture_bytes
+            .max(frame.frame_report.transient_texture_bytes());
         self.submitted_frame_nanoseconds = self
             .submitted_frame_nanoseconds
             .saturating_add(frame.submitted_frame_nanoseconds);
     }
 
-    fn finish(self, step: u64, input: TraceStep, metrics: SceneMetrics) -> TraceReport {
+    fn finish(
+        self,
+        step: u64,
+        input: TraceStep,
+        metrics: SceneMetrics,
+        settlement: SettlementEvidence,
+    ) -> TraceReport {
         TraceReport {
             step,
             input,
             requested_frame_count: u64::from(input.frame_count),
             completed_frame_count: self.completed_frames,
             peak_demanded_nodes: self.peak_demanded_nodes,
+            peak_issued_nodes_per_frame: self.peak_issued_nodes_per_frame,
             issued_nodes: self.issued_nodes,
             retired_nodes: self.retired_nodes,
+            presentation_updates: self.presentation_updates,
             accepted_batches: self.accepted_batches,
             resident_batches: metrics.resident_batches,
             resident_points: metrics.resident_points,
@@ -672,9 +821,22 @@ impl PoseEvidence {
             peak_resident_batches: self.peak_resident_batches,
             peak_resident_points: self.peak_resident_points,
             peak_resident_bytes: self.peak_resident_bytes,
+            peak_transient_texture_bytes: self.peak_transient_texture_bytes,
             submitted_frame_nanoseconds: self.submitted_frame_nanoseconds,
+            settlement_frame: settlement.settlement_frame,
+            settlement_pose_nanoseconds: settlement.settlement_pose_nanoseconds,
+            quiet_observation_frames: settlement.quiet_observation_frames,
+            quiet_window_complete: settlement.quiet_window_complete,
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct SettlementEvidence {
+    settlement_frame: Option<u64>,
+    settlement_pose_nanoseconds: Option<u64>,
+    quiet_observation_frames: u64,
+    quiet_window_complete: bool,
 }
 
 fn preserve_scene_failure(
@@ -694,6 +856,7 @@ fn render_offscreen(
     view_generation: ViewGenerationKey,
     camera: render_wgpu::Camera,
     viewport: Viewport,
+    style: PointStyle,
 ) -> Result<render_wgpu::FrameReport, ViewFailure> {
     let texture = gpu.device.create_texture(&wgpu::TextureDescriptor {
         label: Some("punctra corpus viewing target"),
@@ -716,7 +879,8 @@ fn render_offscreen(
             label: Some("punctra corpus viewing encoder"),
         });
     let frame = Frame::new(view_generation, camera, viewport)
-        .map_err(|error| ViewFailure::internal(ViewPhase::Rendering, error))?;
+        .map_err(|error| ViewFailure::internal(ViewPhase::Rendering, error))?
+        .with_style(style);
     let recorded = renderer
         .render(&mut encoder, &target, &frame)
         .map_err(|error| classify_renderer_failure(ViewPhase::Rendering, error))?;
@@ -776,6 +940,14 @@ const fn gpu_backend_name(backend: wgpu::Backend) -> &'static str {
         wgpu::Backend::Dx12 => "Dx12",
         wgpu::Backend::Gl => "Gl",
         wgpu::Backend::BrowserWebGpu => "BrowserWebGpu",
+    }
+}
+
+const fn depth_cue_status_name(status: DepthCueStatus) -> &'static str {
+    match status {
+        DepthCueStatus::Disabled => "disabled",
+        DepthCueStatus::Active => "active",
+        DepthCueStatus::UnsupportedFallback => "unsupported_fallback",
     }
 }
 
@@ -855,6 +1027,10 @@ pub(crate) struct ResidencyEvidence {
     complete_resident_points: u64,
     retired_batches: u64,
     cancelled_requests: u64,
+    rejected_batches: u64,
+    cumulative_uploaded_batches: u64,
+    cumulative_uploaded_points: u64,
+    cumulative_uploaded_bytes: u64,
     peak_resident_batches: u64,
     peak_resident_points: u64,
     peak_resident_bytes: u64,
@@ -944,6 +1120,22 @@ impl EntryEvidence {
         self.residency.complete_resident_points = metrics.complete_resident_points;
         self.residency.retired_batches = metrics.retired_batches;
         self.residency.cancelled_requests = metrics.cancelled_requests;
+        self.residency.rejected_batches = metrics.rejected_batches;
+    }
+
+    fn observe_upload(&mut self, report: render_protocol::UpdateReport) {
+        if report.uploaded_points() > 0 {
+            self.residency.cumulative_uploaded_batches =
+                self.residency.cumulative_uploaded_batches.saturating_add(1);
+        }
+        self.residency.cumulative_uploaded_points = self
+            .residency
+            .cumulative_uploaded_points
+            .saturating_add(report.uploaded_points());
+        self.residency.cumulative_uploaded_bytes = self
+            .residency
+            .cumulative_uploaded_bytes
+            .saturating_add(report.uploaded_bytes());
     }
 
     fn observe_resident(&mut self, resident: ResidentStats) {
@@ -992,6 +1184,7 @@ impl EntryEvidence {
             measure_permission: _,
             display,
             projection,
+            known_feature_outcomes,
             initial_frame_count,
             trace: declared_trace,
         } = entry;
@@ -1001,6 +1194,7 @@ impl EntryEvidence {
             index: self.index,
             display,
             projection,
+            declared_known_feature_outcomes: known_feature_outcomes,
             declared_initial_frame_count: initial_frame_count,
             declared_trace,
             measurements: self.measurements,
@@ -1059,11 +1253,14 @@ fn report_summary(
     entries: &[EntryReport],
     distinct_project_count: u64,
     distinct_firm_count: u64,
+    pre_v0_13_qualification: bool,
+    settlement_frame_ceiling: u32,
+    display_projection_matrix_complete: bool,
 ) -> ReportSummary {
     ReportSummary {
         entry_count: u64::try_from(entries.len()).unwrap_or(u64::MAX),
-        distinct_project_count,
-        distinct_firm_count,
+        declared_distinct_project_count: distinct_project_count,
+        declared_distinct_firm_count: distinct_firm_count,
         passed_count: u64::try_from(
             entries
                 .iter()
@@ -1085,7 +1282,37 @@ fn report_summary(
                 .count(),
         )
         .unwrap_or(u64::MAX),
+        pre_v0_13_repository_lane_enabled: pre_v0_13_qualification,
+        declared_settlement_frame_ceiling: u64::from(settlement_frame_ceiling),
+        required_quiet_observation_frames: if pre_v0_13_qualification {
+            u64::from(SETTLED_OBSERVATION_FRAMES)
+        } else {
+            0
+        },
+        declared_display_projection_matrix_complete: display_projection_matrix_complete,
+        declared_known_feature_located_count: declared_known_feature_count(
+            entries,
+            KnownFeatureResult::Located,
+        ),
+        declared_known_feature_issue_count: entries
+            .iter()
+            .flat_map(|entry| &entry.declared_known_feature_outcomes)
+            .filter(|outcome| outcome.result != KnownFeatureResult::Located)
+            .count()
+            .try_into()
+            .unwrap_or(u64::MAX),
     }
+}
+
+fn declared_known_feature_count(entries: &[EntryReport], result: KnownFeatureResult) -> u64 {
+    u64::try_from(
+        entries
+            .iter()
+            .flat_map(|entry| &entry.declared_known_feature_outcomes)
+            .filter(|outcome| outcome.result == result)
+            .count(),
+    )
+    .unwrap_or(u64::MAX)
 }
 
 fn elapsed_nanoseconds(duration: std::time::Duration) -> u64 {
@@ -1112,6 +1339,19 @@ where
     D: Deserializer<'de>,
 {
     deserialize_bounded_sequence(deserializer, MAX_TRACE_STEPS, "navigation trace")
+}
+
+fn deserialize_known_feature_outcomes<'de, D>(
+    deserializer: D,
+) -> Result<BoundedSequence<KnownFeatureOutcome, MAX_KNOWN_FEATURE_OUTCOMES>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    deserialize_bounded_sequence(
+        deserializer,
+        MAX_KNOWN_FEATURE_OUTCOMES,
+        "known-feature outcomes",
+    )
 }
 
 fn deserialize_bounded_sequence<'de, D, T, const MAXIMUM: usize>(
@@ -1159,6 +1399,12 @@ impl<T, const MAXIMUM: usize> BoundedSequence<T, MAXIMUM> {
             .into_iter()
             .take(self.length)
             .map(|value| value.expect("a bounded sequence prefix is initialized"))
+    }
+}
+
+impl<T, const MAXIMUM: usize> Default for BoundedSequence<T, MAXIMUM> {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -1219,6 +1465,10 @@ struct BorrowedCorpusManifest<'a> {
     corpus_id: Cow<'a, str>,
     #[serde(borrow)]
     machine: BorrowedMachineDeclaration<'a>,
+    #[serde(default)]
+    pre_v0_13_qualification: bool,
+    #[serde(default = "default_settlement_frame_ceiling")]
+    settlement_frame_ceiling: u32,
     #[serde(borrow, deserialize_with = "deserialize_borrowed_entries")]
     entries: BoundedSequence<&'a serde_json::value::RawValue, MAX_ENTRIES>,
 }
@@ -1253,6 +1503,8 @@ struct BorrowedCorpusEntry<'a> {
     measure_permission: bool,
     display: DisplayChoice,
     projection: ProjectionChoice,
+    #[serde(default, deserialize_with = "deserialize_known_feature_outcomes")]
+    known_feature_outcomes: BoundedSequence<KnownFeatureOutcome, MAX_KNOWN_FEATURE_OUTCOMES>,
     #[serde(default = "default_frames_per_pose")]
     initial_frame_count: u32,
     #[serde(deserialize_with = "deserialize_borrowed_trace")]
@@ -1284,6 +1536,8 @@ impl BorrowedCorpusManifest<'_> {
                 permit_allocation,
             )?,
             machine: self.machine.into_owned(permit_allocation)?,
+            pre_v0_13_qualification: self.pre_v0_13_qualification,
+            settlement_frame_ceiling: self.settlement_frame_ceiling,
             entries,
         })
     }
@@ -1352,6 +1606,12 @@ impl BorrowedCorpusEntry<'_> {
             measure_permission: self.measure_permission,
             display: self.display,
             projection: self.projection,
+            known_feature_outcomes: {
+                let mut outcomes =
+                    manifest_vec(self.known_feature_outcomes.len(), permit_allocation)?;
+                outcomes.extend(self.known_feature_outcomes.into_values());
+                outcomes
+            },
             initial_frame_count: self.initial_frame_count,
             trace,
         })
@@ -1432,6 +1692,8 @@ pub(crate) struct CorpusManifest {
     corpus_id: String,
     machine: MachineDeclaration,
     entries: Vec<CorpusEntry>,
+    pre_v0_13_qualification: bool,
+    settlement_frame_ceiling: u32,
 }
 
 impl CorpusManifest {
@@ -1460,7 +1722,50 @@ impl CorpusManifest {
                 return invalid("corpus entry IDs must be unique");
             }
         }
+        if !(1..=MAX_SETTLEMENT_FRAME_CEILING).contains(&self.settlement_frame_ceiling) {
+            return invalid(format!(
+                "settlement_frame_ceiling must contain between 1 and {MAX_SETTLEMENT_FRAME_CEILING} frames"
+            ));
+        }
+        if self.pre_v0_13_qualification {
+            if self.distinct_project_count() < 5 || self.distinct_firm_count() < 3 {
+                return invalid(
+                    "pre-v0.13 qualification requires at least five projects from three unrelated firms",
+                );
+            }
+            if !self.display_projection_matrix_complete() {
+                return invalid(
+                    "pre-v0.13 qualification requires all five display modes in both projections",
+                );
+            }
+            if !self.known_feature_matrix_complete() {
+                return invalid(
+                    "pre-v0.13 qualification requires outcomes for every declared known-feature kind",
+                );
+            }
+        }
         Ok(())
+    }
+
+    fn display_projection_matrix_complete(&self) -> bool {
+        DisplayChoice::ALL.into_iter().all(|display| {
+            ProjectionChoice::ALL.into_iter().all(|projection| {
+                self.entries
+                    .iter()
+                    .any(|entry| entry.display == display && entry.projection == projection)
+            })
+        })
+    }
+
+    fn known_feature_matrix_complete(&self) -> bool {
+        KnownFeatureKind::ALL.into_iter().all(|kind| {
+            self.entries.iter().any(|entry| {
+                entry
+                    .known_feature_outcomes
+                    .iter()
+                    .any(|outcome| outcome.kind == kind)
+            })
+        })
     }
 
     pub(crate) fn distinct_project_count(&self) -> u64 {
@@ -1629,6 +1934,7 @@ pub(crate) struct CorpusEntry {
     measure_permission: bool,
     display: DisplayChoice,
     projection: ProjectionChoice,
+    known_feature_outcomes: Vec<KnownFeatureOutcome>,
     initial_frame_count: u32,
     trace: Vec<TraceStep>,
 }
@@ -1654,6 +1960,20 @@ impl CorpusEntry {
                 "entry {} trace exceeds {MAX_TRACE_STEPS} steps",
                 self.id
             ));
+        }
+        if self.known_feature_outcomes.len() > MAX_KNOWN_FEATURE_OUTCOMES {
+            return invalid(format!(
+                "entry {} known_feature_outcomes exceeds {MAX_KNOWN_FEATURE_OUTCOMES} items",
+                self.id
+            ));
+        }
+        for (index, outcome) in self.known_feature_outcomes.iter().enumerate() {
+            if self.known_feature_outcomes[..index]
+                .iter()
+                .any(|previous| previous.kind == outcome.kind)
+            {
+                return invalid(format!("entry {} repeats one known-feature kind", self.id));
+            }
         }
         validate_frame_count(self.initial_frame_count)?;
         for step in &self.trace {
@@ -1697,11 +2017,64 @@ pub(crate) enum DisplayChoice {
     Classification,
 }
 
+impl DisplayChoice {
+    const ALL: [Self; 5] = [
+        Self::Neutral,
+        Self::Elevation,
+        Self::Rgb,
+        Self::Intensity,
+        Self::Classification,
+    ];
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, Eq, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum ProjectionChoice {
     Perspective,
     Orthographic,
+}
+
+impl ProjectionChoice {
+    const ALL: [Self; 2] = [Self::Perspective, Self::Orthographic];
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum KnownFeatureKind {
+    TerrainBreak,
+    Vegetation,
+    Building,
+    ScanPatternVariation,
+    LowIntensity,
+    HighIntensity,
+    RepresentativeClassification,
+}
+
+impl KnownFeatureKind {
+    const ALL: [Self; 7] = [
+        Self::TerrainBreak,
+        Self::Vegetation,
+        Self::Building,
+        Self::ScanPatternVariation,
+        Self::LowIntensity,
+        Self::HighIntensity,
+        Self::RepresentativeClassification,
+    ];
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum KnownFeatureResult {
+    Located,
+    ArtifactConfounded,
+    NotObserved,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct KnownFeatureOutcome {
+    kind: KnownFeatureKind,
+    result: KnownFeatureResult,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq)]
@@ -1745,6 +2118,10 @@ impl TraceStep {
 
 const fn default_frames_per_pose() -> u32 {
     DEFAULT_FRAMES_PER_POSE
+}
+
+const fn default_settlement_frame_ceiling() -> u32 {
+    DEFAULT_SETTLEMENT_FRAME_CEILING
 }
 
 fn validate_frame_count(frame_count: u32) -> io::Result<()> {
@@ -1855,17 +2232,24 @@ pub(crate) struct ReportMachine {
     pub(crate) declared_gpu_expectation: String,
     pub(crate) observed_gpu_adapter: String,
     pub(crate) observed_gpu_backend: &'static str,
+    pub(crate) observed_depth_cue_status: &'static str,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Eq, PartialEq)]
 #[allow(clippy::struct_field_names)]
 pub(crate) struct ReportSummary {
     pub(crate) entry_count: u64,
-    pub(crate) distinct_project_count: u64,
-    pub(crate) distinct_firm_count: u64,
+    pub(crate) declared_distinct_project_count: u64,
+    pub(crate) declared_distinct_firm_count: u64,
     pub(crate) passed_count: u64,
     pub(crate) failed_count: u64,
     pub(crate) resource_limited_count: u64,
+    pub(crate) pre_v0_13_repository_lane_enabled: bool,
+    pub(crate) declared_settlement_frame_ceiling: u64,
+    pub(crate) required_quiet_observation_frames: u64,
+    pub(crate) declared_display_projection_matrix_complete: bool,
+    pub(crate) declared_known_feature_located_count: u64,
+    pub(crate) declared_known_feature_issue_count: u64,
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq)]
@@ -1877,6 +2261,7 @@ pub(crate) struct EntryReport {
     pub(crate) index: IndexEvidence,
     pub(crate) display: DisplayChoice,
     pub(crate) projection: ProjectionChoice,
+    pub(crate) declared_known_feature_outcomes: Vec<KnownFeatureOutcome>,
     pub(crate) declared_initial_frame_count: u32,
     pub(crate) declared_trace: Vec<TraceStep>,
     #[serde(flatten)]
@@ -1904,8 +2289,10 @@ pub(crate) struct TraceReport {
     pub(crate) requested_frame_count: u64,
     pub(crate) completed_frame_count: u64,
     pub(crate) peak_demanded_nodes: u64,
+    pub(crate) peak_issued_nodes_per_frame: u64,
     pub(crate) issued_nodes: u64,
     pub(crate) retired_nodes: u64,
+    pub(crate) presentation_updates: u64,
     pub(crate) accepted_batches: u64,
     pub(crate) resident_batches: u64,
     pub(crate) resident_points: u64,
@@ -1913,7 +2300,12 @@ pub(crate) struct TraceReport {
     pub(crate) peak_resident_batches: u64,
     pub(crate) peak_resident_points: u64,
     pub(crate) peak_resident_bytes: u64,
+    pub(crate) peak_transient_texture_bytes: u64,
     pub(crate) submitted_frame_nanoseconds: u64,
+    pub(crate) settlement_frame: Option<u64>,
+    pub(crate) settlement_pose_nanoseconds: Option<u64>,
+    pub(crate) quiet_observation_frames: u64,
+    pub(crate) quiet_window_complete: bool,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Eq, PartialEq)]
@@ -1951,6 +2343,8 @@ pub(crate) struct EffectiveLimits {
     manifest_entries: u64,
     trace_steps_per_entry: u64,
     frames_per_pose: u64,
+    settlement_frame_ceiling: u64,
+    settled_observation_frames: u64,
 }
 
 impl EffectiveLimits {
@@ -1991,6 +2385,8 @@ impl EffectiveLimits {
             manifest_entries: MAX_ENTRIES as u64,
             trace_steps_per_entry: MAX_TRACE_STEPS as u64,
             frames_per_pose: u64::from(MAX_FRAMES_PER_POSE),
+            settlement_frame_ceiling: u64::from(MAX_SETTLEMENT_FRAME_CEILING),
+            settled_observation_frames: u64::from(SETTLED_OBSERVATION_FRAMES),
         }
     }
 }
@@ -2009,6 +2405,7 @@ struct ReportNonclaims {
     production_corpus_complete: bool,
     partner_acceptance_evaluated: bool,
     professional_preference_evaluated: bool,
+    declared_known_feature_outcomes_verified: bool,
     terrain_resource_envelope_evaluated: bool,
     human_time_savings_evaluated: bool,
 }
@@ -2549,7 +2946,7 @@ mod tests {
         );
         let mut renderer = WgpuRenderer::new(
             &device,
-            RendererConfig::new(wgpu::TextureFormat::Rgba8Unorm, limits),
+            render_wgpu::RendererConfig::new(wgpu::TextureFormat::Rgba8Unorm, limits),
         )
         .unwrap();
         let first = corpus_view_generation(0);
@@ -2876,7 +3273,14 @@ mod tests {
         assert_eq!(report_failure.phase, "host-staging");
         assert_eq!(report_failure.safe_action, terminal.action().as_str());
 
-        let summary = report_summary(std::slice::from_ref(&report), 1, 1);
+        let summary = report_summary(
+            std::slice::from_ref(&report),
+            1,
+            1,
+            false,
+            DEFAULT_SETTLEMENT_FRAME_CEILING,
+            false,
+        );
         let encoded = ViewingReport::new(
             "failed-corpus".into(),
             ReportMachine {
@@ -2886,6 +3290,7 @@ mod tests {
                 declared_gpu_expectation: "gpu".into(),
                 observed_gpu_adapter: "adapter".into(),
                 observed_gpu_backend: "backend",
+                observed_depth_cue_status: "active",
             },
             summary,
             vec![report],
@@ -2953,14 +3358,21 @@ mod tests {
                 declared_gpu_expectation: "gpu".into(),
                 observed_gpu_adapter: "adapter".into(),
                 observed_gpu_backend: "backend",
+                observed_depth_cue_status: "active",
             },
             ReportSummary {
                 entry_count: 1,
-                distinct_project_count: 1,
-                distinct_firm_count: 1,
+                declared_distinct_project_count: 1,
+                declared_distinct_firm_count: 1,
                 passed_count: 1,
                 failed_count: 0,
                 resource_limited_count: 0,
+                pre_v0_13_repository_lane_enabled: false,
+                declared_settlement_frame_ceiling: u64::from(DEFAULT_SETTLEMENT_FRAME_CEILING),
+                required_quiet_observation_frames: 0,
+                declared_display_projection_matrix_complete: false,
+                declared_known_feature_located_count: 0,
+                declared_known_feature_issue_count: 0,
             },
             vec![fixture_entry()],
         );
@@ -2974,6 +3386,7 @@ mod tests {
         assert!(!encoded.contains("verified_source_snapshot_bytes"));
         assert!(!encoded.contains("peak_total_temporary_disk_bytes"));
         assert!(encoded.contains("\"production_corpus_complete\":false"));
+        assert!(encoded.contains("\"declared_known_feature_outcomes_verified\":false"));
 
         let directory = tempfile::tempdir().unwrap();
         let target = directory.path().join("report.json");
@@ -3000,14 +3413,21 @@ mod tests {
                 declared_gpu_expectation: "gpu".into(),
                 observed_gpu_adapter: "adapter".into(),
                 observed_gpu_backend: "backend",
+                observed_depth_cue_status: "active",
             },
             ReportSummary {
                 entry_count: 1,
-                distinct_project_count: 1,
-                distinct_firm_count: 1,
+                declared_distinct_project_count: 1,
+                declared_distinct_firm_count: 1,
                 passed_count: 1,
                 failed_count: 0,
                 resource_limited_count: 0,
+                pre_v0_13_repository_lane_enabled: false,
+                declared_settlement_frame_ceiling: u64::from(DEFAULT_SETTLEMENT_FRAME_CEILING),
+                required_quiet_observation_frames: 0,
+                declared_display_projection_matrix_complete: false,
+                declared_known_feature_located_count: 0,
+                declared_known_feature_issue_count: 0,
             },
             vec![fixture_entry()],
         );
@@ -3024,6 +3444,18 @@ mod tests {
         let failure = report_encoding_failure(&error);
         assert_eq!(failure.code(), ViewFailureCode::ResourceLimit);
         assert_eq!(failure.phase(), ViewPhase::ReportPublication);
+    }
+
+    #[test]
+    fn pre_v0_13_manifest_requires_the_complete_mode_projection_and_feature_matrix() {
+        let mut manifest = qualification_manifest();
+        assert!(manifest.validate().is_ok());
+        assert!(manifest.display_projection_matrix_complete());
+        assert!(manifest.known_feature_matrix_complete());
+
+        manifest.entries.pop();
+        let error = manifest.validate().unwrap_err();
+        assert!(error.to_string().contains("all five display modes"));
     }
 
     #[cfg(unix)]
@@ -3126,6 +3558,7 @@ mod tests {
             },
             display: DisplayChoice::Elevation,
             projection: ProjectionChoice::Orthographic,
+            declared_known_feature_outcomes: Vec::new(),
             declared_initial_frame_count: 2,
             declared_trace: vec![TraceStep {
                 orbit_horizontal_pixels: 1.0,
@@ -3155,6 +3588,10 @@ mod tests {
                 complete_resident_points: 0,
                 retired_batches: 0,
                 cancelled_requests: 0,
+                rejected_batches: 0,
+                cumulative_uploaded_batches: 1,
+                cumulative_uploaded_points: 10,
+                cumulative_uploaded_bytes: 240,
                 peak_resident_batches: 1,
                 peak_resident_points: 10,
                 peak_resident_bytes: 240,
@@ -3165,8 +3602,10 @@ mod tests {
                 requested_frame_count: 2,
                 completed_frame_count: 2,
                 peak_demanded_nodes: 1,
+                peak_issued_nodes_per_frame: 1,
                 issued_nodes: 1,
                 retired_nodes: 0,
+                presentation_updates: 0,
                 accepted_batches: 1,
                 resident_batches: 1,
                 resident_points: 10,
@@ -3174,10 +3613,61 @@ mod tests {
                 peak_resident_batches: 1,
                 peak_resident_points: 10,
                 peak_resident_bytes: 240,
+                peak_transient_texture_bytes: 8 * 640 * 480,
                 submitted_frame_nanoseconds: 6,
+                settlement_frame: None,
+                settlement_pose_nanoseconds: None,
+                quiet_observation_frames: 0,
+                quiet_window_complete: false,
             }],
             disposition: EntryDisposition::Passed,
             failure: None,
+        }
+    }
+
+    fn qualification_manifest() -> CorpusManifest {
+        let mut entries = Vec::new();
+        for (display_index, display) in DisplayChoice::ALL.into_iter().enumerate() {
+            for (projection_index, projection) in ProjectionChoice::ALL.into_iter().enumerate() {
+                let index = display_index * ProjectionChoice::ALL.len() + projection_index;
+                entries.push(CorpusEntry {
+                    id: format!("entry-{index}"),
+                    project_id: format!("project-{}", index % 5),
+                    firm_id: format!("firm-{}", index % 3),
+                    source_path: PathBuf::from(format!("source-{index}.laz")),
+                    index_path: PathBuf::from(format!("index-{index}.pidx")),
+                    inspect_permission: true,
+                    measure_permission: true,
+                    display,
+                    projection,
+                    known_feature_outcomes: if index == 0 {
+                        KnownFeatureKind::ALL
+                            .into_iter()
+                            .map(|kind| KnownFeatureOutcome {
+                                kind,
+                                result: KnownFeatureResult::Located,
+                            })
+                            .collect()
+                    } else {
+                        Vec::new()
+                    },
+                    initial_frame_count: DEFAULT_FRAMES_PER_POSE,
+                    trace: Vec::new(),
+                });
+            }
+        }
+        CorpusManifest {
+            schema: MANIFEST_SCHEMA.to_owned(),
+            corpus_id: "qualified-corpus".to_owned(),
+            machine: MachineDeclaration {
+                label: "machine".to_owned(),
+                operating_system: "os".to_owned(),
+                filesystem: "filesystem".to_owned(),
+                gpu_expectation: "gpu".to_owned(),
+            },
+            entries,
+            pre_v0_13_qualification: true,
+            settlement_frame_ceiling: MAX_SETTLEMENT_FRAME_CEILING,
         }
     }
 
@@ -3192,6 +3682,7 @@ mod tests {
             measure_permission: true,
             display: DisplayChoice::Neutral,
             projection: ProjectionChoice::Perspective,
+            known_feature_outcomes: Vec::new(),
             initial_frame_count: DEFAULT_FRAMES_PER_POSE,
             trace: Vec::new(),
         }

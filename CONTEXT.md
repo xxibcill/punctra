@@ -7,8 +7,11 @@ outstanding; the v0.11 exact interactive review technical slice is complete
 and repository-verified while field activation and independent-adoption
 evidence remain outstanding; the v0.12 explicit spatial-reference and library-
 packaging repository slice is complete while its production-corpus,
-downstream, adoption, and support evidence remains outstanding; broader
-selection, terrain, and product terms remain deferred
+downstream, adoption, and support evidence remains outstanding; the accepted
+pre-v0.13 renderer-quality corrective checkpoint is complete and repository-
+verified while permitted field execution remains outstanding; no later
+repository implementation track is Active; broader selection, terrain, and
+product terms remain deferred
 
 Punctra v0.11 builds on the reusable render engine, renderer-neutral View
 planner, and verified Source path described in the accepted [v0.1 renderer

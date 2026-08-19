@@ -240,6 +240,21 @@ pub(crate) enum MutationDisposition {
     },
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct ReviewRecovery {
+    selected_points: u64,
+}
+
+impl ReviewRecovery {
+    pub(crate) const fn selected_points(self) -> u64 {
+        self.selected_points
+    }
+
+    pub(crate) fn clear_selection(&mut self) {
+        self.selected_points = 0;
+    }
+}
+
 impl MutationDisposition {
     pub(crate) fn require_committed(self, requested: &str) -> ReviewResult<()> {
         match self {
@@ -424,9 +439,9 @@ impl ReviewSession {
     pub(crate) fn close_if_indeterminate(
         session: &mut Option<Self>,
         disposition: MutationDisposition,
-    ) -> bool {
+    ) -> Option<ReviewRecovery> {
         let MutationDisposition::Indeterminate { operation } = disposition else {
-            return false;
+            return None;
         };
         let closed = session.take();
         debug_assert!(
@@ -436,11 +451,23 @@ impl ReviewSession {
         eprintln!(
             "Exact review session closed after indeterminate Operation {operation}; reopen explicitly with --resolve-operation-id {operation} before further review or mutation"
         );
-        true
+        Some(ReviewRecovery {
+            selected_points: closed.map_or(0, |review| review.selected_points()),
+        })
     }
 
     pub(crate) const fn is_busy(&self) -> bool {
         self.pending.is_some()
+    }
+
+    pub(crate) const fn has_selection(&self) -> bool {
+        self.selected.is_some()
+    }
+
+    pub(crate) fn selected_points(&self) -> u64 {
+        self.selected
+            .as_ref()
+            .map_or(0, |selection| selection.points.metadata().exact_count())
     }
 
     pub(crate) const fn has_classification_edit(&self) -> bool {
@@ -1314,18 +1341,24 @@ mod tests {
         let (session, _directory, _source) = review_session("indeterminate-close");
         let mut session = Some(session);
 
-        assert!(!ReviewSession::close_if_indeterminate(
-            &mut session,
-            MutationDisposition::Rejected {
-                operation,
-                reason: CommitRejection::NoChanges,
-            },
-        ));
+        assert_eq!(
+            ReviewSession::close_if_indeterminate(
+                &mut session,
+                MutationDisposition::Rejected {
+                    operation,
+                    reason: CommitRejection::NoChanges,
+                },
+            ),
+            None
+        );
         assert!(session.is_some());
-        assert!(ReviewSession::close_if_indeterminate(
-            &mut session,
-            MutationDisposition::Indeterminate { operation },
-        ));
+        assert_eq!(
+            ReviewSession::close_if_indeterminate(
+                &mut session,
+                MutationDisposition::Indeterminate { operation },
+            ),
+            Some(ReviewRecovery { selected_points: 0 })
+        );
         assert!(session.is_none());
     }
 

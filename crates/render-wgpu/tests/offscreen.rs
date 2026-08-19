@@ -1,21 +1,22 @@
 //! GPU acceptance coverage on an available headless adapter.
 
-use std::sync::mpsc;
+use std::time::Duration;
 
 #[path = "../../../tests/support/gpu.rs"]
 mod gpu_support;
 
 use render_protocol::{
     BatchKey, BatchVersion, ESTIMATED_GPU_BYTES_PER_POINT as POINT_BYTES, PointBatch, PointId,
-    ProtocolError, RenderLimits, RenderPoint, RenderUpdate, ResidentResource, SourceId, UpdateKind,
-    UpdateReport, ViewGenerationKey, ViewId, Viewport,
+    PresentationWeight, ProtocolError, RenderLimits, RenderPoint, RenderUpdate, ResidentResource,
+    SourceId, UpdateKind, UpdateReport, ViewGenerationKey, ViewId, Viewport,
 };
 use render_wgpu::{
-    Camera, Frame, FrameReport, PickError, PickHit, PickPoll, PickRequest, PickTicket, PointStyle,
-    RecordedFrame, RendererConfig, RendererError, WgpuRenderer,
+    Camera, DepthCueStatus, EyeDomeLighting, Frame, FrameReport, PickError, PickHit, PickPoll,
+    PickRequest, PickTicket, PointStyle, RecordedFrame, RendererConfig, RendererError,
+    WgpuRenderer,
 };
 
-use gpu_support::{GpuContext, with_gpu};
+use gpu_support::{GpuContext, Rgba8Image as Image, Rgba8Target as ColorTarget, with_gpu};
 
 const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 const VIEWPORT: [u32; 2] = [64, 64];
@@ -30,6 +31,7 @@ const CYAN: [u8; 4] = [0, 255, 255, 255];
 const TRANSPARENT: [u8; 4] = [255, 255, 255, 0];
 const TWO_POINT_BYTES: u64 = 2 * POINT_BYTES;
 const TEST_SOURCE: SourceId = SourceId::new([0x55; 32]);
+const MAX_PICK_COMPLETION_TIME: Duration = Duration::from_secs(2);
 
 #[test]
 fn lifecycle_updates_are_atomic_in_gpu_state() {
@@ -79,6 +81,31 @@ fn recorded_frames_keep_replaced_batch_data_and_identity() {
 #[test]
 fn recorded_frames_are_bound_to_the_renderer_that_created_them() {
     with_gpu(assert_foreign_recorded_frame_rejected);
+}
+
+#[test]
+fn presentation_weight_changes_color_but_not_pick_coverage() {
+    with_gpu(assert_presentation_weight_is_color_only);
+}
+
+#[test]
+fn multi_point_cross_fade_preserves_coverage_across_inverted_batch_depth() {
+    with_gpu(assert_multi_point_cross_fade_coverage);
+}
+
+#[test]
+fn display_size_changes_color_coverage_but_not_pick_coverage() {
+    with_gpu(assert_display_size_is_color_only);
+}
+
+#[test]
+fn eye_dome_lighting_has_bounded_active_and_fallback_paths() {
+    with_gpu(assert_eye_dome_paths);
+}
+
+#[test]
+fn transparent_presentation_does_not_leak_through_eye_dome_lighting() {
+    with_gpu(assert_transparent_eye_dome_staging);
 }
 
 fn assert_lifecycle_updates_are_atomic(gpu: &GpuContext) {
@@ -232,6 +259,7 @@ fn assert_raster_and_pick_semantics(gpu: &GpuContext) {
         view_generation,
         point_ids: vec![near_id],
     });
+    assert_eq!(subject.renderer.resident_highlight_points(), 1);
     let highlighted = subject.render(&frame);
     assert_pixel(highlighted.image.pixel(CENTER), GREEN);
 
@@ -248,6 +276,7 @@ fn assert_raster_and_pick_semantics(gpu: &GpuContext) {
         view_generation,
         point_ids: vec![transparent_id],
     });
+    assert_eq!(subject.renderer.resident_highlight_points(), 1);
     let transparent_highlighted = subject.render(&frame);
     assert_pixel(transparent_highlighted.image.pixel(CENTER), RED);
     let visible_hit = subject
@@ -284,6 +313,231 @@ fn assert_highlight_alpha_preservation(gpu: &GpuContext) {
         .pick_and_wait(&rendered.recorded_frame, CENTER)
         .expect("highlighting must preserve a source-visible point for picking");
     assert_hit(hit, view_generation, 1, 1, point_id);
+}
+
+fn assert_presentation_weight_is_color_only(gpu: &GpuContext) {
+    let mut subject = OffscreenRenderer::new(gpu, roomy_limits());
+    let view_generation = ViewGenerationKey::new(ViewId::new(9), 1);
+    let near_identity = point_id(901);
+    let far_identity = point_id(902);
+    subject.apply(&RenderUpdate::Reset { view_generation });
+    subject.apply(&RenderUpdate::Upsert {
+        batch: batch(
+            view_generation,
+            1,
+            1,
+            WORLD_ORIGIN,
+            vec![point([0.0, -1.0, 0.0], RED, near_identity.ordinal())],
+        ),
+    });
+    subject.apply(&RenderUpdate::Upsert {
+        batch: batch(
+            view_generation,
+            2,
+            1,
+            WORLD_ORIGIN,
+            vec![point([0.0, 1.0, 0.0], BLUE, far_identity.ordinal())],
+        ),
+    });
+    subject.apply(&RenderUpdate::SetBatchPresentation {
+        view_generation,
+        key: BatchKey::new(1),
+        expected_version: BatchVersion::new(1),
+        weight: PresentationWeight::TRANSPARENT,
+    });
+
+    let frame = standard_frame(view_generation, VIEWPORT, 18.0, GREEN);
+    let rendered = subject.render(&frame);
+    assert_pixel(rendered.image.pixel(CENTER), BLUE);
+    let hit = subject
+        .pick_and_wait(&rendered.recorded_frame, CENTER)
+        .expect("transparent presentation must preserve source pick coverage");
+    assert_hit(hit, view_generation, 1, 1, near_identity);
+}
+
+fn assert_multi_point_cross_fade_coverage(gpu: &GpuContext) {
+    let mut subject = OffscreenRenderer::new(gpu, roomy_limits());
+    let view_generation = ViewGenerationKey::new(ViewId::new(10), 1);
+    let near_identity = point_id(1_001);
+    subject.apply(&RenderUpdate::Reset { view_generation });
+    subject.apply(&RenderUpdate::Upsert {
+        batch: batch(
+            view_generation,
+            1,
+            1,
+            WORLD_ORIGIN,
+            vec![
+                point([0.0, -1.0, 0.0], RED, near_identity.ordinal()),
+                point([20.0, 4.0, 0.0], RED, 1_002),
+            ],
+        ),
+    });
+    subject.apply(&RenderUpdate::Upsert {
+        batch: batch(
+            view_generation,
+            2,
+            1,
+            WORLD_ORIGIN,
+            vec![
+                point([0.0, 1.0, 0.0], RED, 1_003),
+                point([-20.0, -4.0, 0.0], RED, 1_004),
+            ],
+        ),
+    });
+    for key in [BatchKey::new(1), BatchKey::new(2)] {
+        subject.apply(&RenderUpdate::SetBatchPresentation {
+            view_generation,
+            key,
+            expected_version: BatchVersion::new(1),
+            weight: PresentationWeight::new(128),
+        });
+    }
+
+    let frame = standard_frame(view_generation, VIEWPORT, 18.0, GREEN);
+    let rendered = subject.render(&frame);
+    let center = rendered.image.pixel(CENTER);
+    assert!(
+        center[0] >= 180 && center[1] <= 1 && center[2] <= 1,
+        "the multi-point cross-fade exposed too much background: {center:?}"
+    );
+    assert_eq!(rendered.report.draw_calls(), 2);
+    let hit = subject
+        .pick_and_wait(&rendered.recorded_frame, CENTER)
+        .expect("the cross-fade must preserve fixed pick coverage");
+    assert_hit(hit, view_generation, 1, 1, near_identity);
+}
+
+fn assert_display_size_is_color_only(gpu: &GpuContext) {
+    let mut subject = OffscreenRenderer::new(gpu, roomy_limits());
+    let view_generation = ViewGenerationKey::new(ViewId::new(10), 1);
+    let identity = point_id(1_001);
+    subject.apply(&RenderUpdate::Reset { view_generation });
+    subject.apply(&RenderUpdate::Upsert {
+        batch: batch(
+            view_generation,
+            1,
+            1,
+            WORLD_ORIGIN,
+            vec![point([0.0; 3], RED, identity.ordinal())],
+        ),
+    });
+
+    let style = PointStyle::new(2.4, [1.0; 3], [0.0, 0.0, 0.0, 1.0])
+        .unwrap()
+        .with_display_size_pixels(18.0)
+        .unwrap();
+    let frame = frame_with_style(view_generation, VIEWPORT, style);
+    let rendered = subject.render(&frame);
+    let visual_only_pixel = [CENTER[0] + 5, CENTER[1]];
+    assert_pixel(rendered.image.pixel(visual_only_pixel), RED);
+    assert_eq!(
+        subject.pick_and_wait(&rendered.recorded_frame, visual_only_pixel),
+        None
+    );
+    let center_hit = subject
+        .pick_and_wait(&rendered.recorded_frame, CENTER)
+        .expect("the nominal pick footprint should still cover the point center");
+    assert_hit(center_hit, view_generation, 1, 1, identity);
+}
+
+fn assert_eye_dome_paths(gpu: &GpuContext) {
+    let cue = EyeDomeLighting::new(1.25, 1).unwrap();
+    let config = RendererConfig::new(FORMAT, roomy_limits()).with_eye_dome_lighting(cue);
+    let mut subject = OffscreenRenderer::with_config(gpu, config);
+    assert_eq!(subject.renderer.depth_cue_status(), DepthCueStatus::Active);
+
+    let view_generation = ViewGenerationKey::new(ViewId::new(10), 1);
+    subject.apply(&RenderUpdate::Reset { view_generation });
+    subject.apply(&RenderUpdate::Upsert {
+        batch: batch(
+            view_generation,
+            1,
+            1,
+            WORLD_ORIGIN,
+            vec![point([0.0; 3], RED, 1_001)],
+        ),
+    });
+    let frame = standard_frame(view_generation, VIEWPORT, 18.0, GREEN);
+    let rendered = subject.render(&frame);
+    assert_eq!(
+        rendered.report.transient_texture_bytes(),
+        u64::from(VIEWPORT[0]) * u64::from(VIEWPORT[1]) * 8
+    );
+    let edge = rendered.image.pixel([CENTER[0] + 8, CENTER[1]]);
+    assert!(
+        edge[0] < 200 && edge[0] > 0,
+        "eye-dome edge should be visibly but tolerantly darkened: {edge:?}"
+    );
+    let repeated = subject.render(&frame);
+    assert_eq!(repeated.image.pixel(CENTER), rendered.image.pixel(CENTER));
+    assert!(
+        subject
+            .pick_and_wait(&repeated.recorded_frame, CENTER)
+            .is_some()
+    );
+    let after_pick = subject.render(&frame);
+    assert_eq!(
+        after_pick.report.transient_texture_bytes(),
+        u64::from(VIEWPORT[0]) * u64::from(VIEWPORT[1]) * 12
+    );
+
+    let resized_viewport = [80, 64];
+    let resized = subject.render(&standard_frame(
+        view_generation,
+        resized_viewport,
+        18.0,
+        GREEN,
+    ));
+    assert_eq!(
+        resized.report.transient_texture_bytes(),
+        u64::from(resized_viewport[0]) * u64::from(resized_viewport[1]) * 8
+    );
+
+    let fallback = WgpuRenderer::new(
+        &gpu.device,
+        RendererConfig::new(wgpu::TextureFormat::Rgba16Float, roomy_limits())
+            .with_eye_dome_lighting(cue),
+    )
+    .expect("the blendable fallback format should remain a valid renderer target");
+    assert_eq!(
+        fallback.depth_cue_status(),
+        DepthCueStatus::UnsupportedFallback
+    );
+}
+
+fn assert_transparent_eye_dome_staging(gpu: &GpuContext) {
+    let cue = EyeDomeLighting::new(1.25, 1).unwrap();
+    let config = RendererConfig::new(FORMAT, roomy_limits()).with_eye_dome_lighting(cue);
+    let mut subject = OffscreenRenderer::with_config(gpu, config);
+    let view_generation = ViewGenerationKey::new(ViewId::new(11), 1);
+    subject.apply(&RenderUpdate::Reset { view_generation });
+    let frame = standard_frame(view_generation, VIEWPORT, 18.0, GREEN);
+    let edge = [CENTER[0] + 8, CENTER[1]];
+    let empty_background = subject.render(&frame).image.pixel(edge);
+
+    let identity = point_id(1_101);
+    subject.apply(&RenderUpdate::Upsert {
+        batch: batch(
+            view_generation,
+            1,
+            1,
+            WORLD_ORIGIN,
+            vec![point([0.0; 3], RED, identity.ordinal())],
+        ),
+    });
+    subject.apply(&RenderUpdate::SetBatchPresentation {
+        view_generation,
+        key: BatchKey::new(1),
+        expected_version: BatchVersion::new(1),
+        weight: PresentationWeight::TRANSPARENT,
+    });
+
+    let staged = subject.render(&frame);
+    assert_eq!(staged.image.pixel(edge), empty_background);
+    let hit = subject
+        .pick_and_wait(&staged.recorded_frame, CENTER)
+        .expect("transparent EDL staging must preserve nominal pick coverage");
+    assert_hit(hit, view_generation, 1, 1, identity);
 }
 
 fn assert_large_world_precision(gpu: &GpuContext) {
@@ -574,7 +828,11 @@ struct OffscreenRenderer<'gpu> {
 
 impl<'gpu> OffscreenRenderer<'gpu> {
     fn new(gpu: &'gpu GpuContext, limits: RenderLimits) -> Self {
-        let renderer = WgpuRenderer::new(&gpu.device, RendererConfig::new(FORMAT, limits))
+        Self::with_config(gpu, RendererConfig::new(FORMAT, limits))
+    }
+
+    fn with_config(gpu: &'gpu GpuContext, config: RendererConfig) -> Self {
+        let renderer = WgpuRenderer::new(&gpu.device, config)
             .expect("the renderer should attach to the test device");
         Self { gpu, renderer }
     }
@@ -594,7 +852,12 @@ impl<'gpu> OffscreenRenderer<'gpu> {
     }
 
     fn try_render(&mut self, frame: &Frame) -> Result<RenderedFrame, RendererError> {
-        let target = ColorTarget::new(&self.gpu.device, frame.viewport().dimensions());
+        let target = ColorTarget::new(
+            &self.gpu.device,
+            frame.viewport().dimensions(),
+            FORMAT,
+            "punctra acceptance color target",
+        );
         let mut encoder = self.encoder("punctra acceptance render encoder");
         let recorded_frame = self.renderer.render(&mut encoder, &target.view, frame)?;
         let report = recorded_frame.report();
@@ -615,9 +878,18 @@ impl<'gpu> OffscreenRenderer<'gpu> {
         first_frame: &Frame,
         second_frame: &Frame,
     ) -> (RenderedFrame, RenderedFrame) {
-        let first_target = ColorTarget::new(&self.gpu.device, first_frame.viewport().dimensions());
-        let second_target =
-            ColorTarget::new(&self.gpu.device, second_frame.viewport().dimensions());
+        let first_target = ColorTarget::new(
+            &self.gpu.device,
+            first_frame.viewport().dimensions(),
+            FORMAT,
+            "punctra first deferred color target",
+        );
+        let second_target = ColorTarget::new(
+            &self.gpu.device,
+            second_frame.viewport().dimensions(),
+            FORMAT,
+            "punctra second deferred color target",
+        );
         let mut encoder = self.encoder("punctra deferred frame acceptance encoder");
         let first_recorded_frame = self
             .renderer
@@ -670,12 +942,16 @@ impl<'gpu> OffscreenRenderer<'gpu> {
         pixel: [u32; 2],
     ) -> Option<PickHit> {
         let (mut ticket, commands) = self.encode_pick(recorded_frame, pixel);
-        self.gpu.queue.submit([commands]);
-        self.gpu.wait();
-        let PickPoll::Ready(hit) = ticket.poll().expect("the submitted pick should resolve") else {
-            panic!("a fully polled pick should not remain pending");
-        };
-        hit
+        let submission = self.gpu.queue.submit([commands]);
+        self.gpu.wait_for_submission(
+            &submission,
+            MAX_PICK_COMPLETION_TIME,
+            "offscreen pick",
+            || match ticket.poll().expect("the submitted pick should resolve") {
+                PickPoll::Ready(hit) => Some(hit),
+                PickPoll::Pending => None,
+            },
+        )
     }
 
     fn encoder(&self, label: &'static str) -> wgpu::CommandEncoder {
@@ -689,123 +965,6 @@ struct RenderedFrame {
     recorded_frame: RecordedFrame,
     report: FrameReport,
     image: Image,
-}
-
-struct ColorTarget {
-    texture: wgpu::Texture,
-    view: wgpu::TextureView,
-    readback: wgpu::Buffer,
-    viewport: [u32; 2],
-    padded_bytes_per_row: u32,
-}
-
-impl ColorTarget {
-    fn new(device: &wgpu::Device, viewport: [u32; 2]) -> Self {
-        let padded_bytes_per_row = padded_bytes_per_row(viewport[0]);
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("punctra acceptance color target"),
-            size: extent(viewport),
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: FORMAT,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-            view_formats: &[],
-        });
-        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let readback = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("punctra acceptance color readback"),
-            size: u64::from(padded_bytes_per_row) * u64::from(viewport[1]),
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        });
-        Self {
-            texture,
-            view,
-            readback,
-            viewport,
-            padded_bytes_per_row,
-        }
-    }
-
-    fn encode_copy(&self, encoder: &mut wgpu::CommandEncoder) {
-        encoder.copy_texture_to_buffer(
-            wgpu::TexelCopyTextureInfo {
-                texture: &self.texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            wgpu::TexelCopyBufferInfo {
-                buffer: &self.readback,
-                layout: wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(self.padded_bytes_per_row),
-                    rows_per_image: Some(self.viewport[1]),
-                },
-            },
-            extent(self.viewport),
-        );
-    }
-
-    fn map_after_submit(
-        &self,
-        encoder: &mut wgpu::CommandEncoder,
-    ) -> mpsc::Receiver<Result<(), wgpu::BufferAsyncError>> {
-        let (sender, receiver) = mpsc::channel();
-        encoder.map_buffer_on_submit(&self.readback, wgpu::MapMode::Read, .., move |result| {
-            let _ = sender.send(result);
-        });
-        receiver
-    }
-
-    fn read(self, receiver: &mpsc::Receiver<Result<(), wgpu::BufferAsyncError>>) -> Image {
-        receiver
-            .recv()
-            .expect("the mapping callback should run")
-            .expect("the color readback should map");
-        let mapped = self
-            .readback
-            .get_mapped_range(..)
-            .expect("the mapped color range should be available");
-        let bytes = mapped.to_vec();
-        drop(mapped);
-        self.readback.unmap();
-        Image {
-            bytes,
-            viewport: self.viewport,
-            padded_bytes_per_row: self.padded_bytes_per_row,
-        }
-    }
-}
-
-struct Image {
-    bytes: Vec<u8>,
-    viewport: [u32; 2],
-    padded_bytes_per_row: u32,
-}
-
-impl Image {
-    fn pixel(&self, pixel: [u32; 2]) -> [u8; 4] {
-        assert!(pixel[0] < self.viewport[0] && pixel[1] < self.viewport[1]);
-        let offset = usize::try_from(pixel[1] * self.padded_bytes_per_row + pixel[0] * 4)
-            .expect("the tiny test image offset fits in usize");
-        self.bytes[offset..offset + 4]
-            .try_into()
-            .expect("an RGBA pixel has four bytes")
-    }
-
-    fn find_pixel(&self, predicate: fn([u8; 4]) -> bool) -> Option<[u32; 2]> {
-        for y in 0..self.viewport[1] {
-            for x in 0..self.viewport[0] {
-                let pixel = [x, y];
-                if predicate(self.pixel(pixel)) {
-                    return Some(pixel);
-                }
-            }
-        }
-        None
-    }
 }
 
 fn roomy_limits() -> RenderLimits {
@@ -944,21 +1103,6 @@ fn rgba8_to_linear_rgb(color: [u8; 4]) -> [f32; 3] {
         f32::from(color[1]) / maximum,
         f32::from(color[2]) / maximum,
     ]
-}
-
-fn extent(viewport: [u32; 2]) -> wgpu::Extent3d {
-    wgpu::Extent3d {
-        width: viewport[0],
-        height: viewport[1],
-        depth_or_array_layers: 1,
-    }
-}
-
-fn padded_bytes_per_row(width: u32) -> u32 {
-    let unpadded = width
-        .checked_mul(4)
-        .expect("test row byte count should fit");
-    unpadded.div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT) * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT
 }
 
 fn assert_pixel(actual: [u8; 4], expected: [u8; 4]) {

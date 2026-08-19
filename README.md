@@ -464,15 +464,19 @@ inspection or make the GPU authoritative.
 - Left-drag orbits, middle-drag pans, and the mouse wheel zooms.
 - `P` toggles perspective/orthographic projection without changing the
   target-plane scale.
-- `R` resets the camera, `H` toggles stable-ID highlights, and Space pauses or
-  resumes new node materialization while planning and safe retirement
-  continue.
+- `R` resets the camera, `H` toggles stable-ID highlights, and Space freezes or
+  resumes planner, request, materialization, and retirement work while keeping
+  the current resident display visible.
 - Escape exits.
 
-The window title distinguishes LOD demand, load candidates, actually issued
-requests, retained/retired nodes, queue/staging facts, and requested/resident
-nodes. It names Sampled versus Complete resident Coverage and labels the
-projection and paused/streaming/steady state; none is called Query completion.
+The on-canvas status names display mode, projection, loading state, Sampled
+versus Complete resident Coverage, Source/drawn/resident Point counts,
+selection state, orientation, scale, cursor coordinates, and palette meaning;
+none is called Query completion. The compact window title contains only the
+package-derived View name and version. A separate engineering transcript on
+standard output distinguishes LOD demand, load candidates, actually issued
+requests, retained/retired nodes, queue/staging facts, requested/resident
+nodes, and detailed timing/resource facts.
 The synthetic hierarchy represents more than 10 million logical Points; both
 paths keep renderer residency at fixed point, byte, and batch limits. The real
 path additionally reports Full verification, index disposition and reuse,
@@ -492,7 +496,15 @@ cargo run --release -p renderer-demo -- corpus \
 
 The GPU-backed runner measures Full verification, cold/warm index preparation,
 first visible submission, a declared navigation trace, residency, and disk
-facts under recorded limits. Reports omit Source/index paths and opaque
+facts under recorded limits. With `pre_v0_13_qualification: true`, it requires
+five permitted projects from three firms, all five display modes in both
+projections, and every known-feature category; each pose must settle within the
+declared ceiling and remain unchanged for 300 additional rendered frames. The
+report records settlement frame/time, the quiet window, adaptive appearance,
+depth-cue/fallback state, transient textures, cumulative uploads, and manifest-
+declared known-feature outcomes. Those inputs and their summary counts use
+`declared_*` report keys, and an explicit false nonclaim says they were not
+verified by viewing operations. Reports omit Source/index paths and opaque
 project/firm identifiers, publish without replacement, and encode explicit
 false nonclaims for production-corpus completion, partner acceptance,
 professional preference, terrain capacity, and human-time savings. They may
@@ -503,6 +515,14 @@ Each corpus entry must name a fresh, absent index target so the first timing is
 a genuine cold build; an existing or resumable target is rejected without
 replacement. The runner then immediately reopens the completed artifact and
 records a separate warm-open timing.
+
+The checked-in example keeps `pre_v0_13_qualification` false because one
+placeholder entry cannot honestly satisfy the ten-combination matrix. Set it
+true only in a private complete manifest; `known_feature_outcomes` accepts
+`located`, `artifact_confounded`, or `not_observed` for the bounded terrain
+break, vegetation, building, scan-pattern, intensity, and classification
+categories. In the report these become `declared_known_feature_outcomes`; a
+generated repository run proves the lane, not field outcomes.
 
 ## v0.4 benchmark evidence
 

@@ -1,12 +1,16 @@
 //! Interactive progressive renderer for the synthetic fixture or one LAS/LAZ Source.
 
+mod appearance;
 mod corpus;
 mod diagnostic;
 mod orbit_camera;
 mod real_cloud;
 mod review;
 mod scene;
+mod status;
+mod status_overlay;
 mod synthetic;
+mod view_pump;
 
 use std::{
     error::Error,
@@ -17,6 +21,10 @@ use std::{
     time::{Duration, Instant},
 };
 
+use appearance::{
+    DensityTransitions, REFERENCE_POINT_SIZE_PIXELS, projected_density_point_size,
+    renderer_appearance_config,
+};
 use diagnostic::{ViewFailure, ViewPhase, classify_protocol_failure, classify_renderer_failure};
 use orbit_camera::{OrbitCamera, ProjectionMode};
 use point_contracts::SourceMetadata;
@@ -31,16 +39,19 @@ use render_protocol::{
     ViewId, Viewport,
 };
 use render_wgpu::{
-    Camera, Frame, FrameReport, PickPoll, PickRequest, PickTicket, PointStyle, RecordedFrame,
-    RendererConfig, RendererError, WgpuRenderer,
+    Camera, DepthCueStatus, Frame, FrameReport, PickPoll, PickRequest, PickTicket, PointStyle,
+    RecordedFrame, RendererError, WgpuRenderer,
 };
 use renderer_demo::display::{DisplayIndexPolicy, DisplayMode};
 use review::{
     CaptureView, ClassificationEdit, MutationDisposition, ReviewCapture, ReviewOptions,
-    ReviewSession, ReviewStatus,
+    ReviewRecovery, ReviewSession, ReviewStatus,
 };
 use scene::{Scene, SceneMetrics};
+use status::{SelectionAction, StatusSnapshot, StreamStatus};
+use status_overlay::StatusOverlay;
 use synthetic::{RESIDENT_BATCH_BUDGET, RESIDENT_BYTE_BUDGET, RESIDENT_POINT_BUDGET};
+use view_pump::{ViewLifecycle, ViewPumpError, ViewSpec};
 use winit::{
     application::ApplicationHandler,
     dpi::{LogicalSize, PhysicalPosition, PhysicalSize},
@@ -50,10 +61,10 @@ use winit::{
     window::{Window, WindowId},
 };
 
-const BASE_TITLE: &str = "Punctra exact interactive review View v0.11";
+const BASE_TITLE: &str = concat!("Punctra ", env!("CARGO_PKG_VERSION"), " View");
 const INITIAL_WIDTH: f64 = 1_280.0;
 const INITIAL_HEIGHT: f64 = 800.0;
-const TITLE_REFRESH_INTERVAL: Duration = Duration::from_millis(500);
+const TRANSCRIPT_REFRESH_INTERVAL: Duration = Duration::from_millis(500);
 const VIEW_GENERATION: ViewGenerationKey = ViewGenerationKey::new(ViewId::new(1), 1);
 const PLANNING_BUDGET: PlanningBudget = PlanningBudget::new(
     RESIDENT_POINT_BUDGET,
@@ -89,6 +100,10 @@ fn preserve_failure_or_internal(phase: ViewPhase, error: Box<dyn Error>) -> Box<
     } else {
         internal_failure(phase, error)
     }
+}
+
+fn view_pump_failure(error: ViewPumpError) -> Box<dyn Error> {
+    Box::new(error.into_view_failure())
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -664,7 +679,7 @@ fn run_main() -> DemoResult<()> {
     let event_loop =
         EventLoop::new().map_err(|error| internal_failure(ViewPhase::GpuSetup, error))?;
     event_loop.set_control_flow(ControlFlow::Wait);
-    let mut app = DemoApp::new(scene, review, command.projection);
+    let mut app = DemoApp::new(scene, review, command.projection, command.display_mode);
     event_loop
         .run_app(&mut app)
         .map_err(|error| internal_failure(ViewPhase::Rendering, error))?;
@@ -678,16 +693,23 @@ struct DemoApp {
     scene: Option<Scene>,
     review: Option<ReviewSession>,
     projection: ProjectionMode,
+    display_mode: DisplayMode,
     graphics: Option<Graphics>,
     failure: Option<ViewFailure>,
 }
 
 impl DemoApp {
-    const fn new(scene: Scene, review: Option<ReviewSession>, projection: ProjectionMode) -> Self {
+    const fn new(
+        scene: Scene,
+        review: Option<ReviewSession>,
+        projection: ProjectionMode,
+        display_mode: DisplayMode,
+    ) -> Self {
         Self {
             scene: Some(scene),
             review,
             projection,
+            display_mode,
             graphics: None,
             failure: None,
         }
@@ -697,6 +719,7 @@ impl DemoApp {
         let attributes = Window::default_attributes()
             .with_title(initial_title())
             .with_inner_size(LogicalSize::new(INITIAL_WIDTH, INITIAL_HEIGHT))
+            .with_min_inner_size(LogicalSize::new(640.0, 480.0))
             .with_visible(false);
         let window = Arc::new(event_loop.create_window(attributes)?);
         let instance =
@@ -714,6 +737,7 @@ impl DemoApp {
             scene,
             review,
             self.projection,
+            self.display_mode,
         ))?;
         graphics.window.set_visible(true);
         graphics.window.request_redraw();
@@ -881,12 +905,16 @@ struct Graphics {
     surface_config: wgpu::SurfaceConfiguration,
     presentation: PresentationState,
     renderer: WgpuRenderer,
+    status_overlay: StatusOverlay,
+    display_mode: DisplayMode,
     planner: ViewPlanner,
     scene: Scene,
     review: Option<ReviewSession>,
+    review_recovery: Option<ReviewRecovery>,
     camera: OrbitCamera,
     camera_reset_radius: f64,
     style: PointStyle,
+    density_transitions: DensityTransitions,
     input: PointerInput,
     loads_paused: bool,
     highlights_enabled: bool,
@@ -906,6 +934,24 @@ struct PendingPick {
     capture: ReviewCapture,
 }
 
+fn create_renderer(
+    device: &wgpu::Device,
+    format: wgpu::TextureFormat,
+    limits: RenderLimits,
+) -> DemoResult<WgpuRenderer> {
+    let mut renderer = WgpuRenderer::new(device, renderer_appearance_config(format, limits))
+        .map_err(|error| ViewFailure::gpu(ViewPhase::GpuSetup, error))?;
+    if renderer.depth_cue_status() == DepthCueStatus::UnsupportedFallback {
+        println!("GPU depth cue: unsupported; using the unenhanced render path");
+    }
+    renderer
+        .apply(&RenderUpdate::Reset {
+            view_generation: VIEW_GENERATION,
+        })
+        .map_err(|error| renderer_failure(ViewPhase::GpuSetup, error))?;
+    Ok(renderer)
+}
+
 impl Graphics {
     async fn new(
         instance: wgpu::Instance,
@@ -913,6 +959,7 @@ impl Graphics {
         scene: Scene,
         review: Option<ReviewSession>,
         projection: ProjectionMode,
+        display_mode: DisplayMode,
     ) -> DemoResult<Self> {
         let surface = instance
             .create_surface(Arc::clone(&window))
@@ -964,23 +1011,20 @@ impl Graphics {
             RESIDENT_BATCH_BUDGET,
         )
         .with_max_highlight_points(review::MAX_HIGHLIGHT_POINTS);
-        let mut renderer =
-            WgpuRenderer::new(&device, RendererConfig::new(surface_config.format, limits))
-                .map_err(|error| ViewFailure::gpu(ViewPhase::GpuSetup, error))?;
-        let reset = RenderUpdate::Reset {
-            view_generation: VIEW_GENERATION,
-        };
-        renderer
-            .apply(&reset)
-            .map_err(|error| renderer_failure(ViewPhase::GpuSetup, error))?;
+        let renderer = create_renderer(&device, surface_config.format, limits)?;
         let planner = ViewPlanner::new(
             PlannerConfig::new(2.0, 0.25)
                 .map_err(|error| internal_failure(ViewPhase::GpuSetup, error))?,
         );
         let camera_target = scene.camera_target();
         let camera_reset_radius = scene.camera_radius();
-        let style = PointStyle::new(2.4, [1.0, 0.24, 0.06], [0.008, 0.012, 0.02, 1.0])
-            .map_err(|error| internal_failure(ViewPhase::GpuSetup, error))?;
+        let style = PointStyle::new(
+            REFERENCE_POINT_SIZE_PIXELS,
+            [1.0, 0.24, 0.06],
+            [0.008, 0.012, 0.02, 1.0],
+        )
+        .map_err(|error| internal_failure(ViewPhase::GpuSetup, error))?;
+        let status_overlay = StatusOverlay::new(&device, surface_config.format);
 
         println!("View phase: gpu-setup (complete)");
         Ok(Self {
@@ -992,13 +1036,17 @@ impl Graphics {
             surface_config,
             presentation: PresentationState::new(surface_configured),
             renderer,
+            status_overlay,
+            display_mode,
             planner,
             scene,
             review,
+            review_recovery: None,
             camera: OrbitCamera::new(camera_target, camera_reset_radius)
                 .with_projection(projection),
             camera_reset_radius,
             style,
+            density_transitions: DensityTransitions::default(),
             input: PointerInput::default(),
             loads_paused: false,
             highlights_enabled: false,
@@ -1036,16 +1084,36 @@ impl Graphics {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("punctra renderer demo frame"),
             });
+        let point_size = projected_density_point_size(
+            viewport,
+            self.density_transitions
+                .display_density_point_count(&self.scene),
+        );
+        let style = self
+            .style
+            .with_display_size_pixels(point_size)
+            .map_err(|error| internal_failure(ViewPhase::Rendering, error))?;
         let frame = Frame::new(VIEW_GENERATION, camera, viewport)
             .map_err(|error| internal_failure(ViewPhase::Rendering, error))?
-            .with_style(self.style);
+            .with_style(style);
         let recorded_frame = self
             .renderer
             .render(&mut encoder, &target, &frame)
             .map_err(|error| renderer_failure(ViewPhase::Rendering, error))?;
+        let review_status =
+            self.record_status_overlay(&mut encoder, &target, recorded_frame.report())?;
         self.queue.submit([encoder.finish()]);
         self.window.pre_present_notify();
         self.queue.present(surface_texture);
+        if !self.loads_paused {
+            ViewLifecycle::new(
+                &mut self.scene,
+                &mut self.renderer,
+                &mut self.density_transitions,
+            )
+            .advance_presented_frame()
+            .map_err(view_pump_failure)?;
+        }
         if reconfigure_after_present {
             self.configure_surface();
         }
@@ -1056,16 +1124,92 @@ impl Graphics {
             recorded: recorded_frame,
             interaction_generation: self.interaction_generation,
         });
-        let review_status = self.review.as_ref().map(ReviewSession::status);
-        self.metrics.update_title(
-            &self.window,
+        self.metrics.emit_diagnostic_transcript(
             self.scene.metrics(),
             self.loads_paused,
+            self.density_transitions.is_active(),
             self.highlights_enabled,
             self.camera.projection(),
             review_status,
         );
         Ok(())
+    }
+
+    fn record_status_overlay(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        target: &wgpu::TextureView,
+        report: FrameReport,
+    ) -> DemoResult<Option<ReviewStatus>> {
+        let scene = self.scene.metrics();
+        let active_review_status = self.review.as_ref().map(ReviewSession::status);
+        let review_status =
+            active_review_status.or(self.review_recovery.map(|_| ReviewStatus::Indeterminate));
+        let selected_points = self.review.as_ref().map_or_else(
+            || {
+                self.review_recovery
+                    .map_or(0, ReviewRecovery::selected_points)
+            },
+            ReviewSession::selected_points,
+        );
+        let selection_action = if active_review_status == Some(ReviewStatus::StaleDiscarded) {
+            Some(SelectionAction::RerunReview)
+        } else if self.review_recovery.is_some() {
+            Some(SelectionAction::ReopenAndResolve)
+        } else if self
+            .review
+            .as_ref()
+            .is_some_and(ReviewSession::has_selection)
+        {
+            Some(SelectionAction::Clear)
+        } else {
+            None
+        };
+        let cursor_world = self
+            .input
+            .cursor
+            .map(|position| [position.x, position.y])
+            .map(|pixel| {
+                self.camera.target_plane_world(
+                    pixel,
+                    [self.surface_config.width, self.surface_config.height],
+                )
+            })
+            .transpose()
+            .map_err(|error| internal_failure(ViewPhase::Rendering, error))?
+            .flatten();
+        let status = StatusSnapshot {
+            display: self.display_mode,
+            projection: self.camera.projection(),
+            stream: self.metrics.stream_status(
+                scene,
+                self.loads_paused,
+                self.density_transitions.is_active(),
+            ),
+            scene,
+            drawn_points: report.drawn_points(),
+            selected: review_status,
+            selected_points,
+            selection_action,
+            resident_highlights: self.renderer.resident_highlight_points(),
+            orientation: self
+                .camera
+                .north_orientation()
+                .map_err(|error| internal_failure(ViewPhase::Rendering, error))?,
+            scale_world_units: self
+                .camera
+                .world_units_for_pixels(100, self.surface_config.height),
+            cursor_world,
+        };
+        self.status_overlay.render(
+            &self.device,
+            encoder,
+            target,
+            [self.surface_config.width, self.surface_config.height],
+            self.window.scale_factor(),
+            &status.lines(),
+        );
+        Ok(review_status)
     }
 
     fn poll_review_work(&mut self) -> DemoResult<()> {
@@ -1188,65 +1332,44 @@ impl Graphics {
         if self.loads_paused {
             return Ok(());
         }
-        let Some(batch) = self
-            .scene
-            .next_batch()
-            .map_err(|error| preserve_failure_or_internal(ViewPhase::NodeRead, error))?
+        let upload_started = Instant::now();
+        let Some(accepted) = ViewLifecycle::new(
+            &mut self.scene,
+            &mut self.renderer,
+            &mut self.density_transitions,
+        )
+        .accept_next_batch(VIEW_GENERATION)
+        .map_err(view_pump_failure)?
         else {
             return Ok(());
         };
-
-        let batch_key = batch.key();
-        let batch_version = batch.version();
-        let update = RenderUpdate::Upsert { batch };
-        let upload_started = Instant::now();
-        let report = match self.renderer.apply(&update) {
-            Ok(report) => report,
-            Err(error) => {
-                self.scene.mark_rejected(batch_key, batch_version);
-                return Err(renderer_failure(ViewPhase::GpuUpload, error));
-            }
-        };
-        self.scene.mark_resident(batch_key, batch_version);
         if self.highlights_enabled {
             self.apply_highlights()?;
         }
-        self.metrics.record_upload(report, upload_started.elapsed());
+        self.metrics
+            .record_upload(accepted.upload(), upload_started.elapsed());
         Ok(())
     }
 
     fn plan_view(&mut self, camera: &Camera, viewport: Viewport) -> DemoResult<()> {
-        let plan = {
-            let planning_nodes = self.scene.planning_nodes();
-            self.planner
-                .plan(
-                    camera,
-                    viewport,
-                    AvailableNodes::new(VIEW_GENERATION, planning_nodes.as_slice()),
-                    PLANNING_BUDGET,
-                )
-                .map_err(|error| internal_failure(ViewPhase::Planning, error))?
-        };
-
-        for retirement in plan.retirements().iter().copied() {
-            let update = retirement.render_update();
-            self.renderer
-                .apply(&update)
-                .map_err(|error| renderer_failure(ViewPhase::GpuUpload, error))?;
-            self.scene
-                .mark_retired(retirement.batch_key(), retirement.expected_version());
+        if self.loads_paused {
+            self.metrics.record_plan(PlanFacts::default());
+            return Ok(());
         }
-        let requests = if self.loads_paused {
-            &[][..]
-        } else {
-            plan.requests()
-        };
-        let issued = self
-            .scene
-            .reconcile_requests(plan.demanded_nodes(), requests)
-            .map_err(|error| preserve_failure_or_internal(ViewPhase::Planning, error))?;
-        self.metrics
-            .record_plan(PlanFacts::from_plan(&plan, issued));
+        let planned = ViewLifecycle::new(
+            &mut self.scene,
+            &mut self.renderer,
+            &mut self.density_transitions,
+        )
+        .reconcile_view(
+            &mut self.planner,
+            ViewSpec::new(camera, viewport, VIEW_GENERATION, PLANNING_BUDGET),
+        )
+        .map_err(view_pump_failure)?;
+        self.metrics.record_plan(PlanFacts::from_plan(
+            planned.plan(),
+            planned.issued_requests(),
+        ));
         Ok(())
     }
 
@@ -1383,17 +1506,21 @@ impl Graphics {
     }
 
     fn finish_interactive_mutation(&mut self, disposition: MutationDisposition) {
-        if ReviewSession::close_if_indeterminate(&mut self.review, disposition) {
+        if let Some(recovery) = ReviewSession::close_if_indeterminate(&mut self.review, disposition)
+        {
+            self.review_recovery = Some(recovery);
             self.pending_pick = None;
             self.latest_recorded_frame = None;
         }
     }
 
     fn clear_exact_selection(&mut self) -> DemoResult<()> {
-        let Some(review) = self.review.as_mut() else {
-            return Ok(());
-        };
-        review.clear_selection();
+        if let Some(review) = self.review.as_mut() {
+            review.clear_selection();
+        }
+        if let Some(recovery) = self.review_recovery.as_mut() {
+            recovery.clear_selection();
+        }
         self.highlights_enabled = false;
         self.renderer
             .apply(&RenderUpdate::SetHighlights {
@@ -1648,17 +1775,31 @@ impl Metrics {
         self.latest_plan = facts;
     }
 
-    fn update_title(
-        &mut self,
-        window: &Window,
+    const fn stream_status(
+        &self,
         scene: SceneMetrics,
         loads_paused: bool,
+        transition_active: bool,
+    ) -> StreamStatus {
+        StreamStatus::from_facts(
+            scene,
+            loads_paused,
+            self.latest_plan.has_stream_work(),
+            transition_active,
+        )
+    }
+
+    fn emit_diagnostic_transcript(
+        &mut self,
+        scene: SceneMetrics,
+        loads_paused: bool,
+        transition_active: bool,
         highlights_enabled: bool,
         projection: ProjectionMode,
         review_status: Option<ReviewStatus>,
     ) {
         let interval = self.interval_started.elapsed();
-        if interval < TITLE_REFRESH_INTERVAL {
+        if interval < TRANSCRIPT_REFRESH_INTERVAL {
             return;
         }
         let Some(report) = self.latest_report else {
@@ -1666,19 +1807,15 @@ impl Metrics {
         };
 
         let frames_per_second = f64::from(self.interval_frames) / interval.as_secs_f64();
-        let stream_state = if loads_paused {
-            "loads-paused"
-        } else if scene.queued_batches > 0 || self.latest_plan.issued > 0 {
-            "streaming"
-        } else {
-            "steady"
-        };
+        let stream_state = self
+            .stream_status(scene, loads_paused, transition_active)
+            .label();
         let highlight_state = if highlights_enabled { "on" } else { "off" };
         let review_state =
             review_status.map_or_else(|| "review:disabled".to_owned(), ReviewStatus::title);
         let coverage_state = coverage_state(scene);
-        let title = format!(
-            "{BASE_TITLE} | {} logical | {} / {} pts | {} MiB resident | {} MiB uploaded | \
+        let transcript = format!(
+            "View diagnostics | {} logical | {} / {} pts | {} MiB resident | {} MiB uploaded | \
              {} draws | \
              {:.0} fps | frame {:.2} ms | encode {:.2} ms | upload {:.2} ms | \
              LOD {} demanded / {} candidates / {} issued / {} retained / {} retired-now | \
@@ -1713,7 +1850,7 @@ impl Metrics {
             scene.rejected_batches,
             scene.cancelled_requests,
         );
-        window.set_title(&title);
+        println!("{transcript}");
         self.interval_started = Instant::now();
         self.interval_frames = 0;
     }
@@ -1741,6 +1878,10 @@ impl PlanFacts {
             usage: plan.resource_usage(),
         }
     }
+
+    const fn has_stream_work(self) -> bool {
+        self.demanded > 0 || self.load_candidates > 0 || self.issued > 0 || self.retirements > 0
+    }
 }
 
 fn coverage_state(scene: SceneMetrics) -> String {
@@ -1764,8 +1905,8 @@ fn coverage_state(scene: SceneMetrics) -> String {
     )
 }
 
-fn initial_title() -> String {
-    format!("{BASE_TITLE} | {}", coverage_state(SceneMetrics::default()))
+const fn initial_title() -> &'static str {
+    BASE_TITLE
 }
 
 fn has_area(size: PhysicalSize<u32>) -> bool {
@@ -2048,7 +2189,7 @@ mod tests {
     }
 
     #[test]
-    fn paused_plan_facts_never_report_unissued_requests() {
+    fn paused_plan_facts_report_no_planner_work() {
         let scene = SyntheticScene::new(VIEW_GENERATION).unwrap();
         let nodes = scene.planning_nodes();
         let camera = OrbitCamera::new(SCENE_TARGET, SCENE_RADIUS)
@@ -2065,11 +2206,19 @@ mod tests {
         assert!(!plan.requests().is_empty());
 
         let running = PlanFacts::from_plan(&plan, 1);
-        let paused = PlanFacts::from_plan(&plan, 0);
+        let paused = PlanFacts::default();
+        let demanded_only = PlanFacts {
+            demanded: 1,
+            ..PlanFacts::default()
+        };
 
         assert_eq!(running.issued, running.load_candidates);
-        assert_eq!(paused.load_candidates, running.load_candidates);
+        assert_eq!(paused.demanded, 0);
+        assert_eq!(paused.load_candidates, 0);
         assert_eq!(paused.issued, 0);
+        assert_eq!(paused.retirements, 0);
+        assert!(!paused.has_stream_work());
+        assert!(demanded_only.has_stream_work());
     }
 
     #[test]
@@ -2116,12 +2265,17 @@ mod tests {
         assert!(authored.contains("Complete 0 batches"));
         assert!(authored.contains("authored fixture presentation 1 batches / 32 pts"));
         assert!(authored.contains("not Query completion"));
+    }
 
-        let initial = initial_title();
-        assert!(initial.starts_with(BASE_TITLE));
-        assert!(initial.contains("Sampled 0 batches"));
-        assert!(initial.contains("Complete 0 batches"));
-        assert!(initial.contains("not Query completion"));
+    #[test]
+    fn window_title_stays_compact_and_leaves_diagnostics_to_the_transcript() {
+        let title = initial_title();
+
+        assert_eq!(title, BASE_TITLE);
+        assert!(title.len() <= 64);
+        assert!(!title.contains("pre-v0.13"));
+        assert!(!title.contains("COVERAGE"));
+        assert!(!title.contains("LOD"));
     }
 
     #[test]

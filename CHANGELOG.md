@@ -5,6 +5,35 @@ All notable changes to Punctra are documented here. The project follows
 
 ## Unreleased - 0.12.0-alpha.1
 
+- Completed the repository implementation of the private pre-v0.13 field
+  evidence lane. Opt-in manifests require the five-mode/two-projection
+  matrix, five projects from three firms, permissions, and declared known-
+  feature outcomes; every pose must settle within a bounded ceiling and remain
+  quiet for 300 rendered frames. Reports now retain settlement, cumulative lifecycle,
+  transient-resource, adaptive-appearance, depth-cue/fallback, and declared
+  feature-outcome inputs while explicitly stating that those inputs were not
+  verified by viewing operations. Permitted field execution and human
+  interpretation evidence remain outstanding.
+- Added a bounded on-canvas inspection status panel with package-derived View
+  version, display/projection/loading state, truthful display Coverage and
+  Point counts, exact-selection and resident-locator state, clear/recovery
+  actions, north orientation, target-plane scale and cursor coordinates, and
+  mode-specific palette meaning. The detailed engineering transcript is
+  printed to standard output while the title stays compact, and the required
+  panel fits the minimum window at 200% interface scaling.
+- Added a bounded renderer appearance policy: projected-density-aware 1–4
+  physical-pixel splats, exact eight-presented-frame parent/child color
+  transitions, and optional eye-dome lighting with an explicit unenhanced
+  fallback. Presentation weight and depth enhancement do not change Point
+  position, depth coverage, or provisional pick identity, and enhanced
+  rendering is capped at eight transient texture bytes per physical pixel.
+- Activated the bounded pre-v0.13 renderer-quality corrective design. The
+  public View planner now reconstructs still-valid refinement history before
+  considering new refinements and budgets only still-demanded in-flight work;
+  the synchronous private Scene bridge admits one new request per pump. The
+  investigated 2560-by-1664 physical-pixel synthetic View now settles within
+  the accepted 1,024-frame ceiling and remains unchanged for a 300-frame
+  observation window instead of alternating coarse and fine request cuts.
 - Added one explicit projected survey-coordinate profile with horizontal and
   vertical EPSG identities, easting/northing/elevation axes, separate linear
   units, provenance, bounded serialization, and canonical hash bytes. Opaque

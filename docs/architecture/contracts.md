@@ -527,6 +527,10 @@ explicit inspection and measurement permission per entry. The no-replace
 Viewing Report records only observed viewing operations, effective limits, and
 explicit false nonclaims. It omits private paths and project/firm identifiers;
 Source identity and machine facts remain caller-controlled sensitive data.
+Manifest-supplied feature outcomes, project/firm counts, mode/projection
+matrix facts, and lane configuration are serialized only under explicit
+`declared_*` names. A false nonclaim records that declared feature outcomes
+were not verified by viewing operations.
 
 ## Jobs, cancellation, and progress
 

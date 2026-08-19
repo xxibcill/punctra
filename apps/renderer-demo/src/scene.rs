@@ -10,6 +10,8 @@ use crate::{
 
 pub(crate) type SceneResult<T> = Result<T, Box<dyn Error>>;
 
+const NEW_REQUESTS_PER_PUMP: usize = 1;
+
 pub(crate) enum PlanningNodes<'scene> {
     Synthetic(Vec<AvailableNode>),
     Real(&'scene [AvailableNode]),
@@ -209,7 +211,8 @@ impl Scene {
         demanded_nodes: &[NodeKey],
         requests: &[NodeRequest],
     ) -> SceneResult<u64> {
-        self.0.reconcile_requests(demanded_nodes, requests)
+        let admitted_requests = &requests[..requests.len().min(NEW_REQUESTS_PER_PUMP)];
+        self.0.reconcile_requests(demanded_nodes, admitted_requests)
     }
 
     pub(crate) fn next_batch(&mut self) -> SceneResult<Option<PointBatch>> {
@@ -246,5 +249,284 @@ impl Scene {
 
     pub(crate) fn label(&self) -> &'static str {
         self.0.label()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use point_view::{AvailableNodes, PlannerConfig, ViewPlanner};
+    use render_protocol::{RenderLimits, RenderStateModel, RenderUpdate, Viewport};
+
+    use crate::{
+        PLANNING_BUDGET, VIEW_GENERATION,
+        orbit_camera::OrbitCamera,
+        synthetic::{RESIDENT_BATCH_BUDGET, RESIDENT_BYTE_BUDGET, RESIDENT_POINT_BUDGET},
+    };
+
+    use super::*;
+
+    const SETTLEMENT_FRAME_CEILING: u64 = 1_024;
+    const SETTLED_OBSERVATION_FRAMES: u64 = 300;
+
+    #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+    struct FrameActivity {
+        demanded: u64,
+        requested: u64,
+        issued: u64,
+        uploaded: u64,
+        retired: u64,
+    }
+
+    impl FrameActivity {
+        const fn is_quiet(self) -> bool {
+            self.demanded == 0
+                && self.requested == 0
+                && self.issued == 0
+                && self.uploaded == 0
+                && self.retired == 0
+        }
+    }
+
+    #[test]
+    fn stationary_default_view_converges_and_remains_quiet() {
+        let scene = Scene::synthetic(VIEW_GENERATION).unwrap();
+        let camera = OrbitCamera::new(scene.camera_target(), scene.camera_radius())
+            .as_render_camera()
+            .unwrap();
+        let viewport = Viewport::new(2_560, 1_664).unwrap();
+        let mut harness = ConvergenceHarness::new(scene);
+
+        harness.settle_and_observe(
+            &camera,
+            viewport,
+            SETTLED_OBSERVATION_FRAMES,
+            "stationary default View",
+        );
+    }
+
+    #[test]
+    fn view_state_changes_reconverge_without_stale_work() {
+        let scene = Scene::synthetic(VIEW_GENERATION).unwrap();
+        let mut orbit = OrbitCamera::new(scene.camera_target(), scene.camera_radius());
+        let mut viewport = Viewport::new(1_280, 800).unwrap();
+        let mut harness = ConvergenceHarness::new(scene);
+
+        harness.settle_and_observe(
+            &orbit.as_render_camera().unwrap(),
+            viewport,
+            SETTLED_OBSERVATION_FRAMES,
+            "initial View",
+        );
+
+        orbit.orbit(120.0, -45.0);
+        harness.settle_and_observe(
+            &orbit.as_render_camera().unwrap(),
+            viewport,
+            SETTLED_OBSERVATION_FRAMES,
+            "moved camera",
+        );
+
+        orbit.toggle_projection();
+        harness.settle_and_observe(
+            &orbit.as_render_camera().unwrap(),
+            viewport,
+            SETTLED_OBSERVATION_FRAMES,
+            "projection switch",
+        );
+
+        viewport = Viewport::new(1_920, 1_080).unwrap();
+        harness.settle_and_observe(
+            &orbit.as_render_camera().unwrap(),
+            viewport,
+            SETTLED_OBSERVATION_FRAMES,
+            "resized View",
+        );
+
+        orbit.zoom(4.0);
+        harness.settle_and_observe(
+            &orbit.as_render_camera().unwrap(),
+            viewport,
+            SETTLED_OBSERVATION_FRAMES,
+            "refined View",
+        );
+
+        orbit.zoom(-8.0);
+        harness.settle_and_observe(
+            &orbit.as_render_camera().unwrap(),
+            viewport,
+            SETTLED_OBSERVATION_FRAMES,
+            "coarsened View",
+        );
+
+        orbit.orbit(-80.0, 20.0);
+        harness.observe_paused(
+            &orbit.as_render_camera().unwrap(),
+            viewport,
+            SETTLED_OBSERVATION_FRAMES,
+            "paused View",
+        );
+        harness.settle_and_observe(
+            &orbit.as_render_camera().unwrap(),
+            viewport,
+            SETTLED_OBSERVATION_FRAMES,
+            "resumed View",
+        );
+
+        orbit.reset(harness.scene.camera_radius());
+        harness.settle_and_observe(
+            &orbit.as_render_camera().unwrap(),
+            viewport,
+            SETTLED_OBSERVATION_FRAMES,
+            "reset View",
+        );
+    }
+
+    fn reset_convergence_runtime() -> (ViewPlanner, RenderStateModel) {
+        let planner = ViewPlanner::new(PlannerConfig::new(2.0, 0.25).unwrap());
+        let mut renderer = RenderStateModel::new(RenderLimits::new(
+            RESIDENT_BYTE_BUDGET,
+            RESIDENT_POINT_BUDGET,
+            RESIDENT_BATCH_BUDGET,
+        ));
+        renderer
+            .apply(&RenderUpdate::Reset {
+                view_generation: VIEW_GENERATION,
+            })
+            .unwrap();
+        (planner, renderer)
+    }
+
+    struct ConvergenceHarness {
+        scene: Scene,
+        planner: ViewPlanner,
+        renderer: RenderStateModel,
+    }
+
+    impl ConvergenceHarness {
+        fn new(scene: Scene) -> Self {
+            let (planner, renderer) = reset_convergence_runtime();
+            Self {
+                scene,
+                planner,
+                renderer,
+            }
+        }
+
+        fn settle_and_observe(
+            &mut self,
+            camera: &render_protocol::Camera,
+            viewport: Viewport,
+            observation_frames: u64,
+            context: &str,
+        ) {
+            let mut settlement_frame = None;
+            let mut latest_activity = FrameActivity::default();
+            for frame in 1..=SETTLEMENT_FRAME_CEILING {
+                latest_activity = self.pump_frame(camera, viewport, false);
+                if latest_activity.is_quiet() && self.scene.metrics().queued_batches == 0 {
+                    settlement_frame = Some(frame);
+                    break;
+                }
+            }
+
+            let settlement_frame = settlement_frame.unwrap_or_else(|| {
+            panic!(
+                "{context} did not settle within {SETTLEMENT_FRAME_CEILING} frames; latest activity: {latest_activity:?}; metrics: {:?}",
+                    self.scene.metrics()
+            )
+        });
+            let settled_metrics = self.scene.metrics();
+            let settled_nodes = self.scene.planning_nodes().as_slice().to_vec();
+
+            for observation_frame in 1..=observation_frames {
+                let activity = self.pump_frame(camera, viewport, false);
+                assert!(
+                    activity.is_quiet(),
+                    "{context} frame {observation_frame} after settlement frame {settlement_frame} produced work: {activity:?}"
+                );
+                assert_eq!(self.scene.metrics(), settled_metrics);
+                assert_eq!(self.scene.planning_nodes().as_slice(), settled_nodes);
+            }
+        }
+
+        fn observe_paused(
+            &mut self,
+            camera: &render_protocol::Camera,
+            viewport: Viewport,
+            observation_frames: u64,
+            context: &str,
+        ) {
+            let settled_metrics = self.scene.metrics();
+            let settled_nodes = self.scene.planning_nodes().as_slice().to_vec();
+            let settled_renderer = self.renderer.snapshot();
+            assert!(settled_metrics.resident_points > 0);
+
+            for observation_frame in 1..=observation_frames {
+                let activity = self.pump_frame(camera, viewport, true);
+                assert!(
+                    activity.is_quiet(),
+                    "{context} frame {observation_frame} produced work: {activity:?}"
+                );
+                assert_eq!(self.scene.metrics(), settled_metrics);
+                assert_eq!(self.scene.planning_nodes().as_slice(), settled_nodes);
+                assert_eq!(self.renderer.snapshot(), settled_renderer);
+            }
+        }
+
+        fn pump_frame(
+            &mut self,
+            camera: &render_protocol::Camera,
+            viewport: Viewport,
+            loads_paused: bool,
+        ) -> FrameActivity {
+            if loads_paused {
+                return FrameActivity::default();
+            }
+            let plan = {
+                let nodes = self.scene.planning_nodes();
+                self.planner
+                    .plan(
+                        camera,
+                        viewport,
+                        AvailableNodes::new(VIEW_GENERATION, nodes.as_slice()),
+                        PLANNING_BUDGET,
+                    )
+                    .unwrap()
+            };
+            let activity = FrameActivity {
+                demanded: u64::try_from(plan.demanded_nodes().len()).unwrap(),
+                requested: u64::try_from(plan.requests().len()).unwrap(),
+                retired: u64::try_from(plan.retirements().len()).unwrap(),
+                ..FrameActivity::default()
+            };
+
+            for retirement in plan.retirements().iter().copied() {
+                self.renderer.apply(&retirement.render_update()).unwrap();
+                self.scene
+                    .mark_retired(retirement.batch_key(), retirement.expected_version());
+            }
+            let issued = self
+                .scene
+                .reconcile_requests(plan.demanded_nodes(), plan.requests())
+                .unwrap();
+            assert!(
+                issued <= u64::try_from(NEW_REQUESTS_PER_PUMP).unwrap(),
+                "a Scene pump admitted {issued} new requests"
+            );
+            let Some(batch) = self.scene.next_batch().unwrap() else {
+                return FrameActivity { issued, ..activity };
+            };
+            let key = batch.key();
+            let version = batch.version();
+            self.renderer
+                .apply(&RenderUpdate::Upsert { batch })
+                .unwrap();
+            self.scene.mark_resident(key, version);
+            FrameActivity {
+                issued,
+                uploaded: 1,
+                ..activity
+            }
+        }
     }
 }

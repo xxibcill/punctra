@@ -8,6 +8,7 @@ fn frame_uses_the_documented_default_point_style() {
     let style = PointStyle::default();
 
     assert_eq!(style.default_size_pixels().to_bits(), 3.0_f32.to_bits());
+    assert_eq!(style.display_size_pixels().to_bits(), 3.0_f32.to_bits());
     assert_eq!(
         style.highlight_color().map(f32::to_bits),
         [1.0, 0.8, 0.1].map(f32::to_bits)

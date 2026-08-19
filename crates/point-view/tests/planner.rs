@@ -1163,6 +1163,183 @@ fn in_flight_work_is_reserved_and_never_requested_twice() {
 }
 
 #[test]
+fn stale_in_flight_work_does_not_block_the_current_cut() {
+    let nodes = [
+        node(
+            1,
+            None,
+            box_at(0.0, 0.0, -10.0),
+            1.0,
+            1,
+            1,
+            1,
+            NodeStatus::Missing,
+        ),
+        node(
+            2,
+            None,
+            box_at(20.0, 0.0, -10.0),
+            1.0,
+            1,
+            1,
+            2,
+            NodeStatus::Requested,
+        ),
+    ];
+
+    let plan = planner(100.0, 1.0)
+        .plan(
+            &camera(),
+            viewport(100, 100),
+            AvailableNodes::new(generation(9, 3), &nodes),
+            PlanningBudget::new(1, 1, 1),
+        )
+        .unwrap();
+
+    assert_eq!(demanded_keys(&plan), vec![node_key(1)]);
+    assert_eq!(request_keys(&plan), vec![node_key(1)]);
+    assert_eq!(plan.resource_usage().point_count(), 1);
+    assert_eq!(plan.resource_usage().estimated_bytes(), 1);
+    assert_eq!(plan.resource_usage().batch_count(), 1);
+}
+
+#[test]
+fn refinement_history_replays_past_retired_ancestors() {
+    let generation = generation(9, 4);
+    let mut planner = planner(2.0, 0.25);
+    let initially_resident = [
+        node(1, None, root_bounds(), 10.0, 1, 1, 1, resident(1)),
+        node(2, Some(1), root_bounds(), 10.0, 1, 1, 2, resident(1)),
+        node(3, Some(2), root_bounds(), 0.0, 1, 1, 3, resident(1)),
+    ];
+    let first = planner
+        .plan(
+            &camera(),
+            viewport(100, 100),
+            AvailableNodes::new(generation, &initially_resident),
+            PlanningBudget::new(1, 1, 1),
+        )
+        .unwrap();
+    assert_eq!(retained_keys(&first), vec![node_key(3)]);
+    assert_eq!(
+        retirement_batches(&first),
+        vec![BatchKey::new(1), BatchKey::new(2)]
+    );
+
+    let retired_ancestors = [
+        node(1, None, root_bounds(), 10.0, 1, 1, 1, NodeStatus::Missing),
+        node(
+            2,
+            Some(1),
+            root_bounds(),
+            10.0,
+            1,
+            1,
+            2,
+            NodeStatus::Missing,
+        ),
+        node(3, Some(2), root_bounds(), 0.0, 1, 1, 3, resident(1)),
+    ];
+    let replayed = planner
+        .plan(
+            &camera(),
+            viewport(100, 100),
+            AvailableNodes::new(generation, &retired_ancestors),
+            PlanningBudget::new(1, 1, 1),
+        )
+        .unwrap();
+
+    assert!(replayed.demanded_nodes().is_empty());
+    assert!(replayed.requests().is_empty());
+    assert_eq!(retained_keys(&replayed), vec![node_key(3)]);
+    assert!(replayed.retirements().is_empty());
+    assert_eq!(replayed.resource_usage().batch_count(), 1);
+}
+
+#[test]
+fn camera_movement_rolls_back_replay_when_new_coverage_exceeds_budget() {
+    let generation = generation(9, 5);
+    let mut planner = planner(2.0, 0.25);
+    let narrow_nodes = [
+        node(
+            1,
+            None,
+            bounds([-1.0, -1.0, -11.0], [3.0, 1.0, -9.0]),
+            1.0,
+            1,
+            1,
+            1,
+            resident(1),
+        ),
+        node(
+            2,
+            Some(1),
+            bounds([-1.0, -1.0, -11.0], [0.0, 1.0, -9.0]),
+            0.0,
+            1,
+            1,
+            2,
+            NodeStatus::Missing,
+        ),
+        node(
+            3,
+            Some(1),
+            bounds([1.5, -1.0, -11.0], [3.0, 1.0, -9.0]),
+            0.0,
+            2,
+            2,
+            3,
+            NodeStatus::Missing,
+        ),
+    ];
+    let budget = PlanningBudget::new(2, 2, 2);
+
+    let narrow = planner
+        .plan(
+            &orthographic_camera(2.0),
+            viewport(100, 100),
+            AvailableNodes::new(generation, &narrow_nodes),
+            budget,
+        )
+        .unwrap();
+    assert_eq!(request_keys(&narrow), vec![node_key(2)]);
+
+    let moved_nodes = [
+        narrow_nodes[0].with_status(NodeStatus::Missing),
+        narrow_nodes[1].with_status(resident(2)),
+        narrow_nodes[2],
+    ];
+    let recovering = planner
+        .plan(
+            &orthographic_camera(8.0),
+            viewport(100, 100),
+            AvailableNodes::new(generation, &moved_nodes),
+            budget,
+        )
+        .unwrap();
+    assert_eq!(demanded_keys(&recovering), vec![node_key(1)]);
+    assert_eq!(request_keys(&recovering), vec![node_key(1)]);
+    assert_eq!(retained_keys(&recovering), vec![node_key(2)]);
+
+    let recovered_nodes = [
+        moved_nodes[0].with_status(resident(3)),
+        moved_nodes[1],
+        moved_nodes[2],
+    ];
+    let quiet = planner
+        .plan(
+            &orthographic_camera(8.0),
+            viewport(100, 100),
+            AvailableNodes::new(generation, &recovered_nodes),
+            budget,
+        )
+        .unwrap();
+    assert!(quiet.demanded_nodes().is_empty());
+    assert!(quiet.requests().is_empty());
+    assert_eq!(retained_keys(&quiet), vec![node_key(1)]);
+}
+
+#[test]
 fn demand_includes_missing_and_requested_targets_in_planner_priority_order() {
     let generation = generation(9, 1);
     let nodes = [

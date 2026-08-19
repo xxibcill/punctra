@@ -43,6 +43,14 @@ impl fmt::Display for ProjectionMode {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum NorthOrientation {
+    Up,
+    Down,
+    Right,
+    Left,
+}
+
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct OrbitCamera {
     home_target: [f64; 3],
@@ -152,6 +160,56 @@ impl OrbitCamera {
         }
     }
 
+    pub(crate) fn target_plane_world(
+        self,
+        pixel: [f64; 2],
+        viewport: [u32; 2],
+    ) -> Result<Option<[f64; 3]>, CameraError> {
+        if viewport[0] == 0
+            || viewport[1] == 0
+            || pixel[0] < 0.0
+            || pixel[1] < 0.0
+            || pixel[0] > f64::from(viewport[0])
+            || pixel[1] > f64::from(viewport[1])
+        {
+            return Ok(None);
+        }
+        let basis = self.as_render_camera()?.world_basis();
+        let world_per_pixel = self.vertical_world_height() / f64::from(viewport[1]);
+        let horizontal = pixel[0] - f64::from(viewport[0]) * 0.5;
+        let vertical = f64::from(viewport[1]) * 0.5 - pixel[1];
+        let mut world = self.target;
+        for (axis, coordinate) in world.iter_mut().enumerate() {
+            *coordinate += basis.right()[axis] * horizontal * world_per_pixel
+                + basis.up()[axis] * vertical * world_per_pixel;
+        }
+        Ok(Some(world))
+    }
+
+    pub(crate) fn world_units_for_pixels(self, pixels: u32, viewport_height: u32) -> f64 {
+        if viewport_height == 0 {
+            return 0.0;
+        }
+        self.vertical_world_height() * f64::from(pixels) / f64::from(viewport_height)
+    }
+
+    pub(crate) fn north_orientation(self) -> Result<NorthOrientation, CameraError> {
+        let basis = self.as_render_camera()?.world_basis();
+        let right = basis.right()[1];
+        let up = basis.up()[1];
+        Ok(if up.abs() >= right.abs() {
+            if up >= 0.0 {
+                NorthOrientation::Up
+            } else {
+                NorthOrientation::Down
+            }
+        } else if right >= 0.0 {
+            NorthOrientation::Right
+        } else {
+            NorthOrientation::Left
+        })
+    }
+
     fn vertical_world_height(self) -> f64 {
         2.0 * self.radius * (f64::from(PERSPECTIVE_FIELD_OF_VIEW) * 0.5).tan()
     }
@@ -206,6 +264,32 @@ mod tests {
             render_protocol::CameraProjection::Orthographic { vertical_world_height }
                 if vertical_world_height.to_bits() == expected_height.to_bits()
         ));
+    }
+
+    #[test]
+    fn status_geometry_reports_target_plane_cursor_scale_and_north() {
+        let camera = OrbitCamera::new(TARGET, 700.0);
+        let center = camera
+            .target_plane_world([640.0, 400.0], [1_280, 800])
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(center.map(f64::to_bits), TARGET.map(f64::to_bits));
+        assert!(camera.world_units_for_pixels(100, 800).is_finite());
+        assert!(camera.world_units_for_pixels(100, 800) > 0.0);
+        assert!(matches!(
+            camera.north_orientation().unwrap(),
+            NorthOrientation::Up
+                | NorthOrientation::Down
+                | NorthOrientation::Left
+                | NorthOrientation::Right
+        ));
+        assert_eq!(
+            camera
+                .target_plane_world([-1.0, 400.0], [1_280, 800])
+                .unwrap(),
+            None
+        );
     }
 
     #[test]
