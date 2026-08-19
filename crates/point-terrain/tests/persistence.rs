@@ -78,6 +78,33 @@ fn cold_and_warm_prepare_share_canonical_file_backed_surface() {
 }
 
 #[test]
+fn retained_stage_is_not_a_mutable_alias_of_the_published_target() {
+    let fixture = fixture("persistence-independent-stage");
+    let target = fixture.terrain_path("surface.pterr");
+    let stage = target.with_file_name("surface.pterr.surface-stage-v1");
+    let surface = prepare_surface(
+        fixture.snapshot(),
+        &target,
+        bounded_recipe(2),
+        TerrainPrepareLimits::default(),
+    )
+    .expect("Surface prepares with a retained stage");
+    let published = fs::read(&target).unwrap();
+
+    fs::write(&stage, b"offline retained-stage rewrite").unwrap();
+
+    assert_eq!(
+        fs::read(&target).unwrap(),
+        published,
+        "the retained stage must not be a writable alias of the published target"
+    );
+    assert_eq!(
+        collect_vertices(&surface, 2).len() as u64,
+        surface.descriptor().vertex_count()
+    );
+}
+
+#[test]
 fn prepared_surface_matches_the_legacy_deterministic_derivation_oracle() {
     let fixture = fixture("persistence-legacy-oracle");
     let target = fixture.terrain_path("surface.pterr");

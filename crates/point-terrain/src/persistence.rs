@@ -528,11 +528,13 @@ impl PreparedTerrainSurface {
         parent.verify()
     }
 
-    fn matches_path_identity(
+    fn publish_open_file(
         &self,
         parent: &DirectoryWitness,
-        path: &Path,
-    ) -> Result<bool, TerrainError> {
+        target: &Path,
+        limits: TerrainPrepareLimits,
+        control: &OperationControl,
+    ) -> Result<(), DescriptorPublicationError> {
         let file = self.inner.file.lock().map_err(|_| {
             TerrainError::corrupt_surface(
                 ARTIFACT_KIND,
@@ -540,20 +542,7 @@ impl PreparedTerrainSurface {
                 "verified artifact reader lock was poisoned",
             )
         })?;
-        path_matches_file(parent, path, &file, &self.inner.opened_metadata)
-    }
-
-    fn publish_open_file(
-        &self,
-        parent: &DirectoryWitness,
-        target: &Path,
-    ) -> io::Result<DescriptorPublication> {
-        let file = self
-            .inner
-            .file
-            .lock()
-            .map_err(|_| io::Error::other("verified artifact reader lock was poisoned"))?;
-        parent.publish_open_file(&file, target)
+        parent.publish_open_file(&file, target, self.complete_checksum(), limits, control)
     }
 
     fn set_peak_temporary_disk_bytes(&mut self, bytes: u64) {
@@ -3478,10 +3467,22 @@ fn path_exists_in(parent: &DirectoryWitness, path: &Path) -> Result<bool, Terrai
     Ok(exists)
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum DescriptorPublication {
-    Linked,
-    Cloned,
+#[derive(Debug)]
+enum DescriptorPublicationError {
+    Io(io::Error),
+    Terrain(TerrainError),
+}
+
+impl From<io::Error> for DescriptorPublicationError {
+    fn from(error: io::Error) -> Self {
+        Self::Io(error)
+    }
+}
+
+impl From<TerrainError> for DescriptorPublicationError {
+    fn from(error: TerrainError) -> Self {
+        Self::Terrain(error)
+    }
 }
 
 struct DirectoryWitness {
@@ -3632,31 +3633,82 @@ impl DirectoryWitness {
         }
     }
 
-    fn publish_open_file(&self, source: &File, target: &Path) -> io::Result<DescriptorPublication> {
+    fn publish_open_file(
+        &self,
+        source: &File,
+        target: &Path,
+        expected_complete_checksum: ContentHash,
+        limits: TerrainPrepareLimits,
+        control: &OperationControl,
+    ) -> Result<(), DescriptorPublicationError> {
         let target_name = child_name(target)?;
         #[cfg(target_os = "linux")]
         {
-            if rustix::fs::linkat(
-                source,
-                "",
+            use std::os::fd::AsRawFd;
+
+            use rustix::fs::{AtFlags, Mode, OFlags, copy_file_range, linkat, openat};
+
+            let source_bytes = source.metadata()?.len();
+            let anonymous = openat(
+                &self.directory,
+                ".",
+                OFlags::RDWR | OFlags::CLOEXEC | OFlags::TMPFILE,
+                Mode::RUSR | Mode::WUSR | Mode::RGRP | Mode::WGRP | Mode::ROTH | Mode::WOTH,
+            )
+            .map_err(io::Error::from)?;
+            let mut anonymous = File::from(anonymous);
+            let mut source_offset = 0_u64;
+            let mut target_offset = 0_u64;
+            while target_offset < source_bytes {
+                control.check_cancelled().map_err(TerrainError::from)?;
+                let remaining = source_bytes - target_offset;
+                let requested =
+                    usize::try_from(remaining.min(8 * 1024 * 1024)).unwrap_or(usize::MAX);
+                let copied = copy_file_range(
+                    source,
+                    Some(&mut source_offset),
+                    &anonymous,
+                    Some(&mut target_offset),
+                    requested,
+                )
+                .map_err(io::Error::from)?;
+                if copied == 0 {
+                    return Err(io::Error::new(
+                        io::ErrorKind::UnexpectedEof,
+                        "Surface stage ended while copying to an anonymous publication file",
+                    )
+                    .into());
+                }
+            }
+            anonymous.sync_all()?;
+            let verified = verified_file(
+                &mut anonymous,
+                target,
+                ARTIFACT_KIND,
+                CHECKSUM_DOMAIN,
+                ARTIFACT_HEADER_BYTES,
+                limits.max_artifact_bytes(),
+                limits.max_verify_buffer_bytes(),
+                control,
+            )?;
+            if verified.bytes != source_bytes || verified.checksum != expected_complete_checksum {
+                return Err(TerrainError::corrupt_surface(
+                    ARTIFACT_KIND,
+                    target.display(),
+                    "anonymous publication bytes differ from the verified stage",
+                )
+                .into());
+            }
+            let descriptor_path = format!("/proc/self/fd/{}", anonymous.as_raw_fd());
+            linkat(
+                rustix::fs::CWD,
+                descriptor_path,
                 &self.directory,
                 target_name,
-                rustix::fs::AtFlags::EMPTY_PATH,
+                AtFlags::SYMLINK_FOLLOW,
             )
-            .is_err()
-            {
-                use std::os::fd::AsRawFd;
-
-                let descriptor_path = format!("/proc/self/fd/{}", source.as_raw_fd());
-                rustix::fs::linkat(
-                    rustix::fs::CWD,
-                    descriptor_path,
-                    &self.directory,
-                    target_name,
-                    rustix::fs::AtFlags::SYMLINK_FOLLOW,
-                )?;
-            }
-            Ok(DescriptorPublication::Linked)
+            .map_err(io::Error::from)?;
+            Ok(())
         }
         #[cfg(target_os = "macos")]
         {
@@ -3665,16 +3717,25 @@ impl DirectoryWitness {
                 &self.directory,
                 target_name,
                 rustix::fs::CloneFlags::NOFOLLOW,
-            )?;
-            Ok(DescriptorPublication::Cloned)
+            )
+            .map_err(io::Error::from)?;
+            let _ = (expected_complete_checksum, limits, control);
+            Ok(())
         }
         #[cfg(not(any(target_os = "linux", target_os = "macos")))]
         {
-            let _ = (source, target_name);
+            let _ = (
+                source,
+                target_name,
+                expected_complete_checksum,
+                limits,
+                control,
+            );
             Err(io::Error::new(
                 io::ErrorKind::Unsupported,
                 "descriptor-bound Surface publication is unavailable on this platform",
-            ))
+            )
+            .into())
         }
     }
 
@@ -4092,7 +4153,7 @@ fn publish_verified_stage(
         work,
         limits,
     } = attempt;
-    let publication = publish_stage(parent, stage, target, control)?;
+    let publication = publish_stage(parent, stage, target, limits, control)?;
     let target_observations =
         observations.with_disposition(publication.result_disposition(observations.disposition));
     let result = reopen_published_artifact(
@@ -4137,6 +4198,7 @@ fn publish_stage(
     parent: &DirectoryWitness,
     stage: &PreparedTerrainSurface,
     target: &Path,
+    limits: TerrainPrepareLimits,
     control: &OperationControl,
 ) -> Result<PublicationOutcome, TerrainError> {
     stage.verify_path_binding(parent)?;
@@ -4149,8 +4211,8 @@ fn publish_stage(
         )
     })?;
     maybe_injected_publication_race();
-    match stage.publish_open_file(parent, target) {
-        Ok(publication) => {
+    match stage.publish_open_file(parent, target, limits, control) {
+        Ok(()) => {
             maybe_injected_cancellation(PersistenceBoundary::CancelAfterTargetLink, control);
             if let Err(error) = maybe_injected_io(PersistenceBoundary::TargetIdentity) {
                 return Err(TerrainError::surface_publication_indeterminate(
@@ -4163,54 +4225,31 @@ fn publish_stage(
                     ),
                 ));
             }
-            if publication == DescriptorPublication::Linked {
-                let matches = stage
-                    .matches_path_identity(parent, target)
-                    .map_err(|error| {
-                        TerrainError::surface_publication_indeterminate(
-                            target.display(),
-                            expected_complete_checksum,
-                            error,
-                        )
-                    })?;
-                if !matches {
-                    return Err(TerrainError::surface_publication_indeterminate(
+            let opened = open_regular_in(parent, target, ARTIFACT_KIND).map_err(|error| {
+                TerrainError::surface_publication_indeterminate(
+                    target.display(),
+                    expected_complete_checksum,
+                    error,
+                )
+            })?;
+            if opened.metadata.len() != stage.report().artifact_bytes() {
+                return Err(TerrainError::surface_publication_indeterminate(
+                    target.display(),
+                    expected_complete_checksum,
+                    TerrainError::corrupt_surface(
+                        ARTIFACT_KIND,
                         target.display(),
-                        expected_complete_checksum,
-                        TerrainError::corrupt_surface(
-                            ARTIFACT_KIND,
-                            target.display(),
-                            "published target does not bind the verified staging file",
-                        ),
-                    ));
-                }
-            } else {
-                let opened = open_regular_in(parent, target, ARTIFACT_KIND).map_err(|error| {
-                    TerrainError::surface_publication_indeterminate(
-                        target.display(),
-                        expected_complete_checksum,
-                        error,
-                    )
-                })?;
-                if opened.metadata.len() != stage.report().artifact_bytes() {
-                    return Err(TerrainError::surface_publication_indeterminate(
-                        target.display(),
-                        expected_complete_checksum,
-                        TerrainError::corrupt_surface(
-                            ARTIFACT_KIND,
-                            target.display(),
-                            "descriptor-cloned target length differs from its verified stage",
-                        ),
-                    ));
-                }
-                sync_file(&opened.file, target).map_err(|error| {
-                    TerrainError::surface_publication_indeterminate(
-                        target.display(),
-                        expected_complete_checksum,
-                        error,
-                    )
-                })?;
+                        "independently published target length differs from its verified stage",
+                    ),
+                ));
             }
+            sync_file(&opened.file, target).map_err(|error| {
+                TerrainError::surface_publication_indeterminate(
+                    target.display(),
+                    expected_complete_checksum,
+                    error,
+                )
+            })?;
             maybe_injected_io(PersistenceBoundary::TargetParentSync)
                 .map_err(|error| {
                     TerrainError::io("sync Surface parent directory", target.display(), error)
@@ -4225,14 +4264,17 @@ fn publish_stage(
                 })?;
             Ok(PublicationOutcome::Created)
         }
-        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+        Err(DescriptorPublicationError::Io(error))
+            if error.kind() == io::ErrorKind::AlreadyExists =>
+        {
             Ok(PublicationOutcome::Existing)
         }
-        Err(error) => Err(TerrainError::io(
+        Err(DescriptorPublicationError::Io(error)) => Err(TerrainError::io(
             "publish Surface artifact without replacement",
             target.display(),
             error,
         )),
+        Err(DescriptorPublicationError::Terrain(error)) => Err(error),
     }
 }
 
@@ -4758,19 +4800,26 @@ mod tests {
     #[test]
     fn descriptor_bound_publication_ignores_a_racing_source_path_replacement() {
         let fixture = Fixture::new("descriptor-publication");
-        let target = fixture.path("published.bin");
-        let parent = Arc::new(DirectoryWitness::capture(&target).unwrap());
-        let private_target = fixture.path("private-stage.bin");
-        let mut source = parent.create_child(&private_target).unwrap();
-        source.write_all(b"owned descriptor bytes").unwrap();
-        source.sync_all().unwrap();
-        let displaced = fixture.path("displaced-private.bin");
-        fs::rename(&private_target, &displaced).unwrap();
-        fs::write(&private_target, b"racing replacement").unwrap();
+        let source_path = fixture.path("source.pterr");
+        let target = fixture.path("published.pterr");
+        let displaced = fixture.path("displaced-source.pterr");
+        let source = run_prepare_direct(&fixture, &source_path, OperationControl::new()).unwrap();
+        let expected = fs::read(&source_path).unwrap();
+        fs::rename(&source_path, &displaced).unwrap();
+        fs::write(&source_path, b"racing replacement").unwrap();
+        let parent = DirectoryWitness::capture(&target).unwrap();
 
-        parent.publish_open_file(&source, &target).unwrap();
-        assert_eq!(fs::read(&target).unwrap(), b"owned descriptor bytes");
-        assert_eq!(fs::read(&private_target).unwrap(), b"racing replacement");
+        source
+            .publish_open_file(
+                &parent,
+                &target,
+                TerrainPrepareLimits::default(),
+                &OperationControl::new(),
+            )
+            .unwrap();
+
+        assert_eq!(fs::read(&target).unwrap(), expected);
+        assert_eq!(fs::read(&source_path).unwrap(), b"racing replacement");
     }
 
     #[test]
