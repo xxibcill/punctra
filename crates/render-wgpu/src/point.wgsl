@@ -82,6 +82,22 @@ fn point_fragment(input: VertexOutput) -> @location(0) vec4<f32> {
     return input.color;
 }
 
+struct EyeDomePointOutput {
+    @location(0) color: vec4<f32>,
+    @builtin(frag_depth) depth: f32,
+}
+
+@fragment
+fn eye_dome_point_fragment(input: VertexOutput) -> EyeDomePointOutput {
+    if input.source_alpha <= 0.0 || !inside_splat(input.corner) {
+        discard;
+    }
+    var output: EyeDomePointOutput;
+    output.color = input.color;
+    output.depth = select(1.0, input.clip_position.z, batch.presentation_weight > 0.0);
+    return output;
+}
+
 @fragment
 fn pick_fragment(input: VertexOutput) -> @location(0) u32 {
     if input.source_alpha <= 0.0 || !inside_splat(input.corner) {

@@ -22,8 +22,18 @@ impl PointPipelines {
         color_format: wgpu::TextureFormat,
         enable_edl: bool,
     ) -> Self {
-        let camera_layout = uniform_layout::<CameraUniform>(device, "punctra camera layout");
-        let batch_layout = uniform_layout::<BatchUniform>(device, "punctra batch layout");
+        let camera_layout = uniform_layout::<CameraUniform>(
+            device,
+            "punctra camera layout",
+            wgpu::ShaderStages::VERTEX,
+        );
+        let batch_visibility = if enable_edl {
+            wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT
+        } else {
+            wgpu::ShaderStages::VERTEX
+        };
+        let batch_layout =
+            uniform_layout::<BatchUniform>(device, "punctra batch layout", batch_visibility);
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("punctra point pipeline layout"),
             bind_group_layouts: &[Some(&camera_layout), Some(&batch_layout)],
@@ -45,13 +55,18 @@ impl PointPipelines {
             write_mask: wgpu::ColorWrites::ALL,
         })];
 
+        let draw_fragment = if enable_edl {
+            "eye_dome_point_fragment"
+        } else {
+            "point_fragment"
+        };
         let draw = create_pipeline(
             device,
             &pipeline_layout,
             &shader,
             &vertex_buffers,
             &color_targets,
-            "point_fragment",
+            draw_fragment,
             "punctra point pipeline",
         );
         let pick = create_pipeline(
@@ -151,12 +166,16 @@ impl EdlPipeline {
     }
 }
 
-fn uniform_layout<T>(device: &wgpu::Device, label: &'static str) -> wgpu::BindGroupLayout {
+fn uniform_layout<T>(
+    device: &wgpu::Device,
+    label: &'static str,
+    visibility: wgpu::ShaderStages,
+) -> wgpu::BindGroupLayout {
     device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some(label),
         entries: &[wgpu::BindGroupLayoutEntry {
             binding: 0,
-            visibility: wgpu::ShaderStages::VERTEX,
+            visibility,
             ty: wgpu::BindingType::Buffer {
                 ty: wgpu::BufferBindingType::Uniform,
                 has_dynamic_offset: false,

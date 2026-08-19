@@ -98,6 +98,11 @@ fn eye_dome_lighting_has_bounded_active_and_fallback_paths() {
     with_gpu(assert_eye_dome_paths);
 }
 
+#[test]
+fn transparent_presentation_does_not_leak_through_eye_dome_lighting() {
+    with_gpu(assert_transparent_eye_dome_staging);
+}
+
 fn assert_lifecycle_updates_are_atomic(gpu: &GpuContext) {
     let limits = RenderLimits::new(POINT_BYTES, 1, 1);
     let mut subject = OffscreenRenderer::new(gpu, limits);
@@ -441,6 +446,41 @@ fn assert_eye_dome_paths(gpu: &GpuContext) {
         fallback.depth_cue_status(),
         DepthCueStatus::UnsupportedFallback
     );
+}
+
+fn assert_transparent_eye_dome_staging(gpu: &GpuContext) {
+    let cue = EyeDomeLighting::new(1.25, 1).unwrap();
+    let config = RendererConfig::new(FORMAT, roomy_limits()).with_eye_dome_lighting(cue);
+    let mut subject = OffscreenRenderer::with_config(gpu, config);
+    let view_generation = ViewGenerationKey::new(ViewId::new(11), 1);
+    subject.apply(&RenderUpdate::Reset { view_generation });
+    let frame = standard_frame(view_generation, VIEWPORT, 18.0, GREEN);
+    let edge = [CENTER[0] + 8, CENTER[1]];
+    let empty_background = subject.render(&frame).image.pixel(edge);
+
+    let identity = point_id(1_101);
+    subject.apply(&RenderUpdate::Upsert {
+        batch: batch(
+            view_generation,
+            1,
+            1,
+            WORLD_ORIGIN,
+            vec![point([0.0; 3], RED, identity.ordinal())],
+        ),
+    });
+    subject.apply(&RenderUpdate::SetBatchPresentation {
+        view_generation,
+        key: BatchKey::new(1),
+        expected_version: BatchVersion::new(1),
+        weight: PresentationWeight::TRANSPARENT,
+    });
+
+    let staged = subject.render(&frame);
+    assert_eq!(staged.image.pixel(edge), empty_background);
+    let hit = subject
+        .pick_and_wait(&staged.recorded_frame, CENTER)
+        .expect("transparent EDL staging must preserve nominal pick coverage");
+    assert_hit(hit, view_generation, 1, 1, identity);
 }
 
 fn assert_large_world_precision(gpu: &GpuContext) {
