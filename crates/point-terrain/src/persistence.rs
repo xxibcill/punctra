@@ -572,29 +572,13 @@ impl PreparedTerrainSurface {
         &self,
         limits: SurfaceReadLimits,
     ) -> Result<SurfaceVertexBatches, TerrainError> {
-        let plan = stream_plan::<SurfaceVertex>(
-            limits,
-            "Surface vertices",
-            VERTEX_RECORD_BYTES,
-            self.inner.descriptor.vertex_count,
-        )?;
         Ok(SurfaceVertexBatches {
-            file: Arc::clone(&self.inner.file),
-            path: self.inner.path.clone(),
-            opened_metadata: self.inner.opened_metadata.clone(),
+            stream: SurfaceBatchStream::new::<SurfaceVertex>(
+                &self.inner,
+                limits,
+                StreamRecordKind::Vertex,
+            )?,
             source: self.inner.descriptor.snapshot.source(),
-            next_id: 1,
-            remaining: self.inner.descriptor.vertex_count,
-            record_count: self.inner.descriptor.vertex_count,
-            record_offset: self.inner.vertex_offset,
-            directory_offset: self.inner.vertex_directory_offset,
-            block_checksums: Arc::clone(&self.inner.block_checksums),
-            verify_buffer: plan.verify_buffer,
-            batch_records: plan.batch_records,
-            max_batch_payload_bytes: limits.max_batch_payload_bytes(),
-            max_working_bytes: limits.max_working_bytes(),
-            max_work_units: limits.max_work_units(),
-            used_work_units: 0,
         })
     }
 
@@ -608,28 +592,12 @@ impl PreparedTerrainSurface {
         &self,
         limits: SurfaceReadLimits,
     ) -> Result<SurfaceFaceBatches, TerrainError> {
-        let plan = stream_plan::<SurfaceFace>(
-            limits,
-            "Surface faces",
-            FACE_RECORD_BYTES,
-            self.inner.descriptor.face_count,
-        )?;
         Ok(SurfaceFaceBatches {
-            file: Arc::clone(&self.inner.file),
-            path: self.inner.path.clone(),
-            opened_metadata: self.inner.opened_metadata.clone(),
-            next_id: 1,
-            remaining: self.inner.descriptor.face_count,
-            record_count: self.inner.descriptor.face_count,
-            record_offset: self.inner.face_offset,
-            directory_offset: self.inner.face_directory_offset,
-            block_checksums: Arc::clone(&self.inner.block_checksums),
-            verify_buffer: plan.verify_buffer,
-            batch_records: plan.batch_records,
-            max_batch_payload_bytes: limits.max_batch_payload_bytes(),
-            max_working_bytes: limits.max_working_bytes(),
-            max_work_units: limits.max_work_units(),
-            used_work_units: 0,
+            stream: SurfaceBatchStream::new::<SurfaceFace>(
+                &self.inner,
+                limits,
+                StreamRecordKind::Face,
+            )?,
             vertex_count: self.inner.descriptor.vertex_count,
         })
     }
@@ -646,12 +614,82 @@ impl std::fmt::Debug for PreparedTerrainSurface {
     }
 }
 
-/// Bounded pull stream of canonical file-backed Surface vertices.
-pub struct SurfaceVertexBatches {
+#[derive(Clone, Copy)]
+enum StreamRecordKind {
+    Vertex,
+    Face,
+}
+
+impl StreamRecordKind {
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Vertex => "Surface vertices",
+            Self::Face => "Surface faces",
+        }
+    }
+
+    const fn record_bytes(self) -> u64 {
+        match self {
+            Self::Vertex => VERTEX_RECORD_BYTES,
+            Self::Face => FACE_RECORD_BYTES,
+        }
+    }
+
+    const fn batch_bytes_label(self) -> &'static str {
+        match self {
+            Self::Vertex => "Surface vertex batch bytes",
+            Self::Face => "Surface face batch bytes",
+        }
+    }
+
+    fn record_count(self, surface: &PreparedSurfaceData) -> u64 {
+        match self {
+            Self::Vertex => surface.descriptor.vertex_count,
+            Self::Face => surface.descriptor.face_count,
+        }
+    }
+
+    fn record_offset(self, surface: &PreparedSurfaceData) -> u64 {
+        match self {
+            Self::Vertex => surface.vertex_offset,
+            Self::Face => surface.face_offset,
+        }
+    }
+
+    fn directory_offset(self, surface: &PreparedSurfaceData) -> u64 {
+        match self {
+            Self::Vertex => surface.vertex_directory_offset,
+            Self::Face => surface.face_directory_offset,
+        }
+    }
+
+    const fn domain(self) -> &'static [u8] {
+        match self {
+            Self::Vertex => VERTEX_BLOCK_DOMAIN,
+            Self::Face => FACE_BLOCK_DOMAIN,
+        }
+    }
+
+    const fn boundary(self) -> StreamReadBoundary {
+        match self {
+            Self::Vertex => StreamReadBoundary::VertexRecordCaptured,
+            Self::Face => StreamReadBoundary::FaceRecordCaptured,
+        }
+    }
+
+    fn checksums(self, verified: &VerifiedBlockChecksums) -> &[[u8; 32]] {
+        match self {
+            Self::Vertex => &verified.vertices,
+            Self::Face => &verified.faces,
+        }
+    }
+}
+
+struct SurfaceBatchStream {
     file: Arc<Mutex<File>>,
     path: PathBuf,
     opened_metadata: fs::Metadata,
-    source: SourceId,
+    kind: StreamRecordKind,
     next_id: u64,
     remaining: u64,
     record_count: u64,
@@ -666,15 +704,43 @@ pub struct SurfaceVertexBatches {
     used_work_units: u64,
 }
 
-impl Iterator for SurfaceVertexBatches {
-    type Item = Result<Vec<SurfaceVertex>, TerrainError>;
+impl SurfaceBatchStream {
+    fn new<T>(
+        surface: &PreparedSurfaceData,
+        limits: SurfaceReadLimits,
+        kind: StreamRecordKind,
+    ) -> Result<Self, TerrainError> {
+        let record_count = kind.record_count(surface);
+        let plan = stream_plan::<T>(limits, kind.label(), kind.record_bytes(), record_count)?;
+        Ok(Self {
+            file: Arc::clone(&surface.file),
+            path: surface.path.clone(),
+            opened_metadata: surface.opened_metadata.clone(),
+            kind,
+            next_id: 1,
+            remaining: record_count,
+            record_count,
+            record_offset: kind.record_offset(surface),
+            directory_offset: kind.directory_offset(surface),
+            block_checksums: Arc::clone(&surface.block_checksums),
+            verify_buffer: plan.verify_buffer,
+            batch_records: plan.batch_records,
+            max_batch_payload_bytes: limits.max_batch_payload_bytes(),
+            max_working_bytes: limits.max_working_bytes(),
+            max_work_units: limits.max_work_units(),
+            used_work_units: 0,
+        })
+    }
 
-    fn next(&mut self) -> Option<Self::Item> {
+    fn next_batch<T>(
+        &mut self,
+        decode: impl FnMut(u64, &[u8], &Path) -> Result<T, TerrainError>,
+    ) -> Option<Result<Vec<T>, TerrainError>> {
         if self.remaining == 0 {
             return None;
         }
         let count = self.remaining.min(self.batch_records);
-        let result = read_vertex_batch(self, count);
+        let result = read_surface_batch(self, count, decode);
         if result.is_err() {
             self.remaining = 0;
         }
@@ -682,23 +748,26 @@ impl Iterator for SurfaceVertexBatches {
     }
 }
 
+/// Bounded pull stream of canonical file-backed Surface vertices.
+pub struct SurfaceVertexBatches {
+    stream: SurfaceBatchStream,
+    source: SourceId,
+}
+
+impl Iterator for SurfaceVertexBatches {
+    type Item = Result<Vec<SurfaceVertex>, TerrainError>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let source = self.source;
+        self.stream.next_batch(move |record_index, bytes, path| {
+            decode_vertex_record(source, record_index, bytes, path)
+        })
+    }
+}
+
 /// Bounded pull stream of canonical file-backed Surface faces.
 pub struct SurfaceFaceBatches {
-    file: Arc<Mutex<File>>,
-    path: PathBuf,
-    opened_metadata: fs::Metadata,
-    next_id: u64,
-    remaining: u64,
-    record_count: u64,
-    record_offset: u64,
-    directory_offset: u64,
-    block_checksums: Arc<VerifiedBlockChecksums>,
-    verify_buffer: Vec<u8>,
-    batch_records: u64,
-    max_batch_payload_bytes: u64,
-    max_working_bytes: u64,
-    max_work_units: u64,
-    used_work_units: u64,
+    stream: SurfaceBatchStream,
     vertex_count: u64,
 }
 
@@ -706,15 +775,10 @@ impl Iterator for SurfaceFaceBatches {
     type Item = Result<Vec<SurfaceFace>, TerrainError>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.remaining == 0 {
-            return None;
-        }
-        let count = self.remaining.min(self.batch_records);
-        let result = read_face_batch(self, count);
-        if result.is_err() {
-            self.remaining = 0;
-        }
-        Some(result)
+        let vertex_count = self.vertex_count;
+        self.stream.next_batch(move |record_index, bytes, path| {
+            decode_face_record(vertex_count, record_index, bytes, path)
+        })
     }
 }
 
@@ -2900,10 +2964,11 @@ fn verified_file(
     })
 }
 
-fn read_vertex_batch(
-    stream: &mut SurfaceVertexBatches,
+fn read_surface_batch<T>(
+    stream: &mut SurfaceBatchStream,
     count: u64,
-) -> Result<Vec<SurfaceVertex>, TerrainError> {
+    mut decode: impl FnMut(u64, &[u8], &Path) -> Result<T, TerrainError>,
+) -> Result<Vec<T>, TerrainError> {
     let batch_work = batch_work_units(stream.record_count, stream.next_id - 1, count)?;
     let next_work = stream
         .used_work_units
@@ -2913,12 +2978,12 @@ fn read_vertex_batch(
         })?;
     require_within("Surface read work units", next_work, stream.max_work_units)?;
     let count_usize = usize::try_from(count).expect("batch count was bounded by usize");
-    let mut result = allocate_surface_batch::<SurfaceVertex>(
+    let mut result = allocate_surface_batch::<T>(
         count_usize,
         stream.max_batch_payload_bytes,
         stream.max_working_bytes,
         stream.verify_buffer.capacity(),
-        "Surface vertex batch bytes",
+        stream.kind.batch_bytes_label(),
     )?;
     let file = Arc::clone(&stream.file);
     let mut file = file.lock().map_err(|_| {
@@ -2929,47 +2994,28 @@ fn read_vertex_batch(
         )
     })?;
     let first_record = stream.next_id - 1;
+    let kind = stream.kind;
+    let path = &stream.path;
     read_verified_records(
         &mut file,
         &stream.opened_metadata,
         RecordBlockLayout {
             record_offset: stream.record_offset,
             record_count: stream.record_count,
-            record_bytes: VERTEX_RECORD_BYTES,
+            record_bytes: kind.record_bytes(),
             directory_offset: stream.directory_offset,
             block_count: block_count(stream.record_count),
-            domain: VERTEX_BLOCK_DOMAIN,
+            domain: kind.domain(),
         },
-        &stream.block_checksums.vertices,
+        kind.checksums(&stream.block_checksums),
         first_record,
         count,
         &mut stream.verify_buffer,
-        &stream.path,
+        path,
         ARTIFACT_KIND,
-        StreamReadBoundary::VertexRecordCaptured,
+        kind.boundary(),
         |record_index, bytes| {
-            let id = SurfaceVertexId::from_zero_based(
-                usize::try_from(record_index).unwrap_or(usize::MAX),
-            )
-            .ok_or_else(|| {
-                TerrainError::corrupt_surface(
-                    ARTIFACT_KIND,
-                    stream.path.display(),
-                    "vertex identity exceeds u32",
-                )
-            })?;
-            result.push(SurfaceVertex::new(
-                id,
-                PointId::new(
-                    stream.source,
-                    u64::from_le_bytes(bytes[0..8].try_into().expect("fixed slice")),
-                ),
-                [
-                    i64::from_le_bytes(bytes[8..16].try_into().expect("fixed slice")),
-                    i64::from_le_bytes(bytes[16..24].try_into().expect("fixed slice")),
-                    i64::from_le_bytes(bytes[24..32].try_into().expect("fixed slice")),
-                ],
-            ));
+            result.push(decode(record_index, bytes, path)?);
             Ok(())
         },
     )?;
@@ -2979,81 +3025,59 @@ fn read_vertex_batch(
     Ok(result)
 }
 
-fn read_face_batch(
-    stream: &mut SurfaceFaceBatches,
-    count: u64,
-) -> Result<Vec<SurfaceFace>, TerrainError> {
-    let batch_work = batch_work_units(stream.record_count, stream.next_id - 1, count)?;
-    let next_work = stream
-        .used_work_units
-        .checked_add(batch_work)
+fn decode_vertex_record(
+    source: SourceId,
+    record_index: u64,
+    bytes: &[u8],
+    path: &Path,
+) -> Result<SurfaceVertex, TerrainError> {
+    let id = SurfaceVertexId::from_zero_based(usize::try_from(record_index).unwrap_or(usize::MAX))
         .ok_or_else(|| {
-            TerrainError::resource("Surface read work units", u64::MAX, stream.max_work_units)
+            TerrainError::corrupt_surface(
+                ARTIFACT_KIND,
+                path.display(),
+                "vertex identity exceeds u32",
+            )
         })?;
-    require_within("Surface read work units", next_work, stream.max_work_units)?;
-    let count_usize = usize::try_from(count).expect("batch count was bounded by usize");
-    let mut result = allocate_surface_batch::<SurfaceFace>(
-        count_usize,
-        stream.max_batch_payload_bytes,
-        stream.max_working_bytes,
-        stream.verify_buffer.capacity(),
-        "Surface face batch bytes",
-    )?;
-    let file = Arc::clone(&stream.file);
-    let mut file = file.lock().map_err(|_| {
-        TerrainError::corrupt_surface(
-            ARTIFACT_KIND,
-            stream.path.display(),
-            "verified artifact reader lock was poisoned",
-        )
-    })?;
-    let first_record = stream.next_id - 1;
-    read_verified_records(
-        &mut file,
-        &stream.opened_metadata,
-        RecordBlockLayout {
-            record_offset: stream.record_offset,
-            record_count: stream.record_count,
-            record_bytes: FACE_RECORD_BYTES,
-            directory_offset: stream.directory_offset,
-            block_count: block_count(stream.record_count),
-            domain: FACE_BLOCK_DOMAIN,
-        },
-        &stream.block_checksums.faces,
-        first_record,
-        count,
-        &mut stream.verify_buffer,
-        &stream.path,
-        ARTIFACT_KIND,
-        StreamReadBoundary::FaceRecordCaptured,
-        |record_index, bytes| {
-            let raw = [
-                u32::from_le_bytes(bytes[0..4].try_into().expect("fixed slice")),
-                u32::from_le_bytes(bytes[4..8].try_into().expect("fixed slice")),
-                u32::from_le_bytes(bytes[8..12].try_into().expect("fixed slice")),
-            ];
-            validate_face_record(raw, stream.vertex_count, None, &stream.path)?;
-            let id =
-                SurfaceFaceId::from_zero_based(usize::try_from(record_index).unwrap_or(usize::MAX))
-                    .ok_or_else(|| {
-                        TerrainError::corrupt_surface(
-                            ARTIFACT_KIND,
-                            stream.path.display(),
-                            "face identity exceeds u32",
-                        )
-                    })?;
-            let vertices = raw.map(|value| {
-                SurfaceVertexId::from_zero_based(usize::try_from(value - 1).unwrap_or(usize::MAX))
-                    .expect("validated vertex identity")
-            });
-            result.push(SurfaceFace::new(id, vertices));
-            Ok(())
-        },
-    )?;
-    stream.next_id += count;
-    stream.remaining -= count;
-    stream.used_work_units = next_work;
-    Ok(result)
+    Ok(SurfaceVertex::new(
+        id,
+        PointId::new(
+            source,
+            u64::from_le_bytes(bytes[0..8].try_into().expect("fixed slice")),
+        ),
+        [
+            i64::from_le_bytes(bytes[8..16].try_into().expect("fixed slice")),
+            i64::from_le_bytes(bytes[16..24].try_into().expect("fixed slice")),
+            i64::from_le_bytes(bytes[24..32].try_into().expect("fixed slice")),
+        ],
+    ))
+}
+
+fn decode_face_record(
+    vertex_count: u64,
+    record_index: u64,
+    bytes: &[u8],
+    path: &Path,
+) -> Result<SurfaceFace, TerrainError> {
+    let raw = [
+        u32::from_le_bytes(bytes[0..4].try_into().expect("fixed slice")),
+        u32::from_le_bytes(bytes[4..8].try_into().expect("fixed slice")),
+        u32::from_le_bytes(bytes[8..12].try_into().expect("fixed slice")),
+    ];
+    validate_face_record(raw, vertex_count, None, path)?;
+    let id = SurfaceFaceId::from_zero_based(usize::try_from(record_index).unwrap_or(usize::MAX))
+        .ok_or_else(|| {
+            TerrainError::corrupt_surface(
+                ARTIFACT_KIND,
+                path.display(),
+                "face identity exceeds u32",
+            )
+        })?;
+    let vertices = raw.map(|value| {
+        SurfaceVertexId::from_zero_based(usize::try_from(value - 1).unwrap_or(usize::MAX))
+            .expect("validated vertex identity")
+    });
+    Ok(SurfaceFace::new(id, vertices))
 }
 
 struct SurfaceStreamPlan {
