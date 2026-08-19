@@ -445,7 +445,7 @@ impl WgpuRenderer {
                 color.view(),
                 depth,
                 clear,
-                &self.pipelines.draw,
+                &self.pipelines,
                 &self.camera_bind_group,
                 &batches,
             );
@@ -464,7 +464,7 @@ impl WgpuRenderer {
                 target,
                 depth,
                 clear,
-                &self.pipelines.draw,
+                &self.pipelines,
                 &self.camera_bind_group,
                 &batches,
             );
@@ -891,7 +891,7 @@ fn record_point_pass(
     target: &wgpu::TextureView,
     depth: &DepthTarget,
     clear: [f64; 4],
-    pipeline: &wgpu::RenderPipeline,
+    pipelines: &PointPipelines,
     camera_bind_group: &wgpu::BindGroup,
     batches: &[RecordedBatch],
 ) {
@@ -924,7 +924,22 @@ fn record_point_pass(
         occlusion_query_set: None,
         multiview_mask: None,
     });
-    record_point_batches(&mut pass, pipeline, camera_bind_group, batches);
+    record_point_batches(
+        &mut pass,
+        &pipelines.draw,
+        camera_bind_group,
+        batches
+            .iter()
+            .filter(|batch| batch.presentation_weight == PresentationWeight::OPAQUE),
+    );
+    record_point_batches(
+        &mut pass,
+        &pipelines.draw_translucent,
+        camera_bind_group,
+        batches
+            .iter()
+            .filter(|batch| batch.presentation_weight != PresentationWeight::OPAQUE),
+    );
 }
 
 fn record_eye_dome_pass(

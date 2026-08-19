@@ -89,6 +89,11 @@ fn presentation_weight_changes_color_but_not_pick_coverage() {
 }
 
 #[test]
+fn multi_point_cross_fade_preserves_coverage_across_inverted_batch_depth() {
+    with_gpu(assert_multi_point_cross_fade_coverage);
+}
+
+#[test]
 fn display_size_changes_color_coverage_but_not_pick_coverage() {
     with_gpu(assert_display_size_is_color_only);
 }
@@ -347,6 +352,58 @@ fn assert_presentation_weight_is_color_only(gpu: &GpuContext) {
     let hit = subject
         .pick_and_wait(&rendered.recorded_frame, CENTER)
         .expect("transparent presentation must preserve source pick coverage");
+    assert_hit(hit, view_generation, 1, 1, near_identity);
+}
+
+fn assert_multi_point_cross_fade_coverage(gpu: &GpuContext) {
+    let mut subject = OffscreenRenderer::new(gpu, roomy_limits());
+    let view_generation = ViewGenerationKey::new(ViewId::new(10), 1);
+    let near_identity = point_id(1_001);
+    subject.apply(&RenderUpdate::Reset { view_generation });
+    subject.apply(&RenderUpdate::Upsert {
+        batch: batch(
+            view_generation,
+            1,
+            1,
+            WORLD_ORIGIN,
+            vec![
+                point([0.0, -1.0, 0.0], RED, near_identity.ordinal()),
+                point([20.0, 4.0, 0.0], RED, 1_002),
+            ],
+        ),
+    });
+    subject.apply(&RenderUpdate::Upsert {
+        batch: batch(
+            view_generation,
+            2,
+            1,
+            WORLD_ORIGIN,
+            vec![
+                point([0.0, 1.0, 0.0], RED, 1_003),
+                point([-20.0, -4.0, 0.0], RED, 1_004),
+            ],
+        ),
+    });
+    for key in [BatchKey::new(1), BatchKey::new(2)] {
+        subject.apply(&RenderUpdate::SetBatchPresentation {
+            view_generation,
+            key,
+            expected_version: BatchVersion::new(1),
+            weight: PresentationWeight::new(128),
+        });
+    }
+
+    let frame = standard_frame(view_generation, VIEWPORT, 18.0, GREEN);
+    let rendered = subject.render(&frame);
+    let center = rendered.image.pixel(CENTER);
+    assert!(
+        center[0] >= 180 && center[1] <= 1 && center[2] <= 1,
+        "the multi-point cross-fade exposed too much background: {center:?}"
+    );
+    assert_eq!(rendered.report.draw_calls(), 2);
+    let hit = subject
+        .pick_and_wait(&rendered.recorded_frame, CENTER)
+        .expect("the cross-fade must preserve fixed pick coverage");
     assert_hit(hit, view_generation, 1, 1, near_identity);
 }
 
