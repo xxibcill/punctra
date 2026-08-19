@@ -50,7 +50,7 @@ const SEMANTIC_HASH_DOMAIN: &[u8] = b"punctra-terrain-workflow-semantic-results-
 const LAS_CLASSIFICATION_ATTRIBUTE: u32 = 6;
 const MAX_INTENT_ORDINALS: usize = 1_000;
 const MAX_INTENT_CHECK_POINTS: usize = 256;
-const LIMIT_FACT_COUNT: usize = 115;
+const LIMIT_FACT_COUNT: usize = 116;
 
 /// Caller-owned paths for one durable terrain Workflow Run.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -2084,6 +2084,7 @@ fn limit_facts(
         terrain.point_rows()
     );
     fact!("terrain.max_input_points", terrain.max_input_points());
+    fact!("terrain.max_vertices", terrain.max_vertices());
     fact!("terrain.max_faces", terrain.max_faces());
     fact!("terrain.max_working_bytes", terrain.max_working_bytes());
     fact!("terrain.max_surface_bytes", terrain.max_surface_bytes());
@@ -3445,13 +3446,17 @@ mod tests {
     }
 
     #[test]
-    fn canonical_limit_facts_name_the_path_binding_ceiling() {
+    fn canonical_limit_facts_name_the_path_binding_and_vertex_ceilings() {
         let facts = limit_facts(&WorkflowLimits::default(), &OperationControl::new())
             .expect("construct canonical Workflow Limit Facts");
 
         assert_eq!(facts.len(), LIMIT_FACT_COUNT);
         assert!(facts.iter().any(|fact| {
             fact.name == "journal.max_path_binding_bytes" && fact.value == PATH_BINDING_BYTES
+        }));
+        assert!(facts.iter().any(|fact| {
+            fact.name == "terrain.max_vertices"
+                && fact.value == TerrainLimits::default().max_vertices()
         }));
     }
 

@@ -8,6 +8,7 @@ const GIB: u64 = 1024 * MIB;
 pub struct TerrainLimits {
     point_rows: PointRowLimits,
     max_input_points: u64,
+    max_vertices: u64,
     max_faces: u64,
     max_working_bytes: u64,
     max_surface_bytes: u64,
@@ -20,6 +21,7 @@ impl TerrainLimits {
     pub const fn new(
         point_rows: PointRowLimits,
         max_input_points: u64,
+        max_vertices: u64,
         max_faces: u64,
         max_working_bytes: u64,
         max_surface_bytes: u64,
@@ -28,6 +30,7 @@ impl TerrainLimits {
         Self {
             point_rows,
             max_input_points,
+            max_vertices,
             max_faces,
             max_working_bytes,
             max_surface_bytes,
@@ -45,6 +48,12 @@ impl TerrainLimits {
     #[must_use]
     pub const fn max_input_points(self) -> u64 {
         self.max_input_points
+    }
+
+    /// Returns the maximum canonical Surface vertex count.
+    #[must_use]
+    pub const fn max_vertices(self) -> u64 {
+        self.max_vertices
     }
 
     /// Returns the maximum canonical face count.
@@ -76,6 +85,7 @@ impl Default for TerrainLimits {
     fn default() -> Self {
         Self::new(
             PointRowLimits::default(),
+            10_000_000,
             10_000_000,
             20_000_000,
             GIB,
@@ -405,8 +415,9 @@ mod tests {
 
     #[test]
     fn limits_preserve_independent_zero_ceilings() {
-        let terrain = TerrainLimits::new(PointRowLimits::default(), 0, 0, 0, 0, 0);
+        let terrain = TerrainLimits::new(PointRowLimits::default(), 0, 0, 0, 0, 0, 0);
         assert_eq!(terrain.max_input_points(), 0);
+        assert_eq!(terrain.max_vertices(), 0);
         assert_eq!(terrain.max_working_bytes(), 0);
 
         let check_points = CheckPointLimits::new(0, 0, 0, 0);

@@ -692,6 +692,7 @@ fn terrain_fuzz_limits(max_artifact_bytes: u64) -> TerrainPrepareLimits {
     let derivation = TerrainLimits::new(
         rows,
         MAX_POINTS,
+        MAX_POINTS,
         MAX_FACES,
         1_024 * KIB,
         1_024 * KIB,

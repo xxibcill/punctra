@@ -281,6 +281,13 @@ pub(crate) fn derive_collected(
         attempt_peak_working_bytes,
     } = collected;
     let input_point_count = u64::try_from(input.len()).unwrap_or(u64::MAX);
+    if input_point_count > limits.max_vertices() {
+        return Err(TerrainError::resource(
+            "Terrain vertices",
+            input_point_count,
+            limits.max_vertices(),
+        ));
+    }
     let coordinate_reference_bytes = coordinate_reference
         .as_wkt()
         .map_or(0, |wkt| u64::try_from(wkt.len()).unwrap_or(u64::MAX));

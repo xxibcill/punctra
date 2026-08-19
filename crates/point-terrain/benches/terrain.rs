@@ -463,6 +463,7 @@ fn assert_surface(
     assert!(descriptor.face_count() > 0);
     assert!(descriptor.face_count() <= limits.max_faces());
     assert!(descriptor.input_point_count() <= limits.max_input_points());
+    assert!(descriptor.vertex_count() <= limits.max_vertices());
     assert!(descriptor.accounted_peak_working_bytes() <= limits.max_working_bytes());
     assert!(descriptor.retained_surface_bytes() <= limits.max_surface_bytes());
     assert!(descriptor.topology_steps() <= limits.max_work_units());
@@ -670,6 +671,7 @@ fn report_persistent_resource_facts(evidence: &PersistentEvidence, limits: Terra
             "max_path_bytes": limits.max_path_bytes(),
             "derivation": {
                 "max_input_points": derivation_limits.max_input_points(),
+                "max_vertices": derivation_limits.max_vertices(),
                 "max_faces": derivation_limits.max_faces(),
                 "max_working_bytes": derivation_limits.max_working_bytes(),
                 "max_surface_bytes": derivation_limits.max_surface_bytes(),

@@ -211,6 +211,7 @@ pub fn terrain_limits_with_row_batch(max_batch_points: u64) -> TerrainLimits {
     TerrainLimits::new(
         point_row_limits(defaults.max_input_points(), max_batch_points),
         defaults.max_input_points(),
+        defaults.max_vertices(),
         defaults.max_faces(),
         defaults.max_working_bytes(),
         defaults.max_surface_bytes(),

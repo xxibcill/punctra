@@ -1079,6 +1079,7 @@ fn sixty_three_input_point_terrain_limits() -> TerrainLimits {
     TerrainLimits::new(
         defaults.point_rows(),
         63,
+        defaults.max_vertices(),
         defaults.max_faces(),
         defaults.max_working_bytes(),
         defaults.max_surface_bytes(),

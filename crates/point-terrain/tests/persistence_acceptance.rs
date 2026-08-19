@@ -145,6 +145,7 @@ fn persistent_prepare_forwards_each_observable_derivation_ceiling() {
         .unwrap();
     let descriptor = baseline.descriptor();
     let exact_input = descriptor.input_point_count();
+    let exact_vertices = descriptor.vertex_count();
     let exact_faces = descriptor.face_count();
     let exact_working = descriptor.accounted_peak_working_bytes();
     let exact_surface = descriptor.retained_surface_bytes();
@@ -170,6 +171,15 @@ fn persistent_prepare_forwards_each_observable_derivation_ceiling() {
         "Ground Input Points",
         exact_input,
         DerivationCeilings::with_input_points,
+    );
+    assert_derivation_boundary(
+        &fixture,
+        &snapshot,
+        recipe,
+        "vertices",
+        "Terrain vertices",
+        exact_vertices,
+        DerivationCeilings::with_vertices,
     );
     assert_derivation_boundary(
         &fixture,
@@ -930,6 +940,7 @@ impl Default for PrepareCeilings {
 struct DerivationCeilings {
     limits: TerrainLimits,
     input_points: u64,
+    vertices: u64,
     faces: u64,
     working_bytes: u64,
     surface_bytes: u64,
@@ -939,6 +950,11 @@ struct DerivationCeilings {
 impl DerivationCeilings {
     fn with_input_points(mut self, value: u64) -> Self {
         self.input_points = value;
+        self
+    }
+
+    fn with_vertices(mut self, value: u64) -> Self {
+        self.vertices = value;
         self
     }
 
@@ -966,6 +982,7 @@ impl DerivationCeilings {
         TerrainLimits::new(
             self.limits.point_rows(),
             self.input_points,
+            self.vertices,
             self.faces,
             self.working_bytes,
             self.surface_bytes,
@@ -980,6 +997,7 @@ impl Default for DerivationCeilings {
         Self {
             limits,
             input_points: limits.max_input_points(),
+            vertices: limits.max_vertices(),
             faces: limits.max_faces(),
             working_bytes: limits.max_working_bytes(),
             surface_bytes: limits.max_surface_bytes(),

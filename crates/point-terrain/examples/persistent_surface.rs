@@ -138,6 +138,7 @@ fn terrain_report(persistent: &PersistentRun) -> Result<Value, Box<dyn std::erro
             "max_path_bytes": limits.max_path_bytes(),
             "derivation": {
                 "max_input_points": derivation_limits.max_input_points(),
+                "max_vertices": derivation_limits.max_vertices(),
                 "max_faces": derivation_limits.max_faces(),
                 "max_working_bytes": derivation_limits.max_working_bytes(),
                 "max_surface_bytes": derivation_limits.max_surface_bytes(),

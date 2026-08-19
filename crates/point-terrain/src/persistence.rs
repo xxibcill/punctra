@@ -1375,6 +1375,11 @@ fn open_artifact(
         limits.derivation().max_input_points(),
     )?;
     require_within(
+        "Terrain vertices",
+        decoded.descriptor.vertex_count,
+        limits.derivation().max_vertices(),
+    )?;
+    require_within(
         "Terrain faces",
         decoded.descriptor.face_count,
         limits.derivation().max_faces(),
@@ -4538,14 +4543,22 @@ mod tests {
         let defaults = TerrainPrepareLimits::default();
         let derivation = defaults.derivation();
 
-        for (max_input_points, max_faces, expected_limit) in [
+        for (max_input_points, max_vertices, max_faces, expected_limit) in [
             (
                 prepared.descriptor().input_point_count() - 1,
+                derivation.max_vertices(),
                 derivation.max_faces(),
                 "Ground Input Points",
             ),
             (
                 derivation.max_input_points(),
+                prepared.descriptor().vertex_count() - 1,
+                derivation.max_faces(),
+                "Terrain vertices",
+            ),
+            (
+                derivation.max_input_points(),
+                derivation.max_vertices(),
                 prepared.descriptor().face_count() - 1,
                 "Terrain faces",
             ),
@@ -4554,6 +4567,7 @@ mod tests {
                 crate::TerrainLimits::new(
                     derivation.point_rows(),
                     max_input_points,
+                    max_vertices,
                     max_faces,
                     derivation.max_working_bytes(),
                     derivation.max_surface_bytes(),

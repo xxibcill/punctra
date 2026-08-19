@@ -700,8 +700,8 @@ through the public workflow facade with generated local LAS data. The local
 | LandXML and report reconciliation | 96.871 ms | 97.629 ms | 98.365 ms |
 | Complete revalidation | 87.233 ms | 88.181 ms | 89.112 ms |
 
-The completed Run had an eight-frame 2,804-byte journal and an 11,490-byte
-canonical report containing 115 semantic limit facts. The benchmark accepts
+The completed Run had an eight-frame 2,804-byte journal and an 11,539-byte
+canonical report containing 116 semantic limit facts. The benchmark accepts
 only the documented generated 10,000, 100,000, and 1,000,000-Point modes through
 `PUNCTRA_TERRAIN_WORKFLOW_BENCH_POINTS`; only the 10,000-Point smoke is recorded
 here. These are generated local technical observations. Worker peak heap was

@@ -110,6 +110,7 @@ fn input_face_and_row_output_limits_fail_before_surface_publication() {
             TerrainLimits::new(
                 defaults.point_rows(),
                 3,
+                defaults.max_vertices(),
                 defaults.max_faces(),
                 defaults.max_working_bytes(),
                 defaults.max_surface_bytes(),
@@ -126,6 +127,7 @@ fn input_face_and_row_output_limits_fail_before_surface_publication() {
             TerrainLimits::new(
                 defaults.point_rows(),
                 defaults.max_input_points(),
+                defaults.max_vertices(),
                 1,
                 defaults.max_working_bytes(),
                 defaults.max_surface_bytes(),
@@ -138,6 +140,7 @@ fn input_face_and_row_output_limits_fail_before_surface_publication() {
     let row_limited = TerrainLimits::new(
         point_row_limits(3, 2),
         defaults.max_input_points(),
+        defaults.max_vertices(),
         defaults.max_faces(),
         defaults.max_working_bytes(),
         defaults.max_surface_bytes(),
@@ -167,6 +170,7 @@ fn working_and_retained_memory_limits_fail_before_surface_publication() {
             TerrainLimits::new(
                 defaults.point_rows(),
                 defaults.max_input_points(),
+                defaults.max_vertices(),
                 defaults.max_faces(),
                 defaults.max_working_bytes(),
                 0,
@@ -183,6 +187,7 @@ fn working_and_retained_memory_limits_fail_before_surface_publication() {
             TerrainLimits::new(
                 defaults.point_rows(),
                 defaults.max_input_points(),
+                defaults.max_vertices(),
                 defaults.max_faces(),
                 0,
                 defaults.max_surface_bytes(),
@@ -205,6 +210,7 @@ fn work_limit_fails_before_surface_publication() {
             TerrainLimits::new(
                 defaults.point_rows(),
                 defaults.max_input_points(),
+                defaults.max_vertices(),
                 defaults.max_faces(),
                 defaults.max_working_bytes(),
                 defaults.max_surface_bytes(),
