@@ -91,6 +91,8 @@ enum StreamReadBoundary {
 type StreamMutationHook = Box<dyn FnOnce()>;
 #[cfg(test)]
 type InjectedStreamMutation = Option<(StreamReadBoundary, StreamMutationHook)>;
+#[cfg(test)]
+type PublicationRaceHook = Box<dyn FnOnce()>;
 
 #[cfg(test)]
 thread_local! {
@@ -98,6 +100,8 @@ thread_local! {
         const { RefCell::new(None) };
     static INJECTED_CANCELLATION: Cell<Option<PersistenceBoundary>> = const { Cell::new(None) };
     static INJECTED_STREAM_MUTATION: RefCell<InjectedStreamMutation> =
+        const { RefCell::new(None) };
+    static INJECTED_PUBLICATION_RACE: RefCell<Option<PublicationRaceHook>> =
         const { RefCell::new(None) };
 }
 
@@ -167,6 +171,13 @@ fn maybe_injected_stream_mutation(boundary: StreamReadBoundary) {
     #[cfg(not(test))]
     {
         let _ = boundary;
+    }
+}
+
+fn maybe_injected_publication_race() {
+    #[cfg(test)]
+    if let Some(hook) = INJECTED_PUBLICATION_RACE.with(|slot| slot.borrow_mut().take()) {
+        hook();
     }
 }
 
@@ -766,6 +777,8 @@ fn run_prepare(
         maybe_injected_cancellation(PersistenceBoundary::CancelAfterStage, control);
         control.check_cancelled()?;
         let publication = publish_stage(&parent, &staged, target, control)?;
+        let result_disposition =
+            publication.result_disposition(TerrainPrepareDisposition::ResumedPublication);
         let result = maybe_injected_io(PersistenceBoundary::TargetReadback)
             .map_err(|error| {
                 TerrainError::io("reopen published Surface target", target.display(), error)
@@ -775,7 +788,7 @@ fn run_prepare(
                     &parent,
                     target,
                     expected,
-                    TerrainPrepareDisposition::ResumedPublication,
+                    result_disposition,
                     0,
                     0,
                     peak_temporary_disk_bytes,
@@ -900,6 +913,7 @@ fn run_prepare(
     maybe_injected_cancellation(PersistenceBoundary::CancelAfterStage, control);
     control.check_cancelled()?;
     let publication = publish_stage(&parent, &staged, target, control)?;
+    let result_disposition = publication.result_disposition(disposition);
     let result = maybe_injected_io(PersistenceBoundary::TargetReadback)
         .map_err(|error| {
             TerrainError::io("reopen published Surface target", target.display(), error)
@@ -909,7 +923,7 @@ fn run_prepare(
                 &parent,
                 target,
                 expected,
-                disposition,
+                result_disposition,
                 reused_input_points,
                 source_points_read,
                 peak_temporary_disk_bytes,
@@ -3888,6 +3902,18 @@ enum PublicationOutcome {
     Existing,
 }
 
+impl PublicationOutcome {
+    const fn result_disposition(
+        self,
+        published: TerrainPrepareDisposition,
+    ) -> TerrainPrepareDisposition {
+        match self {
+            Self::Created => published,
+            Self::Existing => TerrainPrepareDisposition::Opened,
+        }
+    }
+}
+
 fn publish_stage(
     parent: &DirectoryWitness,
     stage: &PreparedTerrainSurface,
@@ -3903,6 +3929,7 @@ fn publish_stage(
             error,
         )
     })?;
+    maybe_injected_publication_race();
     match stage.publish_open_file(parent, target) {
         Ok(publication) => {
             maybe_injected_cancellation(PersistenceBoundary::CancelAfterTargetLink, control);
@@ -4448,6 +4475,31 @@ mod tests {
         parent.publish_open_file(&source, &target).unwrap();
         assert_eq!(fs::read(&target).unwrap(), b"owned descriptor bytes");
         assert_eq!(fs::read(&private_target).unwrap(), b"racing replacement");
+    }
+
+    #[test]
+    fn compatible_target_winning_publication_race_is_reported_as_opened() {
+        let fixture = Fixture::new("compatible-publication-race");
+        let target = fixture.path("surface.pterr");
+        let stage = sibling_path(&target, ".surface-stage-v1").unwrap();
+        install_publication_race({
+            let target = target.clone();
+            move || {
+                fs::copy(&stage, &target).unwrap();
+            }
+        });
+
+        let prepared = run_prepare_direct(&fixture, &target, OperationControl::new()).unwrap();
+
+        assert_publication_race_consumed();
+        assert_eq!(
+            prepared.report().disposition(),
+            TerrainPrepareDisposition::Opened
+        );
+        assert_eq!(
+            prepared.report().source_points_read(),
+            fixture.point_count()
+        );
     }
 
     #[test]
@@ -5355,6 +5407,21 @@ mod tests {
             assert!(
                 slot.borrow().is_none(),
                 "injected stream mutation boundary was not reached"
+            );
+        });
+    }
+
+    fn install_publication_race(hook: impl FnOnce() + 'static) {
+        INJECTED_PUBLICATION_RACE.with(|slot| {
+            assert!(slot.replace(Some(Box::new(hook))).is_none());
+        });
+    }
+
+    fn assert_publication_race_consumed() {
+        INJECTED_PUBLICATION_RACE.with(|slot| {
+            assert!(
+                slot.borrow().is_none(),
+                "injected publication race was not reached"
             );
         });
     }
