@@ -9,7 +9,7 @@ use std::{
 #[cfg(test)]
 use std::cell::{Cell, RefCell};
 
-#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+#[cfg(not(unix))]
 use std::fs::OpenOptions;
 
 use blake3::Hasher;
@@ -3531,14 +3531,14 @@ impl DirectoryWitness {
         maybe_injected_open_race();
         #[cfg(unix)]
         {
-            #[cfg(any(target_os = "linux", target_os = "macos"))]
             let directory = File::from(
                 rustix::fs::open(
                     path,
                     rustix::fs::OFlags::RDONLY
                         | rustix::fs::OFlags::CLOEXEC
                         | rustix::fs::OFlags::DIRECTORY
-                        | rustix::fs::OFlags::NOFOLLOW,
+                        | rustix::fs::OFlags::NOFOLLOW
+                        | rustix::fs::OFlags::NONBLOCK,
                     rustix::fs::Mode::empty(),
                 )
                 .map_err(|error| {
@@ -3549,10 +3549,6 @@ impl DirectoryWitness {
                     )
                 })?,
             );
-            #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-            let directory = File::open(path).map_err(|error| {
-                TerrainError::io("open Surface parent directory", path.display(), error)
-            })?;
             let opened = directory.metadata().map_err(|error| {
                 TerrainError::io("inspect opened Surface parent", path.display(), error)
             })?;
@@ -3609,7 +3605,7 @@ impl DirectoryWitness {
 
     fn open_child(&self, path: &Path) -> io::Result<File> {
         let name = child_name(path)?;
-        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        #[cfg(unix)]
         {
             use rustix::fs::{Mode, OFlags, openat};
 
@@ -3621,7 +3617,7 @@ impl DirectoryWitness {
             )?;
             Ok(File::from(file))
         }
-        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+        #[cfg(not(unix))]
         {
             self.verify().map_err(terrain_error_as_io)?;
             let file = OpenOptions::new().read(true).open(self.path.join(name))?;
@@ -3632,7 +3628,7 @@ impl DirectoryWitness {
 
     fn create_child(&self, path: &Path) -> io::Result<File> {
         let name = child_name(path)?;
-        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        #[cfg(unix)]
         {
             use rustix::fs::{Mode, OFlags, openat};
 
@@ -3644,7 +3640,7 @@ impl DirectoryWitness {
             )?;
             Ok(File::from(file))
         }
-        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+        #[cfg(not(unix))]
         {
             self.verify().map_err(terrain_error_as_io)?;
             let file = OpenOptions::new()
@@ -3799,7 +3795,7 @@ fn changed_parent(path: &Path) -> TerrainError {
     )
 }
 
-#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+#[cfg(not(unix))]
 fn terrain_error_as_io(error: TerrainError) -> io::Error {
     io::Error::other(error)
 }
@@ -4870,7 +4866,7 @@ mod tests {
         ));
     }
 
-    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[cfg(unix)]
     #[test]
     fn raced_fifo_leaf_is_rejected_without_blocking() {
         let fixture = Fixture::new("raced-fifo-leaf");
@@ -4905,7 +4901,7 @@ mod tests {
         );
     }
 
-    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[cfg(unix)]
     #[test]
     fn raced_fifo_parent_is_rejected_without_blocking() {
         let fixture = Fixture::new("raced-fifo-parent");
