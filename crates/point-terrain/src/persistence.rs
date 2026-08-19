@@ -1150,11 +1150,7 @@ fn open_work(
         .seek(SeekFrom::Start(work.layout.record_offset))
         .map_err(|error| TerrainError::io("seek Surface work rows", path.display(), error))?;
     let mut previous_ordinal = None;
-    let mut input_hasher = Hasher::new();
-    input_hasher.update(SNAPSHOT_ROWS_HASH_DOMAIN);
-    input_hasher.update(expected.snapshot.workspace().as_bytes());
-    input_hasher.update(expected.snapshot.source().as_bytes());
-    input_hasher.update(expected.snapshot.revision().as_bytes());
+    let mut input_hasher = snapshot_input_hasher(expected.snapshot);
     for index in 0..work.input_point_count {
         if index.is_multiple_of(RECORDS_PER_BLOCK) {
             control.check_cancelled()?;
@@ -1178,11 +1174,12 @@ fn open_work(
             WORK_KIND,
             "input record",
         )?;
-        input_hasher.update(&ordinal.to_le_bytes());
-        for tick in ticks {
-            input_hasher.update(&tick.to_le_bytes());
-        }
-        input_hasher.update(&[expected.recipe.ground_classification()]);
+        hash_snapshot_input_record(
+            &mut input_hasher,
+            ordinal,
+            ticks,
+            expected.recipe.ground_classification(),
+        );
         vertices.push(InputVertex {
             point: PointId::new(expected.snapshot.source(), ordinal),
             ticks,
@@ -1210,6 +1207,28 @@ fn open_work(
     };
     let witness = OwnedPathWitness::from_opened(path.to_path_buf(), opened);
     Ok(OpenedWork { input, witness })
+}
+
+fn snapshot_input_hasher(snapshot: SnapshotProvenance) -> Hasher {
+    let mut hasher = Hasher::new();
+    hasher.update(SNAPSHOT_ROWS_HASH_DOMAIN);
+    hasher.update(snapshot.workspace().as_bytes());
+    hasher.update(snapshot.source().as_bytes());
+    hasher.update(snapshot.revision().as_bytes());
+    hasher
+}
+
+fn hash_snapshot_input_record(
+    hasher: &mut Hasher,
+    ordinal: u64,
+    ticks: [i64; 3],
+    classification: u8,
+) {
+    hasher.update(&ordinal.to_le_bytes());
+    for tick in ticks {
+        hasher.update(&tick.to_le_bytes());
+    }
+    hasher.update(&[classification]);
 }
 
 fn write_artifact(
@@ -1359,6 +1378,7 @@ fn open_artifact(
         path,
         &decoded.descriptor,
         decoded.layout,
+        limits.derivation().max_working_bytes(),
         control,
     )?;
     control.check_cancelled()?;
@@ -1782,6 +1802,7 @@ fn validate_artifact_payload(
     path: &Path,
     descriptor: &SurfaceArtifactDescriptor,
     layout: ArtifactLayout,
+    max_working_bytes: u64,
     control: &OperationControl,
 ) -> Result<(), TerrainError> {
     file.seek(SeekFrom::Start(layout.vertex_offset))
@@ -1796,6 +1817,8 @@ fn validate_artifact_payload(
     let mut min_xy = [i64::MAX; 2];
     let mut max_xy = [i64::MIN; 2];
     let mut previous_vertex: Option<([i64; 3], u64)> = None;
+    let mut input_records =
+        allocate_artifact_input_records(descriptor.vertex_count, max_working_bytes)?;
     for index in 0..descriptor.vertex_count {
         if index.is_multiple_of(RECORDS_PER_BLOCK) {
             control.check_cancelled()?;
@@ -1823,6 +1846,10 @@ fn validate_artifact_payload(
             ));
         }
         previous_vertex = Some(key);
+        input_records.push(InputVertex {
+            ticks,
+            point: PointId::new(descriptor.snapshot.source(), ordinal),
+        });
         let id = index.saturating_add(1);
         geometry.update(&u32::try_from(id).unwrap_or(u32::MAX).to_le_bytes());
         geometry.update(descriptor.snapshot.source().as_bytes());
@@ -1920,6 +1947,79 @@ fn validate_artifact_payload(
             ARTIFACT_KIND,
             path.display(),
             "geometry bounds do not match canonical vertices",
+        ));
+    }
+    validate_artifact_input_hash(&mut input_records, descriptor, path)?;
+    Ok(())
+}
+
+fn allocate_artifact_input_records(
+    record_count: u64,
+    max_working_bytes: u64,
+) -> Result<Vec<InputVertex>, TerrainError> {
+    let required_bytes = record_count
+        .saturating_mul(u64::try_from(mem::size_of::<InputVertex>()).unwrap_or(u64::MAX));
+    require_within(
+        "Surface input-hash verification bytes",
+        required_bytes,
+        max_working_bytes,
+    )?;
+    let count = usize::try_from(record_count).map_err(|_| {
+        TerrainError::resource(
+            "Surface input-hash verification bytes",
+            required_bytes,
+            max_working_bytes,
+        )
+    })?;
+    let mut records = Vec::new();
+    records.try_reserve_exact(count).map_err(|_| {
+        TerrainError::resource(
+            "Surface input-hash verification bytes",
+            required_bytes,
+            max_working_bytes,
+        )
+    })?;
+    let allocated_bytes = u64::try_from(records.capacity())
+        .unwrap_or(u64::MAX)
+        .saturating_mul(u64::try_from(mem::size_of::<InputVertex>()).unwrap_or(u64::MAX));
+    require_within(
+        "Surface input-hash verification bytes",
+        allocated_bytes,
+        max_working_bytes,
+    )?;
+    Ok(records)
+}
+
+fn validate_artifact_input_hash(
+    records: &mut [InputVertex],
+    descriptor: &SurfaceArtifactDescriptor,
+    path: &Path,
+) -> Result<(), TerrainError> {
+    records.sort_unstable_by_key(|record| record.point.ordinal());
+    if records
+        .windows(2)
+        .any(|pair| pair[0].point.ordinal() == pair[1].point.ordinal())
+    {
+        return Err(TerrainError::corrupt_surface(
+            ARTIFACT_KIND,
+            path.display(),
+            "canonical vertices contain duplicate Source ordinals",
+        ));
+    }
+    let mut hasher = snapshot_input_hasher(descriptor.snapshot);
+    for record in records {
+        hash_snapshot_input_record(
+            &mut hasher,
+            record.point.ordinal(),
+            record.ticks,
+            descriptor.recipe.ground_classification(),
+        );
+    }
+    if ContentHash::new(*hasher.finalize().as_bytes()) != descriptor.input_hash {
+        return Err(TerrainError::corrupt_surface(
+            ARTIFACT_KIND,
+            path.display(),
+            "Snapshot Point content hash does not match canonical vertex records",
         ));
     }
     Ok(())
@@ -4015,6 +4115,8 @@ mod tests {
     const ARTIFACT_RECIPE_GROUND_OFFSET: usize = 112;
     const ARTIFACT_TRANSFORM_OFFSET: usize = 193;
     const ARTIFACT_PROFILE_HORIZONTAL_EPSG_OFFSET: usize = 245;
+    const ARTIFACT_INPUT_HASH_OFFSET: usize = 257;
+    const ARTIFACT_HASH_OFFSET: usize = 353;
     const ARTIFACT_INPUT_COUNT_OFFSET: usize = 385;
     const ARTIFACT_VERTEX_COUNT_OFFSET: usize = 393;
     const WORK_ALGORITHM_OFFSET: usize = 12;
@@ -4042,6 +4144,41 @@ mod tests {
 
         let error = prepare_surface(snapshot, &target, recipe).unwrap_err();
         assert_corruption_reason(error, "record block checksum does not match");
+        assert_eq!(fs::read(&target).unwrap(), bytes);
+    }
+
+    #[test]
+    fn checksum_valid_artifact_input_hash_must_match_canonical_records() {
+        let fixture = Fixture::new("artifact-input-hash");
+        let target = fixture.path("surface.pterr");
+        let snapshot = fixture.workspace.head();
+        let recipe = fixture.recipe();
+        let prepared = prepare_surface(snapshot.clone(), &target, recipe).unwrap();
+        let descriptor = prepared.descriptor();
+        let forged_input_hash = ContentHash::new([0xA5; 32]);
+        let forged_artifact_hash = artifact_hash(
+            descriptor.snapshot(),
+            descriptor.recipe_hash(),
+            descriptor.position_transform(),
+            descriptor.coordinate_reference(),
+            forged_input_hash,
+            descriptor.geometry_hash(),
+            descriptor.topology_hash(),
+        );
+        drop(prepared);
+
+        let mut bytes = fs::read(&target).unwrap();
+        bytes[ARTIFACT_INPUT_HASH_OFFSET..ARTIFACT_INPUT_HASH_OFFSET + 32]
+            .copy_from_slice(forged_input_hash.as_bytes());
+        bytes[ARTIFACT_HASH_OFFSET..ARTIFACT_HASH_OFFSET + 32]
+            .copy_from_slice(forged_artifact_hash.as_bytes());
+        rewrite_checksum(&mut bytes, CHECKSUM_DOMAIN);
+        fs::write(&target, &bytes).unwrap();
+
+        assert_corruption_reason(
+            prepare_surface(snapshot, &target, recipe).unwrap_err(),
+            "Snapshot Point content hash does not match canonical vertex records",
+        );
         assert_eq!(fs::read(&target).unwrap(), bytes);
     }
 
