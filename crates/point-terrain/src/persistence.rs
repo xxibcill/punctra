@@ -748,10 +748,39 @@ pub fn prepare(
     recipe: TerrainRecipe,
     limits: TerrainPrepareLimits,
 ) -> crate::TerrainPrepareJob {
-    let target = target.as_ref().to_path_buf();
+    let target = owned_target_path(target.as_ref(), limits);
     crate::TerrainPrepareJob::spawn(move |control| {
+        let target = target?;
         run_prepare(&snapshot, &target, recipe, limits, &control)
     })
+}
+
+fn owned_target_path(target: &Path, limits: TerrainPrepareLimits) -> Result<PathBuf, TerrainError> {
+    require_target_family_paths_within(target, limits)?;
+    Ok(target.to_path_buf())
+}
+
+fn require_target_family_paths_within(
+    target: &Path,
+    limits: TerrainPrepareLimits,
+) -> Result<(), TerrainError> {
+    if target.file_name().is_none() {
+        return Err(TerrainError::invalid(
+            "Surface target",
+            "target must have a file name",
+        ));
+    }
+    require_path_within(target, limits)?;
+    for suffix in [".surface-stage-v1", ".surface-work-v1"] {
+        let required = path_encoded_bytes(target)
+            .saturating_add(u64::try_from(suffix.len()).unwrap_or(u64::MAX));
+        require_within(
+            "Surface retained path bytes",
+            required,
+            limits.max_path_bytes(),
+        )?;
+    }
+    Ok(())
 }
 
 #[derive(Clone, Copy)]
@@ -800,7 +829,6 @@ fn run_prepare(
     control.check_cancelled()?;
     validate_prepare_limits(limits)?;
     let expected = ExpectedBinding::new(snapshot, recipe, limits)?;
-    require_path_within(target, limits)?;
     let parent = Arc::new(DirectoryWitness::capture(target)?);
 
     if path_exists_in(&parent, target)? {
@@ -824,8 +852,6 @@ fn run_prepare(
 
     let stage_path = sibling_path(target, ".surface-stage-v1")?;
     let work_path = sibling_path(target, ".surface-work-v1")?;
-    require_path_within(&stage_path, limits)?;
-    require_path_within(&work_path, limits)?;
     if path_exists_in(&parent, &stage_path)? {
         maybe_injected_io(PersistenceBoundary::StageReadback).map_err(|error| {
             TerrainError::io(
