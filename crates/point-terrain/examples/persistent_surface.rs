@@ -17,7 +17,7 @@ use point_terrain::{
     PreparedTerrainSurface, SurfaceReadLimits, TerrainPrepareDisposition, TerrainPrepareLimits,
     TerrainRecipe,
 };
-use point_workspace::{OpenLimits, Workspace, WorkspaceSchema};
+use point_workspace::{OpenLimits, PointRowLimits, Workspace, WorkspaceSchema};
 use serde_json::{Value, json};
 use source_memory::MemorySource;
 
@@ -137,6 +137,7 @@ fn terrain_report(persistent: &PersistentRun) -> Result<Value, Box<dyn std::erro
             "max_retained_handle_bytes": limits.max_retained_handle_bytes(),
             "max_path_bytes": limits.max_path_bytes(),
             "derivation": {
+                "point_rows": point_row_limits_report(derivation_limits.point_rows()),
                 "max_input_points": derivation_limits.max_input_points(),
                 "max_vertices": derivation_limits.max_vertices(),
                 "max_faces": derivation_limits.max_faces(),
@@ -146,6 +147,32 @@ fn terrain_report(persistent: &PersistentRun) -> Result<Value, Box<dyn std::erro
             },
         },
     }))
+}
+
+fn point_row_limits_report(limits: PointRowLimits) -> Value {
+    let candidate = limits.candidate_limits();
+    let source_read = limits.source_read_budget();
+    json!({
+        "candidate": {
+            "max_visited_nodes": candidate.max_visited_nodes(),
+            "max_output_spans": candidate.max_output_spans(),
+            "max_candidate_points": candidate.max_candidate_points(),
+            "max_working_bytes": candidate.max_working_bytes(),
+        },
+        "source_read": {
+            "max_spans": source_read.max_spans(),
+            "max_points": source_read.max_points(),
+            "max_batch_points": source_read.max_batch_points(),
+            "max_batch_payload_bytes": source_read.max_batch_payload_bytes(),
+            "max_adapter_working_bytes": source_read.max_adapter_working_bytes(),
+        },
+        "max_overlay_segments": limits.max_overlay_segments(),
+        "max_overlay_bytes": limits.max_overlay_bytes(),
+        "max_output_points": limits.max_output_points(),
+        "max_batch_points": limits.max_batch_points(),
+        "max_batch_payload_bytes": limits.max_batch_payload_bytes(),
+        "max_working_bytes": limits.max_working_bytes(),
+    })
 }
 
 fn stream_report(persistent: &PersistentRun) -> Value {
@@ -585,5 +612,42 @@ impl ExampleDirectory {
 impl Drop for ExampleDirectory {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.path);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn point_row_report_names_every_nested_ceiling() {
+        let limits = PointRowLimits::default();
+        let candidate = limits.candidate_limits();
+        let source_read = limits.source_read_budget();
+
+        assert_eq!(
+            point_row_limits_report(limits),
+            json!({
+                "candidate": {
+                    "max_visited_nodes": candidate.max_visited_nodes(),
+                    "max_output_spans": candidate.max_output_spans(),
+                    "max_candidate_points": candidate.max_candidate_points(),
+                    "max_working_bytes": candidate.max_working_bytes(),
+                },
+                "source_read": {
+                    "max_spans": source_read.max_spans(),
+                    "max_points": source_read.max_points(),
+                    "max_batch_points": source_read.max_batch_points(),
+                    "max_batch_payload_bytes": source_read.max_batch_payload_bytes(),
+                    "max_adapter_working_bytes": source_read.max_adapter_working_bytes(),
+                },
+                "max_overlay_segments": limits.max_overlay_segments(),
+                "max_overlay_bytes": limits.max_overlay_bytes(),
+                "max_output_points": limits.max_output_points(),
+                "max_batch_points": limits.max_batch_points(),
+                "max_batch_payload_bytes": limits.max_batch_payload_bytes(),
+                "max_working_bytes": limits.max_working_bytes(),
+            })
+        );
     }
 }
