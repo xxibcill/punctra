@@ -93,6 +93,8 @@ type StreamMutationHook = Box<dyn FnOnce()>;
 type InjectedStreamMutation = Option<(StreamReadBoundary, StreamMutationHook)>;
 #[cfg(test)]
 type PublicationRaceHook = Box<dyn FnOnce()>;
+#[cfg(test)]
+type OpenRaceHook = Box<dyn FnOnce()>;
 
 #[cfg(test)]
 thread_local! {
@@ -103,6 +105,7 @@ thread_local! {
         const { RefCell::new(None) };
     static INJECTED_PUBLICATION_RACE: RefCell<Option<PublicationRaceHook>> =
         const { RefCell::new(None) };
+    static INJECTED_OPEN_RACE: RefCell<Option<OpenRaceHook>> = const { RefCell::new(None) };
 }
 
 #[allow(
@@ -171,6 +174,15 @@ fn maybe_injected_stream_mutation(boundary: StreamReadBoundary) {
     #[cfg(not(test))]
     {
         let _ = boundary;
+    }
+}
+
+fn maybe_injected_open_race() {
+    #[cfg(test)]
+    let hook = INJECTED_OPEN_RACE.with(|slot| slot.borrow_mut().take());
+    #[cfg(test)]
+    if let Some(hook) = hook {
+        hook();
     }
 }
 
@@ -3485,8 +3497,28 @@ impl DirectoryWitness {
                 "target parent must be an existing non-symbolic-link directory",
             ));
         }
+        maybe_injected_open_race();
         #[cfg(unix)]
         {
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
+            let directory = File::from(
+                rustix::fs::open(
+                    path,
+                    rustix::fs::OFlags::RDONLY
+                        | rustix::fs::OFlags::CLOEXEC
+                        | rustix::fs::OFlags::DIRECTORY
+                        | rustix::fs::OFlags::NOFOLLOW,
+                    rustix::fs::Mode::empty(),
+                )
+                .map_err(|error| {
+                    TerrainError::io(
+                        "open Surface parent directory",
+                        path.display(),
+                        error.into(),
+                    )
+                })?,
+            );
+            #[cfg(not(any(target_os = "linux", target_os = "macos")))]
             let directory = File::open(path).map_err(|error| {
                 TerrainError::io("open Surface parent directory", path.display(), error)
             })?;
@@ -3553,7 +3585,7 @@ impl DirectoryWitness {
             let file = openat(
                 &self.directory,
                 name,
-                OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW,
+                OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW | OFlags::NONBLOCK,
                 Mode::empty(),
             )?;
             Ok(File::from(file))
@@ -3712,7 +3744,8 @@ fn verify_opened_binding(
             TerrainError::io("reinspect durable Surface path", path.display(), error)
         }
     })?;
-    if current.file_type().is_file()
+    if opened.file_type().is_file()
+        && current.file_type().is_file()
         && !current.file_type().is_symlink()
         && same_file_state(initial, &opened)
         && same_file_state(&opened, &current)
@@ -3811,6 +3844,7 @@ fn open_regular_in(
             "path is not a regular non-symbolic-link file",
         ));
     }
+    maybe_injected_open_race();
     let file = parent
         .open_child(path)
         .map_err(|error| TerrainError::io("open durable Surface file", path.display(), error))?;
@@ -4570,6 +4604,69 @@ mod tests {
         assert!(matches!(
             opened.verify_binding(&path, ARTIFACT_KIND).unwrap_err(),
             TerrainError::CorruptSurfaceArtifact { .. }
+        ));
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn raced_fifo_leaf_is_rejected_without_blocking() {
+        let fixture = Fixture::new("raced-fifo-leaf");
+        let target = fixture.path("surface.pterr");
+        fs::write(&target, b"regular").unwrap();
+        let parent = DirectoryWitness::capture(&target).unwrap();
+        install_open_race({
+            let target = target.clone();
+            move || {
+                fs::remove_file(&target).unwrap();
+                let status = std::process::Command::new("mkfifo")
+                    .arg(&target)
+                    .status()
+                    .unwrap();
+                assert!(status.success(), "mkfifo must create the raced leaf");
+            }
+        });
+
+        let error = open_regular_in(&parent, &target, ARTIFACT_KIND)
+            .err()
+            .expect("a raced FIFO must be rejected");
+
+        assert_open_race_consumed();
+        assert_corruption_reason(
+            error,
+            "path or file state changed while it was being verified",
+        );
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn raced_fifo_parent_is_rejected_without_blocking() {
+        let fixture = Fixture::new("raced-fifo-parent");
+        let parent_path = fixture.path("parent");
+        let target = parent_path.join("surface.pterr");
+        fs::create_dir(&parent_path).unwrap();
+        install_open_race({
+            let parent_path = parent_path.clone();
+            move || {
+                fs::remove_dir(&parent_path).unwrap();
+                let status = std::process::Command::new("mkfifo")
+                    .arg(&parent_path)
+                    .status()
+                    .unwrap();
+                assert!(status.success(), "mkfifo must create the raced parent");
+            }
+        });
+
+        let error = DirectoryWitness::capture(&target)
+            .err()
+            .expect("a raced FIFO parent must be rejected");
+
+        assert_open_race_consumed();
+        assert!(matches!(
+            error,
+            TerrainError::Io {
+                operation: "open Surface parent directory",
+                ..
+            }
         ));
     }
 
@@ -5547,6 +5644,22 @@ mod tests {
             assert!(
                 slot.borrow().is_none(),
                 "injected stream mutation boundary was not reached"
+            );
+        });
+    }
+
+    fn install_open_race(hook: impl FnOnce() + 'static) {
+        INJECTED_OPEN_RACE.with(|slot| {
+            let previous = slot.replace(Some(Box::new(hook)));
+            assert!(previous.is_none(), "test installed overlapping open races");
+        });
+    }
+
+    fn assert_open_race_consumed() {
+        INJECTED_OPEN_RACE.with(|slot| {
+            assert!(
+                slot.borrow().is_none(),
+                "injected open race boundary was not reached"
             );
         });
     }
