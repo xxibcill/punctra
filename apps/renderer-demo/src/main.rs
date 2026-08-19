@@ -1152,7 +1152,9 @@ impl Graphics {
             },
             ReviewSession::selected_points,
         );
-        let selection_action = if self.review_recovery.is_some() {
+        let selection_action = if active_review_status == Some(ReviewStatus::StaleDiscarded) {
+            Some(SelectionAction::RerunReview)
+        } else if self.review_recovery.is_some() {
             Some(SelectionAction::ReopenAndResolve)
         } else if self
             .review

@@ -21,6 +21,7 @@ pub(crate) enum StreamStatus {
 pub(crate) enum SelectionAction {
     Clear,
     ReopenAndResolve,
+    RerunReview,
 }
 
 impl StreamStatus {
@@ -138,6 +139,7 @@ fn selection(status: Option<ReviewStatus>) -> &'static str {
         None => "DISABLED",
         Some(ReviewStatus::Selected { .. }) => "EXACT",
         Some(ReviewStatus::SelectionStale { .. }) => "STALE - RERUN OR CLEAR",
+        Some(ReviewStatus::StaleDiscarded) => "STALE",
         Some(ReviewStatus::ProvisionalPick | ReviewStatus::ConfirmingPick) => "CONFIRMING",
         Some(ReviewStatus::SelectingScreen) => "SELECTING",
         Some(ReviewStatus::Indeterminate) => "INDETERMINATE",
@@ -151,6 +153,9 @@ fn selection_line(selection_state: &str, action: Option<SelectionAction>) -> Str
         Some(SelectionAction::Clear) => format!("SELECTION {selection_state} | X CLEAR"),
         Some(SelectionAction::ReopenAndResolve) => {
             format!("SELECTION {selection_state} | REOPEN RESOLVE")
+        }
+        Some(SelectionAction::RerunReview) => {
+            format!("SELECTION {selection_state} | RERUN REVIEW")
         }
         None => format!("SELECTION {selection_state}"),
     }
@@ -226,11 +231,13 @@ mod tests {
             ) => points,
             _ => 0,
         };
-        let selection_action = matches!(
-            status,
-            Some(ReviewStatus::Selected { .. } | ReviewStatus::SelectionStale { .. })
-        )
-        .then_some(SelectionAction::Clear);
+        let selection_action = match status {
+            Some(ReviewStatus::Selected { .. } | ReviewStatus::SelectionStale { .. }) => {
+                Some(SelectionAction::Clear)
+            }
+            Some(ReviewStatus::StaleDiscarded) => Some(SelectionAction::RerunReview),
+            _ => None,
+        };
         StatusSnapshot {
             display: DisplayMode::Classification,
             projection: ProjectionMode::Orthographic,
@@ -283,6 +290,18 @@ mod tests {
 
         assert!(lines.iter().any(|line| line.contains("STALE")));
         assert!(lines.iter().any(|line| line.contains("RERUN OR CLEAR")));
+    }
+
+    #[test]
+    fn discarded_stale_result_requests_a_new_review() {
+        let lines = snapshot(Some(ReviewStatus::StaleDiscarded)).lines();
+
+        assert!(
+            lines
+                .iter()
+                .any(|line| line == "SELECTION STALE | RERUN REVIEW")
+        );
+        assert!(!lines.iter().any(|line| line.contains("READY")));
     }
 
     #[test]
