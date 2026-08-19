@@ -3,8 +3,11 @@
 Status: frozen through the completed v0.9 repository trust and version-1
 compatibility candidate, with the v0.10 professional inspection View and
 repository-verified v0.11 exact-review technical slice plus the v0.12 explicit
-spatial-reference and package-publication repository slice; the v0.13 bounded
-persistent-terrain addition remains inside `point-terrain`; later crates are
+spatial-reference and package-publication repository slice; v0.13:
+Complete and repository-verified for the bounded persistent-terrain slice;
+field activation, production-scale accuracy, true out-of-core adoption,
+independent adoption, partner validation, and support qualification
+outstanding; the addition remains inside `point-terrain`, and later crates are
 created only with accepted behavior and a caller
 
 The repository is one Cargo workspace. Each current crate is independently
@@ -454,11 +457,11 @@ versions, and LandXML/journal/report format versions are separate axes. A Cargo
 `0.9` version does not imply Workspace disk schema or terrain algorithm version
 9.
 
-The active v0.13 work advances all public libraries as one
-`0.13.0-alpha.1` package set with exact inter-Punctra registry requirements and
-local development paths. Their empty default features, dependency roles, MSRV,
-publication order, and pre-v1 policy are documented in the [library packaging
-guide](../guides/library-packaging.md).
+The completed, repository-verified v0.13 work advances all public libraries as
+one `0.13.0-alpha.1` package set with exact inter-Punctra registry requirements
+and local development paths. Their empty default features, dependency roles,
+MSRV, publication order, and pre-v1 policy are documented in the [library
+packaging guide](../guides/library-packaging.md).
 
 - Unknown persisted major versions fail explicitly.
 - Identity and persisted schema values remain opaque outside their owner.
@@ -479,7 +482,7 @@ Run-v1 byte.
 
 ## Implementation order
 
-Completed vertical slices, followed by the single Active slice, are:
+Completed vertical slices are:
 
 1. render protocol and wgpu engine;
 2. adaptive View planning;
@@ -493,9 +496,9 @@ Completed vertical slices, followed by the single Active slice, are:
 8. strict read-only Complete-Run qualification, full-ceiling streaming,
    canonical Round-Trip Evidence, frozen version-1 fixtures, and the reviewed
    support/recovery surface; and
-9. **Active:** one accepted explicit-AOI, resumable, rebuildable Surface
-   disk-v1 path with bounded file-backed streams while full-AOI topology
-   remains memory-resident.
+9. one completed, repository-verified explicit-AOI, resumable, rebuildable
+   Surface disk-v1 path with bounded file-backed streams while full-AOI
+   topology remains memory-resident.
 
 Any later accepted slice may add only terrain or workflow behavior earned by
 its real caller and evidence. True out-of-core/constrained terrain, COPC,

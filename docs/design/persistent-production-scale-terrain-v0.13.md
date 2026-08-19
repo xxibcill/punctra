@@ -1,10 +1,16 @@
 # Persistent Bounded-AOI Terrain Design (v0.13)
 
-Status: **Accepted for repository implementation on 2026-08-19**
+Status: **Complete and repository-verified for the bounded persistent-terrain
+slice; field activation, production-scale accuracy, true out-of-core adoption,
+independent adoption, partner validation, and support qualification
+outstanding**
 
 This design is authoritative for the bounded Punctra v0.13 repository slice.
-The maintainer's request to continue with v0.13 activates this technical scope;
-it does not satisfy the roadmap's field activation gate. No permitted field
+Repository completion is recorded against implementation commit
+`d3ec202198650d1a9d3cdb929ecf4b8d5c6d94e9` in the
+[v0.13 repository verification record](../releases/v0.13.0.md). The
+maintainer's request to continue with v0.13 activated this technical scope; it
+did not satisfy the roadmap's field activation gate. No permitted field
 measurements currently establish a production AOI size, Ground-Point count,
 latency, memory, temporary-storage, accuracy, or workstation envelope.
 

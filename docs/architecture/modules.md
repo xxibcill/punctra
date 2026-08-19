@@ -3,10 +3,10 @@
 Status: frozen module ownership through the completed v0.9 repository trust and
 version-1 compatibility candidate, with the v0.10 professional inspection View
 and repository-verified v0.11 exact-review technical slice plus the v0.12
-explicit spatial-reference and package-publication repository slice; external
-evidence gates remain outstanding; the accepted v0.13 bounded persistent-
-terrain slice is Active without claiming production-scale or out-of-core
-qualification
+explicit spatial-reference and package-publication repository slice; v0.13:
+Complete and repository-verified for the bounded persistent-terrain slice;
+field activation, production-scale accuracy, true out-of-core adoption,
+independent adoption, partner validation, and support qualification outstanding
 
 This is the ownership map for implemented crates. Each crate has one public
 job. Several private files may cooperate behind one deep interface; private
@@ -37,7 +37,7 @@ limits, and recovery modes are frozen in the
 
 `source-copc`, constrained or true out-of-core terrain, general LandXML, general
 application UI, bindings, and remote storage are not implemented modules in
-the active v0.13 scope. Display and correction workflow policy remain private
+the completed v0.13 scope. Display and correction workflow policy remain private
 to `renderer-demo`; v0.13 adds no public display-policy or mutation-facade
 crate.
 

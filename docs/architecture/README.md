@@ -7,8 +7,9 @@ outstanding; the v0.11 exact-review technical slice is repository-verified
 with field-activation and independent-adoption evidence outstanding; the v0.12
 explicit spatial-reference and packaging repository slice is complete with
 production-corpus, downstream, adoption, and support evidence outstanding;
-the v0.13 bounded persistent-terrain repository slice is accepted and Active
-with production scale, true out-of-core adoption, partner, and support evidence
+v0.13: Complete and repository-verified for the bounded persistent-
+terrain slice; field activation, production-scale accuracy, true out-of-core
+adoption, independent adoption, partner validation, and support qualification
 outstanding; broader terrain, export, external interoperability evidence, and
 product layers remain deferred
 
@@ -35,7 +36,7 @@ document Edit, and derives one narrow CPU-authoritative in-memory Terrain
 Surface with detached QA and a metric-metre LandXML deliverable. The headless
 `terrain-demo` application can run that path through one durable, resumable,
 audited Workflow Run without turning orchestration policy into another
-foundation crate. The active v0.13 scope adds a separate rebuildable disk-v1
+foundation crate. The completed v0.13 scope adds a separate rebuildable disk-v1
 Surface preparation/reopen path for one explicit AOI while preserving legacy
 in-memory Derivation and Run-v1. Its topology phase still retains the complete
 AOI in memory. A crate exists only when its behavior, direct tests, and a caller

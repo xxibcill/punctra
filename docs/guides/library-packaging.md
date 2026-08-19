@@ -28,10 +28,12 @@ exists for conformance and fault tests, not production behavior.
 
 ## Version and compatibility policy
 
-All libraries on the active v0.13 track use `0.13.0-alpha.1`, require Rust 1.90,
-and pin inter-Punctra registry dependencies to exactly that version while
-retaining local workspace paths. Publish the complete set as one release unit
-in dependency order; do not mix alpha package versions.
+All libraries in the repository-verified bounded v0.13 slice use
+`0.13.0-alpha.1`, require Rust 1.90, and pin inter-Punctra registry dependencies
+to exactly that version while retaining local workspace paths. This local
+qualification is not publication. If a later explicit decision publishes the
+packages, publish the complete set as one release unit in dependency order; do
+not mix alpha package versions.
 
 Before 1.0, a later alpha minor may make a documented public Cargo/API change.
 Persisted formats do not inherit that freedom from the Cargo version. A frozen

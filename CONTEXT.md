@@ -9,11 +9,12 @@ evidence remain outstanding; the v0.12 explicit spatial-reference and library-
 packaging repository slice is complete while its production-corpus,
 downstream, adoption, and support evidence remains outstanding; the accepted
 pre-v0.13 renderer-quality corrective checkpoint is complete and repository-
-verified while permitted field execution remains outstanding; the accepted
-v0.13 persistent bounded-AOI Terrain repository slice is Active while field
-activation, production-scale, true out-of-core adoption, partner, and support
-evidence remains outstanding; broader selection, constrained terrain, and
-product terms remain deferred
+verified while permitted field execution remains outstanding; v0.13:
+Complete and repository-verified for the bounded persistent-terrain slice;
+field activation, production-scale accuracy, true out-of-core adoption,
+independent adoption, partner validation, and support qualification
+outstanding; broader selection, constrained terrain, and product terms remain
+deferred
 
 Punctra v0.11 builds on the reusable render engine, renderer-neutral View
 planner, and verified Source path described in the accepted [v0.1 renderer

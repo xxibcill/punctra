@@ -1,7 +1,9 @@
 # Persistent bounded-AOI Terrain
 
-Status: v0.13 repository implementation Active; completion evidence not yet
-recorded
+Status: **Complete and repository-verified for the bounded persistent-terrain
+slice; field activation, production-scale accuracy, true out-of-core adoption,
+independent adoption, partner validation, and support qualification
+outstanding**
 
 Punctra v0.13 accepts one durable preparation path for an explicit inclusive
 AOI. It preserves the v0.6 exact Ground Input and canonical unconstrained
@@ -102,8 +104,8 @@ change Source, index, Workspace, Run-v1, report, LandXML, or round-trip bytes.
 
 ## Reproducible generated path
 
-The completion gate runs the public generated example and existing Terrain
-benchmark locally:
+The completed local gate ran the public generated example and existing Terrain
+benchmark:
 
 ~~~bash
 cargo run -p point-terrain --example persistent_surface
@@ -136,12 +138,13 @@ bytes exactly. The bounded streams consume the vertices in three batches and
 the faces in five; the final warm `Opened` attempt reports zero Snapshot Point
 reads and no triangulation observations.
 
-Those are generated-fixture facts from the current Active implementation, not
-an exact-commit completion record or a latency/production claim. Elapsed times
-are intentionally emitted per run and are not copied here. Direct stage bytes,
-worker heap, process peak resident memory, allocated filesystem blocks, QA,
-LandXML, View, and field accuracy remain JSON `null`; the report does not infer
-them from adjacent counters. Set
+Those generated-fixture facts are recorded against implementation commit
+`d3ec202198650d1a9d3cdb929ecf4b8d5c6d94e9` in the [v0.13 repository
+verification record](../releases/v0.13.0.md). They are not a latency or
+production claim. Per-invocation example elapsed times are intentionally not
+copied. Direct stage bytes, worker heap, process peak resident memory,
+allocated filesystem blocks, QA, LandXML, View, and field accuracy remain JSON
+`null`; the report does not infer them from adjacent counters. Set
 `PUNCTRA_PERSISTENT_TERRAIN_EXAMPLE_POINTS` to any integer from 3 through
 1,000,000 for another generated example size. The Criterion benchmark uses
 `PUNCTRA_TERRAIN_BENCH_POINTS` over the same range, with 10,000, 100,000, and
@@ -187,4 +190,5 @@ and local benchmark behavior only. It cannot mark any of these complete:
 
 Use the exact wording from the [accepted v0.13
 design](../design/persistent-production-scale-terrain-v0.13.md): repository
-completion remains separate from every field and product evidence level.
+completion is recorded, but remains separate from every field and product
+evidence level.

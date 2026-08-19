@@ -3,9 +3,11 @@
 Status: frozen through the completed v0.9 repository trust and version-1
 compatibility candidate, with the v0.10 professional inspection View and
 repository-verified v0.11 exact-review technical slice plus the v0.12 explicit
-spatial-reference and packaging repository slice, with the v0.13 bounded
-persistent-terrain contract accepted and Active; external evidence and broader
-terrain, export, and product contracts remain outstanding
+spatial-reference and packaging repository slice; v0.13: Complete and
+repository-verified for the bounded persistent-terrain slice; field activation,
+production-scale accuracy, true out-of-core adoption, independent adoption,
+partner validation, and support qualification outstanding; broader terrain,
+export, and product contracts remain outstanding
 
 The versioned designs in [`docs/design`](../design) control exact release
 scope. This document summarizes the invariants that cross current crate seams.

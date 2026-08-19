@@ -4,8 +4,10 @@ Status: **Complete through the v0.9 repository trust and version-1
 compatibility candidate, the v0.10 professional inspection View repository
 implementation, and the repository-verified v0.11 exact-review technical
 slice, plus the v0.12 explicit spatial-reference and package-publication
-repository slice; v0.13 bounded persistent-terrain verification is Active; all
-gates run locally**
+repository slice; v0.13: Complete and repository-verified for the
+bounded persistent-terrain slice; field activation, production-scale accuracy,
+true out-of-core adoption, independent adoption, partner validation, and
+support qualification outstanding; all gates run locally**
 
 Verification follows public contracts first. Private tests are used for fault
 injection and measured implementation boundaries that cannot be triggered
@@ -225,7 +227,7 @@ for create, reconcile, conflict, races, symlink/non-regular rejection,
 publication faults, post-link cancellation certainty, and lost
 acknowledgement.
 
-The active v0.13 persistence suites additionally require public-interface
+The completed v0.13 persistence suites additionally cover public-interface
 coverage for `TerrainPrepareDisposition::{Built, ResumedInput,
 ResumedPublication, Opened}`; exact equivalence with the legacy
 explicit-AOI topology oracle; no Snapshot row consumption on warm open;
@@ -475,18 +477,20 @@ The intervals are local generated observations, not universal latency claims.
 Worker peak heap was not measured. No partner, production, downstream round-
 trip, paid-use, or human-time acceptance is inferred from this benchmark.
 
-## v0.13 persistent-terrain verification target
+## v0.13 persistent-terrain verification result
 
-The accepted v0.13 generated example and benchmark must report exact fixture,
+The accepted v0.13 generated example and benchmark report exact fixture,
 AOI, limits, algorithm/disk versions, cold/resumed/warm disposition, Source rows
 read or reused, input/vertex/face counts, topology work, retained triangulation
 memory, verified work bytes, complete Artifact bytes, stream buffers,
 cumulative work-plus-stage bytes, and absent observations. The exact-commit
-completion record must pair those reports with named machine and toolchain
-facts. A direct stage-byte observation remains explicitly absent rather than
+completion record pairs those reports with named machine and toolchain facts.
+A direct stage-byte observation remains explicitly absent rather than
 inferred. Source verification, Spatial Index preparation, Terrain preparation,
 warm reopen, legacy QA/LandXML, and View work are separate phases; an unrun or
-unmeasured phase remains explicitly absent.
+unmeasured phase remains explicitly absent. The exact environment, command
+outcomes, fixtures, and generated observations are recorded in the
+[v0.13 repository verification record](../releases/v0.13.0.md).
 
 The default generated example run uses 10,000 Points and currently reports a
 10,000-vertex, 19,602-face, 396-hull-vertex Surface, a 320,480-byte verified
@@ -498,9 +502,8 @@ asserts exact-byte resume and complete bounded stream consumption.
 actually completed local run may be recorded. None establishes a production
 AOI, an above-500-million-Point project, a supported workstation, true out-of-
 core topology, field accuracy, independent adoption, partner acceptance, or
-support qualification. An exact-commit completion record is added only after
-the full local sequence passes; this section is the active target, not that
-record.
+support qualification. The exact-commit completion record does not convert any
+of those external gates into repository facts.
 
 ## Local verification lanes
 
