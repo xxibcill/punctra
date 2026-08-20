@@ -1568,6 +1568,63 @@ struct RecordBlockLayout {
     domain: &'static [u8],
 }
 
+#[derive(Clone, Copy)]
+struct RecordBlockSpan {
+    index: u64,
+    first_record: u64,
+    record_count: u64,
+    byte_offset: u64,
+    byte_len: u64,
+    checksum_offset: u64,
+}
+
+impl RecordBlockLayout {
+    fn span(
+        self,
+        block_index: u64,
+        path: &Path,
+        kind: &'static str,
+    ) -> Result<RecordBlockSpan, TerrainError> {
+        let first_record = block_index.checked_mul(RECORDS_PER_BLOCK).ok_or_else(|| {
+            TerrainError::corrupt_surface(kind, path.display(), "block index overflows")
+        })?;
+        let record_count = self
+            .record_count
+            .saturating_sub(first_record)
+            .min(RECORDS_PER_BLOCK);
+        if record_count == 0 || block_index >= self.block_count {
+            return Err(TerrainError::corrupt_surface(
+                kind,
+                path.display(),
+                "checksum directory references an empty record block",
+            ));
+        }
+        let byte_offset = first_record
+            .checked_mul(self.record_bytes)
+            .and_then(|bytes| self.record_offset.checked_add(bytes))
+            .ok_or_else(|| {
+                TerrainError::corrupt_surface(kind, path.display(), "block offset overflows")
+            })?;
+        let byte_len = record_count.checked_mul(self.record_bytes).ok_or_else(|| {
+            TerrainError::corrupt_surface(kind, path.display(), "block byte length overflows")
+        })?;
+        let checksum_offset = block_index
+            .checked_mul(CHECKSUM_BYTES)
+            .and_then(|bytes| self.directory_offset.checked_add(bytes))
+            .ok_or_else(|| {
+                TerrainError::corrupt_surface(kind, path.display(), "checksum offset overflows")
+            })?;
+        Ok(RecordBlockSpan {
+            index: block_index,
+            first_record,
+            record_count,
+            byte_offset,
+            byte_len,
+            checksum_offset,
+        })
+    }
+}
+
 fn check_verification_cancelled(control: Option<&OperationControl>) -> Result<(), TerrainError> {
     match control {
         Some(control) => control.check_cancelled().map_err(TerrainError::from),
@@ -1695,8 +1752,18 @@ fn validate_record_blocks(
     let mut buffer = verification_buffer(max_verify_buffer_bytes, max_block_bytes)?;
     for block_index in 0..layout.block_count {
         check_verification_cancelled(control)?;
-        let expected =
-            verify_record_block(file, layout, block_index, &mut buffer, path, kind, control)?;
+        let span = layout.span(block_index, path, kind)?;
+        let expected = read_verified_record_block(
+            file,
+            layout,
+            span,
+            &mut buffer,
+            path,
+            kind,
+            control,
+            None,
+            |_, _| Ok(()),
+        )?;
         if let Some(checksums) = captured_checksums.as_deref_mut() {
             checksums.push(expected);
         }
@@ -1762,97 +1829,27 @@ fn read_verified_records(
     let first_block = first_record / RECORDS_PER_BLOCK;
     let last_block = last_record / RECORDS_PER_BLOCK;
     for block_index in first_block..=last_block {
-        let block_first_record = block_index.checked_mul(RECORDS_PER_BLOCK).ok_or_else(|| {
-            TerrainError::corrupt_surface(kind, path.display(), "block index overflows")
-        })?;
-        let block_records = layout
-            .record_count
-            .saturating_sub(block_first_record)
-            .min(RECORDS_PER_BLOCK);
-        if block_records == 0 || block_index >= layout.block_count {
-            return Err(TerrainError::corrupt_surface(
-                kind,
-                path.display(),
-                "checksum directory references an empty record block",
-            ));
-        }
-        let block_byte_offset = block_first_record
-            .checked_mul(layout.record_bytes)
-            .and_then(|bytes| layout.record_offset.checked_add(bytes))
+        let span = layout.span(block_index, path, kind)?;
+        let span_end_record = span
+            .first_record
+            .checked_add(span.record_count)
             .ok_or_else(|| {
-                TerrainError::corrupt_surface(kind, path.display(), "block offset overflows")
+                TerrainError::corrupt_surface(kind, path.display(), "block range overflows")
             })?;
-        let block_bytes = block_records
-            .checked_mul(layout.record_bytes)
-            .ok_or_else(|| {
-                TerrainError::corrupt_surface(kind, path.display(), "block byte length overflows")
-            })?;
-        let selected_first_record = first_record.max(block_first_record);
-        let selected_end_record = end_record.min(block_first_record + block_records);
-        let selected_start_byte = (selected_first_record - block_first_record)
+        let selected_first_record = first_record.max(span.first_record);
+        let selected_end_record = end_record.min(span_end_record);
+        let selected_start_byte = (selected_first_record - span.first_record)
             .checked_mul(layout.record_bytes)
             .ok_or_else(|| {
                 TerrainError::corrupt_surface(kind, path.display(), "batch byte range overflows")
             })?;
-        let selected_end_byte = (selected_end_record - block_first_record)
+        let selected_end_byte = (selected_end_record - span.first_record)
             .checked_mul(layout.record_bytes)
             .ok_or_else(|| {
                 TerrainError::corrupt_surface(kind, path.display(), "batch byte range overflows")
             })?;
-        file.seek(SeekFrom::Start(block_byte_offset))
-            .map_err(|error| {
-                TerrainError::io("seek Surface record block", path.display(), error)
-            })?;
-        let mut hasher = block_hasher(layout.domain, block_index, block_records);
-        let mut chunk_start = 0_u64;
         let mut record_fill = 0_usize;
         let mut next_record = selected_first_record;
-        while chunk_start < block_bytes {
-            let count = usize::try_from(
-                (block_bytes - chunk_start).min(u64::try_from(buffer.len()).unwrap_or(u64::MAX)),
-            )
-            .expect("verification read is bounded by its buffer");
-            read_exact(file, &mut buffer[..count], path, kind)?;
-            hasher.update(&buffer[..count]);
-            let chunk_end = chunk_start
-                .checked_add(u64::try_from(count).expect("buffer length fits u64"))
-                .ok_or_else(|| {
-                    TerrainError::corrupt_surface(kind, path.display(), "block read overflows")
-                })?;
-            let capture_start = selected_start_byte.max(chunk_start);
-            let capture_end = selected_end_byte.min(chunk_end);
-            if capture_start < capture_end {
-                maybe_injected_stream_mutation(boundary);
-                let mut source_start = usize::try_from(capture_start - chunk_start)
-                    .expect("capture offset is bounded by the verification buffer");
-                let source_end = usize::try_from(capture_end - chunk_start)
-                    .expect("capture offset is bounded by the verification buffer");
-                while source_start < source_end {
-                    let copied = (record_bytes - record_fill).min(source_end - source_start);
-                    record[record_fill..record_fill + copied]
-                        .copy_from_slice(&buffer[source_start..source_start + copied]);
-                    record_fill += copied;
-                    source_start += copied;
-                    if record_fill == record_bytes {
-                        decode(next_record, &record[..record_bytes])?;
-                        next_record += 1;
-                        record_fill = 0;
-                    }
-                }
-            }
-            chunk_start = chunk_end;
-        }
-        let checksum_offset = block_index
-            .checked_mul(CHECKSUM_BYTES)
-            .and_then(|bytes| layout.directory_offset.checked_add(bytes))
-            .ok_or_else(|| {
-                TerrainError::corrupt_surface(kind, path.display(), "checksum offset overflows")
-            })?;
-        file.seek(SeekFrom::Start(checksum_offset))
-            .map_err(|error| {
-                TerrainError::io("seek Surface block checksum", path.display(), error)
-            })?;
-        let live_checksum = read_exact_array::<32>(file, path, kind)?;
         let verified_checksum = verified_checksums
             .get(usize::try_from(block_index).unwrap_or(usize::MAX))
             .ok_or_else(|| {
@@ -1862,15 +1859,46 @@ fn read_verified_records(
                     "record block lies outside the verified checksum directory",
                 )
             })?;
-        if live_checksum != *verified_checksum
-            || *verified_checksum != *hasher.finalize().as_bytes()
-        {
-            return Err(TerrainError::corrupt_surface(
-                kind,
-                path.display(),
-                "record block checksum does not match",
-            ));
-        }
+        read_verified_record_block(
+            file,
+            layout,
+            span,
+            buffer,
+            path,
+            kind,
+            None,
+            Some(verified_checksum),
+            |chunk_start, chunk| {
+                let count = chunk.len();
+                let chunk_end = chunk_start
+                    .checked_add(u64::try_from(count).expect("buffer length fits u64"))
+                    .ok_or_else(|| {
+                        TerrainError::corrupt_surface(kind, path.display(), "block read overflows")
+                    })?;
+                let capture_start = selected_start_byte.max(chunk_start);
+                let capture_end = selected_end_byte.min(chunk_end);
+                if capture_start < capture_end {
+                    maybe_injected_stream_mutation(boundary);
+                    let mut source_start = usize::try_from(capture_start - chunk_start)
+                        .expect("capture offset is bounded by the verification buffer");
+                    let source_end = usize::try_from(capture_end - chunk_start)
+                        .expect("capture offset is bounded by the verification buffer");
+                    while source_start < source_end {
+                        let copied = (record_bytes - record_fill).min(source_end - source_start);
+                        record[record_fill..record_fill + copied]
+                            .copy_from_slice(&chunk[source_start..source_start + copied]);
+                        record_fill += copied;
+                        source_start += copied;
+                        if record_fill == record_bytes {
+                            decode(next_record, &record[..record_bytes])?;
+                            next_record += 1;
+                            record_fill = 0;
+                        }
+                    }
+                }
+                Ok(())
+            },
+        )?;
         if record_fill != 0 || next_record != selected_end_record {
             return Err(TerrainError::corrupt_surface(
                 kind,
@@ -1901,67 +1929,54 @@ fn verify_stream_file_state(
     ))
 }
 
-fn verify_record_block(
+#[allow(
+    clippy::too_many_arguments,
+    reason = "block verification keeps disk layout, expected state, cancellation, and chunk consumption explicit"
+)]
+fn read_verified_record_block(
     file: &mut File,
     layout: RecordBlockLayout,
-    block_index: u64,
+    span: RecordBlockSpan,
     buffer: &mut [u8],
     path: &Path,
     kind: &'static str,
     control: Option<&OperationControl>,
+    verified_checksum: Option<&[u8; 32]>,
+    mut consume_chunk: impl FnMut(u64, &[u8]) -> Result<(), TerrainError>,
 ) -> Result<[u8; 32], TerrainError> {
-    let first_record = block_index.checked_mul(RECORDS_PER_BLOCK).ok_or_else(|| {
-        TerrainError::corrupt_surface(kind, path.display(), "block index overflows")
-    })?;
-    let records = layout
-        .record_count
-        .saturating_sub(first_record)
-        .min(RECORDS_PER_BLOCK);
-    if records == 0 || block_index >= layout.block_count {
-        return Err(TerrainError::corrupt_surface(
-            kind,
-            path.display(),
-            "checksum directory references an empty record block",
-        ));
-    }
-    let block_byte_offset = first_record
-        .checked_mul(layout.record_bytes)
-        .and_then(|bytes| layout.record_offset.checked_add(bytes))
-        .ok_or_else(|| {
-            TerrainError::corrupt_surface(kind, path.display(), "block offset overflows")
-        })?;
-    let block_bytes = records.checked_mul(layout.record_bytes).ok_or_else(|| {
-        TerrainError::corrupt_surface(kind, path.display(), "block byte length overflows")
-    })?;
-    file.seek(SeekFrom::Start(block_byte_offset))
+    file.seek(SeekFrom::Start(span.byte_offset))
         .map_err(|error| TerrainError::io("seek Surface record block", path.display(), error))?;
-    let mut hasher = block_hasher(layout.domain, block_index, records);
-    let mut remaining = block_bytes;
-    while remaining > 0 {
+    let mut hasher = block_hasher(layout.domain, span.index, span.record_count);
+    let mut chunk_start = 0_u64;
+    while chunk_start < span.byte_len {
         check_verification_cancelled(control)?;
-        let count = usize::try_from(remaining.min(u64::try_from(buffer.len()).unwrap_or(u64::MAX)))
-            .expect("verification read is bounded by its buffer");
+        let count = usize::try_from(
+            (span.byte_len - chunk_start).min(u64::try_from(buffer.len()).unwrap_or(u64::MAX)),
+        )
+        .expect("verification read is bounded by its buffer");
         read_exact(file, &mut buffer[..count], path, kind)?;
         hasher.update(&buffer[..count]);
-        remaining -= u64::try_from(count).expect("buffer length fits u64");
+        consume_chunk(chunk_start, &buffer[..count])?;
+        chunk_start = chunk_start
+            .checked_add(u64::try_from(count).expect("buffer length fits u64"))
+            .ok_or_else(|| {
+                TerrainError::corrupt_surface(kind, path.display(), "block read overflows")
+            })?;
     }
-    let checksum_offset = block_index
-        .checked_mul(CHECKSUM_BYTES)
-        .and_then(|bytes| layout.directory_offset.checked_add(bytes))
-        .ok_or_else(|| {
-            TerrainError::corrupt_surface(kind, path.display(), "checksum offset overflows")
-        })?;
-    file.seek(SeekFrom::Start(checksum_offset))
+    file.seek(SeekFrom::Start(span.checksum_offset))
         .map_err(|error| TerrainError::io("seek Surface block checksum", path.display(), error))?;
-    let expected = read_exact_array::<32>(file, path, kind)?;
-    if expected != *hasher.finalize().as_bytes() {
+    let live_checksum = read_exact_array::<32>(file, path, kind)?;
+    let computed_checksum = *hasher.finalize().as_bytes();
+    if live_checksum != computed_checksum
+        || verified_checksum.is_some_and(|expected| live_checksum != *expected)
+    {
         return Err(TerrainError::corrupt_surface(
             kind,
             path.display(),
             "record block checksum does not match",
         ));
     }
-    Ok(expected)
+    Ok(live_checksum)
 }
 
 fn verification_buffer(
