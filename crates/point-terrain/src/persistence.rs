@@ -56,6 +56,63 @@ const MIN_VERIFY_BUFFER_BYTES: u64 = 32;
 const MAX_EXACT_F64_INTEGER: i128 = 1_i128 << 53;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PersistedKind {
+    Artifact,
+    Work,
+}
+
+impl PersistedKind {
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Artifact => ARTIFACT_KIND,
+            Self::Work => WORK_KIND,
+        }
+    }
+
+    const fn magic(self) -> [u8; 8] {
+        match self {
+            Self::Artifact => *ARTIFACT_MAGIC,
+            Self::Work => *WORK_MAGIC,
+        }
+    }
+
+    const fn version(self) -> u32 {
+        match self {
+            Self::Artifact => SURFACE_DISK_VERSION,
+            Self::Work => WORK_DISK_VERSION,
+        }
+    }
+
+    const fn checksum_domain(self) -> &'static [u8] {
+        match self {
+            Self::Artifact => CHECKSUM_DOMAIN,
+            Self::Work => WORK_CHECKSUM_DOMAIN,
+        }
+    }
+
+    const fn header_bytes(self) -> u64 {
+        match self {
+            Self::Artifact => ARTIFACT_HEADER_BYTES,
+            Self::Work => WORK_HEADER_BYTES,
+        }
+    }
+
+    const fn max_file_bytes(self, limits: TerrainPrepareLimits) -> u64 {
+        match self {
+            Self::Artifact => limits.max_artifact_bytes(),
+            Self::Work => limits.max_work_bytes(),
+        }
+    }
+
+    const fn resource_limit(self) -> &'static str {
+        match self {
+            Self::Artifact => "Surface artifact bytes",
+            Self::Work => "Surface work checkpoint bytes",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum PersistenceBoundary {
     WorkCreate,
     WorkWrite,
@@ -1157,10 +1214,8 @@ fn open_work(
     let verified = verified_file(
         &mut opened.file,
         path,
-        WORK_KIND,
-        WORK_CHECKSUM_DOMAIN,
-        WORK_HEADER_BYTES,
-        limits.max_work_bytes(),
+        PersistedKind::Work,
+        limits,
         limits.max_verify_buffer_bytes(),
         control,
     )?;
@@ -1420,10 +1475,8 @@ fn open_artifact(
     let verified = verified_file(
         &mut opened.file,
         path,
-        ARTIFACT_KIND,
-        CHECKSUM_DOMAIN,
-        ARTIFACT_HEADER_BYTES,
-        limits.max_artifact_bytes(),
+        PersistedKind::Artifact,
+        limits,
         limits.max_verify_buffer_bytes(),
         control,
     )?;
@@ -2421,9 +2474,9 @@ fn decode_artifact_header(
     expected: ExpectedBinding,
     file_bytes: u64,
 ) -> Result<DecodedArtifact, TerrainError> {
-    let mut decoder = Decoder::new(header, path, ARTIFACT_KIND);
-    decoder.require_magic(*ARTIFACT_MAGIC, SURFACE_DISK_VERSION)?;
-    decoder.require_version(SURFACE_DISK_VERSION)?;
+    let mut decoder = Decoder::new(header, path, PersistedKind::Artifact);
+    decoder.require_magic()?;
+    decoder.require_version()?;
     let binding = decode_surface_binding(
         &mut decoder,
         expected,
@@ -2591,9 +2644,9 @@ fn decode_work_header(
     expected: ExpectedBinding,
     file_bytes: u64,
 ) -> Result<DecodedWork, TerrainError> {
-    let mut decoder = Decoder::new(header, path, WORK_KIND);
-    decoder.require_magic(*WORK_MAGIC, WORK_DISK_VERSION)?;
-    decoder.require_version(WORK_DISK_VERSION)?;
+    let mut decoder = Decoder::new(header, path, PersistedKind::Work);
+    decoder.require_magic()?;
+    decoder.require_version()?;
     let binding = decode_surface_binding(&mut decoder, expected, file_bytes, None)?;
     let transform = binding.transform;
     let profile = binding.profile;
@@ -2652,7 +2705,7 @@ fn decode_surface_binding(
     let algorithm = decoder.u32()?;
     if algorithm != crate::ALGORITHM_VERSION {
         return Err(TerrainError::stale_surface(
-            decoder.kind,
+            decoder.kind.label(),
             "terrain algorithm version",
             decoder.path.display(),
         ));
@@ -2668,7 +2721,7 @@ fn decode_surface_binding(
     let stored_recipe_hash = decoder.hash()?;
     if stored_recipe_hash != expected.recipe_hash || recipe_hash(recipe) != expected.recipe_hash {
         return Err(TerrainError::stale_surface(
-            decoder.kind,
+            decoder.kind.label(),
             "Terrain Recipe",
             decoder.path.display(),
         ));
@@ -2677,14 +2730,14 @@ fn decode_surface_binding(
     let profile = decoder.profile()?;
     if !transform_bits_equal(transform, expected.transform) {
         return Err(TerrainError::stale_surface(
-            decoder.kind,
+            decoder.kind.label(),
             "position transform",
             decoder.path.display(),
         ));
     }
     if profile != expected.profile {
         return Err(TerrainError::stale_surface(
-            decoder.kind,
+            decoder.kind.label(),
             "spatial reference",
             decoder.path.display(),
         ));
@@ -2700,11 +2753,11 @@ struct Decoder<'a> {
     bytes: &'a [u8],
     offset: usize,
     path: &'a Path,
-    kind: &'static str,
+    kind: PersistedKind,
 }
 
 impl<'a> Decoder<'a> {
-    const fn new(bytes: &'a [u8], path: &'a Path, kind: &'static str) -> Self {
+    const fn new(bytes: &'a [u8], path: &'a Path, kind: PersistedKind) -> Self {
         Self {
             bytes,
             offset: 0,
@@ -2764,33 +2817,29 @@ impl<'a> Decoder<'a> {
     }
 
     fn profile(&mut self) -> Result<SpatialReferenceProfile, TerrainError> {
-        decode_profile(self.take()?, self.path, self.kind)
+        decode_profile(self.take()?, self.path, self.kind.label())
     }
 
-    fn require_magic(
-        &mut self,
-        expected: [u8; 8],
-        supported_version: u32,
-    ) -> Result<(), TerrainError> {
-        if self.take::<8>()? != expected {
+    fn require_magic(&mut self) -> Result<(), TerrainError> {
+        if self.take::<8>()? != self.kind.magic() {
             return Err(TerrainError::incompatible_surface(
-                self.kind,
+                self.kind.label(),
                 self.path.display(),
                 0,
-                supported_version,
+                self.kind.version(),
             ));
         }
         Ok(())
     }
 
-    fn require_version(&mut self, supported_version: u32) -> Result<(), TerrainError> {
+    fn require_version(&mut self) -> Result<(), TerrainError> {
         let version = self.u32()?;
-        if version != supported_version {
+        if version != self.kind.version() {
             return Err(TerrainError::incompatible_surface(
-                self.kind,
+                self.kind.label(),
                 self.path.display(),
                 version,
-                supported_version,
+                self.kind.version(),
             ));
         }
         Ok(())
@@ -2818,7 +2867,7 @@ impl<'a> Decoder<'a> {
         };
         if let Some(binding) = binding {
             return Err(TerrainError::stale_surface(
-                self.kind,
+                self.kind.label(),
                 binding,
                 self.path.display(),
             ));
@@ -2834,7 +2883,7 @@ impl<'a> Decoder<'a> {
     }
 
     fn corrupt(&self, reason: impl AsRef<str>) -> TerrainError {
-        TerrainError::corrupt_surface(self.kind, self.path.display(), reason)
+        TerrainError::corrupt_surface(self.kind.label(), self.path.display(), reason)
     }
 }
 
@@ -2895,14 +2944,11 @@ struct VerifiedFile {
     checksum: ContentHash,
 }
 
-#[allow(clippy::too_many_arguments)]
 fn verified_file(
     file: &mut File,
     path: &Path,
-    kind: &'static str,
-    domain: &[u8],
-    minimum_header_bytes: u64,
-    max_file_bytes: u64,
+    kind: PersistedKind,
+    limits: TerrainPrepareLimits,
     max_buffer_bytes: u64,
     control: &OperationControl,
 ) -> Result<VerifiedFile, TerrainError> {
@@ -2911,18 +2957,14 @@ fn verified_file(
         .map_err(|error| TerrainError::io("inspect durable Surface file", path.display(), error))?
         .len();
     require_within(
-        if kind == ARTIFACT_KIND {
-            "Surface artifact bytes"
-        } else {
-            "Surface work checkpoint bytes"
-        },
+        kind.resource_limit(),
         file_bytes,
-        max_file_bytes,
+        kind.max_file_bytes(limits),
     )?;
-    let minimum = minimum_header_bytes.saturating_add(CHECKSUM_BYTES);
+    let minimum = kind.header_bytes().saturating_add(CHECKSUM_BYTES);
     if file_bytes < minimum {
         return Err(TerrainError::corrupt_surface(
-            kind,
+            kind.label(),
             path.display(),
             "file is shorter than its fixed header and checksum",
         ));
@@ -2952,20 +2994,20 @@ fn verified_file(
         max_buffer_bytes,
     )?;
     buffer.resize(buffer_bytes, 0);
-    let mut hasher = checksum_hasher(domain);
+    let mut hasher = checksum_hasher(kind.checksum_domain());
     let mut remaining = payload_bytes;
     while remaining > 0 {
         control.check_cancelled()?;
         let count = usize::try_from(remaining.min(u64::try_from(buffer.len()).unwrap_or(u64::MAX)))
             .expect("bounded by buffer length");
-        read_exact(file, &mut buffer[..count], path, kind)?;
+        read_exact(file, &mut buffer[..count], path, kind.label())?;
         hasher.update(&buffer[..count]);
         remaining -= u64::try_from(count).expect("count fits u64");
     }
-    let expected = read_exact_array::<32>(file, path, kind)?;
+    let expected = read_exact_array::<32>(file, path, kind.label())?;
     if expected != *hasher.finalize().as_bytes() {
         return Err(TerrainError::corrupt_surface(
-            kind,
+            kind.label(),
             path.display(),
             "whole-file checksum does not match",
         ));
@@ -3704,10 +3746,8 @@ impl DirectoryWitness {
             let verified = verified_file(
                 &mut anonymous,
                 target,
-                ARTIFACT_KIND,
-                CHECKSUM_DOMAIN,
-                ARTIFACT_HEADER_BYTES,
-                limits.max_artifact_bytes(),
+                PersistedKind::Artifact,
+                limits,
                 limits.max_verify_buffer_bytes(),
                 control,
             )?;
