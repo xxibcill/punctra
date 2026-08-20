@@ -24,9 +24,9 @@ use crate::{
     SurfaceFace, SurfaceFaceId, SurfaceReadLimits, SurfaceVertex, SurfaceVertexId, TerrainError,
     TerrainPrepareLimits, TerrainRecipe, TerrainSurface,
     derive::{
-        CollectedTerrainInput, GEOMETRY_HASH_DOMAIN, InputVertex, TOPOLOGY_HASH_DOMAIN,
-        artifact_hash, canonical_f64_bits, canonical_topology_hash, collect_input,
-        derive_collected, domain_hasher, hash_transform, recipe_hash,
+        CanonicalTopologyValidation, CollectedTerrainInput, GEOMETRY_HASH_DOMAIN, InputVertex,
+        TOPOLOGY_HASH_DOMAIN, artifact_hash, canonical_f64_bits, canonical_topology_hash,
+        collect_input, derive_collected, domain_hasher, hash_transform, recipe_hash,
     },
 };
 
@@ -259,7 +259,8 @@ pub enum TerrainPrepareDisposition {
     Built,
     /// Verified staged input was reused before triangulation and publication.
     ResumedInput,
-    /// A verified complete staging artifact was published without retriangulation.
+    /// A verified complete staging artifact was published without deriving
+    /// replacement topology; canonical validation work is still reported.
     ResumedPublication,
 }
 
@@ -337,13 +338,15 @@ impl TerrainPrepareReport {
         self.accounted_handle_bytes
     }
 
-    /// Returns the derivation working-byte observation when derivation ran.
+    /// Returns the maximum algorithm-accounted working bytes across derivation
+    /// and canonical topology validation when either ran.
     #[must_use]
     pub const fn accounted_peak_working_bytes(self) -> Option<u64> {
         self.accounted_peak_working_bytes
     }
 
-    /// Returns triangulation primitive operations when triangulation ran.
+    /// Returns cumulative triangulation primitive operations across derivation
+    /// and canonical topology validation when either ran.
     #[must_use]
     pub const fn topology_steps(self) -> Option<u64> {
         self.topology_steps
@@ -391,6 +394,26 @@ impl AttemptObservations {
     const fn with_peak_temporary_disk_bytes(mut self, bytes: u64) -> Self {
         self.peak_temporary_disk_bytes = bytes;
         self
+    }
+
+    fn include_topology_validation(
+        mut self,
+        validation: &CanonicalTopologyValidation,
+    ) -> Result<Self, TerrainError> {
+        self.accounted_peak_working_bytes = Some(
+            self.accounted_peak_working_bytes
+                .unwrap_or(0)
+                .max(validation.peak_working_bytes),
+        );
+        self.topology_steps = Some(
+            self.topology_steps
+                .unwrap_or(0)
+                .checked_add(validation.topology_steps)
+                .ok_or_else(|| {
+                    TerrainError::topology("Terrain topology-step observation overflows u64")
+                })?,
+        );
+        Ok(self)
     }
 }
 
@@ -1065,7 +1088,7 @@ fn run_prepare(
         PublicationAttempt {
             target,
             expected,
-            observations,
+            observations: AttemptObservations::from_report(staged.report()),
             work: Some(work_witness),
             limits,
         },
@@ -1466,7 +1489,7 @@ fn open_artifact(
     path: &Path,
     provenance: DurablePathProvenance,
     expected: ExpectedBinding,
-    observations: AttemptObservations,
+    mut observations: AttemptObservations,
     limits: TerrainPrepareLimits,
     control: &OperationControl,
 ) -> Result<PreparedTerrainSurface, TerrainError> {
@@ -1510,7 +1533,7 @@ fn open_artifact(
         path,
         control,
     )?;
-    validate_artifact_payload(
+    let validation = validate_artifact_payload(
         &mut opened.file,
         path,
         &decoded.descriptor,
@@ -1518,6 +1541,7 @@ fn open_artifact(
         limits.derivation(),
         control,
     )?;
+    observations = observations.include_topology_validation(&validation)?;
     control.check_cancelled()?;
     opened.verify_binding(path, ARTIFACT_KIND)?;
     parent.verify()?;
@@ -2045,7 +2069,7 @@ fn validate_artifact_payload(
     layout: ArtifactLayout,
     limits: crate::TerrainLimits,
     control: &OperationControl,
-) -> Result<(), TerrainError> {
+) -> Result<CanonicalTopologyValidation, TerrainError> {
     file.seek(SeekFrom::Start(layout.vertex_offset))
         .map_err(|error| TerrainError::io("seek Surface vertices", path.display(), error))?;
     let mut geometry = domain_hasher(GEOMETRY_HASH_DOMAIN);
@@ -2191,17 +2215,16 @@ fn validate_artifact_payload(
         ));
     }
     validate_artifact_input_hash(&mut input_records, descriptor, path)?;
-    let canonical_hash =
-        canonical_topology_hash(input_records, descriptor.transform, limits, control)
-            .map_err(|error| map_topology_validation_error(error, path))?;
-    if canonical_hash != descriptor.topology_hash {
+    let validation = canonical_topology_hash(input_records, descriptor.transform, limits, control)
+        .map_err(|error| map_topology_validation_error(error, path))?;
+    if validation.hash != descriptor.topology_hash {
         return Err(TerrainError::corrupt_surface(
             ARTIFACT_KIND,
             path.display(),
             "faces do not match the canonical Delaunay topology",
         ));
     }
-    Ok(())
+    Ok(validation)
 }
 
 fn map_topology_validation_error(error: TerrainError, path: &Path) -> TerrainError {

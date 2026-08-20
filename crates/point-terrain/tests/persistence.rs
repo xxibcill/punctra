@@ -69,8 +69,19 @@ fn cold_and_warm_prepare_share_canonical_file_backed_surface() {
     assert_eq!(warm.report().reused_input_points(), 0);
     assert_eq!(warm.report().source_points_read(), 0);
     assert_eq!(warm.report().peak_temporary_disk_bytes(), 0);
-    assert_eq!(warm.report().accounted_peak_working_bytes(), None);
-    assert_eq!(warm.report().topology_steps(), None);
+    assert!(warm.report().accounted_peak_working_bytes().is_some());
+    assert!(
+        warm.report()
+            .topology_steps()
+            .is_some_and(|steps| steps > 0)
+    );
+    assert_eq!(
+        cold.report().topology_steps(),
+        warm.report()
+            .topology_steps()
+            .and_then(|steps| steps.checked_mul(3)),
+        "cold preparation reports derivation plus stage and target validation triangulations"
+    );
     assert_eq!(warm.descriptor(), cold.descriptor());
     assert_eq!(collect_vertices(&warm, 3), cold_vertices);
     assert_eq!(collect_faces(&warm, 2), cold_faces);
@@ -418,7 +429,7 @@ fn verified_input_checkpoint_resumes_to_canonical_artifact() {
 }
 
 #[test]
-fn verified_complete_stage_resumes_publication_without_triangulation() {
+fn verified_complete_stage_reports_validation_triangulations() {
     let fixture = fixture("persistence-publication-resume");
     let snapshot = fixture.snapshot();
     let recipe = bounded_recipe(2);
@@ -445,8 +456,24 @@ fn verified_complete_stage_resumes_publication_without_triangulation() {
         resumed.report().disposition(),
         TerrainPrepareDisposition::ResumedPublication
     );
-    assert_eq!(resumed.report().accounted_peak_working_bytes(), None);
-    assert_eq!(resumed.report().topology_steps(), None);
+    assert!(resumed.report().accounted_peak_working_bytes().is_some());
+    assert!(
+        resumed
+            .report()
+            .topology_steps()
+            .is_some_and(|steps| steps > 0)
+    );
+    assert_eq!(
+        resumed
+            .report()
+            .topology_steps()
+            .and_then(|steps| steps.checked_mul(3)),
+        source
+            .report()
+            .topology_steps()
+            .and_then(|steps| steps.checked_mul(2)),
+        "publication resume reports both stage and target validation triangulations"
+    );
     assert_eq!(resumed.report().source_points_read(), 0);
     assert_eq!(
         resumed.report().peak_temporary_disk_bytes(),

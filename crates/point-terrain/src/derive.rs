@@ -45,6 +45,12 @@ pub(crate) struct DerivedTerrain {
     pub(crate) work_units: u64,
 }
 
+pub(crate) struct CanonicalTopologyValidation {
+    pub(crate) hash: ContentHash,
+    pub(crate) topology_steps: u64,
+    pub(crate) peak_working_bytes: u64,
+}
+
 struct WorkMeter {
     used: u64,
     next_cancel: u64,
@@ -481,7 +487,7 @@ pub(crate) fn canonical_topology_hash(
     transform: PositionTransform,
     limits: TerrainLimits,
     control: &OperationControl,
-) -> Result<ContentHash, TerrainError> {
+) -> Result<CanonicalTopologyValidation, TerrainError> {
     let input_point_count = u64::try_from(input.len()).unwrap_or(u64::MAX);
     if input_point_count > limits.max_input_points() {
         return Err(TerrainError::resource(
@@ -535,6 +541,7 @@ pub(crate) fn canonical_topology_hash(
         "Terrain topology-validation working bytes",
     )?;
 
+    let topology_steps = triangulation.steps;
     let mut triangles = triangulation.triangles;
     canonicalize_faces(
         &mut triangles,
@@ -560,7 +567,11 @@ pub(crate) fn canonical_topology_hash(
         }
     }
     context.control.check_cancelled()?;
-    Ok(ContentHash::new(*topology.finalize().as_bytes()))
+    Ok(CanonicalTopologyValidation {
+        hash: ContentHash::new(*topology.finalize().as_bytes()),
+        topology_steps,
+        peak_working_bytes: context.memory.peak,
+    })
 }
 
 fn validate_spatial_reference(reference: &CoordinateReference) -> Result<(), TerrainError> {

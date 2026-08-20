@@ -141,7 +141,8 @@ one-byte Artifact ceiling leaves the checkpoint, then `ResumedInput` reuses all
 10,000 inputs with zero Snapshot Point reads and reproduces the cold Artifact
 bytes exactly. The bounded streams consume the vertices in three batches and
 the faces in five; the final warm `Opened` attempt reports zero Snapshot Point
-reads and no triangulation observations.
+reads while reporting the canonical topology-validation triangulation it runs
+before exposing the handle.
 
 Those generated-fixture facts are recorded against implementation commit
 `008a0d97fdfa23547609845b71c34b40d17d1894` in the [v0.13 repository
