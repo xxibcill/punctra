@@ -134,9 +134,10 @@ readable report separates:
 
 The default invocation generates 10,000 Points. The current self-validating
 output reports 10,000 Ground Input Points and vertices, 19,602 faces, 396 hull
-vertices, 521,494 topology steps, a 320,480-byte verified input checkpoint, a
-556,088-byte Surface, and 876,568 peak logical private temporary bytes on the
-qualified macOS/APFS path. A forced
+vertices, 1,564,482 cumulative topology steps for each cold or resumed-input
+attempt, 521,494 topology-validation steps for warm open, a 320,480-byte
+verified input checkpoint, a 556,088-byte Surface, and 876,568 peak logical
+private temporary bytes on the qualified macOS/APFS path. A forced
 one-byte Artifact ceiling leaves the checkpoint, then `ResumedInput` reuses all
 10,000 inputs with zero Snapshot Point reads and reproduces the cold Artifact
 bytes exactly. The bounded streams consume the vertices in three batches and
@@ -145,7 +146,7 @@ reads while reporting the canonical topology-validation triangulation it runs
 before exposing the handle.
 
 Those generated-fixture facts are recorded against implementation commit
-`008a0d97fdfa23547609845b71c34b40d17d1894` in the [v0.13 repository
+`d99ed34324e8938fd0211344fbf65d539bb37178` in the [v0.13 repository
 verification record](../releases/v0.13.0.md). They are not a latency or
 production claim. Per-invocation example elapsed times are intentionally not
 copied. Direct stage bytes, worker heap, process peak resident memory,
