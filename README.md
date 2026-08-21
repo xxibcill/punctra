@@ -295,11 +295,14 @@ cargo run -p source-memory --example memory_source
 
 Inspect a real LAS or LAZ Source, including its verified identity, schema,
 metadata, bounds, and exact read throughput, with the
-[file inspection example](crates/source-las/examples/inspect.rs):
+[file inspection example](crates/source-las/examples/inspect.rs). With no path,
+it uses the repository's modern USGS North Central Idaho sample:
 
 ```bash
-cargo run --release -p source-las --example inspect -- survey.laz
+cargo run --release -p source-las --example inspect
 ```
+
+Pass a path after `--` to inspect another file.
 
 Build, query, and read an index directly over an in-memory Source with:
 

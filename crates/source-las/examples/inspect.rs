@@ -6,6 +6,8 @@ use std::time::Instant;
 
 use point_source::Source;
 
+const DEFAULT_INPUT: &str = "../../examples/data/usgs-id-northcentral-11tnl550650.laz";
+
 fn main() {
     if let Err(error) = run() {
         eprintln!("source-las inspect failed: {error}");
@@ -79,13 +81,17 @@ fn run() -> Result<(), Box<dyn Error>> {
 
 fn input_path() -> Result<PathBuf, Box<dyn Error>> {
     let mut arguments = std::env::args_os().skip(1);
-    let path = arguments.next().ok_or(
-        "usage: cargo run -p source-las --example inspect --release -- <file.las|file.laz>",
-    )?;
+    let path = arguments
+        .next()
+        .map_or_else(default_input_path, PathBuf::from);
     if arguments.next().is_some() {
-        return Err("inspect accepts exactly one LAS or LAZ path".into());
+        return Err("inspect accepts at most one LAS or LAZ path".into());
     }
-    Ok(PathBuf::from(path))
+    Ok(path)
+}
+
+fn default_input_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(DEFAULT_INPUT)
 }
 
 fn print_verified_source(source: &Source, open_seconds: f64) {
