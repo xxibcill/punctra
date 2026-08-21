@@ -1555,8 +1555,8 @@ mod tests {
     use point_workspace::SnapshotProvenance;
 
     use super::{
-        CANCELLATION_STRIDE, ExactTerrainQaRequest, TerrainQaBinding, VerticalTolerance,
-        hash_input, hash_results, poll, validate_request,
+        CANCELLATION_STRIDE, CheckPointResidual, ExactTerrainQaRequest, ResidualOutcome,
+        TerrainQaBinding, VerticalTolerance, hash_input, hash_results, poll, validate_request,
     };
     use crate::{CheckPoint, CheckPointId, TerrainError, TerrainQaLimits};
 
@@ -1626,6 +1626,47 @@ mod tests {
         .expect_err("empty result hashing must observe cancellation before publishing evidence");
 
         assert!(matches!(error, TerrainError::Cancelled));
+    }
+
+    #[test]
+    fn exact_qa_input_and_result_hashes_match_golden_digests() {
+        let check_point =
+            CheckPoint::new(CheckPointId::new(42).unwrap(), [1.25, -2.5, 3.75]).unwrap();
+        let tolerance = VerticalTolerance::new(0.25, 0.75).unwrap();
+        let request = ExactTerrainQaRequest::new(tolerance)
+            .check_points(vec![check_point].into_boxed_slice());
+        let control = OperationControl::new();
+        let input_hash = hash_input(&request, None, &control).unwrap();
+        let result_hash = hash_results(
+            deterministic_binding(),
+            tolerance,
+            input_hash,
+            &[],
+            &[CheckPointResidual {
+                check_point,
+                outcome: ResidualOutcome::Gap,
+            }],
+            &[],
+            &control,
+        )
+        .unwrap();
+
+        assert_eq!(
+            input_hash,
+            ContentHash::new([
+                0x43, 0xf6, 0x6c, 0x32, 0x4e, 0x20, 0x40, 0xa9, 0x31, 0xed, 0x4c, 0xd2, 0x45, 0x15,
+                0xd7, 0x1e, 0x5a, 0x7f, 0xd9, 0xdf, 0x85, 0xd8, 0xc9, 0xbb, 0x41, 0x55, 0xb4, 0x5e,
+                0xdc, 0x2c, 0xea, 0x83,
+            ])
+        );
+        assert_eq!(
+            result_hash,
+            ContentHash::new([
+                0xa7, 0x8e, 0x6a, 0xe2, 0xd0, 0xba, 0x6a, 0x9c, 0xb3, 0x80, 0xe0, 0x43, 0xc2, 0xce,
+                0x0c, 0x02, 0x7e, 0x29, 0xa4, 0xda, 0x9e, 0x92, 0x04, 0xa1, 0x58, 0x6c, 0xe9, 0xe6,
+                0x64, 0xed, 0x20, 0x73,
+            ])
+        );
     }
 
     fn deterministic_binding() -> TerrainQaBinding {
