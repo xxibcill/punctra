@@ -853,7 +853,8 @@ fn run(
             "Snapshot provenance must exactly match Surface provenance",
         ));
     }
-    let validation_peak_working_bytes = validate_request(request, limits, materialized_bytes)?;
+    let validation_peak_working_bytes =
+        validate_request(request, limits, materialized_bytes, control)?;
     let (source_inputs, source_input, source_collection_peak_working_bytes) =
         collect_source_inputs(snapshot, request, limits, materialized_bytes, control)?;
     let check_count = u64::try_from(request.check_points.len()).unwrap_or(u64::MAX);
@@ -1034,6 +1035,7 @@ fn validate_request(
     request: &ExactTerrainQaRequest,
     limits: TerrainQaLimits,
     base_working_bytes: u64,
+    control: &OperationControl,
 ) -> Result<u64, TerrainError> {
     if request.source_query.is_none()
         && request.check_points.is_empty()
@@ -1075,7 +1077,7 @@ fn validate_request(
         identity_bytes,
         limits.max_working_bytes(),
     )?;
-    identities.sort_unstable();
+    crate::qa::sort_identities(&mut identities, control)?;
     if let Some(duplicate) = identities.windows(2).find(|pair| pair[0] == pair[1]) {
         return Err(TerrainError::invalid(
             "detached Check Point identities",
@@ -1546,4 +1548,32 @@ fn poll(index: usize, control: &OperationControl) -> Result<(), TerrainError> {
 
 fn canonical_zero(value: f64) -> f64 {
     if value == 0.0 { 0.0 } else { value }
+}
+
+#[cfg(test)]
+mod tests {
+    use foundation_runtime::OperationControl;
+
+    use super::{ExactTerrainQaRequest, VerticalTolerance, validate_request};
+    use crate::{CheckPoint, CheckPointId, TerrainError, TerrainQaLimits};
+
+    #[test]
+    fn identity_validation_observes_cancellation_while_sorting() {
+        let check_points = (1..=2_048_u64)
+            .rev()
+            .map(|identity| {
+                CheckPoint::new(CheckPointId::new(identity).unwrap(), [0.0; 3]).unwrap()
+            })
+            .collect::<Vec<_>>()
+            .into_boxed_slice();
+        let request = ExactTerrainQaRequest::new(VerticalTolerance::new(0.0, 0.0).unwrap())
+            .check_points(check_points);
+        let control = OperationControl::new();
+        control.cancel();
+
+        let error = validate_request(&request, TerrainQaLimits::default(), 0, &control)
+            .expect_err("identity sorting must observe cancellation at a bounded interval");
+
+        assert!(matches!(error, TerrainError::Cancelled));
+    }
 }

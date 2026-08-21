@@ -210,7 +210,7 @@ fn evaluate(
     Ok(report)
 }
 
-fn sort_identities(
+pub(crate) fn sort_identities(
     identities: &mut [crate::CheckPointId],
     control: &OperationControl,
 ) -> Result<(), TerrainError> {
