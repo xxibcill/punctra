@@ -2,6 +2,7 @@
 
 mod support;
 
+use foundation_runtime::ProgressPhase;
 use point_contracts::WorldBounds;
 use point_terrain::{
     CheckPoint, CheckPointId, ExactTerrainQaRequest, ProfileOutcome, ResidualOutcome,
@@ -695,6 +696,32 @@ fn qa_cancellation_and_comparison_work_limits_publish_no_partial_result() {
             ..
         }
     ));
+}
+
+#[test]
+fn large_profile_keeps_progress_monotonic_through_result_hashing() {
+    let fixture = plane_fixture("exact-qa-progress");
+    let snapshot = fixture.snapshot();
+    let surface = derive_with(
+        snapshot.clone(),
+        TerrainRecipe::new(2),
+        point_terrain::TerrainLimits::default(),
+    )
+    .unwrap();
+    let profile = StationProfile::new([0.0, 0.0], [10.0, 10.0], 2_048).unwrap();
+    let job = surface.exact_qa(
+        snapshot,
+        ExactTerrainQaRequest::new(tolerance()).profile(profile),
+        TerrainQaLimits::default(),
+    );
+    let handle = job.handle();
+
+    let report = job
+        .blocking_wait()
+        .expect("large exact profile completes without progress regression");
+
+    assert_eq!(report.profile_stations().len(), 2_049);
+    assert_eq!(handle.progress().phase(), ProgressPhase::COMPLETE);
 }
 
 fn assert_qa_limit(

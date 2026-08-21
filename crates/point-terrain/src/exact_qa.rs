@@ -1,7 +1,7 @@
 use std::{mem, num::NonZeroU32, sync::Arc};
 
 use blake3::Hasher;
-use foundation_runtime::{OperationControl, ProgressPhase, ProgressSnapshot};
+use foundation_runtime::OperationControl;
 use point_contracts::{ContentHash, PointId, SpatialReferenceProfile};
 use point_workspace::{PointQuery, Snapshot, SnapshotPointSummary, SnapshotProvenance};
 
@@ -1537,11 +1537,6 @@ fn require_within(name: &'static str, required: u64, allowed: u64) -> Result<(),
 fn poll(index: usize, control: &OperationControl) -> Result<(), TerrainError> {
     if index.is_multiple_of(CANCELLATION_STRIDE) {
         control.check_cancelled()?;
-        control.report_progress(ProgressSnapshot::new(
-            ProgressPhase::RUNNING,
-            u64_len(index),
-            None,
-        )?)?;
     }
     Ok(())
 }
