@@ -548,6 +548,56 @@ fn request_and_binding_validation_fail_closed() {
 }
 
 #[test]
+fn source_lineage_mismatch_is_rejected_without_partial_evidence() {
+    let fixture = plane_fixture("exact-qa-source-baseline");
+    let snapshot = fixture.snapshot();
+    let surface = derive_with(
+        snapshot.clone(),
+        TerrainRecipe::new(2),
+        point_terrain::TerrainLimits::default(),
+    )
+    .unwrap();
+    let other_fixture = TerrainFixture::new(
+        "exact-qa-source-mismatch",
+        vec![[0, 0, 0], [10, 0, 10], [10, 10, 21], [0, 10, 10]],
+        vec![2; 4],
+    );
+    let other_snapshot = other_fixture.snapshot();
+    let other_surface = derive_with(
+        other_snapshot.clone(),
+        TerrainRecipe::new(2),
+        point_terrain::TerrainLimits::default(),
+    )
+    .unwrap();
+    assert_ne!(
+        snapshot.provenance().source(),
+        other_snapshot.provenance().source()
+    );
+
+    assert!(matches!(
+        surface
+            .exact_qa(
+                other_snapshot,
+                complete_request(),
+                TerrainQaLimits::default(),
+            )
+            .blocking_wait(),
+        Err(TerrainError::InvalidArgument {
+            argument: "exact QA binding",
+            ..
+        })
+    ));
+    assert!(matches!(
+        compare_surfaces(&surface, &other_surface, SurfaceComparisonLimits::default())
+            .blocking_wait(),
+        Err(TerrainError::InvalidArgument {
+            argument: "Surface comparison lineage",
+            ..
+        })
+    ));
+}
+
+#[test]
 fn qa_resource_ceilings_are_independent_and_inclusive() {
     let fixture = plane_fixture("exact-qa-resources");
     let snapshot = fixture.snapshot();
@@ -567,6 +617,15 @@ fn qa_resource_ceilings_are_independent_and_inclusive() {
         )
         .blocking_wait()
         .unwrap();
+    let exact = surface
+        .exact_qa(
+            snapshot.clone(),
+            complete_request(),
+            exact_qa_limits(&successful, 0),
+        )
+        .blocking_wait()
+        .expect("every in-memory exact QA ceiling is inclusive");
+    assert_eq!(exact, successful);
     assert_qa_limit(
         &surface,
         snapshot.clone(),
@@ -604,11 +663,17 @@ fn qa_resource_ceilings_are_independent_and_inclusive() {
             .with_max_working_bytes(successful.accounted_peak_working_bytes() - 1),
         "exact QA Source input growth overlap",
     );
+}
 
+#[test]
+fn prepared_qa_resource_ceiling_is_inclusive() {
+    let fixture = plane_fixture("exact-qa-prepared-resources");
+    let snapshot = fixture.snapshot();
+    let bounds = WorldBounds::new([0.0, 0.0, 0.0], [10.0, 10.0, 20.0]).unwrap();
     let prepared = prepare(
         snapshot.clone(),
         fixture.terrain_path("resource-surface.pterr"),
-        recipe,
+        TerrainRecipe::new(2).within(bounds),
         TerrainPrepareLimits::default(),
     )
     .blocking_wait()
@@ -621,6 +686,23 @@ fn qa_resource_ceilings_are_independent_and_inclusive() {
                 .unwrap()
                 .saturating_mul(prepared.descriptor().face_count()),
         );
+    let prepared_successful = prepared
+        .exact_qa(
+            snapshot.clone(),
+            complete_request(),
+            TerrainQaLimits::default(),
+        )
+        .blocking_wait()
+        .unwrap();
+    let prepared_exact = prepared
+        .exact_qa(
+            snapshot.clone(),
+            complete_request(),
+            exact_qa_limits(&prepared_successful, materialized_bytes),
+        )
+        .blocking_wait()
+        .expect("every prepared exact QA ceiling is inclusive");
+    assert_eq!(prepared_exact, prepared_successful);
     let error = prepared
         .exact_qa(
             snapshot,
@@ -660,6 +742,19 @@ fn qa_cancellation_and_comparison_work_limits_publish_no_partial_result() {
     let successful = compare_surfaces(&surface, &surface, SurfaceComparisonLimits::default())
         .blocking_wait()
         .unwrap();
+    let exact_faces = surface.descriptor().face_count().saturating_mul(2);
+    let exact = compare_surfaces(
+        &surface,
+        &surface,
+        SurfaceComparisonLimits::new(
+            exact_faces,
+            successful.accounted_peak_working_bytes(),
+            successful.work_units(),
+        ),
+    )
+    .blocking_wait()
+    .expect("every Surface comparison ceiling is inclusive");
+    assert_eq!(exact, successful);
     let working_error = compare_surfaces(
         &surface,
         &surface,
@@ -738,6 +833,31 @@ fn assert_qa_limit(
         error,
         TerrainError::ResourceLimit { limit, .. } if limit == expected
     ));
+}
+
+fn exact_qa_limits(
+    report: &point_terrain::ExactTerrainQaReport,
+    max_materialized_surface_bytes: u64,
+) -> TerrainQaLimits {
+    let source_points = u64::try_from(report.source_points().len()).unwrap();
+    let check_points = u64::try_from(report.check_points().len()).unwrap();
+    let profile_stations = u64::try_from(report.profile_stations().len()).unwrap();
+    let observations = source_points
+        .saturating_add(check_points)
+        .saturating_add(profile_stations);
+    let defaults = TerrainQaLimits::default();
+    TerrainQaLimits::new(
+        point_row_limits(source_points, source_points),
+        defaults.surface_read(),
+        source_points,
+        check_points,
+        profile_stations,
+        observations,
+        report.retained_result_bytes(),
+        max_materialized_surface_bytes,
+        report.face_tests(),
+        report.accounted_peak_working_bytes(),
+    )
 }
 
 fn seeded_defect_fixture() -> TerrainFixture {

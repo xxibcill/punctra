@@ -1549,7 +1549,10 @@ fn canonical_zero(value: f64) -> f64 {
 mod tests {
     use foundation_runtime::OperationControl;
 
-    use super::{ExactTerrainQaRequest, VerticalTolerance, validate_request};
+    use super::{
+        CANCELLATION_STRIDE, ExactTerrainQaRequest, VerticalTolerance, hash_input, poll,
+        validate_request,
+    };
     use crate::{CheckPoint, CheckPointId, TerrainError, TerrainQaLimits};
 
     #[test]
@@ -1568,6 +1571,35 @@ mod tests {
 
         let error = validate_request(&request, TerrainQaLimits::default(), 0, &control)
             .expect_err("identity sorting must observe cancellation at a bounded interval");
+
+        assert!(matches!(error, TerrainError::Cancelled));
+    }
+
+    #[test]
+    fn evaluation_poll_observes_cancellation_at_the_bounded_stride() {
+        let control = OperationControl::new();
+        control.cancel();
+
+        poll(CANCELLATION_STRIDE - 1, &control)
+            .expect("work before the next cancellation boundary may complete");
+        let error = poll(CANCELLATION_STRIDE, &control)
+            .expect_err("the next evaluation boundary must observe cancellation");
+
+        assert!(matches!(error, TerrainError::Cancelled));
+    }
+
+    #[test]
+    fn input_hashing_observes_cancellation() {
+        let request = ExactTerrainQaRequest::new(VerticalTolerance::new(0.0, 0.0).unwrap())
+            .check_points(
+                vec![CheckPoint::new(CheckPointId::new(1).unwrap(), [0.0; 3]).unwrap()]
+                    .into_boxed_slice(),
+            );
+        let control = OperationControl::new();
+        control.cancel();
+
+        let error = hash_input(&request, None, &control)
+            .expect_err("input hashing must observe cancellation before publishing evidence");
 
         assert!(matches!(error, TerrainError::Cancelled));
     }

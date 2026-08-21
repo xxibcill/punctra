@@ -426,3 +426,104 @@ fn require_within(name: &'static str, required: u64, allowed: u64) -> Result<(),
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use foundation_runtime::OperationControl;
+    use point_contracts::{
+        ContentHash, CoordinateReference, LinearUnit, PositionTransform, SpatialAxes,
+        SpatialReferenceProfile, SpatialReferenceProvenance, WorldBounds,
+    };
+    use point_workspace::SnapshotProvenance;
+
+    use super::{CANCELLATION_STRIDE, WorkMeter, compare_surfaces};
+    use crate::{
+        TerrainDescriptor, TerrainError, TerrainRecipe, TerrainSurface,
+        model::SurfaceData as ModelSurfaceData,
+    };
+
+    #[test]
+    fn comparison_rejects_a_spatial_reference_mismatch_without_a_report() {
+        let before = empty_surface(spatial_reference(32_647));
+        let after = before.with_coordinate_reference_for_test(spatial_reference(32_648));
+
+        let error = compare_surfaces(&before, &after, crate::SurfaceComparisonLimits::default())
+            .blocking_wait()
+            .expect_err("a reference mismatch must not publish a comparison report");
+
+        assert!(matches!(
+            error,
+            TerrainError::InvalidArgument {
+                argument: "Surface comparison spatial reference",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn comparison_observes_cancellation_at_the_bounded_work_stride() {
+        let control = OperationControl::new();
+        let mut meter = WorkMeter::new(u64::MAX, &control);
+        for _ in 1..CANCELLATION_STRIDE {
+            meter.charge().unwrap();
+        }
+        control.cancel();
+
+        let error = meter
+            .charge()
+            .expect_err("the next comparison boundary must observe cancellation");
+
+        assert!(matches!(error, TerrainError::Cancelled));
+    }
+
+    fn empty_surface(coordinate_reference: CoordinateReference) -> TerrainSurface {
+        let snapshot: SnapshotProvenance = serde_json::from_value(serde_json::json!({
+            "workspace": vec![1_u8; 16],
+            "source": vec![2_u8; 32],
+            "revision": vec![3_u8; 32],
+        }))
+        .unwrap();
+        let descriptor = TerrainDescriptor::new(
+            snapshot,
+            TerrainRecipe::new(2),
+            ContentHash::new([4; 32]),
+            PositionTransform::new([0.0; 3], [1.0; 3]).unwrap(),
+            coordinate_reference,
+            ContentHash::new([5; 32]),
+            ContentHash::new([6; 32]),
+            ContentHash::new([7; 32]),
+            ContentHash::new([8; 32]),
+            0,
+            0,
+            0,
+            0,
+            WorldBounds::new([0.0; 3], [1.0; 3]).unwrap(),
+            0,
+            0,
+            0,
+        );
+        TerrainSurface {
+            inner: Arc::new(ModelSurfaceData {
+                descriptor,
+                vertices: Vec::new(),
+                faces: Vec::new(),
+            }),
+        }
+    }
+
+    fn spatial_reference(horizontal_epsg: u32) -> CoordinateReference {
+        CoordinateReference::profile(
+            SpatialReferenceProfile::new(
+                horizontal_epsg,
+                5_703,
+                SpatialAxes::EastingNorthingElevation,
+                LinearUnit::Metre,
+                LinearUnit::Metre,
+                SpatialReferenceProvenance::CallerDeclaration,
+            )
+            .unwrap(),
+        )
+    }
+}
