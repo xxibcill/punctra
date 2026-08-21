@@ -67,6 +67,14 @@ publication/reopen, stale detection, and bounded file-backed vertex/face
 streams. It preserves legacy `derive`, the existing canonical single-worker
 full-AOI triangulator, and frozen Workflow Run-v1. It does not authorize true
 out-of-core, tiled, parallel, constrained, or production-qualified terrain.
+The accepted [v0.14 Exact Terrain QA and Correction Loop
+scope](docs/design/exact-terrain-qa-correction-v0.14.md) permits one bounded
+CPU-authoritative QA operation for an exact Snapshot/Surface pair, one exact
+semantic Surface comparison, explicit provenance/freshness/tolerance evidence,
+and a public correction/re-derive/compare/Revert example. Workspace mutation
+continues through existing `point-workspace` commits. It does not authorize
+terrain constraints, automatic correction, a second edit model, continuous
+plane/TIN intersections, general charting/UI, or field claims from fixtures.
 Apart from the explicit v0.8 reader exception,
 external format decoding belongs only in accepted Source adapter crates.
 Networking, polygon/brush/visible-only/occlusion selection, arbitrary

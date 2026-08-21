@@ -1129,7 +1129,14 @@ External exits remain separate:
 
 ### v0.14 — Exact terrain QA and correction loop
 
-Status: **Candidate**
+Status: **Active — accepted bounded repository scope; field activation,
+observed workflow timing, independent adoption, partner validation, and support
+qualification outstanding**
+
+The accepted bounded repository scope is defined by the
+[v0.14 Exact Terrain QA and Correction Loop design](docs/design/exact-terrain-qa-correction-v0.14.md).
+The maintainer's activation request does not satisfy the external evidence
+gates below.
 
 Candidate outcome: let a surveyor locate, explain, correct, and recheck terrain
 defects without treating display colors as measurements.
