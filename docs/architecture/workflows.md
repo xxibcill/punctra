@@ -10,8 +10,8 @@ persistent-terrain slice; field activation, production-scale accuracy, true
 out-of-core adoption, independent adoption, partner validation, and support
 qualification outstanding. The explicit-AOI persistent Surface preparation
 preserves those authority boundaries and frozen Run-v1; v0.14 bounded exact
-Terrain QA and correction-loop scope Active; broader workflows remain
-outstanding**
+Terrain QA and correction-loop slice Complete and repository-verified; broader
+workflows remain outstanding**
 
 The host composes sibling modules explicitly. Lower crates never call back into
 an application, discover a Source for a Workspace, submit a GPU queue, or infer

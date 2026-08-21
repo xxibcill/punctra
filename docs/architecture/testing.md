@@ -8,7 +8,7 @@ repository slice; v0.13: Complete and repository-verified for the
 bounded persistent-terrain slice; field activation, production-scale accuracy,
 true out-of-core adoption, independent adoption, partner validation, and
 support qualification outstanding; v0.14 bounded exact Terrain QA and
-correction-loop scope Active; all gates run locally**
+correction-loop slice Complete and repository-verified; all gates run locally**
 
 Verification follows public contracts first. Private tests are used for fault
 injection and measured implementation boundaries that cannot be triggered

@@ -7,7 +7,8 @@ explicit spatial-reference and package-publication repository slice; v0.13:
 Complete and repository-verified for the bounded persistent-terrain slice;
 field activation, production-scale accuracy, true out-of-core adoption,
 independent adoption, partner validation, and support qualification
-outstanding; v0.14 bounded exact Terrain QA and correction-loop scope Active
+outstanding; v0.14 bounded exact Terrain QA and correction-loop slice Complete
+and repository-verified
 
 This is the ownership map for implemented crates. Each crate has one public
 job. Several private files may cooperate behind one deep interface; private
@@ -38,10 +39,9 @@ limits, and recovery modes are frozen in the
 
 `source-copc`, constrained or true out-of-core terrain, general LandXML, general
 application UI, bindings, and remote storage are not implemented modules in
-the Active v0.14 scope. Display policy remains private to `renderer-demo`, and
-correction remains existing `point-workspace` commit policy; v0.14 adds no
-public display-policy or mutation-facade
-crate.
+the completed v0.14 scope. Display policy remains private to `renderer-demo`,
+and correction remains existing `point-workspace` commit policy; v0.14 adds no
+public display-policy or mutation-facade crate.
 
 ## 1. point-contracts
 
@@ -277,10 +277,10 @@ one topology worker is supported. After publication, the verified stage and any
 work sibling remain because no portable unlink can be conditioned on the open
 owned file identity; an uninspected work sibling is not trusted.
 
-The Active v0.14 addition evaluates one nonempty combination of an exact Source
-Query, detached Check Points, and an evenly stationed profile against the same
-frozen Snapshot/Surface pair. Reports retain metre tolerance, gaps, exact
-values, hashes, resource facts, and freshness. Prepared-Surface QA materializes
+The completed v0.14 addition evaluates one nonempty combination of an exact
+Source Query, detached Check Points, and an evenly stationed profile against
+the same frozen Snapshot/Surface pair. Reports retain metre tolerance, gaps,
+exact values, hashes, resource facts, and freshness. Prepared-Surface QA materializes
 verified disk-v1 records only under explicit limits. Surface comparison matches
 faces by authoritative Point Identity and reports a conservative changed-region
 envelope.

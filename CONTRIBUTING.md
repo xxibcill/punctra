@@ -67,7 +67,7 @@ publication/reopen, stale detection, and bounded file-backed vertex/face
 streams. It preserves legacy `derive`, the existing canonical single-worker
 full-AOI triangulator, and frozen Workflow Run-v1. It does not authorize true
 out-of-core, tiled, parallel, constrained, or production-qualified terrain.
-The accepted [v0.14 Exact Terrain QA and Correction Loop
+The completed [v0.14 Exact Terrain QA and Correction Loop
 scope](docs/design/exact-terrain-qa-correction-v0.14.md) permits one bounded
 CPU-authoritative QA operation for an exact Snapshot/Surface pair, one exact
 semantic Surface comparison, explicit provenance/freshness/tolerance evidence,

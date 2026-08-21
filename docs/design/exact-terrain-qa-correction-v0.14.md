@@ -1,8 +1,8 @@
 # Exact Terrain QA and Correction Loop Design (v0.14)
 
-Status: **Active — accepted bounded repository scope; field activation,
-observed workflow timing, independent adoption, partner validation, and support
-qualification outstanding**
+Status: **Complete and repository-verified for the bounded exact Terrain QA and
+correction-loop slice; field activation, observed workflow timing, independent
+adoption, partner validation, and support qualification outstanding**
 
 This design is authoritative for the bounded Punctra v0.14 repository slice.
 The maintainer's request to continue through v0.14 activates this technical
@@ -229,8 +229,14 @@ Repository completion requires:
   rustdoc, fuzz, benchmark, example, and forced-GPU acceptance with
   `PUNCTRA_REQUIRE_GPU=1`.
 
-No hosted CI is added. Completion will be recorded against one exact local
-implementation commit. The final status wording is: **Complete and repository-
+The repository exit was qualified at implementation commit
+`da4f19f095c3c5676e42ecf06c4e5ebdc794a8f4`. Exact environment, command,
+example, benchmark, and nonclaim facts are recorded in the
+[v0.14 repository verification record](../releases/v0.14.0.md). External exits
+remain outstanding exactly as stated above.
+
+No hosted CI was added. Completion is recorded against the exact local
+implementation commit above. The final status wording is: **Complete and repository-
 verified for the bounded exact Terrain QA and correction-loop slice; field
 activation, observed workflow timing, independent adoption, partner
 validation, and support qualification outstanding.**

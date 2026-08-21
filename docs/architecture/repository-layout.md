@@ -7,9 +7,9 @@ spatial-reference and package-publication repository slice; v0.13:
 Complete and repository-verified for the bounded persistent-terrain slice;
 field activation, production-scale accuracy, true out-of-core adoption,
 independent adoption, partner validation, and support qualification
-outstanding; v0.14 bounded exact Terrain QA and correction-loop scope Active;
-the addition remains inside `point-terrain`, and later crates are created only
-with accepted behavior and a caller
+outstanding; v0.14 bounded exact Terrain QA and correction-loop slice Complete
+and repository-verified; the addition remains inside `point-terrain`, and later
+crates are created only with accepted behavior and a caller
 
 The repository is one Cargo workspace. Each current crate is independently
 buildable and exposes a smaller public interface than its private
@@ -461,7 +461,7 @@ versions, and LandXML/journal/report format versions are separate axes. A Cargo
 `0.9` version does not imply Workspace disk schema or terrain algorithm version
 9.
 
-The Active v0.14 work advances all public libraries as one
+The completed v0.14 work advances all public libraries as one
 `0.14.0-alpha.1` package set with exact inter-Punctra registry requirements and
 local development paths. Their empty default features, dependency roles,
 MSRV, publication order, and pre-v1 policy are documented in the [library

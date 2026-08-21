@@ -8,7 +8,7 @@ repository-verified for the bounded persistent-terrain slice; field activation,
 production-scale accuracy, true out-of-core adoption, independent adoption,
 partner validation, and support qualification outstanding; broader terrain,
 export, and product contracts remain outstanding; v0.14 bounded exact Terrain
-QA and correction-loop scope Active
+QA and correction-loop slice Complete and repository-verified
 
 The versioned designs in [`docs/design`](../design) control exact release
 scope. This document summarizes the invariants that cross current crate seams.

@@ -11,8 +11,9 @@ v0.13: Complete and repository-verified for the bounded persistent-
 terrain slice; field activation, production-scale accuracy, true out-of-core
 adoption, independent adoption, partner validation, and support qualification
 outstanding; v0.14 exact Terrain QA and correction-loop bounded repository
-scope Active with field activation, observed workflow timing, independent
-adoption, partner validation, and support qualification outstanding; broader
+slice Complete and repository-verified with field activation, observed workflow
+timing, independent adoption, partner validation, and support qualification
+outstanding; broader
 terrain, export, external interoperability evidence, and product layers remain
 deferred
 
@@ -46,7 +47,7 @@ in-memory Derivation and Run-v1. Its topology phase still retains the complete
 AOI in memory. A crate exists only when its behavior, direct tests, and a caller
 exist.
 
-The Active v0.14 scope remains inside `point-terrain`. It binds exact Source
+The completed v0.14 scope remains inside `point-terrain`. It binds exact Source
 residuals, detached Check Points, and station profiles to one frozen
 Snapshot/Surface pair, exposes explicit freshness, and compares semantic faces
 by authoritative Point Identity. Correction and Revert remain existing

@@ -171,8 +171,8 @@ verified for the bounded persistent-terrain slice; field activation,
 production-scale accuracy, true out-of-core adoption, independent adoption,
 partner validation, and support qualification outstanding.
 
-Version 0.14.0-alpha.1 is Active under the accepted bounded [Exact Terrain QA
-and Correction Loop
+Version 0.14.0-alpha.1 is Complete and repository-verified for the bounded
+[Exact Terrain QA and Correction Loop
 design](docs/design/exact-terrain-qa-correction-v0.14.md). `point-terrain`
 evaluates one exact Snapshot/Surface pair with Source-Point residuals, detached
 Check Points, and an evenly stationed profile under explicit asymmetric metre
@@ -188,7 +188,9 @@ generated SVG station back to JSON evidence and demonstrates the complete
 correct, re-derive, compare, recheck, and Revert loop. Repository fixtures are
 not observed professional workflow timing, independent adoption, field
 accuracy, partner validation, or support qualification; those external exits
-remain outstanding.
+remain outstanding. The [v0.14 verification
+record](docs/releases/v0.14.0.md) pins the exact qualified implementation,
+environment, command results, and generated observations.
 
 To try the implemented View safely, follow the five-minute [first LAS/LAZ
 guide](docs/guides/first-las-laz.md). It separates position-only disk-v1 and
@@ -196,9 +198,9 @@ attributed disk-v2 caches and explains what progressive Coverage does and does
 not mean.
 
 Later direction and the exact external product gates are described in the
-[living roadmap](ROADMAP.md). The linked v0.14 design defines the Active bounded
-repository scope. Later Candidate themes do not expand accepted scope by
-themselves.
+[living roadmap](ROADMAP.md). The linked v0.14 design defines the completed
+bounded repository scope. Later Candidate themes do not expand accepted scope
+by themselves.
 
 ## Embedding model
 
@@ -301,9 +303,9 @@ no I/O and never mutates renderer state.
 
 Networking, polygon/brush/visible-only/occlusion selection, general editing,
 Source rewriting, constrained or truly out-of-core terrain, general export,
-and general application UI remain outside the accepted scope. The Active v0.14
-slice adds bounded exact QA and comparison without adding terrain constraints
-or a second editing model.
+and general application UI remain outside the accepted scope. The completed
+v0.14 slice adds bounded exact QA and comparison without adding terrain
+constraints or a second editing model.
 
 ## Examples
 
@@ -713,14 +715,14 @@ AOI, an above-500-million-Point containing Source, or another workstation.
 
 ## v0.14 exact-QA evidence boundary
 
-The bounded v0.14 repository slice makes profiles, Source residuals, detached
-Check Points, tolerances, gaps, freshness, and changed topology traceable to one
-exact Snapshot/Surface pair. Prepared-Surface QA is bounded materialization,
-not a persistent spatial QA index or a claim that production-scale QA fits the
-default limits. The generated correction loop proves deterministic repository
-behavior only. Field activation, observed time to find/explain/correct defects,
-independent adoption, partner validation, and support qualification remain
-separate exits.
+The completed bounded v0.14 repository slice makes profiles, Source residuals,
+detached Check Points, tolerances, gaps, freshness, and changed topology
+traceable to one exact Snapshot/Surface pair. Prepared-Surface QA is bounded
+materialization, not a persistent spatial QA index or a claim that production-
+scale QA fits the default limits. The generated correction loop proves
+deterministic repository behavior only. Field activation, observed time to
+find/explain/correct defects, independent adoption, partner validation, and
+support qualification remain separate exits.
 
 ## v0.7 benchmark evidence
 

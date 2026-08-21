@@ -28,7 +28,7 @@ exists for conformance and fault tests, not production behavior.
 
 ## Version and compatibility policy
 
-All libraries in the active bounded v0.14 slice use `0.14.0-alpha.1`, require
+All libraries in the completed bounded v0.14 slice use `0.14.0-alpha.1`, require
 Rust 1.90, and pin inter-Punctra registry dependencies
 to exactly that version while retaining local workspace paths. This local
 qualification is not publication. If a later explicit decision publishes the
