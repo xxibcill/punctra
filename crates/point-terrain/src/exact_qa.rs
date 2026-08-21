@@ -1414,6 +1414,7 @@ fn hash_results(
     profile_stations: &[ProfileStationResult],
     control: &OperationControl,
 ) -> Result<ContentHash, TerrainError> {
+    control.check_cancelled()?;
     let mut hasher = Hasher::new();
     hasher.update(RESULT_HASH_DOMAIN);
     hasher.update(binding.snapshot.workspace().as_bytes());
@@ -1548,10 +1549,14 @@ fn canonical_zero(value: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use foundation_runtime::OperationControl;
+    use point_contracts::{
+        ContentHash, LinearUnit, SpatialAxes, SpatialReferenceProfile, SpatialReferenceProvenance,
+    };
+    use point_workspace::SnapshotProvenance;
 
     use super::{
-        CANCELLATION_STRIDE, ExactTerrainQaRequest, VerticalTolerance, hash_input, poll,
-        validate_request,
+        CANCELLATION_STRIDE, ExactTerrainQaRequest, TerrainQaBinding, VerticalTolerance,
+        hash_input, hash_results, poll, validate_request,
     };
     use crate::{CheckPoint, CheckPointId, TerrainError, TerrainQaLimits};
 
@@ -1602,5 +1607,50 @@ mod tests {
             .expect_err("input hashing must observe cancellation before publishing evidence");
 
         assert!(matches!(error, TerrainError::Cancelled));
+    }
+
+    #[test]
+    fn empty_result_hashing_observes_cancellation() {
+        let control = OperationControl::new();
+        control.cancel();
+
+        let error = hash_results(
+            deterministic_binding(),
+            VerticalTolerance::new(0.0, 0.0).unwrap(),
+            ContentHash::new([9; 32]),
+            &[],
+            &[],
+            &[],
+            &control,
+        )
+        .expect_err("empty result hashing must observe cancellation before publishing evidence");
+
+        assert!(matches!(error, TerrainError::Cancelled));
+    }
+
+    fn deterministic_binding() -> TerrainQaBinding {
+        let snapshot: SnapshotProvenance = serde_json::from_value(serde_json::json!({
+            "workspace": vec![1_u8; 16],
+            "source": vec![2_u8; 32],
+            "revision": vec![3_u8; 32],
+        }))
+        .unwrap();
+        TerrainQaBinding {
+            snapshot,
+            recipe_hash: ContentHash::new([4; 32]),
+            input_hash: ContentHash::new([5; 32]),
+            geometry_hash: ContentHash::new([6; 32]),
+            topology_hash: ContentHash::new([7; 32]),
+            artifact_hash: ContentHash::new([8; 32]),
+            spatial_reference: SpatialReferenceProfile::new(
+                32_647,
+                5_703,
+                SpatialAxes::EastingNorthingElevation,
+                LinearUnit::Metre,
+                LinearUnit::Metre,
+                SpatialReferenceProvenance::CallerDeclaration,
+            )
+            .unwrap(),
+        }
     }
 }
