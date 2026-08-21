@@ -7,7 +7,8 @@ slice, plus the v0.12 explicit spatial-reference and package-publication
 repository slice; v0.13: Complete and repository-verified for the
 bounded persistent-terrain slice; field activation, production-scale accuracy,
 true out-of-core adoption, independent adoption, partner validation, and
-support qualification outstanding; all gates run locally**
+support qualification outstanding; v0.14 bounded exact Terrain QA and
+correction-loop scope Active; all gates run locally**
 
 Verification follows public contracts first. Private tests are used for fault
 injection and measured implementation boundaries that cannot be triggered
@@ -244,6 +245,16 @@ full-AOI triangulation memory, topology work, work/checkpoint/stage/Artifact
 bytes, handle metadata, checksum/read buffers, stream records/payload/work, and
 cumulative temporary bytes. A passing disk-persistence test is not an
 out-of-core-memory claim: the complete AOI remains resident during topology.
+
+The v0.14 exact-QA suite additionally covers analytic station profiles,
+Source-Point and detached residuals, positive/negative/inclusive-boundary
+tolerance, gaps, stable hashes across Source-row batching, exact
+Snapshot/Surface provenance, stale state after Edit, prepared/in-memory result
+equality, semantic face comparison, conservative changed bounds, post-Revert
+topology restoration, independent one-under limits, and cancellation without a
+partial result. The public `exact_terrain_qa` example emits traceable JSON/SVG
+evidence while explicitly denying field, timing, adoption, partner, and support
+claims.
 
 The `terrain-demo` unit/private, frozen-corpus, workflow-facade, and process
 suites cover:
@@ -504,6 +515,16 @@ AOI, an above-500-million-Point project, a supported workstation, true out-of-
 core topology, field accuracy, independent adoption, partner acceptance, or
 support qualification. The exact-commit completion record does not convert any
 of those external gates into repository facts.
+
+## v0.14 exact-QA verification target
+
+Repository qualification requires the exact-QA integration suite, the public
+correction-loop example, package/rustdoc verification, existing fuzz and
+benchmark lanes, and every required forced-GPU acceptance command to pass from
+one exact commit. Generated results can establish only deterministic values,
+hashes, freshness, comparison, resource ceilings, and artifact traceability.
+Observed professional defect-correction time and independent example execution
+remain external exits.
 
 ## Local verification lanes
 

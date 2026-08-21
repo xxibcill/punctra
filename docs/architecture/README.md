@@ -10,8 +10,11 @@ production-corpus, downstream, adoption, and support evidence outstanding;
 v0.13: Complete and repository-verified for the bounded persistent-
 terrain slice; field activation, production-scale accuracy, true out-of-core
 adoption, independent adoption, partner validation, and support qualification
-outstanding; broader terrain, export, external interoperability evidence, and
-product layers remain deferred
+outstanding; v0.14 exact Terrain QA and correction-loop bounded repository
+scope Active with field activation, observed workflow timing, independent
+adoption, partner validation, and support qualification outstanding; broader
+terrain, export, external interoperability evidence, and product layers remain
+deferred
 
 The accepted versioned designs are authoritative:
 
@@ -28,6 +31,7 @@ The accepted versioned designs are authoritative:
 - [v0.11 Exact Interactive Review and Ground Correction](../design/exact-interactive-review-v0.11.md)
 - [v0.12 Explicit Spatial Reference and Package Publication](../design/explicit-spatial-reference-v0.12.md)
 - [v0.13 Persistent Bounded-AOI Terrain](../design/persistent-production-scale-terrain-v0.13.md)
+- [v0.14 Exact Terrain QA and Correction Loop](../design/exact-terrain-qa-correction-v0.14.md)
 
 The current foundation is headless and embeddable. It reads immutable Sources,
 prepares a complete rebuildable Spatial Index, resolves progressive display,
@@ -41,6 +45,12 @@ Surface preparation/reopen path for one explicit AOI while preserving legacy
 in-memory Derivation and Run-v1. Its topology phase still retains the complete
 AOI in memory. A crate exists only when its behavior, direct tests, and a caller
 exist.
+
+The Active v0.14 scope remains inside `point-terrain`. It binds exact Source
+residuals, detached Check Points, and station profiles to one frozen
+Snapshot/Surface pair, exposes explicit freshness, and compares semantic faces
+by authoritative Point Identity. Correction and Revert remain existing
+`point-workspace` operations.
 
 The frozen [v0.9 public interface review](v0.9-interface-review.md) classifies
 reusable, adapter-author, test-support, and private application surfaces. The
@@ -137,8 +147,9 @@ buffers, Workspace journal frames, spill files, or GPU buffers.
   inclusive screen-through rectangles and exact one-Point confirmation. It
   owns no GPU, window, Workspace persistence, or mutation policy.
 - `point-terrain` owns Ground Input normalization, robust triangulation,
-  canonical `SurfaceVertex`/`SurfaceFace` values, detached Check Point QA, and
-  the private LandXML encoder and exact-target reconciliation. It also owns the
+  canonical `SurfaceVertex`/`SurfaceFace` values, exact Snapshot-bound QA,
+  semantic Surface comparison, and the private LandXML encoder and exact-target
+  reconciliation. It also owns the
   Surface disk-v1 target/work/stage family, including validation, resume,
   no-replace publication, and conservative offline-cleanup rules.
 - `terrain-demo` owns its Run lock, eight-frame journal, cross-module recovery
@@ -178,7 +189,8 @@ controlled offline maintenance.
 
 Source reads, index operations, selection, Point-row iteration, Point-ID
 iteration, Workspace open/commit, Terrain Derivation and preparation, file-
-backed Surface streams, QA, and LandXML export each have explicit hard ceilings.
+backed Surface streams, exact QA, Surface comparison, and LandXML export each
+have explicit hard ceilings.
 A limit failure cannot downgrade an exact result to partial Coverage or publish
 a partial Surface, report, or durable value.
 
@@ -190,8 +202,9 @@ integration, and public interface tests. The `point-review` seam is proven by
 public interface tests and the private renderer host that composes it with an
 existing Workspace. The `point-terrain` seam is proven by
 its public example, package benchmark, interface/resource/topology/QA/LandXML
-tests, and `terrain-demo` process caller. v0.13 accepts only the bounded-AOI
-persistent Surface path described above. COPC, constrained or true out-of-core
+tests, `exact_terrain_qa` correction-loop example, and `terrain-demo` process
+caller. v0.14 adds only the bounded exact-QA and comparison path described
+above. COPC, constrained or true out-of-core
 terrain, general LandXML, remote reads, polygon/brush/visible-only selection,
 general Edits, and application UI remain deferred until an accepted design and
 caller earn them.

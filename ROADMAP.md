@@ -1,7 +1,7 @@
 # Punctra Roadmap
 
 Status: living guidance
-Last reviewed: 2026-08-19
+Last reviewed: 2026-08-21
 
 This roadmap communicates direction, not a delivery promise. It has no fixed
 dates. Candidate releases may be split, merged, reordered, renamed, or skipped
@@ -34,7 +34,9 @@ investigation](docs/reviews/render-quality-investigation-2026-08-18.md) records
 one pre-v0.13 corrective checkpoint now **Complete and repository-verified**
 under its [implemented corrective design](docs/design/renderer-quality-corrective-pre-v0.13.md).
 Its permitted field execution remains outstanding. It does not reopen the
-accepted v0.10–v0.12 scopes. v0.14 through v0.20 remain uncommitted Candidate
+accepted v0.10–v0.12 scopes. The bounded v0.14 exact Terrain QA design is now
+**Active** by maintainer request without claiming its field activation or
+observed-workflow gates. v0.15 through v0.20 remain uncommitted Candidate
 themes; each needs evidence and an accepted design before implementation.
 
 ## Working direction
@@ -461,8 +463,9 @@ CRS guessing, or a general desktop product UI.
 The accepted v0.13 bounded persistent-terrain repository slice is complete and
 repository-verified after the completed v0.9, repository-implemented v0.10
 View, completed v0.11 technical slice, bounded v0.12 repository slice, and
-completed pre-v0.13 renderer quality checkpoint. No release is currently
-Active. Seven provisional Candidate themes, v0.14 through v0.20, may follow.
+completed pre-v0.13 renderer quality checkpoint. The bounded v0.14 exact
+Terrain QA and correction-loop repository slice is Active. Six provisional
+Candidate themes, v0.15 through v0.20, may follow.
 This is a planning sequence, not a requirement to publish every number or to
 publish v1 after v0.20. Candidates may be narrowed, split, merged, reordered,
 or stopped before becoming Active.
@@ -1379,10 +1382,10 @@ v0.20 theme is by itself a reason to publish v1.
 | Field inspection and exact correction | v0.10–v0.11 | Repository implementation complete; renderer quality corrected; field and adoption exits outstanding | Qualify representative Sources and connect a professional View to CPU-authoritative review and reversible correction. |
 | Renderer quality corrective checkpoint | pre-v0.13 | Complete; repository-verified only, with permitted field execution outstanding | Stationary LOD converges, bounded density/depth treatments and truthful inspection context are implemented, and the private permitted-source lane records settled evidence without manufacturing field claims. |
 | Spatial contract and production terrain | v0.12–v0.13 | v0.12 bounded repository contract complete; v0.13 bounded persistent-terrain slice complete and repository-verified; external spatial, production-scale, out-of-core, adoption, partner, and support exits outstanding | Make reference semantics explicit, then persist one bounded-AOI Surface without confusing repository durability with field-scale qualification. |
-| Terrain acceptance tooling | v0.14–v0.15 | Candidate | Add exact QA and only the constraints earned by field evidence. |
+| Terrain acceptance tooling | v0.14–v0.15 | v0.14 bounded repository scope Active; v0.15 Candidate | Add exact QA and only the constraints earned by field evidence. |
 | Downstream and partner product | v0.16–v0.18 | Candidate | Qualify one named downstream profile, then package and validate one narrow partner workflow. |
 | Product v1 qualification | v0.19–v1.0 | Candidate | Freeze, support-qualify, soak, and explicitly decide whether the maintained scope deserves v1. |
-| Open-source library adoption | v0.10–v0.20 | v0.12 local package/docs.rs path complete; registry publication and independent adoption outstanding; later work remains Candidate | Progress from an accurate public story and first-file quickstart to independent adoption, contributor readiness, stable integration guidance, and an evidence-backed funding path. |
+| Open-source library adoption | v0.10–v0.20 | v0.12 local package/docs.rs path complete; v0.14 traceable example implemented locally; registry publication and independent adoption outstanding; later work remains Candidate | Progress from an accurate public story and first-file quickstart to independent adoption, contributor readiness, stable integration guidance, and an evidence-backed funding path. |
 
 ## Deferred until evidence changes
 

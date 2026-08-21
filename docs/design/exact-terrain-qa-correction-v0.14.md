@@ -49,8 +49,8 @@ limits, cancellation, examples, and local verification. It does not prove:
 
 - exact QA behavior on an in-memory `TerrainSurface`;
 - the same behavior on a `PreparedTerrainSurface`, which materializes its
-  checksummed disk-v1 records only under explicit QA Surface-read and retained-
-  byte ceilings;
+  checksummed disk-v1 records only under explicit QA Surface-read and
+  materialization-byte ceilings;
 - immutable request, tolerance, profile, result, binding, freshness, and
   report values; and
 - `compare_surfaces(before, after, limits)` for an exact semantic topology

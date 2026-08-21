@@ -7,7 +7,8 @@ spatial-reference and packaging repository slice; v0.13: Complete and
 repository-verified for the bounded persistent-terrain slice; field activation,
 production-scale accuracy, true out-of-core adoption, independent adoption,
 partner validation, and support qualification outstanding; broader terrain,
-export, and product contracts remain outstanding
+export, and product contracts remain outstanding; v0.14 bounded exact Terrain
+QA and correction-loop scope Active
 
 The versioned designs in [`docs/design`](../design) control exact release
 scope. This document summarizes the invariants that cross current crate seams.
@@ -422,6 +423,34 @@ an explicit `CheckPointOutcome::Gap`. For coverage, residual is observed Z
 minus interpolated Surface Z. Results preserve caller order and statistics use
 deterministic compensated accumulation. Failure, cancellation, or any limit
 breach publishes no partial `CheckPointReport`.
+
+## Exact Snapshot/Surface QA and comparison contract
+
+`TerrainSurface::exact_qa` accepts one Snapshot whose provenance exactly
+matches the Surface plus a nonempty combination of one exact Source
+`PointQuery`, uniquely identified detached Check Points, and one evenly
+stationed profile. `PreparedTerrainSurface::exact_qa` has identical semantic
+results after bounded materialization of checksummed disk-v1 records. Both
+paths require the complete supported easting/northing/elevation metre profile.
+
+Source and Check Point residual is observed world Z minus interpolated Surface
+Z. Lower and upper tolerance magnitudes are finite, nonnegative, metre-valued,
+and inclusive. Profiles report exact CPU Surface elevation or an explicit gap
+at each declared station; connected visualization between stations is not a
+continuous plane/TIN intersection. Reports bind Snapshot, Recipe, spatial
+reference, Surface hashes, tolerance, completed Source-row facts, canonical
+input/result hashes, every outcome, and resource accounting. A historical
+report remains valid for its exact pair, but freshness against a caller-
+declared current Snapshot/Surface distinguishes stale Snapshot and Surface
+state after an Edit.
+
+`compare_surfaces` requires common Workspace/Source lineage, Recipe, position
+transform, and spatial reference. It compares faces by three authoritative
+Point Identities rather than Surface-local vertex IDs. Added/removed counts and
+hashes are exact; optional changed bounds conservatively enclose every vertex
+incident to a changed face and are not an exact change polygon. QA and
+comparison limits fail without partial reports, decimation, tolerance changes,
+or suppressed gaps.
 
 ## LandXML export contract
 

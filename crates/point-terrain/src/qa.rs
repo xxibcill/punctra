@@ -275,7 +275,7 @@ fn compare_identity(
     Ok(left < right)
 }
 
-fn locate(
+pub(crate) fn locate(
     surface: &TerrainSurface,
     check_point: CheckPoint,
     limits: CheckPointLimits,
@@ -524,7 +524,7 @@ fn xy(position: [f64; 3]) -> Coord<f64> {
 }
 
 #[derive(Default)]
-struct ResidualAccumulator {
+pub(crate) struct ResidualAccumulator {
     covered_count: u64,
     gap_count: u64,
     minimum: Option<f64>,
@@ -534,7 +534,7 @@ struct ResidualAccumulator {
 }
 
 impl ResidualAccumulator {
-    fn observe(&mut self, outcome: CheckPointOutcome) -> Result<(), TerrainError> {
+    pub(crate) fn observe(&mut self, outcome: CheckPointOutcome) -> Result<(), TerrainError> {
         match outcome {
             CheckPointOutcome::Gap => {
                 self.gap_count = self
@@ -557,7 +557,7 @@ impl ResidualAccumulator {
     }
 
     #[allow(clippy::cast_precision_loss)]
-    fn finish(self) -> ResidualStatistics {
+    pub(crate) fn finish(self) -> ResidualStatistics {
         if self.covered_count == 0 {
             return ResidualStatistics::new(0, self.gap_count, None, None, None, None);
         }

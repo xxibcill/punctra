@@ -9,8 +9,9 @@ boundaries; v0.13: Complete and repository-verified for the bounded
 persistent-terrain slice; field activation, production-scale accuracy, true
 out-of-core adoption, independent adoption, partner validation, and support
 qualification outstanding. The explicit-AOI persistent Surface preparation
-preserves those authority boundaries and frozen Run-v1; broader workflows
-remain outstanding**
+preserves those authority boundaries and frozen Run-v1; v0.14 bounded exact
+Terrain QA and correction-loop scope Active; broader workflows remain
+outstanding**
 
 The host composes sibling modules explicitly. Lower crates never call back into
 an application, discover a Source for a Workspace, submit a GPU queue, or infer
@@ -360,6 +361,43 @@ indeterminate rather than success.
 An exact existing regular target reconciles without replacement. A different,
 symlinked, or non-regular target fails closed. Create versus reconcile is an
 attempt observation; the durable Workflow fact is always `ensured_exact`.
+
+## 8.5. Inspect, correct, re-derive, compare, and Revert
+
+The v0.14 public example composes existing owners without adding a workflow
+facade. Exact QA and Surface comparison belong to `point-terrain`; durable
+classification mutation and Revert remain `point-workspace` operations.
+
+~~~mermaid
+sequenceDiagram
+    participant HOST as Host
+    participant WS as Workspace
+    participant TER as point-terrain
+
+    HOST->>TER: exact_qa(baseline Snapshot/Surface, request, limits)
+    TER-->>HOST: bound profile/residual/tolerance/gap evidence
+    HOST->>WS: select exact Point Identities
+    HOST->>WS: set_classification(recorded Operation Identity)
+    WS-->>HOST: changed Revision
+    HOST->>TER: freshness(current Snapshot, old Surface)
+    TER-->>HOST: stale Snapshot/Surface
+    HOST->>TER: derive or prepare changed Surface
+    HOST->>TER: compare_surfaces(before, after, limits)
+    TER-->>HOST: exact face changes + conservative bounds
+    HOST->>TER: exact_qa(changed Snapshot/Surface, same intent)
+    TER-->>HOST: rechecked evidence
+    opt reject the correction
+        HOST->>WS: revert_head(second recorded Operation Identity)
+        WS-->>HOST: Revert Revision
+        HOST->>TER: re-derive and compare with baseline
+        TER-->>HOST: zero semantic face changes when restored
+    end
+~~~
+
+Every report remains valid historical evidence only for its frozen pair.
+Display colors and connecting SVG lines are not measurements. A caller must
+reconcile indeterminate commits by the same Operation Identity and must use a
+fresh persistent Surface target after Revision change.
 
 ## 9. Start, resume, or inspect one durable terrain Run
 

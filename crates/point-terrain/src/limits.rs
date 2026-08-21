@@ -314,6 +314,230 @@ impl Default for CheckPointLimits {
     }
 }
 
+/// Hard ceilings for one exact Snapshot/Surface QA operation.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[allow(clippy::struct_field_names)]
+pub struct TerrainQaLimits {
+    point_rows: PointRowLimits,
+    surface_read: SurfaceReadLimits,
+    max_source_points: u64,
+    max_check_points: u64,
+    max_profile_stations: u64,
+    max_observations: u64,
+    max_result_bytes: u64,
+    max_materialized_surface_bytes: u64,
+    max_face_tests: u64,
+    max_working_bytes: u64,
+}
+
+impl TerrainQaLimits {
+    /// Creates independent input, Surface-read, output, location, and memory ceilings.
+    #[must_use]
+    #[allow(clippy::too_many_arguments)]
+    pub const fn new(
+        point_rows: PointRowLimits,
+        surface_read: SurfaceReadLimits,
+        max_source_points: u64,
+        max_check_points: u64,
+        max_profile_stations: u64,
+        max_observations: u64,
+        max_result_bytes: u64,
+        max_materialized_surface_bytes: u64,
+        max_face_tests: u64,
+        max_working_bytes: u64,
+    ) -> Self {
+        Self {
+            point_rows,
+            surface_read,
+            max_source_points,
+            max_check_points,
+            max_profile_stations,
+            max_observations,
+            max_result_bytes,
+            max_materialized_surface_bytes,
+            max_face_tests,
+            max_working_bytes,
+        }
+    }
+
+    /// Returns the exact Snapshot Point-row stream ceilings.
+    #[must_use]
+    pub const fn point_rows(self) -> PointRowLimits {
+        self.point_rows
+    }
+
+    /// Returns the file-backed Surface stream ceilings.
+    #[must_use]
+    pub const fn surface_read(self) -> SurfaceReadLimits {
+        self.surface_read
+    }
+
+    /// Returns the maximum retained Source-Point residuals.
+    #[must_use]
+    pub const fn max_source_points(self) -> u64 {
+        self.max_source_points
+    }
+
+    /// Returns the maximum retained detached Check Points.
+    #[must_use]
+    pub const fn max_check_points(self) -> u64 {
+        self.max_check_points
+    }
+
+    /// Returns the maximum generated profile stations.
+    #[must_use]
+    pub const fn max_profile_stations(self) -> u64 {
+        self.max_profile_stations
+    }
+
+    /// Returns the maximum combined Source, Check Point, and profile observations.
+    #[must_use]
+    pub const fn max_observations(self) -> u64 {
+        self.max_observations
+    }
+
+    /// Returns the maximum retained QA result bytes.
+    #[must_use]
+    pub const fn max_result_bytes(self) -> u64 {
+        self.max_result_bytes
+    }
+
+    /// Returns the maximum decoded bytes retained from a prepared Surface.
+    #[must_use]
+    pub const fn max_materialized_surface_bytes(self) -> u64 {
+        self.max_materialized_surface_bytes
+    }
+
+    /// Returns the maximum deterministic face-containment tests.
+    #[must_use]
+    pub const fn max_face_tests(self) -> u64 {
+        self.max_face_tests
+    }
+
+    /// Returns the peak incremental QA working-byte ceiling.
+    #[must_use]
+    pub const fn max_working_bytes(self) -> u64 {
+        self.max_working_bytes
+    }
+
+    /// Replaces the maximum retained Source-Point residuals.
+    #[must_use]
+    pub const fn with_max_source_points(mut self, value: u64) -> Self {
+        self.max_source_points = value;
+        self
+    }
+
+    /// Replaces the maximum retained detached Check Points.
+    #[must_use]
+    pub const fn with_max_check_points(mut self, value: u64) -> Self {
+        self.max_check_points = value;
+        self
+    }
+
+    /// Replaces the maximum generated profile stations.
+    #[must_use]
+    pub const fn with_max_profile_stations(mut self, value: u64) -> Self {
+        self.max_profile_stations = value;
+        self
+    }
+
+    /// Replaces the maximum combined Source, Check Point, and profile observations.
+    #[must_use]
+    pub const fn with_max_observations(mut self, value: u64) -> Self {
+        self.max_observations = value;
+        self
+    }
+
+    /// Replaces the maximum retained QA result bytes.
+    #[must_use]
+    pub const fn with_max_result_bytes(mut self, value: u64) -> Self {
+        self.max_result_bytes = value;
+        self
+    }
+
+    /// Replaces the maximum decoded prepared-Surface bytes.
+    #[must_use]
+    pub const fn with_max_materialized_surface_bytes(mut self, value: u64) -> Self {
+        self.max_materialized_surface_bytes = value;
+        self
+    }
+
+    /// Replaces the maximum deterministic face-containment tests.
+    #[must_use]
+    pub const fn with_max_face_tests(mut self, value: u64) -> Self {
+        self.max_face_tests = value;
+        self
+    }
+
+    /// Replaces the peak incremental QA working-byte ceiling.
+    #[must_use]
+    pub const fn with_max_working_bytes(mut self, value: u64) -> Self {
+        self.max_working_bytes = value;
+        self
+    }
+}
+
+impl Default for TerrainQaLimits {
+    fn default() -> Self {
+        Self::new(
+            PointRowLimits::default(),
+            SurfaceReadLimits::default(),
+            1_000_000,
+            1_000_000,
+            100_001,
+            2_000_000,
+            512 * MIB,
+            2 * GIB,
+            200_000_000,
+            3 * GIB,
+        )
+    }
+}
+
+/// Hard ceilings for one exact semantic Surface comparison.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SurfaceComparisonLimits {
+    faces: u64,
+    working_bytes: u64,
+    work_units: u64,
+}
+
+impl SurfaceComparisonLimits {
+    /// Creates exact face-count, working-byte, and deterministic-work ceilings.
+    #[must_use]
+    pub const fn new(max_faces: u64, max_working_bytes: u64, max_work_units: u64) -> Self {
+        Self {
+            faces: max_faces,
+            working_bytes: max_working_bytes,
+            work_units: max_work_units,
+        }
+    }
+
+    /// Returns the maximum combined before/after face count.
+    #[must_use]
+    pub const fn max_faces(self) -> u64 {
+        self.faces
+    }
+
+    /// Returns the maximum retained comparison-record bytes.
+    #[must_use]
+    pub const fn max_working_bytes(self) -> u64 {
+        self.working_bytes
+    }
+
+    /// Returns the maximum sorting and merge comparisons.
+    #[must_use]
+    pub const fn max_work_units(self) -> u64 {
+        self.work_units
+    }
+}
+
+impl Default for SurfaceComparisonLimits {
+    fn default() -> Self {
+        Self::new(40_000_000, 2 * GIB, 2_000_000_000)
+    }
+}
+
 /// Hard ceilings for one metric-metre `LandXML` publication.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[allow(clippy::struct_field_names)]
@@ -412,7 +636,10 @@ impl Default for LandXmlLimits {
 mod tests {
     use point_workspace::PointRowLimits;
 
-    use super::{CheckPointLimits, LandXmlLimits, TerrainLimits};
+    use super::{
+        CheckPointLimits, LandXmlLimits, SurfaceComparisonLimits, SurfaceReadLimits, TerrainLimits,
+        TerrainQaLimits,
+    };
 
     #[test]
     fn limits_preserve_independent_zero_ceilings() {
@@ -423,6 +650,27 @@ mod tests {
 
         let check_points = CheckPointLimits::new(0, 0, 0, 0);
         assert_eq!(check_points.max_face_tests(), 0);
+
+        let qa = TerrainQaLimits::new(
+            PointRowLimits::default(),
+            SurfaceReadLimits::default(),
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+        );
+        assert_eq!(qa.max_source_points(), 0);
+        assert_eq!(qa.max_observations(), 0);
+        assert_eq!(qa.max_working_bytes(), 0);
+
+        let comparison = SurfaceComparisonLimits::new(0, 0, 0);
+        assert_eq!(comparison.max_faces(), 0);
+        assert_eq!(comparison.max_working_bytes(), 0);
+        assert_eq!(comparison.max_work_units(), 0);
 
         let xml = LandXmlLimits::new(0, 0, 0, 0, 0, 0, 0);
         assert_eq!(xml.max_output_bytes(), 0);
