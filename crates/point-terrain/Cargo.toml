@@ -5,7 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Deterministic terrain derivation and QA for Punctra"
+description = "Deterministic terrain derivation, persistence, QA, and exchange for Punctra"
 homepage.workspace = true
 readme.workspace = true
 keywords.workspace = true
@@ -28,7 +28,7 @@ point-workspace.workspace = true
 robust.workspace = true
 thiserror.workspace = true
 
-[target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
+[target.'cfg(unix)'.dependencies]
 rustix = { version = "=1.1.4", features = ["fs"] }
 
 [dev-dependencies]
@@ -37,6 +37,7 @@ criterion.workspace = true
 delaunator.workspace = true
 point-index.workspace = true
 roxmltree.workspace = true
+serde_json.workspace = true
 source-memory = { workspace = true, features = ["test-support"] }
 
 [lints]

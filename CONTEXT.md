@@ -9,9 +9,12 @@ evidence remain outstanding; the v0.12 explicit spatial-reference and library-
 packaging repository slice is complete while its production-corpus,
 downstream, adoption, and support evidence remains outstanding; the accepted
 pre-v0.13 renderer-quality corrective checkpoint is complete and repository-
-verified while permitted field execution remains outstanding; no later
-repository implementation track is Active; broader selection, terrain, and
-product terms remain deferred
+verified while permitted field execution remains outstanding; v0.13:
+Complete and repository-verified for the bounded persistent-terrain slice;
+field activation, production-scale accuracy, true out-of-core adoption,
+independent adoption, partner validation, and support qualification
+outstanding; broader selection, constrained terrain, and product terms remain
+deferred
 
 Punctra v0.11 builds on the reusable render engine, renderer-neutral View
 planner, and verified Source path described in the accepted [v0.1 renderer
@@ -76,9 +79,21 @@ survey foot can be represented, while the current Terrain, QA, and LandXML path
 supports metre/metre only and performs no transformation. Opaque WKT and
 unknown references remain explicit rather than guessed.
 
+The accepted [v0.13 Persistent Bounded-AOI Terrain
+design](docs/design/persistent-production-scale-terrain-v0.13.md) fixes one
+rebuildable disk-v1 Surface Artifact for an explicit inclusive AOI. It preserves
+the existing exact Ground Input and canonical single-worker full-AOI topology,
+checkpoints complete input and final staging, publishes without replacement,
+reopens compatible Surfaces, and exposes bounded file-backed vertex/face
+streams. Persistence is not true out-of-core triangulation: the complete AOI
+still must fit the declared triangulation-memory limit. After publication, the
+verified stage and any work sibling remain because identity-conditioned
+pathname cleanup is not portable. A work sibling becomes resumable only after
+verification; none of these files is Workspace authority.
+
 ## Artifact
 
-An immutable result produced from a Source, Snapshot, or explicitly detached input with recorded construction parameters, such as a Spatial Index, Terrain Surface, or Profile. Its provenance identifies the Source and either the Workspace Revision or detached input content that was used, plus its construction version.
+An immutable result produced from a Source, Snapshot, or explicitly detached input with recorded construction parameters, such as a Spatial Index, Terrain Surface, or Profile. Its provenance identifies the Source and either the Workspace Revision or detached input content that was used, plus its construction version. A rebuildable persistent Artifact may be deleted and reproduced from that authority; persistence does not make it Workspace state.
 
 _Avoid:_ output blob, generated thing, cached result
 
@@ -130,7 +145,7 @@ _Avoid:_ done, loaded when completeness is what matters
 
 ## Derivation
 
-The act of producing an Artifact from one explicit input provenance and one Recipe. The input is either a Snapshot or detached immutable Source content. A Derivation does not modify its input.
+The act of producing an Artifact from one explicit input provenance and one Recipe. The input is either a Snapshot or detached immutable Source content. A Derivation does not modify its input. Durable checkpoints may resume implementation work without changing the Derivation's semantic input or result.
 
 _Avoid:_ processing when the specific operation is derivation
 
@@ -209,7 +224,9 @@ _Avoid:_ public dataset, benchmark proof, production evidence without permission
 ## Ground Input
 
 The complete set of Snapshot Points selected by one explicit effective ground
-classification and optional Region for a Terrain Derivation.
+classification and optional Region for a Terrain Derivation. The v0.13
+persistent path requires one explicit inclusive world-bounds AOI and may
+checkpoint this complete verified set before topology work.
 
 _Avoid:_ visible ground, display Points, inferred terrain Points
 
@@ -430,7 +447,9 @@ _Avoid:_ Edit Footprint, affected-area polygon, persisted terrain boundary
 An immutable triangulated Artifact representing terrain for one explicit input
 provenance and Recipe. Its Artifact Identity, vertices, faces, constraints or
 explicit absence of constraints, Coordinate Reference, and provenance are
-explicit.
+explicit. A v0.13 prepared Terrain Surface may be file-backed and read through
+bounded canonical streams; its full-AOI triangulation remains memory-resident
+during construction.
 
 _Avoid:_ mesh when the terrain semantics and provenance matter
 

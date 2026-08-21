@@ -141,14 +141,45 @@ guide](docs/guides/library-packaging.md). The applications remain private and
 no registry publication, external adoption, production corpus, downstream
 execution, or partner acceptance is claimed.
 
+Version 0.13.0-alpha.1 is Complete and repository-verified for the bounded
+persistent-terrain slice described by the
+[Persistent Bounded-AOI Terrain
+design](docs/design/persistent-production-scale-terrain-v0.13.md). It adds one
+explicit-AOI preparation path around the existing exact single-worker,
+full-AOI triangulator: complete Ground Input and final Surface stages are
+checksummed and resumable, a complete immutable disk-v1 Surface is published
+without replacement, compatible targets reopen without Snapshot reads, and a
+file-backed handle exposes separately bounded canonical vertex and face
+streams. The legacy in-memory `derive` path remains available.
+
+Successful publication retains its verified `.surface-stage-v1` and any
+`.surface-work-v1` sibling. This is deliberate: no portable unlink can be
+conditioned on the open owned inode, and check-then-unlink cleanup could delete
+a racing replacement. A work sibling is trusted only after verification. The
+complete target takes precedence on warm reopen; recognized siblings may be
+removed only through optional owner-controlled offline cleanup.
+
+This is bounded-memory persistence, not a true out-of-core triangulator. No
+field measurements establish a production AOI or workstation envelope, neither
+required above-500-million-Point project has been completed, and generated
+examples do not establish field, partner, independent-adoption, or support
+qualification. The [persistent-terrain guide](docs/guides/persistent-terrain.md)
+records the accepted evidence boundary and reproducible reporting contract;
+the [v0.13 verification record](docs/releases/v0.13.0.md) records the exact
+qualified implementation and local observations. Complete and repository-
+verified for the bounded persistent-terrain slice; field activation,
+production-scale accuracy, true out-of-core adoption, independent adoption,
+partner validation, and support qualification outstanding.
+
 To try the implemented View safely, follow the five-minute [first LAS/LAZ
 guide](docs/guides/first-las-laz.md). It separates position-only disk-v1 and
 attributed disk-v2 caches and explains what progressive Coverage does and does
 not mean.
 
 Later direction and the exact external product gates are described in the
-[living roadmap](ROADMAP.md). Its candidate themes do not expand accepted
-implementation scope by themselves.
+[living roadmap](ROADMAP.md). The linked v0.13 design defines the completed
+bounded repository scope. No later Candidate theme is Active, and Candidate
+themes do not expand accepted scope by themselves.
 
 ## Embedding model
 
@@ -231,8 +262,10 @@ no I/O and never mutates renderer state.
   provisional-pick confirmation and one inclusive screen-through rectangle.
   It owns no GPU, window, gesture, commit, or recovery state.
 - `point-terrain` derives one immutable `TerrainSurface` with canonical
-  `SurfaceVertex` and `SurfaceFace` values, evaluates detached Check Points,
-  and durably creates or exactly reconciles the supported LandXML 1.2 subset.
+  `SurfaceVertex` and `SurfaceFace` values; prepares or reopens one rebuildable,
+  file-backed Surface for an explicit inclusive AOI with bounded vertex/face
+  streams; evaluates detached Check Points; and durably creates or exactly
+  reconciles the supported LandXML 1.2 subset.
 - `render-protocol` defines and validates renderer-neutral View updates,
   including a caller-selected complete highlight-input ceiling.
 - `point-view` plans deterministic, budgeted hierarchy requests and retirement.
@@ -247,8 +280,9 @@ no I/O and never mutates renderer state.
   to-terrain-to-QA-to-LandXML Workflow Run and its canonical audit report.
 
 Networking, polygon/brush/visible-only/occlusion selection, general editing,
-Source rewriting, persistent or constrained terrain, general export, and
-general application UI remain outside the accepted scope.
+Source rewriting, constrained or truly out-of-core terrain, general export,
+and general application UI remain outside the accepted scope. The completed
+v0.13 slice accepts only rebuildable persistent bounded-AOI Surfaces.
 
 ## Examples
 
@@ -305,6 +339,25 @@ Run the complete generated in-memory Source-to-LandXML terrain composition:
 ```bash
 cargo run -p point-terrain --example derive
 ```
+
+Exercise the repository-verified v0.13 explicit-AOI persistent path through
+cold build, warm reopen, and bounded canonical vertex/face streams with
+generated data:
+
+```bash
+cargo run -p point-terrain --example persistent_surface
+```
+
+The example uses a caller-owned `.pterr` target and reports Source verification,
+indexing, Terrain cold/resumed/warm work, full-AOI triangulation memory,
+verified input-work bytes, cumulative private temporary bytes, complete Artifact
+bytes, and unmeasured phases separately. Its default 10,000-Point fixture
+reports a 10,000-vertex, 19,602-face Surface and asserts exact-byte
+input-checkpoint resume, complete bounded streams, and a zero-Snapshot-row warm
+open. Direct stage
+bytes, worker heap, process resident memory, allocated filesystem blocks, QA,
+LandXML, View, and field accuracy remain explicitly unmeasured. It is generated
+bounded-memory evidence, not a true out-of-core or production-scale claim.
 
 Start one durable headless LAS/LAZ terrain Workflow Run. The caller must retain
 the nonzero Run and Workspace Operation identities and the expected baseline
@@ -604,6 +657,23 @@ universal performance, licensed-production, above-500-million-Point, partner,
 downstream Civil 3D/Bentley, paid-use, or human-time evidence. Every such
 external gate remains outstanding.
 
+## v0.13 persistent-terrain evidence boundary
+
+The completed v0.13 repository slice carries the same canonical full-AOI
+topology through cold preparation, verified-input resume, complete-stage
+publication, and warm reopen. The [exact-commit completion
+record](docs/releases/v0.13.0.md) reports Source verification, index
+preparation, Terrain cold/resumed/warm work, retained triangulation memory,
+verified work, cumulative private temporary and Artifact bytes, stream buffers,
+unmeasured phases, and local Criterion observations separately. Those
+generated facts are repository evidence, not production-resource or latency
+promises.
+
+Because topology still retains the complete AOI in memory, successful
+persistence is not evidence of true out-of-core derivation. Generated
+10,000/100,000/1,000,000-Point modes must not be extrapolated to a production
+AOI, an above-500-million-Point containing Source, or another workstation.
+
 ## v0.7 benchmark evidence
 
 `terrain-demo` now has 133 package tests: 109 unit/private fault and contract
@@ -630,8 +700,8 @@ through the public workflow facade with generated local LAS data. The local
 | LandXML and report reconciliation | 96.871 ms | 97.629 ms | 98.365 ms |
 | Complete revalidation | 87.233 ms | 88.181 ms | 89.112 ms |
 
-The completed Run had an eight-frame 2,804-byte journal and an 11,490-byte
-canonical report containing 115 semantic limit facts. The benchmark accepts
+The completed Run had an eight-frame 2,804-byte journal and an 11,539-byte
+canonical report containing 116 semantic limit facts. The benchmark accepts
 only the documented generated 10,000, 100,000, and 1,000,000-Point modes through
 `PUNCTRA_TERRAIN_WORKFLOW_BENCH_POINTS`; only the 10,000-Point smoke is recorded
 here. These are generated local technical observations. Worker peak heap was

@@ -5,7 +5,12 @@ compatibility hardening Complete; the v0.10 repository View implementation and
 repository-verified v0.11 exact-review technical workflow preserve the same
 authoritative boundaries; the v0.12 explicit spatial-reference profile now
 flows through the same Source, Workspace, Terrain, QA, export, and round-trip
-boundaries; field evidence and broader workflows remain outstanding**
+boundaries; v0.13: Complete and repository-verified for the bounded
+persistent-terrain slice; field activation, production-scale accuracy, true
+out-of-core adoption, independent adoption, partner validation, and support
+qualification outstanding. The explicit-AOI persistent Surface preparation
+preserves those authority boundaries and frozen Run-v1; broader workflows
+remain outstanding**
 
 The host composes sibling modules explicitly. Lower crates never call back into
 an application, discover a Source for a Workspace, submit a GPU queue, or infer
@@ -261,6 +266,63 @@ correction is a separate existing Workspace commit; immediate-head Revert and
 a later Derivation can restore equal geometry while retaining distinct Revision
 provenance. Source bytes remain unchanged.
 
+## 7a. Prepare or reopen one persistent bounded-AOI Surface
+
+~~~mermaid
+sequenceDiagram
+    participant HOST as Host
+    participant TER as point-terrain
+    participant SNAP as Snapshot
+    participant WORK as Surface work/stage
+    participant ART as Surface disk-v1 target
+
+    HOST->>TER: prepare(Snapshot, target, explicit-AOI Recipe, limits)
+    alt compatible complete target
+        TER->>ART: bounded full validation
+        TER-->>HOST: PreparedTerrainSurface + Opened report
+    else compatible final stage
+        TER->>WORK: validate complete staged Surface
+        TER->>ART: no-replace publication + sync + revalidation
+        TER-->>HOST: PreparedTerrainSurface + ResumedPublication report
+    else compatible input work
+        TER->>WORK: validate complete Ground Input checkpoint
+        TER->>TER: resume topology and final staging
+        TER->>ART: no-replace publication + sync + revalidation
+        TER-->>HOST: PreparedTerrainSurface + ResumedInput report
+    else target family absent
+        TER->>SNAP: stream exact AOI Ground Input
+        TER->>WORK: sync complete verified input checkpoint
+        TER->>TER: existing single-worker full-AOI triangulation
+        TER->>WORK: sync and verify complete Surface stage
+        TER->>ART: descriptor-bound no-replace publish + sync
+        TER-->>HOST: PreparedTerrainSurface + Built report
+    end
+    HOST->>TER: bounded vertex_batches / face_batches
+    TER-->>HOST: verified canonical record batches
+~~~
+
+The semantic Surface is identical to the legacy explicit-AOI `derive` result.
+Only execution and storage differ. After the verified input checkpoint, resume
+does not reread Snapshot rows, although sorting and topology may rerun. A warm
+open reads no Snapshot rows. The prepared handle retains bounded metadata and
+file access rather than complete vertex/face arrays.
+
+Acknowledged publication retains the verified final-stage pathname and any
+input-work sibling. A `ResumedPublication` attempt does not inspect or trust an
+arbitrary work sibling. No portable unlink can be conditioned on the still-open
+owned inode, while a check-then-unlink could delete a racing replacement. A
+warm open gives the complete target precedence and ignores siblings; optional
+cleanup is caller-controlled offline maintenance only when no related handle,
+job, or process is live.
+
+Stale, corrupt, incompatible, or conflicting targets are preserved. A later
+Workspace head does not invalidate an Artifact for its historical Snapshot, but
+the same path is stale for a different requested binding. Publication never
+replaces a target and reports conservative indeterminate certainty after its
+commit boundary. The full-AOI triangulator still retains the complete AOI in
+memory and supports one worker; this workflow is persistence, not true
+out-of-core topology.
+
 ## 8. Evaluate detached QA and ensure LandXML
 
 ~~~mermaid
@@ -486,6 +548,7 @@ not resident need not be visible.
 | Exact screen review | Between Snapshot row batches, projected rows, and Point Set construction | Private retained identity vector and Job-owned Point Set spill | No review result, or one complete exact Point Set and terminal summary |
 | Revision commit | Before publication; afterward certainty is conservative | Complete ready/rejection/Revision links and recognized scratch | Rejected old head, Committed new head, or Indeterminate until reopen |
 | Terrain Derivation | Between rows, sort/predicate/topology blocks, and before final seal | Private in-memory working allocations | No Surface, or one complete immutable Surface |
+| Persistent Terrain prepare | Between row blocks and before publication; topology cancellation restarts from complete verified input; after no-replace publication certainty is conservative | Verified input checkpoint, complete verified stage, and possibly one complete target; publication retains the verified stage and any uninspected work sibling | No target, one resumable work family, one compatible complete Artifact/handle, conflict, or publication-indeterminate result |
 | Detached QA | Between inputs and bounded face-location work | Private partial results | No report, or one complete report |
 | LandXML ensure | Before target publication; afterward certainty is conservative | Recognized sibling stage and possibly one complete target | No target, one exact target plus receipt, exact-existing reconciliation, conflict, or ExportIndeterminate |
 | Terrain Workflow Run | Cooperative phase boundaries and directly linked active child Jobs; after publication certainty remains conservative | Fixed `run.lock`/rebuildable index work before Intent; afterward a verified journal prefix, committed Revision, exact XML/report targets, or recognized sibling stages | No Run before Intent, or one resumable Run whose frames never overstate durable facts |
@@ -497,8 +560,10 @@ not resident need not be visible.
 ## 13. Staleness
 
 Snapshots and Revisions are immutable. A later commit creates a new head but
-does not mutate older Snapshots. Derived Surfaces remain immutable even when a
-later Revision restores equal geometry. View generations and GPU residency are
+does not mutate older Snapshots. Derived and prepared Surfaces remain immutable
+even when a later Revision restores equal geometry. A prepared Artifact remains
+valid for its bound historical Snapshot and is stale only for a different
+requested binding at the same path. View generations and GPU residency are
 separate disposable state and may be reset independently.
 
 ~~~mermaid
@@ -512,6 +577,7 @@ flowchart LR
     IDX -. "accelerates exact reads" .-> S2
     S0 --> T0["Immutable Terrain Surface"]
     S2 --> T2["Later immutable Terrain Surface"]
+    T2 --> P2["Rebuildable prepared Surface disk-v1"]
     T2 --> XML["Caller-owned LandXML Export"]
     R2 --> AUD["Rebuildable Revision Audit"]
     T2 --> REP["Canonical audit.json"]
@@ -526,7 +592,8 @@ flowchart LR
 
 ## Deferred workflows
 
-Breakline/constrained or persisted terrain, general Attribute Point-row
-streaming, general LandXML/import, autosave, polygon/brush/visible-only
-selection, continuous painting, and product UI require later accepted designs.
-They are not implied by the current Workspace, review, or Terrain vocabulary.
+Breakline/constrained, tiled, true out-of-core, parallel, or distributed
+terrain, general Attribute Point-row streaming, general LandXML/import,
+autosave, polygon/brush/visible-only selection, continuous painting, and
+product UI require later accepted designs. They are not implied by the current
+Workspace, review, or Terrain vocabulary.

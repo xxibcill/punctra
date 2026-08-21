@@ -4,7 +4,10 @@ Status: **Complete through the v0.9 repository trust and version-1
 compatibility candidate, the v0.10 professional inspection View repository
 implementation, and the repository-verified v0.11 exact-review technical
 slice, plus the v0.12 explicit spatial-reference and package-publication
-repository slice; all gates run locally**
+repository slice; v0.13: Complete and repository-verified for the
+bounded persistent-terrain slice; field activation, production-scale accuracy,
+true out-of-core adoption, independent adoption, partner validation, and
+support qualification outstanding; all gates run locally**
 
 Verification follows public contracts first. Private tests are used for fault
 injection and measured implementation boundaries that cannot be triggered
@@ -44,6 +47,9 @@ itself a persisted or public contract.
 - Use generated LAS and LAZ files for format-to-Workspace integration.
 - Use exact planar, cocircular, duplicate-XY, collinear, boundary, and gap
   fixtures for Terrain/QA oracles.
+- Freeze complete/work Surface disk-v1 bytes before claiming compatibility;
+  mutate copies for truncation, checksum, offset, ordering, reference, and
+  binding failures rather than regenerating expected truth.
 - Compare semantic values before exact bytes unless deterministic bytes are a
   stated contract.
 - Never commit licensed production data without redistribution rights.
@@ -220,6 +226,24 @@ Workspace/Terrain/QA/LandXML APIs. v0.7 adds exact-existing LandXML ensure tests
 for create, reconcile, conflict, races, symlink/non-regular rejection,
 publication faults, post-link cancellation certainty, and lost
 acknowledgement.
+
+The completed v0.13 persistence suites additionally cover public-interface
+coverage for `TerrainPrepareDisposition::{Built, ResumedInput,
+ResumedPublication, Opened}`; exact equivalence with the legacy
+explicit-AOI topology oracle; no Snapshot row consumption on warm open;
+Snapshot/Recipe/AOI/algorithm/transform/spatial-reference stale rejection;
+bounded vertex/face stream ordering, complete exhaustion, and touched-block
+revalidation; complete/work-v1 goldens; and no-replace publication certainty.
+Fault tests cover torn final work suffixes, interior corruption, truncation,
+invalid counts/offsets/order/face references, disk exhaustion, cancellation,
+create/write/sync/link/readback failure, races, and changed paths while
+preserving unproven files.
+
+The v0.13 resource gates independently cover Point rows, Ground Input,
+full-AOI triangulation memory, topology work, work/checkpoint/stage/Artifact
+bytes, handle metadata, checksum/read buffers, stream records/payload/work, and
+cumulative temporary bytes. A passing disk-persistence test is not an
+out-of-core-memory claim: the complete AOI remains resident during topology.
 
 The `terrain-demo` unit/private, frozen-corpus, workflow-facade, and process
 suites cover:
@@ -447,11 +471,39 @@ local smoke is the 10,000-Point, ten-sample run.
 | Complete revalidation | 87.233 ms | 88.181 ms | 89.112 ms |
 
 The completed Run's durable journal was 2,804 bytes across eight frames. Its
-canonical report was 11,490 bytes and contained 115 semantic limit facts.
+canonical report was 11,539 bytes and contained 116 semantic limit facts.
 
 The intervals are local generated observations, not universal latency claims.
 Worker peak heap was not measured. No partner, production, downstream round-
 trip, paid-use, or human-time acceptance is inferred from this benchmark.
+
+## v0.13 persistent-terrain verification result
+
+The accepted v0.13 generated example and benchmark report exact fixture,
+AOI, limits, algorithm/disk versions, cold/resumed/warm disposition, Source rows
+read or reused, input/vertex/face counts, topology work, retained triangulation
+memory, verified work bytes, complete Artifact bytes, stream buffers,
+cumulative work-plus-stage bytes, and absent observations. The exact-commit
+completion record pairs those reports with named machine and toolchain facts.
+A direct stage-byte observation remains explicitly absent rather than
+inferred. Source verification, Spatial Index preparation, Terrain preparation,
+warm reopen, legacy QA/LandXML, and View work are separate phases; an unrun or
+unmeasured phase remains explicitly absent. The exact environment, command
+outcomes, fixtures, and generated observations are recorded in the
+[v0.13 repository verification record](../releases/v0.13.0.md).
+
+The default generated example run uses 10,000 Points and currently reports a
+10,000-vertex, 19,602-face, 396-hull-vertex Surface, a 320,480-byte verified
+input checkpoint, and three-batch vertex/five-batch face consumption. It
+asserts exact-byte resume and complete bounded stream consumption.
+`PUNCTRA_PERSISTENT_TERRAIN_EXAMPLE_POINTS` and
+`PUNCTRA_TERRAIN_BENCH_POINTS` accept generated counts from 3 through 1,000,000;
+10,000, 100,000, and 1,000,000 are the intended benchmark scales. Only an
+actually completed local run may be recorded. None establishes a production
+AOI, an above-500-million-Point project, a supported workstation, true out-of-
+core topology, field accuracy, independent adoption, partner acceptance, or
+support qualification. The exact-commit completion record does not convert any
+of those external gates into repository facts.
 
 ## Local verification lanes
 

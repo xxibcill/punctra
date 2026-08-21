@@ -1,17 +1,25 @@
-//! Bounded public-interface harness for persisted point-index bytes.
+//! Bounded public-interface harnesses for persisted index and terrain bytes.
 
 #![forbid(unsafe_code)]
 
-use std::{fs, sync::OnceLock};
+use std::{
+    ffi::OsString,
+    fs,
+    path::{Path, PathBuf},
+    sync::OnceLock,
+};
 
 use point_contracts::{
     AttributeColumn, AttributeColumns, AttributeDataType, AttributeDefinition, AttributeId,
-    AttributeValues, CoordinateReference, PositionTransform,
+    AttributeValues, CoordinateReference, LinearUnit, PositionTransform, SpatialAxes,
+    SpatialReferenceProfile, SpatialReferenceProvenance, WorldBounds,
 };
 use point_index::{
     IndexRecipe, InspectionAttributeIds, PrepareLimits, prepare, prepare_with_recipe,
 };
 use point_source::Source;
+use point_terrain::{SurfaceReadLimits, TerrainLimits, TerrainPrepareLimits, TerrainRecipe};
+use point_workspace::{OpenLimits, PointRowLimits, Snapshot, WorkspaceSchema};
 use source_memory::MemorySource;
 
 /// Maximum retained persisted input explored by one fuzz iteration.
@@ -20,6 +28,12 @@ pub const MAX_INPUT_BYTES: usize = 256 * 1_024;
 const MAX_MUTATIONS: usize = 4_096;
 const MAX_RETAINED_FILES: usize = 6;
 const MAX_RETAINED_BYTES: u64 = 4 * MAX_INPUT_BYTES as u64;
+const TERRAIN_GROUND_CLASSIFICATION: u8 = 2;
+const TERRAIN_FIXTURE_POINTS: u64 = 16;
+const TERRAIN_POINT_BYTES: u64 = 33;
+const TERRAIN_MAX_STREAM_BATCHES: usize = MAX_INPUT_BYTES / 12 + 1;
+const TERRAIN_ARTIFACT_CHECKSUM_DOMAIN: &[u8] = b"punctra-terrain-disk-v1";
+const TERRAIN_WORK_CHECKSUM_DOMAIN: &[u8] = b"punctra-terrain-work-v1";
 
 struct Seeds {
     artifact: Vec<u8>,
@@ -354,6 +368,401 @@ fn assert_retained_state_is_bounded(directory: &std::path::Path) {
     assert!(bytes <= MAX_RETAINED_BYTES);
 }
 
+struct TerrainSeeds {
+    snapshot: Snapshot,
+    artifact: Vec<u8>,
+    work: Vec<u8>,
+    _directory: tempfile::TempDir,
+}
+
+#[derive(Clone, Copy)]
+enum TerrainPersistedKind {
+    Artifact,
+    Work,
+}
+
+/// Exercises complete-artifact and resumable-work terrain decoding through
+/// public preparation and bounded stream interfaces.
+///
+/// The fuzz payload, mutation count, fixed Source, derivation limits, file
+/// sizes, stream batch sizes, stream iterations, and retained filesystem state
+/// are all capped. Valid seed files are built through the public API so this
+/// harness does not construct private decoder state.
+pub fn exercise_terrain_persisted_bytes(input: &[u8]) {
+    if input.len() > MAX_INPUT_BYTES {
+        return;
+    }
+    let (selector, payload) = input
+        .split_first()
+        .map_or((0_u8, &[][..]), |(&selector, payload)| (selector, payload));
+    let mode = selector % 16;
+    let (kind, persisted) = terrain_persisted_case(mode, payload);
+
+    let directory = tempfile::tempdir().expect("create isolated terrain fuzz directory");
+    let target = directory.path().join("fixture.pterr");
+    let persisted_path = match kind {
+        TerrainPersistedKind::Artifact => target.clone(),
+        TerrainPersistedKind::Work => terrain_sibling_path(&target, ".surface-work-v1"),
+    };
+    fs::write(&persisted_path, persisted).expect("write bounded terrain fuzz input");
+
+    if let Ok(surface) = point_terrain::prepare(
+        terrain_seeds().snapshot.clone(),
+        &target,
+        terrain_recipe(),
+        terrain_fuzz_limits(MAX_INPUT_BYTES as u64),
+    )
+    .blocking_wait()
+    {
+        exercise_terrain_streams(&surface);
+    }
+    assert_retained_state_is_bounded(directory.path());
+}
+
+fn terrain_persisted_case(mode: u8, payload: &[u8]) -> (TerrainPersistedKind, Vec<u8>) {
+    match mode {
+        0 => (TerrainPersistedKind::Artifact, payload.to_vec()),
+        1 => (TerrainPersistedKind::Work, payload.to_vec()),
+        2 => (
+            TerrainPersistedKind::Artifact,
+            mutated(&terrain_seeds().artifact, payload),
+        ),
+        3 => (
+            TerrainPersistedKind::Work,
+            mutated(&terrain_seeds().work, payload),
+        ),
+        4 => (
+            TerrainPersistedKind::Artifact,
+            terrain_tail_mutation(&terrain_seeds().artifact, payload),
+        ),
+        5 => (
+            TerrainPersistedKind::Work,
+            terrain_tail_mutation(&terrain_seeds().work, payload),
+        ),
+        6 => (
+            TerrainPersistedKind::Artifact,
+            terrain_checksum_valid_tail_mutation(
+                &terrain_seeds().artifact,
+                payload,
+                TERRAIN_ARTIFACT_CHECKSUM_DOMAIN,
+            ),
+        ),
+        7 => (
+            TerrainPersistedKind::Work,
+            terrain_checksum_valid_tail_mutation(
+                &terrain_seeds().work,
+                payload,
+                TERRAIN_WORK_CHECKSUM_DOMAIN,
+            ),
+        ),
+        8 => (
+            TerrainPersistedKind::Artifact,
+            terrain_truncated(&terrain_seeds().artifact, payload),
+        ),
+        9 => (
+            TerrainPersistedKind::Work,
+            terrain_truncated(&terrain_seeds().work, payload),
+        ),
+        10 => (
+            TerrainPersistedKind::Artifact,
+            terrain_extended(&terrain_seeds().artifact, payload),
+        ),
+        11 => (
+            TerrainPersistedKind::Work,
+            terrain_extended(&terrain_seeds().work, payload),
+        ),
+        12 => (
+            TerrainPersistedKind::Artifact,
+            terrain_seeds().artifact.clone(),
+        ),
+        13 => (TerrainPersistedKind::Work, terrain_seeds().work.clone()),
+        14 => (
+            TerrainPersistedKind::Artifact,
+            terrain_checksum_mutation(&terrain_seeds().artifact, payload),
+        ),
+        _ => (
+            TerrainPersistedKind::Work,
+            terrain_checksum_mutation(&terrain_seeds().work, payload),
+        ),
+    }
+}
+
+fn terrain_tail_mutation(seed: &[u8], mutations: &[u8]) -> Vec<u8> {
+    const TAIL_BYTES: usize = 96;
+
+    let mut bytes = seed.to_vec();
+    let start = bytes.len().saturating_sub(TAIL_BYTES);
+    let end = bytes.len();
+    mutate_region(&mut bytes, mutations, start, end);
+    bytes
+}
+
+fn terrain_checksum_valid_tail_mutation(seed: &[u8], mutations: &[u8], domain: &[u8]) -> Vec<u8> {
+    const CHECKSUM_BYTES: usize = 32;
+    const DIRECTORY_ADJACENT_BYTES: usize = 64;
+
+    let mut bytes = seed.to_vec();
+    let Some(payload_end) = bytes.len().checked_sub(CHECKSUM_BYTES) else {
+        return bytes;
+    };
+    let start = payload_end.saturating_sub(DIRECTORY_ADJACENT_BYTES);
+    mutate_region(&mut bytes, mutations, start, payload_end);
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(&(domain.len() as u64).to_le_bytes());
+    hasher.update(domain);
+    hasher.update(&bytes[..payload_end]);
+    bytes[payload_end..].copy_from_slice(hasher.finalize().as_bytes());
+    bytes
+}
+
+fn terrain_checksum_mutation(seed: &[u8], mutations: &[u8]) -> Vec<u8> {
+    const CHECKSUM_BYTES: usize = 32;
+
+    let mut bytes = seed.to_vec();
+    let start = bytes.len().saturating_sub(CHECKSUM_BYTES);
+    let end = bytes.len();
+    mutate_region(&mut bytes, mutations, start, end);
+    bytes
+}
+
+fn terrain_truncated(seed: &[u8], selector: &[u8]) -> Vec<u8> {
+    let ordinal = selector.iter().take(8).fold(0_usize, |value, byte| {
+        value.rotate_left(5) ^ usize::from(*byte)
+    });
+    let retained = ordinal % seed.len().saturating_add(1);
+    seed[..retained].to_vec()
+}
+
+fn terrain_extended(seed: &[u8], suffix: &[u8]) -> Vec<u8> {
+    let mut bytes = seed.to_vec();
+    let retained = MAX_INPUT_BYTES
+        .saturating_sub(bytes.len())
+        .min(suffix.len());
+    bytes.extend_from_slice(&suffix[..retained]);
+    bytes
+}
+
+fn terrain_seeds() -> &'static TerrainSeeds {
+    static SEEDS: OnceLock<TerrainSeeds> = OnceLock::new();
+    SEEDS.get_or_init(|| {
+        let directory = tempfile::tempdir().expect("create terrain seed directory");
+        let source = terrain_fixture_source();
+        let index = prepare(
+            source,
+            directory.path().join("fixture.pidx"),
+            terrain_index_limits(),
+        )
+        .blocking_wait()
+        .expect("build terrain fixture index");
+        let workspace = point_workspace::create(
+            directory.path().join("fixture.pcw"),
+            index,
+            WorkspaceSchema::new(terrain_classification_attribute()),
+            terrain_workspace_limits(),
+        )
+        .blocking_wait()
+        .expect("build terrain fixture Workspace");
+        let snapshot = workspace.head();
+
+        let artifact_path = directory.path().join("artifact.pterr");
+        point_terrain::prepare(
+            snapshot.clone(),
+            &artifact_path,
+            terrain_recipe(),
+            terrain_fuzz_limits(MAX_INPUT_BYTES as u64),
+        )
+        .blocking_wait()
+        .expect("build valid terrain artifact seed");
+        let artifact = fs::read(&artifact_path).expect("read valid terrain artifact seed");
+
+        let work_target = directory.path().join("work.pterr");
+        let result = point_terrain::prepare(
+            snapshot.clone(),
+            &work_target,
+            terrain_recipe(),
+            terrain_fuzz_limits(64),
+        )
+        .blocking_wait();
+        assert!(result.is_err(), "seed build must stop before publication");
+        let work = fs::read(terrain_sibling_path(&work_target, ".surface-work-v1"))
+            .expect("read valid terrain work seed");
+
+        let validation_target = directory.path().join("validated-work.pterr");
+        fs::write(
+            terrain_sibling_path(&validation_target, ".surface-work-v1"),
+            &work,
+        )
+        .expect("copy terrain work seed for public validation");
+        point_terrain::prepare(
+            snapshot.clone(),
+            validation_target,
+            terrain_recipe(),
+            terrain_fuzz_limits(MAX_INPUT_BYTES as u64),
+        )
+        .blocking_wait()
+        .expect("resume valid terrain work seed");
+
+        assert!(artifact.len() <= MAX_INPUT_BYTES);
+        assert!(work.len() <= MAX_INPUT_BYTES);
+        TerrainSeeds {
+            snapshot,
+            artifact,
+            work,
+            _directory: directory,
+        }
+    })
+}
+
+fn terrain_fixture_source() -> Source {
+    let mut ticks = Vec::with_capacity(TERRAIN_FIXTURE_POINTS as usize);
+    for ordinal in 0..TERRAIN_FIXTURE_POINTS {
+        let x = i64::try_from(ordinal % 4).expect("small fixture x tick");
+        let y = i64::try_from(ordinal / 4).expect("small fixture y tick");
+        ticks.push([x, y, x * x + 3 * y * y + x * y]);
+    }
+    let classification = AttributeDefinition::new(
+        terrain_classification_attribute(),
+        "classification",
+        AttributeDataType::U8,
+    )
+    .expect("terrain classification definition is valid");
+    let classification = AttributeColumn::new(
+        classification,
+        AttributeValues::u8(vec![
+            TERRAIN_GROUND_CLASSIFICATION;
+            TERRAIN_FIXTURE_POINTS as usize
+        ]),
+    )
+    .expect("terrain classification column is valid");
+    let attributes = AttributeColumns::new(vec![classification], TERRAIN_FIXTURE_POINTS as usize)
+        .expect("terrain fixture attributes are row-aligned");
+    let reference = SpatialReferenceProfile::new(
+        32_647,
+        5_703,
+        SpatialAxes::EastingNorthingElevation,
+        LinearUnit::Metre,
+        LinearUnit::Metre,
+        SpatialReferenceProvenance::CallerDeclaration,
+    )
+    .expect("terrain fixture reference is valid");
+    let input = MemorySource::from_columns(
+        PositionTransform::new([0.0; 3], [1.0, 1.0, 0.1])
+            .expect("terrain fixture transform is valid"),
+        CoordinateReference::profile(reference),
+        ticks,
+        attributes,
+    )
+    .expect("terrain fixture Source is valid");
+    source_memory::open(input)
+        .blocking_wait()
+        .expect("terrain fixture Source opens")
+}
+
+fn terrain_classification_attribute() -> AttributeId {
+    AttributeId::new(301).expect("terrain classification Attribute identity is nonzero")
+}
+
+fn terrain_recipe() -> TerrainRecipe {
+    TerrainRecipe::new(TERRAIN_GROUND_CLASSIFICATION).within(
+        WorldBounds::new([-1.0, -1.0, -1.0], [4.0, 4.0, 10.0])
+            .expect("terrain fixture bounds are valid"),
+    )
+}
+
+fn terrain_fuzz_limits(max_artifact_bytes: u64) -> TerrainPrepareLimits {
+    const MAX_POINTS: u64 = 32;
+    const MAX_FACES: u64 = 64;
+    const KIB: u64 = 1_024;
+
+    let source_budget = point_source::ReadBudget::new(8, 8 * TERRAIN_POINT_BYTES)
+        .expect("nonzero terrain Source batch limits")
+        .with_max_spans(64)
+        .with_max_points(MAX_POINTS)
+        .with_max_adapter_working_bytes(64 * KIB);
+    let rows = PointRowLimits::new(
+        point_index::CandidateLimits::new(1_024, 64, MAX_POINTS, 64 * KIB),
+        source_budget,
+        64,
+        64 * KIB,
+        MAX_POINTS,
+        8,
+        8 * TERRAIN_POINT_BYTES,
+        512 * KIB,
+    );
+    let derivation = TerrainLimits::new(
+        rows,
+        MAX_POINTS,
+        MAX_POINTS,
+        MAX_FACES,
+        1_024 * KIB,
+        1_024 * KIB,
+        100_000,
+    );
+    TerrainPrepareLimits::new(
+        derivation,
+        MAX_INPUT_BYTES as u64,
+        max_artifact_bytes,
+        2 * MAX_INPUT_BYTES as u64,
+        16 * KIB,
+        64 * KIB,
+        4 * KIB,
+    )
+}
+
+fn terrain_index_limits() -> PrepareLimits {
+    const KIB: u64 = 1_024;
+
+    PrepareLimits::new(8, 8 * TERRAIN_POINT_BYTES)
+        .expect("nonzero terrain index Source limits")
+        .with_max_adapter_working_bytes(64 * KIB)
+        .with_max_build_working_bytes(1_024 * KIB)
+        .with_max_incomplete_bytes(MAX_INPUT_BYTES as u64)
+        .with_max_artifact_bytes(MAX_INPUT_BYTES as u64)
+        .with_max_hierarchy_nodes(1_024)
+        .with_max_resident_metadata_bytes(512 * KIB)
+}
+
+fn terrain_workspace_limits() -> OpenLimits {
+    const KIB: u64 = 1_024;
+
+    OpenLimits::new()
+        .with_max_manifest_bytes(64 * KIB)
+        .with_max_operation_records(1)
+        .with_max_revision_files(1)
+        .with_max_revision_blocks(1)
+        .with_max_revision_rows(0)
+        .with_max_revision_block_bytes(64 * KIB)
+        .with_max_single_file_bytes(MAX_INPUT_BYTES as u64)
+        .with_max_total_persisted_bytes(2 * MAX_INPUT_BYTES as u64)
+        .with_max_working_bytes(1_024 * KIB)
+        .with_max_resident_metadata_bytes(128 * KIB)
+}
+
+fn exercise_terrain_streams(surface: &point_terrain::PreparedTerrainSurface) {
+    let _ = surface.descriptor();
+    let limits = SurfaceReadLimits::new(8, 8 * 32, 4 * 1_024, 8 * 1_024, 64 * 1_024);
+    if let Ok(batches) = surface.vertex_batches(limits) {
+        for batch in batches.take(TERRAIN_MAX_STREAM_BATCHES) {
+            if batch.is_err() {
+                break;
+            }
+        }
+    }
+    if let Ok(batches) = surface.face_batches(limits) {
+        for batch in batches.take(TERRAIN_MAX_STREAM_BATCHES) {
+            if batch.is_err() {
+                break;
+            }
+        }
+    }
+}
+
+fn terrain_sibling_path(target: &Path, suffix: &str) -> PathBuf {
+    let mut name = OsString::from(target.as_os_str());
+    name.push(suffix);
+    PathBuf::from(name)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -416,5 +825,12 @@ mod tests {
             blake3::hash(&attributed_frame[272..payload_end]).as_bytes(),
             &attributed_frame[240..272]
         );
+    }
+
+    #[test]
+    fn terrain_seed_and_malformed_modes_stay_bounded_and_panic_free() {
+        for mode in 0_u8..16 {
+            exercise_terrain_persisted_bytes(&[mode, 0, 0, 1, 31, 0, 0x80]);
+        }
     }
 }

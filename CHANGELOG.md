@@ -3,6 +3,31 @@
 All notable changes to Punctra are documented here. The project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased - 0.13.0-alpha.1
+
+- Completed and locally repository-verified the bounded [Persistent Bounded-AOI
+  Terrain design](docs/design/persistent-production-scale-terrain-v0.13.md) at
+  implementation commit `d99ed34324e8938fd0211344fbf65d539bb37178`; the
+  exact environment, command outcomes, fixtures, and generated observations
+  are in the [v0.13 verification record](docs/releases/v0.13.0.md). The scope
+  preserves the exact single-worker full-AOI triangulator and legacy in-memory
+  `derive` path while adding checksummed Ground-Input/final checkpoints,
+  resume, no-replace disk-v1 Surface publication, warm reopen, stale-binding
+  detection, and bounded file-backed vertex/face streams.
+- Retained the verified final stage and any Surface work sibling after
+  successful publication because no portable unlink can be conditioned on the
+  open owned inode. Work is trusted only after verification; a warm open gives
+  the complete target precedence, and cleanup remains an explicit owner-
+  controlled offline action.
+- Kept the evidence boundary explicit: **Complete and repository-verified for
+  the bounded persistent-terrain slice; field activation, production-scale
+  accuracy, true out-of-core adoption, independent adoption, partner
+  validation, and support qualification outstanding.** Persistence is bounded-
+  memory rather than true out-of-core triangulation. The two unrelated-firm
+  above-500-million-Point projects and production AOI/workstation measurements
+  remain outstanding. Version `0.13.0-alpha.1` remains Unreleased; this record
+  does not claim a tag, registry publication, or independent package execution.
+
 ## Unreleased - 0.12.0-alpha.1
 
 - Completed the repository implementation of the private pre-v0.13 field
