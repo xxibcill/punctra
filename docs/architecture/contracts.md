@@ -440,9 +440,11 @@ at each declared station; connected visualization between stations is not a
 continuous plane/TIN intersection. Reports bind Snapshot, Recipe, spatial
 reference, Surface hashes, tolerance, completed Source-row facts, canonical
 input/result hashes, every outcome, and resource accounting. A historical
-report remains valid for its exact pair, but freshness against a caller-
-declared current Snapshot/Surface distinguishes stale Snapshot and Surface
-state after an Edit.
+report remains valid for its exact pair. Freshness against a caller-declared
+current Snapshot alone makes no Surface claim; freshness against a declared
+current Snapshot/Surface pair additionally distinguishes stale Snapshot and
+Surface state after an Edit. The five outcomes keep Snapshot-only evidence
+distinct from evidence whose current Surface was checked.
 
 `compare_surfaces` requires common Workspace/Source lineage, Recipe, position
 transform, and spatial reference. It compares faces by three authoritative

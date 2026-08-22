@@ -119,10 +119,12 @@ Every successful report binds:
 
 QA starts only when the supplied Snapshot provenance exactly equals the
 Surface Snapshot provenance. An immutable report remains valid historical
-evidence for that pair. Its freshness check against a caller-declared current
-Snapshot and Surface distinguishes current, stale Snapshot, stale Surface, and
-both stale. After an Edit, callers must not present a historical report as
-current merely because its bytes remain valid.
+evidence for that pair. A freshness check against a caller-declared current
+Snapshot alone distinguishes Snapshot-only current from stale Snapshot without
+claiming that a current Surface was checked. A check that also declares the
+current Surface distinguishes current, stale Snapshot, stale Surface, and both
+stale. These five explicit outcomes prevent callers from presenting historical
+evidence as current merely because its bytes remain valid.
 
 Hashes use fixed domain-separated little-endian encodings. Package version,
 hash grammar version, Terrain algorithm version, Surface disk version, and any
