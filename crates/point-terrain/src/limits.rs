@@ -1,7 +1,24 @@
 use point_workspace::PointRowLimits;
 
+use crate::error::TerrainError;
+
 const MIB: u64 = 1024 * 1024;
 const GIB: u64 = 1024 * MIB;
+
+pub(crate) fn usize_to_u64_saturating(value: usize) -> u64 {
+    u64::try_from(value).unwrap_or(u64::MAX)
+}
+
+pub(crate) fn require_within(
+    label: &'static str,
+    required: u64,
+    allowed: u64,
+) -> Result<(), TerrainError> {
+    if required > allowed {
+        return Err(TerrainError::resource(label, required, allowed));
+    }
+    Ok(())
+}
 
 /// Hard ceilings for one complete Terrain Derivation.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

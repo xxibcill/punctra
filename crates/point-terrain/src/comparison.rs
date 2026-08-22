@@ -5,7 +5,10 @@ use foundation_runtime::{OperationControl, ProgressPhase, ProgressSnapshot};
 use point_contracts::{ContentHash, PointId, WorldBounds};
 use point_workspace::SnapshotProvenance;
 
-use crate::{SurfaceComparisonLimits, SurfaceFace, TerrainError, TerrainSurface};
+use crate::{
+    SurfaceComparisonLimits, SurfaceFace, TerrainError, TerrainSurface,
+    limits::{require_within, usize_to_u64_saturating},
+};
 
 const CHANGE_HASH_DOMAIN: &[u8] = b"punctra-terrain-surface-change-v1";
 const CANCELLATION_STRIDE: u64 = 1_024;
@@ -167,19 +170,7 @@ fn run(
 ) -> Result<SurfaceComparisonReport, TerrainError> {
     control.check_cancelled()?;
     validate_compatible(before, after)?;
-    let total_faces = u64_len(before.faces().len()).saturating_add(u64_len(after.faces().len()));
-    require_within("Surface comparison faces", total_faces, limits.max_faces())?;
-    let required_record_bytes = total_faces.saturating_mul(u64_len(mem::size_of::<FaceRecord>()));
-    require_within(
-        "Surface comparison record bytes",
-        required_record_bytes,
-        limits.max_record_bytes(),
-    )?;
-    require_within(
-        "Surface comparison working bytes",
-        required_record_bytes,
-        limits.max_working_bytes(),
-    )?;
+    preflight_records(before, after, limits)?;
 
     let mut meter = WorkMeter::new(limits.max_work_units(), control);
     let mut before_records = face_records(before, &mut meter)?;
@@ -323,6 +314,28 @@ fn validate_compatible(
     Ok(())
 }
 
+fn preflight_records(
+    before: &TerrainSurface,
+    after: &TerrainSurface,
+    limits: SurfaceComparisonLimits,
+) -> Result<(), TerrainError> {
+    let total_faces = usize_to_u64_saturating(before.faces().len())
+        .saturating_add(usize_to_u64_saturating(after.faces().len()));
+    require_within("Surface comparison faces", total_faces, limits.max_faces())?;
+    let required_record_bytes =
+        total_faces.saturating_mul(usize_to_u64_saturating(mem::size_of::<FaceRecord>()));
+    require_within(
+        "Surface comparison record bytes",
+        required_record_bytes,
+        limits.max_record_bytes(),
+    )?;
+    require_within(
+        "Surface comparison working bytes",
+        required_record_bytes,
+        limits.max_working_bytes(),
+    )
+}
+
 fn face_records(
     surface: &TerrainSurface,
     meter: &mut WorkMeter<'_>,
@@ -333,8 +346,8 @@ fn face_records(
         .map_err(|_| {
             TerrainError::resource(
                 "Surface comparison allocation",
-                u64_len(surface.faces().len()),
-                u64_len(usize::MAX),
+                usize_to_u64_saturating(surface.faces().len()),
+                usize_to_u64_saturating(usize::MAX),
             )
         })?;
     for face in surface.faces().iter().copied() {
@@ -419,18 +432,8 @@ fn hash_face(hasher: &mut Hasher, key: [PointId; 3]) {
 }
 
 fn allocation_bytes(records: &Vec<FaceRecord>) -> u64 {
-    u64_len(records.capacity()).saturating_mul(u64_len(mem::size_of::<FaceRecord>()))
-}
-
-fn u64_len(value: usize) -> u64 {
-    u64::try_from(value).unwrap_or(u64::MAX)
-}
-
-fn require_within(name: &'static str, required: u64, allowed: u64) -> Result<(), TerrainError> {
-    if required > allowed {
-        return Err(TerrainError::resource(name, required, allowed));
-    }
-    Ok(())
+    usize_to_u64_saturating(records.capacity())
+        .saturating_mul(usize_to_u64_saturating(mem::size_of::<FaceRecord>()))
 }
 
 #[cfg(test)]

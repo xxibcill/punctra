@@ -8,7 +8,9 @@ use point_workspace::{PointQuery, Snapshot, SnapshotPointSummary, SnapshotProven
 use crate::{
     ALGORITHM_VERSION, CheckPoint, CheckPointId, CheckPointLimits, CheckPointOutcome,
     PreparedTerrainSurface, ResidualStatistics, SurfaceFace, SurfaceVertex, TerrainDescriptor,
-    TerrainError, TerrainQaLimits, TerrainSurface, model::SurfaceData as ModelSurfaceData,
+    TerrainError, TerrainQaLimits, TerrainSurface,
+    limits::{require_within, usize_to_u64_saturating},
+    model::SurfaceData as ModelSurfaceData,
     qa::ResidualAccumulator,
 };
 
@@ -1476,7 +1478,7 @@ fn hash_input(
             hasher.update(summary.content_hash.as_bytes());
         }
     }
-    hasher.update(&u64_len(request.check_points.len()).to_le_bytes());
+    hasher.update(&usize_to_u64_saturating(request.check_points.len()).to_le_bytes());
     for (index, point) in request.check_points.iter().enumerate() {
         poll(index, control)?;
         hasher.update(&point.id().get().to_le_bytes());
@@ -1550,7 +1552,7 @@ fn hash_results(
     hasher.update(&binding.spatial_reference.canonical_bytes());
     hasher.update(&tolerance.below_metres.to_bits().to_le_bytes());
     hasher.update(&tolerance.above_metres.to_bits().to_le_bytes());
-    hasher.update(&u64_len(source_points.len()).to_le_bytes());
+    hasher.update(&usize_to_u64_saturating(source_points.len()).to_le_bytes());
     for (index, result) in source_points.iter().enumerate() {
         poll(index, control)?;
         hasher.update(result.point.source().as_bytes());
@@ -1561,7 +1563,7 @@ fn hash_results(
         hasher.update(&[result.effective_classification]);
         hash_residual_outcome(&mut hasher, result.outcome);
     }
-    hasher.update(&u64_len(check_points.len()).to_le_bytes());
+    hasher.update(&usize_to_u64_saturating(check_points.len()).to_le_bytes());
     for (index, result) in check_points.iter().enumerate() {
         poll(index, control)?;
         hasher.update(&result.check_point.id().get().to_le_bytes());
@@ -1570,7 +1572,7 @@ fn hash_results(
         }
         hash_residual_outcome(&mut hasher, result.outcome);
     }
-    hasher.update(&u64_len(profile_stations.len()).to_le_bytes());
+    hasher.update(&usize_to_u64_saturating(profile_stations.len()).to_le_bytes());
     for (index, result) in profile_stations.iter().enumerate() {
         poll(index, control)?;
         hasher.update(&result.index.to_le_bytes());
@@ -1641,26 +1643,15 @@ fn extend_with_cancellation<T>(
 }
 
 fn payload_bytes<T>(count: usize) -> u64 {
-    u64_len(count).saturating_mul(u64_len(mem::size_of::<T>()))
+    usize_to_u64_saturating(count).saturating_mul(usize_to_u64_saturating(mem::size_of::<T>()))
 }
 
 fn allocation_bytes<T>(capacity: usize) -> u64 {
     payload_bytes::<T>(capacity)
 }
 
-fn u64_len(value: usize) -> u64 {
-    u64::try_from(value).unwrap_or(u64::MAX)
-}
-
 fn usize_limit() -> u64 {
     u64::try_from(usize::MAX).unwrap_or(u64::MAX)
-}
-
-fn require_within(name: &'static str, required: u64, allowed: u64) -> Result<(), TerrainError> {
-    if required > allowed {
-        return Err(TerrainError::resource(name, required, allowed));
-    }
-    Ok(())
 }
 
 fn poll(index: usize, control: &OperationControl) -> Result<(), TerrainError> {

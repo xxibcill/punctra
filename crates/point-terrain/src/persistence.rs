@@ -28,6 +28,7 @@ use crate::{
         TOPOLOGY_HASH_DOMAIN, artifact_hash, canonical_f64_bits, canonical_topology_hash,
         collect_input, derive_collected, domain_hasher, hash_transform, recipe_hash,
     },
+    limits::require_within,
 };
 
 /// Fixed complete Surface artifact disk contract supported by this crate.
@@ -3535,13 +3536,6 @@ const fn block_count(record_count: u64) -> u64 {
 
 const fn directory_bytes(block_count: u64) -> u64 {
     block_count.saturating_mul(CHECKSUM_BYTES)
-}
-
-fn require_within(label: &'static str, required: u64, allowed: u64) -> Result<(), TerrainError> {
-    if required > allowed {
-        return Err(TerrainError::resource(label, required, allowed));
-    }
-    Ok(())
 }
 
 fn require_path_within(path: &Path, limits: TerrainPrepareLimits) -> Result<(), TerrainError> {
