@@ -15,14 +15,14 @@ support gates remain historically accurate, but they do not determine the next
 product direction. The project now pivots from a desktop terrain-delivery
 hypothesis to an embeddable browser point-cloud rendering engine.
 
-Versions v0.15 through v0.30 are uncommitted Candidate themes. v0.15–v0.20
-establish browser execution, streaming, the viewer API, embedding, and platform
-qualification. v0.21–v0.29 then improve and qualify visual quality. v0.30 is
-the earliest planned browser-engine release candidate; no earlier future
-release may be represented as a product release candidate. The historical
-v0.9 "Trust and v1 candidate" name describes its bounded repository
-compatibility checkpoint, not browser-product release-candidate status. There
-is currently no Active release.
+v0.15 is the Active browser-foundation release. Versions v0.16 through v0.30
+remain uncommitted Candidate themes. v0.15–v0.20 establish browser execution,
+streaming, the viewer API, embedding, and platform qualification. v0.21–v0.29
+then improve and qualify visual quality. v0.30 is the earliest planned browser-
+engine release candidate; no earlier future release may be represented as a
+product release candidate. The historical v0.9 "Trust and v1 candidate" name
+describes its bounded repository compatibility checkpoint, not browser-product
+release-candidate status.
 
 ## Working direction
 
@@ -90,7 +90,7 @@ release can be Complete while every product gate remains outstanding.
 ## Current pivot checkpoint
 
 Status: **v0.14 complete and repository-verified for its bounded historical
-slice; browser-engine v0.15 not yet Active**
+slice; browser-engine v0.15 Active under its accepted design**
 
 The completed v0.1–v0.14 contracts are inputs to the pivot, not permission to
 carry the old product sequence forward. In particular:
@@ -105,12 +105,13 @@ carry the old product sequence forward. In particular:
 - Workspace, terrain, QA, LandXML, and downstream-verification work remain
   implemented historical modules, not post-v0.14 product priorities.
 
-Before v0.15 becomes Active, its accepted design must select the browser build
-and packaging path, supported WebGPU capability floor, JavaScript/TypeScript
-boundary, host ownership model, and one local browser acceptance harness.
-Useful activation evidence includes a small real embedding host, at least one
-representative LAS/LAZ Source, measured browser memory and frame behavior, and
-a precise list of browser-only failures that native acceptance cannot expose.
+The accepted [v0.15 browser-foundation
+design](docs/design/browser-foundation-v0.15.md) selects the browser build and
+packaging path, supported WebGPU capability floor, example JavaScript boundary,
+host ownership model, resource accounting, and local browser acceptance
+harness. Its generated in-memory scene intentionally precedes the remote
+representative LAS/LAZ Source and measured delivery behavior required to
+activate v0.16.
 
 ## Pre-v0.13 renderer quality corrective checkpoint
 
@@ -1096,16 +1097,17 @@ Repository exit evidence:
 
 ### v0.15 — WebAssembly and WebGPU browser foundation
 
-Status: **Candidate**
+Status: **Active**
 
 Candidate outcome: render one deterministic Punctra scene inside a browser
 canvas through a bounded WebAssembly/WebGPU path.
 
 Activation gate:
 
-- an accepted design selects the Rust-to-WebAssembly toolchain, JavaScript API
-  boundary, WebGPU capability floor, browser test harness, and canvas/device
-  ownership model.
+- satisfied by the accepted [WebAssembly and WebGPU Browser Foundation
+  design](docs/design/browser-foundation-v0.15.md), which selects the Rust-to-
+  WebAssembly toolchain, example JavaScript boundary, WebGPU capability floor,
+  browser test harness, and canvas/device ownership model.
 
 Likely scope:
 
