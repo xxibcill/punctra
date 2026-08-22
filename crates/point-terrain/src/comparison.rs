@@ -196,12 +196,14 @@ fn run(
                 right += 1;
             }
             (Some(before_record), Some(after_record)) if before_record.key < after_record.key => {
-                removed_face_count = removed_face_count.checked_add(1).ok_or_else(|| {
-                    TerrainError::numeric("removed Surface face count overflowed")
-                })?;
-                hash_face(&mut removed_hasher, before_record.key);
-                extend_bounds(&mut bounds, before, before_record.vertices)?;
-                left += 1;
+                record_removed_face(
+                    &mut removed_face_count,
+                    &mut removed_hasher,
+                    &mut bounds,
+                    before,
+                    *before_record,
+                    &mut left,
+                )?;
             }
             (Some(_) | None, Some(after_record)) => {
                 added_face_count = added_face_count
@@ -212,12 +214,14 @@ fn run(
                 right += 1;
             }
             (Some(before_record), None) => {
-                removed_face_count = removed_face_count.checked_add(1).ok_or_else(|| {
-                    TerrainError::numeric("removed Surface face count overflowed")
-                })?;
-                hash_face(&mut removed_hasher, before_record.key);
-                extend_bounds(&mut bounds, before, before_record.vertices)?;
-                left += 1;
+                record_removed_face(
+                    &mut removed_face_count,
+                    &mut removed_hasher,
+                    &mut bounds,
+                    before,
+                    *before_record,
+                    &mut left,
+                )?;
             }
             (None, None) => break,
         }
@@ -240,6 +244,23 @@ fn run(
         work_units: meter.used,
         accounted_peak_working_bytes,
     })
+}
+
+fn record_removed_face(
+    count: &mut u64,
+    hasher: &mut Hasher,
+    bounds: &mut Option<([f64; 3], [f64; 3])>,
+    surface: &TerrainSurface,
+    record: FaceRecord,
+    cursor: &mut usize,
+) -> Result<(), TerrainError> {
+    *count = count
+        .checked_add(1)
+        .ok_or_else(|| TerrainError::numeric("removed Surface face count overflowed"))?;
+    hash_face(hasher, record.key);
+    extend_bounds(bounds, surface, record.vertices)?;
+    *cursor += 1;
+    Ok(())
 }
 
 fn validate_compatible(
