@@ -1226,6 +1226,7 @@ fn collect_source_inputs(
         limits.max_working_bytes(),
     )?;
     let mut rows = snapshot.point_rows(query, limits.point_rows())?;
+    let _rows_parent_link = rows.handle().token().link_to_parent(&control.token())?;
     let mut inputs = Vec::new();
     while let Some(batch) = rows.next()? {
         control.check_cancelled()?;

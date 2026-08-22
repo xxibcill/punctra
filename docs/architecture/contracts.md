@@ -620,7 +620,9 @@ cancellation. Cancellation is observed only at boundaries where the operation
 can still report its durable certainty truthfully.
 
 `Job::blocking_wait_cancelled_by` links a synchronously awaited child directly
-to one parent `CancellationToken`. Parent cancellation is then visible to child
+to one parent `CancellationToken`. Pull-based compositions use
+`CancellationToken::link_to_parent` and retain its scoped `CancellationLink`
+while the child stream is active. Parent cancellation is then visible to child
 control, reporters, and streams without polling or a hidden runtime. Child
 cancellation does not cancel the parent, and an uncooperative child retains the
 existing detached-worker limitation.

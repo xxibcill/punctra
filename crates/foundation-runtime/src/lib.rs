@@ -89,8 +89,18 @@ impl CancellationToken {
         }
     }
 
-    fn link_parent(&self, parent: &Self) -> ParentCancellationLink {
-        ParentCancellationLink::install(self, parent)
+    /// Links this child token directly to one parent for the returned guard's lifetime.
+    ///
+    /// Parent cancellation becomes visible through this token. Cancelling this
+    /// child does not cancel the parent. Dropping the returned guard deactivates
+    /// the parent relationship without clearing this token's own cancellation.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RuntimeError::CancellationParentAlreadyLinked`] when this child
+    /// has previously received a direct parent link.
+    pub fn link_to_parent(&self, parent: &Self) -> Result<CancellationLink, RuntimeError> {
+        CancellationLink::install(self, parent)
     }
 }
 
@@ -180,34 +190,38 @@ impl LinkedParentCancellation {
     }
 }
 
-struct ParentCancellationLink {
+/// Scoped direct-parent relationship between two cancellation tokens.
+///
+/// Keep this value alive while the child operation must observe its parent.
+#[must_use = "dropping the link stops parent cancellation propagation"]
+pub struct CancellationLink {
     child: Weak<CancellationState>,
 }
 
-impl ParentCancellationLink {
-    fn install(child: &CancellationToken, parent: &CancellationToken) -> Self {
+impl CancellationLink {
+    fn install(
+        child: &CancellationToken,
+        parent: &CancellationToken,
+    ) -> Result<Self, RuntimeError> {
         if Arc::ptr_eq(&child.state, &parent.state) {
-            return Self { child: Weak::new() };
+            return Ok(Self { child: Weak::new() });
         }
 
-        assert!(
-            child
-                .state
-                .parent
-                .set(LinkedParentCancellation {
-                    state: Arc::downgrade(&parent.state),
-                    active: AtomicBool::new(true),
-                })
-                .is_ok(),
-            "a child cancellation token may link only one direct parent"
-        );
-        Self {
+        child
+            .state
+            .parent
+            .set(LinkedParentCancellation {
+                state: Arc::downgrade(&parent.state),
+                active: AtomicBool::new(true),
+            })
+            .map_err(|_| RuntimeError::CancellationParentAlreadyLinked)?;
+        Ok(Self {
             child: Arc::downgrade(&child.state),
-        }
+        })
     }
 }
 
-impl Drop for ParentCancellationLink {
+impl Drop for CancellationLink {
     fn drop(&mut self) {
         let Some(child) = self.child.upgrade() else {
             return;
@@ -678,7 +692,11 @@ where
     /// Returns the worker closure's error, including cooperative cancellation
     /// observed from the child or linked parent and converted runtime failures.
     pub fn blocking_wait_cancelled_by(self, parent: &CancellationToken) -> Result<T, E> {
-        let _parent_link = self.handle.token().link_parent(parent);
+        let _parent_link = self
+            .handle
+            .token()
+            .link_to_parent(parent)
+            .map_err(E::from)?;
         self.shared.wait()
     }
 }
@@ -749,6 +767,9 @@ pub enum RuntimeError {
     /// The worker panicked or could not be started.
     #[error("operation worker panicked or could not be started")]
     WorkerPanicked,
+    /// A child cancellation token already received its one direct parent link.
+    #[error("cancellation token already has a direct parent")]
+    CancellationParentAlreadyLinked,
     /// Completed work exceeded the declared total.
     #[error("completed progress {completed_units} exceeds total {total_units}")]
     InvalidProgress {
@@ -908,8 +929,8 @@ mod tests {
     fn linked_cancellation_cycles_remain_finite_and_observe_members() {
         let first = CancellationToken::new();
         let second = CancellationToken::new();
-        let _first_link = first.link_parent(&second);
-        let _second_link = second.link_parent(&first);
+        let _first_link = first.link_to_parent(&second).unwrap();
+        let _second_link = second.link_to_parent(&first).unwrap();
 
         assert!(!first.is_cancelled());
         second.cancel();

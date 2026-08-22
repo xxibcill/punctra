@@ -98,6 +98,19 @@ fn parent_cancellation_reaches_a_linked_active_child() {
 }
 
 #[test]
+fn explicit_cancellation_link_reaches_a_pull_based_child() {
+    let parent = CancellationToken::new();
+    let child = CancellationToken::new();
+    let _link = child
+        .link_to_parent(&parent)
+        .expect("one direct cancellation parent should link");
+
+    parent.cancel();
+
+    assert!(child.is_cancelled());
+}
+
+#[test]
 fn root_cancellation_reaches_a_grandchild_awaited_by_a_linked_parent() {
     let root = CancellationToken::new();
     let waiter_root = root.clone();
