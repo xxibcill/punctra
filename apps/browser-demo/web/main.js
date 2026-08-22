@@ -66,6 +66,15 @@ function publishDiagnostics(diagnostics) {
     ["Adapter", diagnostics.capabilities.adapter_name],
     ["Backend", diagnostics.capabilities.backend],
     ["Surface", diagnostics.capabilities.surface_format],
+    ["Composite alpha", diagnostics.capabilities.composite_alpha_mode],
+    [
+      "Render attachment",
+      diagnostics.capabilities.surface_format_support.render_attachment ? "available" : "unavailable",
+    ],
+    [
+      "Blendable surface",
+      diagnostics.capabilities.surface_format_support.blendable ? "available" : "unavailable",
+    ],
     ["Physical viewport", `${diagnostics.viewport.physical_width} × ${diagnostics.viewport.physical_height}`],
   ]);
   replaceFacts(resourceFacts, [
@@ -136,15 +145,30 @@ function verifyCapabilityDiagnostics(diagnostics) {
   assertFact(capabilities.backend === "BrowserWebGpu", "browser WebGPU backend");
   assertFact(capabilities.device_type.length > 0, "adapter device type");
   assertFact(capabilities.surface_format.length > 0, "surface format");
+  assertFact(
+    ["Opaque", "PreMultiplied"].includes(capabilities.composite_alpha_mode),
+    "supported composite alpha mode",
+  );
   assertFact(capabilities.present_mode === "fifo", "FIFO presentation");
+  assertFact(
+    capabilities.surface_format_support.render_attachment === true,
+    "render-attachment surface",
+  );
+  assertFact(capabilities.surface_format_support.blendable === true, "blendable surface format");
   assertFact(capabilities.required_feature_count === 0, "WebGPU core features only");
   assertFact(
-    capabilities.adapter_max_buffer_size >= diagnostics.limits.estimated_gpu_bytes,
-    "adapter buffer limit",
+    capabilities.adapter_max_buffer_size >= 268_435_456,
+    "default adapter buffer limit",
   );
   assertFact(
-    capabilities.adapter_max_texture_dimension_2d >= diagnostics.limits.canvas_dimension,
-    "adapter texture-dimension limit",
+    capabilities.adapter_max_texture_dimension_2d >= 8_192,
+    "default adapter texture-dimension limit",
+  );
+  assertFact(capabilities.adapter_max_bind_groups >= 4, "default adapter bind-group limit");
+  assertFact(capabilities.adapter_max_vertex_buffers >= 8, "default adapter vertex-buffer limit");
+  assertFact(
+    capabilities.adapter_max_color_attachments >= 8,
+    "default adapter color-attachment limit",
   );
 }
 
@@ -224,8 +248,21 @@ async function runSmokePath() {
   assertFact(diagnostics.scene.retained_nodes === 1, "settled planner retention");
   assertFact(diagnostics.scene.generation === 1, "View generation");
   assertFact(diagnostics.scene.batch_version === 1, "batch version");
+  assertFact(diagnostics.scene.estimated_gpu_bytes === 26_136, "fixed scene logical bytes");
   assertFact(diagnostics.frame.drawn_points === 1089, "drawn Point count");
-  assertFact(diagnostics.scene.estimated_gpu_bytes <= diagnostics.limits.estimated_gpu_bytes, "logical residency ceiling");
+  assertFact(diagnostics.frame.draw_calls === 1, "single generated draw call");
+  assertFact(diagnostics.frame.resident_bytes === 26_136, "fixed resident bytes");
+  assertFact(diagnostics.limits.estimated_gpu_bytes === 49_152, "logical byte ceiling");
+  assertFact(diagnostics.limits.points === 2_048, "Point ceiling");
+  assertFact(diagnostics.limits.batches === 4, "batch ceiling");
+  assertFact(diagnostics.limits.highlight_points === 32, "highlight ceiling");
+  assertFact(diagnostics.limits.canvas_dimension === 4_096, "canvas dimension ceiling");
+  assertFact(diagnostics.limits.canvas_pixels === 8_388_608, "canvas area ceiling");
+  assertFact(diagnostics.limits.device_pixel_ratio === 4, "device-pixel-ratio ceiling");
+  assertFact(
+    diagnostics.limits.renderer_transient_bytes === 67_108_864,
+    "transient texture ceiling",
+  );
   assertFact(
     diagnostics.viewport.surface_bytes
       <= diagnostics.limits.canvas_pixels * diagnostics.limits.surface_bytes_per_pixel,
@@ -233,7 +270,10 @@ async function runSmokePath() {
   );
   assertFact(diagnostics.limits.surface_bytes_per_pixel === 4, "surface byte factor");
   assertFact(diagnostics.limits.presentation_latency_frames === 2, "presentation latency hint");
-  assertFact(diagnostics.frame.transient_texture_bytes <= diagnostics.limits.renderer_transient_bytes, "transient texture ceiling");
+  assertFact(
+    diagnostics.frame.transient_texture_bytes === diagnostics.viewport.surface_bytes,
+    "exact pre-pick transient texture accounting",
+  );
 
   const resizedViewport = verifyBoundedResize(initialViewport);
 
@@ -248,6 +288,7 @@ async function runSmokePath() {
   assertFact(diagnostics.pick.status === "hit", "centre provisional pick");
   assertFact(diagnostics.pick.point_ordinal === 544, "centre Point identity");
   assertFact(diagnostics.pick.generation === 1, "pick generation");
+  assertFact(diagnostics.pick.batch_key === 1, "pick batch key");
   assertFact(diagnostics.pick.batch_version === 1, "pick batch version");
   assertFact(
     diagnostics.frame.transient_texture_bytes

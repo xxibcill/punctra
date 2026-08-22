@@ -311,6 +311,7 @@ impl BrowserResources {
         let facts = CapabilityFacts::new(
             &adapter_info,
             &adapter_limits,
+            &capabilities,
             &surface_configuration,
             browser_user_agent(),
             browser_platform(),
@@ -582,13 +583,23 @@ fn surface_configuration(
             INITIALIZATION_ACTION,
         ));
     }
-    let alpha_mode = capabilities.alpha_modes.first().copied().ok_or_else(|| {
-        failure(
-            "surface_alpha_mode",
-            "the canvas exposes no composite alpha mode",
-            INITIALIZATION_ACTION,
-        )
-    })?;
+    let alpha_mode = capabilities
+        .alpha_modes
+        .iter()
+        .copied()
+        .find(|mode| {
+            matches!(
+                mode,
+                wgpu::CompositeAlphaMode::Opaque | wgpu::CompositeAlphaMode::PreMultiplied
+            )
+        })
+        .ok_or_else(|| {
+            failure(
+                "surface_alpha_mode",
+                "the canvas exposes no supported opaque or premultiplied composite alpha mode",
+                INITIALIZATION_ACTION,
+            )
+        })?;
     let dimensions = viewport.dimensions();
     Ok(wgpu::SurfaceConfiguration {
         usage: wgpu::TextureUsages::RENDER_ATTACHMENT,

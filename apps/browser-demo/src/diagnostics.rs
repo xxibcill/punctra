@@ -47,10 +47,21 @@ pub(crate) struct CapabilityFacts {
     backend: String,
     device_type: String,
     surface_format: String,
+    composite_alpha_mode: String,
     present_mode: &'static str,
+    surface_format_support: SurfaceFormatSupport,
     required_feature_count: u64,
     adapter_max_buffer_size: u64,
     adapter_max_texture_dimension_2d: u32,
+    adapter_max_bind_groups: u32,
+    adapter_max_vertex_buffers: u32,
+    adapter_max_color_attachments: u32,
+}
+
+#[derive(Serialize)]
+struct SurfaceFormatSupport {
+    render_attachment: bool,
+    blendable: bool,
 }
 
 impl CapabilityFacts {
@@ -58,6 +69,7 @@ impl CapabilityFacts {
     pub(crate) fn new(
         adapter: &wgpu::AdapterInfo,
         limits: &wgpu::Limits,
+        surface_capabilities: &wgpu::SurfaceCapabilities,
         surface: &wgpu::SurfaceConfiguration,
         browser_user_agent: String,
         browser_platform: String,
@@ -67,6 +79,9 @@ impl CapabilityFacts {
         } else {
             adapter.name.clone()
         };
+        let format_features = surface
+            .format
+            .guaranteed_format_features(wgpu::Features::empty());
         Self {
             secure_context: true,
             webgpu: true,
@@ -76,10 +91,25 @@ impl CapabilityFacts {
             backend: format!("{:?}", adapter.backend),
             device_type: format!("{:?}", adapter.device_type),
             surface_format: format!("{:?}", surface.format),
+            composite_alpha_mode: format!("{:?}", surface.alpha_mode),
             present_mode: "fifo",
+            surface_format_support: SurfaceFormatSupport {
+                render_attachment: surface_capabilities
+                    .usages
+                    .contains(wgpu::TextureUsages::RENDER_ATTACHMENT)
+                    && format_features
+                        .allowed_usages
+                        .contains(wgpu::TextureUsages::RENDER_ATTACHMENT),
+                blendable: format_features
+                    .flags
+                    .contains(wgpu::TextureFormatFeatureFlags::BLENDABLE),
+            },
             required_feature_count: 0,
             adapter_max_buffer_size: limits.max_buffer_size,
             adapter_max_texture_dimension_2d: limits.max_texture_dimension_2d,
+            adapter_max_bind_groups: limits.max_bind_groups,
+            adapter_max_vertex_buffers: limits.max_vertex_buffers,
+            adapter_max_color_attachments: limits.max_color_attachments,
         }
     }
 }
@@ -278,6 +308,14 @@ mod tests {
         assert_eq!(value["limits"]["presentation_latency_frames"], 2);
         assert_eq!(value["viewport"]["surface_bytes"], 6_400_000);
         assert_eq!(value["pick"]["status"], "not_requested");
+        assert_eq!(value["capabilities"]["composite_alpha_mode"], "Opaque");
+        assert_eq!(
+            value["capabilities"]["surface_format_support"],
+            json!({ "render_attachment": true, "blendable": true })
+        );
+        assert_eq!(value["capabilities"]["adapter_max_bind_groups"], 4);
+        assert_eq!(value["capabilities"]["adapter_max_vertex_buffers"], 8);
+        assert_eq!(value["capabilities"]["adapter_max_color_attachments"], 8);
     }
 
     #[test]
@@ -337,10 +375,18 @@ mod tests {
             backend: "BrowserWebGpu".to_owned(),
             device_type: "Other".to_owned(),
             surface_format: "Bgra8Unorm".to_owned(),
+            composite_alpha_mode: "Opaque".to_owned(),
             present_mode: "fifo",
+            surface_format_support: SurfaceFormatSupport {
+                render_attachment: true,
+                blendable: true,
+            },
             required_feature_count: 0,
             adapter_max_buffer_size: 268_435_456,
             adapter_max_texture_dimension_2d: 8_192,
+            adapter_max_bind_groups: 4,
+            adapter_max_vertex_buffers: 8,
+            adapter_max_color_attachments: 8,
         }
     }
 }
