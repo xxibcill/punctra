@@ -1,3 +1,5 @@
+use std::sync::{Arc, Mutex};
+
 use js_sys::Reflect;
 use render_protocol::{RenderLimits, Viewport};
 use render_wgpu::{
@@ -83,7 +85,7 @@ impl BrowserViewer {
         self.ensure_active()?;
         let viewport = PhysicalViewport::from_css(css_width, css_height, device_pixel_ratio)
             .map_err(model_failure)?;
-        self.resources_mut()?.reconfigure(viewport);
+        self.resources_mut()?.reconfigure(viewport)?;
         self.viewport = viewport;
         self.last_frame = None;
         self.pick = PickFacts::not_requested();
@@ -93,6 +95,7 @@ impl BrowserViewer {
     /// Declares whether the host considers the canvas visible.
     #[wasm_bindgen(js_name = setVisible)]
     pub fn set_visible(&mut self, visible: bool) -> Result<String, JsValue> {
+        self.ensure_active()?;
         self.lifecycle.set_visible(visible).map_err(model_failure)?;
         if !visible {
             self.resources_mut()?.discard_interaction_state();
@@ -104,6 +107,7 @@ impl BrowserViewer {
     /// Records, submits, and presents one frame when the host is visible.
     #[wasm_bindgen]
     pub fn render(&mut self) -> Result<String, JsValue> {
+        self.ensure_active()?;
         match self.lifecycle.begin_render().map_err(model_failure)? {
             RenderDisposition::SkipHidden => return self.diagnostics(),
             RenderDisposition::Record => {}
@@ -151,6 +155,9 @@ impl BrowserViewer {
     /// Returns the complete bounded host diagnostics as JSON.
     #[wasm_bindgen]
     pub fn diagnostics(&self) -> Result<String, JsValue> {
+        if let Some(resources) = &self.resources {
+            resources.ensure_device_available()?;
+        }
         let limits = LimitFacts::new(render_limits());
         let diagnostics = Diagnostics {
             schema: "punctra-browser-foundation-v1",
@@ -256,7 +263,10 @@ struct BrowserResources {
     renderer: WgpuRenderer,
     recorded_frame: Option<RecordedFrame>,
     pick_ticket: Option<PickTicket>,
+    device_loss: DeviceLossState,
 }
+
+type DeviceLossState = Arc<Mutex<Option<String>>>;
 
 impl BrowserResources {
     async fn initialize(
@@ -274,6 +284,7 @@ impl BrowserResources {
         let adapter_info = adapter.get_info();
         let adapter_limits = adapter.limits();
         let (device, queue) = request_device(&adapter).await?;
+        let device_loss = track_device_loss(&device);
         let renderer = create_renderer(&device, surface_configuration.format, scene)?;
         set_canvas_size(canvas, viewport);
         surface.configure(&device, &surface_configuration);
@@ -289,12 +300,14 @@ impl BrowserResources {
                 renderer,
                 recorded_frame: None,
                 pick_ticket: None,
+                device_loss,
             },
             facts,
         ))
     }
 
-    fn reconfigure(&mut self, viewport: PhysicalViewport) {
+    fn reconfigure(&mut self, viewport: PhysicalViewport) -> Result<(), JsValue> {
+        self.ensure_device_available()?;
         let dimensions = viewport.dimensions();
         self.surface_configuration.width = dimensions[0];
         self.surface_configuration.height = dimensions[1];
@@ -302,9 +315,11 @@ impl BrowserResources {
         self.discard_interaction_state();
         self.surface
             .configure(&self.device, &self.surface_configuration);
+        self.ensure_device_available()
     }
 
     fn render(&mut self, frame: &Frame) -> Result<(FrameReport, bool), JsValue> {
+        self.ensure_device_available()?;
         self.discard_interaction_state();
         let (surface_texture, suboptimal) = self.acquire_surface_texture()?;
         let target = surface_texture
@@ -327,6 +342,7 @@ impl BrowserResources {
     }
 
     fn begin_pick(&mut self, pixel: [u32; 2]) -> Result<(), JsValue> {
+        self.ensure_device_available()?;
         if self.pick_ticket.is_some() {
             return Err(failure(
                 "pick_pending",
@@ -352,6 +368,7 @@ impl BrowserResources {
     }
 
     fn poll_pick(&mut self) -> Result<PickPoll, JsValue> {
+        self.ensure_device_available()?;
         self.device
             .poll(wgpu::PollType::Poll)
             .map_err(|error| failure("device_poll", error, RECREATE_ACTION))?;
@@ -412,6 +429,30 @@ impl BrowserResources {
         self.device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some(label) })
     }
+
+    fn ensure_device_available(&self) -> Result<(), JsValue> {
+        let loss = self
+            .device_loss
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        match loss {
+            Some(loss) => Err(failure("device_lost", loss, RECREATE_ACTION)),
+            None => Ok(()),
+        }
+    }
+}
+
+fn track_device_loss(device: &wgpu::Device) -> DeviceLossState {
+    let state = Arc::new(Mutex::new(None));
+    let callback_state = Arc::clone(&state);
+    device.set_device_lost_callback(move |reason, message| {
+        let loss = format!("WebGPU device lost ({reason:?}): {message}");
+        *callback_state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(loss);
+    });
+    state
 }
 
 fn preflight_browser() -> Result<(), JsValue> {
