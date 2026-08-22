@@ -102,6 +102,7 @@ function setControls(enabled) {
 }
 
 function failureRecord(error) {
+  if (error?.schema === "punctra-browser-failure-v1") return error;
   const message = typeof error === "string" ? error : String(error?.message ?? error);
   try {
     return JSON.parse(message);
@@ -115,11 +116,12 @@ function failureRecord(error) {
   }
 }
 
-function publishFailure(error, { disableControls = false } = {}) {
+function publishFailure(error, { disableControls = false, state = "failed" } = {}) {
   const record = failureRecord(error);
   diagnosticOutput.textContent = JSON.stringify(record, null, 2);
   if (disableControls) setControls(false);
-  setHarnessState("failed", `FAILED — ${record.message}`, record.safe_action);
+  const label = state === "unsupported" ? "UNSUPPORTED" : "FAILED";
+  setHarnessState(state, `${label} — ${record.message}`, record.safe_action);
 }
 
 function assertFact(condition, message) {
@@ -281,10 +283,14 @@ async function runSmokePath() {
 async function start() {
   if (!window.isSecureContext || !navigator.gpu) {
     const missing = !window.isSecureContext ? "secure context" : "WebGPU";
-    setHarnessState(
-      "unsupported",
-      `UNSUPPORTED — ${missing} is unavailable.`,
-      "Serve this page from localhost or HTTPS in a WebGPU-capable browser, then recreate the viewer.",
+    publishFailure(
+      {
+        schema: "punctra-browser-failure-v1",
+        code: "browser_capability",
+        message: `${missing} is unavailable.`,
+        safe_action: "Serve this page from localhost or HTTPS in a WebGPU-capable browser, then recreate the viewer.",
+      },
+      { disableControls: true, state: "unsupported" },
     );
     return;
   }
