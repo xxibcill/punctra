@@ -164,6 +164,23 @@ impl BrowserViewer {
     /// Returns the complete bounded host diagnostics as JSON.
     #[wasm_bindgen]
     pub fn diagnostics(&self) -> Result<String, JsValue> {
+        self.ensure_active()?;
+        self.diagnostics_unchecked()
+    }
+
+    /// Drops renderer and GPU state and fuses the viewer against later work.
+    #[wasm_bindgen]
+    pub fn shutdown(&mut self) -> Result<String, JsValue> {
+        self.lifecycle.shutdown().map_err(model_failure)?;
+        self.resources.take();
+        self.last_frame = None;
+        self.pick = PickFacts::not_requested();
+        self.diagnostics_unchecked()
+    }
+}
+
+impl BrowserViewer {
+    fn diagnostics_unchecked(&self) -> Result<String, JsValue> {
         if let Some(resources) = &self.resources {
             resources.ensure_device_available()?;
         }
@@ -192,18 +209,6 @@ impl BrowserViewer {
         })
     }
 
-    /// Drops renderer and GPU state and fuses the viewer against later work.
-    #[wasm_bindgen]
-    pub fn shutdown(&mut self) -> Result<String, JsValue> {
-        self.resources.take();
-        self.last_frame = None;
-        self.pick = PickFacts::not_requested();
-        self.lifecycle.shutdown();
-        self.diagnostics()
-    }
-}
-
-impl BrowserViewer {
     fn ensure_active(&self) -> Result<(), JsValue> {
         self.lifecycle.ensure_active().map_err(model_failure)
     }

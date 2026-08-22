@@ -134,8 +134,10 @@ impl Lifecycle {
         Ok(())
     }
 
-    pub(crate) fn shutdown(&mut self) {
+    pub(crate) fn shutdown(&mut self) -> Result<(), HostModelError> {
+        self.ensure_active()?;
         self.phase = ViewerPhase::Shutdown;
+        Ok(())
     }
 
     pub(crate) fn ensure_active(self) -> Result<(), HostModelError> {
@@ -262,7 +264,7 @@ mod tests {
         lifecycle.ensure_ready().unwrap();
         assert_eq!(lifecycle.begin_render().unwrap(), RenderDisposition::Record);
         lifecycle.record_frame().unwrap();
-        lifecycle.shutdown();
+        lifecycle.shutdown().unwrap();
 
         assert_eq!(lifecycle.phase(), ViewerPhase::Shutdown);
         assert_eq!(lifecycle.rendered_frames(), 1);
@@ -274,5 +276,6 @@ mod tests {
             lifecycle.set_visible(true),
             Err(HostModelError::ViewerShutdown)
         );
+        assert_eq!(lifecycle.shutdown(), Err(HostModelError::ViewerShutdown));
     }
 }
