@@ -1153,11 +1153,7 @@ fn validate_request(
         base_working_bytes.saturating_add(identity_payload_bytes),
         limits.max_working_bytes(),
     )?;
-    let mut identities = request
-        .check_points
-        .iter()
-        .map(|point| point.id())
-        .collect::<Vec<_>>();
+    let mut identities = allocate_exact::<CheckPointId>(request.check_points.len())?;
     let identity_bytes =
         base_working_bytes.saturating_add(allocation_bytes::<CheckPointId>(identities.capacity()));
     require_within(
@@ -1165,12 +1161,20 @@ fn validate_request(
         identity_bytes,
         limits.max_working_bytes(),
     )?;
+    extend_with_cancellation(
+        &mut identities,
+        request.check_points.iter().map(|point| point.id()),
+        control,
+    )?;
     crate::qa::sort_identities(&mut identities, control)?;
-    if let Some(duplicate) = identities.windows(2).find(|pair| pair[0] == pair[1]) {
-        return Err(TerrainError::invalid(
-            "detached Check Point identities",
-            format!("identity {} occurs more than once", duplicate[0].get()),
-        ));
+    for (index, pair) in identities.windows(2).enumerate() {
+        poll(index, control)?;
+        if pair[0] == pair[1] {
+            return Err(TerrainError::invalid(
+                "detached Check Point identities",
+                format!("identity {} occurs more than once", pair[0].get()),
+            ));
+        }
     }
     Ok(identity_bytes)
 }
@@ -1197,6 +1201,7 @@ fn collect_source_inputs(
     while let Some(batch) = rows.next()? {
         control.check_cancelled()?;
         for row in 0..batch.len() {
+            poll(row, control)?;
             let required = u64::try_from(inputs.len())
                 .unwrap_or(u64::MAX)
                 .saturating_add(1);
@@ -1371,7 +1376,7 @@ fn materialize(
     let mut vertices = allocate_exact::<SurfaceVertex>(vertex_count)?;
     for batch in prepared.vertex_batches(limits.surface_read())? {
         control.check_cancelled()?;
-        vertices.extend(batch?);
+        extend_with_cancellation(&mut vertices, batch?, control)?;
     }
     let mut faces = allocate_exact::<SurfaceFace>(face_count)?;
     let materialized_bytes = allocation_bytes::<SurfaceVertex>(vertices.capacity())
@@ -1388,7 +1393,7 @@ fn materialize(
     )?;
     for batch in prepared.face_batches(limits.surface_read())? {
         control.check_cancelled()?;
-        faces.extend(batch?);
+        extend_with_cancellation(&mut faces, batch?, control)?;
     }
     if vertices.len() != vertex_count || faces.len() != face_count {
         return Err(TerrainError::topology(
@@ -1612,6 +1617,18 @@ fn allocate_exact<T>(count: usize) -> Result<Vec<T>, TerrainError> {
     Ok(values)
 }
 
+fn extend_with_cancellation<T>(
+    target: &mut Vec<T>,
+    values: impl IntoIterator<Item = T>,
+    control: &OperationControl,
+) -> Result<(), TerrainError> {
+    for (index, value) in values.into_iter().enumerate() {
+        poll(index, control)?;
+        target.push(value);
+    }
+    Ok(())
+}
+
 fn payload_bytes<T>(count: usize) -> u64 {
     u64_len(count).saturating_mul(u64_len(mem::size_of::<T>()))
 }
@@ -1656,8 +1673,8 @@ mod tests {
 
     use super::{
         CANCELLATION_STRIDE, CheckPointResidual, ExactTerrainQaRequest, ResidualOutcome,
-        StationProfile, TerrainQaBinding, VerticalTolerance, hash_input, hash_results, poll,
-        validate_request,
+        StationProfile, TerrainQaBinding, VerticalTolerance, extend_with_cancellation, hash_input,
+        hash_results, poll, validate_request,
     };
     use crate::{CheckPoint, CheckPointId, TerrainError, TerrainQaLimits};
 
@@ -1673,6 +1690,23 @@ mod tests {
             profile.station(1).0.map(f64::to_bits),
             profile.end_xy().map(f64::to_bits)
         );
+    }
+
+    #[test]
+    fn batch_extension_observes_cancellation_at_the_bounded_stride() {
+        let control = OperationControl::new();
+        let values = (0..=CANCELLATION_STRIDE).inspect(|&index| {
+            if index == CANCELLATION_STRIDE {
+                control.cancel();
+            }
+        });
+        let mut collected = Vec::new();
+
+        let error = extend_with_cancellation(&mut collected, values, &control)
+            .expect_err("the next batch-copy boundary must observe cancellation");
+
+        assert!(matches!(error, TerrainError::Cancelled));
+        assert_eq!(collected.len(), CANCELLATION_STRIDE);
     }
 
     #[test]
