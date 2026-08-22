@@ -111,6 +111,12 @@ function failureRecord(error) {
   }
 }
 
+function publishFailure(error, { disableControls = false } = {}) {
+  const record = failureRecord(error);
+  if (disableControls) setControls(false);
+  setHarnessState("failed", `FAILED — ${record.message}`, record.safe_action);
+}
+
 function assertFact(condition, message) {
   if (!condition) throw new Error(`Browser acceptance invariant failed: ${message}`);
 }
@@ -221,9 +227,7 @@ async function start() {
     await runSmokePath();
   } catch (error) {
     smokeRunning = false;
-    setControls(false);
-    const record = failureRecord(error);
-    setHarnessState("failed", `FAILED — ${record.message}`, record.safe_action);
+    publishFailure(error, { disableControls: true });
   }
 }
 
@@ -236,9 +240,7 @@ async function restart() {
     publishDiagnostics(diagnostics);
     setHarnessState("passed", "READY — viewer explicitly recreated.");
   } catch (error) {
-    const record = failureRecord(error);
-    setControls(false);
-    setHarnessState("failed", `FAILED — ${record.message}`, record.safe_action);
+    publishFailure(error, { disableControls: true });
   }
 }
 
@@ -250,8 +252,7 @@ async function toggleVisibility() {
     visibilityButton.textContent = suspended ? "Resume rendering" : "Suspend rendering";
     if (!suspended) publishDiagnostics(parseDiagnostics(viewer.render()));
   } catch (error) {
-    const record = failureRecord(error);
-    setHarnessState("failed", `FAILED — ${record.message}`, record.safe_action);
+    publishFailure(error);
   }
 }
 
@@ -262,8 +263,7 @@ async function checkPick() {
     assertFact(diagnostics.pick.status === "hit", "manual centre provisional pick");
     setHarnessState("passed", "READY — centre provisional pick retained the recorded identity.");
   } catch (error) {
-    const record = failureRecord(error);
-    setHarnessState("failed", `FAILED — ${record.message}`, record.safe_action);
+    publishFailure(error);
   }
 }
 
@@ -285,8 +285,7 @@ function scheduleResize() {
       viewer.resize(requested.cssWidth, requested.cssHeight, requested.dpr);
       publishDiagnostics(parseDiagnostics(viewer.render()));
     } catch (error) {
-      const record = failureRecord(error);
-      setHarnessState("failed", `FAILED — ${record.message}`, record.safe_action);
+      publishFailure(error);
     }
   });
 }
