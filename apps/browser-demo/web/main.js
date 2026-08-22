@@ -151,10 +151,40 @@ async function pollCentrePick() {
   throw new Error("Browser acceptance invariant failed: provisional pick remained pending");
 }
 
+function verifyBoundedResize(initialViewport) {
+  const requested = {
+    cssWidth: Math.max(1, initialViewport.cssWidth * 0.75),
+    cssHeight: Math.max(1, initialViewport.cssHeight * 0.75),
+    dpr: initialViewport.dpr,
+  };
+  const diagnostics = parseDiagnostics(
+    viewer.resize(requested.cssWidth, requested.cssHeight, requested.dpr),
+  );
+  const viewport = diagnostics.viewport;
+  assertFact(viewport.css_width === requested.cssWidth, "resized CSS width");
+  assertFact(viewport.css_height === requested.cssHeight, "resized CSS height");
+  assertFact(viewport.device_pixel_ratio === requested.dpr, "resized device-pixel ratio");
+  assertFact(
+    viewport.physical_width === Math.round(requested.cssWidth * requested.dpr),
+    "resized physical width",
+  );
+  assertFact(
+    viewport.physical_height === Math.round(requested.cssHeight * requested.dpr),
+    "resized physical height",
+  );
+  assertFact(
+    viewport.surface_bytes === viewport.physical_width * viewport.physical_height * 4,
+    "resized surface accounting",
+  );
+  assertFact(diagnostics.frame === null, "resize discards the recorded frame");
+  publishDiagnostics(parseDiagnostics(viewer.render()));
+  return viewport;
+}
+
 async function runSmokePath() {
   smokeRunning = true;
   setHarnessState("checking", "Running bounded browser lifecycle checks…");
-  await initializeViewer();
+  const initialViewport = await initializeViewer();
 
   let diagnostics = parseDiagnostics(viewer.render());
   publishDiagnostics(diagnostics);
@@ -168,6 +198,8 @@ async function runSmokePath() {
   assertFact(diagnostics.scene.estimated_gpu_bytes <= diagnostics.limits.estimated_gpu_bytes, "logical residency ceiling");
   assertFact(diagnostics.viewport.surface_bytes <= diagnostics.limits.canvas_pixels * 4, "canvas byte ceiling");
   assertFact(diagnostics.frame.transient_texture_bytes <= diagnostics.limits.renderer_transient_bytes, "transient texture ceiling");
+
+  const resizedViewport = verifyBoundedResize(initialViewport);
 
   viewer.setVisible(false);
   diagnostics = parseDiagnostics(viewer.render());
@@ -190,6 +222,7 @@ async function runSmokePath() {
     frame: diagnostics.frame,
     pick: diagnostics.pick,
     viewport: diagnostics.viewport,
+    resized_viewport: resizedViewport,
   };
 
   parseDiagnostics(viewer.shutdown());
