@@ -18,8 +18,10 @@ let createViewer = null;
 let wasmReady = false;
 let suspended = false;
 let smokeRunning = false;
+let smokePassed = false;
 let resizeFrame = null;
 let smokeRecord = null;
+let moduleLoadAttempt = 0;
 
 function requestedViewport() {
   const bounds = canvasShell.getBoundingClientRect();
@@ -187,6 +189,7 @@ function verifyBoundedResize(initialViewport) {
 
 async function runSmokePath() {
   smokeRunning = true;
+  smokePassed = false;
   setHarnessState("checking", "Running bounded browser lifecycle checks…");
   const initialViewport = await initializeViewer();
 
@@ -250,6 +253,7 @@ async function runSmokePath() {
   publishDiagnostics(diagnostics);
   assertFact(diagnostics.phase === "ready", "explicit recreation");
   setHarnessState("passed", "PASS — browser WebGPU lifecycle and invariants verified locally.");
+  smokePassed = true;
   smokeRunning = false;
 }
 
@@ -265,19 +269,34 @@ async function start() {
   }
 
   try {
-    const browserBindings = await import("./pkg/browser_demo.js");
-    await browserBindings.default();
-    createViewer = browserBindings.createViewer;
-    wasmReady = true;
+    if (!wasmReady) {
+      const attempt = moduleLoadAttempt;
+      moduleLoadAttempt += 1;
+      const browserBindings = await import(`./pkg/browser_demo.js?attempt=${attempt}`);
+      await browserBindings.default();
+      createViewer = browserBindings.createViewer;
+      wasmReady = true;
+    }
     await runSmokePath();
   } catch (error) {
     smokeRunning = false;
+    smokePassed = false;
+    try {
+      viewer?.shutdown();
+    } catch {
+      // Preserve the original acceptance failure as the actionable diagnostic.
+    }
+    viewer = null;
     publishFailure(error, { disableControls: true });
   }
 }
 
 async function restart() {
-  if (!wasmReady || smokeRunning) return;
+  if (smokeRunning) return;
+  if (!smokePassed) {
+    await start();
+    return;
+  }
   try {
     viewer?.shutdown();
     await initializeViewer();
