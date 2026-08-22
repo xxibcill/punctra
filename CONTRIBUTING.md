@@ -79,6 +79,16 @@ mutation continues through existing `point-workspace` commits. It does not
 authorize terrain constraints, automatic correction, a second edit model,
 continuous plane/TIN intersections, general charting/UI, or field claims from
 fixtures.
+The accepted [v0.15 WebAssembly and WebGPU Browser Foundation
+scope](docs/design/browser-foundation-v0.15.md) permits one private
+`browser-demo` application that compiles the existing `render-protocol`,
+`point-view`, and `render-wgpu` composition to `wasm32-unknown-unknown`. The
+JavaScript caller owns its canvas and lifecycle policy; the private Rust host
+owns WebGPU resources on that caller's behalf. The generated scene, resource
+ceilings, progressive display, provisional pick, and explicit failure states
+are local acceptance evidence only. It does not authorize remote LAS/LAZ
+delivery, browser decoding, a supported JavaScript SDK, exact browser Queries,
+editing, broad browser qualification, or visual-quality claims.
 Apart from the explicit v0.8 reader exception,
 external format decoding belongs only in accepted Source adapter crates.
 Networking, polygon/brush/visible-only/occlusion selection, arbitrary
@@ -101,6 +111,11 @@ cargo clippy --manifest-path fuzz/Cargo.toml --all-targets -- -D warnings
 cargo check --manifest-path fuzz/Cargo.toml --bin index_persistence
 cargo check --manifest-path fuzz/Cargo.toml --bin terrain_persistence
 cargo test --manifest-path fuzz/Cargo.toml --lib
+cargo check -p browser-demo --target wasm32-unknown-unknown
+cargo clippy -p browser-demo --all-targets --all-features -- -D warnings
+cargo clippy -p browser-demo --target wasm32-unknown-unknown --all-targets \
+  --all-features -- -D warnings
+scripts/build-browser-demo.sh
 cargo bench -p point-view --bench planner
 cargo bench -p source-memory --bench read
 cargo bench -p source-las --bench read
@@ -140,10 +155,21 @@ test -f docs/guides/first-las-laz.md
 test -f docs/guides/library-packaging.md
 test -f docs/guides/persistent-terrain.md
 test -f docs/guides/exact-terrain-qa.md
+test -f docs/guides/browser-foundation.md
 ruby -rjson -e 'JSON.parse(File.read(ARGV.fetch(0)))' \
   docs/guides/field-corpus.example.json
 git diff --check
 ```
+
+After `scripts/build-browser-demo.sh`, serve `apps/browser-demo/web` over local
+HTTP and open it in a secure-context WebGPU browser. The document must publish
+`PASS` after initialization, deterministic generation/batch validation, one
+visible render, bounded resize, hidden-frame suppression, centre provisional
+pick, fused shutdown rejection, and explicit recreation. Record the exact
+browser, operating system, adapter, surface format, viewport, and reported
+logical/surface/transient resource facts. The step qualifies only that exact
+local browser environment. See the [browser-foundation
+guide](docs/guides/browser-foundation.md).
 
 The default `point-index` benchmark generates one million Points. Use only the
 documented scale values when a larger local run is intended, for example:

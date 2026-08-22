@@ -161,7 +161,8 @@ The acceptance host fixes and reports these separate ceilings:
 - caller-declared device-pixel ratio: finite and inside `0 < dpr <= 4`;
 - host surface allocation accounting: four bytes per physical pixel;
 - renderer transient texture accounting: reported exactly by each recorded
-  frame and independently checked against the accepted physical-pixel ceiling;
+  frame at eight bytes per physical pixel and independently checked against
+  the 67,108,864-byte physical-pixel ceiling;
   and
 - presentation latency hint: two frames.
 

@@ -1,0 +1,312 @@
+import initWasm, { createViewer } from "./pkg/browser_demo.js";
+
+const canvas = document.querySelector("#punctra-canvas");
+const canvasShell = document.querySelector("#canvas-shell");
+const statusBlock = document.querySelector("#status-block");
+const statusMessage = document.querySelector("#status-message");
+const diagnosticOutput = document.querySelector("#diagnostic-output");
+const recoveryBlock = document.querySelector("#recovery-block");
+const recoveryMessage = document.querySelector("#recovery-message");
+const capabilityFacts = document.querySelector("#capability-facts");
+const resourceFacts = document.querySelector("#resource-facts");
+const pickFacts = document.querySelector("#pick-facts");
+const restartButton = document.querySelector("#restart-button");
+const visibilityButton = document.querySelector("#visibility-button");
+const pickButton = document.querySelector("#pick-button");
+const shutdownButton = document.querySelector("#shutdown-button");
+
+let viewer = null;
+let wasmReady = false;
+let suspended = false;
+let smokeRunning = false;
+let resizeFrame = null;
+let smokeRecord = null;
+
+function requestedViewport() {
+  const bounds = canvasShell.getBoundingClientRect();
+  return {
+    cssWidth: Math.max(1, bounds.width),
+    cssHeight: Math.max(1, bounds.height),
+    dpr: Math.min(window.devicePixelRatio || 1, 4),
+  };
+}
+
+function parseDiagnostics(json) {
+  return JSON.parse(json);
+}
+
+function formatBytes(bytes) {
+  if (!Number.isFinite(bytes)) return "—";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KiB`;
+  return `${(bytes / 1024 ** 2).toFixed(2)} MiB`;
+}
+
+function replaceFacts(list, entries) {
+  list.replaceChildren(
+    ...entries.map(([label, value]) => {
+      const row = document.createElement("div");
+      const term = document.createElement("dt");
+      const detail = document.createElement("dd");
+      term.textContent = label;
+      detail.textContent = String(value);
+      row.append(term, detail);
+      return row;
+    }),
+  );
+}
+
+function publishDiagnostics(diagnostics) {
+  diagnosticOutput.textContent = JSON.stringify(diagnostics, null, 2);
+  replaceFacts(capabilityFacts, [
+    ["Secure context", diagnostics.capabilities.secure_context ? "available" : "unavailable"],
+    ["WebGPU", diagnostics.capabilities.webgpu ? "available" : "unavailable"],
+    ["Browser", diagnostics.capabilities.browser_user_agent],
+    ["Adapter", diagnostics.capabilities.adapter_name],
+    ["Backend", diagnostics.capabilities.backend],
+    ["Surface", diagnostics.capabilities.surface_format],
+    ["Physical viewport", `${diagnostics.viewport.physical_width} × ${diagnostics.viewport.physical_height}`],
+  ]);
+  replaceFacts(resourceFacts, [
+    ["Resident Points", `${diagnostics.scene.point_count} / ${diagnostics.limits.points}`],
+    ["Logical vertex bytes", `${formatBytes(diagnostics.scene.estimated_gpu_bytes)} / ${formatBytes(diagnostics.limits.estimated_gpu_bytes)}`],
+    ["Canvas bytes", formatBytes(diagnostics.viewport.surface_bytes)],
+    ["Transient texture bytes", formatBytes(diagnostics.frame?.transient_texture_bytes)],
+    ["Rendered frames", diagnostics.rendered_frames],
+    ["Hidden frame skips", diagnostics.hidden_frame_skips],
+  ]);
+  replaceFacts(pickFacts, [
+    ["Pick state", diagnostics.pick.status.replaceAll("_", " ")],
+    ["Point ordinal", diagnostics.pick.point_ordinal ?? "—"],
+    ["Generation / batch / version", diagnostics.pick.generation === null
+      ? "—"
+      : `${diagnostics.pick.generation} / ${diagnostics.pick.batch_key} / ${diagnostics.pick.batch_version}`],
+  ]);
+}
+
+function setHarnessState(state, message, safeAction = "") {
+  document.body.dataset.browserSmoke = state;
+  statusBlock.dataset.state = state;
+  statusMessage.textContent = message;
+  recoveryBlock.hidden = safeAction.length === 0;
+  recoveryMessage.textContent = safeAction;
+}
+
+function setControls(enabled) {
+  visibilityButton.disabled = !enabled;
+  pickButton.disabled = !enabled;
+  shutdownButton.disabled = !enabled;
+}
+
+function failureRecord(error) {
+  const message = typeof error === "string" ? error : String(error?.message ?? error);
+  try {
+    return JSON.parse(message);
+  } catch {
+    return {
+      code: "browser_module",
+      message,
+      safe_action: "Build the browser package again, serve it from localhost, and recreate the viewer.",
+    };
+  }
+}
+
+function assertFact(condition, message) {
+  if (!condition) throw new Error(`Browser acceptance invariant failed: ${message}`);
+}
+
+async function initializeViewer() {
+  const requested = requestedViewport();
+  const next = await createViewer(
+    canvas,
+    requested.cssWidth,
+    requested.cssHeight,
+    requested.dpr,
+  );
+  viewer = next;
+  suspended = false;
+  visibilityButton.textContent = "Suspend rendering";
+  setControls(true);
+  return requested;
+}
+
+async function pollCentrePick() {
+  let diagnostics = parseDiagnostics(viewer.diagnostics());
+  const x = Math.floor(diagnostics.viewport.physical_width / 2);
+  const y = Math.floor(diagnostics.viewport.physical_height / 2);
+  publishDiagnostics(parseDiagnostics(viewer.beginPick(x, y)));
+
+  for (let attempt = 0; attempt < 180; attempt += 1) {
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    diagnostics = parseDiagnostics(viewer.pollPick());
+    publishDiagnostics(diagnostics);
+    if (diagnostics.pick.status !== "pending") return diagnostics;
+  }
+  throw new Error("Browser acceptance invariant failed: provisional pick remained pending");
+}
+
+async function runSmokePath() {
+  smokeRunning = true;
+  setHarnessState("checking", "Running bounded browser lifecycle checks…");
+  await initializeViewer();
+
+  let diagnostics = parseDiagnostics(viewer.render());
+  publishDiagnostics(diagnostics);
+  assertFact(diagnostics.schema === "punctra-browser-foundation-v1", "diagnostic schema");
+  assertFact(diagnostics.scene.point_count === 1089, "fixed scene Point count");
+  assertFact(diagnostics.scene.initial_requests === 1, "initial planner request");
+  assertFact(diagnostics.scene.retained_nodes === 1, "settled planner retention");
+  assertFact(diagnostics.scene.generation === 1, "View generation");
+  assertFact(diagnostics.scene.batch_version === 1, "batch version");
+  assertFact(diagnostics.frame.drawn_points === 1089, "drawn Point count");
+  assertFact(diagnostics.scene.estimated_gpu_bytes <= diagnostics.limits.estimated_gpu_bytes, "logical residency ceiling");
+  assertFact(diagnostics.viewport.surface_bytes <= diagnostics.limits.canvas_pixels * 4, "canvas byte ceiling");
+  assertFact(diagnostics.frame.transient_texture_bytes <= diagnostics.limits.renderer_transient_bytes, "transient texture ceiling");
+
+  viewer.setVisible(false);
+  diagnostics = parseDiagnostics(viewer.render());
+  assertFact(diagnostics.phase === "hidden", "hidden phase");
+  assertFact(diagnostics.hidden_frame_skips === 1, "hidden frame suppression");
+  viewer.setVisible(true);
+  publishDiagnostics(parseDiagnostics(viewer.render()));
+
+  diagnostics = await pollCentrePick();
+  assertFact(diagnostics.pick.status === "hit", "centre provisional pick");
+  assertFact(diagnostics.pick.point_ordinal === 544, "centre Point identity");
+  assertFact(diagnostics.pick.generation === 1, "pick generation");
+  assertFact(diagnostics.pick.batch_version === 1, "pick batch version");
+
+  smokeRecord = {
+    state: "pick_verified",
+    browser: diagnostics.capabilities.browser_user_agent,
+    platform: diagnostics.capabilities.browser_platform,
+    scene: diagnostics.scene,
+    frame: diagnostics.frame,
+    pick: diagnostics.pick,
+    viewport: diagnostics.viewport,
+  };
+
+  parseDiagnostics(viewer.shutdown());
+  let shutdownRejected = false;
+  try {
+    viewer.render();
+  } catch (error) {
+    shutdownRejected = failureRecord(error).code === "host_model";
+  }
+  assertFact(shutdownRejected, "fused shutdown");
+  smokeRecord.shutdown_rejected = shutdownRejected;
+
+  await initializeViewer();
+  diagnostics = parseDiagnostics(viewer.render());
+  publishDiagnostics(diagnostics);
+  assertFact(diagnostics.phase === "ready", "explicit recreation");
+  setHarnessState("passed", "PASS — browser WebGPU lifecycle and invariants verified locally.");
+  smokeRunning = false;
+}
+
+async function start() {
+  if (!window.isSecureContext || !navigator.gpu) {
+    const missing = !window.isSecureContext ? "secure context" : "WebGPU";
+    setHarnessState(
+      "unsupported",
+      `UNSUPPORTED — ${missing} is unavailable.`,
+      "Serve this page from localhost or HTTPS in a WebGPU-capable browser, then recreate the viewer.",
+    );
+    return;
+  }
+
+  try {
+    await initWasm();
+    wasmReady = true;
+    await runSmokePath();
+  } catch (error) {
+    smokeRunning = false;
+    setControls(false);
+    const record = failureRecord(error);
+    setHarnessState("failed", `FAILED — ${record.message}`, record.safe_action);
+  }
+}
+
+async function restart() {
+  if (!wasmReady || smokeRunning) return;
+  try {
+    viewer?.shutdown();
+    await initializeViewer();
+    const diagnostics = parseDiagnostics(viewer.render());
+    publishDiagnostics(diagnostics);
+    setHarnessState("passed", "READY — viewer explicitly recreated.");
+  } catch (error) {
+    const record = failureRecord(error);
+    setControls(false);
+    setHarnessState("failed", `FAILED — ${record.message}`, record.safe_action);
+  }
+}
+
+async function toggleVisibility() {
+  if (!viewer || smokeRunning) return;
+  suspended = !suspended;
+  try {
+    publishDiagnostics(parseDiagnostics(viewer.setVisible(!suspended)));
+    visibilityButton.textContent = suspended ? "Resume rendering" : "Suspend rendering";
+    if (!suspended) publishDiagnostics(parseDiagnostics(viewer.render()));
+  } catch (error) {
+    const record = failureRecord(error);
+    setHarnessState("failed", `FAILED — ${record.message}`, record.safe_action);
+  }
+}
+
+async function checkPick() {
+  if (!viewer || smokeRunning || suspended) return;
+  try {
+    const diagnostics = await pollCentrePick();
+    assertFact(diagnostics.pick.status === "hit", "manual centre provisional pick");
+    setHarnessState("passed", "READY — centre provisional pick retained the recorded identity.");
+  } catch (error) {
+    const record = failureRecord(error);
+    setHarnessState("failed", `FAILED — ${record.message}`, record.safe_action);
+  }
+}
+
+function shutdown() {
+  if (!viewer || smokeRunning) return;
+  publishDiagnostics(parseDiagnostics(viewer.shutdown()));
+  viewer = null;
+  suspended = false;
+  setControls(false);
+  setHarnessState("passed", "SHUT DOWN — recreate the viewer before more work.");
+}
+
+function scheduleResize() {
+  if (!viewer || smokeRunning || suspended || resizeFrame !== null) return;
+  resizeFrame = requestAnimationFrame(() => {
+    resizeFrame = null;
+    try {
+      const requested = requestedViewport();
+      viewer.resize(requested.cssWidth, requested.cssHeight, requested.dpr);
+      publishDiagnostics(parseDiagnostics(viewer.render()));
+    } catch (error) {
+      const record = failureRecord(error);
+      setHarnessState("failed", `FAILED — ${record.message}`, record.safe_action);
+    }
+  });
+}
+
+restartButton.addEventListener("click", restart);
+visibilityButton.addEventListener("click", toggleVisibility);
+pickButton.addEventListener("click", checkPick);
+shutdownButton.addEventListener("click", shutdown);
+document.addEventListener("visibilitychange", () => {
+  if (!viewer || smokeRunning) return;
+  const visible = document.visibilityState === "visible" && !suspended;
+  viewer.setVisible(visible);
+  if (visible) publishDiagnostics(parseDiagnostics(viewer.render()));
+});
+new ResizeObserver(scheduleResize).observe(canvasShell);
+
+window.__PUNCTRA_BROWSER_FOUNDATION__ = {
+  diagnostics: () => viewer ? parseDiagnostics(viewer.diagnostics()) : null,
+  smoke: () => smokeRecord,
+  state: () => document.body.dataset.browserSmoke,
+};
+
+start();

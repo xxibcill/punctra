@@ -10,8 +10,9 @@ persistent-terrain slice; field activation, production-scale accuracy, true
 out-of-core adoption, independent adoption, partner validation, and support
 qualification outstanding. The explicit-AOI persistent Surface preparation
 preserves those authority boundaries and frozen Run-v1; v0.14 bounded exact
-Terrain QA and correction-loop slice Complete and repository-verified; broader
-workflows remain outstanding**
+Terrain QA and correction-loop slice Complete and repository-verified; v0.15
+bounded local WebAssembly/WebGPU browser-host workflow Complete and repository-
+verified; remote browser delivery and broader workflows remain outstanding**
 
 The host composes sibling modules explicitly. Lower crates never call back into
 an application, discover a Source for a Workspace, submit a GPU queue, or infer
@@ -574,6 +575,43 @@ Point Set remains exact for its pinned Snapshot but cannot commit over a newer
 head. Highlights are display overlays only: exact selected identities that are
 not resident need not be visible.
 
+## 11b. Run the private browser acceptance host
+
+The v0.15 private host preserves the same renderer ownership boundary while
+moving the application composition into a browser. It uses a deterministic
+generated batch; browser Source delivery begins in a later accepted scope.
+
+~~~mermaid
+sequenceDiagram
+    participant JS as JavaScript host
+    participant WASM as private browser-demo adapter
+    participant VIEW as point-view
+    participant GPU as render-wgpu / WebGPU
+
+    JS->>WASM: createViewer(canvas, CSS size, DPR)
+    WASM->>GPU: request compatible adapter/device/surface
+    WASM->>VIEW: plan missing generated root
+    VIEW-->>WASM: one request
+    WASM->>GPU: Reset + complete generated Upsert
+    WASM->>VIEW: plan resident root
+    VIEW-->>WASM: retain root; no request/retirement
+    WASM-->>JS: ready diagnostics
+    JS->>WASM: resize / visibility / render
+    WASM->>GPU: configure / record / submit / present
+    JS->>WASM: centre provisional pick
+    WASM->>GPU: asynchronous readback
+    GPU-->>WASM: generation-safe provisional Point identity
+    WASM-->>JS: bounded non-authoritative diagnostics
+    JS->>WASM: shutdown
+    WASM-->>JS: GPU resources dropped; later work rejected
+~~~
+
+JavaScript owns the canvas, CSS placement, DPR, visibility, scheduling, error
+presentation, and retry decision. The Rust adapter owns WebGPU resources on its
+behalf. A device/surface failure instructs the caller to destroy and explicitly
+recreate the viewer; neither layer silently retries. The pick is progressive
+display evidence, never an exact empty or selected Source Query.
+
 ## 12. Cancellation and crash matrix
 
 | Operation | Safe cancellation boundary | Permitted residue | Published truth |
@@ -593,6 +631,7 @@ not resident need not be visible.
 | Run-bound qualification | Before evidence publication; afterward certainty is conservative | No Run mutation; retained private evidence stage and possibly one complete target | No evidence for unevaluated operational failure; otherwise one exact canonical pass/fail record, conflict, or publication-indeterminate result |
 | View planning | Before returning a plan | None | Old planner history or one complete new plan |
 | GPU frame | Host-controlled frame/device boundary | Disposable GPU allocations | Workspace unchanged |
+| Browser acceptance host | Before viewer return and at explicit frame/pick boundaries; shutdown is fused | Disposable WebGPU resources and ignored generated bindings | No viewer, one active private viewer, or one shut-down viewer; Workspace and Sources unchanged |
 | Viewing Report | Before no-replace link of a synced, read-back-verified owned stage | Recognized identity-checked owned stage, or one complete target | No report, exact-existing reconciliation, one complete new report, or conflict without replacement |
 
 ## 13. Staleness

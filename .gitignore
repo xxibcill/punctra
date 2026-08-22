@@ -2,5 +2,6 @@
 /target/
 /fuzz/artifacts/
 /fuzz/target/
+/apps/browser-demo/web/pkg/
 *.profraw
 *.profdata

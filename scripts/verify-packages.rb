@@ -6,7 +6,7 @@ require "open3"
 require "tmpdir"
 
 EXPECTED_LIBRARY_COUNT = 12
-EXPECTED_APPLICATION_COUNT = 2
+EXPECTED_APPLICATION_COUNT = 3
 
 def capture!(*command)
   output, error, status = Open3.capture3(*command)
