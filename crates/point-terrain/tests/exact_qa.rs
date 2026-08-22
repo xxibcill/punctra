@@ -717,14 +717,7 @@ fn prepared_qa_resource_ceiling_is_inclusive() {
     )
     .blocking_wait()
     .unwrap();
-    let materialized_bytes = u64::try_from(std::mem::size_of::<point_terrain::SurfaceVertex>())
-        .unwrap()
-        .saturating_mul(prepared.descriptor().vertex_count())
-        .saturating_add(
-            u64::try_from(std::mem::size_of::<point_terrain::SurfaceFace>())
-                .unwrap()
-                .saturating_mul(prepared.descriptor().face_count()),
-        );
+    let materialized_bytes = prepared_surface_bytes(&prepared);
     let prepared_successful = prepared
         .exact_qa(
             snapshot.clone(),
@@ -798,6 +791,52 @@ fn prepared_qa_shares_one_surface_read_work_ceiling() {
             ..
         }
     ));
+}
+
+#[test]
+fn prepared_profile_report_includes_the_surface_read_peak() {
+    let fixture = plane_fixture("exact-qa-prepared-read-peak");
+    let snapshot = fixture.snapshot();
+    let bounds = WorldBounds::new([0.0, 0.0, 0.0], [10.0, 10.0, 20.0]).unwrap();
+    let prepared = prepare(
+        snapshot.clone(),
+        fixture.terrain_path("read-peak-surface.pterr"),
+        TerrainRecipe::new(2).within(bounds),
+        TerrainPrepareLimits::default(),
+    )
+    .blocking_wait()
+    .unwrap();
+    let request = ExactTerrainQaRequest::new(tolerance())
+        .profile(StationProfile::new([0.0, 0.0], [10.0, 10.0], 2).unwrap());
+
+    let report = prepared
+        .exact_qa(
+            snapshot.clone(),
+            request.clone(),
+            TerrainQaLimits::default(),
+        )
+        .blocking_wait()
+        .unwrap();
+    let materialization_peak = prepared_surface_bytes(&prepared).saturating_add(
+        TerrainQaLimits::default()
+            .surface_read()
+            .max_working_bytes(),
+    );
+    assert!(report.accounted_peak_working_bytes() >= materialization_peak);
+
+    let exact = prepared
+        .exact_qa(
+            snapshot,
+            request,
+            TerrainQaLimits::default()
+                .with_max_working_bytes(report.accounted_peak_working_bytes()),
+        )
+        .blocking_wait()
+        .expect("the reported prepared-QA peak must be an inclusive rerun ceiling");
+    assert_eq!(
+        exact.accounted_peak_working_bytes(),
+        report.accounted_peak_working_bytes()
+    );
 }
 
 #[test]
@@ -1043,4 +1082,15 @@ fn qa_limits_with_surface_read_work(max_work_units: u64) -> TerrainQaLimits {
         defaults.max_face_tests(),
         defaults.max_working_bytes(),
     )
+}
+
+fn prepared_surface_bytes(surface: &point_terrain::PreparedTerrainSurface) -> u64 {
+    u64::try_from(std::mem::size_of::<point_terrain::SurfaceVertex>())
+        .unwrap()
+        .saturating_mul(surface.descriptor().vertex_count())
+        .saturating_add(
+            u64::try_from(std::mem::size_of::<point_terrain::SurfaceFace>())
+                .unwrap()
+                .saturating_mul(surface.descriptor().face_count()),
+        )
 }

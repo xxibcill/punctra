@@ -9,7 +9,7 @@ use crate::{
     ALGORITHM_VERSION, CheckPoint, CheckPointId, CheckPointLimits, CheckPointOutcome,
     PreparedTerrainSurface, ResidualStatistics, TerrainError, TerrainQaLimits, TerrainSurface,
     limits::{require_within, usize_to_u64_saturating},
-    persistence::SurfaceMaterializationLimits,
+    persistence::{SurfaceMaterialization, SurfaceMaterializationLimits},
     qa::ResidualAccumulator,
 };
 
@@ -837,7 +837,14 @@ pub(crate) fn start_in_memory(
 ) -> crate::ExactTerrainQaJob {
     let surface = surface.clone();
     crate::ExactTerrainQaJob::spawn(move |control| {
-        run(&snapshot, &surface, &request, limits, 0, &control)
+        run(
+            &snapshot,
+            &surface,
+            &request,
+            limits,
+            QaWorkingBaseline::default(),
+            &control,
+        )
     })
 }
 
@@ -851,7 +858,11 @@ pub(crate) fn start_prepared(
     crate::ExactTerrainQaJob::spawn(move |control| {
         control.check_cancelled()?;
         validate_snapshot_binding(&snapshot, surface.descriptor().snapshot())?;
-        let (surface, materialized_bytes) = surface.materialize_in_memory(
+        let SurfaceMaterialization {
+            surface,
+            retained_bytes,
+            peak_working_bytes,
+        } = surface.materialize_in_memory(
             SurfaceMaterializationLimits::new(
                 limits.surface_read(),
                 limits.max_materialized_surface_bytes(),
@@ -864,10 +875,19 @@ pub(crate) fn start_prepared(
             &surface,
             &request,
             limits,
-            materialized_bytes,
+            QaWorkingBaseline {
+                retained_surface_bytes: retained_bytes,
+                prior_peak_working_bytes: peak_working_bytes,
+            },
             &control,
         )
     })
+}
+
+#[derive(Clone, Copy, Default)]
+struct QaWorkingBaseline {
+    retained_surface_bytes: u64,
+    prior_peak_working_bytes: u64,
 }
 
 fn run(
@@ -875,16 +895,22 @@ fn run(
     surface: &TerrainSurface,
     request: &ExactTerrainQaRequest,
     limits: TerrainQaLimits,
-    materialized_bytes: u64,
+    working: QaWorkingBaseline,
     control: &OperationControl,
 ) -> Result<ExactTerrainQaReport, TerrainError> {
     control.check_cancelled()?;
     let binding = TerrainQaBinding::from_surface(surface)?;
     validate_snapshot_binding(snapshot, binding.snapshot)?;
     let validation_peak_working_bytes =
-        validate_request(request, limits, materialized_bytes, control)?;
+        validate_request(request, limits, working.retained_surface_bytes, control)?;
     let (source_inputs, source_input, source_collection_peak_working_bytes) =
-        collect_source_inputs(snapshot, request, limits, materialized_bytes, control)?;
+        collect_source_inputs(
+            snapshot,
+            request,
+            limits,
+            working.retained_surface_bytes,
+            control,
+        )?;
     let check_count = u64::try_from(request.check_points.len()).unwrap_or(u64::MAX);
     let profile_count = request.profile.map_or(0, StationProfile::station_count);
     let observation_count = u64::try_from(source_inputs.len())
@@ -906,7 +932,8 @@ fn run(
     let pre_evaluation_peak_working_bytes = validation_peak_working_bytes
         .max(source_collection_peak_working_bytes)
         .max(
-            materialized_bytes
+            working
+                .retained_surface_bytes
                 .saturating_add(source_input_bytes)
                 .saturating_add(retained_result_bytes),
         );
@@ -921,11 +948,14 @@ fn run(
         request,
         source_inputs,
         observation_count,
-        materialized_bytes,
+        working.retained_surface_bytes,
         limits,
         control,
     )?;
-    let peak_working_bytes = pre_evaluation_peak_working_bytes.max(evaluation.peak_working_bytes);
+    let peak_working_bytes = working
+        .prior_peak_working_bytes
+        .max(pre_evaluation_peak_working_bytes)
+        .max(evaluation.peak_working_bytes);
     control.check_cancelled()?;
     let input_hash = hash_input(request, source_input, control)?;
     let result_hash = hash_results(

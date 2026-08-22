@@ -619,6 +619,12 @@ pub struct PreparedTerrainSurface {
     inner: Arc<PreparedSurfaceData>,
 }
 
+pub(crate) struct SurfaceMaterialization {
+    pub(crate) surface: TerrainSurface,
+    pub(crate) retained_bytes: u64,
+    pub(crate) peak_working_bytes: u64,
+}
+
 impl PreparedTerrainSurface {
     /// Returns immutable semantic provenance and topology facts.
     #[must_use]
@@ -727,7 +733,7 @@ impl PreparedTerrainSurface {
         &self,
         limits: SurfaceMaterializationLimits,
         control: &OperationControl,
-    ) -> Result<(TerrainSurface, u64), TerrainError> {
+    ) -> Result<SurfaceMaterialization, TerrainError> {
         materialize_surface(self, limits, control)
     }
 }
@@ -736,7 +742,7 @@ fn materialize_surface(
     prepared: &PreparedTerrainSurface,
     limits: SurfaceMaterializationLimits,
     control: &OperationControl,
-) -> Result<(TerrainSurface, u64), TerrainError> {
+) -> Result<SurfaceMaterialization, TerrainError> {
     control.check_cancelled()?;
     let descriptor = prepared.descriptor();
     let vertex_count = materialized_count("prepared Surface vertices", descriptor.vertex_count())?;
@@ -771,8 +777,8 @@ fn materialize_surface(
             "prepared Surface stream counts changed during materialization",
         ));
     }
-    Ok((
-        TerrainSurface {
+    Ok(SurfaceMaterialization {
+        surface: TerrainSurface {
             inner: Arc::new(ModelSurfaceData {
                 descriptor: descriptor.in_memory_descriptor(retained_bytes),
                 vertices,
@@ -780,7 +786,8 @@ fn materialize_surface(
             }),
         },
         retained_bytes,
-    ))
+        peak_working_bytes: retained_bytes.saturating_add(limits.read.max_working_bytes()),
+    })
 }
 
 fn materialized_count(label: &'static str, count: u64) -> Result<usize, TerrainError> {
