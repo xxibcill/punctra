@@ -8,7 +8,9 @@ repository slice; v0.13: Complete and repository-verified for the
 bounded persistent-terrain slice; field activation, production-scale accuracy,
 true out-of-core adoption, independent adoption, partner validation, and
 support qualification outstanding; v0.14 bounded exact Terrain QA and
-correction-loop slice Complete and repository-verified; all gates run locally**
+correction-loop slice Complete and repository-verified; v0.15 bounded local
+WebAssembly/WebGPU browser-foundation slice Complete and repository-verified;
+all gates run locally**
 
 Verification follows public contracts first. Private tests are used for fault
 injection and measured implementation boundaries that cannot be triggered
@@ -30,8 +32,12 @@ safely through the public API. Hosted CI is not configured.
    regenerating the expected side.
 7. **Benchmarks and resource gates** measure Source-scale time, heap,
    temporary bytes, durable growth, and GPU residency.
-8. **Required local GPU acceptance** proves the wgpu path when an adapter is
-   expected.
+8. **Required local GPU acceptance** proves the native wgpu path when an
+   adapter is expected.
+9. **Local browser acceptance** proves one exact WebAssembly/WebGPU host,
+   canvas lifecycle, resize/visibility behavior, provisional pick, resource
+   diagnostics, shutdown, and recreation without generalizing to other
+   browsers.
 
 Tests assert semantic results, ordering, exactness, publication certainty, and
 resource failure. They avoid depending on private tree shape, batching,
@@ -526,6 +532,19 @@ hashes, freshness, comparison, resource ceilings, and artifact traceability.
 Observed professional defect-correction time and independent example execution
 remain external exits.
 
+## v0.15 browser-foundation verification target
+
+Repository qualification requires native host/scene unit tests, strict native
+and `wasm32-unknown-unknown` checks, a release WebAssembly build with the exact
+matching `wasm-bindgen` CLI, and the static browser harness passing in one
+recorded local WebGPU environment. The harness checks initialization, planning,
+generation and batch version, bounded resize, visibility suppression,
+provisional centre pick, fused shutdown rejection, and explicit recreation.
+Generated diagnostics are logical protocol, canvas, and renderer texture
+accounting; they are not browser heap or observed GPU-allocation measurements.
+Remote Sources, independent embedding, broad compatibility, SDK stability, and
+support qualification remain external or later-version exits.
+
 ## Local verification lanes
 
 ### Change qualification
@@ -535,6 +554,11 @@ Run the authoritative sequence directly from
 command list; this architecture guide does not duplicate it. Required local GPU
 lanes use `PUNCTRA_REQUIRE_GPU=1`, including renderer appearance, corpus,
 offscreen, planner, display-mapping, and public-host acceptance.
+
+The v0.15 browser lane is separate from native GPU acceptance. It uses the
+build and local-host steps in `CONTRIBUTING.md`, requires the document itself to
+publish `PASS`, and records the exact browser/adapter facts rather than claiming
+a browser support matrix.
 
 Opt-in larger generated Workspace runs use:
 

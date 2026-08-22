@@ -8,8 +8,9 @@ Complete and repository-verified for the bounded persistent-terrain slice;
 field activation, production-scale accuracy, true out-of-core adoption,
 independent adoption, partner validation, and support qualification
 outstanding; v0.14 bounded exact Terrain QA and correction-loop slice Complete
-and repository-verified; the addition remains inside `point-terrain`, and later
-crates are created only with accepted behavior and a caller
+and repository-verified; v0.15 bounded local WebAssembly/WebGPU browser-
+foundation slice Complete and repository-verified; later crates are created
+only with accepted behavior and a caller
 
 The repository is one Cargo workspace. Each current crate is independently
 buildable and exposes a smaller public interface than its private
@@ -24,6 +25,18 @@ README.md
 ROADMAP.md
 
 apps/
+  browser-demo/
+    src/
+      lib.rs
+      browser.rs
+      diagnostics.rs
+      host.rs
+      scene.rs
+    web/
+      index.html
+      main.js
+      styles.css
+
   renderer-demo/
     src/
       lib.rs
@@ -258,6 +271,7 @@ point-terrain -> point-workspace + point-contracts + foundation-runtime
 render-protocol -> point-contracts
 point-view -> render-protocol
 render-wgpu -> render-protocol + point-contracts
+browser-demo -> point-view + render-protocol + render-wgpu
 renderer-demo -> source-las + point-source + point-index + point-workspace + point-review + point-view + render-protocol + render-wgpu + point-contracts + foundation-runtime
 terrain-demo -> source-las + point-source + point-index + point-workspace + point-terrain + point-contracts + foundation-runtime
 ~~~
@@ -309,6 +323,8 @@ cargo bench -p terrain-demo --bench journal
 cargo bench -p renderer-demo --bench viewing
 
 cargo bench -p point-view --bench planner
+cargo check -p browser-demo --target wasm32-unknown-unknown
+scripts/build-browser-demo.sh
 cargo test -p renderer-demo --test headless_smoke
 PUNCTRA_REQUIRE_GPU=1 cargo test -p renderer-demo --test headless_smoke \
   corpus_success_binds_trace_inputs_and_separate_resource_measurements -- --exact
@@ -461,8 +477,8 @@ versions, and LandXML/journal/report format versions are separate axes. A Cargo
 `0.9` version does not imply Workspace disk schema or terrain algorithm version
 9.
 
-The completed v0.14 work advances all public libraries as one
-`0.14.0-alpha.1` package set with exact inter-Punctra registry requirements and
+The completed v0.15 work advances all public libraries as one
+`0.15.0-alpha.1` package set with exact inter-Punctra registry requirements and
 local development paths. Their empty default features, dependency roles,
 MSRV, publication order, and pre-v1 policy are documented in the [library
 packaging guide](../guides/library-packaging.md).

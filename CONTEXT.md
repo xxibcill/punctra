@@ -13,8 +13,10 @@ verified while permitted field execution remains outstanding; v0.13:
 Complete and repository-verified for the bounded persistent-terrain slice;
 field activation, production-scale accuracy, true out-of-core adoption,
 independent adoption, partner validation, and support qualification
-outstanding; broader selection, constrained terrain, and product terms remain
-deferred
+outstanding; v0.14 exact Terrain QA/correction and v0.15 local browser-
+foundation slices are Complete and repository-verified while their declared
+external exits remain outstanding; broader selection, constrained terrain,
+remote browser delivery, supported SDK, and product terms remain deferred
 
 Punctra v0.11 builds on the reusable render engine, renderer-neutral View
 planner, and verified Source path described in the accepted [v0.1 renderer
@@ -91,6 +93,21 @@ verified stage and any work sibling remain because identity-conditioned
 pathname cleanup is not portable. A work sibling becomes resumable only after
 verification; none of these files is Workspace authority.
 
+The accepted [v0.14 Exact Terrain QA and Correction Loop
+design](docs/design/exact-terrain-qa-correction-v0.14.md) fixes one exact,
+CPU-authoritative QA report for a frozen Snapshot/Surface pair and one semantic
+Surface comparison. Rendered colors and profile drawings remain presentation;
+correction and Revert retain the existing `point-workspace` Operation meanings.
+
+The accepted [v0.15 WebAssembly and WebGPU Browser Foundation
+design](docs/design/browser-foundation-v0.15.md) fixes Browser Host as one
+private application composition over the existing renderer protocol, View
+planner, and wgpu renderer. The JavaScript caller owns the canvas element and
+lifecycle policy; the private Rust adapter owns WebGPU resources on its behalf
+as the host of `render-wgpu`. Browser display and picking remain progressive
+and provisional. Local generated execution does not mean remote LAS/LAZ
+delivery, a supported SDK, broad Browser Qualification, or exact CPU Query.
+
 ## Artifact
 
 An immutable result produced from a Source, Snapshot, or explicitly detached input with recorded construction parameters, such as a Spatial Index, Terrain Surface, or Profile. Its provenance identifies the Source and either the Workspace Revision or detached input content that was used, plus its construction version. A rebuildable persistent Artifact may be deleted and reproduced from that authority; persistence does not make it Workspace state.
@@ -108,6 +125,17 @@ _Avoid:_ property, metadata when referring to a per-point value
 An ordered line whose vertices constrain the shape of a Terrain Surface. A Breakline may represent a ridge, curb, channel, wall, or another discontinuity that triangulation must respect.
 
 _Avoid:_ polyline when its terrain-constraining meaning matters
+
+## Browser Host
+
+The caller-owned application layer that embeds Punctra in a browser. It owns
+the canvas element, CSS placement, device-pixel-ratio and visibility policy,
+input, scheduling, errors, and recovery decisions. A private Rust adapter may
+own WebGPU instance/device/queue/surface resources on its behalf while the
+public renderer remains submission-neutral.
+
+_Avoid:_ browser SDK when referring to the private v0.15 acceptance adapter,
+Punctra UI when the host owns application policy
 
 ## Check Point
 

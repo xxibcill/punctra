@@ -3,6 +3,34 @@
 All notable changes to Punctra are documented here. The project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased - 0.15.0-alpha.1
+
+- Completed and locally repository-verified the private `browser-demo`
+  WebAssembly/WebGPU acceptance host at implementation commit
+  `6fd3906d5386029f95c4e273cc9f6333c653854c`. The [v0.15 verification
+  record](docs/releases/v0.15.0.md) pins the exact native/browser environments,
+  commands, generated observations, benchmark comparisons, and nonclaims. The
+  host remains under the bounded [v0.15 browser-foundation
+  design](docs/design/browser-foundation-v0.15.md). It builds through
+  `wasm32-unknown-unknown` and pinned `wasm-bindgen` ES modules, runs without a
+  framework or bundler, and renders one deterministic 1,089-Point large-world
+  scene in a browser canvas.
+- Exercised the existing `point-view`, `render-protocol`, and `render-wgpu`
+  contracts in the browser with exact request/retention, View-generation,
+  batch-version, logical-residency, provisional-pick, visibility, resize/DPR,
+  shutdown, and explicit-recreation checks. `render-wgpu` now selects
+  `web_time::Instant` on bare WebAssembly so frame timing no longer traps at
+  runtime; native timing remains `std::time::Instant`.
+- Added explicit capability and safe-action failures plus separate logical
+  vertex, host surface, and renderer transient-texture accounting. The checked-
+  in static harness publishes an inspectable pass/unsupported/fail state and a
+  restrained engineering-console view documented in the [local browser
+  guide](docs/guides/browser-foundation.md).
+- Kept the evidence boundary explicit: generated local browser success is not
+  HTTP Range delivery, browser LAS/LAZ decoding, a supported SDK, broad browser
+  qualification, observed process/GPU memory, independent adoption, support
+  qualification, or release-candidate status.
+
 ## Unreleased - 0.14.0-alpha.1
 
 - Completed and locally repository-verified the bounded [Exact Terrain QA and

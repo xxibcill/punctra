@@ -13,6 +13,9 @@ adoption, independent adoption, partner validation, and support qualification
 outstanding; v0.14 exact Terrain QA and correction-loop bounded repository
 slice Complete and repository-verified with field activation, observed workflow
 timing, independent adoption, partner validation, and support qualification
+outstanding; v0.15 local WebAssembly/WebGPU browser-foundation slice Complete
+and repository-verified with remote Source delivery, broad browser
+qualification, independent adoption, SDK stability, and support qualification
 outstanding; broader
 terrain, export, external interoperability evidence, and product layers remain
 deferred
@@ -33,6 +36,7 @@ The accepted versioned designs are authoritative:
 - [v0.12 Explicit Spatial Reference and Package Publication](../design/explicit-spatial-reference-v0.12.md)
 - [v0.13 Persistent Bounded-AOI Terrain](../design/persistent-production-scale-terrain-v0.13.md)
 - [v0.14 Exact Terrain QA and Correction Loop](../design/exact-terrain-qa-correction-v0.14.md)
+- [v0.15 WebAssembly and WebGPU Browser Foundation](../design/browser-foundation-v0.15.md)
 
 The current foundation is headless and embeddable. It reads immutable Sources,
 prepares a complete rebuildable Spatial Index, resolves progressive display,
@@ -52,6 +56,13 @@ residuals, detached Check Points, and station profiles to one frozen
 Snapshot/Surface pair, exposes explicit freshness, and compares semantic faces
 by authoritative Point Identity. Correction and Revert remain existing
 `point-workspace` operations.
+
+The completed v0.15 scope adds one private `browser-demo` host over the
+existing `point-view`, `render-protocol`, and `render-wgpu` seams. Those core
+paths compile to `wasm32-unknown-unknown`; the browser adapter owns a WebGPU
+canvas lifecycle and runs one deterministic generated scene under independent
+logical, surface, and transient-texture ceilings. It does not add browser
+networking, LAS/LAZ decoding, a supported SDK, or a public browser crate.
 
 The frozen [v0.9 public interface review](v0.9-interface-review.md) classifies
 reusable, adapter-author, test-support, and private application surfaces. The
@@ -79,6 +90,10 @@ flowchart TD
     RDEMO --> IDX
     RDEMO --> LAS
     RDEMO --> SRC
+
+    BDEMO["browser-demo"] --> VIEW
+    BDEMO --> RW
+    BDEMO --> RP
 
     WS --> IDX
     WS --> SRC
