@@ -111,6 +111,38 @@ fn explicit_cancellation_link_reaches_a_pull_based_child() {
 }
 
 #[test]
+fn dropping_an_explicit_cancellation_link_deactivates_parent_propagation() {
+    let parent = CancellationToken::new();
+    let child = CancellationToken::new();
+    let link = child
+        .link_to_parent(&parent)
+        .expect("one direct cancellation parent should link");
+
+    drop(link);
+    parent.cancel();
+
+    assert!(!child.is_cancelled());
+    child.cancel();
+    assert!(child.is_cancelled());
+}
+
+#[test]
+fn an_explicit_cancellation_link_allows_only_one_direct_parent() {
+    let first_parent = CancellationToken::new();
+    let second_parent = CancellationToken::new();
+    let child = CancellationToken::new();
+    let link = child
+        .link_to_parent(&first_parent)
+        .expect("the first direct cancellation parent should link");
+    drop(link);
+
+    assert!(matches!(
+        child.link_to_parent(&second_parent),
+        Err(RuntimeError::CancellationParentAlreadyLinked)
+    ));
+}
+
+#[test]
 fn root_cancellation_reaches_a_grandchild_awaited_by_a_linked_parent() {
     let root = CancellationToken::new();
     let waiter_root = root.clone();
