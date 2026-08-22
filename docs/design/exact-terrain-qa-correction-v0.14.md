@@ -67,8 +67,9 @@ contain any nonempty combination of:
 
 - one exact `PointQuery` evaluated through `Snapshot::point_rows`;
 - caller-owned detached Check Points with unique nonzero identities; and
-- one station profile defined by finite distinct world-XY endpoints and a
-  nonzero interval count.
+- one station profile defined by finite distinct world-XY endpoints whose
+  planar metre length is finite and representable as `f64`, plus a nonzero
+  interval count.
 
 A station profile contains both endpoints and every evenly spaced station.
 Every station is evaluated exactly against the CPU Terrain triangles at its

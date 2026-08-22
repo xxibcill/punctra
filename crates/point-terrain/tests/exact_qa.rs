@@ -554,6 +554,11 @@ fn request_and_binding_validation_fail_closed() {
 }
 
 #[test]
+fn profile_requires_a_finite_representable_planar_length() {
+    assert!(StationProfile::new([-1.0e308, 0.0], [1.0e308, 0.0], 1).is_err());
+}
+
+#[test]
 fn prepared_binding_mismatch_precedes_materialization() {
     let fixture = plane_fixture("exact-qa-prepared-binding");
     let snapshot = fixture.snapshot();

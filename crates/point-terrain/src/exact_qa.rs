@@ -70,7 +70,7 @@ impl VerticalTolerance {
     }
 }
 
-/// One finite line sampled at exact, evenly spaced stations.
+/// One finite, representable-length line sampled at exact, evenly spaced stations.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct StationProfile {
     start_xy: [f64; 2],
@@ -84,7 +84,8 @@ impl StationProfile {
     /// # Errors
     ///
     /// Returns [`TerrainError::InvalidArgument`] when an endpoint is non-finite,
-    /// both endpoints coincide, or `intervals` is zero.
+    /// the planar length is zero or not representable as a finite `f64`, or
+    /// `intervals` is zero.
     pub fn new(start_xy: [f64; 2], end_xy: [f64; 2], intervals: u32) -> Result<Self, TerrainError> {
         if start_xy
             .into_iter()
