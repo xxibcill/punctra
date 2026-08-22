@@ -849,6 +849,8 @@ pub(crate) fn start_prepared(
 ) -> crate::ExactTerrainQaJob {
     let surface = surface.clone();
     crate::ExactTerrainQaJob::spawn(move |control| {
+        control.check_cancelled()?;
+        validate_snapshot_binding(&snapshot, surface.descriptor().snapshot())?;
         let (surface, materialized_bytes) = surface.materialize_in_memory(
             SurfaceMaterializationLimits::new(
                 limits.surface_read(),
@@ -878,12 +880,7 @@ fn run(
 ) -> Result<ExactTerrainQaReport, TerrainError> {
     control.check_cancelled()?;
     let binding = TerrainQaBinding::from_surface(surface)?;
-    if *snapshot.provenance() != binding.snapshot {
-        return Err(TerrainError::invalid(
-            "exact QA binding",
-            "Snapshot provenance must exactly match Surface provenance",
-        ));
-    }
+    validate_snapshot_binding(snapshot, binding.snapshot)?;
     let validation_peak_working_bytes =
         validate_request(request, limits, materialized_bytes, control)?;
     let (source_inputs, source_input, source_collection_peak_working_bytes) =
@@ -958,6 +955,19 @@ fn run(
         accounted_peak_working_bytes: peak_working_bytes,
         retained_result_bytes,
     })
+}
+
+fn validate_snapshot_binding(
+    snapshot: &Snapshot,
+    surface_snapshot: SnapshotProvenance,
+) -> Result<(), TerrainError> {
+    if *snapshot.provenance() != surface_snapshot {
+        return Err(TerrainError::invalid(
+            "exact QA binding",
+            "Snapshot provenance must exactly match Surface provenance",
+        ));
+    }
+    Ok(())
 }
 
 fn evaluate(

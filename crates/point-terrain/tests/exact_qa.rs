@@ -554,6 +554,39 @@ fn request_and_binding_validation_fail_closed() {
 }
 
 #[test]
+fn prepared_binding_mismatch_precedes_materialization() {
+    let fixture = plane_fixture("exact-qa-prepared-binding");
+    let snapshot = fixture.snapshot();
+    let bounds = WorldBounds::new([0.0, 0.0, 0.0], [10.0, 10.0, 20.0]).unwrap();
+    let prepared = prepare(
+        snapshot,
+        fixture.terrain_path("binding-surface.pterr"),
+        TerrainRecipe::new(2).within(bounds),
+        TerrainPrepareLimits::default(),
+    )
+    .blocking_wait()
+    .unwrap();
+    let mismatched_snapshot = plane_fixture("exact-qa-prepared-binding-mismatch").snapshot();
+
+    let error = prepared
+        .exact_qa(
+            mismatched_snapshot,
+            complete_request(),
+            TerrainQaLimits::default().with_max_materialized_surface_bytes(0),
+        )
+        .blocking_wait()
+        .expect_err("binding mismatch must fail before prepared Surface materialization");
+
+    assert!(matches!(
+        error,
+        TerrainError::InvalidArgument {
+            argument: "exact QA binding",
+            ..
+        }
+    ));
+}
+
+#[test]
 fn source_lineage_mismatch_is_rejected_without_partial_evidence() {
     let fixture = plane_fixture("exact-qa-source-baseline");
     let snapshot = fixture.snapshot();
