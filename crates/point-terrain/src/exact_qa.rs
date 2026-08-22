@@ -819,6 +819,64 @@ struct BoxedResults<T> {
     peak_working_bytes: u64,
 }
 
+#[derive(Clone, Copy)]
+struct ResultMemoryLedger {
+    base_working_bytes: u64,
+    retained_result_bytes: u64,
+    max_result_bytes: u64,
+    max_working_bytes: u64,
+}
+
+impl ResultMemoryLedger {
+    const fn new(base_working_bytes: u64, limits: TerrainQaLimits) -> Self {
+        Self {
+            base_working_bytes,
+            retained_result_bytes: 0,
+            max_result_bytes: limits.max_result_bytes(),
+            max_working_bytes: limits.max_working_bytes(),
+        }
+    }
+
+    fn with_retained<T>(mut self, count: usize) -> Self {
+        self.retained_result_bytes = self
+            .retained_result_bytes
+            .saturating_add(payload_bytes::<T>(count));
+        self
+    }
+
+    fn retained_working_bytes(self) -> u64 {
+        self.base_working_bytes
+            .saturating_add(self.retained_result_bytes)
+    }
+
+    fn require_result_bytes(self, label: &'static str, bytes: u64) -> Result<(), TerrainError> {
+        require_within(label, bytes, self.max_result_bytes)
+    }
+
+    fn box_results<T>(
+        self,
+        results: Vec<T>,
+        concurrent_working_bytes: u64,
+    ) -> Result<BoxedResults<T>, TerrainError> {
+        let allocation_bytes = allocation_bytes::<T>(results.capacity());
+        let boxed_bytes = payload_bytes::<T>(results.len());
+        let peak_working_bytes = self
+            .retained_working_bytes()
+            .saturating_add(concurrent_working_bytes)
+            .saturating_add(allocation_bytes)
+            .saturating_add(boxed_bytes);
+        require_within(
+            "exact QA boxed result conversion working bytes",
+            peak_working_bytes,
+            self.max_working_bytes,
+        )?;
+        Ok(BoxedResults {
+            values: results.into_boxed_slice(),
+            peak_working_bytes,
+        })
+    }
+}
+
 struct EvaluationState<'a> {
     surface: &'a TerrainSurface,
     tolerance: VerticalTolerance,
@@ -1057,24 +1115,15 @@ fn evaluate(
         tolerance_summary: ToleranceSummary::default(),
         control,
     };
-    let source_points =
-        evaluate_source_points(source_inputs, base_working_bytes, limits, &mut state)?;
-    let retained_source_bytes = payload_bytes::<SourcePointResidual>(source_points.values.len());
-    let check_points = evaluate_check_points(
-        &request.check_points,
-        base_working_bytes,
-        retained_source_bytes,
-        limits,
-        &mut state,
-    )?;
-    let retained_check_bytes = payload_bytes::<CheckPointResidual>(check_points.values.len());
-    let (profile_stations, profile_gap_count) = evaluate_profile(
-        request.profile,
-        base_working_bytes,
-        retained_source_bytes.saturating_add(retained_check_bytes),
-        limits,
-        &mut state,
-    )?;
+    let source_memory = ResultMemoryLedger::new(base_working_bytes, limits);
+    let source_points = evaluate_source_points(source_inputs, source_memory, &mut state)?;
+    let check_memory =
+        source_memory.with_retained::<SourcePointResidual>(source_points.values.len());
+    let check_points = evaluate_check_points(&request.check_points, check_memory, &mut state)?;
+    let profile_memory =
+        check_memory.with_retained::<CheckPointResidual>(check_points.values.len());
+    let (profile_stations, profile_gap_count) =
+        evaluate_profile(request.profile, profile_memory, &mut state)?;
     let peak_working_bytes = source_points
         .peak_working_bytes
         .max(check_points.peak_working_bytes)
@@ -1093,8 +1142,7 @@ fn evaluate(
 
 fn evaluate_source_points(
     inputs: Vec<SourceInput>,
-    base_working_bytes: u64,
-    limits: TerrainQaLimits,
+    memory: ResultMemoryLedger,
     state: &mut EvaluationState<'_>,
 ) -> Result<BoxedResults<SourcePointResidual>, TerrainError> {
     let source_input_bytes = allocation_bytes::<SourceInput>(inputs.capacity());
@@ -1109,14 +1157,12 @@ fn evaluate_source_points(
             outcome: state.residual(input.world_position)?,
         });
     }
-    box_results(results, base_working_bytes, 0, source_input_bytes, limits)
+    memory.box_results(results, source_input_bytes)
 }
 
 fn evaluate_check_points(
     inputs: &[CheckPoint],
-    base_working_bytes: u64,
-    retained_result_bytes: u64,
-    limits: TerrainQaLimits,
+    memory: ResultMemoryLedger,
     state: &mut EvaluationState<'_>,
 ) -> Result<BoxedResults<CheckPointResidual>, TerrainError> {
     let mut results = allocate_exact::<CheckPointResidual>(inputs.len())?;
@@ -1127,27 +1173,19 @@ fn evaluate_check_points(
             outcome: state.residual(check_point.position())?,
         });
     }
-    box_results(
-        results,
-        base_working_bytes,
-        retained_result_bytes,
-        0,
-        limits,
-    )
+    memory.box_results(results, 0)
 }
 
 fn evaluate_profile(
     profile: Option<StationProfile>,
-    base_working_bytes: u64,
-    retained_result_bytes: u64,
-    limits: TerrainQaLimits,
+    memory: ResultMemoryLedger,
     state: &mut EvaluationState<'_>,
 ) -> Result<(BoxedResults<ProfileStationResult>, u64), TerrainError> {
     let Some(profile) = profile else {
         return Ok((
             BoxedResults {
                 values: Box::new([]),
-                peak_working_bytes: base_working_bytes.saturating_add(retained_result_bytes),
+                peak_working_bytes: memory.retained_working_bytes(),
             },
             0,
         ));
@@ -1174,42 +1212,8 @@ fn evaluate_profile(
         });
     }
     let bytes = allocation_bytes::<ProfileStationResult>(results.capacity());
-    require_within("profile result bytes", bytes, limits.max_result_bytes())?;
-    Ok((
-        box_results(
-            results,
-            base_working_bytes,
-            retained_result_bytes,
-            0,
-            limits,
-        )?,
-        gaps,
-    ))
-}
-
-fn box_results<T>(
-    results: Vec<T>,
-    base_working_bytes: u64,
-    retained_result_bytes: u64,
-    concurrent_working_bytes: u64,
-    limits: TerrainQaLimits,
-) -> Result<BoxedResults<T>, TerrainError> {
-    let allocation_bytes = allocation_bytes::<T>(results.capacity());
-    let boxed_bytes = payload_bytes::<T>(results.len());
-    let peak_working_bytes = base_working_bytes
-        .saturating_add(retained_result_bytes)
-        .saturating_add(concurrent_working_bytes)
-        .saturating_add(allocation_bytes)
-        .saturating_add(boxed_bytes);
-    require_within(
-        "exact QA boxed result conversion working bytes",
-        peak_working_bytes,
-        limits.max_working_bytes(),
-    )?;
-    Ok(BoxedResults {
-        values: results.into_boxed_slice(),
-        peak_working_bytes,
-    })
+    memory.require_result_bytes("profile result bytes", bytes)?;
+    Ok((memory.box_results(results, 0)?, gaps))
 }
 
 fn validate_request(
