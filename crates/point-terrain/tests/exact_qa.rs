@@ -6,7 +6,7 @@ use foundation_runtime::ProgressPhase;
 use point_contracts::WorldBounds;
 use point_terrain::{
     CheckPoint, CheckPointId, ExactTerrainQaRequest, ProfileOutcome, ResidualOutcome,
-    StationProfile, SurfaceComparisonLimits, TerrainError, TerrainPrepareLimits,
+    StationProfile, SurfaceComparisonLimits, SurfaceReadLimits, TerrainError, TerrainPrepareLimits,
     TerrainQaCurrentState, TerrainQaFreshness, TerrainQaLimits, TerrainRecipe,
     ToleranceDisposition, VerticalTolerance, compare_surfaces, prepare,
 };
@@ -760,6 +760,47 @@ fn prepared_qa_resource_ceiling_is_inclusive() {
 }
 
 #[test]
+fn prepared_qa_shares_one_surface_read_work_ceiling() {
+    let fixture = plane_fixture("exact-qa-prepared-read-work");
+    let snapshot = fixture.snapshot();
+    let bounds = WorldBounds::new([0.0, 0.0, 0.0], [10.0, 10.0, 20.0]).unwrap();
+    let prepared = prepare(
+        snapshot.clone(),
+        fixture.terrain_path("read-work-surface.pterr"),
+        TerrainRecipe::new(2).within(bounds),
+        TerrainPrepareLimits::default(),
+    )
+    .blocking_wait()
+    .unwrap();
+
+    let exact = prepared
+        .exact_qa(
+            snapshot.clone(),
+            complete_request(),
+            qa_limits_with_surface_read_work(12),
+        )
+        .blocking_wait()
+        .expect("four vertices and two faces consume exactly twelve read-work units");
+    assert_eq!(exact.source_points().len(), 4);
+
+    let error = prepared
+        .exact_qa(
+            snapshot,
+            complete_request(),
+            qa_limits_with_surface_read_work(8),
+        )
+        .blocking_wait()
+        .expect_err("vertex work must leave only the remaining budget for faces");
+    assert!(matches!(
+        error,
+        TerrainError::ResourceLimit {
+            limit: "Surface read work units",
+            ..
+        }
+    ));
+}
+
+#[test]
 fn boxed_result_conversion_is_included_in_the_working_ceiling() {
     let fixture = plane_fixture("exact-qa-boxed-result-overlap");
     let snapshot = fixture.snapshot();
@@ -970,6 +1011,29 @@ fn qa_limits_with_rows(point_rows: PointRowLimits) -> TerrainQaLimits {
     TerrainQaLimits::new(
         point_rows,
         defaults.surface_read(),
+        defaults.max_source_points(),
+        defaults.max_check_points(),
+        defaults.max_profile_stations(),
+        defaults.max_observations(),
+        defaults.max_result_bytes(),
+        defaults.max_materialized_surface_bytes(),
+        defaults.max_face_tests(),
+        defaults.max_working_bytes(),
+    )
+}
+
+fn qa_limits_with_surface_read_work(max_work_units: u64) -> TerrainQaLimits {
+    let defaults = TerrainQaLimits::default();
+    let read = defaults.surface_read();
+    TerrainQaLimits::new(
+        defaults.point_rows(),
+        SurfaceReadLimits::new(
+            read.max_batch_records(),
+            read.max_batch_payload_bytes(),
+            read.max_verify_buffer_bytes(),
+            read.max_working_bytes(),
+            max_work_units,
+        ),
         defaults.max_source_points(),
         defaults.max_check_points(),
         defaults.max_profile_stations(),

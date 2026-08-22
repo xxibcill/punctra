@@ -746,17 +746,23 @@ fn materialize_surface(
     require_materialization_bytes(requested_bytes, limits)?;
 
     let mut vertices = allocate_materialized::<SurfaceVertex>(vertex_count, limits)?;
-    for batch in prepared.vertex_batches(limits.read)? {
+    let mut vertex_batches = prepared.vertex_batches(limits.read)?;
+    for batch in vertex_batches.by_ref() {
         control.check_cancelled()?;
         extend_materialized(&mut vertices, batch?, control)?;
     }
+    let remaining_read_work_units = limits
+        .read
+        .max_work_units()
+        .saturating_sub(vertex_batches.used_work_units());
+    let face_read_limits = limits.read.with_max_work_units(remaining_read_work_units);
     let mut faces = allocate_materialized::<SurfaceFace>(face_count, limits)?;
     let retained_bytes = materialized_allocation_bytes::<SurfaceVertex>(vertices.capacity())
         .saturating_add(materialized_allocation_bytes::<SurfaceFace>(
             faces.capacity(),
         ));
     require_materialization_bytes(retained_bytes, limits)?;
-    for batch in prepared.face_batches(limits.read)? {
+    for batch in prepared.face_batches(face_read_limits)? {
         control.check_cancelled()?;
         extend_materialized(&mut faces, batch?, control)?;
     }
@@ -954,6 +960,12 @@ impl SurfaceBatchStream {
 pub struct SurfaceVertexBatches {
     stream: SurfaceBatchStream,
     source: SourceId,
+}
+
+impl SurfaceVertexBatches {
+    fn used_work_units(&self) -> u64 {
+        self.stream.used_work_units
+    }
 }
 
 impl Iterator for SurfaceVertexBatches {

@@ -265,6 +265,11 @@ impl SurfaceReadLimits {
     pub const fn max_work_units(self) -> u64 {
         self.max_work_units
     }
+
+    pub(crate) const fn with_max_work_units(mut self, value: u64) -> Self {
+        self.max_work_units = value;
+        self
+    }
 }
 
 impl Default for SurfaceReadLimits {
