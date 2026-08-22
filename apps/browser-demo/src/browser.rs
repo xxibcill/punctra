@@ -14,7 +14,7 @@ use crate::diagnostics::{
 };
 use crate::host::{
     CssViewportRequest, HostModelError, Lifecycle, MAX_RENDER_TRANSIENT_BYTES,
-    PRESENTATION_LATENCY_FRAMES, PhysicalViewport, RenderDisposition, ViewerPhase,
+    PRESENTATION_LATENCY_FRAMES, PhysicalViewport, RenderDisposition,
 };
 use crate::scene::{
     BATCH_KEY, BATCH_VERSION, PreparedScene, VIEW_GENERATION, centre_point_id, render_limits,
@@ -205,24 +205,11 @@ impl BrowserViewer {
 
 impl BrowserViewer {
     fn ensure_active(&self) -> Result<(), JsValue> {
-        if self.lifecycle.phase() == ViewerPhase::Shutdown {
-            Err(model_failure(HostModelError::ViewerShutdown))
-        } else {
-            Ok(())
-        }
+        self.lifecycle.ensure_active().map_err(model_failure)
     }
 
     fn ensure_ready(&self) -> Result<(), JsValue> {
-        self.ensure_active()?;
-        if self.lifecycle.phase() == ViewerPhase::Hidden {
-            Err(failure(
-                "viewer_hidden",
-                "the host declared the canvas hidden",
-                RETRY_FRAME_ACTION,
-            ))
-        } else {
-            Ok(())
-        }
+        self.lifecycle.ensure_ready().map_err(interaction_failure)
     }
 
     fn resources_mut(&mut self) -> Result<&mut BrowserResources, JsValue> {
@@ -641,6 +628,14 @@ fn browser_navigator() -> Option<web_sys::Navigator> {
 
 fn model_failure(error: HostModelError) -> JsValue {
     failure("host_model", error, RECREATE_ACTION)
+}
+
+fn interaction_failure(error: HostModelError) -> JsValue {
+    if error == HostModelError::ViewerHidden {
+        failure("viewer_hidden", error, RETRY_FRAME_ACTION)
+    } else {
+        model_failure(error)
+    }
 }
 
 fn failure(

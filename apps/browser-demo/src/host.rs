@@ -138,9 +138,18 @@ impl Lifecycle {
         self.phase = ViewerPhase::Shutdown;
     }
 
-    fn ensure_active(self) -> Result<(), HostModelError> {
+    pub(crate) fn ensure_active(self) -> Result<(), HostModelError> {
         if self.phase == ViewerPhase::Shutdown {
             Err(HostModelError::ViewerShutdown)
+        } else {
+            Ok(())
+        }
+    }
+
+    pub(crate) fn ensure_ready(self) -> Result<(), HostModelError> {
+        self.ensure_active()?;
+        if self.phase == ViewerPhase::Hidden {
+            Err(HostModelError::ViewerHidden)
         } else {
             Ok(())
         }
@@ -159,6 +168,8 @@ pub(crate) enum HostModelError {
     CanvasPixelLimit,
     #[error("viewer is shut down; create a new viewer before performing more work")]
     ViewerShutdown,
+    #[error("the host declared the canvas hidden")]
+    ViewerHidden,
     #[error("browser host resource accounting overflowed")]
     SizeOverflow,
 }
@@ -244,9 +255,11 @@ mod tests {
             lifecycle.begin_render().unwrap(),
             RenderDisposition::SkipHidden
         );
+        assert_eq!(lifecycle.ensure_ready(), Err(HostModelError::ViewerHidden));
         assert_eq!(lifecycle.hidden_frame_skips(), 1);
 
         lifecycle.set_visible(true).unwrap();
+        lifecycle.ensure_ready().unwrap();
         assert_eq!(lifecycle.begin_render().unwrap(), RenderDisposition::Record);
         lifecycle.record_frame().unwrap();
         lifecycle.shutdown();
