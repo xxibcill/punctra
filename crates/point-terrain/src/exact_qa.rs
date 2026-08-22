@@ -765,6 +765,12 @@ struct QaEvaluation {
     tolerance_summary: ToleranceSummary,
     profile_gap_count: u64,
     face_tests: u64,
+    peak_working_bytes: u64,
+}
+
+struct BoxedResults<T> {
+    values: Box<[T]>,
+    peak_working_bytes: u64,
 }
 
 struct EvaluationState<'a> {
@@ -881,7 +887,7 @@ fn run(
         limits.max_result_bytes(),
     )?;
     let source_input_bytes = allocation_bytes::<SourceInput>(source_inputs.capacity());
-    let peak_working_bytes = validation_peak_working_bytes
+    let pre_evaluation_peak_working_bytes = validation_peak_working_bytes
         .max(source_collection_peak_working_bytes)
         .max(
             materialized_bytes
@@ -890,7 +896,7 @@ fn run(
         );
     require_within(
         "exact QA working bytes",
-        peak_working_bytes,
+        pre_evaluation_peak_working_bytes,
         limits.max_working_bytes(),
     )?;
 
@@ -899,9 +905,11 @@ fn run(
         request,
         source_inputs,
         observation_count,
+        materialized_bytes,
         limits,
         control,
     )?;
+    let peak_working_bytes = pre_evaluation_peak_working_bytes.max(evaluation.peak_working_bytes);
     control.check_cancelled()?;
     let input_hash = hash_input(request, source_input, control)?;
     let result_hash = hash_results(
@@ -938,6 +946,7 @@ fn evaluate(
     request: &ExactTerrainQaRequest,
     source_inputs: Vec<SourceInput>,
     observation_count: u64,
+    base_working_bytes: u64,
     limits: TerrainQaLimits,
     control: &OperationControl,
 ) -> Result<QaEvaluation, TerrainError> {
@@ -955,25 +964,47 @@ fn evaluate(
         tolerance_summary: ToleranceSummary::default(),
         control,
     };
-    let source_points = evaluate_source_points(source_inputs, &mut state)?;
-    let check_points = evaluate_check_points(&request.check_points, &mut state)?;
-    let (profile_stations, profile_gap_count) =
-        evaluate_profile(request.profile, limits, &mut state)?;
+    let source_points =
+        evaluate_source_points(source_inputs, base_working_bytes, limits, &mut state)?;
+    let retained_source_bytes = payload_bytes::<SourcePointResidual>(source_points.values.len());
+    let check_points = evaluate_check_points(
+        &request.check_points,
+        base_working_bytes,
+        retained_source_bytes,
+        limits,
+        &mut state,
+    )?;
+    let retained_check_bytes = payload_bytes::<CheckPointResidual>(check_points.values.len());
+    let (profile_stations, profile_gap_count) = evaluate_profile(
+        request.profile,
+        base_working_bytes,
+        retained_source_bytes.saturating_add(retained_check_bytes),
+        limits,
+        &mut state,
+    )?;
+    let peak_working_bytes = source_points
+        .peak_working_bytes
+        .max(check_points.peak_working_bytes)
+        .max(profile_stations.peak_working_bytes);
     Ok(QaEvaluation {
-        source_points,
-        check_points,
-        profile_stations,
+        source_points: source_points.values,
+        check_points: check_points.values,
+        profile_stations: profile_stations.values,
         statistics: state.residuals.finish(),
         tolerance_summary: state.tolerance_summary,
         profile_gap_count,
         face_tests: state.face_tests,
+        peak_working_bytes,
     })
 }
 
 fn evaluate_source_points(
     inputs: Vec<SourceInput>,
+    base_working_bytes: u64,
+    limits: TerrainQaLimits,
     state: &mut EvaluationState<'_>,
-) -> Result<Box<[SourcePointResidual]>, TerrainError> {
+) -> Result<BoxedResults<SourcePointResidual>, TerrainError> {
+    let source_input_bytes = allocation_bytes::<SourceInput>(inputs.capacity());
     let mut results = allocate_exact::<SourcePointResidual>(inputs.len())?;
     for (index, input) in inputs.into_iter().enumerate() {
         poll(index, state.control)?;
@@ -985,13 +1016,16 @@ fn evaluate_source_points(
             outcome: state.residual(input.world_position)?,
         });
     }
-    Ok(results.into_boxed_slice())
+    box_results(results, base_working_bytes, 0, source_input_bytes, limits)
 }
 
 fn evaluate_check_points(
     inputs: &[CheckPoint],
+    base_working_bytes: u64,
+    retained_result_bytes: u64,
+    limits: TerrainQaLimits,
     state: &mut EvaluationState<'_>,
-) -> Result<Box<[CheckPointResidual]>, TerrainError> {
+) -> Result<BoxedResults<CheckPointResidual>, TerrainError> {
     let mut results = allocate_exact::<CheckPointResidual>(inputs.len())?;
     for (index, check_point) in inputs.iter().copied().enumerate() {
         poll(index, state.control)?;
@@ -1000,16 +1034,30 @@ fn evaluate_check_points(
             outcome: state.residual(check_point.position())?,
         });
     }
-    Ok(results.into_boxed_slice())
+    box_results(
+        results,
+        base_working_bytes,
+        retained_result_bytes,
+        0,
+        limits,
+    )
 }
 
 fn evaluate_profile(
     profile: Option<StationProfile>,
+    base_working_bytes: u64,
+    retained_result_bytes: u64,
     limits: TerrainQaLimits,
     state: &mut EvaluationState<'_>,
-) -> Result<(Box<[ProfileStationResult]>, u64), TerrainError> {
+) -> Result<(BoxedResults<ProfileStationResult>, u64), TerrainError> {
     let Some(profile) = profile else {
-        return Ok((Box::new([]), 0));
+        return Ok((
+            BoxedResults {
+                values: Box::new([]),
+                peak_working_bytes: base_working_bytes.saturating_add(retained_result_bytes),
+            },
+            0,
+        ));
     };
     let count = profile.station_count();
     let count = usize::try_from(count)
@@ -1034,7 +1082,41 @@ fn evaluate_profile(
     }
     let bytes = allocation_bytes::<ProfileStationResult>(results.capacity());
     require_within("profile result bytes", bytes, limits.max_result_bytes())?;
-    Ok((results.into_boxed_slice(), gaps))
+    Ok((
+        box_results(
+            results,
+            base_working_bytes,
+            retained_result_bytes,
+            0,
+            limits,
+        )?,
+        gaps,
+    ))
+}
+
+fn box_results<T>(
+    results: Vec<T>,
+    base_working_bytes: u64,
+    retained_result_bytes: u64,
+    concurrent_working_bytes: u64,
+    limits: TerrainQaLimits,
+) -> Result<BoxedResults<T>, TerrainError> {
+    let allocation_bytes = allocation_bytes::<T>(results.capacity());
+    let boxed_bytes = payload_bytes::<T>(results.len());
+    let peak_working_bytes = base_working_bytes
+        .saturating_add(retained_result_bytes)
+        .saturating_add(concurrent_working_bytes)
+        .saturating_add(allocation_bytes)
+        .saturating_add(boxed_bytes);
+    require_within(
+        "exact QA boxed result conversion working bytes",
+        peak_working_bytes,
+        limits.max_working_bytes(),
+    )?;
+    Ok(BoxedResults {
+        values: results.into_boxed_slice(),
+        peak_working_bytes,
+    })
 }
 
 fn validate_request(
@@ -1274,8 +1356,26 @@ fn materialize(
             usize_limit(),
         )
     })?;
-    let materialized_bytes = payload_bytes::<SurfaceVertex>(vertex_count)
+    let requested_materialized_bytes = payload_bytes::<SurfaceVertex>(vertex_count)
         .saturating_add(payload_bytes::<SurfaceFace>(face_count));
+    require_within(
+        "prepared Surface materialization bytes",
+        requested_materialized_bytes,
+        limits.max_materialized_surface_bytes(),
+    )?;
+    require_within(
+        "exact QA working bytes",
+        requested_materialized_bytes.saturating_add(limits.surface_read().max_working_bytes()),
+        limits.max_working_bytes(),
+    )?;
+    let mut vertices = allocate_exact::<SurfaceVertex>(vertex_count)?;
+    for batch in prepared.vertex_batches(limits.surface_read())? {
+        control.check_cancelled()?;
+        vertices.extend(batch?);
+    }
+    let mut faces = allocate_exact::<SurfaceFace>(face_count)?;
+    let materialized_bytes = allocation_bytes::<SurfaceVertex>(vertices.capacity())
+        .saturating_add(allocation_bytes::<SurfaceFace>(faces.capacity()));
     require_within(
         "prepared Surface materialization bytes",
         materialized_bytes,
@@ -1286,12 +1386,6 @@ fn materialize(
         materialized_bytes.saturating_add(limits.surface_read().max_working_bytes()),
         limits.max_working_bytes(),
     )?;
-    let mut vertices = allocate_exact::<SurfaceVertex>(vertex_count)?;
-    for batch in prepared.vertex_batches(limits.surface_read())? {
-        control.check_cancelled()?;
-        vertices.extend(batch?);
-    }
-    let mut faces = allocate_exact::<SurfaceFace>(face_count)?;
     for batch in prepared.face_batches(limits.surface_read())? {
         control.check_cancelled()?;
         faces.extend(batch?);

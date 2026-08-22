@@ -721,6 +721,39 @@ fn prepared_qa_resource_ceiling_is_inclusive() {
 }
 
 #[test]
+fn boxed_result_conversion_is_included_in_the_working_ceiling() {
+    let fixture = plane_fixture("exact-qa-boxed-result-overlap");
+    let snapshot = fixture.snapshot();
+    let surface = derive_with(
+        snapshot.clone(),
+        TerrainRecipe::new(2),
+        point_terrain::TerrainLimits::default(),
+    )
+    .unwrap();
+    let request = ExactTerrainQaRequest::new(tolerance())
+        .check_points(vec![check_point(1, [1.0, 1.0, 2.0])].into_boxed_slice());
+    let retained_result_bytes =
+        u64::try_from(std::mem::size_of::<point_terrain::CheckPointResidual>()).unwrap();
+
+    let error = surface
+        .exact_qa(
+            snapshot,
+            request,
+            TerrainQaLimits::default().with_max_working_bytes(retained_result_bytes),
+        )
+        .blocking_wait()
+        .expect_err("boxed-result conversion overlap must respect the working-byte ceiling");
+
+    assert!(matches!(
+        error,
+        TerrainError::ResourceLimit {
+            limit: "exact QA boxed result conversion working bytes",
+            ..
+        }
+    ));
+}
+
+#[test]
 fn qa_cancellation_and_comparison_work_limits_publish_no_partial_result() {
     let fixture = plane_fixture("exact-qa-cancel");
     let snapshot = fixture.snapshot();
