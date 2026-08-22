@@ -126,6 +126,26 @@ function assertFact(condition, message) {
   if (!condition) throw new Error(`Browser acceptance invariant failed: ${message}`);
 }
 
+function verifyCapabilityDiagnostics(diagnostics) {
+  const capabilities = diagnostics.capabilities;
+  assertFact(capabilities.secure_context === true, "secure-context capability");
+  assertFact(capabilities.webgpu === true, "WebGPU capability");
+  assertFact(capabilities.adapter_name.length > 0, "adapter name");
+  assertFact(capabilities.backend === "BrowserWebGpu", "browser WebGPU backend");
+  assertFact(capabilities.device_type.length > 0, "adapter device type");
+  assertFact(capabilities.surface_format.length > 0, "surface format");
+  assertFact(capabilities.present_mode === "fifo", "FIFO presentation");
+  assertFact(capabilities.required_feature_count === 0, "WebGPU core features only");
+  assertFact(
+    capabilities.adapter_max_buffer_size >= diagnostics.limits.estimated_gpu_bytes,
+    "adapter buffer limit",
+  );
+  assertFact(
+    capabilities.adapter_max_texture_dimension_2d >= diagnostics.limits.canvas_dimension,
+    "adapter texture-dimension limit",
+  );
+}
+
 async function initializeViewer() {
   const requested = requestedViewport();
   const next = await createViewer(
@@ -196,6 +216,7 @@ async function runSmokePath() {
   let diagnostics = parseDiagnostics(viewer.render());
   publishDiagnostics(diagnostics);
   assertFact(diagnostics.schema === "punctra-browser-foundation-v1", "diagnostic schema");
+  verifyCapabilityDiagnostics(diagnostics);
   assertFact(diagnostics.scene.point_count === 1089, "fixed scene Point count");
   assertFact(diagnostics.scene.initial_requests === 1, "initial planner request");
   assertFact(diagnostics.scene.retained_nodes === 1, "settled planner retention");
