@@ -6,7 +6,8 @@ use serde::Serialize;
 use crate::{
     host::{
         MAX_CANVAS_DIMENSION, MAX_CANVAS_PIXELS, MAX_DEVICE_PIXEL_RATIO,
-        MAX_RENDER_TRANSIENT_BYTES, PhysicalViewport, ViewerPhase,
+        MAX_RENDER_TRANSIENT_BYTES, PRESENTATION_LATENCY_FRAMES, PhysicalViewport,
+        SURFACE_BYTES_PER_PIXEL, ViewerPhase,
     },
     scene::SceneFacts,
 };
@@ -90,7 +91,9 @@ pub(crate) struct LimitFacts {
     canvas_dimension: u32,
     canvas_pixels: u64,
     device_pixel_ratio: f64,
+    surface_bytes_per_pixel: u64,
     renderer_transient_bytes: u64,
+    presentation_latency_frames: u32,
 }
 
 impl LimitFacts {
@@ -103,7 +106,9 @@ impl LimitFacts {
             canvas_dimension: MAX_CANVAS_DIMENSION,
             canvas_pixels: MAX_CANVAS_PIXELS,
             device_pixel_ratio: MAX_DEVICE_PIXEL_RATIO,
+            surface_bytes_per_pixel: SURFACE_BYTES_PER_PIXEL,
             renderer_transient_bytes: MAX_RENDER_TRANSIENT_BYTES,
+            presentation_latency_frames: PRESENTATION_LATENCY_FRAMES,
         }
     }
 }
@@ -253,6 +258,8 @@ mod tests {
         assert_eq!(value["scene"]["point_count"], 1_089);
         assert_eq!(value["limits"]["points"], 2_048);
         assert_eq!(value["limits"]["estimated_gpu_bytes"], 49_152);
+        assert_eq!(value["limits"]["surface_bytes_per_pixel"], 4);
+        assert_eq!(value["limits"]["presentation_latency_frames"], 2);
         assert_eq!(value["viewport"]["surface_bytes"], 6_400_000);
         assert_eq!(value["pick"]["status"], "not_requested");
     }

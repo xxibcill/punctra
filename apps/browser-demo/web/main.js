@@ -69,8 +69,10 @@ function publishDiagnostics(diagnostics) {
   replaceFacts(resourceFacts, [
     ["Resident Points", `${diagnostics.scene.point_count} / ${diagnostics.limits.points}`],
     ["Logical vertex bytes", `${formatBytes(diagnostics.scene.estimated_gpu_bytes)} / ${formatBytes(diagnostics.limits.estimated_gpu_bytes)}`],
+    ["Surface bytes / pixel", diagnostics.limits.surface_bytes_per_pixel],
     ["Canvas bytes", formatBytes(diagnostics.viewport.surface_bytes)],
     ["Transient texture bytes", formatBytes(diagnostics.frame?.transient_texture_bytes)],
+    ["Presentation latency hint", `${diagnostics.limits.presentation_latency_frames} frames`],
     ["Rendered frames", diagnostics.rendered_frames],
     ["Hidden frame skips", diagnostics.hidden_frame_skips],
   ]);
@@ -174,7 +176,8 @@ function verifyBoundedResize(initialViewport) {
     "resized physical height",
   );
   assertFact(
-    viewport.surface_bytes === viewport.physical_width * viewport.physical_height * 4,
+    viewport.surface_bytes
+      === viewport.physical_width * viewport.physical_height * diagnostics.limits.surface_bytes_per_pixel,
     "resized surface accounting",
   );
   assertFact(diagnostics.frame === null, "resize discards the recorded frame");
@@ -197,7 +200,13 @@ async function runSmokePath() {
   assertFact(diagnostics.scene.batch_version === 1, "batch version");
   assertFact(diagnostics.frame.drawn_points === 1089, "drawn Point count");
   assertFact(diagnostics.scene.estimated_gpu_bytes <= diagnostics.limits.estimated_gpu_bytes, "logical residency ceiling");
-  assertFact(diagnostics.viewport.surface_bytes <= diagnostics.limits.canvas_pixels * 4, "canvas byte ceiling");
+  assertFact(
+    diagnostics.viewport.surface_bytes
+      <= diagnostics.limits.canvas_pixels * diagnostics.limits.surface_bytes_per_pixel,
+    "canvas byte ceiling",
+  );
+  assertFact(diagnostics.limits.surface_bytes_per_pixel === 4, "surface byte factor");
+  assertFact(diagnostics.limits.presentation_latency_frames === 2, "presentation latency hint");
   assertFact(diagnostics.frame.transient_texture_bytes <= diagnostics.limits.renderer_transient_bytes, "transient texture ceiling");
 
   const resizedViewport = verifyBoundedResize(initialViewport);

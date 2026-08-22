@@ -6,6 +6,7 @@ pub(crate) const MAX_CANVAS_PIXELS: u64 = 8_388_608;
 pub(crate) const MAX_DEVICE_PIXEL_RATIO: f64 = 4.0;
 pub(crate) const SURFACE_BYTES_PER_PIXEL: u64 = 4;
 pub(crate) const MAX_RENDER_TRANSIENT_BYTES: u64 = MAX_CANVAS_PIXELS * 8;
+pub(crate) const PRESENTATION_LATENCY_FRAMES: u32 = 2;
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
 pub(crate) struct PhysicalViewport {

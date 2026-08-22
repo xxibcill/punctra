@@ -13,8 +13,8 @@ use crate::diagnostics::{
     CapabilityFacts, Diagnostics, Failure, FrameFacts, LimitFacts, PickFacts,
 };
 use crate::host::{
-    HostModelError, Lifecycle, MAX_RENDER_TRANSIENT_BYTES, PhysicalViewport, RenderDisposition,
-    ViewerPhase,
+    HostModelError, Lifecycle, MAX_RENDER_TRANSIENT_BYTES, PRESENTATION_LATENCY_FRAMES,
+    PhysicalViewport, RenderDisposition, ViewerPhase,
 };
 use crate::scene::{
     BATCH_KEY, BATCH_VERSION, PreparedScene, VIEW_GENERATION, centre_point_id, render_limits,
@@ -573,7 +573,7 @@ fn surface_configuration(
         width: dimensions[0],
         height: dimensions[1],
         present_mode: wgpu::PresentMode::Fifo,
-        desired_maximum_frame_latency: 2,
+        desired_maximum_frame_latency: PRESENTATION_LATENCY_FRAMES,
         alpha_mode,
         view_formats: Vec::new(),
     })
