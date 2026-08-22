@@ -29,6 +29,7 @@ apps/
     src/
       lib.rs
       browser.rs
+      diagnostics.rs
       host.rs
       scene.rs
     web/
