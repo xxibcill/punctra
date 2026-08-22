@@ -613,23 +613,33 @@ impl TerrainQaCurrentState {
     /// Captures current state from an in-memory Surface.
     #[must_use]
     pub fn in_memory(snapshot: &Snapshot, surface: &TerrainSurface) -> Self {
-        Self {
-            snapshot: *snapshot.provenance(),
-            surface: Some(CurrentSurfaceState {
-                snapshot: surface.descriptor().snapshot(),
-                artifact_hash: surface.descriptor().artifact_hash(),
-            }),
-        }
+        Self::with_surface(
+            snapshot,
+            surface.descriptor().snapshot(),
+            surface.descriptor().artifact_hash(),
+        )
     }
 
     /// Captures current state from a file-backed Surface.
     #[must_use]
     pub fn prepared(snapshot: &Snapshot, surface: &PreparedTerrainSurface) -> Self {
+        Self::with_surface(
+            snapshot,
+            surface.descriptor().snapshot(),
+            surface.descriptor().artifact_hash(),
+        )
+    }
+
+    fn with_surface(
+        snapshot: &Snapshot,
+        surface_snapshot: SnapshotProvenance,
+        artifact_hash: ContentHash,
+    ) -> Self {
         Self {
             snapshot: *snapshot.provenance(),
             surface: Some(CurrentSurfaceState {
-                snapshot: surface.descriptor().snapshot(),
-                artifact_hash: surface.descriptor().artifact_hash(),
+                snapshot: surface_snapshot,
+                artifact_hash,
             }),
         }
     }

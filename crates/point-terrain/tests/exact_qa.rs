@@ -160,7 +160,11 @@ fn prepared_and_in_memory_surfaces_produce_identical_exact_evidence() {
         .blocking_wait()
         .expect("in-memory QA succeeds");
     let actual = prepared
-        .exact_qa(snapshot, complete_request(), TerrainQaLimits::default())
+        .exact_qa(
+            snapshot.clone(),
+            complete_request(),
+            TerrainQaLimits::default(),
+        )
         .blocking_wait()
         .expect("prepared QA succeeds");
 
@@ -170,6 +174,18 @@ fn prepared_and_in_memory_surfaces_produce_identical_exact_evidence() {
     assert_eq!(actual.source_points(), expected.source_points());
     assert_eq!(actual.check_points(), expected.check_points());
     assert_eq!(actual.profile_stations(), expected.profile_stations());
+    assert_eq!(
+        expected
+            .binding()
+            .freshness(TerrainQaCurrentState::in_memory(&snapshot, &in_memory)),
+        TerrainQaFreshness::Current
+    );
+    assert_eq!(
+        actual
+            .binding()
+            .freshness(TerrainQaCurrentState::prepared(&snapshot, &prepared)),
+        TerrainQaFreshness::Current
+    );
 }
 
 #[test]
