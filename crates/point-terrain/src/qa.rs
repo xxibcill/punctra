@@ -215,51 +215,11 @@ pub(crate) fn sort_identities(
     control: &OperationControl,
 ) -> Result<(), TerrainError> {
     let mut comparisons = 0_usize;
-    for root in (0..identities.len() / 2).rev() {
-        sift_down(
-            identities,
-            root,
-            identities.len(),
-            &mut comparisons,
-            control,
-        )?;
-    }
-    for end in (1..identities.len()).rev() {
-        identities.swap(0, end);
-        sift_down(identities, 0, end, &mut comparisons, control)?;
-    }
+    crate::sort::heap_sort_by(identities, |left, right| {
+        compare_identity(left, right, &mut comparisons, control)
+    })?;
     control.check_cancelled()?;
     Ok(())
-}
-
-fn sift_down(
-    identities: &mut [crate::CheckPointId],
-    mut root: usize,
-    end: usize,
-    comparisons: &mut usize,
-    control: &OperationControl,
-) -> Result<(), TerrainError> {
-    loop {
-        let Some(left) = root.checked_mul(2).and_then(|value| value.checked_add(1)) else {
-            return Ok(());
-        };
-        if left >= end {
-            return Ok(());
-        }
-        let right = left.saturating_add(1);
-        let child = if right < end
-            && compare_identity(identities[left], identities[right], comparisons, control)?
-        {
-            right
-        } else {
-            left
-        };
-        if !compare_identity(identities[root], identities[child], comparisons, control)? {
-            return Ok(());
-        }
-        identities.swap(root, child);
-        root = child;
-    }
 }
 
 fn compare_identity(

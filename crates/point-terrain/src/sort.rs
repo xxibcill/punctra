@@ -42,6 +42,47 @@ pub(crate) fn merge_sort_by<T: Copy, E>(
     })
 }
 
+pub(crate) fn heap_sort_by<T: Copy, E>(
+    values: &mut [T],
+    mut less: impl FnMut(T, T) -> Result<bool, E>,
+) -> Result<(), E> {
+    for root in (0..values.len() / 2).rev() {
+        sift_down(values, root, values.len(), &mut less)?;
+    }
+    for end in (1..values.len()).rev() {
+        values.swap(0, end);
+        sift_down(values, 0, end, &mut less)?;
+    }
+    Ok(())
+}
+
+fn sift_down<T: Copy, E>(
+    values: &mut [T],
+    mut root: usize,
+    end: usize,
+    less: &mut impl FnMut(T, T) -> Result<bool, E>,
+) -> Result<(), E> {
+    loop {
+        let Some(left) = root.checked_mul(2).and_then(|value| value.checked_add(1)) else {
+            return Ok(());
+        };
+        if left >= end {
+            return Ok(());
+        }
+        let right = left.saturating_add(1);
+        let child = if right < end && less(values[left], values[right])? {
+            right
+        } else {
+            left
+        };
+        if !less(values[root], values[child])? {
+            return Ok(());
+        }
+        values.swap(root, child);
+        root = child;
+    }
+}
+
 fn merge_pass<T: Copy, E>(
     source: &[T],
     target: &mut [T],

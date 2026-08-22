@@ -197,8 +197,12 @@ fn run(
         accounted_peak_working_bytes,
         limits.max_working_bytes(),
     )?;
-    heap_sort(&mut before_records, &mut meter)?;
-    heap_sort(&mut after_records, &mut meter)?;
+    crate::sort::heap_sort_by(&mut before_records, |left, right| {
+        less(left, right, &mut meter)
+    })?;
+    crate::sort::heap_sort_by(&mut after_records, |left, right| {
+        less(left, right, &mut meter)
+    })?;
 
     let mut added_hasher = change_hasher(b"added");
     let mut removed_hasher = change_hasher(b"removed");
@@ -357,44 +361,6 @@ fn point_for_vertex(surface: &TerrainSurface, id: u32) -> Result<PointId, Terrai
         .get(usize::try_from(id - 1).unwrap_or(usize::MAX))
         .map(|vertex| vertex.point())
         .ok_or_else(|| TerrainError::topology("a Surface face references a missing vertex"))
-}
-
-fn heap_sort(records: &mut [FaceRecord], meter: &mut WorkMeter<'_>) -> Result<(), TerrainError> {
-    for root in (0..records.len() / 2).rev() {
-        sift_down(records, root, records.len(), meter)?;
-    }
-    for end in (1..records.len()).rev() {
-        records.swap(0, end);
-        sift_down(records, 0, end, meter)?;
-    }
-    Ok(())
-}
-
-fn sift_down(
-    records: &mut [FaceRecord],
-    mut root: usize,
-    end: usize,
-    meter: &mut WorkMeter<'_>,
-) -> Result<(), TerrainError> {
-    loop {
-        let Some(left) = root.checked_mul(2).and_then(|value| value.checked_add(1)) else {
-            return Ok(());
-        };
-        if left >= end {
-            return Ok(());
-        }
-        let right = left.saturating_add(1);
-        let child = if right < end && less(records[left], records[right], meter)? {
-            right
-        } else {
-            left
-        };
-        if !less(records[root], records[child], meter)? {
-            return Ok(());
-        }
-        records.swap(root, child);
-        root = child;
-    }
 }
 
 fn less(
