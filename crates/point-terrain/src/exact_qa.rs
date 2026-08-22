@@ -770,6 +770,29 @@ struct SourceInput {
     effective_classification: u8,
 }
 
+#[derive(Clone, Copy)]
+struct SourceInputGrowth {
+    base_working_bytes: u64,
+    stream_working_bytes: u64,
+    previous_capacity: usize,
+}
+
+impl SourceInputGrowth {
+    fn check(self, new_capacity: usize, max_working_bytes: u64) -> Result<u64, TerrainError> {
+        let overlap = self
+            .base_working_bytes
+            .saturating_add(self.stream_working_bytes)
+            .saturating_add(allocation_bytes::<SourceInput>(self.previous_capacity))
+            .saturating_add(allocation_bytes::<SourceInput>(new_capacity));
+        require_within(
+            "exact QA Source input growth overlap",
+            overlap,
+            max_working_bytes,
+        )?;
+        Ok(overlap)
+    }
+}
+
 struct QaEvaluation {
     source_points: Box<[SourcePointResidual]>,
     check_points: Box<[CheckPointResidual]>,
@@ -1322,23 +1345,20 @@ fn grow_source_inputs(
     base_working_bytes: u64,
     stream_working_bytes: u64,
 ) -> Result<u64, TerrainError> {
+    let previous_capacity = inputs.capacity();
+    let growth = SourceInputGrowth {
+        base_working_bytes,
+        stream_working_bytes,
+        previous_capacity,
+    };
     let maximum = usize::try_from(limits.max_source_points()).unwrap_or(usize::MAX);
-    let requested = inputs
-        .capacity()
+    let requested = previous_capacity
         .max(1)
         .saturating_mul(2)
         .min(maximum)
         .max(inputs.len().saturating_add(1));
     let bytes = allocation_bytes::<SourceInput>(requested);
-    let overlap = base_working_bytes
-        .saturating_add(stream_working_bytes)
-        .saturating_add(allocation_bytes::<SourceInput>(inputs.capacity()))
-        .saturating_add(bytes);
-    require_within(
-        "exact QA Source input growth overlap",
-        overlap,
-        limits.max_working_bytes(),
-    )?;
+    let requested_overlap = growth.check(requested, limits.max_working_bytes())?;
     inputs
         .try_reserve_exact(requested.saturating_sub(inputs.len()))
         .map_err(|_| {
@@ -1348,6 +1368,7 @@ fn grow_source_inputs(
                 limits.max_working_bytes(),
             )
         })?;
+    let actual_overlap = growth.check(inputs.capacity(), limits.max_working_bytes())?;
     let retained = base_working_bytes
         .saturating_add(stream_working_bytes)
         .saturating_add(allocation_bytes::<SourceInput>(inputs.capacity()));
@@ -1356,7 +1377,7 @@ fn grow_source_inputs(
         retained,
         limits.max_working_bytes(),
     )?;
-    Ok(overlap.max(retained))
+    Ok(requested_overlap.max(actual_overlap).max(retained))
 }
 
 fn locate_residual(
@@ -1634,8 +1655,8 @@ mod tests {
 
     use super::{
         CANCELLATION_STRIDE, CheckPointResidual, ExactTerrainQaRequest, ResidualOutcome,
-        StationProfile, TerrainQaBinding, VerticalTolerance, extend_with_cancellation, hash_input,
-        hash_results, poll, validate_request,
+        SourceInputGrowth, StationProfile, TerrainQaBinding, VerticalTolerance,
+        extend_with_cancellation, hash_input, hash_results, poll, validate_request,
     };
     use crate::{CheckPoint, CheckPointId, TerrainError, TerrainQaLimits};
 
@@ -1668,6 +1689,31 @@ mod tests {
 
         assert!(matches!(error, TerrainError::Cancelled));
         assert_eq!(collected.len(), CANCELLATION_STRIDE);
+    }
+
+    #[test]
+    fn source_input_growth_checks_the_actual_reallocation_capacity() {
+        let growth = SourceInputGrowth {
+            base_working_bytes: 128,
+            stream_working_bytes: 256,
+            previous_capacity: 4,
+        };
+        let requested_overlap = growth
+            .check(8, u64::MAX)
+            .expect("the requested growth should fit an unbounded ceiling");
+        let actual_overlap = growth
+            .check(16, u64::MAX)
+            .expect("the actual growth should fit an unbounded ceiling");
+
+        assert!(actual_overlap > requested_overlap);
+        assert!(matches!(
+            growth.check(16, requested_overlap),
+            Err(TerrainError::ResourceLimit {
+                limit: "exact QA Source input growth overlap",
+                required,
+                allowed,
+            }) if required == actual_overlap && allowed == requested_overlap
+        ));
     }
 
     #[test]
