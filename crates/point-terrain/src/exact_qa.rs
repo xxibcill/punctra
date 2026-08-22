@@ -1,4 +1,4 @@
-use std::{mem, num::NonZeroU32};
+use std::num::NonZeroU32;
 
 use blake3::Hasher;
 use foundation_runtime::OperationControl;
@@ -8,7 +8,7 @@ use point_workspace::{PointQuery, Snapshot, SnapshotPointSummary, SnapshotProven
 use crate::{
     ALGORITHM_VERSION, CheckPoint, CheckPointId, CheckPointLimits, CheckPointOutcome,
     PreparedTerrainSurface, ResidualStatistics, TerrainError, TerrainQaLimits, TerrainSurface,
-    limits::{require_within, usize_to_u64_saturating},
+    limits::{allocation_bytes, require_within, usize_to_u64_saturating},
     persistence::{SurfaceMaterialization, SurfaceMaterializationLimits},
     qa::ResidualAccumulator,
 };
@@ -1606,11 +1606,7 @@ fn extend_with_cancellation<T>(
 }
 
 fn payload_bytes<T>(count: usize) -> u64 {
-    usize_to_u64_saturating(count).saturating_mul(usize_to_u64_saturating(mem::size_of::<T>()))
-}
-
-fn allocation_bytes<T>(capacity: usize) -> u64 {
-    payload_bytes::<T>(capacity)
+    allocation_bytes::<T>(count)
 }
 
 fn usize_limit() -> u64 {

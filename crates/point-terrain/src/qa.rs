@@ -7,7 +7,7 @@ use robust::{Coord, orient2d};
 use crate::{
     CheckPoint, CheckPointJob, CheckPointLimits, CheckPointOutcome, CheckPointReport,
     CheckPointResult, ResidualStatistics, SurfaceFace, TerrainError, TerrainSurface,
-    numeric::canonical_zero,
+    limits::allocation_bytes, numeric::canonical_zero,
 };
 
 const CANCELLATION_STRIDE: usize = 1_024;
@@ -700,10 +700,4 @@ fn checked_payload_bytes<T>(len: usize) -> Result<u64, TerrainError> {
         .unwrap_or(u64::MAX)
         .checked_mul(u64::try_from(mem::size_of::<T>()).unwrap_or(u64::MAX))
         .ok_or_else(|| TerrainError::numeric("Check Point payload byte count overflowed"))
-}
-
-fn allocation_bytes<T>(capacity: usize) -> u64 {
-    u64::try_from(capacity)
-        .unwrap_or(u64::MAX)
-        .saturating_mul(u64::try_from(mem::size_of::<T>()).unwrap_or(u64::MAX))
 }

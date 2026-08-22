@@ -7,7 +7,7 @@ use point_workspace::SnapshotProvenance;
 
 use crate::{
     SurfaceComparisonLimits, SurfaceFace, TerrainError, TerrainSurface,
-    limits::{require_within, usize_to_u64_saturating},
+    limits::{allocation_bytes, require_within, usize_to_u64_saturating},
 };
 
 const CHANGE_HASH_DOMAIN: &[u8] = b"punctra-terrain-surface-change-v1";
@@ -205,8 +205,8 @@ fn run(
     let mut meter = WorkMeter::new(limits.max_work_units(), control);
     let mut before_records = face_records(before, &mut meter)?;
     let mut after_records = face_records(after, &mut meter)?;
-    let retained_record_bytes =
-        allocation_bytes(&before_records).saturating_add(allocation_bytes(&after_records));
+    let retained_record_bytes = allocation_bytes::<FaceRecord>(before_records.capacity())
+        .saturating_add(allocation_bytes::<FaceRecord>(after_records.capacity()));
     require_within(
         "Surface comparison record bytes",
         retained_record_bytes,
@@ -424,11 +424,6 @@ fn hash_face(hasher: &mut Hasher, key: [PointId; 3]) {
         hasher.update(point.source().as_bytes());
         hasher.update(&point.ordinal().to_le_bytes());
     }
-}
-
-fn allocation_bytes(records: &Vec<FaceRecord>) -> u64 {
-    usize_to_u64_saturating(records.capacity())
-        .saturating_mul(usize_to_u64_saturating(mem::size_of::<FaceRecord>()))
 }
 
 #[cfg(test)]

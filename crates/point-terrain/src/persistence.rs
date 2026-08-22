@@ -28,7 +28,7 @@ use crate::{
         TOPOLOGY_HASH_DOMAIN, artifact_hash, canonical_f64_bits, canonical_topology_hash,
         collect_input, derive_collected, domain_hasher, hash_transform, recipe_hash,
     },
-    limits::{require_within, usize_to_u64_saturating},
+    limits::{allocation_bytes, require_within, usize_to_u64_saturating},
     model::SurfaceData as ModelSurfaceData,
 };
 
@@ -747,8 +747,8 @@ fn materialize_surface(
     let descriptor = prepared.descriptor();
     let vertex_count = materialized_count("prepared Surface vertices", descriptor.vertex_count())?;
     let face_count = materialized_count("prepared Surface faces", descriptor.face_count())?;
-    let requested_bytes = materialized_bytes::<SurfaceVertex>(vertex_count)
-        .saturating_add(materialized_bytes::<SurfaceFace>(face_count));
+    let requested_bytes = allocation_bytes::<SurfaceVertex>(vertex_count)
+        .saturating_add(allocation_bytes::<SurfaceFace>(face_count));
     require_materialization_bytes(requested_bytes, limits)?;
 
     let mut vertices = allocate_materialized::<SurfaceVertex>(vertex_count, limits)?;
@@ -763,10 +763,8 @@ fn materialize_surface(
         .saturating_sub(vertex_batches.used_work_units());
     let face_read_limits = limits.read.with_max_work_units(remaining_read_work_units);
     let mut faces = allocate_materialized::<SurfaceFace>(face_count, limits)?;
-    let retained_bytes = materialized_allocation_bytes::<SurfaceVertex>(vertices.capacity())
-        .saturating_add(materialized_allocation_bytes::<SurfaceFace>(
-            faces.capacity(),
-        ));
+    let retained_bytes = allocation_bytes::<SurfaceVertex>(vertices.capacity())
+        .saturating_add(allocation_bytes::<SurfaceFace>(faces.capacity()));
     require_materialization_bytes(retained_bytes, limits)?;
     for batch in prepared.face_batches(face_read_limits)? {
         control.check_cancelled()?;
@@ -799,7 +797,7 @@ fn allocate_materialized<T>(
     count: usize,
     limits: SurfaceMaterializationLimits,
 ) -> Result<Vec<T>, TerrainError> {
-    let requested_bytes = materialized_bytes::<T>(count);
+    let requested_bytes = allocation_bytes::<T>(count);
     let mut values = Vec::new();
     values.try_reserve_exact(count).map_err(|_| {
         TerrainError::resource(
@@ -839,14 +837,6 @@ fn require_materialization_bytes(
         retained_bytes.saturating_add(limits.read.max_working_bytes()),
         limits.max_working_bytes,
     )
-}
-
-fn materialized_bytes<T>(count: usize) -> u64 {
-    usize_to_u64_saturating(count).saturating_mul(usize_to_u64_saturating(mem::size_of::<T>()))
-}
-
-fn materialized_allocation_bytes<T>(capacity: usize) -> u64 {
-    materialized_bytes::<T>(capacity)
 }
 
 impl std::fmt::Debug for PreparedTerrainSurface {

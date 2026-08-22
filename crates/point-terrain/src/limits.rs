@@ -1,3 +1,5 @@
+use std::mem;
+
 use point_workspace::PointRowLimits;
 
 use crate::error::TerrainError;
@@ -7,6 +9,10 @@ const GIB: u64 = 1024 * MIB;
 
 pub(crate) fn usize_to_u64_saturating(value: usize) -> u64 {
     u64::try_from(value).unwrap_or(u64::MAX)
+}
+
+pub(crate) fn allocation_bytes<T>(capacity: usize) -> u64 {
+    usize_to_u64_saturating(capacity).saturating_mul(usize_to_u64_saturating(mem::size_of::<T>()))
 }
 
 pub(crate) fn require_within(
