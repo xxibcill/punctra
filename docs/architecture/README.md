@@ -91,6 +91,10 @@ flowchart TD
     RDEMO --> LAS
     RDEMO --> SRC
 
+    BDEMO["browser-demo"] --> VIEW
+    BDEMO --> RW
+    BDEMO --> RP
+
     WS --> IDX
     WS --> SRC
     WS --> CT["point-contracts"]

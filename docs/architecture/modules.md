@@ -506,6 +506,7 @@ The allowlist is stricter than what Cargo can compile:
 | `render-protocol` | `point-contracts` |
 | `point-view` | `render-protocol` and narrow math/value dependencies |
 | `render-wgpu` | `render-protocol`, `point-contracts` |
+| `browser-demo` | `point-view`, `render-protocol`, `render-wgpu`, and narrow private serialization, browser, and WebGPU dependencies |
 | `renderer-demo` | only the Source/index/Workspace/review/View/render crates it composes |
 | `terrain-demo` | `source-las`, `point-source`, `point-index`, `point-workspace`, `point-terrain`, `point-contracts`, `foundation-runtime`, and narrow checksum, identity-generation, and error dependencies |
 
