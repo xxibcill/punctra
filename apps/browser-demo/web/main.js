@@ -23,6 +23,21 @@ let resizeFrame = null;
 let smokeRecord = null;
 let moduleLoadAttempt = 0;
 
+const UNSUPPORTED_INITIALIZATION_CODES = new Set([
+  "missing_window",
+  "insecure_context",
+  "webgpu_unavailable",
+  "capability_inspection",
+  "canvas_surface",
+  "webgpu_adapter",
+  "webgpu_device",
+  "surface_format",
+  "presentation_mode",
+  "surface_alpha_mode",
+  "surface_configuration",
+  "renderer_capability",
+]);
+
 function requestedViewport() {
   const bounds = canvasShell.getBoundingClientRect();
   return {
@@ -125,16 +140,29 @@ function failureRecord(error) {
   }
 }
 
-function publishFailure(error, { disableControls = false, state = "failed" } = {}) {
+function failureState(record) {
+  return UNSUPPORTED_INITIALIZATION_CODES.has(record.code) ? "unsupported" : "failed";
+}
+
+function publishFailure(error, { disableControls = false, state } = {}) {
   const record = failureRecord(error);
+  const publishedState = state ?? failureState(record);
   diagnosticOutput.textContent = JSON.stringify(record, null, 2);
   if (disableControls) setControls(false);
-  const label = state === "unsupported" ? "UNSUPPORTED" : "FAILED";
-  setHarnessState(state, `${label} — ${record.message}`, record.safe_action);
+  const label = publishedState === "unsupported" ? "UNSUPPORTED" : "FAILED";
+  setHarnessState(publishedState, `${label} — ${record.message}`, record.safe_action);
 }
 
 function assertFact(condition, message) {
   if (!condition) throw new Error(`Browser acceptance invariant failed: ${message}`);
+}
+
+function verifyFailureStateClassification() {
+  for (const code of UNSUPPORTED_INITIALIZATION_CODES) {
+    assertFact(failureState({ code }) === "unsupported", `${code} unsupported classification`);
+  }
+  assertFact(failureState({ code: "browser_module" }) === "failed", "module failure classification");
+  assertFact(failureState({ code: "scene_publication" }) === "failed", "logic failure classification");
 }
 
 function verifyCapabilityDiagnostics(diagnostics) {
@@ -242,6 +270,7 @@ async function runSmokePath() {
   let diagnostics = parseDiagnostics(viewer.render());
   publishDiagnostics(diagnostics);
   assertFact(diagnostics.schema === "punctra-browser-foundation-v1", "diagnostic schema");
+  verifyFailureStateClassification();
   verifyCapabilityDiagnostics(diagnostics);
   assertFact(diagnostics.scene.point_count === 1089, "fixed scene Point count");
   assertFact(diagnostics.scene.initial_requests === 1, "initial planner request");
