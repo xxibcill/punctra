@@ -9,6 +9,8 @@ pub(crate) const RENDERER_DEPTH_AND_PICK_BYTES_PER_PIXEL: u64 = 8;
 pub(crate) const MAX_RENDER_TRANSIENT_BYTES: u64 =
     MAX_CANVAS_PIXELS * RENDERER_DEPTH_AND_PICK_BYTES_PER_PIXEL;
 pub(crate) const PRESENTATION_LATENCY_FRAMES: u32 = 2;
+pub(crate) const RESIZE_VIEWPORT_FAILURE_CODE: &str = "resize_viewport";
+pub(crate) const RESIZE_VIEWPORT_ACTION: &str = "Keep the current surface configuration, choose finite positive CSS dimensions and a device-pixel ratio at most four so the physical canvas remains within 4,096 pixels per dimension and 8,388,608 pixels total, then resize again.";
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct CssViewportRequest {

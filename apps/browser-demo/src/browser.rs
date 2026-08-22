@@ -14,7 +14,8 @@ use crate::diagnostics::{
 };
 use crate::host::{
     CssViewportRequest, HostModelError, Lifecycle, MAX_RENDER_TRANSIENT_BYTES,
-    PRESENTATION_LATENCY_FRAMES, PhysicalViewport, RenderDisposition,
+    PRESENTATION_LATENCY_FRAMES, PhysicalViewport, RESIZE_VIEWPORT_ACTION,
+    RESIZE_VIEWPORT_FAILURE_CODE, RenderDisposition,
 };
 use crate::scene::{
     BATCH_KEY, BATCH_VERSION, PreparedScene, VIEW_GENERATION, centre_point_id, render_limits,
@@ -94,7 +95,7 @@ impl BrowserViewer {
             css_height,
             device_pixel_ratio,
         ))
-        .map_err(model_failure)?;
+        .map_err(resize_viewport_failure)?;
         self.resources_mut()?.reconfigure(viewport)?;
         self.viewport = viewport;
         self.last_frame = None;
@@ -709,6 +710,10 @@ fn model_failure(error: HostModelError) -> JsValue {
 
 fn initial_viewport_failure(error: HostModelError) -> JsValue {
     failure("initial_viewport", error, INITIAL_VIEWPORT_ACTION)
+}
+
+fn resize_viewport_failure(error: HostModelError) -> JsValue {
+    failure(RESIZE_VIEWPORT_FAILURE_CODE, error, RESIZE_VIEWPORT_ACTION)
 }
 
 fn interaction_failure(error: HostModelError) -> JsValue {

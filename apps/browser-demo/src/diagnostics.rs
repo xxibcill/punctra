@@ -268,7 +268,10 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::{host::Lifecycle, scene};
+    use crate::{
+        host::{HostModelError, Lifecycle, RESIZE_VIEWPORT_ACTION, RESIZE_VIEWPORT_FAILURE_CODE},
+        scene,
+    };
 
     #[test]
     fn diagnostics_preserve_schema_authority_and_bounded_resource_facts() {
@@ -330,6 +333,26 @@ mod tests {
                 "code": "device_lost",
                 "message": "adapter reset",
                 "safe_action": "recreate the viewer",
+            })
+        );
+    }
+
+    #[test]
+    fn resize_failure_preserves_retry_without_recreation_contract() {
+        let failure = Failure::new(
+            RESIZE_VIEWPORT_FAILURE_CODE,
+            HostModelError::DevicePixelRatioLimit,
+            RESIZE_VIEWPORT_ACTION,
+        );
+        let value: serde_json::Value = serde_json::from_str(&failure.to_json()).unwrap();
+
+        assert_eq!(
+            value,
+            json!({
+                "schema": "punctra-browser-failure-v1",
+                "code": "resize_viewport",
+                "message": "device-pixel ratio exceeds the accepted maximum of 4",
+                "safe_action": "Keep the current surface configuration, choose finite positive CSS dimensions and a device-pixel ratio at most four so the physical canvas remains within 4,096 pixels per dimension and 8,388,608 pixels total, then resize again.",
             })
         );
     }
