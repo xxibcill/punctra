@@ -137,9 +137,18 @@ impl FrameFacts {
     }
 }
 
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum PickStatus {
+    NotRequested,
+    Pending,
+    Miss,
+    Hit,
+}
+
 #[derive(Serialize)]
 pub(crate) struct PickFacts {
-    status: &'static str,
+    status: PickStatus,
     authority: &'static str,
     generation: Option<u64>,
     batch_key: Option<u64>,
@@ -149,20 +158,20 @@ pub(crate) struct PickFacts {
 
 impl PickFacts {
     pub(crate) const fn not_requested() -> Self {
-        Self::empty("not_requested")
+        Self::empty(PickStatus::NotRequested)
     }
 
     #[cfg(target_arch = "wasm32")]
     pub(crate) const fn pending() -> Self {
-        Self::empty("pending")
+        Self::empty(PickStatus::Pending)
     }
 
     #[cfg(target_arch = "wasm32")]
     pub(crate) const fn miss() -> Self {
-        Self::empty("miss")
+        Self::empty(PickStatus::Miss)
     }
 
-    const fn empty(status: &'static str) -> Self {
+    const fn empty(status: PickStatus) -> Self {
         Self {
             status,
             authority: "provisional_gpu_hint",
@@ -176,7 +185,7 @@ impl PickFacts {
     #[cfg(target_arch = "wasm32")]
     pub(crate) const fn hit(hit: PickHit) -> Self {
         Self {
-            status: "hit",
+            status: PickStatus::Hit,
             authority: "provisional_gpu_hint",
             generation: Some(hit.view_generation().generation()),
             batch_key: Some(hit.batch().get()),
@@ -277,6 +286,20 @@ mod tests {
                 "message": "adapter reset",
                 "safe_action": "recreate the viewer",
             })
+        );
+    }
+
+    #[test]
+    fn pick_status_serialization_is_closed_and_stable() {
+        assert_eq!(
+            serde_json::to_value([
+                PickStatus::NotRequested,
+                PickStatus::Pending,
+                PickStatus::Miss,
+                PickStatus::Hit,
+            ])
+            .unwrap(),
+            json!(["not_requested", "pending", "miss", "hit"])
         );
     }
 
