@@ -566,17 +566,15 @@ impl TerrainQaBinding {
         let stale_snapshot = self.snapshot.workspace() != current.snapshot.workspace()
             || self.snapshot.source() != current.snapshot.source()
             || self.snapshot.revision() != current.snapshot.revision();
-        let snapshot_only =
-            current.surface_snapshot.is_none() && current.surface_artifact_hash.is_none();
-        let stale_surface = match (current.surface_snapshot, current.surface_artifact_hash) {
-            (None, None) => false,
-            (Some(surface_snapshot), Some(surface_artifact_hash)) => {
-                self.artifact_hash != surface_artifact_hash
-                    || surface_snapshot.workspace() != current.snapshot.workspace()
-                    || surface_snapshot.source() != current.snapshot.source()
-                    || surface_snapshot.revision() != current.snapshot.revision()
+        let snapshot_only = current.surface.is_none();
+        let stale_surface = match current.surface {
+            None => false,
+            Some(surface) => {
+                self.artifact_hash != surface.artifact_hash
+                    || surface.snapshot.workspace() != current.snapshot.workspace()
+                    || surface.snapshot.source() != current.snapshot.source()
+                    || surface.snapshot.revision() != current.snapshot.revision()
             }
-            _ => true,
         };
         match (stale_snapshot, stale_surface, snapshot_only) {
             (false, false, true) => TerrainQaFreshness::SnapshotOnlyCurrent,
@@ -588,12 +586,17 @@ impl TerrainQaBinding {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct CurrentSurfaceState {
+    snapshot: SnapshotProvenance,
+    artifact_hash: ContentHash,
+}
+
 /// Caller-declared current Snapshot and Surface state for a freshness check.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct TerrainQaCurrentState {
     snapshot: SnapshotProvenance,
-    surface_snapshot: Option<SnapshotProvenance>,
-    surface_artifact_hash: Option<ContentHash>,
+    surface: Option<CurrentSurfaceState>,
 }
 
 impl TerrainQaCurrentState {
@@ -602,8 +605,7 @@ impl TerrainQaCurrentState {
     pub fn snapshot(snapshot: &Snapshot) -> Self {
         Self {
             snapshot: *snapshot.provenance(),
-            surface_snapshot: None,
-            surface_artifact_hash: None,
+            surface: None,
         }
     }
 
@@ -612,8 +614,10 @@ impl TerrainQaCurrentState {
     pub fn in_memory(snapshot: &Snapshot, surface: &TerrainSurface) -> Self {
         Self {
             snapshot: *snapshot.provenance(),
-            surface_snapshot: Some(surface.descriptor().snapshot()),
-            surface_artifact_hash: Some(surface.descriptor().artifact_hash()),
+            surface: Some(CurrentSurfaceState {
+                snapshot: surface.descriptor().snapshot(),
+                artifact_hash: surface.descriptor().artifact_hash(),
+            }),
         }
     }
 
@@ -622,8 +626,10 @@ impl TerrainQaCurrentState {
     pub fn prepared(snapshot: &Snapshot, surface: &PreparedTerrainSurface) -> Self {
         Self {
             snapshot: *snapshot.provenance(),
-            surface_snapshot: Some(surface.descriptor().snapshot()),
-            surface_artifact_hash: Some(surface.descriptor().artifact_hash()),
+            surface: Some(CurrentSurfaceState {
+                snapshot: surface.descriptor().snapshot(),
+                artifact_hash: surface.descriptor().artifact_hash(),
+            }),
         }
     }
 }
