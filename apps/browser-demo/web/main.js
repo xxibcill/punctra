@@ -249,6 +249,11 @@ async function runSmokePath() {
   assertFact(diagnostics.pick.point_ordinal === 544, "centre Point identity");
   assertFact(diagnostics.pick.generation === 1, "pick generation");
   assertFact(diagnostics.pick.batch_version === 1, "pick batch version");
+  assertFact(
+    diagnostics.frame.transient_texture_bytes
+      === diagnostics.viewport.physical_width * diagnostics.viewport.physical_height * 8,
+    "exact post-pick transient texture accounting",
+  );
 
   smokeRecord = {
     state: "pick_verified",

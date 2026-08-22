@@ -137,6 +137,10 @@ impl FrameFacts {
             surface_suboptimal,
         }
     }
+
+    pub(crate) const fn record_pick_transient_bytes(&mut self, transient_texture_bytes: u64) {
+        self.transient_texture_bytes = transient_texture_bytes;
+    }
 }
 
 #[derive(Clone, Copy, Serialize)]
@@ -304,6 +308,23 @@ mod tests {
             .unwrap(),
             json!(["not_requested", "pending", "miss", "hit"])
         );
+    }
+
+    #[test]
+    fn frame_facts_refresh_exact_transient_bytes_after_pick_allocation() {
+        let mut frame = FrameFacts {
+            view_generation: 1,
+            drawn_points: 1_089,
+            draw_calls: 1,
+            resident_bytes: 26_136,
+            transient_texture_bytes: 7_646_628,
+            surface_suboptimal: false,
+        };
+
+        frame.record_pick_transient_bytes(15_293_256);
+
+        let value = serde_json::to_value(frame).unwrap();
+        assert_eq!(value["transient_texture_bytes"], 15_293_256);
     }
 
     fn capability_fixture() -> CapabilityFacts {

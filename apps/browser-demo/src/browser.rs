@@ -124,7 +124,7 @@ impl BrowserViewer {
 
         let frame = self.scene_frame()?;
         let (report, suboptimal) = self.resources_mut()?.render(&frame)?;
-        validate_transient_bytes(report)?;
+        validate_transient_bytes(report.transient_texture_bytes())?;
         self.lifecycle.record_frame().map_err(model_failure)?;
         self.last_frame = Some(FrameFacts::from_report(report, suboptimal));
         self.pick = PickFacts::not_requested();
@@ -143,7 +143,19 @@ impl BrowserViewer {
                 "Choose a physical pixel inside the current viewport and begin a new provisional pick.",
             ));
         }
+        self.last_frame
+            .as_ref()
+            .ok_or_else(missing_recorded_frame_failure)?;
+        let transient_texture_bytes = self
+            .viewport
+            .renderer_transient_bytes_with_pick()
+            .map_err(model_failure)?;
+        validate_transient_bytes(transient_texture_bytes)?;
         self.resources_mut()?.begin_pick([x, y])?;
+        self.last_frame
+            .as_mut()
+            .ok_or_else(missing_recorded_frame_failure)?
+            .record_pick_transient_bytes(transient_texture_bytes);
         self.pick = PickFacts::pending();
         self.diagnostics()
     }
@@ -599,20 +611,26 @@ fn set_canvas_size(canvas: &HtmlCanvasElement, viewport: PhysicalViewport) {
     canvas.set_height(dimensions[1]);
 }
 
-fn validate_transient_bytes(report: FrameReport) -> Result<(), JsValue> {
-    if report.transient_texture_bytes() <= MAX_RENDER_TRANSIENT_BYTES {
+fn validate_transient_bytes(transient_texture_bytes: u64) -> Result<(), JsValue> {
+    if transient_texture_bytes <= MAX_RENDER_TRANSIENT_BYTES {
         Ok(())
     } else {
         Err(failure(
             "transient_texture_limit",
             format!(
-                "renderer transient textures used {} bytes above the {}-byte ceiling",
-                report.transient_texture_bytes(),
-                MAX_RENDER_TRANSIENT_BYTES
+                "renderer transient textures used {transient_texture_bytes} bytes above the {MAX_RENDER_TRANSIENT_BYTES}-byte ceiling"
             ),
             RECREATE_ACTION,
         ))
     }
+}
+
+fn missing_recorded_frame_failure() -> JsValue {
+    failure(
+        "missing_recorded_frame",
+        "no recorded frame is available for provisional picking",
+        "Render a visible frame before beginning a provisional pick.",
+    )
 }
 
 fn browser_user_agent() -> String {

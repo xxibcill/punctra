@@ -5,7 +5,9 @@ pub(crate) const MAX_CANVAS_DIMENSION: u32 = 4_096;
 pub(crate) const MAX_CANVAS_PIXELS: u64 = 8_388_608;
 pub(crate) const MAX_DEVICE_PIXEL_RATIO: f64 = 4.0;
 pub(crate) const SURFACE_BYTES_PER_PIXEL: u64 = 4;
-pub(crate) const MAX_RENDER_TRANSIENT_BYTES: u64 = MAX_CANVAS_PIXELS * 8;
+pub(crate) const RENDERER_DEPTH_AND_PICK_BYTES_PER_PIXEL: u64 = 8;
+pub(crate) const MAX_RENDER_TRANSIENT_BYTES: u64 =
+    MAX_CANVAS_PIXELS * RENDERER_DEPTH_AND_PICK_BYTES_PER_PIXEL;
 pub(crate) const PRESENTATION_LATENCY_FRAMES: u32 = 2;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -56,6 +58,12 @@ impl PhysicalViewport {
 
     pub(crate) const fn dimensions(self) -> [u32; 2] {
         [self.physical_width, self.physical_height]
+    }
+
+    pub(crate) fn renderer_transient_bytes_with_pick(self) -> Result<u64, HostModelError> {
+        pixel_count(self.physical_width, self.physical_height)?
+            .checked_mul(RENDERER_DEPTH_AND_PICK_BYTES_PER_PIXEL)
+            .ok_or(HostModelError::SizeOverflow)
     }
 }
 
@@ -228,6 +236,10 @@ mod tests {
 
         assert_eq!(viewport.dimensions(), [1_600, 1_000]);
         assert_eq!(viewport.surface_bytes, 6_400_000);
+        assert_eq!(
+            viewport.renderer_transient_bytes_with_pick().unwrap(),
+            12_800_000
+        );
     }
 
     #[test]
