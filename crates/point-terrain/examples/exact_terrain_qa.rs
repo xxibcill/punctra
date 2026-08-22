@@ -20,7 +20,7 @@ use point_terrain::{
     CheckPoint, CheckPointId, ExactTerrainQaReport, ExactTerrainQaRequest, ProfileOutcome,
     ResidualOutcome, StationProfile, SurfaceComparisonLimits, SurfaceComparisonReport,
     TerrainLimits, TerrainQaCurrentState, TerrainQaFreshness, TerrainQaLimits, TerrainRecipe,
-    TerrainSurface, ToleranceDisposition, VerticalTolerance, compare_surfaces, derive,
+    TerrainSurface, VerticalTolerance, compare_surfaces, derive,
 };
 use point_workspace::{
     CommitLimits, CommitOutcome, CommitRequest, OpenLimits, OperationId, PointQuery,
@@ -395,21 +395,16 @@ fn source_result_json(result: &point_terrain::SourcePointResidual) -> Value {
 }
 
 fn residual_outcome_json(outcome: ResidualOutcome) -> Value {
-    match outcome {
-        ResidualOutcome::Gap => json!({ "kind": "gap" }),
-        ResidualOutcome::Sampled {
-            face,
-            surface_z,
-            residual,
-            tolerance,
-        } => json!({
-            "kind": "sampled",
-            "face": face.get(),
-            "surface_z_metres": surface_z,
-            "residual_metres": residual,
-            "tolerance": tolerance_name(tolerance),
-        }),
-    }
+    let Some(sample) = outcome.sampled() else {
+        return json!({ "kind": "gap" });
+    };
+    json!({
+        "kind": "sampled",
+        "face": sample.face().get(),
+        "surface_z_metres": sample.surface_z(),
+        "residual_metres": sample.residual(),
+        "tolerance": sample.tolerance().as_str(),
+    })
 }
 
 fn profile_outcome_json(outcome: ProfileOutcome) -> Value {
@@ -511,14 +506,6 @@ fn write_profile_series(
         writeln!(svg, "<circle id=\"{name}-station-{}\" data-evidence-pointer=\"/qa/{name}/profile/stations/{}\" cx=\"{x:.3}\" cy=\"{y:.3}\" r=\"6\" fill=\"{color}\"><title>{name} station {}: {:.6} m, {:.6} m elevation</title></circle>", station.index(), station.index(), station.index(), station.station_metres(), z).map_err(io::Error::other)?;
     }
     Ok(())
-}
-
-fn tolerance_name(value: ToleranceDisposition) -> &'static str {
-    match value {
-        ToleranceDisposition::Below => "below",
-        ToleranceDisposition::Within => "within",
-        ToleranceDisposition::Above => "above",
-    }
 }
 
 fn freshness_name(value: TerrainQaFreshness) -> &'static str {

@@ -97,9 +97,9 @@ pub use derive::derive;
 pub use error::{MAX_TERRAIN_DIAGNOSTIC_BYTES, TerrainDiagnostic, TerrainError};
 pub use exact_qa::{
     CheckPointResidual, ExactTerrainQaReport, ExactTerrainQaRequest, ProfileOutcome,
-    ProfileStationResult, ResidualOutcome, SourcePointInputSummary, SourcePointResidual,
-    StationProfile, TerrainQaBinding, TerrainQaCurrentState, TerrainQaFreshness,
-    ToleranceDisposition, ToleranceSummary, VerticalTolerance,
+    ProfileStationResult, ResidualOutcome, SampledResidual, SourcePointInputSummary,
+    SourcePointResidual, StationProfile, TerrainQaBinding, TerrainQaCurrentState,
+    TerrainQaFreshness, ToleranceDisposition, ToleranceSummary, VerticalTolerance,
 };
 pub use landxml::LandXmlOptions;
 pub use limits::{

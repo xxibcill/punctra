@@ -240,6 +240,26 @@ pub enum ToleranceDisposition {
     Above,
 }
 
+impl ToleranceDisposition {
+    /// Returns the stable lowercase semantic name.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Below => "below",
+            Self::Within => "within",
+            Self::Above => "above",
+        }
+    }
+
+    const fn hash_code(self) -> u8 {
+        match self {
+            Self::Below => 0,
+            Self::Within => 1,
+            Self::Above => 2,
+        }
+    }
+}
+
 /// Exact Surface sampling outcome carrying tolerance only for residual inputs.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ResidualOutcome {
@@ -256,6 +276,85 @@ pub enum ResidualOutcome {
     },
     /// The XY position lies outside the Surface domain.
     Gap,
+}
+
+impl ResidualOutcome {
+    /// Returns authoritative sampled fields, or `None` for an explicit gap.
+    #[must_use]
+    pub const fn sampled(self) -> Option<SampledResidual> {
+        match self {
+            Self::Gap => None,
+            Self::Sampled {
+                face,
+                surface_z,
+                residual,
+                tolerance,
+            } => Some(SampledResidual {
+                face,
+                surface_z,
+                residual,
+                tolerance,
+            }),
+        }
+    }
+
+    fn check_point_outcome(self) -> CheckPointOutcome {
+        let Some(sample) = self.sampled() else {
+            return CheckPointOutcome::Gap;
+        };
+        CheckPointOutcome::Sampled {
+            face: sample.face,
+            surface_z: sample.surface_z,
+            residual: sample.residual,
+        }
+    }
+
+    fn hash_into(self, hasher: &mut Hasher) {
+        let Some(sample) = self.sampled() else {
+            hasher.update(&[0]);
+            return;
+        };
+        hasher.update(&[1]);
+        hasher.update(&sample.face.get().to_le_bytes());
+        hasher.update(&sample.surface_z.to_bits().to_le_bytes());
+        hasher.update(&sample.residual.to_bits().to_le_bytes());
+        hasher.update(&[sample.tolerance.hash_code()]);
+    }
+}
+
+/// Authoritative fields retained for one sampled residual.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SampledResidual {
+    face: crate::SurfaceFaceId,
+    surface_z: f64,
+    residual: f64,
+    tolerance: ToleranceDisposition,
+}
+
+impl SampledResidual {
+    /// Returns the deterministically selected canonical face.
+    #[must_use]
+    pub const fn face(self) -> crate::SurfaceFaceId {
+        self.face
+    }
+
+    /// Returns the interpolated Surface elevation in metres.
+    #[must_use]
+    pub const fn surface_z(self) -> f64 {
+        self.surface_z
+    }
+
+    /// Returns signed observed-minus-Surface elevation in metres.
+    #[must_use]
+    pub const fn residual(self) -> f64 {
+        self.residual
+    }
+
+    /// Returns the inclusive tolerance classification.
+    #[must_use]
+    pub const fn tolerance(self) -> ToleranceDisposition {
+        self.tolerance
+    }
 }
 
 /// Exact Surface sampling outcome for one profile station.
@@ -457,20 +556,11 @@ impl ToleranceSummary {
     }
 
     fn observe(&mut self, outcome: ResidualOutcome) -> Result<(), TerrainError> {
-        let count = match outcome {
-            ResidualOutcome::Gap => &mut self.gaps,
-            ResidualOutcome::Sampled {
-                tolerance: ToleranceDisposition::Below,
-                ..
-            } => &mut self.below,
-            ResidualOutcome::Sampled {
-                tolerance: ToleranceDisposition::Within,
-                ..
-            } => &mut self.within,
-            ResidualOutcome::Sampled {
-                tolerance: ToleranceDisposition::Above,
-                ..
-            } => &mut self.above,
+        let count = match outcome.sampled().map(SampledResidual::tolerance) {
+            None => &mut self.gaps,
+            Some(ToleranceDisposition::Below) => &mut self.below,
+            Some(ToleranceDisposition::Within) => &mut self.within,
+            Some(ToleranceDisposition::Above) => &mut self.above,
         };
         *count = count
             .checked_add(1)
@@ -821,36 +911,35 @@ struct BoxedResults<T> {
 
 #[derive(Clone, Copy)]
 struct ResultMemoryLedger {
-    base_working_bytes: u64,
-    retained_result_bytes: u64,
-    max_result_bytes: u64,
-    max_working_bytes: u64,
+    working_baseline: u64,
+    retained_results: u64,
+    result_limit: u64,
+    working_limit: u64,
 }
 
 impl ResultMemoryLedger {
     const fn new(base_working_bytes: u64, limits: TerrainQaLimits) -> Self {
         Self {
-            base_working_bytes,
-            retained_result_bytes: 0,
-            max_result_bytes: limits.max_result_bytes(),
-            max_working_bytes: limits.max_working_bytes(),
+            working_baseline: base_working_bytes,
+            retained_results: 0,
+            result_limit: limits.max_result_bytes(),
+            working_limit: limits.max_working_bytes(),
         }
     }
 
     fn with_retained<T>(mut self, count: usize) -> Self {
-        self.retained_result_bytes = self
-            .retained_result_bytes
+        self.retained_results = self
+            .retained_results
             .saturating_add(payload_bytes::<T>(count));
         self
     }
 
     fn retained_working_bytes(self) -> u64 {
-        self.base_working_bytes
-            .saturating_add(self.retained_result_bytes)
+        self.working_baseline.saturating_add(self.retained_results)
     }
 
     fn require_result_bytes(self, label: &'static str, bytes: u64) -> Result<(), TerrainError> {
-        require_within(label, bytes, self.max_result_bytes)
+        require_within(label, bytes, self.result_limit)
     }
 
     fn box_results<T>(
@@ -868,7 +957,7 @@ impl ResultMemoryLedger {
         require_within(
             "exact QA boxed result conversion working bytes",
             peak_working_bytes,
-            self.max_working_bytes,
+            self.working_limit,
         )?;
         Ok(BoxedResults {
             values: results.into_boxed_slice(),
@@ -897,7 +986,7 @@ impl EvaluationState<'_> {
             &mut self.face_tests,
             self.control,
         )?;
-        self.residuals.observe(as_check_point_outcome(outcome))?;
+        self.residuals.observe(outcome.check_point_outcome())?;
         self.tolerance_summary.observe(outcome)?;
         Ok(outcome)
     }
@@ -1426,22 +1515,6 @@ fn locate_residual(
     })
 }
 
-fn as_check_point_outcome(outcome: ResidualOutcome) -> CheckPointOutcome {
-    match outcome {
-        ResidualOutcome::Gap => CheckPointOutcome::Gap,
-        ResidualOutcome::Sampled {
-            face,
-            surface_z,
-            residual,
-            ..
-        } => CheckPointOutcome::Sampled {
-            face,
-            surface_z,
-            residual,
-        },
-    }
-}
-
 fn result_bytes(source_count: usize, request: &ExactTerrainQaRequest) -> Result<u64, TerrainError> {
     let profile_count = request.profile.map_or(0, StationProfile::station_count);
     let profile_count = usize::try_from(profile_count)
@@ -1559,7 +1632,7 @@ fn hash_results(
             hasher.update(&tick.to_le_bytes());
         }
         hasher.update(&[result.effective_classification]);
-        hash_residual_outcome(&mut hasher, result.outcome);
+        result.outcome.hash_into(&mut hasher);
     }
     hasher.update(&usize_to_u64_saturating(check_points.len()).to_le_bytes());
     for (index, result) in check_points.iter().enumerate() {
@@ -1568,7 +1641,7 @@ fn hash_results(
         for coordinate in result.check_point.position() {
             hasher.update(&coordinate.to_bits().to_le_bytes());
         }
-        hash_residual_outcome(&mut hasher, result.outcome);
+        result.outcome.hash_into(&mut hasher);
     }
     hasher.update(&usize_to_u64_saturating(profile_stations.len()).to_le_bytes());
     for (index, result) in profile_stations.iter().enumerate() {
@@ -1590,30 +1663,6 @@ fn hash_results(
         }
     }
     Ok(ContentHash::new(*hasher.finalize().as_bytes()))
-}
-
-fn hash_residual_outcome(hasher: &mut Hasher, outcome: ResidualOutcome) {
-    match outcome {
-        ResidualOutcome::Gap => {
-            hasher.update(&[0]);
-        }
-        ResidualOutcome::Sampled {
-            face,
-            surface_z,
-            residual,
-            tolerance,
-        } => {
-            hasher.update(&[1]);
-            hasher.update(&face.get().to_le_bytes());
-            hasher.update(&surface_z.to_bits().to_le_bytes());
-            hasher.update(&residual.to_bits().to_le_bytes());
-            hasher.update(&[match tolerance {
-                ToleranceDisposition::Below => 0,
-                ToleranceDisposition::Within => 1,
-                ToleranceDisposition::Above => 2,
-            }]);
-        }
-    }
 }
 
 fn allocate_exact<T>(count: usize) -> Result<Vec<T>, TerrainError> {

@@ -96,6 +96,12 @@ fn exact_qa_reports_profiles_residuals_tolerances_gaps_and_provenance() {
             ..
         }
     ));
+    let sampled = report.check_points()[0]
+        .outcome()
+        .sampled()
+        .expect("covered residual exposes one sampled value");
+    assert!((sampled.residual() - 1.0).abs() < f64::EPSILON);
+    assert_eq!(sampled.tolerance().as_str(), "above");
     assert!(matches!(
         report.check_points()[1].outcome(),
         ResidualOutcome::Sampled {
