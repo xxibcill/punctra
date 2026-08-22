@@ -283,9 +283,43 @@ pub(crate) fn locate(
     control: &OperationControl,
 ) -> Result<CheckPointOutcome, TerrainError> {
     let position = check_point.position();
+    let Some(sample) = sample_surface(
+        surface,
+        [position[0], position[1]],
+        limits,
+        face_tests,
+        control,
+    )?
+    else {
+        return Ok(CheckPointOutcome::Gap);
+    };
+    let residual = canonical_zero(position[2] - sample.surface_z);
+    if !residual.is_finite() {
+        return Err(TerrainError::numeric("Check Point residual is not finite"));
+    }
+    Ok(CheckPointOutcome::Sampled {
+        face: sample.face,
+        surface_z: sample.surface_z,
+        residual,
+    })
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct SurfaceSample {
+    pub(crate) face: crate::SurfaceFaceId,
+    pub(crate) surface_z: f64,
+}
+
+pub(crate) fn sample_surface(
+    surface: &TerrainSurface,
+    world_xy: [f64; 2],
+    limits: CheckPointLimits,
+    face_tests: &mut u64,
+    control: &OperationControl,
+) -> Result<Option<SurfaceSample>, TerrainError> {
     let world_query = Coord {
-        x: position[0],
-        y: position[1],
+        x: world_xy[0],
+        y: world_xy[1],
     };
     for (index, face) in surface.faces().iter().copied().enumerate() {
         if index.is_multiple_of(CANCELLATION_STRIDE) {
@@ -308,8 +342,8 @@ pub(crate) fn locate(
             NormalizedFace::Degenerate => {
                 let frame = face_local(surface, face)?;
                 let local_query = Coord {
-                    x: position[0] - frame.world_origin[0],
-                    y: position[1] - frame.world_origin[1],
+                    x: world_xy[0] - frame.world_origin[0],
+                    y: world_xy[1] - frame.world_origin[1],
                 };
                 let NormalizedFace::Candidate { triangle, query } =
                     normalize_xy(frame.triangle, local_query)
@@ -326,18 +360,13 @@ pub(crate) fn locate(
                     "interpolated Surface elevation is not finite",
                 ));
             }
-            let residual = canonical_zero(position[2] - surface_z);
-            if !residual.is_finite() {
-                return Err(TerrainError::numeric("Check Point residual is not finite"));
-            }
-            return Ok(CheckPointOutcome::Sampled {
+            return Ok(Some(SurfaceSample {
                 face: face.id(),
                 surface_z,
-                residual,
-            });
+            }));
         }
     }
-    Ok(CheckPointOutcome::Gap)
+    Ok(None)
 }
 
 struct LocalFaceFrame {

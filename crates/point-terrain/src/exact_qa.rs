@@ -799,19 +799,19 @@ impl EvaluationState<'_> {
     }
 
     fn profile(&mut self, world_xy: [f64; 2]) -> Result<ProfileOutcome, TerrainError> {
-        let check_point = CheckPoint::new(CheckPointId::new(1)?, [world_xy[0], world_xy[1], 0.0])?;
         Ok(
-            match crate::qa::locate(
+            match crate::qa::sample_surface(
                 self.surface,
-                check_point,
+                world_xy,
                 self.locator_limits,
                 &mut self.face_tests,
                 self.control,
             )? {
-                CheckPointOutcome::Gap => ProfileOutcome::Gap,
-                CheckPointOutcome::Sampled {
-                    face, surface_z, ..
-                } => ProfileOutcome::Sampled { face, surface_z },
+                None => ProfileOutcome::Gap,
+                Some(sample) => ProfileOutcome::Sampled {
+                    face: sample.face,
+                    surface_z: sample.surface_z,
+                },
             },
         )
     }
@@ -1306,22 +1306,28 @@ fn locate_residual(
     face_tests: &mut u64,
     control: &OperationControl,
 ) -> Result<ResidualOutcome, TerrainError> {
-    let check_point = CheckPoint::new(CheckPointId::new(1)?, position)?;
-    Ok(
-        match crate::qa::locate(surface, check_point, limits, face_tests, control)? {
-            CheckPointOutcome::Gap => ResidualOutcome::Gap,
-            CheckPointOutcome::Sampled {
-                face,
-                surface_z,
-                residual,
-            } => ResidualOutcome::Sampled {
-                face,
-                surface_z,
-                residual,
-                tolerance: tolerance.classify(residual),
-            },
-        },
-    )
+    let Some(sample) = crate::qa::sample_surface(
+        surface,
+        [position[0], position[1]],
+        limits,
+        face_tests,
+        control,
+    )?
+    else {
+        return Ok(ResidualOutcome::Gap);
+    };
+    let residual = canonical_zero(position[2] - sample.surface_z);
+    if !residual.is_finite() {
+        return Err(TerrainError::numeric(
+            "exact Terrain QA residual is not finite",
+        ));
+    }
+    Ok(ResidualOutcome::Sampled {
+        face: sample.face,
+        surface_z: sample.surface_z,
+        residual,
+        tolerance: tolerance.classify(residual),
+    })
 }
 
 fn as_check_point_outcome(outcome: ResidualOutcome) -> CheckPointOutcome {
