@@ -326,16 +326,22 @@ function scheduleResize() {
   });
 }
 
+function synchronizeDocumentVisibility() {
+  if (!viewer || smokeRunning) return;
+  try {
+    const visible = document.visibilityState === "visible" && !suspended;
+    viewer.setVisible(visible);
+    if (visible) publishDiagnostics(parseDiagnostics(viewer.render()));
+  } catch (error) {
+    publishFailure(error, { disableControls: true });
+  }
+}
+
 restartButton.addEventListener("click", restart);
 visibilityButton.addEventListener("click", toggleVisibility);
 pickButton.addEventListener("click", checkPick);
 shutdownButton.addEventListener("click", shutdown);
-document.addEventListener("visibilitychange", () => {
-  if (!viewer || smokeRunning) return;
-  const visible = document.visibilityState === "visible" && !suspended;
-  viewer.setVisible(visible);
-  if (visible) publishDiagnostics(parseDiagnostics(viewer.render()));
-});
+document.addEventListener("visibilitychange", synchronizeDocumentVisibility);
 new ResizeObserver(scheduleResize).observe(canvasShell);
 
 window.__PUNCTRA_BROWSER_FOUNDATION__ = {
