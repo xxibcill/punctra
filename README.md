@@ -209,6 +209,11 @@ Generated in-memory browser success is not remote LAS/LAZ delivery, a supported
 JavaScript SDK, broad browser qualification, independent adoption, or release-
 candidate evidence.
 
+The [v0.15 repository verification record](docs/releases/v0.15.0.md) pins the
+exact implementation commit, local native/browser environments, command
+outcomes, bounded browser diagnostics, benchmark observations, and unsupported
+external exits.
+
 To try the implemented View safely, follow the five-minute [first LAS/LAZ
 guide](docs/guides/first-las-laz.md). It separates position-only disk-v1 and
 attributed disk-v2 caches and explains what progressive Coverage does and does

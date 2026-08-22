@@ -5,8 +5,12 @@ All notable changes to Punctra are documented here. The project follows
 
 ## Unreleased - 0.15.0-alpha.1
 
-- Added the private `browser-demo` WebAssembly/WebGPU acceptance host under the
-  bounded [v0.15 browser-foundation
+- Completed and locally repository-verified the private `browser-demo`
+  WebAssembly/WebGPU acceptance host at implementation commit
+  `c6e8cbc81d7446757888527ea836c345e1353619`. The [v0.15 verification
+  record](docs/releases/v0.15.0.md) pins the exact native/browser environments,
+  commands, generated observations, benchmark comparisons, and nonclaims. The
+  host remains under the bounded [v0.15 browser-foundation
   design](docs/design/browser-foundation-v0.15.md). It builds through
   `wasm32-unknown-unknown` and pinned `wasm-bindgen` ES modules, runs without a
   framework or bundler, and renders one deterministic 1,089-Point large-world

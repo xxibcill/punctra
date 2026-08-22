@@ -1,7 +1,9 @@
 # WebAssembly and WebGPU Browser Foundation Design (v0.15)
 
-Status: **Active — accepted repository scope; browser implementation and local
-acceptance in progress**
+Status: **Complete and repository-verified for one bounded local
+WebAssembly/WebGPU browser-foundation slice; remote Source delivery, broad
+browser qualification, independent adoption, SDK stability, and support
+qualification outstanding**
 
 This design is authoritative for the bounded Punctra v0.15 repository slice.
 The maintainer's request to continue through v0.15 activates this technical
@@ -161,8 +163,8 @@ The acceptance host fixes and reports these separate ceilings:
 - caller-declared device-pixel ratio: finite and inside `0 < dpr <= 4`;
 - host surface allocation accounting: four bytes per physical pixel;
 - renderer transient texture accounting: reported exactly by each recorded
-  frame at eight bytes per physical pixel and independently checked against
-  the 67,108,864-byte physical-pixel ceiling;
+  frame and independently checked against a conservative eight-bytes-per-
+  physical-pixel, 67,108,864-byte ceiling;
   and
 - presentation latency hint: two frames.
 
