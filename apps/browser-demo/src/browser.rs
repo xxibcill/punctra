@@ -21,6 +21,7 @@ use crate::scene::{
 };
 
 const INITIALIZATION_ACTION: &str = "Keep the canvas unavailable, use a secure context with a WebGPU-capable browser and device, then retry initialization.";
+const INITIAL_VIEWPORT_ACTION: &str = "Keep the canvas unavailable, choose finite positive CSS dimensions and a device-pixel ratio at most four so the physical canvas remains within 4,096 pixels per dimension and 8,388,608 pixels total, then retry initialization.";
 const RECREATE_ACTION: &str =
     "Destroy this viewer and explicitly create a new viewer before rendering again.";
 const RETRY_FRAME_ACTION: &str = "Keep the last presented frame and request another frame after the browser reports the canvas visible.";
@@ -47,7 +48,7 @@ pub async fn create_viewer(
         css_height,
         device_pixel_ratio,
     ))
-    .map_err(model_failure)?;
+    .map_err(initial_viewport_failure)?;
     let scene = PreparedScene::new()
         .map_err(|error| failure("scene_validation", error, INITIALIZATION_ACTION))?;
     let (resources, capabilities) = BrowserResources::initialize(&canvas, viewport, &scene).await?;
@@ -697,6 +698,10 @@ fn browser_navigator() -> Option<web_sys::Navigator> {
 
 fn model_failure(error: HostModelError) -> JsValue {
     failure("host_model", error, RECREATE_ACTION)
+}
+
+fn initial_viewport_failure(error: HostModelError) -> JsValue {
+    failure("initial_viewport", error, INITIAL_VIEWPORT_ACTION)
 }
 
 fn interaction_failure(error: HostModelError) -> JsValue {
