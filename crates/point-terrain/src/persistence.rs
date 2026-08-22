@@ -761,6 +761,7 @@ fn materialize_surface(
         .read
         .max_work_units()
         .saturating_sub(vertex_batches.used_work_units());
+    drop(vertex_batches);
     let face_read_limits = limits.read.with_max_work_units(remaining_read_work_units);
     let mut faces = allocate_materialized::<SurfaceFace>(face_count, limits)?;
     let retained_bytes = allocation_bytes::<SurfaceVertex>(vertices.capacity())
