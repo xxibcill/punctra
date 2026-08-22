@@ -383,13 +383,10 @@ impl BrowserResources {
                 "Poll the current pick to completion before beginning another one.",
             ));
         }
-        let recorded = self.recorded_frame.as_ref().ok_or_else(|| {
-            failure(
-                FailureCode::MissingRecordedFrame,
-                "no recorded frame is available for provisional picking",
-                "Render a visible frame before beginning a provisional pick.",
-            )
-        })?;
+        let recorded = self
+            .recorded_frame
+            .as_ref()
+            .ok_or_else(missing_recorded_frame_failure)?;
         let mut encoder = self.encoder("Punctra browser provisional pick");
         let ticket = self
             .renderer
