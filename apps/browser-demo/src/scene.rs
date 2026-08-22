@@ -32,6 +32,7 @@ pub(crate) struct PreparedScene {
     batch: PointBatch,
     camera: Camera,
     facts: SceneFacts,
+    planner: ViewPlanner,
 }
 
 impl PreparedScene {
@@ -45,12 +46,12 @@ impl PreparedScene {
             points,
         )?;
         let camera = scene_camera()?;
-        let planning = validate_planning(&batch, &camera)?;
+        let planner = plan_missing_root(&batch, &camera)?;
         let facts = SceneFacts {
             point_count: batch.point_count(),
             estimated_gpu_bytes: batch.estimated_gpu_bytes(),
-            initial_requests: planning.initial_requests,
-            retained_nodes: planning.retained_nodes,
+            initial_requests: 1,
+            retained_nodes: 0,
             view_id: VIEW_GENERATION.view().get(),
             generation: VIEW_GENERATION.generation(),
             batch_key: BATCH_KEY.get(),
@@ -63,7 +64,30 @@ impl PreparedScene {
             batch,
             camera,
             facts,
+            planner,
         })
+    }
+
+    pub(crate) fn settle_after_publication(&mut self) -> Result<(), SceneError> {
+        if self.facts.retained_nodes != 0 {
+            return Err(SceneError::PlanningInvariant);
+        }
+        let resident = available_node(
+            &self.batch,
+            scene_bounds()?,
+            NodeStatus::Resident {
+                version: BATCH_VERSION,
+            },
+        )?;
+        let settled = self.planner.plan(
+            &self.camera,
+            planning_viewport()?,
+            AvailableNodes::new(VIEW_GENERATION, &[resident]),
+            planning_budget(),
+        )?;
+        validate_settled_plan_contract(&settled)?;
+        self.facts.retained_nodes = 1;
+        Ok(())
     }
 
     pub(crate) const fn reset_update() -> RenderUpdate {
@@ -101,12 +125,6 @@ pub(crate) struct SceneFacts {
     pub(crate) centre_point_ordinal: u64,
     pub(crate) progressive_coverage: bool,
     pub(crate) cpu_authoritative: bool,
-}
-
-#[derive(Clone, Copy, Debug)]
-struct PlanningFacts {
-    initial_requests: u64,
-    retained_nodes: u64,
 }
 
 #[derive(Debug, Error)]
@@ -176,8 +194,21 @@ fn scene_camera() -> Result<Camera, CameraError> {
     )
 }
 
-fn validate_planning(batch: &PointBatch, camera: &Camera) -> Result<PlanningFacts, SceneError> {
-    let bounds = AxisAlignedBox::new(
+fn plan_missing_root(batch: &PointBatch, camera: &Camera) -> Result<ViewPlanner, SceneError> {
+    let missing = available_node(batch, scene_bounds()?, NodeStatus::Missing)?;
+    let mut planner = ViewPlanner::default();
+    let initial = planner.plan(
+        camera,
+        planning_viewport()?,
+        AvailableNodes::new(VIEW_GENERATION, &[missing]),
+        planning_budget(),
+    )?;
+    validate_initial_plan_contract(&initial)?;
+    Ok(planner)
+}
+
+fn scene_bounds() -> Result<AxisAlignedBox, point_view::PlanError> {
+    AxisAlignedBox::new(
         [
             WORLD_ORIGIN[0] - 12.0,
             WORLD_ORIGIN[1] - 12.0,
@@ -188,39 +219,19 @@ fn validate_planning(batch: &PointBatch, camera: &Camera) -> Result<PlanningFact
             WORLD_ORIGIN[1] + 12.0,
             WORLD_ORIGIN[2] + 4.0,
         ],
-    )?;
-    let missing = available_node(batch, bounds, NodeStatus::Missing)?;
-    let viewport = Viewport::new(960, 600).map_err(|_| SceneError::PlanningInvariant)?;
-    let budget = PlanningBudget::new(
+    )
+}
+
+fn planning_viewport() -> Result<Viewport, SceneError> {
+    Viewport::new(960, 600).map_err(|_| SceneError::PlanningInvariant)
+}
+
+const fn planning_budget() -> PlanningBudget {
+    PlanningBudget::new(
         MAX_RESIDENT_POINTS,
         MAX_RESIDENT_BYTES,
         MAX_RESIDENT_BATCHES,
-    );
-    let mut planner = ViewPlanner::default();
-    let initial = planner.plan(
-        camera,
-        viewport,
-        AvailableNodes::new(VIEW_GENERATION, &[missing]),
-        budget,
-    )?;
-    let resident = available_node(
-        batch,
-        bounds,
-        NodeStatus::Resident {
-            version: BATCH_VERSION,
-        },
-    )?;
-    let settled = planner.plan(
-        camera,
-        viewport,
-        AvailableNodes::new(VIEW_GENERATION, &[resident]),
-        budget,
-    )?;
-    validate_plan_contract(&initial, &settled)?;
-    Ok(PlanningFacts {
-        initial_requests: 1,
-        retained_nodes: 1,
-    })
+    )
 }
 
 fn available_node(
@@ -240,19 +251,24 @@ fn available_node(
     )
 }
 
-fn validate_plan_contract(
-    initial: &point_view::ViewPlan,
-    settled: &point_view::ViewPlan,
-) -> Result<(), SceneError> {
+fn validate_initial_plan_contract(initial: &point_view::ViewPlan) -> Result<(), SceneError> {
     let initial_is_exact = initial.requests().len() == 1
         && initial.requests()[0].node() == NODE_KEY
         && initial.retained_nodes().is_empty()
         && initial.retirements().is_empty();
+    if initial_is_exact {
+        Ok(())
+    } else {
+        Err(SceneError::PlanningInvariant)
+    }
+}
+
+fn validate_settled_plan_contract(settled: &point_view::ViewPlan) -> Result<(), SceneError> {
     let settled_is_exact = settled.requests().is_empty()
         && settled.retained_nodes().len() == 1
         && settled.retained_nodes()[0].node_key() == NODE_KEY
         && settled.retirements().is_empty();
-    if initial_is_exact && settled_is_exact {
+    if settled_is_exact {
         Ok(())
     } else {
         Err(SceneError::PlanningInvariant)
@@ -267,17 +283,24 @@ mod tests {
 
     #[test]
     fn generated_scene_has_fixed_identity_planning_and_resource_facts() {
-        let scene = PreparedScene::new().unwrap();
-        let facts = scene.facts();
+        let mut scene = PreparedScene::new().unwrap();
+        let initial_facts = scene.facts();
         let frame = scene.frame(Viewport::new(960, 600).unwrap()).unwrap();
 
-        assert_eq!(facts.point_count, 1_089);
-        assert_eq!(facts.estimated_gpu_bytes, 26_136);
-        assert_eq!(facts.initial_requests, 1);
-        assert_eq!(facts.retained_nodes, 1);
-        assert_eq!(facts.centre_point_ordinal, 544);
-        assert!(!facts.cpu_authoritative);
+        assert_eq!(initial_facts.point_count, 1_089);
+        assert_eq!(initial_facts.estimated_gpu_bytes, 26_136);
+        assert_eq!(initial_facts.initial_requests, 1);
+        assert_eq!(initial_facts.retained_nodes, 0);
+        assert_eq!(initial_facts.centre_point_ordinal, 544);
+        assert!(!initial_facts.cpu_authoritative);
         assert_eq!(frame.view_generation(), VIEW_GENERATION);
+
+        scene.settle_after_publication().unwrap();
+        assert_eq!(scene.facts().retained_nodes, 1);
+        assert!(matches!(
+            scene.settle_after_publication(),
+            Err(SceneError::PlanningInvariant)
+        ));
     }
 
     #[test]

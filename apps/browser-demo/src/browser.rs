@@ -50,9 +50,10 @@ pub async fn create_viewer(
         device_pixel_ratio,
     ))
     .map_err(initial_viewport_failure)?;
-    let scene = PreparedScene::new()
+    let mut scene = PreparedScene::new()
         .map_err(|error| failure("scene_validation", error, INITIALIZATION_ACTION))?;
-    let (resources, capabilities) = BrowserResources::initialize(&canvas, viewport, &scene).await?;
+    let (resources, capabilities) =
+        BrowserResources::initialize(&canvas, viewport, &mut scene).await?;
     Ok(BrowserViewer {
         resources: Some(resources),
         scene,
@@ -287,7 +288,7 @@ impl BrowserResources {
     async fn initialize(
         canvas: &HtmlCanvasElement,
         viewport: PhysicalViewport,
-        scene: &PreparedScene,
+        scene: &mut PreparedScene,
     ) -> Result<(Self, CapabilityFacts), JsValue> {
         let instance = browser_instance();
         let surface = instance
@@ -308,7 +309,11 @@ impl BrowserResources {
             "surface_configuration",
             INITIALIZATION_ACTION,
         )?;
-        let renderer = create_renderer(&device, surface_configuration.format, scene)?;
+        let mut renderer = create_renderer(&device, surface_configuration.format)?;
+        publish_scene(&mut renderer, scene)?;
+        scene
+            .settle_after_publication()
+            .map_err(|error| failure("scene_planning", error, INITIALIZATION_ACTION))?;
         let facts = CapabilityFacts::new(
             &adapter_info,
             &adapter_limits,
@@ -614,15 +619,17 @@ fn surface_configuration(
 fn create_renderer(
     device: &wgpu::Device,
     format: wgpu::TextureFormat,
-    scene: &PreparedScene,
 ) -> Result<WgpuRenderer, JsValue> {
-    let mut renderer = WgpuRenderer::new(device, RendererConfig::new(format, render_limits()))
-        .map_err(|error| failure("renderer_capability", error, INITIALIZATION_ACTION))?;
+    WgpuRenderer::new(device, RendererConfig::new(format, render_limits()))
+        .map_err(|error| failure("renderer_capability", error, INITIALIZATION_ACTION))
+}
+
+fn publish_scene(renderer: &mut WgpuRenderer, scene: &PreparedScene) -> Result<(), JsValue> {
     renderer
         .apply(&PreparedScene::reset_update())
         .and_then(|_| renderer.apply(&scene.batch_update()))
-        .map_err(|error| failure("scene_publication", error, INITIALIZATION_ACTION))?;
-    Ok(renderer)
+        .map(|_| ())
+        .map_err(|error| failure("scene_publication", error, INITIALIZATION_ACTION))
 }
 
 fn set_canvas_size(canvas: &HtmlCanvasElement, viewport: PhysicalViewport) {
