@@ -299,7 +299,6 @@ impl BrowserResources {
         let adapter_limits = adapter.limits();
         let (device, queue) = request_device(&adapter).await?;
         let device_loss = track_device_loss(&device);
-        let renderer = create_renderer(&device, surface_configuration.format, scene)?;
         set_canvas_size(canvas, viewport);
         configure_surface(
             &surface,
@@ -308,6 +307,7 @@ impl BrowserResources {
             "surface_configuration",
             INITIALIZATION_ACTION,
         )?;
+        let renderer = create_renderer(&device, surface_configuration.format, scene)?;
         let facts = CapabilityFacts::new(
             &adapter_info,
             &adapter_limits,
