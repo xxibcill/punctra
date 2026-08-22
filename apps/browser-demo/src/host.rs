@@ -8,6 +8,23 @@ pub(crate) const SURFACE_BYTES_PER_PIXEL: u64 = 4;
 pub(crate) const MAX_RENDER_TRANSIENT_BYTES: u64 = MAX_CANVAS_PIXELS * 8;
 pub(crate) const PRESENTATION_LATENCY_FRAMES: u32 = 2;
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct CssViewportRequest {
+    width: f64,
+    height: f64,
+    device_pixel_ratio: f64,
+}
+
+impl CssViewportRequest {
+    pub(crate) const fn new(width: f64, height: f64, device_pixel_ratio: f64) -> Self {
+        Self {
+            width,
+            height,
+            device_pixel_ratio,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
 pub(crate) struct PhysicalViewport {
     css_width: f64,
@@ -19,22 +36,18 @@ pub(crate) struct PhysicalViewport {
 }
 
 impl PhysicalViewport {
-    pub(crate) fn from_css(
-        css_width: f64,
-        css_height: f64,
-        device_pixel_ratio: f64,
-    ) -> Result<Self, HostModelError> {
-        validate_css_size(css_width, css_height, device_pixel_ratio)?;
-        let physical_width = physical_dimension(css_width, device_pixel_ratio)?;
-        let physical_height = physical_dimension(css_height, device_pixel_ratio)?;
+    pub(crate) fn from_css(request: CssViewportRequest) -> Result<Self, HostModelError> {
+        validate_css_size(request)?;
+        let physical_width = physical_dimension(request.width, request.device_pixel_ratio)?;
+        let physical_height = physical_dimension(request.height, request.device_pixel_ratio)?;
         validate_physical_size(physical_width, physical_height)?;
         let surface_bytes = pixel_count(physical_width, physical_height)?
             .checked_mul(SURFACE_BYTES_PER_PIXEL)
             .ok_or(HostModelError::SizeOverflow)?;
         Ok(Self {
-            css_width,
-            css_height,
-            device_pixel_ratio,
+            css_width: request.width,
+            css_height: request.height,
+            device_pixel_ratio: request.device_pixel_ratio,
             physical_width,
             physical_height,
             surface_bytes,
@@ -150,21 +163,17 @@ pub(crate) enum HostModelError {
     SizeOverflow,
 }
 
-fn validate_css_size(
-    css_width: f64,
-    css_height: f64,
-    device_pixel_ratio: f64,
-) -> Result<(), HostModelError> {
-    if !css_width.is_finite()
-        || css_width <= 0.0
-        || !css_height.is_finite()
-        || css_height <= 0.0
-        || !device_pixel_ratio.is_finite()
-        || device_pixel_ratio <= 0.0
+fn validate_css_size(request: CssViewportRequest) -> Result<(), HostModelError> {
+    if !request.width.is_finite()
+        || request.width <= 0.0
+        || !request.height.is_finite()
+        || request.height <= 0.0
+        || !request.device_pixel_ratio.is_finite()
+        || request.device_pixel_ratio <= 0.0
     {
         return Err(HostModelError::InvalidCssSize);
     }
-    if device_pixel_ratio > MAX_DEVICE_PIXEL_RATIO {
+    if request.device_pixel_ratio > MAX_DEVICE_PIXEL_RATIO {
         return Err(HostModelError::DevicePixelRatioLimit);
     }
     Ok(())
@@ -201,7 +210,8 @@ mod tests {
 
     #[test]
     fn viewport_preserves_separate_css_physical_and_surface_facts() {
-        let viewport = PhysicalViewport::from_css(800.0, 500.0, 2.0).unwrap();
+        let viewport =
+            PhysicalViewport::from_css(CssViewportRequest::new(800.0, 500.0, 2.0)).unwrap();
 
         assert_eq!(viewport.dimensions(), [1_600, 1_000]);
         assert_eq!(viewport.surface_bytes, 6_400_000);
@@ -210,15 +220,15 @@ mod tests {
     #[test]
     fn viewport_limits_fail_before_rounding_into_an_accepted_size() {
         assert_eq!(
-            PhysicalViewport::from_css(1_025.0, 600.0, 4.0),
+            PhysicalViewport::from_css(CssViewportRequest::new(1_025.0, 600.0, 4.0)),
             Err(HostModelError::CanvasDimensionLimit)
         );
         assert_eq!(
-            PhysicalViewport::from_css(800.0, 600.0, 4.01),
+            PhysicalViewport::from_css(CssViewportRequest::new(800.0, 600.0, 4.01)),
             Err(HostModelError::DevicePixelRatioLimit)
         );
         assert_eq!(
-            PhysicalViewport::from_css(4_000.0, 4_000.0, 1.0),
+            PhysicalViewport::from_css(CssViewportRequest::new(4_000.0, 4_000.0, 1.0)),
             Err(HostModelError::CanvasPixelLimit)
         );
     }

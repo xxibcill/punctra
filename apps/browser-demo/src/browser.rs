@@ -13,8 +13,8 @@ use crate::diagnostics::{
     CapabilityFacts, Diagnostics, Failure, FrameFacts, LimitFacts, PickFacts,
 };
 use crate::host::{
-    HostModelError, Lifecycle, MAX_RENDER_TRANSIENT_BYTES, PRESENTATION_LATENCY_FRAMES,
-    PhysicalViewport, RenderDisposition, ViewerPhase,
+    CssViewportRequest, HostModelError, Lifecycle, MAX_RENDER_TRANSIENT_BYTES,
+    PRESENTATION_LATENCY_FRAMES, PhysicalViewport, RenderDisposition, ViewerPhase,
 };
 use crate::scene::{
     BATCH_KEY, BATCH_VERSION, PreparedScene, VIEW_GENERATION, centre_point_id, render_limits,
@@ -42,8 +42,12 @@ pub async fn create_viewer(
 ) -> Result<BrowserViewer, JsValue> {
     console_error_panic_hook::set_once();
     preflight_browser()?;
-    let viewport = PhysicalViewport::from_css(css_width, css_height, device_pixel_ratio)
-        .map_err(model_failure)?;
+    let viewport = PhysicalViewport::from_css(CssViewportRequest::new(
+        css_width,
+        css_height,
+        device_pixel_ratio,
+    ))
+    .map_err(model_failure)?;
     let scene = PreparedScene::new()
         .map_err(|error| failure("scene_validation", error, INITIALIZATION_ACTION))?;
     let (resources, capabilities) = BrowserResources::initialize(&canvas, viewport, &scene).await?;
@@ -84,8 +88,12 @@ impl BrowserViewer {
         device_pixel_ratio: f64,
     ) -> Result<String, JsValue> {
         self.ensure_active()?;
-        let viewport = PhysicalViewport::from_css(css_width, css_height, device_pixel_ratio)
-            .map_err(model_failure)?;
+        let viewport = PhysicalViewport::from_css(CssViewportRequest::new(
+            css_width,
+            css_height,
+            device_pixel_ratio,
+        ))
+        .map_err(model_failure)?;
         self.resources_mut()?.reconfigure(viewport)?;
         self.viewport = viewport;
         self.last_frame = None;

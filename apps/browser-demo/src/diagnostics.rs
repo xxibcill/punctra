@@ -3,6 +3,8 @@ use render_protocol::RenderLimits;
 use render_wgpu::{FrameReport, PickHit};
 use serde::Serialize;
 
+#[cfg(test)]
+use crate::host::CssViewportRequest;
 use crate::{
     host::{
         MAX_CANVAS_DIMENSION, MAX_CANVAS_PIXELS, MAX_DEVICE_PIXEL_RATIO,
@@ -237,7 +239,8 @@ mod tests {
     #[test]
     fn diagnostics_preserve_schema_authority_and_bounded_resource_facts() {
         let scene = scene::PreparedScene::new().unwrap();
-        let viewport = PhysicalViewport::from_css(800.0, 500.0, 2.0).unwrap();
+        let viewport =
+            PhysicalViewport::from_css(CssViewportRequest::new(800.0, 500.0, 2.0)).unwrap();
         let capabilities = capability_fixture();
         let pick = PickFacts::not_requested();
         let lifecycle = Lifecycle::ready();
