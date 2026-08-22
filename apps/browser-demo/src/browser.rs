@@ -10,12 +10,11 @@ use wasm_bindgen::prelude::*;
 use web_sys::HtmlCanvasElement;
 
 use crate::diagnostics::{
-    CapabilityFacts, Diagnostics, Failure, FrameFacts, LimitFacts, PickFacts,
+    CapabilityFacts, Diagnostics, Failure, FailureCode, FrameFacts, LimitFacts, PickFacts,
 };
 use crate::host::{
     CssViewportRequest, HostModelError, Lifecycle, MAX_RENDER_TRANSIENT_BYTES,
-    PRESENTATION_LATENCY_FRAMES, PhysicalViewport, RESIZE_VIEWPORT_ACTION,
-    RESIZE_VIEWPORT_FAILURE_CODE, RenderDisposition,
+    PRESENTATION_LATENCY_FRAMES, PhysicalViewport, RESIZE_VIEWPORT_ACTION, RenderDisposition,
 };
 use crate::scene::{
     BATCH_KEY, BATCH_VERSION, PreparedScene, VIEW_GENERATION, centre_point_id, render_limits,
@@ -51,7 +50,7 @@ pub async fn create_viewer(
     ))
     .map_err(initial_viewport_failure)?;
     let mut scene = PreparedScene::new()
-        .map_err(|error| failure("scene_validation", error, INITIALIZATION_ACTION))?;
+        .map_err(|error| failure(FailureCode::SceneValidation, error, INITIALIZATION_ACTION))?;
     let (resources, capabilities) =
         BrowserResources::initialize(&canvas, viewport, &mut scene).await?;
     Ok(BrowserViewer {
@@ -141,7 +140,7 @@ impl BrowserViewer {
         let dimensions = self.viewport.dimensions();
         if x >= dimensions[0] || y >= dimensions[1] {
             return Err(failure(
-                "pick_outside_viewport",
+                FailureCode::PickOutsideViewport,
                 format!("pick pixel [{x}, {y}] is outside viewport {dimensions:?}"),
                 "Choose a physical pixel inside the current viewport and begin a new provisional pick.",
             ));
@@ -217,7 +216,7 @@ impl BrowserViewer {
         };
         diagnostics.to_json().map_err(|error| {
             failure(
-                "diagnostic_serialization",
+                FailureCode::DiagnosticSerialization,
                 error,
                 "Keep the canvas unavailable and recreate the viewer before relying on diagnostics.",
             )
@@ -242,14 +241,14 @@ impl BrowserViewer {
         let dimensions = self.viewport.dimensions();
         let viewport = Viewport::new(dimensions[0], dimensions[1]).map_err(|error| {
             failure(
-                "viewport_validation",
+                FailureCode::ViewportValidation,
                 error,
                 "Choose a nonzero bounded canvas size.",
             )
         })?;
         self.scene
             .frame(viewport)
-            .map_err(|error| failure("frame_validation", error, RECREATE_ACTION))
+            .map_err(|error| failure(FailureCode::FrameValidation, error, RECREATE_ACTION))
     }
 
     fn accept_pick(&mut self, hit: PickHit) -> Result<(), JsValue> {
@@ -259,7 +258,7 @@ impl BrowserViewer {
             && hit.point() == centre_point_id();
         if !invariant_matches {
             return Err(failure(
-                "pick_invariant",
+                FailureCode::PickInvariant,
                 "the centre-pixel hit did not preserve the fixed generation, batch, version, and Point identity",
                 RECREATE_ACTION,
             ));
@@ -293,7 +292,7 @@ impl BrowserResources {
         let instance = browser_instance();
         let surface = instance
             .create_surface(wgpu::SurfaceTarget::Canvas(canvas.clone()))
-            .map_err(|error| failure("canvas_surface", error, INITIALIZATION_ACTION))?;
+            .map_err(|error| failure(FailureCode::CanvasSurface, error, INITIALIZATION_ACTION))?;
         let adapter = request_adapter(&instance, &surface).await?;
         let capabilities = surface.get_capabilities(&adapter);
         let surface_configuration = surface_configuration(&capabilities, viewport)?;
@@ -306,14 +305,14 @@ impl BrowserResources {
             &surface,
             &device,
             &surface_configuration,
-            "surface_configuration",
+            FailureCode::SurfaceConfiguration,
             INITIALIZATION_ACTION,
         )?;
         let mut renderer = create_renderer(&device, surface_configuration.format)?;
         publish_scene(&mut renderer, scene)?;
         scene
             .settle_after_publication()
-            .map_err(|error| failure("scene_planning", error, INITIALIZATION_ACTION))?;
+            .map_err(|error| failure(FailureCode::ScenePlanning, error, INITIALIZATION_ACTION))?;
         let facts = CapabilityFacts::new(
             &adapter_info,
             &adapter_limits,
@@ -350,7 +349,7 @@ impl BrowserResources {
             &self.surface,
             &self.device,
             &self.surface_configuration,
-            "surface_reconfiguration",
+            FailureCode::SurfaceReconfiguration,
             RECREATE_ACTION,
         )?;
         self.ensure_device_available()
@@ -367,7 +366,7 @@ impl BrowserResources {
         let recorded = self
             .renderer
             .render(&mut encoder, &target, frame)
-            .map_err(|error| failure("frame_recording", error, RECREATE_ACTION))?;
+            .map_err(|error| failure(FailureCode::FrameRecording, error, RECREATE_ACTION))?;
         let report = recorded.report();
         self.queue.submit([encoder.finish()]);
         self.queue.present(surface_texture);
@@ -379,14 +378,14 @@ impl BrowserResources {
         self.ensure_device_available()?;
         if self.pick_ticket.is_some() {
             return Err(failure(
-                "pick_pending",
+                FailureCode::PickPending,
                 "a provisional pick is already pending",
                 "Poll the current pick to completion before beginning another one.",
             ));
         }
         let recorded = self.recorded_frame.as_ref().ok_or_else(|| {
             failure(
-                "missing_recorded_frame",
+                FailureCode::MissingRecordedFrame,
                 "no recorded frame is available for provisional picking",
                 "Render a visible frame before beginning a provisional pick.",
             )
@@ -395,7 +394,7 @@ impl BrowserResources {
         let ticket = self
             .renderer
             .pick(&mut encoder, recorded, PickRequest::new(pixel))
-            .map_err(|error| failure("pick_recording", error, RECREATE_ACTION))?;
+            .map_err(|error| failure(FailureCode::PickRecording, error, RECREATE_ACTION))?;
         self.queue.submit([encoder.finish()]);
         self.pick_ticket = Some(ticket);
         Ok(())
@@ -405,17 +404,17 @@ impl BrowserResources {
         self.ensure_device_available()?;
         self.device
             .poll(wgpu::PollType::Poll)
-            .map_err(|error| failure("device_poll", error, RECREATE_ACTION))?;
+            .map_err(|error| failure(FailureCode::DevicePoll, error, RECREATE_ACTION))?;
         let ticket = self.pick_ticket.as_mut().ok_or_else(|| {
             failure(
-                "pick_not_requested",
+                FailureCode::PickNotRequested,
                 "no provisional pick is pending",
                 "Begin a provisional pick against the last visible frame before polling.",
             )
         })?;
         let outcome = ticket
             .poll()
-            .map_err(|error| failure("pick_readback", error, RECREATE_ACTION))?;
+            .map_err(|error| failure(FailureCode::PickReadback, error, RECREATE_ACTION))?;
         if matches!(outcome, PickPoll::Ready(_)) {
             self.pick_ticket = None;
         }
@@ -432,27 +431,27 @@ impl BrowserResources {
             wgpu::CurrentSurfaceTexture::Success(texture) => Ok((texture, false)),
             wgpu::CurrentSurfaceTexture::Suboptimal(texture) => Ok((texture, true)),
             wgpu::CurrentSurfaceTexture::Timeout => Err(failure(
-                "surface_timeout",
+                FailureCode::SurfaceTimeout,
                 "the browser timed out while acquiring a canvas texture",
                 RETRY_FRAME_ACTION,
             )),
             wgpu::CurrentSurfaceTexture::Occluded => Err(failure(
-                "surface_occluded",
+                FailureCode::SurfaceOccluded,
                 "the browser reported the canvas occluded",
                 RETRY_FRAME_ACTION,
             )),
             wgpu::CurrentSurfaceTexture::Outdated => Err(failure(
-                "surface_outdated",
+                FailureCode::SurfaceOutdated,
                 "the browser canvas surface is outdated",
                 "Repeat the bounded resize, then request a new frame.",
             )),
             wgpu::CurrentSurfaceTexture::Lost => Err(failure(
-                "surface_lost",
+                FailureCode::SurfaceLost,
                 "the browser canvas surface was lost",
                 RECREATE_ACTION,
             )),
             wgpu::CurrentSurfaceTexture::Validation => Err(failure(
-                "surface_validation",
+                FailureCode::SurfaceValidation,
                 "WebGPU rejected canvas texture acquisition",
                 RECREATE_ACTION,
             )),
@@ -471,7 +470,7 @@ impl BrowserResources {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone();
         match loss {
-            Some(loss) => Err(failure("device_lost", loss, RECREATE_ACTION)),
+            Some(loss) => Err(failure(FailureCode::DeviceLost, loss, RECREATE_ACTION)),
             None => Ok(()),
         }
     }
@@ -492,14 +491,14 @@ fn track_device_loss(device: &wgpu::Device) -> DeviceLossState {
 fn preflight_browser() -> Result<(), JsValue> {
     let window = web_sys::window().ok_or_else(|| {
         failure(
-            "missing_window",
+            FailureCode::MissingWindow,
             "the WebAssembly module is not running in a browser Window",
             INITIALIZATION_ACTION,
         )
     })?;
     if !window.is_secure_context() {
         return Err(failure(
-            "insecure_context",
+            FailureCode::InsecureContext,
             "WebGPU requires a secure browser context; serve this host from localhost or HTTPS",
             INITIALIZATION_ACTION,
         ));
@@ -508,14 +507,14 @@ fn preflight_browser() -> Result<(), JsValue> {
     let has_webgpu =
         Reflect::has(navigator.as_ref(), &JsValue::from_str("gpu")).map_err(|error| {
             failure(
-                "capability_inspection",
+                FailureCode::CapabilityInspection,
                 format!("could not inspect navigator.gpu: {error:?}"),
                 INITIALIZATION_ACTION,
             )
         })?;
     if !has_webgpu {
         return Err(failure(
-            "webgpu_unavailable",
+            FailureCode::WebGpuUnavailable,
             "navigator.gpu is unavailable in this browser",
             INITIALIZATION_ACTION,
         ));
@@ -541,7 +540,7 @@ async fn request_adapter(
             apply_limit_buckets: false,
         })
         .await
-        .map_err(|error| failure("webgpu_adapter", error, INITIALIZATION_ACTION))
+        .map_err(|error| failure(FailureCode::WebGpuAdapter, error, INITIALIZATION_ACTION))
 }
 
 async fn request_device(adapter: &wgpu::Adapter) -> Result<(wgpu::Device, wgpu::Queue), JsValue> {
@@ -555,7 +554,7 @@ async fn request_device(adapter: &wgpu::Adapter) -> Result<(wgpu::Device, wgpu::
             trace: wgpu::Trace::Off,
         })
         .await
-        .map_err(|error| failure("webgpu_device", error, INITIALIZATION_ACTION))
+        .map_err(|error| failure(FailureCode::WebGpuDevice, error, INITIALIZATION_ACTION))
 }
 
 fn surface_configuration(
@@ -570,7 +569,7 @@ fn surface_configuration(
         .or_else(|| capabilities.formats.first().copied())
         .ok_or_else(|| {
             failure(
-                "surface_format",
+                FailureCode::SurfaceFormat,
                 "the canvas exposes no surface format",
                 INITIALIZATION_ACTION,
             )
@@ -580,7 +579,7 @@ fn surface_configuration(
         .contains(&wgpu::PresentMode::Fifo)
     {
         return Err(failure(
-            "presentation_mode",
+            FailureCode::PresentationMode,
             "the canvas does not expose required FIFO presentation",
             INITIALIZATION_ACTION,
         ));
@@ -597,7 +596,7 @@ fn surface_configuration(
         })
         .ok_or_else(|| {
             failure(
-                "surface_alpha_mode",
+                FailureCode::SurfaceAlphaMode,
                 "the canvas exposes no supported opaque or premultiplied composite alpha mode",
                 INITIALIZATION_ACTION,
             )
@@ -620,8 +619,13 @@ fn create_renderer(
     device: &wgpu::Device,
     format: wgpu::TextureFormat,
 ) -> Result<WgpuRenderer, JsValue> {
-    WgpuRenderer::new(device, RendererConfig::new(format, render_limits()))
-        .map_err(|error| failure("renderer_capability", error, INITIALIZATION_ACTION))
+    WgpuRenderer::new(device, RendererConfig::new(format, render_limits())).map_err(|error| {
+        failure(
+            FailureCode::RendererCapability,
+            error,
+            INITIALIZATION_ACTION,
+        )
+    })
 }
 
 fn publish_scene(renderer: &mut WgpuRenderer, scene: &PreparedScene) -> Result<(), JsValue> {
@@ -629,7 +633,7 @@ fn publish_scene(renderer: &mut WgpuRenderer, scene: &PreparedScene) -> Result<(
         .apply(&PreparedScene::reset_update())
         .and_then(|_| renderer.apply(&scene.batch_update()))
         .map(|_| ())
-        .map_err(|error| failure("scene_publication", error, INITIALIZATION_ACTION))
+        .map_err(|error| failure(FailureCode::ScenePublication, error, INITIALIZATION_ACTION))
 }
 
 fn set_canvas_size(canvas: &HtmlCanvasElement, viewport: PhysicalViewport) {
@@ -642,7 +646,7 @@ fn configure_surface(
     surface: &wgpu::Surface<'_>,
     device: &wgpu::Device,
     configuration: &wgpu::SurfaceConfiguration,
-    failure_code: &'static str,
+    failure_code: FailureCode,
     safe_action: &'static str,
 ) -> Result<(), JsValue> {
     surface.configure(device, configuration);
@@ -678,7 +682,7 @@ fn validate_transient_bytes(transient_texture_bytes: u64) -> Result<(), JsValue>
         Ok(())
     } else {
         Err(failure(
-            "transient_texture_limit",
+            FailureCode::TransientTextureLimit,
             format!(
                 "renderer transient textures used {transient_texture_bytes} bytes above the {MAX_RENDER_TRANSIENT_BYTES}-byte ceiling"
             ),
@@ -689,7 +693,7 @@ fn validate_transient_bytes(transient_texture_bytes: u64) -> Result<(), JsValue>
 
 fn missing_recorded_frame_failure() -> JsValue {
     failure(
-        "missing_recorded_frame",
+        FailureCode::MissingRecordedFrame,
         "no recorded frame is available for provisional picking",
         "Render a visible frame before beginning a provisional pick.",
     )
@@ -712,27 +716,27 @@ fn browser_navigator() -> Option<web_sys::Navigator> {
 }
 
 fn model_failure(error: HostModelError) -> JsValue {
-    failure("host_model", error, RECREATE_ACTION)
+    failure(FailureCode::HostModel, error, RECREATE_ACTION)
 }
 
 fn initial_viewport_failure(error: HostModelError) -> JsValue {
-    failure("initial_viewport", error, INITIAL_VIEWPORT_ACTION)
+    failure(FailureCode::InitialViewport, error, INITIAL_VIEWPORT_ACTION)
 }
 
 fn resize_viewport_failure(error: HostModelError) -> JsValue {
-    failure(RESIZE_VIEWPORT_FAILURE_CODE, error, RESIZE_VIEWPORT_ACTION)
+    failure(FailureCode::ResizeViewport, error, RESIZE_VIEWPORT_ACTION)
 }
 
 fn interaction_failure(error: HostModelError) -> JsValue {
     if error == HostModelError::ViewerHidden {
-        failure("viewer_hidden", error, RETRY_FRAME_ACTION)
+        failure(FailureCode::ViewerHidden, error, RETRY_FRAME_ACTION)
     } else {
         model_failure(error)
     }
 }
 
 fn failure(
-    code: &'static str,
+    code: FailureCode,
     message: impl std::fmt::Display,
     safe_action: &'static str,
 ) -> JsValue {

@@ -231,17 +231,64 @@ impl PickFacts {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum FailureCode {
+    CapabilityInspection,
+    CanvasSurface,
+    DeviceLost,
+    DevicePoll,
+    DiagnosticSerialization,
+    FrameRecording,
+    FrameValidation,
+    HostModel,
+    InitialViewport,
+    InsecureContext,
+    MissingRecordedFrame,
+    MissingWindow,
+    PickInvariant,
+    PickNotRequested,
+    PickOutsideViewport,
+    PickPending,
+    PickReadback,
+    PickRecording,
+    PresentationMode,
+    RendererCapability,
+    ResizeViewport,
+    ScenePlanning,
+    ScenePublication,
+    SceneValidation,
+    SurfaceAlphaMode,
+    SurfaceConfiguration,
+    SurfaceFormat,
+    SurfaceLost,
+    SurfaceOccluded,
+    SurfaceOutdated,
+    SurfaceReconfiguration,
+    SurfaceTimeout,
+    SurfaceValidation,
+    TransientTextureLimit,
+    ViewerHidden,
+    ViewportValidation,
+    #[serde(rename = "webgpu_adapter")]
+    WebGpuAdapter,
+    #[serde(rename = "webgpu_device")]
+    WebGpuDevice,
+    #[serde(rename = "webgpu_unavailable")]
+    WebGpuUnavailable,
+}
+
 #[derive(Serialize)]
 pub(crate) struct Failure {
     schema: &'static str,
-    code: &'static str,
+    code: FailureCode,
     message: String,
     safe_action: &'static str,
 }
 
 impl Failure {
     pub(crate) fn new(
-        code: &'static str,
+        code: FailureCode,
         message: impl std::fmt::Display,
         safe_action: &'static str,
     ) -> Self {
@@ -256,8 +303,8 @@ impl Failure {
     pub(crate) fn to_json(&self) -> String {
         serde_json::to_string(self).unwrap_or_else(|_| {
             format!(
-                "{{\"schema\":\"punctra-browser-failure-v1\",\"code\":\"{}\",\"message\":\"browser failure\",\"safe_action\":\"{}\"}}",
-                self.code, self.safe_action
+                "{{\"schema\":\"punctra-browser-failure-v1\",\"code\":\"diagnostic_serialization\",\"message\":\"browser failure\",\"safe_action\":\"{}\"}}",
+                self.safe_action
             )
         })
     }
@@ -269,7 +316,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        host::{HostModelError, Lifecycle, RESIZE_VIEWPORT_ACTION, RESIZE_VIEWPORT_FAILURE_CODE},
+        host::{HostModelError, Lifecycle, RESIZE_VIEWPORT_ACTION},
         scene,
     };
 
@@ -323,7 +370,11 @@ mod tests {
 
     #[test]
     fn failure_preserves_schema_code_message_and_single_safe_action() {
-        let failure = Failure::new("device_lost", "adapter reset", "recreate the viewer");
+        let failure = Failure::new(
+            FailureCode::DeviceLost,
+            "adapter reset",
+            "recreate the viewer",
+        );
         let value: serde_json::Value = serde_json::from_str(&failure.to_json()).unwrap();
 
         assert_eq!(
@@ -340,7 +391,7 @@ mod tests {
     #[test]
     fn resize_failure_preserves_retry_without_recreation_contract() {
         let failure = Failure::new(
-            RESIZE_VIEWPORT_FAILURE_CODE,
+            FailureCode::ResizeViewport,
             HostModelError::DevicePixelRatioLimit,
             RESIZE_VIEWPORT_ACTION,
         );
@@ -354,6 +405,97 @@ mod tests {
                 "message": "device-pixel ratio exceeds the accepted maximum of 4",
                 "safe_action": "Keep the current surface configuration, choose finite positive CSS dimensions and a device-pixel ratio at most four so the physical canvas remains within 4,096 pixels per dimension and 8,388,608 pixels total, then resize again.",
             })
+        );
+    }
+
+    #[test]
+    fn failure_codes_preserve_the_existing_json_vocabulary() {
+        assert_eq!(
+            serde_json::to_value(
+                &[
+                    FailureCode::CapabilityInspection,
+                    FailureCode::CanvasSurface,
+                    FailureCode::DeviceLost,
+                    FailureCode::DevicePoll,
+                    FailureCode::DiagnosticSerialization,
+                    FailureCode::FrameRecording,
+                    FailureCode::FrameValidation,
+                    FailureCode::HostModel,
+                    FailureCode::InitialViewport,
+                    FailureCode::InsecureContext,
+                    FailureCode::MissingRecordedFrame,
+                    FailureCode::MissingWindow,
+                    FailureCode::PickInvariant,
+                    FailureCode::PickNotRequested,
+                    FailureCode::PickOutsideViewport,
+                    FailureCode::PickPending,
+                    FailureCode::PickReadback,
+                    FailureCode::PickRecording,
+                    FailureCode::PresentationMode,
+                    FailureCode::RendererCapability,
+                    FailureCode::ResizeViewport,
+                    FailureCode::ScenePlanning,
+                    FailureCode::ScenePublication,
+                    FailureCode::SceneValidation,
+                    FailureCode::SurfaceAlphaMode,
+                    FailureCode::SurfaceConfiguration,
+                    FailureCode::SurfaceFormat,
+                    FailureCode::SurfaceLost,
+                    FailureCode::SurfaceOccluded,
+                    FailureCode::SurfaceOutdated,
+                    FailureCode::SurfaceReconfiguration,
+                    FailureCode::SurfaceTimeout,
+                    FailureCode::SurfaceValidation,
+                    FailureCode::TransientTextureLimit,
+                    FailureCode::ViewerHidden,
+                    FailureCode::ViewportValidation,
+                    FailureCode::WebGpuAdapter,
+                    FailureCode::WebGpuDevice,
+                    FailureCode::WebGpuUnavailable,
+                ][..]
+            )
+            .unwrap(),
+            json!([
+                "capability_inspection",
+                "canvas_surface",
+                "device_lost",
+                "device_poll",
+                "diagnostic_serialization",
+                "frame_recording",
+                "frame_validation",
+                "host_model",
+                "initial_viewport",
+                "insecure_context",
+                "missing_recorded_frame",
+                "missing_window",
+                "pick_invariant",
+                "pick_not_requested",
+                "pick_outside_viewport",
+                "pick_pending",
+                "pick_readback",
+                "pick_recording",
+                "presentation_mode",
+                "renderer_capability",
+                "resize_viewport",
+                "scene_planning",
+                "scene_publication",
+                "scene_validation",
+                "surface_alpha_mode",
+                "surface_configuration",
+                "surface_format",
+                "surface_lost",
+                "surface_occluded",
+                "surface_outdated",
+                "surface_reconfiguration",
+                "surface_timeout",
+                "surface_validation",
+                "transient_texture_limit",
+                "viewer_hidden",
+                "viewport_validation",
+                "webgpu_adapter",
+                "webgpu_device",
+                "webgpu_unavailable"
+            ])
         );
     }
 
