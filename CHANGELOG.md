@@ -7,7 +7,7 @@ All notable changes to Punctra are documented here. The project follows
 
 - Completed and locally repository-verified the private `browser-demo`
   WebAssembly/WebGPU acceptance host at implementation commit
-  `ed726f52f969cf2bcbec5b2f799b49a9b5e3e121`. The [v0.15 verification
+  `6fd3906d5386029f95c4e273cc9f6333c653854c`. The [v0.15 verification
   record](docs/releases/v0.15.0.md) pins the exact native/browser environments,
   commands, generated observations, benchmark comparisons, and nonclaims. The
   host remains under the bounded [v0.15 browser-foundation
