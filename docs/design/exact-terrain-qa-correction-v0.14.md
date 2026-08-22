@@ -56,6 +56,18 @@ limits, cancellation, examples, and local verification. It does not prove:
 - `compare_surfaces(before, after, limits)` for an exact semantic topology
   difference and conservative changed-region envelope.
 
+Two narrow supporting seams are also public so that `point-terrain` can keep
+the operation exact and cancellable across crate boundaries:
+
+- `foundation-runtime` exposes one scoped child-to-parent cancellation link for
+  pull-based operations; and
+- `point-workspace::PointQuery` exposes read-only access to its optional bounds
+  and effective-classification predicate for canonical hashing and evidence.
+
+These seams add no new mutation authority. The cancellation link is active only
+for its guard's lifetime, and the Query accessors only reveal semantics already
+declared by the caller.
+
 No new crate, Workspace mutation facade, UI framework, QA database, generic
 report serializer, or renderer protocol is added. Correction and Revert remain
 owned by `point-workspace`; the public example composes those existing seams.
