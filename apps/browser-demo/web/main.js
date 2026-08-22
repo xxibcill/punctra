@@ -38,6 +38,12 @@ const UNSUPPORTED_INITIALIZATION_CODES = new Set([
   "renderer_capability",
 ]);
 
+const RECOVERABLE_VIEWER_FAILURE_CODES = new Set([
+  "surface_timeout",
+  "surface_occluded",
+  "surface_outdated",
+]);
+
 function requestedViewport() {
   const bounds = canvasShell.getBoundingClientRect();
   return {
@@ -144,6 +150,10 @@ function failureState(record) {
   return UNSUPPORTED_INITIALIZATION_CODES.has(record.code) ? "unsupported" : "failed";
 }
 
+function preservesCurrentViewer(record) {
+  return RECOVERABLE_VIEWER_FAILURE_CODES.has(record.code);
+}
+
 function publishFailure(error, { disableControls = false, state } = {}) {
   const record = failureRecord(error);
   const publishedState = state ?? failureState(record);
@@ -163,6 +173,13 @@ function verifyFailureStateClassification() {
   }
   assertFact(failureState({ code: "browser_module" }) === "failed", "module failure classification");
   assertFact(failureState({ code: "scene_publication" }) === "failed", "logic failure classification");
+  for (const code of RECOVERABLE_VIEWER_FAILURE_CODES) {
+    assertFact(preservesCurrentViewer({ code }), `${code} preserves the current viewer`);
+  }
+  assertFact(
+    !preservesCurrentViewer({ code: "surface_lost" }),
+    "surface loss requires viewer recreation",
+  );
 }
 
 function verifyCapabilityDiagnostics(diagnostics) {
@@ -383,13 +400,17 @@ async function start() {
   } catch (error) {
     smokeRunning = false;
     smokePassed = false;
-    try {
-      viewer?.shutdown();
-    } catch {
-      // Preserve the original acceptance failure as the actionable diagnostic.
+    const record = failureRecord(error);
+    const preserveViewer = preservesCurrentViewer(record);
+    if (!preserveViewer) {
+      try {
+        viewer?.shutdown();
+      } catch {
+        // Preserve the original acceptance failure as the actionable diagnostic.
+      }
+      viewer = null;
     }
-    viewer = null;
-    publishFailure(error, { disableControls: true });
+    publishFailure(record, { disableControls: !preserveViewer });
   }
 }
 
