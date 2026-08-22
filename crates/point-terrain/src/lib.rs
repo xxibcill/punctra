@@ -3,11 +3,13 @@
 //! The crate consumes one immutable Workspace Snapshot and either derives one
 //! complete in-memory 2.5D Terrain Surface or prepares one rebuildable,
 //! file-backed Surface for an explicit inclusive area of interest. It also
-//! evaluates detached Check Points and creates the narrow metric-metre
-//! `LandXML` deliverable accepted for Punctra v0.6. A complete v0.12 structured
-//! Source profile is propagated and must declare easting/northing/elevation
-//! metre coordinates. Unsupported or opaque references fail Terrain derivation
-//! and preparation with [`TerrainError::UnsupportedSpatialReference`].
+//! evaluates detached Check Points, produces exact Snapshot/Surface-bound
+//! Source residuals and station profiles, compares semantic Surface topology,
+//! and creates the narrow metric-metre `LandXML` deliverable accepted for
+//! Punctra v0.6. A complete v0.12 structured Source profile is propagated and
+//! must declare easting/northing/elevation metre coordinates. Unsupported or
+//! opaque references fail Terrain derivation, preparation, and exact QA with
+//! [`TerrainError::UnsupportedSpatialReference`].
 //!
 //! # In-memory derivation
 //!
@@ -77,8 +79,10 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+mod comparison;
 mod derive;
 mod error;
+mod exact_qa;
 mod landxml;
 mod limits;
 mod model;
@@ -88,11 +92,19 @@ mod qa;
 mod sort;
 mod triangulation;
 
+pub use comparison::{SurfaceComparisonReport, compare_surfaces};
 pub use derive::derive;
 pub use error::{MAX_TERRAIN_DIAGNOSTIC_BYTES, TerrainDiagnostic, TerrainError};
+pub use exact_qa::{
+    CheckPointResidual, ExactTerrainQaReport, ExactTerrainQaRequest, ProfileOutcome,
+    ProfileStationResult, ResidualOutcome, SampledResidual, SourcePointInputSummary,
+    SourcePointResidual, StationProfile, TerrainQaBinding, TerrainQaCurrentState,
+    TerrainQaFreshness, ToleranceDisposition, ToleranceSummary, VerticalTolerance,
+};
 pub use landxml::LandXmlOptions;
 pub use limits::{
-    CheckPointLimits, LandXmlLimits, SurfaceReadLimits, TerrainLimits, TerrainPrepareLimits,
+    CheckPointLimits, LandXmlLimits, SurfaceComparisonLimits, SurfaceReadLimits, TerrainLimits,
+    TerrainPrepareLimits, TerrainQaLimits,
 };
 pub use model::{
     ALGORITHM_VERSION, CheckPoint, CheckPointId, CheckPointOutcome, CheckPointReport,
@@ -114,10 +126,27 @@ pub type TerrainPrepareJob = foundation_runtime::Job<PreparedTerrainSurface, Ter
 /// One-worker detached Check Point evaluation job.
 pub type CheckPointJob = foundation_runtime::Job<CheckPointReport, TerrainError>;
 
+/// One-worker exact Snapshot/Surface QA job.
+pub type ExactTerrainQaJob = foundation_runtime::Job<ExactTerrainQaReport, TerrainError>;
+
+/// One-worker exact semantic Surface comparison job.
+pub type SurfaceComparisonJob = foundation_runtime::Job<SurfaceComparisonReport, TerrainError>;
+
 /// One-worker metric-metre `LandXML` publication job.
 pub type LandXmlJob = foundation_runtime::Job<LandXmlReceipt, TerrainError>;
 
 impl TerrainSurface {
+    /// Starts exact CPU-authoritative QA against this Surface's frozen Snapshot.
+    #[must_use]
+    pub fn exact_qa(
+        &self,
+        snapshot: point_workspace::Snapshot,
+        request: ExactTerrainQaRequest,
+        limits: TerrainQaLimits,
+    ) -> ExactTerrainQaJob {
+        exact_qa::start_in_memory(self, snapshot, request, limits)
+    }
+
     /// Starts bounded deterministic evaluation of detached Check Points.
     #[must_use]
     pub fn check_points<I>(&self, check_points: I, limits: CheckPointLimits) -> CheckPointJob
@@ -152,5 +181,18 @@ impl TerrainSurface {
         limits: LandXmlLimits,
     ) -> LandXmlJob {
         landxml::start_ensure(self, target, options, limits)
+    }
+}
+
+impl PreparedTerrainSurface {
+    /// Starts exact QA after bounded materialization of this checksummed Surface.
+    #[must_use]
+    pub fn exact_qa(
+        &self,
+        snapshot: point_workspace::Snapshot,
+        request: ExactTerrainQaRequest,
+        limits: TerrainQaLimits,
+    ) -> ExactTerrainQaJob {
+        exact_qa::start_prepared(self, snapshot, request, limits)
     }
 }

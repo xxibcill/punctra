@@ -6,7 +6,9 @@ and repository-verified v0.11 exact-review technical slice plus the v0.12
 explicit spatial-reference and package-publication repository slice; v0.13:
 Complete and repository-verified for the bounded persistent-terrain slice;
 field activation, production-scale accuracy, true out-of-core adoption,
-independent adoption, partner validation, and support qualification outstanding
+independent adoption, partner validation, and support qualification
+outstanding; v0.14 bounded exact Terrain QA and correction-loop slice Complete
+and repository-verified
 
 This is the ownership map for implemented crates. Each crate has one public
 job. Several private files may cooperate behind one deep interface; private
@@ -28,7 +30,7 @@ limits, and recovery modes are frozen in the
 | `point-index` | Prepare and query one rebuildable persistent spatial index. | Verified Source, target, limits | Complete `PreparedIndex`, candidates, display reads |
 | `point-workspace` | Make narrow exact classification selection/history durable and stream exact effective Point rows for one Source. | Complete index, schema, selection/row/commit requests | Workspace, Snapshot, Point rows, Point Set, commit/recovery outcomes |
 | `point-review` | Compose one pinned Snapshot with renderer-neutral screen or Point identity input for exact CPU review. | Snapshot, Camera, Viewport, rectangle or PointId, limits | Confirmed Point or exact spillable Point Set plus terminal facts |
-| `point-terrain` | Derive/evaluate the narrow Terrain Surface and prepare one rebuildable bounded-AOI disk Artifact. | Snapshot, explicit Terrain Recipe/AOI, target, detached Check Points | In-memory or file-backed Terrain Surface, bounded vertex/face streams, prepare report, QA report, LandXML receipt |
+| `point-terrain` | Derive/persist the narrow Terrain Surface, evaluate exact Snapshot-bound QA, and compare semantic topology. | Snapshot, Terrain Recipe/AOI, target, Source Query, profile, detached Check Points | In-memory or file-backed Surface, bounded streams, QA/comparison reports, LandXML receipt |
 | `render-protocol` | Define generation-safe renderer-neutral point display state. | Camera and display values | Validated updates and frame values |
 | `point-view` | Plan one frozen View over a host-owned hierarchy without I/O. | Camera, viewport, hierarchy/residency, budget | Demand, requests, retention, retirements |
 | `render-wgpu` | Maintain and draw one wgpu representation of render-protocol state. | Render updates, frame, host target | Recorded commands, report, provisional picks |
@@ -37,9 +39,9 @@ limits, and recovery modes are frozen in the
 
 `source-copc`, constrained or true out-of-core terrain, general LandXML, general
 application UI, bindings, and remote storage are not implemented modules in
-the completed v0.13 scope. Display and correction workflow policy remain private
-to `renderer-demo`; v0.13 adds no public display-policy or mutation-facade
-crate.
+the completed v0.14 scope. Display policy remains private to `renderer-demo`,
+and correction remains existing `point-workspace` commit policy; v0.14 adds no
+public display-policy or mutation-facade crate.
 
 ## 1. point-contracts
 
@@ -251,8 +253,9 @@ complete CPU scan without claiming production latency.
 
 ## 6. point-terrain
 
-**Job:** derive and evaluate the narrow Terrain Surface, prepare/reopen its one
-bounded-AOI persistent representation, and encode its supported deliverable.
+**Job:** derive and persist the narrow Terrain Surface, evaluate exact
+Snapshot-bound QA, compare semantic topology, and encode its supported
+deliverable.
 
 `point-terrain` owns exact Ground Input ingestion through
 `Snapshot::point_rows`, deterministic robust unconstrained 2.5D triangulation,
@@ -273,6 +276,14 @@ bounded-memory: sorting/triangulation still retain the complete AOI and exactly
 one topology worker is supported. After publication, the verified stage and any
 work sibling remain because no portable unlink can be conditioned on the open
 owned file identity; an uninspected work sibling is not trusted.
+
+The completed v0.14 addition evaluates one nonempty combination of an exact
+Source Query, detached Check Points, and an evenly stationed profile against
+the same frozen Snapshot/Surface pair. Reports retain metre tolerance, gaps,
+exact values, hashes, resource facts, and freshness. Prepared-Surface QA materializes
+verified disk-v1 records only under explicit limits. Surface comparison matches
+faces by authoritative Point Identity and reports a conservative changed-region
+envelope.
 
 Primary shape:
 
@@ -300,6 +311,14 @@ let descriptor: &SurfaceArtifactDescriptor = prepared.descriptor();
 let attempt: TerrainPrepareReport = prepared.report();
 let vertices: SurfaceVertexBatches =
     prepared.vertex_batches(SurfaceReadLimits::default())?;
+
+let qa = surface.exact_qa(snapshot, request, TerrainQaLimits::default())
+    .blocking_wait()?;
+let changed = point_terrain::compare_surfaces(
+    &surface,
+    &corrected_surface,
+    SurfaceComparisonLimits::default(),
+).blocking_wait()?;
 ~~~
 
 It does not own Source/index discovery, Workspace edits, Breaklines,
@@ -309,7 +328,9 @@ LandXML, rendering, Workflow Run-v1 mutation, or host rebuild policy.
 **Independent proof:** package and documentation tests cover the public
 interface, robust topology/oracle agreement, degeneracy and every resource
 family, large-world and extreme finite numeric behavior, detached QA,
-overflow-safe residual statistics, exact-existing reconciliation, injected
+overflow-safe residual statistics, exact profile/Source residual provenance,
+freshness, prepared/in-memory equality, semantic Surface comparison,
+exact-existing reconciliation, injected
 durable LandXML certainty boundaries, and independent XML semantics. A public
 example and generated 10k/100k/1M-capable benchmark compose only public seams;
 `terrain-demo` is the real LAS/LAZ process caller.

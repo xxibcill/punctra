@@ -21,13 +21,15 @@ use point_contracts::{
 use point_workspace::{PointQuery, Snapshot, SnapshotProvenance};
 
 use crate::{
-    SurfaceFace, SurfaceFaceId, SurfaceReadLimits, SurfaceVertex, SurfaceVertexId, TerrainError,
-    TerrainPrepareLimits, TerrainRecipe, TerrainSurface,
+    SurfaceFace, SurfaceFaceId, SurfaceReadLimits, SurfaceVertex, SurfaceVertexId,
+    TerrainDescriptor, TerrainError, TerrainPrepareLimits, TerrainRecipe, TerrainSurface,
     derive::{
         CanonicalTopologyValidation, CollectedTerrainInput, GEOMETRY_HASH_DOMAIN, InputVertex,
         TOPOLOGY_HASH_DOMAIN, artifact_hash, canonical_f64_bits, canonical_topology_hash,
         collect_input, derive_collected, domain_hasher, hash_transform, recipe_hash,
     },
+    limits::{allocation_bytes, require_within, usize_to_u64_saturating},
+    model::SurfaceData as ModelSurfaceData,
 };
 
 /// Fixed complete Surface artifact disk contract supported by this crate.
@@ -54,6 +56,7 @@ const WORK_BLOCK_DOMAIN: &[u8] = b"punctra-terrain-work-block-v1";
 const SNAPSHOT_ROWS_HASH_DOMAIN: &[u8] = b"punctra-snapshot-point-rows-v1";
 const MIN_VERIFY_BUFFER_BYTES: u64 = 32;
 const MAX_EXACT_F64_INTEGER: i128 = 1_i128 << 53;
+const MATERIALIZATION_CANCELLATION_STRIDE: usize = 1_024;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum PersistedKind {
@@ -546,6 +549,28 @@ impl SurfaceArtifactDescriptor {
     pub const fn bounds(&self) -> WorldBounds {
         self.bounds
     }
+
+    fn in_memory_descriptor(&self, retained_surface_bytes: u64) -> TerrainDescriptor {
+        TerrainDescriptor::new(
+            self.snapshot,
+            self.recipe,
+            self.recipe_hash,
+            self.transform,
+            self.coordinate_reference.clone(),
+            self.input_hash,
+            self.geometry_hash,
+            self.topology_hash,
+            self.artifact_hash,
+            self.input_point_count,
+            self.vertex_count,
+            self.face_count,
+            self.hull_vertex_count,
+            self.bounds,
+            retained_surface_bytes,
+            retained_surface_bytes,
+            0,
+        )
+    }
 }
 
 struct PreparedSurfaceData {
@@ -567,10 +592,37 @@ struct VerifiedBlockChecksums {
     faces: Vec<[u8; 32]>,
 }
 
+#[derive(Clone, Copy)]
+pub(crate) struct SurfaceMaterializationLimits {
+    read: SurfaceReadLimits,
+    max_materialized_bytes: u64,
+    max_working_bytes: u64,
+}
+
+impl SurfaceMaterializationLimits {
+    pub(crate) const fn new(
+        read: SurfaceReadLimits,
+        max_materialized_bytes: u64,
+        max_working_bytes: u64,
+    ) -> Self {
+        Self {
+            read,
+            max_materialized_bytes,
+            max_working_bytes,
+        }
+    }
+}
+
 /// Immutable file-backed disk-v1 Terrain Surface.
 #[derive(Clone)]
 pub struct PreparedTerrainSurface {
     inner: Arc<PreparedSurfaceData>,
+}
+
+pub(crate) struct SurfaceMaterialization {
+    pub(crate) surface: TerrainSurface,
+    pub(crate) retained_bytes: u64,
+    pub(crate) peak_working_bytes: u64,
 }
 
 impl PreparedTerrainSurface {
@@ -676,6 +728,116 @@ impl PreparedTerrainSurface {
             vertex_count: self.inner.descriptor.vertex_count,
         })
     }
+
+    pub(crate) fn materialize_in_memory(
+        &self,
+        limits: SurfaceMaterializationLimits,
+        control: &OperationControl,
+    ) -> Result<SurfaceMaterialization, TerrainError> {
+        materialize_surface(self, limits, control)
+    }
+}
+
+fn materialize_surface(
+    prepared: &PreparedTerrainSurface,
+    limits: SurfaceMaterializationLimits,
+    control: &OperationControl,
+) -> Result<SurfaceMaterialization, TerrainError> {
+    control.check_cancelled()?;
+    let descriptor = prepared.descriptor();
+    let vertex_count = materialized_count("prepared Surface vertices", descriptor.vertex_count())?;
+    let face_count = materialized_count("prepared Surface faces", descriptor.face_count())?;
+    let requested_bytes = allocation_bytes::<SurfaceVertex>(vertex_count)
+        .saturating_add(allocation_bytes::<SurfaceFace>(face_count));
+    require_materialization_bytes(requested_bytes, limits)?;
+
+    let mut vertices = allocate_materialized::<SurfaceVertex>(vertex_count, limits)?;
+    let mut vertex_batches = prepared.vertex_batches(limits.read)?;
+    for batch in vertex_batches.by_ref() {
+        control.check_cancelled()?;
+        extend_materialized(&mut vertices, batch?, control)?;
+    }
+    let remaining_read_work_units = limits
+        .read
+        .max_work_units()
+        .saturating_sub(vertex_batches.used_work_units());
+    drop(vertex_batches);
+    let face_read_limits = limits.read.with_max_work_units(remaining_read_work_units);
+    let mut faces = allocate_materialized::<SurfaceFace>(face_count, limits)?;
+    let retained_bytes = allocation_bytes::<SurfaceVertex>(vertices.capacity())
+        .saturating_add(allocation_bytes::<SurfaceFace>(faces.capacity()));
+    require_materialization_bytes(retained_bytes, limits)?;
+    for batch in prepared.face_batches(face_read_limits)? {
+        control.check_cancelled()?;
+        extend_materialized(&mut faces, batch?, control)?;
+    }
+    if vertices.len() != vertex_count || faces.len() != face_count {
+        return Err(TerrainError::topology(
+            "prepared Surface stream counts changed during materialization",
+        ));
+    }
+    Ok(SurfaceMaterialization {
+        surface: TerrainSurface {
+            inner: Arc::new(ModelSurfaceData {
+                descriptor: descriptor.in_memory_descriptor(retained_bytes),
+                vertices,
+                faces,
+            }),
+        },
+        retained_bytes,
+        peak_working_bytes: retained_bytes.saturating_add(limits.read.max_working_bytes()),
+    })
+}
+
+fn materialized_count(label: &'static str, count: u64) -> Result<usize, TerrainError> {
+    usize::try_from(count)
+        .map_err(|_| TerrainError::resource(label, count, usize_to_u64_saturating(usize::MAX)))
+}
+
+fn allocate_materialized<T>(
+    count: usize,
+    limits: SurfaceMaterializationLimits,
+) -> Result<Vec<T>, TerrainError> {
+    let requested_bytes = allocation_bytes::<T>(count);
+    let mut values = Vec::new();
+    values.try_reserve_exact(count).map_err(|_| {
+        TerrainError::resource(
+            "prepared Surface materialization allocation",
+            requested_bytes,
+            limits.max_materialized_bytes,
+        )
+    })?;
+    Ok(values)
+}
+
+fn extend_materialized<T>(
+    target: &mut Vec<T>,
+    values: impl IntoIterator<Item = T>,
+    control: &OperationControl,
+) -> Result<(), TerrainError> {
+    for (index, value) in values.into_iter().enumerate() {
+        if index.is_multiple_of(MATERIALIZATION_CANCELLATION_STRIDE) {
+            control.check_cancelled()?;
+        }
+        target.push(value);
+    }
+    Ok(())
+}
+
+fn require_materialization_bytes(
+    retained_bytes: u64,
+    limits: SurfaceMaterializationLimits,
+) -> Result<(), TerrainError> {
+    require_within(
+        "prepared Surface materialization bytes",
+        retained_bytes,
+        limits.max_materialized_bytes,
+    )?;
+    require_within(
+        "prepared Surface materialization working bytes",
+        retained_bytes.saturating_add(limits.read.max_working_bytes()),
+        limits.max_working_bytes,
+    )
 }
 
 impl std::fmt::Debug for PreparedTerrainSurface {
@@ -796,6 +958,12 @@ impl SurfaceBatchStream {
 pub struct SurfaceVertexBatches {
     stream: SurfaceBatchStream,
     source: SourceId,
+}
+
+impl SurfaceVertexBatches {
+    fn used_work_units(&self) -> u64 {
+        self.stream.used_work_units
+    }
 }
 
 impl Iterator for SurfaceVertexBatches {
@@ -3535,13 +3703,6 @@ const fn block_count(record_count: u64) -> u64 {
 
 const fn directory_bytes(block_count: u64) -> u64 {
     block_count.saturating_mul(CHECKSUM_BYTES)
-}
-
-fn require_within(label: &'static str, required: u64, allowed: u64) -> Result<(), TerrainError> {
-    if required > allowed {
-        return Err(TerrainError::resource(label, required, allowed));
-    }
-    Ok(())
 }
 
 fn require_path_within(path: &Path, limits: TerrainPrepareLimits) -> Result<(), TerrainError> {

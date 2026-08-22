@@ -3,6 +3,38 @@
 All notable changes to Punctra are documented here. The project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased - 0.14.0-alpha.1
+
+- Completed and locally repository-verified the bounded [Exact Terrain QA and
+  Correction Loop design](docs/design/exact-terrain-qa-correction-v0.14.md) at
+  implementation commit `b8b767df87241eaab4dded82720e38ba8d410670`.
+  Exact environment, command, example, benchmark, and nonclaim facts are in the
+  [v0.14 verification record](docs/releases/v0.14.0.md). `point-terrain`
+  now evaluates one exact Snapshot/Surface pair with a combined Source-Point
+  Query, detached Check Points, and evenly stationed profile under one explicit
+  asymmetric vertical tolerance. Reports retain authoritative ticks,
+  classifications, faces, elevations, signed residuals, gaps, units, spatial
+  reference, Snapshot/Surface provenance, input/result hashes, resource facts,
+  and explicit freshness state.
+- Added exact semantic Surface comparison by authoritative face Point
+  identities, including deterministic added/removed counts and hashes plus a
+  conservative incident-vertex changed-region envelope. The existing
+  `point-workspace` commit, Operation reconciliation, and immediate-head Revert
+  contracts remain the only correction model.
+- Added bounded exact QA over checksummed file-backed disk-v1 Surfaces. Prepared
+  vertices and faces materialize only under explicit Surface-read,
+  materialization, result, face-test, and combined working-byte ceilings; the
+  in-memory and prepared paths produce identical semantic evidence.
+- Added the public `exact_terrain_qa` example and [traceability
+  guide](docs/guides/exact-terrain-qa.md). The example seeds a generated
+  defect, inspects it, corrects classification, proves old evidence stale,
+  re-derives, compares, rechecks, emits JSON/SVG evidence, Reverts, and proves
+  baseline topology restoration.
+- Kept the evidence boundary explicit: field activation, observed professional
+  workflow timing, independent publication/adoption, partner validation, and
+  support qualification remain outstanding. Generated fixtures do not satisfy
+  those exits.
+
 ## Unreleased - 0.13.0-alpha.1
 
 - Completed and locally repository-verified the bounded [Persistent Bounded-AOI

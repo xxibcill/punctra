@@ -67,6 +67,18 @@ publication/reopen, stale detection, and bounded file-backed vertex/face
 streams. It preserves legacy `derive`, the existing canonical single-worker
 full-AOI triangulator, and frozen Workflow Run-v1. It does not authorize true
 out-of-core, tiled, parallel, constrained, or production-qualified terrain.
+The completed [v0.14 Exact Terrain QA and Correction Loop
+scope](docs/design/exact-terrain-qa-correction-v0.14.md) permits one bounded
+CPU-authoritative QA operation for an exact Snapshot/Surface pair, one exact
+semantic Surface comparison, explicit provenance/freshness/tolerance evidence,
+and a public correction/re-derive/compare/Revert example. It also permits the
+narrow supporting public `foundation-runtime` scoped cancellation link and the
+read-only `PointQuery` bounds/classification inspectors required for linked
+pull-stream cancellation, canonical Query hashing, and evidence. Workspace
+mutation continues through existing `point-workspace` commits. It does not
+authorize terrain constraints, automatic correction, a second edit model,
+continuous plane/TIN intersections, general charting/UI, or field claims from
+fixtures.
 Apart from the explicit v0.8 reader exception,
 external format decoding belongs only in accepted Source adapter crates.
 Networking, polygon/brush/visible-only/occlusion selection, arbitrary
@@ -106,6 +118,7 @@ cargo test -p point-review --test interface
 cargo test -p render-protocol --test state_model
 cargo run -p point-terrain --example derive
 cargo run -p point-terrain --example persistent_surface
+cargo run -p point-terrain --example exact_terrain_qa
 cargo test -p point-terrain --all-features
 cargo test -p point-terrain --test persistence
 cargo test -p terrain-demo --lib --all-features
@@ -126,6 +139,7 @@ PUNCTRA_REQUIRE_GPU=1 cargo run -p render-wgpu --example third_party_host
 test -f docs/guides/first-las-laz.md
 test -f docs/guides/library-packaging.md
 test -f docs/guides/persistent-terrain.md
+test -f docs/guides/exact-terrain-qa.md
 ruby -rjson -e 'JSON.parse(File.read(ARGV.fetch(0)))' \
   docs/guides/field-corpus.example.json
 git diff --check
@@ -160,6 +174,18 @@ The persistent-Surface example accepts generated sizes from 3 through
 warm-open, and bounded-stream facts. Direct stage bytes, worker heap, process
 resident memory, allocated filesystem blocks, QA, LandXML, View, and field
 accuracy remain explicit null observations rather than inferred values.
+
+The exact-QA example uses a generated seeded defect and exercises the public
+correct, re-derive, compare, recheck, and Revert composition. Its default
+temporary artifacts are removed on exit. Set
+`PUNCTRA_QA_EXAMPLE_OUTPUT_DIR` to an absent path to retain the generated
+Workspace, JSON evidence, and SVG profile. Every SVG station carries a pointer
+to exact JSON evidence; this is repository traceability, not field activation,
+observed workflow timing, or independent adoption. `TerrainQaLimits` bound
+Point rows, Source residuals, Check Points, profile stations, their combined
+observation count, results, prepared-Surface materialization, face tests, and
+combined work. Surface comparison has independent face, retained-record-byte,
+working-byte, and work-unit ceilings.
 
 The Workflow benchmark accepts exactly 10,000, 100,000, or 1,000,000 generated
 Points. It measures cold start, committed-Edit resume, Retryable-intent resume,

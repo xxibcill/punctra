@@ -7,8 +7,9 @@ spatial-reference and package-publication repository slice; v0.13:
 Complete and repository-verified for the bounded persistent-terrain slice;
 field activation, production-scale accuracy, true out-of-core adoption,
 independent adoption, partner validation, and support qualification
-outstanding; the addition remains inside `point-terrain`, and later crates are
-created only with accepted behavior and a caller
+outstanding; v0.14 bounded exact Terrain QA and correction-loop slice Complete
+and repository-verified; the addition remains inside `point-terrain`, and later
+crates are created only with accepted behavior and a caller
 
 The repository is one Cargo workspace. Each current crate is independently
 buildable and exposes a smaller public interface than its private
@@ -375,6 +376,8 @@ The public interface is also compact:
 derive(Snapshot, TerrainRecipe, TerrainLimits) -> TerrainSurface
 TerrainSurface -> descriptor/vertices/faces
 TerrainSurface -> check_points -> CheckPointReport
+TerrainSurface/PreparedTerrainSurface -> exact_qa -> ExactTerrainQaReport
+compare_surfaces(before, after, SurfaceComparisonLimits) -> SurfaceComparisonReport
 TerrainSurface -> export_landxml/ensure_landxml -> LandXmlReceipt
 prepare(Snapshot, target, explicit-AOI recipe, TerrainPrepareLimits) -> TerrainPrepareJob
 TerrainPrepareJob::blocking_wait() -> Result<PreparedTerrainSurface, TerrainError>
@@ -383,7 +386,8 @@ PreparedTerrainSurface -> SurfaceArtifactDescriptor/TerrainPrepareReport/bounded
 
 Private behavior includes exact row ingestion, normalized predicate inputs,
 robust triangulation and canonicalization, topology validation, deterministic
-point location and compensated QA statistics, XML encoding, durable create-new
+point location, exact QA hashing/freshness, semantic face comparison,
+compensated residual statistics, XML encoding, durable create-new
 publication, Surface disk/work encoding, resume/reopen validation, and
 operation-specific limits. No triangulator, page-store, filesystem,
 point-locator, or exporter registry is public. Persistent preparation retains
@@ -457,9 +461,9 @@ versions, and LandXML/journal/report format versions are separate axes. A Cargo
 `0.9` version does not imply Workspace disk schema or terrain algorithm version
 9.
 
-The completed, repository-verified v0.13 work advances all public libraries as
-one `0.13.0-alpha.1` package set with exact inter-Punctra registry requirements
-and local development paths. Their empty default features, dependency roles,
+The completed v0.14 work advances all public libraries as one
+`0.14.0-alpha.1` package set with exact inter-Punctra registry requirements and
+local development paths. Their empty default features, dependency roles,
 MSRV, publication order, and pre-v1 policy are documented in the [library
 packaging guide](../guides/library-packaging.md).
 

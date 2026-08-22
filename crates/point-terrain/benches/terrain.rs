@@ -24,11 +24,12 @@ use point_contracts::{
 };
 use point_index::{PrepareLimits, prepare};
 use point_terrain::{
-    CheckPoint, CheckPointId, CheckPointLimits, CheckPointReport, LandXmlLimits, LandXmlOptions,
-    LandXmlReceipt, PreparedTerrainSurface, SurfaceReadLimits, TerrainDescriptor, TerrainLimits,
-    TerrainPrepareDisposition, TerrainPrepareLimits, TerrainRecipe, TerrainSurface,
+    CheckPoint, CheckPointId, CheckPointLimits, CheckPointReport, ExactTerrainQaReport,
+    ExactTerrainQaRequest, LandXmlLimits, LandXmlOptions, LandXmlReceipt, PreparedTerrainSurface,
+    StationProfile, SurfaceReadLimits, TerrainDescriptor, TerrainLimits, TerrainPrepareDisposition,
+    TerrainPrepareLimits, TerrainQaLimits, TerrainRecipe, TerrainSurface, VerticalTolerance,
 };
-use point_workspace::{OpenLimits, Snapshot, Workspace, WorkspaceSchema, create};
+use point_workspace::{OpenLimits, PointQuery, Snapshot, Workspace, WorkspaceSchema, create};
 use serde_json::{Value, json};
 use source_memory::MemorySource;
 
@@ -119,6 +120,8 @@ fn benchmark_terrain(criterion: &mut Criterion) {
         prepare_limits,
     );
     benchmark_qa(criterion, &baseline, &check_points, &expected_qa, qa_limits);
+    let exact_qa_snapshot = fixture.snapshot();
+    benchmark_exact_qa(criterion, &exact_qa_snapshot, &baseline, &check_points);
     benchmark_landxml(
         criterion,
         &fixture,
@@ -296,6 +299,31 @@ fn benchmark_qa(
     group.finish();
 }
 
+fn benchmark_exact_qa(
+    criterion: &mut Criterion,
+    snapshot: &Snapshot,
+    surface: &TerrainSurface,
+    check_points: &[CheckPoint],
+) {
+    let request = exact_qa_request(surface, check_points);
+    let limits = TerrainQaLimits::default();
+    let expected = evaluate_exact_qa(surface, snapshot.clone(), request.clone(), limits);
+    let input_count = u64::try_from(expected.source_points().len())
+        .unwrap_or(u64::MAX)
+        .saturating_add(u64::try_from(expected.check_points().len()).unwrap_or(u64::MAX))
+        .saturating_add(u64::try_from(expected.profile_stations().len()).unwrap_or(u64::MAX));
+    let mut group = criterion.benchmark_group("point_terrain/exact_qa");
+    group.throughput(Throughput::Elements(input_count));
+    group.bench_function("source_check_and_profile", |bencher| {
+        bencher.iter(|| {
+            let report = evaluate_exact_qa(surface, snapshot.clone(), request.clone(), limits);
+            assert_eq!(report.result_hash(), expected.result_hash());
+            black_box(report);
+        });
+    });
+    group.finish();
+}
+
 fn benchmark_landxml(
     criterion: &mut Criterion,
     fixture: &Fixture,
@@ -438,6 +466,18 @@ fn evaluate_check_points(
         .expect("benchmark detached QA succeeds")
 }
 
+fn evaluate_exact_qa(
+    surface: &TerrainSurface,
+    snapshot: Snapshot,
+    request: ExactTerrainQaRequest,
+    limits: TerrainQaLimits,
+) -> ExactTerrainQaReport {
+    surface
+        .exact_qa(snapshot, request, limits)
+        .blocking_wait()
+        .expect("benchmark exact QA succeeds")
+}
+
 fn export_surface(
     surface: &TerrainSurface,
     target: &Path,
@@ -529,6 +569,31 @@ fn benchmark_check_points(surface: &TerrainSurface) -> Vec<CheckPoint> {
             [bounds.max()[0] + 1.0, bounds.max()[1] + 1.0, centroid[2]],
         ),
     ]
+}
+
+fn exact_qa_request(
+    surface: &TerrainSurface,
+    check_points: &[CheckPoint],
+) -> ExactTerrainQaRequest {
+    let transform = surface.descriptor().position_transform();
+    let first_face = surface
+        .faces()
+        .first()
+        .expect("benchmark Surface has a face");
+    let world = first_face.vertices().map(|id| {
+        let index = usize::try_from(id.get() - 1).expect("Surface identity fits usize");
+        transform.world_f64(surface.vertices()[index].ticks())
+    });
+    let source_bounds = WorldBounds::new(world[0], world[0]).expect("one-Point bounds are valid");
+    ExactTerrainQaRequest::new(
+        VerticalTolerance::new(0.05, 0.05).expect("benchmark tolerance is valid"),
+    )
+    .source_points(PointQuery::within(source_bounds))
+    .check_points(check_points.to_vec().into_boxed_slice())
+    .profile(
+        StationProfile::new([world[0][0], world[0][1]], [world[1][0], world[1][1]], 2)
+            .expect("benchmark station profile is valid"),
+    )
 }
 
 fn check_point(id: u64, position: [f64; 3]) -> CheckPoint {

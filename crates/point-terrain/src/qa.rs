@@ -7,7 +7,7 @@ use robust::{Coord, orient2d};
 use crate::{
     CheckPoint, CheckPointJob, CheckPointLimits, CheckPointOutcome, CheckPointReport,
     CheckPointResult, ResidualStatistics, SurfaceFace, TerrainError, TerrainSurface,
-    numeric::canonical_zero,
+    limits::allocation_bytes, numeric::canonical_zero,
 };
 
 const CANCELLATION_STRIDE: usize = 1_024;
@@ -210,56 +210,16 @@ fn evaluate(
     Ok(report)
 }
 
-fn sort_identities(
+pub(crate) fn sort_identities(
     identities: &mut [crate::CheckPointId],
     control: &OperationControl,
 ) -> Result<(), TerrainError> {
     let mut comparisons = 0_usize;
-    for root in (0..identities.len() / 2).rev() {
-        sift_down(
-            identities,
-            root,
-            identities.len(),
-            &mut comparisons,
-            control,
-        )?;
-    }
-    for end in (1..identities.len()).rev() {
-        identities.swap(0, end);
-        sift_down(identities, 0, end, &mut comparisons, control)?;
-    }
+    crate::sort::heap_sort_by(identities, |left, right| {
+        compare_identity(left, right, &mut comparisons, control)
+    })?;
     control.check_cancelled()?;
     Ok(())
-}
-
-fn sift_down(
-    identities: &mut [crate::CheckPointId],
-    mut root: usize,
-    end: usize,
-    comparisons: &mut usize,
-    control: &OperationControl,
-) -> Result<(), TerrainError> {
-    loop {
-        let Some(left) = root.checked_mul(2).and_then(|value| value.checked_add(1)) else {
-            return Ok(());
-        };
-        if left >= end {
-            return Ok(());
-        }
-        let right = left.saturating_add(1);
-        let child = if right < end
-            && compare_identity(identities[left], identities[right], comparisons, control)?
-        {
-            right
-        } else {
-            left
-        };
-        if !compare_identity(identities[root], identities[child], comparisons, control)? {
-            return Ok(());
-        }
-        identities.swap(root, child);
-        root = child;
-    }
 }
 
 fn compare_identity(
@@ -275,7 +235,7 @@ fn compare_identity(
     Ok(left < right)
 }
 
-fn locate(
+pub(crate) fn locate(
     surface: &TerrainSurface,
     check_point: CheckPoint,
     limits: CheckPointLimits,
@@ -283,9 +243,43 @@ fn locate(
     control: &OperationControl,
 ) -> Result<CheckPointOutcome, TerrainError> {
     let position = check_point.position();
+    let Some(sample) = sample_surface(
+        surface,
+        [position[0], position[1]],
+        limits,
+        face_tests,
+        control,
+    )?
+    else {
+        return Ok(CheckPointOutcome::Gap);
+    };
+    let residual = canonical_zero(position[2] - sample.surface_z);
+    if !residual.is_finite() {
+        return Err(TerrainError::numeric("Check Point residual is not finite"));
+    }
+    Ok(CheckPointOutcome::Sampled {
+        face: sample.face,
+        surface_z: sample.surface_z,
+        residual,
+    })
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct SurfaceSample {
+    pub(crate) face: crate::SurfaceFaceId,
+    pub(crate) surface_z: f64,
+}
+
+pub(crate) fn sample_surface(
+    surface: &TerrainSurface,
+    world_xy: [f64; 2],
+    limits: CheckPointLimits,
+    face_tests: &mut u64,
+    control: &OperationControl,
+) -> Result<Option<SurfaceSample>, TerrainError> {
     let world_query = Coord {
-        x: position[0],
-        y: position[1],
+        x: world_xy[0],
+        y: world_xy[1],
     };
     for (index, face) in surface.faces().iter().copied().enumerate() {
         if index.is_multiple_of(CANCELLATION_STRIDE) {
@@ -308,8 +302,8 @@ fn locate(
             NormalizedFace::Degenerate => {
                 let frame = face_local(surface, face)?;
                 let local_query = Coord {
-                    x: position[0] - frame.world_origin[0],
-                    y: position[1] - frame.world_origin[1],
+                    x: world_xy[0] - frame.world_origin[0],
+                    y: world_xy[1] - frame.world_origin[1],
                 };
                 let NormalizedFace::Candidate { triangle, query } =
                     normalize_xy(frame.triangle, local_query)
@@ -326,18 +320,13 @@ fn locate(
                     "interpolated Surface elevation is not finite",
                 ));
             }
-            let residual = canonical_zero(position[2] - surface_z);
-            if !residual.is_finite() {
-                return Err(TerrainError::numeric("Check Point residual is not finite"));
-            }
-            return Ok(CheckPointOutcome::Sampled {
+            return Ok(Some(SurfaceSample {
                 face: face.id(),
                 surface_z,
-                residual,
-            });
+            }));
         }
     }
-    Ok(CheckPointOutcome::Gap)
+    Ok(None)
 }
 
 struct LocalFaceFrame {
@@ -524,7 +513,7 @@ fn xy(position: [f64; 3]) -> Coord<f64> {
 }
 
 #[derive(Default)]
-struct ResidualAccumulator {
+pub(crate) struct ResidualAccumulator {
     covered_count: u64,
     gap_count: u64,
     minimum: Option<f64>,
@@ -534,7 +523,7 @@ struct ResidualAccumulator {
 }
 
 impl ResidualAccumulator {
-    fn observe(&mut self, outcome: CheckPointOutcome) -> Result<(), TerrainError> {
+    pub(crate) fn observe(&mut self, outcome: CheckPointOutcome) -> Result<(), TerrainError> {
         match outcome {
             CheckPointOutcome::Gap => {
                 self.gap_count = self
@@ -557,7 +546,7 @@ impl ResidualAccumulator {
     }
 
     #[allow(clippy::cast_precision_loss)]
-    fn finish(self) -> ResidualStatistics {
+    pub(crate) fn finish(self) -> ResidualStatistics {
         if self.covered_count == 0 {
             return ResidualStatistics::new(0, self.gap_count, None, None, None, None);
         }
@@ -711,10 +700,4 @@ fn checked_payload_bytes<T>(len: usize) -> Result<u64, TerrainError> {
         .unwrap_or(u64::MAX)
         .checked_mul(u64::try_from(mem::size_of::<T>()).unwrap_or(u64::MAX))
         .ok_or_else(|| TerrainError::numeric("Check Point payload byte count overflowed"))
-}
-
-fn allocation_bytes<T>(capacity: usize) -> u64 {
-    u64::try_from(capacity)
-        .unwrap_or(u64::MAX)
-        .saturating_mul(u64::try_from(mem::size_of::<T>()).unwrap_or(u64::MAX))
 }

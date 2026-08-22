@@ -554,11 +554,15 @@ impl PointQuery {
         self
     }
 
-    pub(crate) const fn bounds(self) -> Option<WorldBounds> {
+    /// Returns the optional inclusive world-bounds predicate.
+    #[must_use]
+    pub const fn bounds(self) -> Option<WorldBounds> {
         self.bounds
     }
 
-    pub(crate) const fn classification_eq(self) -> Option<u8> {
+    /// Returns the optional effective-classification equality predicate.
+    #[must_use]
+    pub const fn classification_eq(self) -> Option<u8> {
         self.classification_eq
     }
 }
