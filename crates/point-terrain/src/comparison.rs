@@ -22,6 +22,7 @@ pub struct SurfaceComparisonReport {
     added_face_hash: ContentHash,
     removed_face_hash: ContentHash,
     changed_bounds: Option<WorldBounds>,
+    retained_record_bytes: u64,
     work_units: u64,
     accounted_peak_working_bytes: u64,
 }
@@ -81,6 +82,12 @@ impl SurfaceComparisonReport {
     #[must_use]
     pub const fn changed_bounds(self) -> Option<WorldBounds> {
         self.changed_bounds
+    }
+
+    /// Returns the retained before/after comparison-record bytes.
+    #[must_use]
+    pub const fn retained_record_bytes(self) -> u64 {
+        self.retained_record_bytes
     }
 
     /// Returns deterministic record, sort, and merge work units.
@@ -162,18 +169,29 @@ fn run(
     validate_compatible(before, after)?;
     let total_faces = u64_len(before.faces().len()).saturating_add(u64_len(after.faces().len()));
     require_within("Surface comparison faces", total_faces, limits.max_faces())?;
-    let required_bytes = total_faces.saturating_mul(u64_len(mem::size_of::<FaceRecord>()));
+    let required_record_bytes = total_faces.saturating_mul(u64_len(mem::size_of::<FaceRecord>()));
+    require_within(
+        "Surface comparison record bytes",
+        required_record_bytes,
+        limits.max_record_bytes(),
+    )?;
     require_within(
         "Surface comparison working bytes",
-        required_bytes,
+        required_record_bytes,
         limits.max_working_bytes(),
     )?;
 
     let mut meter = WorkMeter::new(limits.max_work_units(), control);
     let mut before_records = face_records(before, &mut meter)?;
     let mut after_records = face_records(after, &mut meter)?;
-    let accounted_peak_working_bytes =
+    let retained_record_bytes =
         allocation_bytes(&before_records).saturating_add(allocation_bytes(&after_records));
+    require_within(
+        "Surface comparison record bytes",
+        retained_record_bytes,
+        limits.max_record_bytes(),
+    )?;
+    let accounted_peak_working_bytes = retained_record_bytes;
     require_within(
         "Surface comparison working bytes",
         accounted_peak_working_bytes,
@@ -241,6 +259,7 @@ fn run(
         added_face_hash: ContentHash::new(*added_hasher.finalize().as_bytes()),
         removed_face_hash: ContentHash::new(*removed_hasher.finalize().as_bytes()),
         changed_bounds,
+        retained_record_bytes,
         work_units: meter.used,
         accounted_peak_working_bytes,
     })

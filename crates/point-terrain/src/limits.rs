@@ -498,16 +498,23 @@ impl Default for TerrainQaLimits {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct SurfaceComparisonLimits {
     faces: u64,
+    record_bytes: u64,
     working_bytes: u64,
     work_units: u64,
 }
 
 impl SurfaceComparisonLimits {
-    /// Creates exact face-count, working-byte, and deterministic-work ceilings.
+    /// Creates independent face, record-byte, working-byte, and work ceilings.
     #[must_use]
-    pub const fn new(max_faces: u64, max_working_bytes: u64, max_work_units: u64) -> Self {
+    pub const fn new(
+        max_faces: u64,
+        max_record_bytes: u64,
+        max_working_bytes: u64,
+        max_work_units: u64,
+    ) -> Self {
         Self {
             faces: max_faces,
+            record_bytes: max_record_bytes,
             working_bytes: max_working_bytes,
             work_units: max_work_units,
         }
@@ -520,6 +527,12 @@ impl SurfaceComparisonLimits {
     }
 
     /// Returns the maximum retained comparison-record bytes.
+    #[must_use]
+    pub const fn max_record_bytes(self) -> u64 {
+        self.record_bytes
+    }
+
+    /// Returns the peak incremental comparison working-byte ceiling.
     #[must_use]
     pub const fn max_working_bytes(self) -> u64 {
         self.working_bytes
@@ -534,7 +547,7 @@ impl SurfaceComparisonLimits {
 
 impl Default for SurfaceComparisonLimits {
     fn default() -> Self {
-        Self::new(40_000_000, 2 * GIB, 2_000_000_000)
+        Self::new(40_000_000, 2 * GIB, 2 * GIB, 2_000_000_000)
     }
 }
 
@@ -667,8 +680,9 @@ mod tests {
         assert_eq!(qa.max_observations(), 0);
         assert_eq!(qa.max_working_bytes(), 0);
 
-        let comparison = SurfaceComparisonLimits::new(0, 0, 0);
+        let comparison = SurfaceComparisonLimits::new(0, 0, 0, 0);
         assert_eq!(comparison.max_faces(), 0);
+        assert_eq!(comparison.max_record_bytes(), 0);
         assert_eq!(comparison.max_working_bytes(), 0);
         assert_eq!(comparison.max_work_units(), 0);
 

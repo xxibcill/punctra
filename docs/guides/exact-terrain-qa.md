@@ -193,7 +193,7 @@ working bytes. The combined ledger conservatively includes the prepared
 Surface materialization and the configured Point-row stream working ceiling
 while Source inputs are collected.
 
-`SurfaceComparisonLimits` bounds combined faces, working bytes, and sort/merge
-work. A limit failure, cancellation, stale input pair, unsupported spatial
-reference, corrupt prepared Surface, or Source failure returns no partial QA or
-comparison report.
+`SurfaceComparisonLimits` independently bounds combined faces, retained
+comparison-record bytes, peak working bytes, and sort/merge work. A limit
+failure, cancellation, stale input pair, unsupported spatial reference, corrupt
+prepared Surface, or Source failure returns no partial QA or comparison report.

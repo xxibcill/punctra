@@ -180,8 +180,8 @@ to exact JSON evidence; this is repository traceability, not field activation,
 observed workflow timing, or independent adoption. `TerrainQaLimits` bound
 Point rows, Source residuals, Check Points, profile stations, their combined
 observation count, results, prepared-Surface materialization, face tests, and
-combined work. Surface comparison has independent face, working-byte, and
-work-unit ceilings.
+combined work. Surface comparison has independent face, retained-record-byte,
+working-byte, and work-unit ceilings.
 
 The Workflow benchmark accepts exactly 10,000, 100,000, or 1,000,000 generated
 Points. It measures cold start, committed-Edit resume, Retryable-intent resume,

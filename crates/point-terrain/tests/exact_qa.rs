@@ -418,7 +418,7 @@ fn hashes_ignore_source_row_batch_partitioning_and_limits_fail_without_results()
     let comparison_error = compare_surfaces(
         &surface,
         &surface,
-        SurfaceComparisonLimits::new(3, u64::MAX, u64::MAX),
+        SurfaceComparisonLimits::new(3, u64::MAX, u64::MAX, u64::MAX),
     )
     .blocking_wait()
     .expect_err("combined face count is independently bounded");
@@ -787,6 +787,7 @@ fn qa_cancellation_and_comparison_work_limits_publish_no_partial_result() {
         &surface,
         SurfaceComparisonLimits::new(
             exact_faces,
+            successful.retained_record_bytes(),
             successful.accounted_peak_working_bytes(),
             successful.work_units(),
         ),
@@ -794,10 +795,30 @@ fn qa_cancellation_and_comparison_work_limits_publish_no_partial_result() {
     .blocking_wait()
     .expect("every Surface comparison ceiling is inclusive");
     assert_eq!(exact, successful);
+    let record_error = compare_surfaces(
+        &surface,
+        &surface,
+        SurfaceComparisonLimits::new(
+            u64::MAX,
+            successful.retained_record_bytes() - 1,
+            u64::MAX,
+            u64::MAX,
+        ),
+    )
+    .blocking_wait()
+    .expect_err("one-under comparison record-byte ceiling fails");
+    assert!(matches!(
+        record_error,
+        TerrainError::ResourceLimit {
+            limit: "Surface comparison record bytes",
+            ..
+        }
+    ));
     let working_error = compare_surfaces(
         &surface,
         &surface,
         SurfaceComparisonLimits::new(
+            u64::MAX,
             u64::MAX,
             successful.accounted_peak_working_bytes() - 1,
             u64::MAX,
@@ -816,6 +837,7 @@ fn qa_cancellation_and_comparison_work_limits_publish_no_partial_result() {
         &surface,
         &surface,
         SurfaceComparisonLimits::new(
+            u64::MAX,
             u64::MAX,
             u64::MAX,
             successful.work_units().saturating_sub(1),

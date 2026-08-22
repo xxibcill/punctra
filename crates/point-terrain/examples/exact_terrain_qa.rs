@@ -438,6 +438,7 @@ fn comparison_json(report: &SurfaceComparisonReport) -> Value {
             "max": bounds.max(),
             "meaning": "conservative incident-vertex envelope; not an exact change polygon",
         })),
+        "retained_record_bytes": report.retained_record_bytes(),
         "work_units": report.work_units(),
         "accounted_peak_working_bytes": report.accounted_peak_working_bytes(),
     })
