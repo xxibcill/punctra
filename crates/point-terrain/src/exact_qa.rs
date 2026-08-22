@@ -1,4 +1,4 @@
-use std::{mem, num::NonZeroU32, sync::Arc};
+use std::{mem, num::NonZeroU32};
 
 use blake3::Hasher;
 use foundation_runtime::OperationControl;
@@ -7,10 +7,9 @@ use point_workspace::{PointQuery, Snapshot, SnapshotPointSummary, SnapshotProven
 
 use crate::{
     ALGORITHM_VERSION, CheckPoint, CheckPointId, CheckPointLimits, CheckPointOutcome,
-    PreparedTerrainSurface, ResidualStatistics, SurfaceFace, SurfaceVertex, TerrainDescriptor,
-    TerrainError, TerrainQaLimits, TerrainSurface,
+    PreparedTerrainSurface, ResidualStatistics, TerrainError, TerrainQaLimits, TerrainSurface,
     limits::{require_within, usize_to_u64_saturating},
-    model::SurfaceData as ModelSurfaceData,
+    persistence::SurfaceMaterializationLimits,
     qa::ResidualAccumulator,
 };
 
@@ -844,7 +843,14 @@ pub(crate) fn start_prepared(
 ) -> crate::ExactTerrainQaJob {
     let surface = surface.clone();
     crate::ExactTerrainQaJob::spawn(move |control| {
-        let (surface, materialized_bytes) = materialize(&surface, limits, &control)?;
+        let (surface, materialized_bytes) = surface.materialize_in_memory(
+            SurfaceMaterializationLimits::new(
+                limits.surface_read(),
+                limits.max_materialized_surface_bytes(),
+                limits.max_working_bytes(),
+            ),
+            &control,
+        )?;
         run(
             &snapshot,
             &surface,
@@ -1351,97 +1357,6 @@ fn as_check_point_outcome(outcome: ResidualOutcome) -> CheckPointOutcome {
             residual,
         },
     }
-}
-
-fn materialize(
-    prepared: &PreparedTerrainSurface,
-    limits: TerrainQaLimits,
-    control: &OperationControl,
-) -> Result<(TerrainSurface, u64), TerrainError> {
-    control.check_cancelled()?;
-    let descriptor = prepared.descriptor();
-    let vertex_count = usize::try_from(descriptor.vertex_count()).map_err(|_| {
-        TerrainError::resource(
-            "prepared Surface vertices",
-            descriptor.vertex_count(),
-            usize_limit(),
-        )
-    })?;
-    let face_count = usize::try_from(descriptor.face_count()).map_err(|_| {
-        TerrainError::resource(
-            "prepared Surface faces",
-            descriptor.face_count(),
-            usize_limit(),
-        )
-    })?;
-    let requested_materialized_bytes = payload_bytes::<SurfaceVertex>(vertex_count)
-        .saturating_add(payload_bytes::<SurfaceFace>(face_count));
-    require_within(
-        "prepared Surface materialization bytes",
-        requested_materialized_bytes,
-        limits.max_materialized_surface_bytes(),
-    )?;
-    require_within(
-        "exact QA working bytes",
-        requested_materialized_bytes.saturating_add(limits.surface_read().max_working_bytes()),
-        limits.max_working_bytes(),
-    )?;
-    let mut vertices = allocate_exact::<SurfaceVertex>(vertex_count)?;
-    for batch in prepared.vertex_batches(limits.surface_read())? {
-        control.check_cancelled()?;
-        extend_with_cancellation(&mut vertices, batch?, control)?;
-    }
-    let mut faces = allocate_exact::<SurfaceFace>(face_count)?;
-    let materialized_bytes = allocation_bytes::<SurfaceVertex>(vertices.capacity())
-        .saturating_add(allocation_bytes::<SurfaceFace>(faces.capacity()));
-    require_within(
-        "prepared Surface materialization bytes",
-        materialized_bytes,
-        limits.max_materialized_surface_bytes(),
-    )?;
-    require_within(
-        "exact QA working bytes",
-        materialized_bytes.saturating_add(limits.surface_read().max_working_bytes()),
-        limits.max_working_bytes(),
-    )?;
-    for batch in prepared.face_batches(limits.surface_read())? {
-        control.check_cancelled()?;
-        extend_with_cancellation(&mut faces, batch?, control)?;
-    }
-    if vertices.len() != vertex_count || faces.len() != face_count {
-        return Err(TerrainError::topology(
-            "prepared Surface stream counts changed during exact QA materialization",
-        ));
-    }
-    let terrain_descriptor = TerrainDescriptor::new(
-        descriptor.snapshot(),
-        descriptor.recipe(),
-        descriptor.recipe_hash(),
-        descriptor.position_transform(),
-        descriptor.coordinate_reference().clone(),
-        descriptor.input_hash(),
-        descriptor.geometry_hash(),
-        descriptor.topology_hash(),
-        descriptor.artifact_hash(),
-        descriptor.input_point_count(),
-        descriptor.vertex_count(),
-        descriptor.face_count(),
-        descriptor.hull_vertex_count(),
-        descriptor.bounds(),
-        materialized_bytes,
-        materialized_bytes,
-        0,
-    );
-    Ok((
-        TerrainSurface {
-            inner: Arc::new(ModelSurfaceData {
-                descriptor: terrain_descriptor,
-                vertices,
-                faces,
-            }),
-        },
-        materialized_bytes,
-    ))
 }
 
 fn result_bytes(source_count: usize, request: &ExactTerrainQaRequest) -> Result<u64, TerrainError> {
