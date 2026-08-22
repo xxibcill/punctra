@@ -1,7 +1,7 @@
 # Punctra Roadmap
 
 Status: living guidance
-Last reviewed: 2026-08-21
+Last reviewed: 2026-08-22
 
 This roadmap communicates direction, not a delivery promise. It has no fixed
 dates. Candidate releases may be split, merged, reordered, renamed, or skipped
@@ -9,54 +9,41 @@ as technical and customer evidence changes. Milestone outcomes and dependency
 order matter more than version numbers.
 
 Among incomplete releases, only an **Active** release has accepted
-implementation scope. Punctra v0.1 through v0.9 are Complete repository
-technical slices. The v0.8 interoperability qualification and v0.9 trust
-candidate are repository-verified, while every external product gate remains
-outstanding. The
-[v0.10 Field Qualification and
-Professional Inspection View design](docs/design/field-inspection-view-v0.10.md)
-has a complete repository implementation without claiming that its field or
-adoption-publication gates are satisfied. The [v0.11 Exact Interactive Review
-and Ground Correction design](docs/design/exact-interactive-review-v0.11.md) is
-complete and repository-verified for its bounded technical slice without
-claiming external field-activation or independent-adoption evidence. The
-[v0.12 Explicit Spatial Reference and Package Publication
-design](docs/design/explicit-spatial-reference-v0.12.md) is complete for its
-bounded repository slice without claiming the outstanding production-corpus,
-downstream, adoption, or support gates. The [v0.13 Persistent Bounded-AOI
-Terrain design](docs/design/persistent-production-scale-terrain-v0.13.md) is
-**Complete and repository-verified for the bounded persistent-terrain slice;
-field activation, production-scale accuracy, true out-of-core adoption,
-independent adoption, partner validation, and support qualification
-outstanding.** Its full-AOI triangulator remains memory-resident.
-The [2026-08-18 renderer quality
-investigation](docs/reviews/render-quality-investigation-2026-08-18.md) records
-one pre-v0.13 corrective checkpoint now **Complete and repository-verified**
-under its [implemented corrective design](docs/design/renderer-quality-corrective-pre-v0.13.md).
-Its permitted field execution remains outstanding. It does not reopen the
-accepted v0.10–v0.12 scopes. The bounded v0.14 exact Terrain QA design is
-**Complete and repository-verified for its bounded technical slice** without
-claiming field activation, observed workflow timing, independent adoption,
-partner validation, or support qualification. v0.15 through v0.20 remain
-uncommitted Candidate themes; each needs evidence and an accepted design before
-implementation. There is currently no Active release.
+implementation scope. Punctra v0.1 through v0.14 are Complete repository
+technical slices. Their recorded external field, adoption, partner, and
+support gates remain historically accurate, but they do not determine the next
+product direction. The project now pivots from a desktop terrain-delivery
+hypothesis to an embeddable browser point-cloud rendering engine.
+
+Versions v0.15 through v0.30 are uncommitted Candidate themes. v0.15–v0.20
+establish browser execution, streaming, the viewer API, embedding, and platform
+qualification. v0.21–v0.29 then improve and qualify visual quality. v0.30 is
+the earliest planned browser-engine release candidate; no earlier future
+release may be represented as a product release candidate. The historical
+v0.9 "Trust and v1 candidate" name describes its bounded repository
+compatibility checkpoint, not browser-product release-candidate status. There
+is currently no Active release.
 
 ## Working direction
 
-The working product hypothesis is a local-first sidecar that helps survey and
-civil teams move from very large LAS/LAZ Sources to an accepted terrain
-deliverable without manual tiling or decimation, while materially reducing
-attended production time.
+The working product hypothesis is an embeddable Rust/WebAssembly point-cloud
+rendering engine for browser applications. A host should be able to stream a
+very large LAS/LAZ Source, render progressive WebGPU Coverage in a canvas, and
+integrate navigation, display modes, picking, highlighting, and exact Queries
+without adopting a complete editor, desktop product, or terrain-delivery
+workflow.
 
-Punctra should contribute reusable, bounded modules to that workflow while
-preserving two important boundaries:
+Punctra owns bounded render state, deterministic View planning, and validated
+rendering behavior. The browser host owns application UI, credentials, network
+policy, storage policy, WebGPU/canvas lifecycle, and product-specific workflow.
+Progressive GPU display remains disposable and non-authoritative. Exact Point
+values and Queries remain CPU-authoritative with explicit provenance; the
+completed Edit, terrain, QA, and export modules remain available but do not
+drive the post-v0.14 roadmap.
 
-- progressive GPU display is disposable and never authoritative geometry; and
-- exact Queries, Edits, terrain, and exports operate on CPU-authoritative values
-  with explicit provenance.
-
-The hypothesis must be tested against real workflows. A fast viewer alone is
-not sufficient product evidence.
+The hypothesis must be tested through real browser embeddings. Native examples
+remain useful reference and GPU-acceptance hosts, but native success alone is
+not browser support evidence.
 
 ## How to use this roadmap
 
@@ -64,8 +51,9 @@ not sufficient product evidence.
   promise dates.
 - Accept a short design before starting a candidate release. That design defines
   its exact scope, non-goals, public seams, and verification gates.
-- Preserve the proposed dependency order: contracts and runtime, Source access,
-  index, durable document state, terrain, then export.
+- Preserve the proposed browser dependency order: WebAssembly/WebGPU execution,
+  remote Source delivery, browser View API, SDK integration, platform
+  qualification, measured visual-quality work, then release-candidate soak.
 - Add a crate only with its first behavior, direct interface tests, and at least
   one real caller. Do not scaffold the future tree in advance.
 - Keep Cargo/API versions, persisted schema versions, and deterministic
@@ -75,7 +63,7 @@ not sufficient product evidence.
   `PUNCTRA_REQUIRE_GPU=1` when a GPU adapter is expected.
 - Treat a measured corrective checkpoint as evidence for a short design, not
   as permission to silently broaden a completed release or public seam.
-- Let customer evidence narrow, reorder, pause, or end the product-facing work.
+- Let adopter evidence narrow, reorder, pause, or end the browser-engine work.
 
 Roadmap status labels are:
 
@@ -93,100 +81,36 @@ release can be Complete while every product gate remains outstanding.
 | Evidence maturity | Meaning |
 |---|---|
 | **Repository-verified** | The accepted design, local verification, fixtures, and declared benchmarks pass. |
-| **Field-qualified** | Representative licensed or sanitized production data and observed workflows satisfy the declared scale and usability envelope. |
-| **Partner-validated** | Real partner projects repeatedly satisfy their tolerance and accepted-deliverable checks. |
-| **Support-qualified** | The declared compatibility, migration, operational, workstation, and support matrices are maintainable. |
+| **Field-qualified** | Historical field evidence satisfies a completed slice's declared production-data and observed-workflow envelope. |
+| **Partner-validated** | Historical partner projects repeatedly satisfy the completed slice's declared tolerance and deliverable checks. |
+| **Browser-qualified** | Declared browsers, WebGPU adapters, devices, and representative Sources satisfy the measured functional, resource, and visual envelope. |
+| **Adopter-validated** | Independent host applications repeatedly complete the documented embedding path without maintainer-only repairs. |
+| **Support-qualified** | The declared browser, device, API, packaging, recovery, and support matrices are maintainable. |
 
-## Scope and evidence checkpoint
+## Current pivot checkpoint
 
-Status: **v0.13 — Complete and repository-verified for the bounded persistent-
-terrain slice; field activation, production-scale accuracy, true out-of-core
-adoption, independent adoption, partner validation, and support qualification
-outstanding**
+Status: **v0.14 complete and repository-verified for its bounded historical
+slice; browser-engine v0.15 not yet Active**
 
-The [implemented v0.5 design](docs/design/durable-document-core-v0.5.md) places
-exact classification selection, temporary Point Sets, sparse Revisions, and
-Operation recovery behind one deep `point-workspace` interface. Repository
-tests and generated-source benchmarks close that technical slice. The
-implemented [v0.6 design](docs/design/terrain-qa-benchmark-v0.6.md) adds only
-its exact `Snapshot::point_rows` input, one-worker in-memory unconstrained TIN,
-detached Check Point residual, and metric-metre LandXML points/faces path. It
-does not authorize broader terrain, screen selection, general Edit, or product-
-application proposals, and neither v0.5 nor v0.6 repository evidence
-substitutes for licensed field data or partner validation.
+The completed v0.1–v0.14 contracts are inputs to the pivot, not permission to
+carry the old product sequence forward. In particular:
 
-The implemented v0.7 slice closes the repository restart/audit gap for that
-narrow path: caller-owned intent precedes selection/commit, one eight-frame Run
-can be resumed or inspected, the changed Revision has an exact Audit/Edit
-Footprint, and exact LandXML/report targets reconcile without overwrite. Its
-generated tests and benchmark establish only those technical guarantees; they
-do not satisfy any external evidence item below.
+- `render-protocol`, `render-wgpu`, and `point-view` provide the renderer,
+  generation safety, large-world precision, picking, display, and planning
+  baseline;
+- `point-source`, `source-las`, and `point-index` provide verified Source data
+  and bounded progressive materialization, but no browser networking contract;
+- `point-review` provides the separation between provisional GPU identity and
+  exact CPU confirmation; and
+- Workspace, terrain, QA, LandXML, and downstream-verification work remain
+  implemented historical modules, not post-v0.14 product priorities.
 
-The completed v0.8 slice did not broaden that workflow. Its private verifier
-compares the exact v0.7 metric-metre LandXML TIN with a caller-returned LandXML
-1.2 file under declared tolerances, with strict read-only Complete-Run binding,
-canonical no-replace evidence publication, and full-ceiling exact-byte
-streaming outside the Run root. Caller-declared application/version/settings
-labels are still not proof that the application ran. The v0.7 journal and
-`audit.json` remain unchanged.
-
-The completed v0.9 slice adds no new feature family. It extends the inherited
-Spatial Index v1 goldens across the remaining persisted-v1 compatibility
-surface, distinguishes authoritative, rebuildable, and temporary artifacts,
-hardens recovery and filesystem failure behavior, publishes the exact support
-matrix, reviews only exercised public interfaces, and reproduces local
-resource/performance gates. Implemented hardening preserves Index filesystem
-failures as recoverable I/O diagnostics through the private Workflow seam and
-publishes a complete synced initial `.work` header from an owned temporary by
-a no-replace link. Unknown, racing, and caller-owned targets remain untouched.
-The repository fixture/recovery/support matrix, complete local candidate record,
-and independent review are recorded in the v0.9 release evidence.
-
-The accepted v0.10 design adds a separate repository View track. The private
-host now owns five deterministic display modes, perspective/orthographic
-navigation, truthful loading/Coverage state, structured diagnostics, and a
-permission-gated corpus runner. `point-index` retains position-only disk v1 and
-adds one bounded attributed disk-v2 recipe with immutable fixtures and explicit
-rebuild migration. CPU-authoritative Source, Query, Edit, terrain, QA, and
-export contracts are unchanged. This implementation is not evidence of a
-permitted production corpus or an observed workflow; those field gates remain
-outstanding and are reported separately.
-
-The accepted v0.11 design connects that disposable View to a separate exact CPU
-review path without promoting renderer samples to authority. The public
-`point-review` crate confirms one provisional Point Identity against a pinned
-Snapshot and performs one inclusive screen-through rectangle scan with an
-optional effective-classification filter. Exact Point Set iteration supplies
-bounded renderer highlights. Durable correction reuses caller-owned Operation
-Identities and existing Workspace commit, immediate-head Revert, Revision
-Audit/Edit Footprint, and recovery contracts. A public `render-wgpu` example
-demonstrates host ownership without `renderer-demo` private state. Polygon,
-brush, visible-only, and occlusion selection, arbitrary Attribute or position
-editing, general UI, and automatic recovery remain outside scope.
-
-Repository activation was an explicit implementation decision, not field
-evidence. No observed correction workflow, permitted production correction
-corpus, independent adopter, time saving, reduced rework, partner acceptance,
-or product efficacy is recorded.
-
-Useful evidence for proceeding includes:
-
-- screen-shared workflows with current users that identify the actual expensive
-  step;
-- five permitted production LAS/LAZ datasets from at least three unrelated
-  firms, including at least two Sources above 500 million Points;
-- customer accuracy, coordinate, QA, and downstream export requirements;
-- a measured baseline for time to first use, attended editing time, unattended
-  processing time, and rework; and
-- a clear reason the proposed workflow is meaningfully better than the
-  customer's current toolchain.
-
-If the evidence points elsewhere, revise this roadmap before building the next
-module. The detailed discovery signals and pivot criteria live in the
-[market-validation research](docs/research/saas-point-cloud-market-validation.md#customer-tests-and-kill-criteria).
-Production-data access, downstream observations, and paid-pilot evidence are
-long-lead work. Collection may proceed during v0.11 without silently expanding
-any later repository release.
+Before v0.15 becomes Active, its accepted design must select the browser build
+and packaging path, supported WebGPU capability floor, JavaScript/TypeScript
+boundary, host ownership model, and one local browser acceptance harness.
+Useful activation evidence includes a small real embedding host, at least one
+representative LAS/LAZ Source, measured browser memory and frame behavior, and
+a precise list of browser-only failures that native acceptance cannot expose.
 
 ## Pre-v0.13 renderer quality corrective checkpoint
 
@@ -462,16 +386,18 @@ CRS guessing, or a general desktop product UI.
 
 ## Release sequence
 
-The accepted v0.13 bounded persistent-terrain repository slice is complete and
-repository-verified after the completed v0.9, repository-implemented v0.10
-View, completed v0.11 technical slice, bounded v0.12 repository slice, and
-completed pre-v0.13 renderer quality checkpoint. The bounded v0.14 exact
-Terrain QA and correction-loop repository slice is complete and repository-
-verified. Six provisional
-Candidate themes, v0.15 through v0.20, may follow.
-This is a planning sequence, not a requirement to publish every number or to
-publish v1 after v0.20. Candidates may be narrowed, split, merged, reordered,
-or stopped before becoming Active.
+The completed v0.1–v0.14 sequence remains the historical repository baseline.
+The browser-engine pivot begins at v0.15. Six platform Candidate themes,
+v0.15–v0.20, establish a browser execution and embedding baseline. Nine
+visual-quality Candidate themes, v0.21–v0.29, then improve that baseline under
+measured image, motion, resource, and interpretation gates. v0.30 is the first
+planned browser-engine release candidate.
+
+This is a planning sequence, not a requirement to publish every number.
+Candidates may be narrowed, split, merged, reordered, or stopped before
+becoming Active, but visual-quality scope must not be pulled into v0.15–v0.20
+without an explicit roadmap revision. No v0.15–v0.29 release is a product
+release candidate, and completing v0.30 does not automatically publish v1.
 
 ### v0.1 — Renderer foundation
 
@@ -825,65 +751,60 @@ Evidence of readiness:
 - resource ceilings and performance claims are reproducible locally; and
 - unsupported formats, transformations, and device capabilities fail clearly.
 
-## Standing boundaries for v0.10–v0.20
+## Standing boundaries for v0.15–v0.30
 
-- GPU display remains disposable and non-authoritative. Exact inspection,
-  selection, Edit, terrain, QA, and export use revision-pinned CPU values.
-- Opening and viewing a large Source is not evidence that deriving its complete
-  terrain fits the same resource envelope. Measure and report those paths
-  separately.
-- The proposed desktop host supports one narrow survey-to-terrain workflow. It
-  is not a general CAD, BIM, point-cloud, or geospatial editor.
-- Visual quality means a clear professional inspection View, not Cesium parity,
-  photorealism, a globe, 3D Tiles, texture streaming, or rendering every Point
-  simultaneously.
-- A fixed View must reach a declared settled cut before its frame rate, image,
-  feature visibility, or resource use is presented as representative. A high
-  refresh rate during perpetual request/upload/retirement churn is not a
-  successful viewing result.
-- Point-size, depth, tone, legend, locator, and status treatments remain
+- Punctra is an embeddable browser rendering engine, not a complete browser
+  application, desktop editor, cloud service, or terrain-delivery product.
+- The host owns UI, authentication, authorization, credentials, URL policy,
+  caching consent, telemetry consent, and application persistence. Punctra may
+  expose narrow mechanisms and facts without silently taking over those
+  policies.
+- GPU display remains disposable and non-authoritative. Picking is provisional
+  until confirmed against exact CPU Source values or another caller-owned
+  authority.
+- Browser support means execution in the declared browser/device/WebGPU matrix.
+  Native wgpu tests are necessary regression evidence but cannot substitute for
+  browser acceptance.
+- v0.15–v0.20 establish functional browser delivery and embedding. Their image
+  gates protect existing correctness and prevent regressions; intentional
+  visual-quality expansion begins only at v0.21.
+- v0.21–v0.29 visual treatments remain deterministic, reversible, bounded, and
   presentation-only. They never change Point Identity, exact position,
   classification, selection membership, Coverage truth, or Query completion.
-- Coordinate systems, units, vertical references, transformations, downstream
-  products, and settings are explicit supported profiles. Nothing is guessed.
-- Repository status and external evidence maturity are recorded separately.
-  Tests, generated data, free evaluations, and declarations do not become
-  partner, paid-use, or accepted-deliverable evidence.
+- A fixed View must reach a declared settled cut before its frame rate, image,
+  feature visibility, or resource use is presented as representative. Smooth
+  animation during perpetual request/upload/retirement churn is not success.
+- Browser memory, retained GPU bytes, transient textures, network requests,
+  decoded staging, worker queues, frame work, and cache use have independent
+  limits. One aggregate limit may not hide an unbounded subsystem.
+- Unsupported WebGPU capability, browser lifecycle state, Source response, or
+  cache condition fails explicitly and leaves the host a safe recovery action.
+- v0.30 is the earliest future release that may carry a browser-engine release-
+  candidate label. No earlier beta, preview, or package is evidence of that
+  qualification.
 - Every Candidate needs an accepted design with one coherent outcome, explicit
   non-goals, local verification, and a repository-activation decision before
-  implementation. External evidence gates may remain outstanding only when
-  they are named separately and no field, partner, or support maturity is
-  claimed from repository work.
+  implementation.
 
-## Open-source library adoption track
+## Browser-engine adoption track
 
-Punctra is intended to remain useful as an embeddable Rust library, not only as
-the implementation behind its own desktop host. Public attention, independent
-adoption, and funding are not inferred from repository completeness. The
-following are explicit exit requirements for the corresponding Candidate
-releases; they do not expand a release's technical feature scope.
+The post-v0.14 adoption path is browser-first while retaining directly usable
+Rust libraries. Public attention and repository completeness do not establish
+independent adoption. These exit requirements do not expand technical scope.
 
-| Release | Open-source adoption exit requirement |
+| Release range | Adoption exit requirement |
 |---|---|
-| **v0.10** | Publish one accurate public description, repository topics and homepage, an approved screenshot or short demonstration, a reproducible settled-view benchmark, and a five-minute “view your first LAS/LAZ Source” guide. Close the pre-v0.13 P1 convergence/LOD gates before presenting a generated frame as representative, or disclose the exact unsettled limitation. Clearly separate current capabilities from roadmap claims. |
-| **v0.11** | Provide a minimal third-party renderer integration example that does not depend on demo-private state, plus focused rustdoc explaining host ownership, provisional GPU picks, exact CPU confirmation, and resource limits. |
-| **v0.12** | Define and exercise the crates.io/docs.rs packaging path for the supported library crates. Package metadata, licenses, minimum supported Rust version, feature flags, dependency roles, and pre-v1 compatibility expectations must be explicit. |
-| **v0.13** | Publish a reproducible out-of-core terrain example and resource report that distinguishes Source viewing, indexing, and full Terrain Derivation and does not extrapolate beyond measured data. |
-| **v0.14** | Publish one end-to-end QA example whose documentation lets an adopter trace every displayed profile, residual, tolerance, and gap to authoritative inputs. |
-| **v0.15** | Publish a constrained-terrain example and non-goals guide covering the exact supported constraint grammar, failure cases, and boundary between Punctra and general CAD authoring. |
-| **v0.16** | Publish the exact named downstream integration guide and only customer-approved, anonymized round-trip evidence. Do not present declared application labels or repository fixtures as observed interoperability. |
-| **v0.17** | At least one independent adopter, outside the maintainer and repository demos, completes the documented library quickstart or embedding path; record setup time, failures, unclear APIs, and resulting documentation fixes. |
-| **v0.18** | Publish contributor onboarding, issue and pull-request templates, a code of conduct, security-reporting policy, support channels, and a small set of genuinely bounded contributor issues. Document which help is community support and which is paid product support. |
-| **v0.19** | Publish the reviewed public API surface, semantic-versioning and deprecation policy, compatibility matrix, migration or rebuild guidance, release notes, and locally reproducible verification commands for downstream maintainers. |
-| **v0.20** | Complete an open-source release-readiness review covering the landing page, quickstart, API docs, examples, changelog, known limitations, support expectations, and approved showcase material. Add a funding or GitHub Sponsors path only with transparent goals and only after independent use exists; funding is not a v1 correctness gate. |
+| **v0.15–v0.17** | Publish one minimal browser host that renders a representative Source and documents WebGPU capability checks, host ownership, memory limits, progressive Coverage, picking authority, and unsupported states. |
+| **v0.18** | Publish the supported SDK packages, generated API reference, one plain TypeScript integration, and only the framework adapters justified by real callers. |
+| **v0.19–v0.20** | At least one independent adopter completes the documented embedding path. Record setup time, browser/device facts, failures, unclear APIs, and resulting fixes. v0.20 publishes an accurate browser support and limitation matrix without claiming release-candidate status. |
+| **v0.21–v0.25** | Publish reproducible visual fixtures and before/after evidence for each quality release, including settings, camera, viewport, device-pixel ratio, browser, adapter, and fallback state. |
+| **v0.26–v0.29** | Independent hosts exercise interaction and visual-quality behavior on the declared browser/device matrix. Approved examples may be showcased only with Source and image permission. |
+| **v0.30** | Complete the browser-engine release-candidate review: packages, quickstart, API docs, examples, changelog, security and support policies, compatibility matrix, known limitations, visual evidence, and locally reproducible verification. |
 
-Adoption evidence is counted conservatively. Stars, downloads, praise, generated
-examples, and maintainer-run integrations are useful signals but do not equal
-independent production use. No release is delayed merely to reach a vanity
-metric, and no benchmark or customer dataset is published without permission.
-The completed v0.13 repository design deliberately uses full-AOI resident
-triangulation; its generated persistent-terrain example therefore does not
-satisfy v0.13's true out-of-core adoption requirement in the table above.
+Adoption evidence is counted conservatively. Stars, downloads, praise,
+generated examples, and maintainer-run integrations are useful signals but do
+not equal independent production use. No benchmark, screenshot, or customer
+dataset is published without permission.
 
 ### v0.10 — Field qualification and professional inspection View
 
@@ -1173,208 +1094,483 @@ Repository exit evidence:
 - observed trials measure time to find, explain, and correct seeded or known
   defects.
 
-### v0.15 — Evidence-selected terrain constraints
+### v0.15 — WebAssembly and WebGPU browser foundation
 
 Status: **Candidate**
 
-Candidate outcome: add only the constraint behavior proven necessary for the
-selected terrain and downstream-delivery workflow.
+Candidate outcome: render one deterministic Punctra scene inside a browser
+canvas through a bounded WebAssembly/WebGPU path.
 
 Activation gate:
 
-- field evidence shows that missing Breaklines, boundaries, or holes—not
-  classification, QA, scale, or coordinate handling—is the next recurring
-  source of unacceptable terrain or rework.
+- an accepted design selects the Rust-to-WebAssembly toolchain, JavaScript API
+  boundary, WebGPU capability floor, browser test harness, and canvas/device
+  ownership model.
 
 Likely scope:
 
-- one narrow revisioned constraint grammar containing only the selected kinds;
-- exact snapping, noding, validation, audit, Revert, and recovery rules;
-- deterministic constrained terrain integrated with persistent Surface
-  provenance; and
-- explicit rejection of self-intersection, ambiguity, unsupported topology,
-  and tolerance-dependent degeneracy.
+- `wasm32`-compatible renderer, protocol, math, and View-planning paths;
+- explicit asynchronous initialization and capability diagnostics;
+- browser-safe frame recording, resize, device-pixel-ratio, visibility, and
+  shutdown behavior; and
+- one local static browser host using generated in-memory data, without remote
+  Source delivery or framework integration.
 
 Candidate exit evidence:
 
-- independent fixtures prove every supported constraint changes topology as
-  specified and survives reopen and Revert;
-- input order, interruption, resume, and supported worker count do not change
-  canonical output;
-- adversarial near-degenerate cases fail deterministically; and
-- the scope does not grow into general linework or CAD authoring.
+- the declared browser opens the example and renders the fixed scene through
+  WebGPU without native-only shims;
+- protocol generation, batch-version, resource-limit, and picking invariants
+  match the native reference path;
+- unsupported capabilities fail before partial publication with one safe host
+  action; and
+- package and browser tests run locally without claiming broad browser support.
 
-### v0.16 — Named downstream interoperability
+### v0.16 — HTTP range streaming, browser caching, and worker decoding
 
 Status: **Candidate**
 
-Candidate outcome: deliver one exact terrain profile to one named downstream
-application version and settings matrix chosen from partner evidence.
-
-The working hypothesis is Autodesk Civil 3D. The activation gate must still
-name the exact supported version and settings from observed evidence.
+Candidate outcome: progressively view a remote LAS/LAZ Source without loading
+the complete file or blocking the browser main thread.
 
 Activation gate:
 
-- multiple observed firms use the same named downstream profile and agree on
-  units, references, precision, topology, constraints, and acceptance checks.
+- the v0.15 host records a representative remote Source, hosting behavior, CORS
+  policy, byte-range behavior, compatible prebuilt Spatial Index, cache needs,
+  and main-thread latency baseline.
 
 Likely scope:
 
-- the exact LandXML subset needed by the selected product/version/settings;
-- deterministic points, faces, units, references, precision, and only the
-  v0.15 constraints required by that profile;
-- the already-closed generic Complete-Run binding and no-replace canonical
-  round-trip evidence specialized to the named product/version/settings; and
-- bounded semantic comparison of the exported and caller-returned deliverable.
+- bounded Fetch/HTTP Range reads with explicit status, length, validator, CORS,
+  content-encoding, cancellation, retry, and changed-Source handling;
+- one deployment profile binding an immutable remote Source to a compatible
+  Punctra Spatial Index and display-sample recipe;
+- bounded Web Worker decoding and transfer with request backpressure;
+- host-selected memory and persistent-cache policy with versioned cache keys and
+  explicit invalidation; and
+- progressive index/sample delivery that preserves Coverage and Point Identity
+  contracts.
 
 Candidate exit evidence:
 
-- fixtures cover accepted, malformed, ambiguous, partial, raced, unit-drift,
-  reference-drift, tolerance-drift, and topology-drift cases;
-- the same unmodified export is accepted in three firms' observed production
-  round trips without bespoke code repair;
-- application, version, and settings declarations are not represented as
-  proof unless matching external execution evidence exists; and
-- no claim is made for both Autodesk and Bentley ecosystems or for a generic
-  exporter framework.
+- request count, concurrent bytes, decoded staging, worker queues, cache bytes,
+  cancellation latency, and main-thread work stay under independent limits;
+- missing Range support, validator drift, truncation, corruption, offline state,
+  quota failure, and worker failure produce deterministic recoverable outcomes;
+- reload and warm-cache behavior never combine bytes from different Source
+  identities; and
+- progressive rendering starts before full Source transfer on the declared
+  fixture. An arbitrary raw LAS/LAZ URL without a compatible index is rejected
+  rather than silently downloaded or scanned in full.
 
-### v0.17 — Narrow design-partner alpha
+### v0.17 — Browser viewer API
 
 Status: **Candidate**
 
-Candidate outcome: package the field-qualified path as one usable end-to-end
-desktop workflow for selected design partners.
+Candidate outcome: expose one coherent browser API for camera control, display
+modes, picking, highlighting, and exact Query handoff.
 
 Activation gate:
 
-- v0.10 through v0.16 identify a stable repeated workflow and at least one
-  partner willing to use the declared supported profile on production work.
+- the v0.16 example identifies the smallest API a real browser host needs
+  without exposing renderer, planner, worker, or Source internals separately.
 
 Likely scope:
 
-- open, inspect, correct, derive, QA, and export through one focused host;
-- installable packaging for a declared platform and workstation envelope;
-- autosave policy, progress, cancellation, recovery, safe retry, and actionable
-  diagnostics; and
-- consent-aware local evidence capture without uploading Source data.
+- typed lifecycle, camera, perspective/orthographic projection, viewport,
+  display-mode, render scheduling, and bounded state-report interfaces;
+- provisional GPU picking and highlighting with explicit Point Identity and
+  generation semantics;
+- a separate asynchronous exact-Query bridge that cannot promote display
+  samples to authority; and
+- normalized pointer, wheel, keyboard, and touch inputs as optional mechanisms,
+  while host applications retain interaction policy.
 
 Candidate exit evidence:
 
-- partners complete the supported workflow on representative projects and can
-  distinguish exact, stale, sampled, running, failed, and recovered states;
-- every failure names the Source or Artifact, operation, phase, certainty, and
-  one safe recovery action;
-- packaging, reopen, cancellation, and recovery pass local acceptance on each
-  supported machine class; and
-- requests outside the narrow workflow are recorded rather than silently added.
+- a plain browser host implements navigation, five inherited display modes,
+  pick, highlight, clear, and exact confirmation using only the public API;
+- stale generations, destroyed viewers, device loss, cancelled Queries, and
+  nonresident highlights fail without stale presentation;
+- TypeScript declarations and runtime errors agree; and
+- no terrain, export, editor, framework, or application-UI policy enters the
+  viewer interface.
 
-### v0.18 — Design-partner MVP and operations
+### v0.18 — Embeddable SDK and framework integration
 
 Status: **Candidate**
 
-Candidate outcome: make the narrow alpha repeatable to install, operate,
-support, and evaluate across several firms.
+Candidate outcome: make the browser viewer repeatable to install, bundle,
+instantiate, and dispose inside real web applications.
 
 Activation gate:
 
-- alpha projects repeatedly produce acceptable deliverables and the delivery,
-  update, licensing, privacy, and support model has been explicitly selected.
+- at least two embedding trials identify the actual package, bundler, worker,
+  asset-URL, and framework-lifecycle requirements.
 
 Likely scope:
 
-- reproducible installation, update, rollback, configuration, and diagnostic
-  collection for the declared support matrix;
-- licensing only if the selected delivery model requires it;
-- corpus regression, support playbooks, issue evidence, and recovery drills;
+- versioned ES-module/WebAssembly packages with generated TypeScript types;
+- one framework-neutral integration and only the framework adapters justified
+  by observed adopters;
+- explicit worker and WebAssembly asset resolution for supported bundlers;
+- lifecycle-safe mount, resize, pause, resume, and dispose behavior; and
+- Content Security Policy, cross-origin isolation, and deployment guidance for
+  the features that actually require them.
+
+Candidate exit evidence:
+
+- clean example applications install from packed artifacts rather than
+  repository-relative paths;
+- development, production, code-split, worker, and cache-busted builds reproduce
+  the same public behavior;
+- repeated mount/unmount and hot-reload trials leak no owned worker, listener,
+  canvas resource, or GPU allocation; and
+- framework adapters remain thin translations over the same viewer API.
+
+### v0.19 — Browser and device qualification
+
+Status: **Candidate**
+
+Candidate outcome: define and reproduce the functional, performance, recovery,
+and support envelope of the browser engine before visual-quality expansion.
+
+Activation gate:
+
+- v0.18 adopters provide a bounded set of browsers, operating systems, GPU
+  classes, integrated/discrete devices, and mobile expectations worth
+  supporting.
+
+Likely scope:
+
+- an explicit browser/OS/adapter/capability matrix with tested fallback and
+  unsupported states;
+- repeatable first-Coverage, settled-View, frame-time, network, worker, CPU,
+  JavaScript heap, retained GPU, and cache measurements where the platform can
+  report them truthfully;
+- device-loss, tab-backgrounding, resize, zoom, DPR change, network loss,
+  offline/cache, memory-pressure, and worker-crash recovery; and
+- browser-facing diagnostics, issue evidence, support playbooks, and security
+  review for remote Source handling.
+
+Candidate exit evidence:
+
+- the declared functional suite passes on every supported matrix entry and
+  unsupported entries fail before use;
+- fixed workloads remain within declared resource and latency ceilings;
+- recovery never displays stale generations or combines changed Source data;
   and
-- workflow measurement that separates time to first use, attended work,
-  unattended work, rework, and downstream acceptance.
+- v0.19 preserves the inherited visual baseline rather than introducing new
+  appearance policies.
 
-Candidate exit evidence:
+### v0.20 — Stable browser-engine integration baseline
 
-- repository acceptance proves the declared packaging and operational paths;
-- external evidence separately carries forward the v0.8 product gates: three
-  firms use the same supported path, three paid pilots reach production use,
-  and two firms convert or document sufficient measured labor savings;
-- multiple runs at one firm, free trials, fixtures, projected savings, and
-  declarations do not multiply or substitute for those external gates; and
-- accuracy and accepted-deliverable checks remain non-negotiable when measuring
-  speed or labor reduction.
+Status: **Candidate — not a release candidate**
 
-### v0.19 — Expanded-scope compatibility and support qualification
-
-Status: **Candidate**
-
-Candidate outcome: freeze new feature families and qualify the expanded
-workflow for a maintainable compatibility and support promise.
+Candidate outcome: consolidate v0.15–v0.19 into one documented and independently
+embeddable functional baseline before visual-quality work begins.
 
 Activation gate:
 
-- the v0.18 workflow is Partner-validated and its exact supported surface is
-  narrow enough to maintain.
+- v0.19 is Browser-qualified for its declared matrix and at least one
+  independent adopter has completed the v0.18 embedding path.
 
 Likely scope:
 
-- final format, coordinate, precision, platform, device, workstation, and
-  downstream-product support matrices;
-- persisted-schema compatibility, migration only where a second version
-  exists, upgrade/rollback fixtures, and artifact ownership policy;
-- fault injection, resource/performance reproduction, security review, public
-  interface review, upgrade notes, and support playbooks; and
-- removal or explicit deferral of experimental paths outside the promise.
+- close release-blocking correctness, lifecycle, recovery, packaging, and
+  documentation gaps in the accepted browser surface;
+- review public API depth and remove accidental seams without promising final
+  pre-v1 compatibility;
+- publish a browser quickstart, embedding guide, capability matrix, performance
+  report, recovery guide, and exact known limitations; and
+- freeze the input scenes, browser matrix, and existing visual behavior that
+  v0.21 will use as its measured starting point.
 
 Candidate exit evidence:
 
-- no known open release-blocking correctness or data-loss defect remains in the
-  declared support matrix;
-- the enumerated recovery contract passes its fault-injection fixtures;
-- old supported Artifacts reopen or follow a tested explicit migration/rebuild
-  path; and
-- declared workstation ceilings and downstream round trips reproduce locally.
+- an adopter can install, stream, render, navigate, pick, highlight, query,
+  recover, and dispose without maintainer-only patches;
+- the complete functional and resource suite reproduces from packed artifacts;
+- no known release-blocking correctness, security, data-mixing, lifecycle, or
+  recovery defect remains in the declared baseline; and
+- v0.20 is described as an integration baseline, not a beta, release candidate,
+  v1 promise, or claim of completed visual quality.
 
-### v0.20 — Product v1 release candidate and production soak
+### v0.21 — Visual-quality baseline and regression corpus
 
 Status: **Candidate**
 
-Candidate outcome: hold the qualified scope stable long enough to decide
-whether it deserves the v1 compatibility and support promise.
+Candidate outcome: establish reproducible evidence for visual changes before
+changing point appearance.
 
 Activation gate:
 
-- v0.19 is Support-qualified and design partners have scheduled representative
-  production work within the declared matrix.
+- v0.20 is complete and its fixed scenes expose representative sparse, dense,
+  layered, high-dynamic-range, classification, large-world, and mixed-LOD
+  viewing conditions.
 
 Likely scope:
 
-- feature freeze, release-candidate packaging, upgrade/rollback rehearsal, and
-  extended production soak;
-- full local regression, GPU acceptance, fault, resource, performance, and
-  downstream-compatibility reproduction;
-- user, administrator, recovery, support, and upgrade documentation; and
-- final review of support capacity, known limitations, and compatibility
-  commitments.
+- fixed generated and permitted real-Source camera trials with immutable input
+  facts;
+- browser image capture, tolerant comparison, temporal-difference, Coverage,
+  feature-location, and resource reporting;
+- declared viewport, DPR, browser, adapter, color-space, projection, mode,
+  settling, and capability/fallback facts; and
+- a small human interpretation rubric for depth, shape, density transitions,
+  color meaning, selection, and false-feature impressions.
 
 Candidate exit evidence:
 
-- repeated partner projects produce accepted deliverables without bespoke code
-  repair inside the supported profile;
-- release-candidate installation, update, rollback, recovery, and diagnostics
-  pass across the declared machine matrix;
-- no known release-blocking correctness, recovery, security, or support defect
-  remains; and
+- the same accepted inputs reproduce comparable evidence without hiding
+  adapter-specific variation;
+- unstable pixels and allowed tolerances are bounded and explained;
+- every later visual-quality claim can cite a v0.21 baseline; and
+- screenshots remain evidence, never authoritative geometry.
+
+### v0.22 — Point footprint and edge quality
+
+Status: **Candidate**
+
+Candidate outcome: make individual Points and dense Point coverage read cleanly
+across DPR and zoom without changing geometry or picking authority.
+
+Likely scope:
+
+- deterministic anti-aliased Point footprints and projected-size behavior;
+- bounded sparse/dense sizing that avoids avoidable holes, blobs, square edges,
+  and moiré;
+- explicit capability fallback with the same geometry and identity; and
+- image and frame-cost comparison against the v0.21 baseline.
+
+Candidate exit evidence:
+
+- fixed trials improve accepted edge and density metrics without hiding thin
+  features or creating false surfaces;
+- pick coverage remains defined independently of decorative edge treatment;
+- physical-pixel behavior is stable across the declared DPR range; and
+- shader, transient-memory, and frame-time costs remain under declared limits.
+
+### v0.23 — LOD density and transition continuity
+
+Status: **Candidate**
+
+Candidate outcome: reduce visible tile boundaries, density popping, holes, and
+mixed-LOD false features during refinement, coarsening, and motion.
+
+Likely scope:
+
+- evidence-selected refinement presentation beyond the inherited bounded
+  cross-fade;
+- transition-aware point density and parent/child coverage treatment;
+- deterministic motion, stop, settle, refine, coarsen, and cancellation rules;
+  and
+- exact duplicate-Coverage, transition-byte, and transition-frame ceilings.
+
+Candidate exit evidence:
+
+- fixed moving and stationary trials remain hole-free and settle without churn;
+- tile edges and density steps stay below accepted image and interpretation
+  thresholds;
+- transitions never change Query completion or Point Identity; and
+- rapid camera changes cannot retain unbounded duplicate Coverage.
+
+### v0.24 — Depth and shape legibility
+
+Status: **Candidate**
+
+Candidate outcome: improve separation of terrain, structures, vegetation, and
+overlapping layers without implying geometry that is absent from the Source.
+
+Likely scope:
+
+- evidence-selected depth enhancement building on the inherited bounded EDL
+  path;
+- projection-aware depth parameters and large-world depth precision;
+- clear fallback when required texture, format, or sampling capabilities are
+  unavailable; and
+- reversible controls whose defaults are justified by feature-location trials.
+
+Candidate exit evidence:
+
+- users locate declared shapes more reliably without mistaking enhancement
+  halos or occlusion artifacts for Source geometry;
+- pick, depth test, Point Identity, and exact position remain unchanged;
+- sparse, dense, perspective, and orthographic cases have explicit regressions;
+  and
+- transient texture and frame-time ceilings hold on the supported matrix.
+
+### v0.25 — Color, tone, and attribute legibility
+
+Status: **Candidate**
+
+Candidate outcome: make RGB, intensity, elevation, classification, and neutral
+display predictable and readable across supported browsers and displays.
+
+Likely scope:
+
+- explicit linear/sRGB handling and browser canvas color assumptions;
+- deterministic reversible exposure, contrast, and intensity/elevation range
+  controls selected from measured cases;
+- accessible palettes and non-color-only legends for categorical and continuous
+  modes; and
+- an always-available raw/reference mapping for comparison.
+
+Candidate exit evidence:
+
+- numeric CPU-to-GPU mappings and captured colors match declared transfer rules
+  within tolerance;
+- clipping, banding, washed-out RGB, and indistinguishable classification cases
+  improve against v0.21 fixtures;
+- no silent normalization changes the meaning of repeated views; and
+- fallback and raw modes remain deterministic across the supported matrix.
+
+### v0.26 — Camera and temporal visual stability
+
+Status: **Candidate**
+
+Candidate outcome: keep the image spatially and temporally stable during
+navigation, projection changes, large-world origin changes, and settling.
+
+Likely scope:
+
+- quantified jitter, shimmer, popping, and origin-rebase behavior;
+- deterministic camera interpolation and optional host-selected motion damping;
+- projection-switch and reset treatments with reduced-motion behavior; and
+- cross-frame diagnostics that distinguish camera, LOD, streaming, and shader
+  causes.
+
+Candidate exit evidence:
+
+- fixed camera paths remain below accepted temporal-difference and position-
+  stability thresholds;
+- stop and reset converge to the same canonical View cut;
+- reduced-motion mode does not rely on animation to communicate state; and
+- no temporal treatment retains stale geometry or weakens generation safety.
+
+### v0.27 — Selection, highlighting, and locator clarity
+
+Status: **Candidate**
+
+Candidate outcome: keep selected, provisional, exact, stale, and nonresident
+states visually distinguishable in sparse and dense scenes.
+
+Likely scope:
+
+- bounded highlight, outline, locator, and selection-state treatments that do
+  not rely on color alone;
+- clear provisional-pick versus exact-confirmation presentation facts;
+- dense-selection and nonresident-selection degradation rules; and
+- host-composable state needed for accessible DOM labels or legends.
+
+Candidate exit evidence:
+
+- interpretation fixtures distinguish every supported state at minimum size,
+  high DPR, and supported contrast modes;
+- visual selection never changes exact membership or promotes a sampled Point;
+- large selections remain within highlight and frame-time limits; and
+- clearing, staleness, device loss, and recovery leave no ghost highlight.
+
+### v0.28 — Canvas composition and adaptive presentation
+
+Status: **Candidate**
+
+Candidate outcome: preserve visual intent when Punctra is embedded in varied
+browser layouts, canvas sizes, backgrounds, and device conditions.
+
+Likely scope:
+
+- explicit opaque and transparent composition behavior where WebGPU permits it;
+- deterministic resize, DPR, browser zoom, fullscreen, and responsive-layout
+  presentation;
+- bounded host-selected quality tiers that degrade declared visual treatments
+  without changing authoritative behavior; and
+- high-contrast, reduced-motion, and non-color-only presentation hooks.
+
+Candidate exit evidence:
+
+- composition fixtures cover supported alpha/background, size, DPR, and quality
+  combinations without stale or stretched frames;
+- adaptive quality respects resource ceilings and cannot silently alter Source
+  or Query meaning;
+- minimum supported canvases retain required visual state; and
+- unsupported composition paths fail explicitly rather than rendering a
+  misleading image.
+
+### v0.29 — Cross-browser visual qualification and hardening
+
+Status: **Candidate — not a release candidate**
+
+Candidate outcome: freeze the accepted visual feature set and prove it is
+maintainable across the supported browser/device matrix.
+
+Activation gate:
+
+- v0.21–v0.28 evidence identifies the exact visual defaults, optional controls,
+  fallbacks, and quality tiers worth supporting.
+
+Likely scope:
+
+- full visual, temporal, interaction, fallback, resource, and recovery
+  reproduction across the declared matrix;
+- closure or explicit deferral of open release-blocking visual defects;
+- reviewed shader/material interfaces, defaults, diagnostics, examples, and
+  visual migration notes; and
+- independent interpretation trials on permitted Sources.
+
+Candidate exit evidence:
+
+- supported matrix entries reproduce accepted images and temporal behavior
+  within declared tolerances;
+- no known release-blocking false-feature, Coverage, depth, color, selection,
+  motion, or composition defect remains;
+- every fallback is visible in diagnostics and covered by acceptance; and
+- v0.29 is a qualification checkpoint, not a browser-engine release candidate.
+
+### v0.30 — Browser render-engine release candidate
+
+Status: **Candidate — earliest planned release candidate**
+
+Candidate outcome: hold the qualified functional and visual scope stable long
+enough to decide whether it deserves a maintained compatibility and support
+promise.
+
+Activation gate:
+
+- v0.20's browser integration baseline and v0.29's visual-quality baseline are
+  Support-qualified, and independent adopters have scheduled representative
+  production embeddings inside the declared matrix.
+
+Likely scope:
+
+- functional and visual feature freeze, release-candidate packaging, API and
+  asset upgrade rehearsal, rollback guidance, and extended browser soak;
+- full local WebAssembly, browser, native GPU, image, fault, resource,
+  performance, recovery, packaging, and compatibility reproduction;
+- user, integrator, security, recovery, support, and upgrade documentation; and
+- final review of support capacity, known limitations, compatibility promises,
+  and deferred scope.
+
+Candidate exit evidence:
+
+- independent hosts repeatedly install and run representative Sources without
+  maintainer-only code repair inside the supported matrix;
+- package upgrade, cache invalidation, rollback, device loss, Source change,
+  and diagnostics pass their declared rehearsals;
+- no known release-blocking correctness, security, recovery, resource, visual,
+  packaging, or support defect remains; and
 - the evidence record supports an explicit ship, extend-soak, narrow, or stop
-  decision. Completing v0.20 does not automatically publish v1.
+  decision. Completing v0.30 does not automatically publish v1.
 
-### v1.0 — Trustworthy supported scope
+### v1.0 — Trustworthy supported browser engine
 
 Status: **Candidate**
 
-Release v1 when the narrow supported workflow repeatedly produces accepted
-deliverables, the enumerated recovery contract passes its fixtures, resource
-use is bounded, and the public compatibility promise can be maintained.
-Neither the v0.9 repository trust baseline nor completion of the provisional
-v0.20 theme is by itself a reason to publish v1.
+Release v1 only after the v0.30 candidate survives its declared production soak,
+independent browser hosts repeatedly reproduce the supported path, resource use
+remains bounded, visual evidence remains stable, and the public compatibility
+promise can be maintained. Neither the historical v0.9 repository checkpoint
+nor completion of v0.20 is a reason to publish v1.
 
 ## Product milestone map
 
@@ -1386,10 +1582,13 @@ v0.20 theme is by itself a reason to publish v1.
 | Field inspection and exact correction | v0.10–v0.11 | Repository implementation complete; renderer quality corrected; field and adoption exits outstanding | Qualify representative Sources and connect a professional View to CPU-authoritative review and reversible correction. |
 | Renderer quality corrective checkpoint | pre-v0.13 | Complete; repository-verified only, with permitted field execution outstanding | Stationary LOD converges, bounded density/depth treatments and truthful inspection context are implemented, and the private permitted-source lane records settled evidence without manufacturing field claims. |
 | Spatial contract and production terrain | v0.12–v0.13 | v0.12 bounded repository contract complete; v0.13 bounded persistent-terrain slice complete and repository-verified; external spatial, production-scale, out-of-core, adoption, partner, and support exits outstanding | Make reference semantics explicit, then persist one bounded-AOI Surface without confusing repository durability with field-scale qualification. |
-| Terrain acceptance tooling | v0.14–v0.15 | v0.14 bounded repository slice complete and repository-verified; external exits outstanding; v0.15 Candidate | Add exact QA and only the constraints earned by field evidence. |
-| Downstream and partner product | v0.16–v0.18 | Candidate | Qualify one named downstream profile, then package and validate one narrow partner workflow. |
-| Product v1 qualification | v0.19–v1.0 | Candidate | Freeze, support-qualify, soak, and explicitly decide whether the maintained scope deserves v1. |
-| Open-source library adoption | v0.10–v0.20 | v0.12 local package/docs.rs path complete; v0.14 traceable example implemented locally; registry publication and independent adoption outstanding; later work remains Candidate | Progress from an accurate public story and first-file quickstart to independent adoption, contributor readiness, stable integration guidance, and an evidence-backed funding path. |
+| Terrain acceptance tooling | v0.14 | Complete and repository-verified for the bounded slice; external historical exits outstanding | Preserve exact Terrain QA and correction as an available module without extending it in the current browser-engine path. |
+| Browser execution and streaming | v0.15–v0.16 | Candidate | Establish WebAssembly/WebGPU execution, then bounded remote Source delivery, browser caching, and worker decoding. |
+| Browser viewer and embedding | v0.17–v0.20 | Candidate | Expose the viewer API, package the SDK, qualify the browser/device envelope, and consolidate a stable integration baseline without release-candidate status. |
+| Measured visual quality | v0.21–v0.25 | Candidate | Establish visual evidence, then improve point footprints, LOD continuity, depth, and color. |
+| Visual interaction and qualification | v0.26–v0.29 | Candidate | Improve temporal, selection, and composition clarity, then freeze and qualify the visual surface without release-candidate status. |
+| Browser-engine release candidate | v0.30 | Candidate; earliest planned release candidate | Freeze, soak, and explicitly decide whether the supported browser engine should ship or narrow. |
+| Trustworthy supported browser engine | v1.0 | Candidate after v0.30 soak | Publish v1 only when independent use and maintainable functional, visual, compatibility, resource, and support evidence justify the promise. |
 
 ## Deferred until evidence changes
 
@@ -1401,18 +1600,25 @@ The current path does not include:
 - automatic CRS or vertical-datum guessing;
 - broad coordinate-transformation coverage added without a selected workflow;
 - multi-Source Workspaces;
-- raw-cloud hosting, cloud collaboration, or distributed execution;
-- remote Source reads or networking policy;
-- a public plugin registry, generic export framework, or simultaneous Autodesk
-  and Bentley compatibility promise;
+- a hosted point-cloud service, authentication system, collaboration backend,
+  or distributed processing platform;
+- Punctra-owned credential, authorization, telemetry-consent, or application
+  persistence policy;
+- new terrain constraints, broader terrain authoring, or automatic correction;
+- new downstream export work, named Civil 3D/Bentley qualification, a generic
+  export framework, or a simultaneous downstream compatibility promise;
+- a complete browser application, editor UI, design system, or framework-owned
+  product shell;
+- a public plugin registry or arbitrary shader execution;
 - Cesium visual/platform parity, globe-scale 3D Tiles, global imagery or
   terrain, texture streaming, photorealistic meshes, or rendering every Point
   simultaneously;
-- runtime point schemas, arbitrary shaders, or GPU-authoritative geometry; or
+- runtime point schemas or GPU-authoritative geometry; or
 - broad format support added only for completeness.
 
-COPC, bindings, additional export formats, and team-review features may move
-forward only when a real caller or partner workflow earns their seams.
+COPC, additional Source formats, collaboration, terrain expansion, and export
+features may move forward only when a real browser adopter earns their seams
+and the roadmap is explicitly revised.
 
 ## Maintenance
 
@@ -1424,12 +1630,16 @@ direction. A roadmap update should:
 3. move unsupported ideas to Deferred instead of leaving ambiguous promises;
 4. link the accepted design or ADR for newly Active scope; and
 5. record why a release was split, merged, reordered, or stopped;
-6. update open-source adoption evidence without treating popularity metrics as
-   product, correctness, or release acceptance; and
+6. update browser and open-source adoption evidence without treating popularity
+   metrics as product, correctness, or release acceptance;
 7. link measured corrective investigations and carry their unresolved P1/P2
    gates into the owning release or pre-release checkpoint without converting
-   local generated observations into field evidence.
+   local generated observations into browser, adopter, or support evidence; and
+8. preserve the v0.15–v0.20 functional / v0.21–v0.29 visual-quality boundary and
+   the rule that v0.30 is the earliest browser-engine release candidate unless
+   an explicit roadmap decision changes them.
 
-The broader candidate architecture is described in
-[docs/architecture](docs/architecture/README.md). It is a source of design
-constraints and module ordering, not an implementation commitment.
+The completed foundation architecture is described in
+[docs/architecture](docs/architecture/README.md). It constrains ownership and
+module ordering, but it does not yet describe or authorize the Candidate
+browser runtime, networking adapter, viewer API, or SDK.
