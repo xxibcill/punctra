@@ -146,10 +146,16 @@ impl StationProfile {
     )]
     fn station(self, index: u32) -> ([f64; 2], f64) {
         let fraction = f64::from(index) / f64::from(self.intervals.get());
-        let xy = [
-            self.start_xy[0] + (self.end_xy[0] - self.start_xy[0]) * fraction,
-            self.start_xy[1] + (self.end_xy[1] - self.start_xy[1]) * fraction,
-        ];
+        let xy = if index == 0 {
+            self.start_xy
+        } else if index == self.intervals.get() {
+            self.end_xy
+        } else {
+            [
+                self.start_xy[0] + (self.end_xy[0] - self.start_xy[0]) * fraction,
+                self.start_xy[1] + (self.end_xy[1] - self.start_xy[1]) * fraction,
+            ]
+        };
         (xy, canonical_zero(self.length_metres() * fraction))
     }
 }
@@ -1556,9 +1562,24 @@ mod tests {
 
     use super::{
         CANCELLATION_STRIDE, CheckPointResidual, ExactTerrainQaRequest, ResidualOutcome,
-        TerrainQaBinding, VerticalTolerance, hash_input, hash_results, poll, validate_request,
+        StationProfile, TerrainQaBinding, VerticalTolerance, hash_input, hash_results, poll,
+        validate_request,
     };
     use crate::{CheckPoint, CheckPointId, TerrainError, TerrainQaLimits};
+
+    #[test]
+    fn profile_stations_preserve_the_declared_endpoints() {
+        let profile = StationProfile::new([1.0e16, 2.0], [1.0, 3.0], 1).unwrap();
+
+        assert_eq!(
+            profile.station(0).0.map(f64::to_bits),
+            profile.start_xy().map(f64::to_bits)
+        );
+        assert_eq!(
+            profile.station(1).0.map(f64::to_bits),
+            profile.end_xy().map(f64::to_bits)
+        );
+    }
 
     #[test]
     fn identity_validation_observes_cancellation_while_sorting() {
