@@ -233,7 +233,7 @@ Repository completion requires:
   `PUNCTRA_REQUIRE_GPU=1`.
 
 The repository exit was qualified at implementation commit
-`4dc502306646dfcc5876106287861ac5cf60c9d8`. Exact environment, command,
+`ed51a0c16d42747e725fc0c6c2b23c911ee65a0b`. Exact environment, command,
 example, benchmark, and nonclaim facts are recorded in the
 [v0.14 repository verification record](../releases/v0.14.0.md). External exits
 remain outstanding exactly as stated above.

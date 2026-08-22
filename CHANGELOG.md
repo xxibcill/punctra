@@ -7,7 +7,7 @@ All notable changes to Punctra are documented here. The project follows
 
 - Completed and locally repository-verified the bounded [Exact Terrain QA and
   Correction Loop design](docs/design/exact-terrain-qa-correction-v0.14.md) at
-  implementation commit `4dc502306646dfcc5876106287861ac5cf60c9d8`.
+  implementation commit `ed51a0c16d42747e725fc0c6c2b23c911ee65a0b`.
   Exact environment, command, example, benchmark, and nonclaim facts are in the
   [v0.14 verification record](docs/releases/v0.14.0.md). `point-terrain`
   now evaluates one exact Snapshot/Surface pair with a combined Source-Point
