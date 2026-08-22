@@ -1,22 +1,23 @@
 use std::sync::{Arc, Mutex};
 
 use js_sys::Reflect;
-use render_protocol::{RenderLimits, Viewport};
+use render_protocol::Viewport;
 use render_wgpu::{
     Frame, FrameReport, PickHit, PickPoll, PickRequest, PickTicket, RecordedFrame, RendererConfig,
     WgpuRenderer,
 };
-use serde::Serialize;
 use wasm_bindgen::prelude::*;
 use web_sys::HtmlCanvasElement;
 
+use crate::diagnostics::{
+    CapabilityFacts, Diagnostics, Failure, FrameFacts, LimitFacts, PickFacts,
+};
 use crate::host::{
-    HostModelError, Lifecycle, MAX_CANVAS_DIMENSION, MAX_CANVAS_PIXELS, MAX_DEVICE_PIXEL_RATIO,
-    MAX_RENDER_TRANSIENT_BYTES, PhysicalViewport, RenderDisposition, ViewerPhase,
+    HostModelError, Lifecycle, MAX_RENDER_TRANSIENT_BYTES, PhysicalViewport, RenderDisposition,
+    ViewerPhase,
 };
 use crate::scene::{
-    BATCH_KEY, BATCH_VERSION, PreparedScene, SceneFacts, VIEW_GENERATION, centre_point_id,
-    render_limits,
+    BATCH_KEY, BATCH_VERSION, PreparedScene, VIEW_GENERATION, centre_point_id, render_limits,
 };
 
 const INITIALIZATION_ACTION: &str = "Keep the canvas unavailable, use a secure context with a WebGPU-capable browser and device, then retry initialization.";
@@ -174,7 +175,7 @@ impl BrowserViewer {
             display_authority: "progressive_gpu_non_authoritative",
             safe_shutdown_action: RECREATE_ACTION,
         };
-        serde_json::to_string(&diagnostics).map_err(|error| {
+        diagnostics.to_json().map_err(|error| {
             failure(
                 "diagnostic_serialization",
                 error,
@@ -288,7 +289,13 @@ impl BrowserResources {
         let renderer = create_renderer(&device, surface_configuration.format, scene)?;
         set_canvas_size(canvas, viewport);
         surface.configure(&device, &surface_configuration);
-        let facts = CapabilityFacts::new(&adapter_info, &adapter_limits, &surface_configuration);
+        let facts = CapabilityFacts::new(
+            &adapter_info,
+            &adapter_limits,
+            &surface_configuration,
+            browser_user_agent(),
+            browser_platform(),
+        );
         Ok((
             Self {
                 _instance: instance,
@@ -608,67 +615,6 @@ fn validate_transient_bytes(report: FrameReport) -> Result<(), JsValue> {
     }
 }
 
-#[derive(Serialize)]
-struct Diagnostics<'a> {
-    schema: &'static str,
-    package_version: &'static str,
-    phase: ViewerPhase,
-    rendered_frames: u64,
-    hidden_frame_skips: u64,
-    capabilities: &'a CapabilityFacts,
-    limits: LimitFacts,
-    viewport: PhysicalViewport,
-    scene: SceneFacts,
-    frame: Option<FrameFacts>,
-    pick: &'a PickFacts,
-    display_authority: &'static str,
-    safe_shutdown_action: &'static str,
-}
-
-#[derive(Serialize)]
-struct CapabilityFacts {
-    secure_context: bool,
-    webgpu: bool,
-    browser_user_agent: String,
-    browser_platform: String,
-    adapter_name: String,
-    backend: String,
-    device_type: String,
-    surface_format: String,
-    present_mode: &'static str,
-    required_feature_count: u64,
-    adapter_max_buffer_size: u64,
-    adapter_max_texture_dimension_2d: u32,
-}
-
-impl CapabilityFacts {
-    fn new(
-        adapter: &wgpu::AdapterInfo,
-        limits: &wgpu::Limits,
-        surface: &wgpu::SurfaceConfiguration,
-    ) -> Self {
-        let adapter_name = if adapter.name.is_empty() {
-            "browser WebGPU adapter".to_owned()
-        } else {
-            adapter.name.clone()
-        };
-        Self {
-            secure_context: true,
-            webgpu: true,
-            browser_user_agent: browser_user_agent(),
-            browser_platform: browser_platform(),
-            adapter_name,
-            backend: format!("{:?}", adapter.backend),
-            device_type: format!("{:?}", adapter.device_type),
-            surface_format: format!("{:?}", surface.format),
-            present_mode: "fifo",
-            required_feature_count: 0,
-            adapter_max_buffer_size: limits.max_buffer_size,
-            adapter_max_texture_dimension_2d: limits.max_texture_dimension_2d,
-        }
-    }
-}
-
 fn browser_user_agent() -> String {
     browser_navigator()
         .and_then(|navigator| navigator.user_agent().ok())
@@ -685,113 +631,6 @@ fn browser_navigator() -> Option<web_sys::Navigator> {
     web_sys::window().map(|window| window.navigator())
 }
 
-#[derive(Clone, Copy, Serialize)]
-struct LimitFacts {
-    estimated_gpu_bytes: u64,
-    points: u64,
-    batches: u64,
-    highlight_points: u64,
-    canvas_dimension: u32,
-    canvas_pixels: u64,
-    device_pixel_ratio: f64,
-    renderer_transient_bytes: u64,
-}
-
-impl LimitFacts {
-    const fn new(render: RenderLimits) -> Self {
-        Self {
-            estimated_gpu_bytes: render.max_estimated_gpu_bytes(),
-            points: render.max_points(),
-            batches: render.max_batches(),
-            highlight_points: render.max_highlight_points(),
-            canvas_dimension: MAX_CANVAS_DIMENSION,
-            canvas_pixels: MAX_CANVAS_PIXELS,
-            device_pixel_ratio: MAX_DEVICE_PIXEL_RATIO,
-            renderer_transient_bytes: MAX_RENDER_TRANSIENT_BYTES,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Serialize)]
-struct FrameFacts {
-    view_generation: u64,
-    drawn_points: u64,
-    draw_calls: u64,
-    resident_bytes: u64,
-    transient_texture_bytes: u64,
-    surface_suboptimal: bool,
-}
-
-impl FrameFacts {
-    const fn from_report(report: FrameReport, surface_suboptimal: bool) -> Self {
-        Self {
-            view_generation: report.view_generation().generation(),
-            drawn_points: report.drawn_points(),
-            draw_calls: report.draw_calls(),
-            resident_bytes: report.resident_bytes(),
-            transient_texture_bytes: report.transient_texture_bytes(),
-            surface_suboptimal,
-        }
-    }
-}
-
-#[derive(Serialize)]
-struct PickFacts {
-    status: &'static str,
-    authority: &'static str,
-    generation: Option<u64>,
-    batch_key: Option<u64>,
-    batch_version: Option<u64>,
-    point_ordinal: Option<u64>,
-}
-
-impl PickFacts {
-    const fn not_requested() -> Self {
-        Self::new("not_requested", None)
-    }
-
-    const fn pending() -> Self {
-        Self::new("pending", None)
-    }
-
-    const fn miss() -> Self {
-        Self::new("miss", None)
-    }
-
-    const fn new(status: &'static str, hit: Option<PickHit>) -> Self {
-        match hit {
-            Some(hit) => Self {
-                status,
-                authority: "provisional_gpu_hint",
-                generation: Some(hit.view_generation().generation()),
-                batch_key: Some(hit.batch().get()),
-                batch_version: Some(hit.version().get()),
-                point_ordinal: Some(hit.point().ordinal()),
-            },
-            None => Self {
-                status,
-                authority: "provisional_gpu_hint",
-                generation: None,
-                batch_key: None,
-                batch_version: None,
-                point_ordinal: None,
-            },
-        }
-    }
-
-    const fn hit(hit: PickHit) -> Self {
-        Self::new("hit", Some(hit))
-    }
-}
-
-#[derive(Serialize)]
-struct Failure {
-    schema: &'static str,
-    code: &'static str,
-    message: String,
-    safe_action: &'static str,
-}
-
 fn model_failure(error: HostModelError) -> JsValue {
     failure("host_model", error, RECREATE_ACTION)
 }
@@ -801,16 +640,5 @@ fn failure(
     message: impl std::fmt::Display,
     safe_action: &'static str,
 ) -> JsValue {
-    let failure = Failure {
-        schema: "punctra-browser-failure-v1",
-        code,
-        message: message.to_string(),
-        safe_action,
-    };
-    let json = serde_json::to_string(&failure).unwrap_or_else(|_| {
-        format!(
-            "{{\"schema\":\"punctra-browser-failure-v1\",\"code\":\"{code}\",\"message\":\"browser failure\",\"safe_action\":\"{safe_action}\"}}"
-        )
-    });
-    JsValue::from_str(&json)
+    JsValue::from_str(&Failure::new(code, message, safe_action).to_json())
 }
