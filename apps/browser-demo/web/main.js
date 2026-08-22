@@ -28,7 +28,7 @@ function requestedViewport() {
   return {
     cssWidth: Math.max(1, bounds.width),
     cssHeight: Math.max(1, bounds.height),
-    dpr: Math.min(window.devicePixelRatio || 1, 4),
+    dpr: window.devicePixelRatio,
   };
 }
 
