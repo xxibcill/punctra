@@ -608,9 +608,12 @@ sequenceDiagram
 
 JavaScript owns the canvas, CSS placement, DPR, visibility, scheduling, error
 presentation, and retry decision. The Rust adapter owns WebGPU resources on its
-behalf. A device/surface failure instructs the caller to destroy and explicitly
-recreate the viewer; neither layer silently retries. The pick is progressive
-display evidence, never an exact empty or selected Source Query.
+behalf. Device loss, surface loss, or surface validation failure instructs the
+caller to destroy and explicitly recreate the viewer. A timeout or occlusion
+keeps the last frame and waits for a caller-requested frame; an outdated surface
+requires a caller-requested bounded resize before another frame. Neither layer
+silently retries. The pick is progressive display evidence, never an exact
+empty or selected Source Query.
 
 ## 12. Cancellation and crash matrix
 
