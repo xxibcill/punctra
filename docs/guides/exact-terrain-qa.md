@@ -132,9 +132,10 @@ After classification correction, the exact old QA bytes remain valid
 historical evidence for the baseline pair. The example reports
 `stale_snapshot_and_surface` because they must not be presented as current for
 the corrected Snapshot. `TerrainQaCurrentState::snapshot` checks only Snapshot
-freshness; the in-memory and prepared constructors additionally compare the
-declared Surface and reject a Surface that is not derived from the declared
-current Snapshot as stale.
+freshness and reports `SnapshotOnlyCurrent` when that Snapshot matches without
+claiming that a current Surface was checked. The in-memory and prepared
+constructors additionally compare the declared Surface and reject a Surface
+that is not derived from the declared current Snapshot as stale.
 
 ## Use the public API
 

@@ -283,6 +283,12 @@ fn assert_freshness_states(
     assert_eq!(
         baseline_qa
             .binding()
+            .freshness(TerrainQaCurrentState::snapshot(baseline)),
+        TerrainQaFreshness::SnapshotOnlyCurrent
+    );
+    assert_eq!(
+        baseline_qa
+            .binding()
             .freshness(TerrainQaCurrentState::snapshot(corrected)),
         TerrainQaFreshness::StaleSnapshot
     );

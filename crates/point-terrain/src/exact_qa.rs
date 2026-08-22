@@ -565,6 +565,8 @@ impl TerrainQaBinding {
         let stale_snapshot = self.snapshot.workspace() != current.snapshot.workspace()
             || self.snapshot.source() != current.snapshot.source()
             || self.snapshot.revision() != current.snapshot.revision();
+        let snapshot_only =
+            current.surface_snapshot.is_none() && current.surface_artifact_hash.is_none();
         let stale_surface = match (current.surface_snapshot, current.surface_artifact_hash) {
             (None, None) => false,
             (Some(surface_snapshot), Some(surface_artifact_hash)) => {
@@ -575,11 +577,12 @@ impl TerrainQaBinding {
             }
             _ => true,
         };
-        match (stale_snapshot, stale_surface) {
-            (false, false) => TerrainQaFreshness::Current,
-            (true, false) => TerrainQaFreshness::StaleSnapshot,
-            (false, true) => TerrainQaFreshness::StaleSurface,
-            (true, true) => TerrainQaFreshness::StaleSnapshotAndSurface,
+        match (stale_snapshot, stale_surface, snapshot_only) {
+            (false, false, true) => TerrainQaFreshness::SnapshotOnlyCurrent,
+            (false, false, false) => TerrainQaFreshness::Current,
+            (true, false, _) => TerrainQaFreshness::StaleSnapshot,
+            (false, true, _) => TerrainQaFreshness::StaleSurface,
+            (true, true, _) => TerrainQaFreshness::StaleSnapshotAndSurface,
         }
     }
 }
@@ -629,6 +632,8 @@ impl TerrainQaCurrentState {
 pub enum TerrainQaFreshness {
     /// Snapshot and Surface exactly match the evidence binding.
     Current,
+    /// Snapshot matches the evidence binding and no current Surface was declared.
+    SnapshotOnlyCurrent,
     /// The current Snapshot differs and no current Surface was declared.
     StaleSnapshot,
     /// The current Surface differs or is not derived from the current Snapshot.

@@ -523,6 +523,7 @@ fn tolerance_name(value: ToleranceDisposition) -> &'static str {
 fn freshness_name(value: TerrainQaFreshness) -> &'static str {
     match value {
         TerrainQaFreshness::Current => "current",
+        TerrainQaFreshness::SnapshotOnlyCurrent => "snapshot_only_current",
         TerrainQaFreshness::StaleSnapshot => "stale_snapshot",
         TerrainQaFreshness::StaleSurface => "stale_surface",
         TerrainQaFreshness::StaleSnapshotAndSurface => "stale_snapshot_and_surface",
