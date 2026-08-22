@@ -300,7 +300,13 @@ impl BrowserResources {
         let device_loss = track_device_loss(&device);
         let renderer = create_renderer(&device, surface_configuration.format, scene)?;
         set_canvas_size(canvas, viewport);
-        surface.configure(&device, &surface_configuration);
+        configure_surface(
+            &surface,
+            &device,
+            &surface_configuration,
+            "surface_configuration",
+            INITIALIZATION_ACTION,
+        )?;
         let facts = CapabilityFacts::new(
             &adapter_info,
             &adapter_limits,
@@ -332,8 +338,13 @@ impl BrowserResources {
         self.surface_configuration.height = dimensions[1];
         set_canvas_size(&self.canvas, viewport);
         self.discard_interaction_state();
-        self.surface
-            .configure(&self.device, &self.surface_configuration);
+        configure_surface(
+            &self.surface,
+            &self.device,
+            &self.surface_configuration,
+            "surface_reconfiguration",
+            RECREATE_ACTION,
+        )?;
         self.ensure_device_available()
     }
 
@@ -609,6 +620,41 @@ fn set_canvas_size(canvas: &HtmlCanvasElement, viewport: PhysicalViewport) {
     let dimensions = viewport.dimensions();
     canvas.set_width(dimensions[0]);
     canvas.set_height(dimensions[1]);
+}
+
+fn configure_surface(
+    surface: &wgpu::Surface<'_>,
+    device: &wgpu::Device,
+    configuration: &wgpu::SurfaceConfiguration,
+    failure_code: &'static str,
+    safe_action: &'static str,
+) -> Result<(), JsValue> {
+    surface.configure(device, configuration);
+    // The WebGPU backend converts a thrown canvas `configure` into `Lost` on
+    // the next acquisition, so probe once before publishing success.
+    match surface.get_current_texture() {
+        wgpu::CurrentSurfaceTexture::Success(texture)
+        | wgpu::CurrentSurfaceTexture::Suboptimal(texture) => {
+            drop(texture);
+            Ok(())
+        }
+        wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => Ok(()),
+        wgpu::CurrentSurfaceTexture::Outdated => Err(failure(
+            failure_code,
+            "the browser canvas surface remained outdated after configuration",
+            safe_action,
+        )),
+        wgpu::CurrentSurfaceTexture::Lost => Err(failure(
+            failure_code,
+            "the browser rejected the canvas surface configuration",
+            safe_action,
+        )),
+        wgpu::CurrentSurfaceTexture::Validation => Err(failure(
+            failure_code,
+            "WebGPU rejected canvas surface configuration validation",
+            safe_action,
+        )),
+    }
 }
 
 fn validate_transient_bytes(transient_texture_bytes: u64) -> Result<(), JsValue> {
