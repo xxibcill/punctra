@@ -1,5 +1,3 @@
-import initWasm, { createViewer } from "./pkg/browser_demo.js";
-
 const canvas = document.querySelector("#punctra-canvas");
 const canvasShell = document.querySelector("#canvas-shell");
 const statusBlock = document.querySelector("#status-block");
@@ -16,6 +14,7 @@ const pickButton = document.querySelector("#pick-button");
 const shutdownButton = document.querySelector("#shutdown-button");
 
 let viewer = null;
+let createViewer = null;
 let wasmReady = false;
 let suspended = false;
 let smokeRunning = false;
@@ -104,6 +103,7 @@ function failureRecord(error) {
     return JSON.parse(message);
   } catch {
     return {
+      schema: "punctra-browser-failure-v1",
       code: "browser_module",
       message,
       safe_action: "Build the browser package again, serve it from localhost, and recreate the viewer.",
@@ -113,6 +113,7 @@ function failureRecord(error) {
 
 function publishFailure(error, { disableControls = false } = {}) {
   const record = failureRecord(error);
+  diagnosticOutput.textContent = JSON.stringify(record, null, 2);
   if (disableControls) setControls(false);
   setHarnessState("failed", `FAILED — ${record.message}`, record.safe_action);
 }
@@ -255,7 +256,9 @@ async function start() {
   }
 
   try {
-    await initWasm();
+    const browserBindings = await import("./pkg/browser_demo.js");
+    await browserBindings.default();
+    createViewer = browserBindings.createViewer;
     wasmReady = true;
     await runSmokePath();
   } catch (error) {
