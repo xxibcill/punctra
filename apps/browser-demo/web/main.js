@@ -131,6 +131,16 @@ function setControls(enabled) {
   shutdownButton.disabled = !enabled;
 }
 
+function discardViewer() {
+  const currentViewer = viewer;
+  viewer = null;
+  try {
+    currentViewer?.shutdown();
+  } catch {
+    // A failed or fused viewer is already unavailable to the host.
+  }
+}
+
 function failureRecord(error) {
   if (error?.schema === "punctra-browser-failure-v1") return error;
   const message = typeof error === "string" ? error : String(error?.message ?? error);
@@ -403,12 +413,7 @@ async function start() {
     const record = failureRecord(error);
     const preserveViewer = preservesCurrentViewer(record);
     if (!preserveViewer) {
-      try {
-        viewer?.shutdown();
-      } catch {
-        // Preserve the original acceptance failure as the actionable diagnostic.
-      }
-      viewer = null;
+      discardViewer();
     }
     publishFailure(record, { disableControls: !preserveViewer });
   }
@@ -417,11 +422,12 @@ async function start() {
 async function restart() {
   if (smokeRunning) return;
   if (!smokePassed) {
+    discardViewer();
     await start();
     return;
   }
   try {
-    viewer?.shutdown();
+    discardViewer();
     await initializeViewer();
     const diagnostics = parseDiagnostics(viewer.render());
     publishDiagnostics(diagnostics);
