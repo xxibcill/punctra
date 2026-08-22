@@ -365,10 +365,6 @@ impl BrowserResources {
         let report = recorded.report();
         self.queue.submit([encoder.finish()]);
         self.queue.present(surface_texture);
-        if suboptimal {
-            self.surface
-                .configure(&self.device, &self.surface_configuration);
-        }
         self.recorded_frame = Some(recorded);
         Ok((report, suboptimal))
     }
