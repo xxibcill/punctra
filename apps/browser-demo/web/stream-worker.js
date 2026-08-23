@@ -1,10 +1,9 @@
 import {
   StreamingFailure,
-  WORKER_SCHEMA,
   createWorkerMessage,
   runStreamingOperation,
-  workerFailure,
 } from "./streaming-protocol.js?v=16-qualified";
+import { WORKER_SCHEMA, workerFailure } from "./worker-protocol.js?v=16-qualified";
 
 let active;
 const memoryCacheStorage = new Map();

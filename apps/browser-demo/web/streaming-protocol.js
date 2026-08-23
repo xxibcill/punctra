@@ -1,11 +1,16 @@
+import {
+  WORKER_FAILURE_SAFE_ACTION,
+  WORKER_OUTPUT_TYPES,
+  WORKER_SCHEMA,
+} from "./worker-protocol.js?v=16-qualified";
+
+export {
+  WORKER_OUTPUT_TYPES,
+  WORKER_SCHEMA,
+  workerFailure,
+} from "./worker-protocol.js?v=16-qualified";
+
 export const STREAM_SCHEMA = "punctra-browser-stream-v1";
-export const WORKER_SCHEMA = "punctra-browser-worker-v1";
-export const WORKER_OUTPUT_TYPES = Object.freeze([
-  "state",
-  "batch",
-  "complete",
-  "failure",
-]);
 
 export const LIMITS = Object.freeze({
   manifestBytes: 32 * 1024,
@@ -65,7 +70,7 @@ const SAFE_ACTIONS = Object.freeze({
   cache_quota: "Free origin storage or explicitly retry with memory or no cache.",
   cache_unavailable: "Explicitly retry with memory or no cache.",
   cancelled: "Start a new operation only if the caller still wants the progressive View.",
-  worker_failed: "Terminate the worker, keep the current frame, and create a new worker before retrying.",
+  worker_failed: WORKER_FAILURE_SAFE_ACTION,
   resource_limit: "Select a deployment inside the fixed browser streaming ceilings.",
 });
 
@@ -86,10 +91,6 @@ export class StreamingFailure extends Error {
       safe_action: this.safeAction,
     };
   }
-}
-
-export function workerFailure(message) {
-  return new StreamingFailure("worker_failed", message).toJSON();
 }
 
 export function createWorkerMessage(operationId, type, facts = {}) {

@@ -6,6 +6,7 @@ import {
 } from "./failure-policy.js?v=16-qualified";
 import { runWorkerOperation } from "./worker-operation.js?v=16-qualified";
 import { createDeferredStreamPublication } from "./stream-publication.js?v=16-qualified";
+import { WORKER_SCHEMA, workerFailure } from "./worker-protocol.js?v=16-qualified";
 
 const canvas = document.querySelector("#punctra-canvas");
 const canvasShell = document.querySelector("#canvas-shell");
@@ -35,7 +36,6 @@ let streamingFacts = null;
 let streamSequence = 0;
 let preserveViewerOnRestart = false;
 
-const WORKER_SCHEMA = "punctra-browser-worker-v1";
 const STREAM_MANIFEST_URL = "./fixtures/v1/deployment.json";
 const BUILD_CACHE_TOKEN = "16-qualified";
 
@@ -509,9 +509,9 @@ function runWorkerStream({ cacheMode, invalidate }) {
     workerUrl: `./stream-worker.js?v=${BUILD_CACHE_TOKEN}-${streamSequence}`,
     workerName: operationId,
     timeoutMilliseconds: 30_000,
-    timeoutFailure: workerFailureRecord("stream worker did not complete within 30 seconds"),
-    errorFailure: (event) => workerFailureRecord(event.message),
-    messageErrorFailure: workerFailureRecord("the browser could not deserialize a worker message"),
+    timeoutFailure: workerFailure("stream worker did not complete within 30 seconds"),
+    errorFailure: (event) => workerFailure(event.message),
+    messageErrorFailure: workerFailure("the browser could not deserialize a worker message"),
     initialMessage: {
       schema: WORKER_SCHEMA,
       type: "start",
@@ -552,16 +552,6 @@ function runWorkerStream({ cacheMode, invalidate }) {
       }
     },
   });
-}
-
-function workerFailureRecord(message) {
-  return {
-    schema: WORKER_SCHEMA,
-    type: "failure",
-    code: "worker_failed",
-    message,
-    safe_action: "Terminate the worker, keep the current frame, and create a new worker before retrying.",
-  };
 }
 
 function verifyStreamingResult(result, disposition) {
