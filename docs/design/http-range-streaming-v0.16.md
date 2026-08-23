@@ -1,7 +1,7 @@
 # HTTP Range Streaming, Browser Caching, and Worker Decoding Design (v0.16)
 
-Status: **Active — accepted repository scope; implementation and local
-acceptance in progress**
+Status: **Complete and repository-verified for the accepted bounded repository
+scope; external qualification exits remain outstanding**
 
 This design is authoritative for the bounded Punctra v0.16 repository slice.
 The maintainer's request to continue through v0.16 activates this technical

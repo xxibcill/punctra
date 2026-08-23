@@ -5,6 +5,11 @@ All notable changes to Punctra are documented here. The project follows
 
 ## Unreleased - 0.16.0-alpha.1
 
+- Completed and locally repository-verified the accepted v0.16 slice at
+  implementation commit `68020dc80e1a0ca95f6746df04862b3f3013ca13`. The
+  [v0.16 verification record](docs/releases/v0.16.0.md) pins the exact native
+  and browser environments, complete local command matrix, bounded browser
+  observations, generated benchmark intervals, and unsupported external exits.
 - Added the bounded private [HTTP Range streaming
   slice](docs/design/http-range-streaming-v0.16.md): one versioned deployment
   manifest binds an immutable remote LAS representation, strong validators,

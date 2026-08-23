@@ -10,8 +10,8 @@ independent adoption, partner validation, and support qualification
 outstanding; v0.14 bounded exact Terrain QA and correction-loop slice Complete
 and repository-verified; v0.15 bounded local WebAssembly/WebGPU browser-
 foundation slice Complete and repository-verified; v0.16 private HTTP Range,
-cache, and worker streaming implementation complete with final repository
-qualification in progress; later crates are created only with accepted behavior
+cache, and worker streaming slice Complete and repository-verified; later
+crates are created only with accepted behavior
 and a caller
 
 The repository is one Cargo workspace. Each current crate is independently

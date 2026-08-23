@@ -231,6 +231,11 @@ verification, build, strict Range serving, and the automatic cold/recreation/
 warm-cache acceptance path. This is not arbitrary LAS/LAZ URL support, an
 exact browser Query path, a supported SDK, or broad browser qualification.
 
+The [v0.16 repository verification record](docs/releases/v0.16.0.md) pins the
+exact implementation commit, strict local server/browser evidence, complete
+native and forced-GPU command results, generated benchmark observations, and
+remaining external exits.
+
 To try the implemented View safely, follow the five-minute [first LAS/LAZ
 guide](docs/guides/first-las-laz.md). It separates position-only disk-v1 and
 attributed disk-v2 caches and explains what progressive Coverage does and does

@@ -12,8 +12,8 @@ qualification outstanding. The explicit-AOI persistent Surface preparation
 preserves those authority boundaries and frozen Run-v1; v0.14 bounded exact
 Terrain QA and correction-loop slice Complete and repository-verified; v0.15
 bounded local WebAssembly/WebGPU browser-host workflow Complete and repository-
-verified; v0.16 bounded immutable-LAS Range/cache/Worker workflow implemented
-with final repository qualification in progress; arbitrary remote browser
+verified; v0.16 bounded immutable-LAS Range/cache/Worker workflow Complete and
+repository-verified; arbitrary remote browser
 delivery and broader workflows remain outstanding**
 
 The host composes sibling modules explicitly. Lower crates never call back into

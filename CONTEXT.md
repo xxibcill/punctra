@@ -109,7 +109,7 @@ as the host of `render-wgpu`. Browser display and picking remain progressive
 and provisional. Local generated execution does not mean remote LAS/LAZ
 delivery, a supported SDK, broad Browser Qualification, or exact CPU Query.
 
-The accepted [v0.16 HTTP Range Streaming, Browser Caching, and Worker Decoding
+The completed [v0.16 HTTP Range Streaming, Browser Caching, and Worker Decoding
 design](docs/design/http-range-streaming-v0.16.md) fixes Remote Deployment as a
 trusted versioned binding between one immutable LAS representation, its strong
 HTTP validator and Source identity, and one compatible disk-v2 Spatial Index.
@@ -117,6 +117,8 @@ The private worker may publish only the root node's bounded Sampled Coverage;
 the manifest and cache do not become Source authority, and browser display does
 not repeat the complete `source-las` verification used to prepare the binding.
 An arbitrary raw URL is not a Remote Deployment.
+The [v0.16 repository verification record](docs/releases/v0.16.0.md) owns the
+exact local implementation, environment, command, browser, and nonclaim facts.
 
 ## Artifact
 

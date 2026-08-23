@@ -10,8 +10,8 @@ true out-of-core adoption, independent adoption, partner validation, and
 support qualification outstanding; v0.14 bounded exact Terrain QA and
 correction-loop slice Complete and repository-verified; v0.15 bounded local
 WebAssembly/WebGPU browser-foundation slice Complete and repository-verified;
-v0.16 bounded HTTP Range/cache/worker verification implemented with final
-repository qualification in progress; all gates run locally**
+v0.16 bounded HTTP Range/cache/worker slice Complete and repository-verified;
+all gates run locally**
 
 Verification follows public contracts first. Private tests are used for fault
 injection and measured implementation boundaries that cannot be triggered
@@ -546,7 +546,7 @@ accounting; they are not browser heap or observed GPU-allocation measurements.
 Remote Sources, independent embedding, broad compatibility, SDK stability, and
 support qualification remain external or later-version exits.
 
-## v0.16 HTTP Range streaming verification target
+## v0.16 HTTP Range streaming verification lane
 
 The private v0.16 browser lane adds three independent local layers:
 

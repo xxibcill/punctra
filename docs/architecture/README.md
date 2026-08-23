@@ -15,12 +15,10 @@ slice Complete and repository-verified with field activation, observed workflow
 timing, independent adoption, partner validation, and support qualification
 outstanding; v0.15 local WebAssembly/WebGPU browser-foundation slice Complete
 and repository-verified; v0.16 bounded immutable-LAS HTTP Range, browser-cache,
-and worker-decoding implementation complete with final repository qualification
-in progress; arbitrary Source delivery, broad browser qualification,
-independent adoption, SDK stability, and support qualification outstanding;
-broader
-terrain, export, external interoperability evidence, and product layers remain
-deferred
+and worker-decoding slice Complete and repository-verified; arbitrary Source
+delivery, broad browser qualification, independent adoption, SDK stability,
+and support qualification outstanding; broader terrain, export, external
+interoperability evidence, and product layers remain deferred
 
 The accepted versioned designs are authoritative:
 
