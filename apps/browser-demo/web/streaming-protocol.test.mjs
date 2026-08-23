@@ -160,6 +160,17 @@ test("full response to a Range request fails before its body is read", async () 
   assert.equal(server.bodyReads, 0);
 });
 
+test("redirects and non-retryable HTTP statuses are terminal Range failures", async () => {
+  const redirected = fixtureServer({ scenario: "redirect" });
+  await rejectsWithCode(run(redirected), "range_unsupported");
+  assert.equal(redirected.attempts, 2);
+  assert.equal(redirected.binaryRequests[0].redirect, "manual");
+
+  const missing = fixtureServer({ scenario: "not_found" });
+  await rejectsWithCode(run(missing), "range_unsupported");
+  assert.equal(missing.attempts, 2);
+});
+
 test("validator drift has a distinct changed-Source outcome", async () => {
   await rejectsWithCode(run(fixtureServer({ scenario: "validator_drift" })), "source_changed");
 });
@@ -265,9 +276,16 @@ function fixtureServer(options = {}) {
     }
     const descriptor = binaryDescriptor(url, servedManifest);
     const range = new Headers(init.headers).get("Range");
-    state.binaryRequests.push({ url, range });
+    state.binaryRequests.push({ url, range, redirect: init.redirect });
     const [start, end] = parseRange(range);
     const original = descriptor.bytes.subarray(start, end + 1);
+    if (options.scenario === "redirect") {
+      return new Response(null, {
+        status: 302,
+        headers: { Location: "https://fixtures.test/redirected" },
+      });
+    }
+    if (options.scenario === "not_found") return new Response(null, { status: 404 });
     if (options.scenario === "full_response") {
       return unreadResponse(200, descriptor.bytes, {}, state);
     }

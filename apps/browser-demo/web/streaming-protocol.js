@@ -345,7 +345,7 @@ export class RangeTransport {
           headers: { Range: `bytes=${start}-${end}` },
           credentials: this.credentials,
           cache: "no-store",
-          redirect: "error",
+          redirect: "manual",
           signal: this.signal,
         });
         if (RETRYABLE_STATUS.has(response.status)) {
@@ -577,9 +577,15 @@ function encodeTransfer(view, offset, sample) {
 }
 
 function validateRangeResponse(response, resource, range, requireAcceptRanges) {
+  if (
+    response.type === "opaqueredirect"
+    || response.redirected
+    || (response.status >= 300 && response.status < 400)
+  ) {
+    throw new StreamingFailure("range_unsupported", "Range request was redirected");
+  }
   if (response.status === 200) throw new StreamingFailure("range_unsupported", "server returned a full 200 response to a Range request");
-  if (response.status !== 206) throw new StreamingFailure("retry_exhausted", `Range request returned HTTP ${response.status}`);
-  if (response.redirected) throw new StreamingFailure("range_unsupported", "Range request was redirected");
+  if (response.status !== 206) throw new StreamingFailure("range_unsupported", `Range request returned terminal HTTP ${response.status}`);
   const headers = response.headers;
   const required = ["content-length", "content-range", "etag"];
   if (required.some((name) => headers.get(name) === null)) throw new StreamingFailure("cors_headers_hidden", "required Range response headers are unavailable");
