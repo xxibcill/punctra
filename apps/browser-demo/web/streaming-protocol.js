@@ -285,13 +285,13 @@ export class RangeTransport {
   async fetchRange(kind, range, requireAcceptRanges) {
     const resource = kind === "source" ? this.deployment.source : this.deployment.index;
     const key = cacheEntryUrl(this.deployment, kind, range);
-    const cached = await this.readCache(key, resource, range);
+    const cached = await this.readCache(key, kind, resource, range);
     if (cached) {
       this.recordCacheHit(kind, cached.byteLength);
       return cached;
     }
     const bytes = await this.fetchNetwork(resource, range, requireAcceptRanges);
-    await this.writeCache(key, resource, range, bytes);
+    await this.writeCache(key, kind, resource, range, bytes);
     this.recordNetwork(kind, bytes.byteLength);
     return bytes;
   }
@@ -339,7 +339,7 @@ export class RangeTransport {
     await this.delay(LIMITS.retryDelayMilliseconds * (attempt + 1), this.signal);
   }
 
-  async readCache(key, resource, range) {
+  async readCache(key, kind, resource, range) {
     if (this.cacheMode === "none") return undefined;
     if (this.cacheMode === "memory") {
       const value = this.memory.get(key);
@@ -350,7 +350,7 @@ export class RangeTransport {
     try {
       const response = await this.persistent.match(key);
       if (!response) return undefined;
-      validateCachedMetadata(response, this.deployment, resource, range);
+      validateCachedMetadata(response, this.deployment, kind, resource, range);
       const bytes = await readBoundedBody(
         response,
         range.length,
@@ -366,7 +366,7 @@ export class RangeTransport {
     }
   }
 
-  async writeCache(key, resource, range, bytes) {
+  async writeCache(key, kind, resource, range, bytes) {
     if (this.cacheMode === "none") return;
     const ceiling = this.cacheMode === "memory" ? LIMITS.memoryCacheBytes : LIMITS.persistentCacheBytes;
     const nextBytes = this.cachedBytes + bytes.byteLength;
@@ -375,7 +375,10 @@ export class RangeTransport {
       this.memory.set(key, bytes.slice());
     } else {
       try {
-        await this.persistent.put(key, cachedResponse(this.deployment, resource, range, bytes));
+        await this.persistent.put(
+          key,
+          cachedResponse(this.deployment, kind, resource, range, bytes),
+        );
       } catch (error) {
         throw cacheFailure(error);
       }
@@ -590,24 +593,32 @@ async function readBoundedBody(
   return bytes;
 }
 
-function cachedResponse(deployment, resource, range, bytes) {
+function cachedResponse(deployment, kind, resource, range, bytes) {
   return new Response(bytes.slice(), {
     status: 200,
     headers: {
       "Content-Length": String(bytes.byteLength),
       "X-Punctra-Schema": STREAM_SCHEMA,
+      "X-Punctra-Deployment": deployment.deploymentId,
       "X-Punctra-Source": deployment.source.sourceIdentity,
-      "X-Punctra-Validator": resource.etag,
+      "X-Punctra-Source-Validator": deployment.source.etag,
+      "X-Punctra-Index": deployment.index.sha256,
+      "X-Punctra-Kind": kind,
+      "X-Punctra-Resource-Validator": resource.etag,
       "X-Punctra-Digest": range.sha256,
       "X-Punctra-Range": `${range.offset}:${range.length}`,
     },
   });
 }
 
-function validateCachedMetadata(response, deployment, resource, range) {
+function validateCachedMetadata(response, deployment, kind, resource, range) {
   equal(response.headers.get("x-punctra-schema"), STREAM_SCHEMA, "range_corrupt", "cache schema");
+  equal(response.headers.get("x-punctra-deployment"), deployment.deploymentId, "range_corrupt", "cache deployment");
   equal(response.headers.get("x-punctra-source"), deployment.source.sourceIdentity, "range_corrupt", "cache Source identity");
-  equal(response.headers.get("x-punctra-validator"), resource.etag, "range_corrupt", "cache validator");
+  equal(response.headers.get("x-punctra-source-validator"), deployment.source.etag, "range_corrupt", "cache Source validator");
+  equal(response.headers.get("x-punctra-index"), deployment.index.sha256, "range_corrupt", "cache index digest");
+  equal(response.headers.get("x-punctra-kind"), kind, "range_corrupt", "cache resource kind");
+  equal(response.headers.get("x-punctra-resource-validator"), resource.etag, "range_corrupt", "cache resource validator");
   equal(response.headers.get("x-punctra-digest"), range.sha256, "range_corrupt", "cache digest");
   equal(response.headers.get("x-punctra-range"), `${range.offset}:${range.length}`, "range_corrupt", "cache range");
 }
@@ -620,8 +631,12 @@ export function cacheEntryUrl(deployment, kind, range) {
   const resource = kind === "source" ? deployment.source : deployment.index;
   const url = new URL(resource.url);
   url.searchParams.set("__punctra_schema", STREAM_SCHEMA);
+  url.searchParams.set("__punctra_deployment", deployment.deploymentId);
   url.searchParams.set("__punctra_source", deployment.source.sourceIdentity);
-  url.searchParams.set("__punctra_validator", resource.etag);
+  url.searchParams.set("__punctra_source_validator", deployment.source.etag);
+  url.searchParams.set("__punctra_index", deployment.index.sha256);
+  url.searchParams.set("__punctra_kind", kind);
+  url.searchParams.set("__punctra_resource_validator", resource.etag);
   url.searchParams.set("__punctra_range", `${range.offset}:${range.length}`);
   return url.href;
 }

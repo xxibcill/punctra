@@ -95,6 +95,26 @@ test("persistent warm stream reuses only the exact identity-versioned ranges", a
   assert.equal(server.binaryRequests.length, binaryRequestsAfterCold);
 
   const deployment = validateManifest(manifest, MANIFEST_URL);
+  const entries = cacheStorage.namespaces.get(cacheNamespace(deployment));
+  assert.equal(entries.size, 3);
+  for (const [key, response] of entries) {
+    const entry = new URL(key);
+    const kind = entry.searchParams.get("__punctra_kind");
+    assert.ok(kind === "source" || kind === "index");
+    assert.equal(entry.searchParams.get("__punctra_schema"), deployment.schema);
+    assert.equal(entry.searchParams.get("__punctra_deployment"), deployment.deploymentId);
+    assert.equal(entry.searchParams.get("__punctra_source"), deployment.source.sourceIdentity);
+    assert.equal(entry.searchParams.get("__punctra_source_validator"), deployment.source.etag);
+    assert.equal(entry.searchParams.get("__punctra_index"), deployment.index.sha256);
+    assert.equal(response.headers.get("x-punctra-schema"), deployment.schema);
+    assert.equal(response.headers.get("x-punctra-deployment"), deployment.deploymentId);
+    assert.equal(response.headers.get("x-punctra-source"), deployment.source.sourceIdentity);
+    assert.equal(response.headers.get("x-punctra-source-validator"), deployment.source.etag);
+    assert.equal(response.headers.get("x-punctra-index"), deployment.index.sha256);
+    assert.equal(response.headers.get("x-punctra-kind"), kind);
+    assert.equal(response.headers.get("x-punctra-range"), entry.searchParams.get("__punctra_range"));
+    assert.match(response.headers.get("x-punctra-digest"), /^[0-9a-f]{64}$/);
+  }
   const changedManifest = structuredClone(manifest);
   changedManifest.source.source_identity = "aa".repeat(32);
   changedManifest.index.source_identity = "aa".repeat(32);
