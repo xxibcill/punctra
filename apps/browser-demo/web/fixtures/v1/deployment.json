@@ -1,6 +1,6 @@
 {
   "deployment_id": "repository-las-v1",
-  "display_mapping": "rgb16_high_byte_rgba8_v1",
+  "display_mapping": "rgb16_full_range_rounded_rgba8_v1",
   "index": {
     "byte_length": 172808,
     "disk_version": 2,

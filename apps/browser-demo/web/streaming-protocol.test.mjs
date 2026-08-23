@@ -28,6 +28,7 @@ test("manifest fixes one immutable LAS and sampled disk-v2 root", () => {
 
   assert.equal(deployment.source.byteLength, 2_380_227);
   assert.equal(deployment.source.pointCount, 70_000);
+  assert.equal(deployment.displayMapping, "rgb16_full_range_rounded_rgba8_v1");
   assert.equal(deployment.index.root.coverage, "sampled");
   assert.equal(deployment.index.root.displayPointCount, 4_096);
   assert.equal(deployment.index.root.sampleRange.length, 172_032);

@@ -171,7 +171,12 @@ export function validateManifest(value, manifestUrl) {
     requireObject(value, "manifest");
     equal(value.schema, STREAM_SCHEMA, "unsupported_deployment", "manifest schema");
     boundedString(value.deployment_id, 1, 128, "deployment_id");
-    equal(value.display_mapping, "rgb16_high_byte_rgba8_v1", "unsupported_deployment", "display mapping");
+    equal(
+      value.display_mapping,
+      "rgb16_full_range_rounded_rgba8_v1",
+      "unsupported_deployment",
+      "display mapping",
+    );
     const source = validateSource(value.source, manifestUrl);
     const index = validateIndex(value.index, manifestUrl);
     equal(index.sourceIdentity, source.sourceIdentity, "manifest_invalid", "Source identity binding");

@@ -101,7 +101,7 @@ mod native {
         Ok(json!({
             "schema": "punctra-browser-stream-v1",
             "deployment_id": "repository-las-v1",
-            "display_mapping": "rgb16_high_byte_rgba8_v1",
+            "display_mapping": "rgb16_full_range_rounded_rgba8_v1",
             "source": {
                 "url": format!("./{SOURCE_NAME}"),
                 "media_type": "application/vnd.las",
@@ -367,6 +367,10 @@ mod native {
                 serde_json::from_slice(&fs::read(generated.path().join(MANIFEST_NAME))?)?;
 
             assert_eq!(manifest["schema"], "punctra-browser-stream-v1");
+            assert_eq!(
+                manifest["display_mapping"],
+                "rgb16_full_range_rounded_rgba8_v1"
+            );
             assert_eq!(manifest["source"]["byte_length"], source.len());
             assert_eq!(manifest["source"]["sha256"], sha256_hex(&source));
             assert_eq!(manifest["index"]["byte_length"], index.len());
