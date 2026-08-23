@@ -12,6 +12,7 @@ use crate::{
         SURFACE_BYTES_PER_PIXEL, ViewerPhase,
     },
     scene::SceneFacts,
+    streaming::{StreamFacts, StreamingLimitFacts},
 };
 
 #[derive(Serialize)]
@@ -25,6 +26,8 @@ pub(crate) struct Diagnostics<'a> {
     pub(crate) limits: LimitFacts,
     pub(crate) viewport: PhysicalViewport,
     pub(crate) scene: SceneFacts,
+    pub(crate) streaming: StreamFacts,
+    pub(crate) streaming_limits: StreamingLimitFacts,
     pub(crate) frame: Option<FrameFacts>,
     pub(crate) pick: &'a PickFacts,
     pub(crate) display_authority: &'static str,
@@ -258,6 +261,9 @@ pub(crate) enum FailureCode {
     ScenePlanning,
     ScenePublication,
     SceneValidation,
+    StreamPickUnsupported,
+    StreamPublication,
+    StreamValidation,
     SurfaceAlphaMode,
     SurfaceConfiguration,
     SurfaceFormat,
@@ -318,6 +324,7 @@ mod tests {
     use crate::{
         host::{HostModelError, Lifecycle, RESIZE_VIEWPORT_ACTION},
         scene,
+        streaming::{StreamingLimitFacts, StreamingScene},
     };
 
     #[test]
@@ -329,7 +336,7 @@ mod tests {
         let pick = PickFacts::not_requested();
         let lifecycle = Lifecycle::ready();
         let diagnostics = Diagnostics {
-            schema: "punctra-browser-foundation-v1",
+            schema: "punctra-browser-streaming-v1",
             package_version: env!("CARGO_PKG_VERSION"),
             phase: lifecycle.phase(),
             rendered_frames: lifecycle.rendered_frames(),
@@ -338,6 +345,8 @@ mod tests {
             limits: LimitFacts::new(scene::render_limits()),
             viewport,
             scene: scene.facts(),
+            streaming: StreamingScene::idle().facts(),
+            streaming_limits: StreamingLimitFacts::fixed(),
             frame: None,
             pick: &pick,
             display_authority: "progressive_gpu_non_authoritative",
@@ -346,18 +355,20 @@ mod tests {
 
         let value: serde_json::Value =
             serde_json::from_str(&diagnostics.to_json().unwrap()).unwrap();
-        assert_eq!(value["schema"], "punctra-browser-foundation-v1");
+        assert_eq!(value["schema"], "punctra-browser-streaming-v1");
         assert_eq!(
             value["display_authority"],
             "progressive_gpu_non_authoritative"
         );
         assert_eq!(value["scene"]["point_count"], 1_089);
-        assert_eq!(value["limits"]["points"], 2_048);
-        assert_eq!(value["limits"]["estimated_gpu_bytes"], 49_152);
+        assert_eq!(value["limits"]["points"], 8_192);
+        assert_eq!(value["limits"]["estimated_gpu_bytes"], 196_608);
         assert_eq!(value["limits"]["surface_bytes_per_pixel"], 4);
         assert_eq!(value["limits"]["presentation_latency_frames"], 2);
         assert_eq!(value["viewport"]["surface_bytes"], 6_400_000);
         assert_eq!(value["pick"]["status"], "not_requested");
+        assert_eq!(value["streaming"]["phase"], "idle");
+        assert_eq!(value["streaming_limits"]["range_bytes"], 262_144);
         assert_eq!(value["capabilities"]["composite_alpha_mode"], "Opaque");
         assert_eq!(
             value["capabilities"]["surface_format_support"],
@@ -437,6 +448,9 @@ mod tests {
                     FailureCode::ScenePlanning,
                     FailureCode::ScenePublication,
                     FailureCode::SceneValidation,
+                    FailureCode::StreamPickUnsupported,
+                    FailureCode::StreamPublication,
+                    FailureCode::StreamValidation,
                     FailureCode::SurfaceAlphaMode,
                     FailureCode::SurfaceConfiguration,
                     FailureCode::SurfaceFormat,
@@ -480,6 +494,9 @@ mod tests {
                 "scene_planning",
                 "scene_publication",
                 "scene_validation",
+                "stream_pick_unsupported",
+                "stream_publication",
+                "stream_validation",
                 "surface_alpha_mode",
                 "surface_configuration",
                 "surface_format",

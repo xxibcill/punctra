@@ -89,6 +89,15 @@ ceilings, progressive display, provisional pick, and explicit failure states
 are local acceptance evidence only. It does not authorize remote LAS/LAZ
 delivery, browser decoding, a supported JavaScript SDK, exact browser Queries,
 editing, broad browser qualification, or visual-quality claims.
+The accepted [v0.16 HTTP Range Streaming, Browser Caching, and Worker Decoding
+scope](docs/design/http-range-streaming-v0.16.md) extends only that private host
+with one trusted immutable-LAS deployment manifest, strict bounded Range
+transport, disk-v2 root-sample decoding in one Worker, explicit cache policy,
+identity-versioned keys, deterministic recovery outcomes, and a cold/
+recreation/warm-cache local acceptance path. It does not authorize arbitrary
+LAS/LAZ URLs, complete browser Source decoding, exact browser Queries, a public
+network/viewer seam, credentials policy, service-worker ownership, a supported
+SDK, or broad browser qualification.
 Apart from the explicit v0.8 reader exception,
 external format decoding belongs only in accepted Source adapter crates.
 Networking, polygon/brush/visible-only/occlusion selection, arbitrary
@@ -115,6 +124,8 @@ cargo check -p browser-demo --target wasm32-unknown-unknown
 cargo clippy -p browser-demo --all-targets --all-features -- -D warnings
 cargo clippy -p browser-demo --target wasm32-unknown-unknown --all-targets \
   --all-features -- -D warnings
+cargo run -p browser-demo --bin generate_stream_fixture
+node --test apps/browser-demo/web/streaming-protocol.test.mjs
 scripts/build-browser-demo.sh
 cargo bench -p point-view --bench planner
 cargo bench -p source-memory --bench read
@@ -156,20 +167,28 @@ test -f docs/guides/library-packaging.md
 test -f docs/guides/persistent-terrain.md
 test -f docs/guides/exact-terrain-qa.md
 test -f docs/guides/browser-foundation.md
+test -f docs/guides/browser-streaming.md
 ruby -rjson -e 'JSON.parse(File.read(ARGV.fetch(0)))' \
   docs/guides/field-corpus.example.json
 git diff --check
 ```
 
-After `scripts/build-browser-demo.sh`, serve `apps/browser-demo/web` over local
-HTTP and open it in a secure-context WebGPU browser. The document must publish
-`PASS` after initialization, deterministic generation/batch validation, one
-visible render, bounded resize, hidden-frame suppression, centre provisional
-pick, fused shutdown rejection, and explicit recreation. Record the exact
-browser, operating system, adapter, surface format, viewport, and reported
+After `scripts/build-browser-demo.sh`, run
+`scripts/serve-browser-demo.py --port 8000` and open
+`http://127.0.0.1:8000/` in a secure-context WebGPU browser. A generic static
+server is insufficient for the v0.16 acceptance fixture because exact Range,
+strong-validator, identity-encoding, and exposed CORS-header behavior is part
+of the contract. The document must publish `PASS` after the inherited v0.15
+lifecycle checks, cold bounded Source/index requests, worker decode and
+transfer, progressive render before complete Source transfer, explicit viewer
+and Worker recreation, and an identity-matched warm-cache run with zero binary
+network requests. The harness must also acknowledge its deliberately delayed
+Fetch cancellation within 1,000 milliseconds. Record the exact browser,
+operating system, adapter, surface
+format, viewport, and reported transport/cache/worker/main-thread plus
 logical/surface/transient resource facts. The step qualifies only that exact
-local browser environment. See the [browser-foundation
-guide](docs/guides/browser-foundation.md).
+local browser environment. See the [browser streaming
+guide](docs/guides/browser-streaming.md).
 
 The default `point-index` benchmark generates one million Points. Use only the
 documented scale values when a larger local run is intended, for example:

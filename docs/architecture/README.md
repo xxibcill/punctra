@@ -14,9 +14,11 @@ outstanding; v0.14 exact Terrain QA and correction-loop bounded repository
 slice Complete and repository-verified with field activation, observed workflow
 timing, independent adoption, partner validation, and support qualification
 outstanding; v0.15 local WebAssembly/WebGPU browser-foundation slice Complete
-and repository-verified with remote Source delivery, broad browser
-qualification, independent adoption, SDK stability, and support qualification
-outstanding; broader
+and repository-verified; v0.16 bounded immutable-LAS HTTP Range, browser-cache,
+and worker-decoding implementation complete with final repository qualification
+in progress; arbitrary Source delivery, broad browser qualification,
+independent adoption, SDK stability, and support qualification outstanding;
+broader
 terrain, export, external interoperability evidence, and product layers remain
 deferred
 
@@ -37,6 +39,7 @@ The accepted versioned designs are authoritative:
 - [v0.13 Persistent Bounded-AOI Terrain](../design/persistent-production-scale-terrain-v0.13.md)
 - [v0.14 Exact Terrain QA and Correction Loop](../design/exact-terrain-qa-correction-v0.14.md)
 - [v0.15 WebAssembly and WebGPU Browser Foundation](../design/browser-foundation-v0.15.md)
+- [v0.16 HTTP Range Streaming, Browser Caching, and Worker Decoding](../design/http-range-streaming-v0.16.md)
 
 The current foundation is headless and embeddable. It reads immutable Sources,
 prepares a complete rebuildable Spatial Index, resolves progressive display,
@@ -63,6 +66,15 @@ paths compile to `wasm32-unknown-unknown`; the browser adapter owns a WebGPU
 canvas lifecycle and runs one deterministic generated scene under independent
 logical, surface, and transient-texture ceilings. It does not add browser
 networking, LAS/LAZ decoding, a supported SDK, or a public browser crate.
+
+The v0.16 implementation remains inside that private host. A trusted deployment
+manifest binds one immutable HTTP LAS representation to its fully verified
+Source identity and compatible disk-v2 index. JavaScript owns Fetch, Worker,
+cache, retry, and recovery policy; the worker validates bounded ranges and
+decodes the index root's Sampled Coverage; the Rust Wasm host validates and
+publishes bounded renderer batches. Native fixture generation depends on
+`source-las` and `point-index`, but the browser runtime adds no foundation-crate
+dependency and exposes no public networking or viewer seam.
 
 The frozen [v0.9 public interface review](v0.9-interface-review.md) classifies
 reusable, adapter-author, test-support, and private application surfaces. The

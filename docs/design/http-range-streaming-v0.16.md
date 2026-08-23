@@ -115,8 +115,10 @@ server misconduct and outside the proven integrity envelope.
 
 Every binary request:
 
-- sends one inclusive `Range: bytes=start-end` header, `Accept-Encoding:
-  identity`, the host-selected credentials mode, and an abort signal;
+- sends one inclusive `Range: bytes=start-end` header, the host-selected
+  credentials mode, and an abort signal. Browser Fetch owns the forbidden
+  `Accept-Encoding` request header, so the deployment disables transformation
+  server-side and the worker validates the response encoding;
 - accepts only status `206`, exact `Content-Range`, exact visible
   `Content-Length`, the expected total representation length, the manifest's
   strong ETag, and absent or `identity` content encoding;
@@ -154,6 +156,8 @@ The fixed repository ceilings are:
   output batch;
 - 1,024 Points and 24 encoded bytes per transferred display batch;
 - eight transferred batches and 8,192 decoded Points for the accepted root;
+- 1,000 milliseconds from an explicit host cancellation request to the
+  worker's deterministic `cancelled` acknowledgement;
 - 512 KiB of memory-cache response bodies; and
 - 4 MiB of logical persistent-cache response bodies for one identity-versioned
   cache namespace.
@@ -241,13 +245,15 @@ The local static server implements the exact Range/CORS/validator contract and
 bounded fault routes used by protocol tests. The browser harness:
 
 1. completes the inherited v0.15 WebGPU lifecycle smoke;
-2. starts a cold persistent-cache remote operation;
-3. proves the Source probe and index header/root/sample requests are bounded;
-4. renders Sampled Coverage before complete Source transfer;
-5. shuts down and recreates the viewer and worker;
-6. completes a warm-cache operation with identical Source identity and Point
+2. cancels one delayed manifest Fetch and receives `cancelled` within 1,000
+   milliseconds;
+3. starts a cold persistent-cache remote operation;
+4. proves the Source probe and index header/root/sample requests are bounded;
+5. renders Sampled Coverage before complete Source transfer;
+6. shuts down and recreates the viewer and worker;
+7. completes a warm-cache operation with identical Source identity and Point
    ordinals without refetching cached index bytes; and
-7. publishes `PASS`, `UNSUPPORTED`, or `FAIL` plus inspectable streaming and
+8. publishes `PASS`, `UNSUPPORTED`, or `FAIL` plus inspectable streaming and
    renderer diagnostics.
 
 Native Rust tests cover manifest/batch/resource/render publication rules.

@@ -9,8 +9,10 @@ field activation, production-scale accuracy, true out-of-core adoption,
 independent adoption, partner validation, and support qualification
 outstanding; v0.14 bounded exact Terrain QA and correction-loop slice Complete
 and repository-verified; v0.15 bounded local WebAssembly/WebGPU browser-
-foundation slice Complete and repository-verified; later crates are created
-only with accepted behavior and a caller
+foundation slice Complete and repository-verified; v0.16 private HTTP Range,
+cache, and worker streaming implementation complete with final repository
+qualification in progress; later crates are created only with accepted behavior
+and a caller
 
 The repository is one Cargo workspace. Each current crate is independently
 buildable and exposes a smaller public interface than its private
@@ -32,10 +34,21 @@ apps/
       diagnostics.rs
       host.rs
       scene.rs
+      streaming.rs
+      bin/generate_stream_fixture.rs
     web/
       index.html
       main.js
       styles.css
+      stream-worker.js
+      streaming-protocol.js
+      streaming-protocol.test.mjs
+      fixtures/v1/
+        README.md
+        deployment.json
+        representative.las
+        representative.pidx
+        source-record.json
 
   renderer-demo/
     src/
@@ -242,6 +255,10 @@ docs/
   releases/
   adr/
   research/
+
+scripts/
+  build-browser-demo.sh
+  serve-browser-demo.py
 ~~~
 
 Files inside a crate are private locality, not additional public modules. In
@@ -271,7 +288,8 @@ point-terrain -> point-workspace + point-contracts + foundation-runtime
 render-protocol -> point-contracts
 point-view -> render-protocol
 render-wgpu -> render-protocol + point-contracts
-browser-demo -> point-view + render-protocol + render-wgpu
+browser-demo runtime -> point-view + render-protocol + render-wgpu
+browser-demo native fixture generator -> source-las + point-index + point-contracts
 renderer-demo -> source-las + point-source + point-index + point-workspace + point-review + point-view + render-protocol + render-wgpu + point-contracts + foundation-runtime
 terrain-demo -> source-las + point-source + point-index + point-workspace + point-terrain + point-contracts + foundation-runtime
 ~~~
@@ -324,6 +342,8 @@ cargo bench -p renderer-demo --bench viewing
 
 cargo bench -p point-view --bench planner
 cargo check -p browser-demo --target wasm32-unknown-unknown
+cargo run -p browser-demo --bin generate_stream_fixture
+node --test apps/browser-demo/web/streaming-protocol.test.mjs
 scripts/build-browser-demo.sh
 cargo test -p renderer-demo --test headless_smoke
 PUNCTRA_REQUIRE_GPU=1 cargo test -p renderer-demo --test headless_smoke \
@@ -477,8 +497,8 @@ versions, and LandXML/journal/report format versions are separate axes. A Cargo
 `0.9` version does not imply Workspace disk schema or terrain algorithm version
 9.
 
-The completed v0.15 work advances all public libraries as one
-`0.15.0-alpha.1` package set with exact inter-Punctra registry requirements and
+The v0.16 work advances all public libraries as one `0.16.0-alpha.1` package
+set with exact inter-Punctra registry requirements and
 local development paths. Their empty default features, dependency roles,
 MSRV, publication order, and pre-v1 policy are documented in the [library
 packaging guide](../guides/library-packaging.md).

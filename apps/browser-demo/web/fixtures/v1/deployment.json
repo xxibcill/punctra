@@ -1,0 +1,78 @@
+{
+  "deployment_id": "repository-las-v1",
+  "display_mapping": "rgb16_high_byte_rgba8_v1",
+  "index": {
+    "byte_length": 172808,
+    "disk_version": 2,
+    "display_sample_schema": 1,
+    "header_and_root": {
+      "length": 408,
+      "offset": 0,
+      "sha256": "ba6f195bfd5268679b1b0ed7ddfe6408d8dae166597dff00d161423940c4beaf"
+    },
+    "position_transform": {
+      "offset": [
+        500000.0,
+        4600000.0,
+        100.0
+      ],
+      "scale": [
+        0.01,
+        0.01,
+        0.01
+      ]
+    },
+    "recipe_version": 2,
+    "root": {
+      "bounds": {
+        "max": [
+          500043.75,
+          4600024.75,
+          102.39
+        ],
+        "min": [
+          499956.5,
+          4599975.0,
+          99.22
+        ]
+      },
+      "coverage": "sampled",
+      "covered_point_count": 70000,
+      "display_point_count": 4096,
+      "node_id": 1,
+      "sample_range": {
+        "count": 4096,
+        "disk_checksum_blake3": "b35e2b66b1499107d927de7769d9c7d78a3b146b85c4b2cce4d29faf7d2e0080",
+        "length": 172032,
+        "offset": 744,
+        "record_bytes": 42,
+        "sha256": "dd6dae8c173e2d410abe526226f854193f1493a7826fa2dc07707eb89bf2f8a0"
+      },
+      "world_origin": [
+        500000.0,
+        4600000.0,
+        100.0
+      ]
+    },
+    "sha256": "2707e8a163ec2855fe7c859beb6259108204b78e111997785a8defc4c560f1ff",
+    "source_identity": "c459ff39717b7d6994aaebf344641f5a3add7faf65e249b85933ebd066d1c26e",
+    "source_point_count": 70000,
+    "strong_etag": "\"sha256-2707e8a163ec2855fe7c859beb6259108204b78e111997785a8defc4c560f1ff\"",
+    "url": "./representative.pidx"
+  },
+  "schema": "punctra-browser-stream-v1",
+  "source": {
+    "byte_length": 2380227,
+    "media_type": "application/vnd.las",
+    "point_count": 70000,
+    "probe": {
+      "length": 256,
+      "offset": 0,
+      "sha256": "d4e3653b70a2199f0658a8c4f77689cb87ff58069c7a73ea03d0e16e55c6dc36"
+    },
+    "sha256": "bc2b1cb9077505425e051e26920edba152a67f83c2b0b00dc26fc08ed8198697",
+    "source_identity": "c459ff39717b7d6994aaebf344641f5a3add7faf65e249b85933ebd066d1c26e",
+    "strong_etag": "\"sha256-bc2b1cb9077505425e051e26920edba152a67f83c2b0b00dc26fc08ed8198697\"",
+    "url": "./representative.las"
+  }
+}

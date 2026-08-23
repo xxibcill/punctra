@@ -3,6 +3,37 @@
 All notable changes to Punctra are documented here. The project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased - 0.16.0-alpha.1
+
+- Added the bounded private [HTTP Range streaming
+  slice](docs/design/http-range-streaming-v0.16.md): one versioned deployment
+  manifest binds an immutable remote LAS representation, strong validators,
+  exact byte lengths, Source identity, and a compatible disk-v2 Punctra index.
+  Bare LAS/LAZ URLs are rejected instead of triggering a full download or scan.
+- Added strict worker-owned Range response validation, bounded retry and
+  cancellation, Source-change detection, per-range SHA-256 integrity, disk-v2
+  header/root validation, attributed-sample decoding, transferable 1,024-Point
+  batches, and deterministic failures with one safe recovery action.
+- Added host-selected none, memory, and persistent Cache API policies. Cache
+  namespaces and entries include the deployment schema, Source identity,
+  strong validator, index digest, resource, and exact range; explicit
+  invalidation is scoped to that namespace, and quota/API failures never
+  silently change policy.
+- Added a deterministic 70,000-Point LAS 1.2 fixture, its fully verified Source
+  record, compatible 172,808-byte disk-v2 index, deployment manifest, fixture
+  regeneration verifier, strict local Range/CORS server, and Node module tests
+  for transport, cache, retry, cancellation, corruption, and recovery rules.
+- Extended the private WebAssembly browser host with an identity-bound sampled
+  View generation and four independently bounded renderer batches. The local
+  acceptance page now proves the inherited v0.15 lifecycle first, then cold
+  streaming, explicit viewer/worker recreation, and a zero-binary-request warm
+  cache path while reporting network, cache, queue, staging, transfer, main-
+  thread, canvas, and renderer facts separately.
+- Kept the boundary private: v0.16 does not add arbitrary URL loading, general
+  browser LAS/LAZ decoding, exact browser Queries, Source rewriting, a public
+  viewer/networking API, SDK/framework packages, or broad browser/support
+  qualification.
+
 ## Unreleased - 0.15.0-alpha.1
 
 - Completed and locally repository-verified the private `browser-demo`
