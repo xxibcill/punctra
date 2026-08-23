@@ -1,6 +1,7 @@
 import {
   StreamingFailure,
   WORKER_SCHEMA,
+  createWorkerMessage,
   runStreamingOperation,
   workerFailure,
 } from "./streaming-protocol.js?v=16-qualified";
@@ -44,7 +45,8 @@ async function start(message) {
         signal: controller.signal,
       },
       {
-        onDeployment: (deployment) => publish(message.operation_id, "deployment", {
+        onDeployment: (deployment) => publish(message.operation_id, "state", {
+          phase: "deployment",
           deployment: publicDeployment(deployment),
         }),
         onState: (phase, metrics) => publish(message.operation_id, "state", { phase, metrics }),
@@ -65,25 +67,26 @@ async function start(message) {
 
 function publishBatch(operationId, buffer, facts) {
   self.postMessage(
-    {
-      schema: WORKER_SCHEMA,
-      type: "batch",
-      operation_id: operationId,
+    createWorkerMessage(operationId, "batch", {
       batch_index: facts.batchIndex,
       point_count: facts.pointCount,
       payload: buffer,
-    },
+    }),
     [buffer],
   );
 }
 
 function publish(operationId, type, facts) {
-  self.postMessage({ schema: WORKER_SCHEMA, type, operation_id: operationId, ...facts });
+  self.postMessage(createWorkerMessage(operationId, type, facts));
 }
 
 function publishFailure(operationId, error) {
   const failure = error instanceof StreamingFailure ? error.toJSON() : workerFailure(error?.message ?? String(error));
-  self.postMessage({ ...failure, operation_id: operationId });
+  self.postMessage(createWorkerMessage(operationId, "failure", {
+    code: failure.code,
+    message: failure.message,
+    safe_action: failure.safe_action,
+  }));
 }
 
 function publicDeployment(deployment) {
@@ -101,7 +104,7 @@ function publicDeployment(deployment) {
 
 self.addEventListener("error", (event) => {
   if (active) {
-    self.postMessage({ ...workerFailure(event.message), operation_id: active.operationId });
+    publishFailure(active.operationId, new Error(event.message));
     active.controller.abort();
   }
 });

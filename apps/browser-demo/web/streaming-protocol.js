@@ -1,5 +1,11 @@
 export const STREAM_SCHEMA = "punctra-browser-stream-v1";
 export const WORKER_SCHEMA = "punctra-browser-worker-v1";
+export const WORKER_OUTPUT_TYPES = Object.freeze([
+  "state",
+  "batch",
+  "complete",
+  "failure",
+]);
 
 export const LIMITS = Object.freeze({
   manifestBytes: 32 * 1024,
@@ -68,6 +74,20 @@ export class StreamingFailure extends Error {
 
 export function workerFailure(message) {
   return new StreamingFailure("worker_failed", message).toJSON();
+}
+
+export function createWorkerMessage(operationId, type, facts = {}) {
+  require(
+    WORKER_OUTPUT_TYPES.includes(type),
+    "manifest_invalid",
+    `unsupported worker output message ${type}`,
+  );
+  return {
+    ...facts,
+    schema: WORKER_SCHEMA,
+    type,
+    operation_id: operationId,
+  };
 }
 
 export async function runStreamingOperation(configuration, hooks = {}) {

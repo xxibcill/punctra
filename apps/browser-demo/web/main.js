@@ -539,10 +539,11 @@ function runWorkerStream({ cacheMode, invalidate }) {
       if (message?.schema !== WORKER_SCHEMA || message.operation_id !== operationId) return;
       if (message.type === "failure") {
         controls.reject(message);
-      } else if (message.type === "deployment") {
-        deployment = message.deployment;
-        beginRemoteScene(deployment);
       } else if (message.type === "state") {
+        if (message.phase === "deployment") {
+          deployment = message.deployment;
+          beginRemoteScene(deployment);
+        }
         streamingFacts = message.metrics ?? streamingFacts;
       } else if (message.type === "batch") {
         const started = performance.now();
