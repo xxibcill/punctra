@@ -43,8 +43,11 @@ apps/
       stream-worker.js
       streaming-protocol.js
       streaming-protocol.test.mjs
+      failure-policy.js
+      failure-policy.test.mjs
       worker-operation.js
       worker-operation.test.mjs
+      worker-protocol.test.mjs
       range-server.test.mjs
       fixtures/v1/
         README.md
