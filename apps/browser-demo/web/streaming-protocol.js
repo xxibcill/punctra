@@ -33,6 +33,17 @@ const CREDENTIAL_MODES = new Set(["omit", "same-origin", "include"]);
 const INDEX_HEADER_BYTES = 240;
 const NODE_RECORD_BYTES = 168;
 const SAMPLE_RECORD_BYTES = 42;
+const CACHE_IDENTITY_FIELDS = Object.freeze([
+  Object.freeze({ name: "schema", header: "X-Punctra-Schema", query: "__punctra_schema", namespace: true }),
+  Object.freeze({ name: "deployment", header: "X-Punctra-Deployment", query: "__punctra_deployment", namespace: true }),
+  Object.freeze({ name: "source", header: "X-Punctra-Source", query: "__punctra_source", namespace: true }),
+  Object.freeze({ name: "sourceValidator", header: "X-Punctra-Source-Validator", query: "__punctra_source_validator", namespace: true }),
+  Object.freeze({ name: "index", header: "X-Punctra-Index", query: "__punctra_index", namespace: true }),
+  Object.freeze({ name: "kind", header: "X-Punctra-Kind", query: "__punctra_kind" }),
+  Object.freeze({ name: "resourceValidator", header: "X-Punctra-Resource-Validator", query: "__punctra_resource_validator" }),
+  Object.freeze({ name: "byteRange", header: "X-Punctra-Range", query: "__punctra_range" }),
+  Object.freeze({ name: "digest", header: "X-Punctra-Digest" }),
+]);
 
 const SAFE_ACTIONS = Object.freeze({
   manifest_invalid: "Repair or select a compatible deployment manifest before retrying.",
@@ -644,51 +655,59 @@ export async function readBoundedBody(
 }
 
 function cachedResponse(deployment, kind, resource, range, bytes) {
+  const identity = cacheIdentity(deployment, kind, range, resource);
+  const headers = new Headers({ "Content-Length": String(bytes.byteLength) });
+  for (const field of CACHE_IDENTITY_FIELDS) {
+    headers.set(field.header, identity[field.name]);
+  }
   return new Response(bytes.slice(), {
     status: 200,
-    headers: {
-      "Content-Length": String(bytes.byteLength),
-      "X-Punctra-Schema": STREAM_SCHEMA,
-      "X-Punctra-Deployment": deployment.deploymentId,
-      "X-Punctra-Source": deployment.source.sourceIdentity,
-      "X-Punctra-Source-Validator": deployment.source.etag,
-      "X-Punctra-Index": deployment.index.sha256,
-      "X-Punctra-Kind": kind,
-      "X-Punctra-Resource-Validator": resource.etag,
-      "X-Punctra-Digest": range.sha256,
-      "X-Punctra-Range": `${range.offset}:${range.length}`,
-    },
+    headers,
   });
 }
 
 function validateCachedMetadata(response, deployment, kind, resource, range) {
-  equal(response.headers.get("x-punctra-schema"), STREAM_SCHEMA, "range_corrupt", "cache schema");
-  equal(response.headers.get("x-punctra-deployment"), deployment.deploymentId, "range_corrupt", "cache deployment");
-  equal(response.headers.get("x-punctra-source"), deployment.source.sourceIdentity, "range_corrupt", "cache Source identity");
-  equal(response.headers.get("x-punctra-source-validator"), deployment.source.etag, "range_corrupt", "cache Source validator");
-  equal(response.headers.get("x-punctra-index"), deployment.index.sha256, "range_corrupt", "cache index digest");
-  equal(response.headers.get("x-punctra-kind"), kind, "range_corrupt", "cache resource kind");
-  equal(response.headers.get("x-punctra-resource-validator"), resource.etag, "range_corrupt", "cache resource validator");
-  equal(response.headers.get("x-punctra-digest"), range.sha256, "range_corrupt", "cache digest");
-  equal(response.headers.get("x-punctra-range"), `${range.offset}:${range.length}`, "range_corrupt", "cache range");
+  const identity = cacheIdentity(deployment, kind, range, resource);
+  for (const field of CACHE_IDENTITY_FIELDS) {
+    equal(
+      response.headers.get(field.header),
+      identity[field.name],
+      "range_corrupt",
+      `cache ${field.name}`,
+    );
+  }
 }
 
 export function cacheNamespace(deployment) {
-  return [STREAM_SCHEMA, deployment.deploymentId, deployment.source.sourceIdentity, deployment.source.etag, deployment.index.sha256].join(":");
+  const identity = cacheIdentity(deployment);
+  return CACHE_IDENTITY_FIELDS
+    .filter((field) => field.namespace)
+    .map((field) => identity[field.name])
+    .join(":");
 }
 
 export function cacheEntryUrl(deployment, kind, range) {
   const resource = kind === "source" ? deployment.source : deployment.index;
+  const identity = cacheIdentity(deployment, kind, range, resource);
   const url = new URL(resource.url);
-  url.searchParams.set("__punctra_schema", STREAM_SCHEMA);
-  url.searchParams.set("__punctra_deployment", deployment.deploymentId);
-  url.searchParams.set("__punctra_source", deployment.source.sourceIdentity);
-  url.searchParams.set("__punctra_source_validator", deployment.source.etag);
-  url.searchParams.set("__punctra_index", deployment.index.sha256);
-  url.searchParams.set("__punctra_kind", kind);
-  url.searchParams.set("__punctra_resource_validator", resource.etag);
-  url.searchParams.set("__punctra_range", `${range.offset}:${range.length}`);
+  for (const field of CACHE_IDENTITY_FIELDS) {
+    if (field.query) url.searchParams.set(field.query, identity[field.name]);
+  }
   return url.href;
+}
+
+function cacheIdentity(deployment, kind, range, resource) {
+  return Object.freeze({
+    schema: STREAM_SCHEMA,
+    deployment: deployment.deploymentId,
+    source: deployment.source.sourceIdentity,
+    sourceValidator: deployment.source.etag,
+    index: deployment.index.sha256,
+    kind,
+    resourceValidator: resource?.etag,
+    byteRange: range ? `${range.offset}:${range.length}` : undefined,
+    digest: range?.sha256,
+  });
 }
 
 function freshMetrics() {
