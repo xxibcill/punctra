@@ -633,9 +633,12 @@ async function start() {
       const browserBindings = await import(
         `./pkg/browser_demo.js?v=${BUILD_CACHE_TOKEN}-${attempt}`
       );
-      await browserBindings.default(
-        new URL(`./pkg/browser_demo_bg.wasm?v=${BUILD_CACHE_TOKEN}-${attempt}`, import.meta.url),
-      );
+      await browserBindings.default({
+        module_or_path: new URL(
+          `./pkg/browser_demo_bg.wasm?v=${BUILD_CACHE_TOKEN}-${attempt}`,
+          import.meta.url,
+        ),
+      });
       createViewer = browserBindings.createViewer;
       wasmReady = true;
     }
