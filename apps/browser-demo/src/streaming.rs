@@ -19,6 +19,7 @@ pub(crate) const MAX_QUEUED_RANGE_BYTES: u64 = 512 * 1_024;
 pub(crate) const MAX_RANGE_BYTES: u64 = 256 * 1_024;
 pub(crate) const MAX_CONCURRENT_RESPONSE_BYTES: u64 = 256 * 1_024;
 pub(crate) const MAX_WORKER_STAGING_BYTES: u64 = 320 * 1_024;
+pub(crate) const MAX_CACHE_ENTRIES: u64 = 64;
 pub(crate) const MAX_MEMORY_CACHE_BYTES: u64 = 512 * 1_024;
 pub(crate) const MAX_PERSISTENT_CACHE_BYTES: u64 = 4 * 1_024 * 1_024;
 pub(crate) const MAX_CANCELLATION_MILLISECONDS: u64 = 1_000;
@@ -87,6 +88,7 @@ pub(crate) struct StreamingLimitFacts {
     transfer_batch_bytes: u64,
     transfer_batches: u64,
     stream_points: u64,
+    cache_entries: u64,
     memory_cache_bytes: u64,
     persistent_cache_bytes: u64,
     cancellation_milliseconds: u64,
@@ -106,6 +108,7 @@ impl StreamingLimitFacts {
             transfer_batch_bytes: MAX_TRANSFER_BATCH_BYTES,
             transfer_batches: MAX_TRANSFER_BATCHES,
             stream_points: MAX_STREAM_POINTS,
+            cache_entries: MAX_CACHE_ENTRIES,
             memory_cache_bytes: MAX_MEMORY_CACHE_BYTES,
             persistent_cache_bytes: MAX_PERSISTENT_CACHE_BYTES,
             cancellation_milliseconds: MAX_CANCELLATION_MILLISECONDS,
@@ -610,6 +613,7 @@ mod tests {
         assert_eq!(value["worker_staging_bytes"], 327_680);
         assert_eq!(value["transfer_batch_points"], 1_024);
         assert_eq!(value["stream_points"], 8_192);
+        assert_eq!(value["cache_entries"], 64);
         assert_eq!(value["persistent_cache_bytes"], 4_194_304);
         assert_eq!(value["cancellation_milliseconds"], 1_000);
     }

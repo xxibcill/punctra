@@ -158,6 +158,7 @@ The fixed repository ceilings are:
 - eight transferred batches and 8,192 decoded Points for the accepted root;
 - 1,000 milliseconds from an explicit host cancellation request to the
   worker's deterministic `cancelled` acknowledgement;
+- 64 cached range entries per identity-versioned cache namespace;
 - 512 KiB of memory-cache response bodies; and
 - 4 MiB of logical persistent-cache response bodies for one identity-versioned
   cache namespace.
@@ -187,6 +188,13 @@ a hit is revalidated before decode. Bytes from another Source identity,
 validator, index digest, or range are unreachable through the key and rejected
 if metadata differs.
 
+Persistent namespaces use a versioned, fixed-size accounting ledger. The
+ledger records logical range-entry count and verified response-body bytes, is
+validated before any range lookup, and is reserved before a new body is
+written. An interrupted write can therefore only conservatively overcount.
+Initialization never enumerates Cache API keys, and both cache modes reject the
+first entry above the fixed count ceiling before retaining its metadata.
+
 Explicit invalidation deletes only the exact derived namespace before network
 work. Quota or Cache API failure never falls back silently: the operation
 returns `cache_quota` or `cache_unavailable`, and the safe action tells the host
@@ -206,7 +214,7 @@ Diagnostics separately report Source bytes requested/received, index bytes
 requested/received, network and cache hits, retries, queue high-water, decoded
 staging high-water, transferred batches/bytes/Points, main-thread publication
 high-water, cancellation latency when exercised, logical cache bytes, and the
-renderer facts inherited from v0.15. The accepted fixture must render before
+logical cache entry count, and the renderer facts inherited from v0.15. The accepted fixture must render before
 its complete Source byte length has been transferred.
 
 ## Deterministic failures and safe actions

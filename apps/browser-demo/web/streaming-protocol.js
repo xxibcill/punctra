@@ -20,6 +20,7 @@ export const LIMITS = Object.freeze({
   transferRecordBytes: 24,
   transferBatches: 8,
   streamPoints: 8192,
+  cacheEntries: 64,
   memoryCacheBytes: 512 * 1024,
   persistentCacheBytes: 4 * 1024 * 1024,
   cancellationMilliseconds: 1000,
@@ -33,7 +34,11 @@ const CREDENTIAL_MODES = new Set(["omit", "same-origin", "include"]);
 const INDEX_HEADER_BYTES = 240;
 const NODE_RECORD_BYTES = 168;
 const SAMPLE_RECORD_BYTES = 42;
+const CACHE_LAYOUT = "bounded-ledger-v1";
+const CACHE_LEDGER_ENTRIES_HEADER = "X-Punctra-Cache-Entries";
+const CACHE_LEDGER_BYTES_HEADER = "X-Punctra-Cache-Bytes";
 const CACHE_IDENTITY_FIELDS = Object.freeze([
+  Object.freeze({ name: "layout", header: "X-Punctra-Cache-Layout", query: "__punctra_cache_layout", namespace: true }),
   Object.freeze({ name: "schema", header: "X-Punctra-Schema", query: "__punctra_schema", namespace: true }),
   Object.freeze({ name: "deployment", header: "X-Punctra-Deployment", query: "__punctra_deployment", namespace: true }),
   Object.freeze({ name: "source", header: "X-Punctra-Source", query: "__punctra_source", namespace: true }),
@@ -296,6 +301,7 @@ export class RangeTransport {
     this.delay = options.delay ?? defaultDelay;
     this.memory = undefined;
     this.persistent = undefined;
+    this.cachedEntries = 0;
     this.cachedBytes = 0;
     this.metrics = freshMetrics();
     this.metrics.queuedRangeBytesHighWater =
@@ -314,16 +320,10 @@ export class RangeTransport {
       if (this.invalidate) this.memoryCacheStorage.delete(namespace);
       this.memory = this.memoryCacheStorage.get(namespace) ?? new Map();
       this.memoryCacheStorage.set(namespace, this.memory);
-      this.cachedBytes = Array.from(
-        this.memory.values(),
-        (value) => value.byteLength,
-      ).reduce((total, bytes) => total + bytes, 0);
-      require(
-        this.cachedBytes <= LIMITS.memoryCacheBytes,
-        "resource_limit",
-        `logical memory cache exceeds ${LIMITS.memoryCacheBytes} bytes`,
-      );
-      this.metrics.logicalCacheBytes = this.cachedBytes;
+      for (const value of this.memory.values()) {
+        this.recordExistingCacheEntry(value.byteLength, LIMITS.memoryCacheBytes);
+      }
+      this.recordLogicalCacheSize();
       return;
     }
     if (this.cacheMode !== "persistent") return;
@@ -334,30 +334,48 @@ export class RangeTransport {
     } catch (error) {
       throw cacheFailure(error);
     }
-    this.cachedBytes = await this.measurePersistentCacheBytes();
-    this.metrics.logicalCacheBytes = this.cachedBytes;
+    const ledger = await this.readPersistentCacheLedger();
+    this.cachedEntries = ledger.entries;
+    this.cachedBytes = ledger.bytes;
+    this.recordLogicalCacheSize();
   }
 
-  async measurePersistentCacheBytes() {
+  recordExistingCacheEntry(bytes, byteCeiling) {
+    const nextEntries = this.cachedEntries + 1;
+    const nextBytes = this.cachedBytes + bytes;
+    require(
+      nextEntries <= LIMITS.cacheEntries,
+      "resource_limit",
+      `logical ${this.cacheMode} cache exceeds ${LIMITS.cacheEntries} entries`,
+    );
+    require(
+      nextBytes <= byteCeiling,
+      "resource_limit",
+      `logical ${this.cacheMode} cache exceeds ${byteCeiling} bytes`,
+    );
+    this.cachedEntries = nextEntries;
+    this.cachedBytes = nextBytes;
+  }
+
+  async readPersistentCacheLedger() {
     try {
-      const requests = await this.persistent.keys();
-      let total = 0;
-      for (const request of requests) {
-        const response = await this.persistent.match(request);
-        if (!response) continue;
-        const bytes = validateStoredCacheEntry(request, response, this.deployment);
-        total += bytes;
-        require(
-          total <= LIMITS.persistentCacheBytes,
-          "resource_limit",
-          `logical persistent cache exceeds ${LIMITS.persistentCacheBytes} bytes`,
-        );
+      const response = await this.persistent.match(cacheLedgerUrl(this.deployment));
+      if (!response) {
+        await this.writePersistentCacheLedger(0, 0);
+        return { entries: 0, bytes: 0 };
       }
-      return total;
+      return validateCacheLedger(response, this.deployment);
     } catch (error) {
       if (error instanceof StreamingFailure) throw error;
       throw cacheFailure(error);
     }
+  }
+
+  async writePersistentCacheLedger(entries, bytes) {
+    await this.persistent.put(
+      cacheLedgerUrl(this.deployment),
+      cacheLedgerResponse(this.deployment, entries, bytes),
+    );
   }
 
   async fetchRange(kind, range, requireAcceptRanges) {
@@ -449,12 +467,17 @@ export class RangeTransport {
   async writeCache(key, kind, resource, range, bytes) {
     if (this.cacheMode === "none") return;
     const ceiling = this.cacheMode === "memory" ? LIMITS.memoryCacheBytes : LIMITS.persistentCacheBytes;
+    const nextEntries = this.cachedEntries + 1;
     const nextBytes = this.cachedBytes + bytes.byteLength;
+    require(nextEntries <= LIMITS.cacheEntries, "resource_limit", `logical ${this.cacheMode} cache exceeds ${LIMITS.cacheEntries} entries`);
     require(nextBytes <= ceiling, "resource_limit", `logical ${this.cacheMode} cache exceeds ${ceiling} bytes`);
     if (this.cacheMode === "memory") {
       this.memory.set(key, bytes.slice());
     } else {
       try {
+        // Reserve first so an interrupted or quota-failed body write can only
+        // conservatively overcount, never permit the namespace to exceed a ceiling.
+        await this.writePersistentCacheLedger(nextEntries, nextBytes);
         await this.persistent.put(
           key,
           cachedResponse(this.deployment, kind, resource, range, bytes),
@@ -463,8 +486,14 @@ export class RangeTransport {
         throw cacheFailure(error);
       }
     }
+    this.cachedEntries = nextEntries;
     this.cachedBytes = nextBytes;
-    this.metrics.logicalCacheBytes = nextBytes;
+    this.recordLogicalCacheSize();
+  }
+
+  recordLogicalCacheSize() {
+    this.metrics.logicalCacheEntries = this.cachedEntries;
+    this.metrics.logicalCacheBytes = this.cachedBytes;
   }
 
   recordCacheHit(kind, bytes) {
@@ -719,6 +748,45 @@ function cachedResponse(deployment, kind, resource, range, bytes) {
   });
 }
 
+function cacheLedgerResponse(deployment, entries, bytes) {
+  const identity = cacheIdentity(deployment);
+  const headers = new Headers({
+    "Content-Length": "0",
+    [CACHE_LEDGER_ENTRIES_HEADER]: String(entries),
+    [CACHE_LEDGER_BYTES_HEADER]: String(bytes),
+  });
+  for (const field of CACHE_IDENTITY_FIELDS.filter((candidate) => candidate.namespace)) {
+    headers.set(field.header, identity[field.name]);
+  }
+  return new Response(null, { status: 200, headers });
+}
+
+function validateCacheLedger(response, deployment) {
+  const identity = cacheIdentity(deployment);
+  for (const field of CACHE_IDENTITY_FIELDS.filter((candidate) => candidate.namespace)) {
+    equal(
+      response.headers.get(field.header),
+      identity[field.name],
+      "range_corrupt",
+      `cache ledger ${field.name}`,
+    );
+  }
+  equal(response.headers.get("content-length"), "0", "range_corrupt", "cache ledger Content-Length");
+  return {
+    entries: cacheLedgerInteger(response, CACHE_LEDGER_ENTRIES_HEADER, LIMITS.cacheEntries),
+    bytes: cacheLedgerInteger(response, CACHE_LEDGER_BYTES_HEADER, LIMITS.persistentCacheBytes),
+  };
+}
+
+function cacheLedgerInteger(response, header, ceiling) {
+  const encoded = response.headers.get(header) ?? "";
+  require(/^(0|[1-9]\d*)$/.test(encoded), "range_corrupt", `${header} is invalid`);
+  const value = Number(encoded);
+  require(Number.isSafeInteger(value), "range_corrupt", `${header} is not safely addressable`);
+  require(value <= ceiling, "resource_limit", `${header} exceeds ${ceiling}`);
+  return value;
+}
+
 function validateCachedMetadata(response, deployment, kind, resource, range) {
   const identity = cacheIdentity(deployment, kind, range, resource);
   for (const field of CACHE_IDENTITY_FIELDS) {
@@ -731,43 +799,22 @@ function validateCachedMetadata(response, deployment, kind, resource, range) {
   }
 }
 
-function validateStoredCacheEntry(request, response, deployment) {
-  const key = typeof request === "string" ? request : request.url;
-  const url = new URL(key);
-  const kind = url.searchParams.get("__punctra_kind");
-  require(kind === "source" || kind === "index", "range_corrupt", "cache kind is invalid");
-  const resource = kind === "source" ? deployment.source : deployment.index;
-  const encodedRange = url.searchParams.get("__punctra_range") ?? "";
-  const matchedRange = /^(0|[1-9]\d*):([1-9]\d*)$/.exec(encodedRange);
-  require(matchedRange, "range_corrupt", "cache range is invalid");
-  const offset = Number(matchedRange[1]);
-  const length = Number(matchedRange[2]);
-  require(
-    Number.isSafeInteger(offset) && Number.isSafeInteger(length),
-    "range_corrupt",
-    "cache range is not safely addressable",
-  );
-  require(length <= LIMITS.rangeBytes, "resource_limit", "cached range exceeds 256 KiB");
-  require(offset + length <= resource.byteLength, "range_corrupt", "cached range exceeds its representation");
-  const sha256 = response.headers.get("x-punctra-digest");
-  require(
-    typeof sha256 === "string" && /^[0-9a-f]{64}$/.test(sha256),
-    "range_corrupt",
-    "cache digest is invalid",
-  );
-  const range = Object.freeze({ offset, length, sha256 });
-  equal(key, cacheEntryUrl(deployment, kind, range), "range_corrupt", "cache key");
-  validateCachedMetadata(response, deployment, kind, resource, range);
-  equal(response.headers.get("content-length"), String(length), "range_corrupt", "cache Content-Length");
-  return length;
-}
-
 export function cacheNamespace(deployment) {
   const identity = cacheIdentity(deployment);
   return CACHE_IDENTITY_FIELDS
     .filter((field) => field.namespace)
     .map((field) => identity[field.name])
     .join(":");
+}
+
+function cacheLedgerUrl(deployment) {
+  const identity = cacheIdentity(deployment);
+  const url = new URL(deployment.source.url);
+  for (const field of CACHE_IDENTITY_FIELDS.filter((candidate) => candidate.namespace)) {
+    url.searchParams.set(field.query, identity[field.name]);
+  }
+  url.searchParams.set("__punctra_cache_ledger", CACHE_LAYOUT);
+  return url.href;
 }
 
 export function cacheEntryUrl(deployment, kind, range) {
@@ -782,6 +829,7 @@ export function cacheEntryUrl(deployment, kind, range) {
 
 function cacheIdentity(deployment, kind, range, resource) {
   return Object.freeze({
+    layout: CACHE_LAYOUT,
     schema: STREAM_SCHEMA,
     deployment: deployment.deploymentId,
     source: deployment.source.sourceIdentity,
@@ -810,6 +858,7 @@ function freshMetrics() {
     cacheBytes: 0,
     sourceCacheBytes: 0,
     indexCacheBytes: 0,
+    logicalCacheEntries: 0,
     logicalCacheBytes: 0,
     retries: 0,
     concurrentRequestsHighWater: 1,

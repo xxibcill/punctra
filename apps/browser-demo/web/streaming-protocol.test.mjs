@@ -148,8 +148,12 @@ test("persistent warm stream reuses only the exact identity-versioned ranges", a
 
   const deployment = validateManifest(manifest, MANIFEST_URL);
   const entries = cacheStorage.namespaces.get(cacheNamespace(deployment));
-  assert.equal(entries.size, 3);
-  for (const [key, response] of entries) {
+  const rangeEntries = Array.from(entries).filter(([key]) =>
+    new URL(key).searchParams.has("__punctra_kind")
+  );
+  assert.equal(entries.size, 4);
+  assert.equal(rangeEntries.length, 3);
+  for (const [key, response] of rangeEntries) {
     const entry = new URL(key);
     const kind = entry.searchParams.get("__punctra_kind");
     assert.ok(kind === "source" || kind === "index");
@@ -158,6 +162,8 @@ test("persistent warm stream reuses only the exact identity-versioned ranges", a
     assert.equal(entry.searchParams.get("__punctra_source"), deployment.source.sourceIdentity);
     assert.equal(entry.searchParams.get("__punctra_source_validator"), deployment.source.etag);
     assert.equal(entry.searchParams.get("__punctra_index"), deployment.index.sha256);
+    assert.equal(entry.searchParams.get("__punctra_cache_layout"), "bounded-ledger-v1");
+    assert.equal(response.headers.get("x-punctra-cache-layout"), "bounded-ledger-v1");
     assert.equal(response.headers.get("x-punctra-schema"), deployment.schema);
     assert.equal(response.headers.get("x-punctra-deployment"), deployment.deploymentId);
     assert.equal(response.headers.get("x-punctra-source"), deployment.source.sourceIdentity);
@@ -196,6 +202,33 @@ test("persistent cache ceiling includes compatible ranges from prior operations"
     }),
     "resource_limit",
   );
+});
+
+test("cache entry metadata accepts the exact ceiling and rejects one over", async (context) => {
+  for (const cacheMode of ["memory", "persistent"]) {
+    await context.test(cacheMode, async () => {
+      const deployment = validateManifest(manifest, MANIFEST_URL);
+      const server = fixtureServer();
+      const transport = new RangeTransport({
+        deployment,
+        cacheMode,
+        credentials: "omit",
+        fetchImplementation: server.fetch,
+        cacheStorage: new TestCacheStorage(),
+        memoryCacheStorage: new Map(),
+      });
+      await transport.initialize();
+      for (let offset = 0; offset < LIMITS.cacheEntries; offset += 1) {
+        await transport.fetchRange("source", sourceRange(offset, 1), true);
+      }
+
+      assert.equal(transport.snapshot().logicalCacheEntries, LIMITS.cacheEntries);
+      await rejectsWithCode(
+        transport.fetchRange("source", sourceRange(LIMITS.cacheEntries, 1), true),
+        "resource_limit",
+      );
+    });
+  }
 });
 
 test("memory cache survives sequential operations in one worker and invalidates exactly", async () => {
@@ -392,6 +425,15 @@ function manifestWithSourceProbe(offset, length) {
   return rangedManifest;
 }
 
+function sourceRange(offset, length) {
+  const bytes = sourceBytes.subarray(offset, offset + length);
+  return Object.freeze({
+    offset,
+    length,
+    sha256: createHash("sha256").update(bytes).digest("hex"),
+  });
+}
+
 function decodeBoundaryDeployment(pointCount) {
   return {
     index: {
@@ -481,7 +523,6 @@ class TestCacheStorage {
     const entries = this.namespaces.get(name) ?? new Map();
     this.namespaces.set(name, entries);
     return {
-      keys: async () => Array.from(entries.keys(), (key) => new Request(key)),
       match: async (key) => entries.get(typeof key === "string" ? key : key.url)?.clone(),
       put: async (key, response) => {
         if (this.quotaFailure) throw new DOMException("quota full", "QuotaExceededError");

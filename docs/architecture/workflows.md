@@ -659,7 +659,9 @@ fixed 1,000-millisecond acceptance limit. Every transferred batch is
 strictly Source-ordinal ordered and detached from worker memory. A cache entry
 is reachable only through the deployment schema, Source identity, strong
 validator, index digest, resource kind, and exact range; quota or Cache API
-failure cannot silently change the caller's policy. The main thread yields
+failure cannot silently change the caller's policy. A versioned fixed-size
+ledger enforces both the response-body and 64-entry namespace ceilings without
+enumerating Cache API keys. The main thread yields
 between at-most-1,024-Point publications. All output remains non-authoritative
 Sampled Coverage.
 
