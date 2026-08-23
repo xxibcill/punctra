@@ -6,6 +6,7 @@ import {
 } from "./streaming-protocol.js?v=16-qualified";
 
 let active;
+const memoryCacheStorage = new Map();
 
 self.addEventListener("message", (event) => {
   const message = event.data;
@@ -37,6 +38,7 @@ async function start(message) {
       {
         manifestUrl: new URL(message.manifest_url, self.location.href).href,
         cacheMode: message.cache_mode,
+        memoryCacheStorage,
         invalidate: message.invalidate,
         credentials: message.credentials,
         signal: controller.signal,

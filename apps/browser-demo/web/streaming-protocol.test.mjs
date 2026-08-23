@@ -126,6 +126,27 @@ test("persistent warm stream reuses only the exact identity-versioned ranges", a
   );
 });
 
+test("memory cache survives sequential operations in one worker and invalidates exactly", async () => {
+  const memoryCacheStorage = new Map();
+  const server = fixtureServer();
+  const cold = await run(server, {}, { cacheMode: "memory", memoryCacheStorage });
+  const requestsAfterCold = server.binaryRequests.length;
+  const warm = await run(server, {}, { cacheMode: "memory", memoryCacheStorage });
+
+  assert.equal(cold.metrics.requestCount, 3);
+  assert.equal(warm.metrics.requestCount, 0);
+  assert.equal(warm.metrics.cacheHits, 3);
+  assert.equal(server.binaryRequests.length, requestsAfterCold);
+
+  const invalidated = await run(server, {}, {
+    cacheMode: "memory",
+    memoryCacheStorage,
+    invalidate: true,
+  });
+  assert.equal(invalidated.metrics.requestCount, 3);
+  assert.equal(server.binaryRequests.length, requestsAfterCold + 3);
+});
+
 test("full response to a Range request fails before its body is read", async () => {
   const server = fixtureServer({ scenario: "full_response" });
   await rejectsWithCode(run(server), "range_unsupported");

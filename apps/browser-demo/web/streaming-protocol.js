@@ -87,6 +87,7 @@ export async function runStreamingOperation(configuration, hooks = {}) {
     credentials: configuration.credentials,
     fetchImplementation,
     cacheStorage: configuration.cacheStorage ?? globalThis.caches,
+    memoryCacheStorage: configuration.memoryCacheStorage,
     signal: configuration.signal,
     delay: configuration.delay,
   });
@@ -254,9 +255,10 @@ export class RangeTransport {
     this.credentials = credentialMode(options.credentials);
     this.fetchImplementation = options.fetchImplementation;
     this.cacheStorage = options.cacheStorage;
+    this.memoryCacheStorage = options.memoryCacheStorage ?? new Map();
     this.signal = options.signal;
     this.delay = options.delay ?? defaultDelay;
-    this.memory = new Map();
+    this.memory = undefined;
     this.persistent = undefined;
     this.cachedBytes = 0;
     this.metrics = freshMetrics();
@@ -271,9 +273,24 @@ export class RangeTransport {
   }
 
   async initialize() {
+    const namespace = cacheNamespace(this.deployment);
+    if (this.cacheMode === "memory") {
+      if (this.invalidate) this.memoryCacheStorage.delete(namespace);
+      this.memory = this.memoryCacheStorage.get(namespace) ?? new Map();
+      this.memoryCacheStorage.set(namespace, this.memory);
+      this.cachedBytes = Array.from(
+        this.memory.values(),
+        (value) => value.byteLength,
+      ).reduce((total, bytes) => total + bytes, 0);
+      require(
+        this.cachedBytes <= LIMITS.memoryCacheBytes,
+        "resource_limit",
+        `logical memory cache exceeds ${LIMITS.memoryCacheBytes} bytes`,
+      );
+      return;
+    }
     if (this.cacheMode !== "persistent") return;
     require(this.cacheStorage && typeof this.cacheStorage.open === "function", "cache_unavailable", "Cache API is unavailable");
-    const namespace = cacheNamespace(this.deployment);
     try {
       if (this.invalidate) await this.cacheStorage.delete(namespace);
       this.persistent = await this.cacheStorage.open(namespace);
