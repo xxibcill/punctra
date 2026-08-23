@@ -204,6 +204,30 @@ test("persistent cache ceiling includes compatible ranges from prior operations"
   );
 });
 
+test("an orphaned persistent range invalidates its unaccounted namespace", async () => {
+  const cacheStorage = new TestCacheStorage();
+  const server = fixtureServer();
+  await run(server, {}, { cacheMode: "persistent", cacheStorage });
+  const requestsAfterCold = server.binaryRequests.length;
+  const deployment = validateManifest(manifest, MANIFEST_URL);
+  const entries = cacheStorage.namespaces.get(cacheNamespace(deployment));
+  const ledgerKey = Array.from(entries.keys()).find((key) =>
+    new URL(key).searchParams.has("__punctra_cache_ledger")
+  );
+  assert.ok(ledgerKey);
+  entries.delete(ledgerKey);
+
+  const recovered = await run(server, {}, { cacheMode: "persistent", cacheStorage });
+
+  assert.equal(recovered.metrics.cacheHits, 0);
+  assert.equal(recovered.metrics.requestCount, 3);
+  assert.equal(server.binaryRequests.length, requestsAfterCold + 3);
+  assert.equal(
+    cacheStorage.namespaces.get(cacheNamespace(deployment)).size,
+    4,
+  );
+});
+
 test("cache entry metadata accepts the exact ceiling and rejects one over", async (context) => {
   for (const cacheMode of ["memory", "persistent"]) {
     await context.test(cacheMode, async () => {

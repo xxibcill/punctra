@@ -345,17 +345,28 @@ export class RangeTransport {
       if (this.invalidate) {
         await awaitWithCancellation(this.cacheStorage.delete(namespace), this.signal);
       }
-      this.persistent = await awaitWithCancellation(
-        this.cacheStorage.open(namespace),
-        this.signal,
-      );
+      this.persistent = await this.openPersistentCache(namespace);
     } catch (error) {
       throw cacheFailure(error);
     }
-    const ledger = await this.readPersistentCacheLedger();
+    let ledger = await this.readPersistentCacheLedger();
+    if (!ledger) {
+      try {
+        await awaitWithCancellation(this.cacheStorage.delete(namespace), this.signal);
+        this.persistent = await this.openPersistentCache(namespace);
+        await this.writePersistentCacheLedger(0, 0);
+        ledger = { entries: 0, bytes: 0 };
+      } catch (error) {
+        throw cacheFailure(error);
+      }
+    }
     this.cachedEntries = ledger.entries;
     this.cachedBytes = ledger.bytes;
     this.recordLogicalCacheSize();
+  }
+
+  openPersistentCache(namespace) {
+    return awaitWithCancellation(this.cacheStorage.open(namespace), this.signal);
   }
 
   recordExistingCacheEntry(bytes, byteCeiling) {
@@ -381,10 +392,7 @@ export class RangeTransport {
         this.persistent.match(cacheLedgerUrl(this.deployment)),
         this.signal,
       );
-      if (!response) {
-        await this.writePersistentCacheLedger(0, 0);
-        return { entries: 0, bytes: 0 };
-      }
+      if (!response) return undefined;
       return validateCacheLedger(response, this.deployment);
     } catch (error) {
       if (error instanceof StreamingFailure) throw error;

@@ -194,6 +194,8 @@ validated before any range lookup, and is reserved before a new body is
 written. An interrupted write can therefore only conservatively overcount.
 Initialization never enumerates Cache API keys, and both cache modes reject the
 first entry above the fixed count ceiling before retaining its metadata.
+A missing ledger invalidates and recreates the exact namespace before any
+orphaned response body can become a cache hit.
 
 Explicit invalidation deletes only the exact derived namespace before network
 work. Quota or Cache API failure never falls back silently: the operation
