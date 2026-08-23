@@ -1,3 +1,9 @@
+import {
+  RECOVERABLE_VIEWER_FAILURE_CODES,
+  UNSUPPORTED_INITIALIZATION_CODES,
+  failureState,
+  preservesCurrentViewer,
+} from "./failure-policy.js?v=16-qualified";
 import { runWorkerOperation } from "./worker-operation.js?v=16-qualified";
 
 const canvas = document.querySelector("#punctra-canvas");
@@ -30,27 +36,6 @@ let streamSequence = 0;
 const WORKER_SCHEMA = "punctra-browser-worker-v1";
 const STREAM_MANIFEST_URL = "./fixtures/v1/deployment.json";
 const BUILD_CACHE_TOKEN = "16-qualified";
-
-const UNSUPPORTED_INITIALIZATION_CODES = new Set([
-  "missing_window",
-  "insecure_context",
-  "webgpu_unavailable",
-  "capability_inspection",
-  "canvas_surface",
-  "webgpu_adapter",
-  "webgpu_device",
-  "surface_format",
-  "presentation_mode",
-  "surface_alpha_mode",
-  "surface_configuration",
-  "renderer_capability",
-]);
-
-const RECOVERABLE_VIEWER_FAILURE_CODES = new Set([
-  "surface_timeout",
-  "surface_occluded",
-  "surface_outdated",
-]);
 
 function requestedViewport() {
   const bounds = canvasShell.getBoundingClientRect();
@@ -176,14 +161,6 @@ function failureRecord(error) {
       safe_action: "Build the browser package again, serve it from localhost, and recreate the viewer.",
     };
   }
-}
-
-function failureState(record) {
-  return UNSUPPORTED_INITIALIZATION_CODES.has(record.code) ? "unsupported" : "failed";
-}
-
-function preservesCurrentViewer(record) {
-  return RECOVERABLE_VIEWER_FAILURE_CODES.has(record.code);
 }
 
 function publishFailure(error, { disableControls = false, state } = {}) {
