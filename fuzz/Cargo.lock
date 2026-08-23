@@ -97,7 +97,7 @@ checksum = "26b73573e6edcd2af0cdf47bd6cb58f0b3839491263c314eaad1ccf24430e1de"
 
 [[package]]
 name = "foundation-runtime"
-version = "0.14.0-alpha.1"
+version = "0.15.0-alpha.1"
 dependencies = [
  "thiserror",
 ]
@@ -165,7 +165,7 @@ checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
 
 [[package]]
 name = "point-contracts"
-version = "0.14.0-alpha.1"
+version = "0.15.0-alpha.1"
 dependencies = [
  "serde",
  "thiserror",
@@ -173,7 +173,7 @@ dependencies = [
 
 [[package]]
 name = "point-index"
-version = "0.14.0-alpha.1"
+version = "0.15.0-alpha.1"
 dependencies = [
  "blake3",
  "foundation-runtime",
@@ -186,7 +186,7 @@ dependencies = [
 
 [[package]]
 name = "point-source"
-version = "0.14.0-alpha.1"
+version = "0.15.0-alpha.1"
 dependencies = [
  "blake3",
  "foundation-runtime",
@@ -197,7 +197,7 @@ dependencies = [
 
 [[package]]
 name = "point-terrain"
-version = "0.14.0-alpha.1"
+version = "0.15.0-alpha.1"
 dependencies = [
  "blake3",
  "foundation-runtime",
@@ -210,7 +210,7 @@ dependencies = [
 
 [[package]]
 name = "point-workspace"
-version = "0.14.0-alpha.1"
+version = "0.15.0-alpha.1"
 dependencies = [
  "blake3",
  "foundation-runtime",
@@ -325,7 +325,7 @@ checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 
 [[package]]
 name = "source-memory"
-version = "0.14.0-alpha.1"
+version = "0.15.0-alpha.1"
 dependencies = [
  "blake3",
  "foundation-runtime",

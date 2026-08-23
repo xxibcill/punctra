@@ -192,13 +192,35 @@ remain outstanding. The [v0.14 verification
 record](docs/releases/v0.14.0.md) pins the exact qualified implementation,
 environment, command results, and generated observations.
 
+Version 0.15.0-alpha.1 completes one bounded local browser-foundation slice
+under the [WebAssembly and WebGPU Browser Foundation
+design](docs/design/browser-foundation-v0.15.md). The existing renderer
+protocol, View planner, and wgpu renderer compile to
+`wasm32-unknown-unknown`; `render-wgpu` uses a browser-safe monotonic clock for
+frame-encoding observations. One private `browser-demo` package builds with
+the pinned `wasm-bindgen` toolchain and renders a deterministic 1,089-Point
+large-world scene in a caller-owned canvas through WebGPU.
+
+The local host reports capability, ownership, View generation, batch version,
+logical residency, surface bytes, renderer transient bytes, visibility,
+provisional picking, and shutdown/recreation facts. Follow the [local browser
+foundation guide](docs/guides/browser-foundation.md) to build and run it.
+Generated in-memory browser success is not remote LAS/LAZ delivery, a supported
+JavaScript SDK, broad browser qualification, independent adoption, or release-
+candidate evidence.
+
+The [v0.15 repository verification record](docs/releases/v0.15.0.md) pins the
+exact implementation commit, local native/browser environments, command
+outcomes, bounded browser diagnostics, benchmark observations, and unsupported
+external exits.
+
 To try the implemented View safely, follow the five-minute [first LAS/LAZ
 guide](docs/guides/first-las-laz.md). It separates position-only disk-v1 and
 attributed disk-v2 caches and explains what progressive Coverage does and does
 not mean.
 
 Later direction and the exact external product gates are described in the
-[living roadmap](ROADMAP.md). The linked v0.14 design defines the completed
+[living roadmap](ROADMAP.md). The linked v0.15 design defines the completed
 bounded repository scope. Later Candidate themes do not expand accepted scope
 by themselves.
 

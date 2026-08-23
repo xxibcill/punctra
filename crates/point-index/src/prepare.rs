@@ -587,7 +587,12 @@ mod allocation_probe {
 
 #[cfg(test)]
 mod allocation_tests {
-    use std::{hint::black_box, path::PathBuf, time::SystemTime};
+    use std::{
+        hint::black_box,
+        path::PathBuf,
+        sync::atomic::{AtomicU64, Ordering},
+        time::SystemTime,
+    };
 
     use point_contracts::{AttributeColumns, CoordinateReference, PositionTransform};
     use source_memory::MemorySource;
@@ -596,6 +601,7 @@ mod allocation_tests {
 
     const TEST_POINTS: usize = 131_073;
     const MAX_PREPARE_PEAK_HEAP_BYTES: u64 = 64 * 1024 * 1024;
+    static TEMPORARY_DIRECTORY_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
     #[test]
     fn fresh_prepare_rejects_a_work_path_replaced_before_acknowledgement() {
@@ -793,8 +799,9 @@ mod allocation_tests {
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap_or_default()
             .as_nanos();
+        let sequence = TEMPORARY_DIRECTORY_SEQUENCE.fetch_add(1, Ordering::Relaxed);
         std::env::temp_dir().join(format!(
-            "punctra-point-index-allocation-{}-{timestamp}",
+            "punctra-point-index-allocation-{}-{timestamp}-{sequence}",
             std::process::id()
         ))
     }

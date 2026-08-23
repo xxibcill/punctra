@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="color-scheme" content="light">
+    <title>Punctra browser foundation</title>
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body data-browser-smoke="pending">
+    <a class="skip-link" href="#main-content">Skip to browser acceptance</a>
+
+    <header class="masthead">
+      <div>
+        <p class="eyebrow">Punctra / browser execution record</p>
+        <h1>WebGPU foundation console</h1>
+      </div>
+      <div class="release-stamp" aria-label="Release and harness">
+        <span>v0.15</span>
+        <span>LOCAL HARNESS 01</span>
+      </div>
+    </header>
+
+    <main id="main-content" class="workbench">
+      <section class="viewport-section" aria-labelledby="viewport-heading">
+        <div class="section-heading">
+          <div>
+            <p class="index-label">STATION A</p>
+            <h2 id="viewport-heading">Generated point view</h2>
+          </div>
+          <p id="authority-label" class="authority-label">
+            Progressive GPU display · non-authoritative
+          </p>
+        </div>
+
+        <div id="canvas-shell" class="canvas-shell">
+          <canvas
+            id="punctra-canvas"
+            aria-label="Deterministic generated Punctra point-cloud scene. Display and picking are provisional GPU evidence."
+          >
+            This browser does not provide a usable canvas.
+          </canvas>
+          <div class="canvas-coordinate" aria-hidden="true">
+            <span>N</span>
+            <span>500000 E / 4600000 N / 100 Z</span>
+          </div>
+        </div>
+
+        <div class="controls" aria-label="Viewer controls">
+          <button id="restart-button" type="button">Recreate viewer</button>
+          <button id="visibility-button" type="button" disabled>Suspend rendering</button>
+          <button id="pick-button" type="button" disabled>Check centre pick</button>
+          <button id="shutdown-button" type="button" disabled>Shut down viewer</button>
+        </div>
+      </section>
+
+      <aside class="instrument-panel" aria-labelledby="instrument-heading">
+        <div class="panel-header">
+          <p class="index-label">INSTRUMENT RECORD</p>
+          <h2 id="instrument-heading">Browser acceptance</h2>
+        </div>
+
+        <div id="status-block" class="status-block" data-state="checking">
+          <span class="status-marker" aria-hidden="true"></span>
+          <div>
+            <p class="status-label">Harness state</p>
+            <p id="status-message" role="status" aria-live="polite">
+              Inspecting secure context and WebGPU capability…
+            </p>
+          </div>
+        </div>
+
+        <section class="fact-section" aria-labelledby="capability-heading">
+          <h3 id="capability-heading">Capability</h3>
+          <dl id="capability-facts" class="fact-list">
+            <div><dt>Secure context</dt><dd>checking</dd></div>
+            <div><dt>WebGPU</dt><dd>checking</dd></div>
+            <div><dt>Adapter</dt><dd>not selected</dd></div>
+          </dl>
+        </section>
+
+        <section class="fact-section" aria-labelledby="resource-heading">
+          <h3 id="resource-heading">Bounded resources</h3>
+          <dl id="resource-facts" class="fact-list">
+            <div><dt>Resident Points</dt><dd>—</dd></div>
+            <div><dt>Logical vertex bytes</dt><dd>—</dd></div>
+            <div><dt>Canvas bytes</dt><dd>—</dd></div>
+            <div><dt>Transient texture bytes</dt><dd>—</dd></div>
+          </dl>
+        </section>
+
+        <section class="fact-section" aria-labelledby="authority-heading">
+          <h3 id="authority-heading">Authority boundary</h3>
+          <p class="boundary-copy">
+            Coverage and picks describe one recorded GPU frame. Confirm Point identity and
+            exact values against a caller-owned CPU Source before inspection or editing.
+          </p>
+          <dl id="pick-facts" class="fact-list compact">
+            <div><dt>Pick state</dt><dd>not requested</dd></div>
+            <div><dt>Point ordinal</dt><dd>—</dd></div>
+          </dl>
+        </section>
+
+        <details class="diagnostic-details">
+          <summary>Raw bounded diagnostics</summary>
+          <pre id="diagnostic-output">No viewer diagnostics have been published.</pre>
+        </details>
+
+        <section id="recovery-block" class="recovery-block" hidden aria-labelledby="recovery-heading">
+          <h3 id="recovery-heading">Safe action</h3>
+          <p id="recovery-message"></p>
+        </section>
+      </aside>
+    </main>
+
+    <footer>
+      <p>Generated in-memory data only. No network Source, cache, framework, or exact Query.</p>
+      <p>Repository browser evidence is not a broad browser-support claim.</p>
+    </footer>
+
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>

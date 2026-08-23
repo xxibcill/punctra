@@ -8,7 +8,8 @@ Complete and repository-verified for the bounded persistent-terrain slice;
 field activation, production-scale accuracy, true out-of-core adoption,
 independent adoption, partner validation, and support qualification
 outstanding; v0.14 bounded exact Terrain QA and correction-loop slice Complete
-and repository-verified
+and repository-verified; v0.15 bounded local WebAssembly/WebGPU browser-
+foundation slice Complete and repository-verified
 
 This is the ownership map for implemented crates. Each crate has one public
 job. Several private files may cooperate behind one deep interface; private
@@ -34,14 +35,16 @@ limits, and recovery modes are frozen in the
 | `render-protocol` | Define generation-safe renderer-neutral point display state. | Camera and display values | Validated updates and frame values |
 | `point-view` | Plan one frozen View over a host-owned hierarchy without I/O. | Camera, viewport, hierarchy/residency, budget | Demand, requests, retention, retirements |
 | `render-wgpu` | Maintain and draw one wgpu representation of render-protocol state. | Render updates, frame, host target | Recorded commands, report, provisional picks |
+| `browser-demo` | Verify one private bounded browser composition without defining the later supported SDK. | Caller-owned canvas/lifecycle facts and generated scene | WebGPU frame, provisional pick, structured local diagnostics |
 | `renderer-demo` | Exercise indexed LAS/LAZ View-to-render composition, exact review/correction, and local viewing measurement. | CLI, permitted corpus manifest, generated inputs, or an existing Workspace | Interactive demo, exact review outcome, GPU-free process smoke, or canonical Viewing Report |
 | `terrain-demo` | Own one recoverable headless LAS/LAZ-to-terrain Workflow Run and its private post-Run qualification. | Caller-owned paths, identities, baseline, correction/QA intent, limits, and returned LandXML declaration | Eight-frame journal, Revision, Terrain/QA evidence, LandXML/report, and separate Round-Trip Evidence |
 
 `source-copc`, constrained or true out-of-core terrain, general LandXML, general
-application UI, bindings, and remote storage are not implemented modules in
-the completed v0.14 scope. Display policy remains private to `renderer-demo`,
-and correction remains existing `point-workspace` commit policy; v0.14 adds no
-public display-policy or mutation-facade crate.
+application UI, supported browser bindings, and remote storage are not
+implemented modules in the completed v0.15 scope. The example-only
+`wasm-bindgen` boundary remains private to `browser-demo`; display policy
+remains private to application hosts, and correction remains existing
+`point-workspace` commit policy.
 
 ## 1. point-contracts
 
@@ -503,6 +506,7 @@ The allowlist is stricter than what Cargo can compile:
 | `render-protocol` | `point-contracts` |
 | `point-view` | `render-protocol` and narrow math/value dependencies |
 | `render-wgpu` | `render-protocol`, `point-contracts` |
+| `browser-demo` | `point-view`, `render-protocol`, `render-wgpu`, and narrow private serialization, browser, and WebGPU dependencies |
 | `renderer-demo` | only the Source/index/Workspace/review/View/render crates it composes |
 | `terrain-demo` | `source-las`, `point-source`, `point-index`, `point-workspace`, `point-terrain`, `point-contracts`, `foundation-runtime`, and narrow checksum, identity-generation, and error dependencies |
 
