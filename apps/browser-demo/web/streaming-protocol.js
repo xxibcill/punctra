@@ -342,8 +342,13 @@ export class RangeTransport {
     if (this.cacheMode !== "persistent") return;
     require(this.cacheStorage && typeof this.cacheStorage.open === "function", "cache_unavailable", "Cache API is unavailable");
     try {
-      if (this.invalidate) await this.cacheStorage.delete(namespace);
-      this.persistent = await this.cacheStorage.open(namespace);
+      if (this.invalidate) {
+        await awaitWithCancellation(this.cacheStorage.delete(namespace), this.signal);
+      }
+      this.persistent = await awaitWithCancellation(
+        this.cacheStorage.open(namespace),
+        this.signal,
+      );
     } catch (error) {
       throw cacheFailure(error);
     }
@@ -372,7 +377,10 @@ export class RangeTransport {
 
   async readPersistentCacheLedger() {
     try {
-      const response = await this.persistent.match(cacheLedgerUrl(this.deployment));
+      const response = await awaitWithCancellation(
+        this.persistent.match(cacheLedgerUrl(this.deployment)),
+        this.signal,
+      );
       if (!response) {
         await this.writePersistentCacheLedger(0, 0);
         return { entries: 0, bytes: 0 };
@@ -385,9 +393,12 @@ export class RangeTransport {
   }
 
   async writePersistentCacheLedger(entries, bytes) {
-    await this.persistent.put(
-      cacheLedgerUrl(this.deployment),
-      cacheLedgerResponse(this.deployment, entries, bytes),
+    await awaitWithCancellation(
+      this.persistent.put(
+        cacheLedgerUrl(this.deployment),
+        cacheLedgerResponse(this.deployment, entries, bytes),
+      ),
+      this.signal,
     );
   }
 
@@ -437,7 +448,7 @@ export class RangeTransport {
         );
         this.recordResponse(kind, bytes.byteLength);
         if (bytes.byteLength !== range.length) throw new StreamingFailure("range_truncated", `received ${bytes.byteLength} bytes instead of ${range.length}`);
-        await verifyDigest(bytes, range.sha256);
+        await verifyDigest(bytes, range.sha256, this.signal);
         return bytes;
       } catch (error) {
         const classified = classifyThrown(error, "offline");
@@ -459,12 +470,15 @@ export class RangeTransport {
     if (this.cacheMode === "memory") {
       const value = this.memory.get(key);
       if (!value) return undefined;
-      await verifyDigest(value, range.sha256);
+      await verifyDigest(value, range.sha256, this.signal);
       assertNotCancelled(this.signal);
       return value.slice();
     }
     try {
-      const response = await this.persistent.match(key);
+      const response = await awaitWithCancellation(
+        this.persistent.match(key),
+        this.signal,
+      );
       assertNotCancelled(this.signal);
       if (!response) return undefined;
       validateCachedMetadata(response, this.deployment, kind, resource, range);
@@ -476,7 +490,7 @@ export class RangeTransport {
         this.signal,
       );
       if (bytes.byteLength !== range.length) throw new StreamingFailure("range_corrupt", "cached range length differs");
-      await verifyDigest(bytes, range.sha256);
+      await verifyDigest(bytes, range.sha256, this.signal);
       assertNotCancelled(this.signal);
       return bytes;
     } catch (error) {
@@ -499,9 +513,12 @@ export class RangeTransport {
         // Reserve first so an interrupted or quota-failed body write can only
         // conservatively overcount, never permit the namespace to exceed a ceiling.
         await this.writePersistentCacheLedger(nextEntries, nextBytes);
-        await this.persistent.put(
-          key,
-          cachedResponse(this.deployment, kind, resource, range, bytes),
+        await awaitWithCancellation(
+          this.persistent.put(
+            key,
+            cachedResponse(this.deployment, kind, resource, range, bytes),
+          ),
+          this.signal,
         );
       } catch (error) {
         throw cacheFailure(error);
@@ -720,10 +737,14 @@ function validateRangeResponse(response, resource, range, requireAcceptRanges) {
   if (requireAcceptRanges && headers.get("accept-ranges")?.toLowerCase() !== "bytes") throw new StreamingFailure("range_unsupported", "Source response does not declare Accept-Ranges: bytes");
 }
 
-async function verifyDigest(bytes, expected) {
+async function verifyDigest(bytes, expected, signal) {
   const subtle = globalThis.crypto?.subtle;
   require(subtle, "unsupported_deployment", "Web Crypto SHA-256 is unavailable");
-  const actual = hex(new Uint8Array(await subtle.digest("SHA-256", bytes)));
+  const digestBytes = await awaitWithCancellation(
+    subtle.digest("SHA-256", bytes),
+    signal,
+  );
+  const actual = hex(new Uint8Array(digestBytes));
   equal(actual, expected, "range_corrupt", "range SHA-256");
 }
 
@@ -754,12 +775,12 @@ export async function readBoundedBody(
   const bytes = new Uint8Array(maximumBytes);
   let length = 0;
   while (true) {
-    const { done, value } = await reader.read();
+    const { done, value } = await awaitWithCancellation(reader.read(), signal);
     assertNotCancelled(signal);
     if (done) break;
     const nextLength = length + value.byteLength;
     if (nextLength > maximumBytes) {
-      await reader.cancel();
+      await awaitWithCancellation(reader.cancel(), signal);
       throw new StreamingFailure("resource_limit", `${label} exceeds ${maximumBytes} bytes`);
     }
     bytes.set(value, length);
@@ -917,6 +938,7 @@ function credentialMode(value) {
 }
 
 function cacheFailure(error) {
+  if (error instanceof StreamingFailure) return error;
   const code = error?.name === "QuotaExceededError" ? "cache_quota" : "cache_unavailable";
   return new StreamingFailure(code, error?.message ?? String(error), { cause: error });
 }
@@ -929,6 +951,30 @@ function classifyThrown(error, fallbackCode) {
 
 function assertNotCancelled(signal) {
   if (signal?.aborted) throw new StreamingFailure("cancelled", "the stream operation was cancelled");
+}
+
+function awaitWithCancellation(promise, signal) {
+  assertNotCancelled(signal);
+  if (!signal) return promise;
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (callback, value) => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener("abort", onAbort);
+      callback(value);
+    };
+    const onAbort = () => finish(
+      reject,
+      new StreamingFailure("cancelled", "the stream operation was cancelled"),
+    );
+    signal.addEventListener("abort", onAbort, { once: true });
+    if (signal.aborted) onAbort();
+    Promise.resolve(promise).then(
+      (value) => finish(resolve, value),
+      (error) => finish(reject, error),
+    );
+  });
 }
 
 function defaultDelay(milliseconds, signal) {

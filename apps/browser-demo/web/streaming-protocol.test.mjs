@@ -376,6 +376,25 @@ test("decode yields between batches so cancellation cannot race completion", asy
   assert.equal(publishedBatches, 1);
 });
 
+test("stalled persistent cache work cannot block cancellation acknowledgement", async () => {
+  const cacheStorage = new TestCacheStorage({ stalledPut: 1 });
+  const controller = new AbortController();
+  const operation = run(fixtureServer(), {}, {
+    cacheMode: "persistent",
+    cacheStorage,
+    signal: controller.signal,
+  });
+  await cacheStorage.putStalled;
+  const started = performance.now();
+  controller.abort();
+
+  await completesWithin(
+    rejectsWithCode(operation, "cancelled"),
+    LIMITS.cancellationMilliseconds,
+  );
+  assert.ok(performance.now() - started < LIMITS.cancellationMilliseconds);
+});
+
 test("unsupported bare or mismatched deployments fail before binary Fetch", async () => {
   const invalid = structuredClone(manifest);
   invalid.index = undefined;
@@ -555,10 +574,32 @@ async function rejectsWithCode(promise, code) {
   });
 }
 
+async function completesWithin(promise, milliseconds) {
+  let timeout;
+  try {
+    await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timeout = setTimeout(
+          () => reject(new Error(`operation exceeded ${milliseconds} milliseconds`)),
+          milliseconds,
+        );
+      }),
+    ]);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 class TestCacheStorage {
   constructor(options = {}) {
     this.namespaces = new Map();
     this.quotaFailure = options.quotaFailure === true;
+    this.stalledPut = options.stalledPut;
+    this.putCount = 0;
+    this.putStalled = new Promise((resolve) => {
+      this.markPutStalled = resolve;
+    });
   }
 
   async delete(name) {
@@ -571,6 +612,11 @@ class TestCacheStorage {
     return {
       match: async (key) => entries.get(typeof key === "string" ? key : key.url)?.clone(),
       put: async (key, response) => {
+        this.putCount += 1;
+        if (this.putCount === this.stalledPut) {
+          this.markPutStalled();
+          return new Promise(() => {});
+        }
         if (this.quotaFailure) throw new DOMException("quota full", "QuotaExceededError");
         entries.set(String(key), response.clone());
       },
