@@ -570,6 +570,10 @@ export function decodeRootSamples(bytes, deployment, onBatch = () => {}) {
   let previousOrdinal = -1;
   let batchCount = 0;
   let transferredBytes = 0;
+  let intensityMinimum = 65_535;
+  let intensityMaximum = 0;
+  let classificationMinimum = 255;
+  let classificationMaximum = 0;
   for (let first = 0; first < root.displayPointCount; first += LIMITS.transferBatchPoints) {
     const count = Math.min(LIMITS.transferBatchPoints, root.displayPointCount - first);
     const output = new ArrayBuffer(count * LIMITS.transferRecordBytes);
@@ -577,6 +581,10 @@ export function decodeRootSamples(bytes, deployment, onBatch = () => {}) {
     for (let row = 0; row < count; row += 1) {
       const decoded = decodeSample(view, (first + row) * SAMPLE_RECORD_BYTES, deployment, previousOrdinal);
       previousOrdinal = decoded.ordinal;
+      intensityMinimum = Math.min(intensityMinimum, decoded.intensity);
+      intensityMaximum = Math.max(intensityMaximum, decoded.intensity);
+      classificationMinimum = Math.min(classificationMinimum, decoded.classification);
+      classificationMaximum = Math.max(classificationMaximum, decoded.classification);
       encodeTransfer(encoded, row * LIMITS.transferRecordBytes, decoded);
     }
     batchCount += 1;
@@ -584,13 +592,24 @@ export function decodeRootSamples(bytes, deployment, onBatch = () => {}) {
     require(batchCount <= LIMITS.transferBatches, "resource_limit", "transferred batch count exceeds eight");
     onBatch(output, { batchIndex: batchCount - 1, pointCount: count });
   }
-  return { batchCount, pointCount: root.displayPointCount, transferredBytes, stagingBytesHighWater };
+  return {
+    batchCount,
+    pointCount: root.displayPointCount,
+    transferredBytes,
+    stagingBytesHighWater,
+    intensityMinimum,
+    intensityMaximum,
+    classificationMinimum,
+    classificationMaximum,
+  };
 }
 
 function decodeSample(view, offset, deployment, previousOrdinal) {
   const ordinal = u64(view, offset);
   require(ordinal > previousOrdinal, "range_corrupt", "root sample ordinals are not sorted and unique");
   const ticks = [i64(view, offset + 8), i64(view, offset + 16), i64(view, offset + 24)];
+  const intensity = view.getUint16(offset + 32, true);
+  const classification = view.getUint8(offset + 34);
   equal(view.getUint8(offset + 35), 0, "range_corrupt", "sample reserved byte");
   const world = ticks.map((tick, axis) => deployment.index.transform.offset[axis] + tick * deployment.index.transform.scale[axis]);
   require(world.every(Number.isFinite), "range_corrupt", "sample world position is not finite");
@@ -603,7 +622,7 @@ function decodeSample(view, offset, deployment, previousOrdinal) {
     rgb16ToRgb8(view.getUint16(offset + 40, true)),
     255,
   ];
-  return { ordinal, relative, color };
+  return { ordinal, relative, intensity, classification, color };
 }
 
 function rgb16ToRgb8(value) {

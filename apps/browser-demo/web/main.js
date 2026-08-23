@@ -607,6 +607,12 @@ function verifyStreamingResult(result, disposition) {
   assertFact(metrics.queuedRangeBytesHighWater <= 524_288, `${disposition} queue-byte ceiling`);
   assertFact(metrics.decodedStagingBytesHighWater <= 327_680, `${disposition} decode staging ceiling`);
   assertFact(metrics.transferredBatches <= 8, `${disposition} transfer-batch ceiling`);
+  assertFact(result.decode.intensityMinimum === 22, `${disposition} decoded intensity minimum`);
+  assertFact(result.decode.intensityMaximum === 65_519, `${disposition} decoded intensity maximum`);
+  assertFact(
+    result.decode.classificationMinimum === 2 && result.decode.classificationMaximum === 2,
+    `${disposition} decoded Ground classification`,
+  );
   assertFact(
     metrics.sourceNetworkBytes < result.deployment.source_byte_length,
     `${disposition} first frame precedes complete Source transfer`,

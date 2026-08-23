@@ -56,6 +56,10 @@ test("cold stream verifies bounded ranges and transfers four ordered batches", a
   assert.equal(result.metrics.transferredPoints, 4_096);
   assert.equal(result.metrics.transferredBytes, 98_304);
   assert.equal(result.metrics.decodedStagingBytesHighWater, 196_608);
+  assert.equal(result.decode.intensityMinimum, 22);
+  assert.equal(result.decode.intensityMaximum, 65_519);
+  assert.equal(result.decode.classificationMinimum, 2);
+  assert.equal(result.decode.classificationMaximum, 2);
   assert.equal(batches.length, 4);
   assert.ok(strictlyIncreasingOrdinals(batches));
   assert.equal(server.binaryRequests.length, 3);
