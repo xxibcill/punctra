@@ -336,6 +336,15 @@ test("retryable server failures stop at the declared bounded retry count", async
   assert.equal(exhausted.attempts, 4);
 });
 
+test("retryable responses are cancelled before the next Range attempt", async () => {
+  const server = fixtureServer({ scenario: "retry_open_body" });
+
+  await run(server, {}, { delay: async () => {} });
+
+  assert.equal(server.retryBodyCancellations, 1);
+  assert.equal(server.overlappingRetry, false);
+});
+
 test("offline, cancellation, quota, and worker failure have safe recovery codes", async () => {
   await rejectsWithCode(run(fixtureServer({ scenario: "offline" }), {}, { delay: async () => {} }), "offline");
 
@@ -445,6 +454,9 @@ function fixtureServer(options = {}) {
     attempts: 0,
     bodyReads: 0,
     binaryRequests: [],
+    overlappingRetry: false,
+    retryBodyCancellations: 0,
+    retryBodyOpen: false,
   };
   const servedManifest = options.manifestOverride ?? manifest;
   state.fetch = async (input, init = {}) => {
@@ -460,6 +472,18 @@ function fixtureServer(options = {}) {
     if (options.scenario === "retry_forever") return new Response(null, { status: 503 });
     if (options.scenario === "retry_twice" && state.binaryRequests.length === 0 && state.attempts <= 3) {
       return new Response(null, { status: 503 });
+    }
+    if (options.scenario === "retry_open_body" && state.attempts === 2) {
+      state.retryBodyOpen = true;
+      return new Response(new ReadableStream({
+        cancel() {
+          state.retryBodyOpen = false;
+          state.retryBodyCancellations += 1;
+        },
+      }), { status: 503 });
+    }
+    if (options.scenario === "retry_open_body" && state.retryBodyOpen) {
+      state.overlappingRetry = true;
     }
     const descriptor = binaryDescriptor(url, servedManifest);
     const range = new Headers(init.headers).get("Range");

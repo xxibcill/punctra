@@ -442,6 +442,7 @@ export class RangeTransport {
           signal: this.signal,
         });
         if (RETRYABLE_STATUS.has(response.status)) {
+          await cancelResponseBody(response, this.signal);
           if (attempt === LIMITS.retries) throw new StreamingFailure("retry_exhausted", `HTTP ${response.status} persisted after ${attempt + 1} attempts`);
           await this.retry(attempt);
           continue;
@@ -574,6 +575,20 @@ export class RangeTransport {
 
   snapshot() {
     return { ...this.metrics };
+  }
+}
+
+async function cancelResponseBody(response, signal) {
+  if (!response.body) return;
+  try {
+    await awaitWithCancellation(response.body.cancel(), signal);
+  } catch (error) {
+    assertNotCancelled(signal);
+    throw new StreamingFailure(
+      "retry_exhausted",
+      "the retryable response body could not be cancelled safely",
+      { cause: error },
+    );
   }
 }
 
