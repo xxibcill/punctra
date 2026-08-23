@@ -7,6 +7,7 @@ import {
   cacheEntryUrl,
   cacheNamespace,
   decodeRootSamples,
+  readBoundedBody,
   runStreamingOperation,
   validateManifest,
   workerFailure,
@@ -167,6 +168,22 @@ test("truncation, oversized bodies, and digest corruption remain distinct", asyn
   await rejectsWithCode(run(fixtureServer({ scenario: "truncated" })), "range_truncated");
   await rejectsWithCode(run(fixtureServer({ scenario: "oversized" })), "resource_limit");
   await rejectsWithCode(run(fixtureServer({ scenario: "corrupt" })), "range_corrupt");
+});
+
+test("bounded body reading copies chunks into one fixed-capacity buffer", async () => {
+  const response = new Response(new ReadableStream({
+    start(controller) {
+      controller.enqueue(Uint8Array.of(1, 2));
+      controller.enqueue(Uint8Array.of(3));
+      controller.close();
+    },
+  }));
+
+  const bytes = await readBoundedBody(response, 8, "test response");
+
+  assert.deepEqual([...bytes], [1, 2, 3]);
+  assert.equal(bytes.byteLength, 3);
+  assert.equal(bytes.buffer.byteLength, 8);
 });
 
 test("retryable server failures stop at the declared bounded retry count", async () => {

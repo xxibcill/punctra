@@ -599,7 +599,7 @@ async function verifyDigest(bytes, expected) {
   equal(actual, expected, "range_corrupt", "range SHA-256");
 }
 
-async function readBoundedBody(
+export async function readBoundedBody(
   response,
   maximumBytes,
   label,
@@ -621,25 +621,20 @@ async function readBoundedBody(
     `${label} requires a readable response stream`,
   );
   const reader = response.body.getReader();
-  const chunks = [];
+  const bytes = new Uint8Array(maximumBytes);
   let length = 0;
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
-    length += value.byteLength;
-    if (length > maximumBytes) {
+    const nextLength = length + value.byteLength;
+    if (nextLength > maximumBytes) {
       await reader.cancel();
       throw new StreamingFailure("resource_limit", `${label} exceeds ${maximumBytes} bytes`);
     }
-    chunks.push(value);
+    bytes.set(value, length);
+    length = nextLength;
   }
-  const bytes = new Uint8Array(length);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return bytes;
+  return bytes.subarray(0, length);
 }
 
 function cachedResponse(deployment, kind, resource, range, bytes) {
