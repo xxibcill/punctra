@@ -468,7 +468,7 @@ mod tests {
     fn stream_rejects_an_oversized_batch_before_decoding_records() {
         let mut stream = StreamingScene::idle();
         stream.begin(SOURCE, MAX_STREAM_POINTS, [0.0; 3]).unwrap();
-        let payload = vec![0; (MAX_TRANSFER_BATCH_POINTS as usize + 1) * TRANSFER_RECORD_BYTES];
+        let payload = vec![0; (max_transfer_batch_points() + 1) * TRANSFER_RECORD_BYTES];
 
         assert!(matches!(
             stream.publish(0, &payload),
@@ -482,6 +482,94 @@ mod tests {
     }
 
     #[test]
+    fn stream_point_limit_accepts_exact_and_rejects_one_over() {
+        let mut stream = StreamingScene::idle();
+        stream.begin(SOURCE, MAX_STREAM_POINTS, [0.0; 3]).unwrap();
+
+        assert!(matches!(
+            stream.begin(SOURCE, MAX_STREAM_POINTS + 1, [0.0; 3]),
+            Err(StreamError::ResourceLimit {
+                limit: StreamLimit::StreamPoints,
+                actual,
+                allowed: MAX_STREAM_POINTS,
+            }) if actual == MAX_STREAM_POINTS + 1
+        ));
+    }
+
+    #[test]
+    fn transfer_batch_limits_accept_exact_and_reject_one_over() {
+        let mut stream = StreamingScene::idle();
+        stream.begin(SOURCE, MAX_STREAM_POINTS, [0.0; 3]).unwrap();
+
+        stream
+            .validate_capacity(max_transfer_batch_points(), max_transfer_batch_bytes())
+            .unwrap();
+        assert!(matches!(
+            stream.validate_capacity(
+                max_transfer_batch_points() + 1,
+                max_transfer_batch_bytes(),
+            ),
+            Err(StreamError::ResourceLimit {
+                limit: StreamLimit::BatchPoints,
+                actual,
+                allowed: MAX_TRANSFER_BATCH_POINTS,
+            }) if actual == MAX_TRANSFER_BATCH_POINTS + 1
+        ));
+        assert!(matches!(
+            stream.validate_capacity(
+                max_transfer_batch_points(),
+                max_transfer_batch_bytes() + 1,
+            ),
+            Err(StreamError::ResourceLimit {
+                limit: StreamLimit::BatchBytes,
+                actual,
+                allowed: MAX_TRANSFER_BATCH_BYTES,
+            }) if actual == MAX_TRANSFER_BATCH_BYTES + 1
+        ));
+    }
+
+    #[test]
+    fn transfer_batch_count_accepts_exact_and_rejects_one_over() {
+        let mut stream = StreamingScene::idle();
+        stream.begin(SOURCE, MAX_STREAM_POINTS, [0.0; 3]).unwrap();
+        for batch_index in 0..max_transfer_batches() {
+            stream
+                .publish(batch_index, &payload(&[(u64::from(batch_index), [0.0; 3])]))
+                .unwrap();
+        }
+
+        assert_eq!(stream.facts().published_batches, MAX_TRANSFER_BATCHES);
+        assert!(matches!(
+            stream.publish(
+                max_transfer_batches(),
+                &payload(&[(MAX_TRANSFER_BATCHES, [0.0; 3])]),
+            ),
+            Err(StreamError::ResourceLimit {
+                limit: StreamLimit::Batches,
+                actual,
+                allowed: MAX_TRANSFER_BATCHES,
+            }) if actual == MAX_TRANSFER_BATCHES + 1
+        ));
+    }
+
+    #[test]
+    fn expected_point_limit_accepts_exact_and_rejects_one_over() {
+        let mut stream = StreamingScene::idle();
+        stream.begin(SOURCE, 1, [0.0; 3]).unwrap();
+        stream.publish(0, &payload(&[(0, [0.0; 3])])).unwrap();
+
+        assert_eq!(stream.facts().published_points, 1);
+        assert!(matches!(
+            stream.publish(1, &payload(&[(1, [0.0; 3])])),
+            Err(StreamError::ResourceLimit {
+                limit: StreamLimit::ExpectedPoints,
+                actual: 2,
+                allowed: 1,
+            })
+        ));
+    }
+
+    #[test]
     fn fixed_limits_are_independent_and_serializable() {
         let value = serde_json::to_value(StreamingLimitFacts::fixed()).unwrap();
         assert_eq!(value["concurrent_requests"], 1);
@@ -492,6 +580,18 @@ mod tests {
         assert_eq!(value["stream_points"], 8_192);
         assert_eq!(value["persistent_cache_bytes"], 4_194_304);
         assert_eq!(value["cancellation_milliseconds"], 1_000);
+    }
+
+    fn max_transfer_batch_points() -> usize {
+        usize::try_from(MAX_TRANSFER_BATCH_POINTS).expect("batch Point limit fits usize")
+    }
+
+    fn max_transfer_batch_bytes() -> usize {
+        usize::try_from(MAX_TRANSFER_BATCH_BYTES).expect("batch byte limit fits usize")
+    }
+
+    fn max_transfer_batches() -> u32 {
+        u32::try_from(MAX_TRANSFER_BATCHES).expect("batch-count limit fits u32")
     }
 
     fn payload(points: &[(u64, [f32; 3])]) -> Vec<u8> {
