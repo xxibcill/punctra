@@ -1,0 +1,78 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { runWorkerOperation } from "./worker-operation.js";
+
+test("worker operation owns creation, settlement, and termination", async () => {
+  const worker = new FakeWorker();
+  const pending = runWorkerOperation({
+    WorkerConstructor: class {
+      constructor(url, options) {
+        assert.equal(url, "worker.js");
+        assert.deepEqual(options, { type: "module", name: "operation-1" });
+        return worker;
+      }
+    },
+    workerUrl: "worker.js",
+    workerName: "operation-1",
+    timeoutMilliseconds: 100,
+    timeoutFailure: { code: "timeout" },
+    errorFailure: (event) => ({ code: "error", message: event.message }),
+    messageErrorFailure: { code: "message_error" },
+    initialMessage: { type: "start" },
+    onMessage(message, controls) {
+      if (message.type === "complete") controls.resolve(message.value);
+    },
+  });
+
+  assert.deepEqual(worker.messages, [{ type: "start" }]);
+  worker.emit("message", { data: { type: "complete", value: 42 } });
+  worker.emit("message", { data: { type: "complete", value: 99 } });
+
+  assert.equal(await pending, 42);
+  assert.equal(worker.terminations, 1);
+});
+
+test("worker operation maps errors and terminates", async () => {
+  const worker = new FakeWorker();
+  const pending = runWorkerOperation({
+    WorkerConstructor: class { constructor() { return worker; } },
+    workerUrl: "worker.js",
+    workerName: "operation-2",
+    timeoutMilliseconds: 100,
+    timeoutFailure: { code: "timeout" },
+    errorFailure: (event) => ({ code: "error", message: event.message }),
+    messageErrorFailure: { code: "message_error" },
+    initialMessage: { type: "start" },
+    onMessage() {},
+  });
+
+  worker.emit("error", { message: "worker crashed" });
+
+  await assert.rejects(pending, (error) => error.code === "error");
+  assert.equal(worker.terminations, 1);
+});
+
+class FakeWorker {
+  constructor() {
+    this.listeners = new Map();
+    this.messages = [];
+    this.terminations = 0;
+  }
+
+  addEventListener(type, listener) {
+    this.listeners.set(type, listener);
+  }
+
+  postMessage(message) {
+    this.messages.push(message);
+  }
+
+  terminate() {
+    this.terminations += 1;
+  }
+
+  emit(type, event) {
+    this.listeners.get(type)?.(event);
+  }
+}

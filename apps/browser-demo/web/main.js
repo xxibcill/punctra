@@ -1,3 +1,5 @@
+import { runWorkerOperation } from "./worker-operation.js?v=16-qualified";
+
 const canvas = document.querySelector("#punctra-canvas");
 const canvasShell = document.querySelector("#canvas-shell");
 const statusBlock = document.querySelector("#status-block");
@@ -456,61 +458,15 @@ function publishAcceptanceEvidence(renderer, cancellation, cold, warm) {
 function runCancellationProbe() {
   const operationId = `browser-v016-cancel-${Date.now()}-${streamSequence}`;
   streamSequence += 1;
-  return new Promise((resolve, reject) => {
-    const worker = new Worker(`./stream-worker.js?v=${BUILD_CACHE_TOKEN}-${streamSequence}`, {
-      type: "module",
-      name: operationId,
-    });
-    let cancelStarted;
-    let settled = false;
-    const timeout = window.setTimeout(() => {
-      finish(reject, new Error("stream worker did not acknowledge cancellation"));
-    }, 1_500);
-
-    function finish(callback, value) {
-      if (settled) return;
-      settled = true;
-      window.clearTimeout(timeout);
-      worker.terminate();
-      callback(value);
-    }
-
-    worker.addEventListener("error", (event) => finish(reject, new Error(event.message)));
-    worker.addEventListener("messageerror", () => {
-      finish(reject, new Error("the browser could not deserialize the cancellation response"));
-    });
-    worker.addEventListener("message", (event) => {
-      const message = event.data;
-      if (message?.schema !== WORKER_SCHEMA || message.operation_id !== operationId) return;
-      if (message.type === "state" && message.phase === "starting" && cancelStarted === undefined) {
-        cancelStarted = performance.now();
-        worker.postMessage({
-          schema: WORKER_SCHEMA,
-          type: "cancel",
-          operation_id: operationId,
-        });
-      } else if (message.type === "failure") {
-        try {
-          assertFact(cancelStarted !== undefined, "cancellation followed worker start");
-          assertFact(message.code === "cancelled", "deterministic cancellation code");
-          const acknowledgementMilliseconds = performance.now() - cancelStarted;
-          assertFact(
-            acknowledgementMilliseconds <= 1_000,
-            "cancellation acknowledgement deadline",
-          );
-          finish(resolve, {
-            code: message.code,
-            acknowledgement_milliseconds: acknowledgementMilliseconds,
-            limit_milliseconds: 1_000,
-          });
-        } catch (error) {
-          finish(reject, error);
-        }
-      } else if (message.type === "complete") {
-        finish(reject, new Error("cancelled stream operation completed"));
-      }
-    });
-    worker.postMessage({
+  let cancelStarted;
+  return runWorkerOperation({
+    workerUrl: `./stream-worker.js?v=${BUILD_CACHE_TOKEN}-${streamSequence}`,
+    workerName: operationId,
+    timeoutMilliseconds: 1_500,
+    timeoutFailure: new Error("stream worker did not acknowledge cancellation"),
+    errorFailure: (event) => new Error(event.message),
+    messageErrorFailure: new Error("the browser could not deserialize the cancellation response"),
+    initialMessage: {
       schema: WORKER_SCHEMA,
       type: "start",
       operation_id: operationId,
@@ -518,7 +474,33 @@ function runCancellationProbe() {
       cache_mode: "none",
       invalidate: false,
       credentials: "same-origin",
-    });
+    },
+    onMessage(message, controls) {
+      if (message?.schema !== WORKER_SCHEMA || message.operation_id !== operationId) return;
+      if (message.type === "state" && message.phase === "starting" && cancelStarted === undefined) {
+        cancelStarted = performance.now();
+        controls.postMessage({
+          schema: WORKER_SCHEMA,
+          type: "cancel",
+          operation_id: operationId,
+        });
+      } else if (message.type === "failure") {
+        assertFact(cancelStarted !== undefined, "cancellation followed worker start");
+        assertFact(message.code === "cancelled", "deterministic cancellation code");
+        const acknowledgementMilliseconds = performance.now() - cancelStarted;
+        assertFact(
+          acknowledgementMilliseconds <= 1_000,
+          "cancellation acknowledgement deadline",
+        );
+        controls.resolve({
+          code: message.code,
+          acknowledgement_milliseconds: acknowledgementMilliseconds,
+          limit_milliseconds: 1_000,
+        });
+      } else if (message.type === "complete") {
+        controls.reject(new Error("cancelled stream operation completed"));
+      }
+    },
   });
 }
 
@@ -534,89 +516,16 @@ function compactStreamResult(result) {
 function runWorkerStream({ cacheMode, invalidate }) {
   const operationId = `browser-v016-${Date.now()}-${streamSequence}`;
   streamSequence += 1;
-  return new Promise((resolve, reject) => {
-    const worker = new Worker(`./stream-worker.js?v=${BUILD_CACHE_TOKEN}-${streamSequence}`, {
-      type: "module",
-      name: operationId,
-    });
-    let deployment;
-    let mainThreadMillisecondsHighWater = 0;
-    let settled = false;
-    const timeout = window.setTimeout(() => {
-      fail({
-        schema: WORKER_SCHEMA,
-        type: "failure",
-        code: "worker_failed",
-        message: "stream worker did not complete within 30 seconds",
-        safe_action: "Terminate the worker, keep the current frame, and create a new worker before retrying.",
-      });
-    }, 30_000);
-
-    function finish(callback, value) {
-      if (settled) return;
-      settled = true;
-      window.clearTimeout(timeout);
-      worker.terminate();
-      callback(value);
-    }
-
-    function fail(error) {
-      finish(reject, error);
-    }
-
-    worker.addEventListener("error", (event) => {
-      fail({
-        schema: WORKER_SCHEMA,
-        type: "failure",
-        code: "worker_failed",
-        message: event.message,
-        safe_action: "Terminate the worker, keep the current frame, and create a new worker before retrying.",
-      });
-    });
-    worker.addEventListener("messageerror", () => {
-      fail({
-        schema: WORKER_SCHEMA,
-        type: "failure",
-        code: "worker_failed",
-        message: "the browser could not deserialize a worker message",
-        safe_action: "Terminate the worker, keep the current frame, and create a new worker before retrying.",
-      });
-    });
-    worker.addEventListener("message", (event) => {
-      try {
-        const message = event.data;
-        if (message?.schema !== WORKER_SCHEMA || message.operation_id !== operationId) return;
-        if (message.type === "failure") {
-          fail(message);
-        } else if (message.type === "deployment") {
-          deployment = message.deployment;
-          beginRemoteScene(deployment);
-        } else if (message.type === "state") {
-          streamingFacts = message.metrics ?? streamingFacts;
-        } else if (message.type === "batch") {
-          const started = performance.now();
-          publishRemoteBatch(message);
-          mainThreadMillisecondsHighWater = Math.max(
-            mainThreadMillisecondsHighWater,
-            performance.now() - started,
-          );
-        } else if (message.type === "complete") {
-          const diagnostics = completeRemoteScene();
-          streamingFacts = message.metrics;
-          publishDiagnostics(diagnostics);
-          finish(resolve, {
-            deployment: message.deployment,
-            metrics: message.metrics,
-            decode: message.decode,
-            main_thread_milliseconds_high_water: mainThreadMillisecondsHighWater,
-            renderer: diagnostics,
-          });
-        }
-      } catch (error) {
-        fail(failureRecord(error));
-      }
-    });
-    worker.postMessage({
+  let deployment;
+  let mainThreadMillisecondsHighWater = 0;
+  return runWorkerOperation({
+    workerUrl: `./stream-worker.js?v=${BUILD_CACHE_TOKEN}-${streamSequence}`,
+    workerName: operationId,
+    timeoutMilliseconds: 30_000,
+    timeoutFailure: workerFailureRecord("stream worker did not complete within 30 seconds"),
+    errorFailure: (event) => workerFailureRecord(event.message),
+    messageErrorFailure: workerFailureRecord("the browser could not deserialize a worker message"),
+    initialMessage: {
       schema: WORKER_SCHEMA,
       type: "start",
       operation_id: operationId,
@@ -624,8 +533,47 @@ function runWorkerStream({ cacheMode, invalidate }) {
       cache_mode: cacheMode,
       invalidate,
       credentials: "same-origin",
-    });
+    },
+    onMessage(message, controls) {
+      if (message?.schema !== WORKER_SCHEMA || message.operation_id !== operationId) return;
+      if (message.type === "failure") {
+        controls.reject(message);
+      } else if (message.type === "deployment") {
+        deployment = message.deployment;
+        beginRemoteScene(deployment);
+      } else if (message.type === "state") {
+        streamingFacts = message.metrics ?? streamingFacts;
+      } else if (message.type === "batch") {
+        const started = performance.now();
+        publishRemoteBatch(message);
+        mainThreadMillisecondsHighWater = Math.max(
+          mainThreadMillisecondsHighWater,
+          performance.now() - started,
+        );
+      } else if (message.type === "complete") {
+        const diagnostics = completeRemoteScene();
+        streamingFacts = message.metrics;
+        publishDiagnostics(diagnostics);
+        controls.resolve({
+          deployment: message.deployment,
+          metrics: message.metrics,
+          decode: message.decode,
+          main_thread_milliseconds_high_water: mainThreadMillisecondsHighWater,
+          renderer: diagnostics,
+        });
+      }
+    },
   });
+}
+
+function workerFailureRecord(message) {
+  return {
+    schema: WORKER_SCHEMA,
+    type: "failure",
+    code: "worker_failed",
+    message,
+    safe_action: "Terminate the worker, keep the current frame, and create a new worker before retrying.",
+  };
 }
 
 function beginRemoteScene(deployment) {
