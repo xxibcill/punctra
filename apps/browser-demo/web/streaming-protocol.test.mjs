@@ -71,13 +71,13 @@ test("cold stream verifies bounded ranges and transfers four ordered batches", a
   ]);
 });
 
-test("worker RGB mapping matches the exact repository U16 conversion", () => {
+test("worker RGB mapping matches the exact repository U16 conversion", async () => {
   const deployment = validateManifest(manifest, MANIFEST_URL);
   const range = deployment.index.root.sampleRange;
   const sampleBytes = indexBytes.subarray(range.offset, range.offset + range.length);
   const batches = [];
 
-  decodeRootSamples(sampleBytes, deployment, (buffer) => batches.push(buffer));
+  await decodeRootSamples(sampleBytes, deployment, (buffer) => batches.push(buffer));
 
   let sampleIndex = 0;
   for (const buffer of batches) {
@@ -117,18 +117,18 @@ test("queued-range bytes accept the exact ceiling and reject one over", () => {
   );
 });
 
-test("decode staging rejects the first record-width step over its ceiling before allocation", () => {
+test("decode staging rejects the first record-width step over its ceiling before allocation", async () => {
   const acceptedCount = 7_216;
   const acceptedBytes = sampleRecords(acceptedCount);
   const acceptedDeployment = decodeBoundaryDeployment(acceptedCount);
-  const accepted = decodeRootSamples(acceptedBytes, acceptedDeployment);
+  const accepted = await decodeRootSamples(acceptedBytes, acceptedDeployment);
   assert.equal(accepted.stagingBytesHighWater, LIMITS.workerStagingBytes - 32);
   assert.equal(accepted.batchCount, LIMITS.transferBatches);
 
   const rejectedCount = acceptedCount + 1;
   const rejectedBytes = new Uint8Array(rejectedCount * 42);
-  assert.throws(
-    () => decodeRootSamples(rejectedBytes, decodeBoundaryDeployment(rejectedCount)),
+  await assert.rejects(
+    decodeRootSamples(rejectedBytes, decodeBoundaryDeployment(rejectedCount)),
     (error) => error instanceof StreamingFailure && error.code === "resource_limit",
   );
 });
@@ -328,6 +328,52 @@ test("offline, cancellation, quota, and worker failure have safe recovery codes"
   const failure = workerFailure("worker crashed");
   assert.equal(failure.code, "worker_failed");
   assert.match(failure.safe_action, /create a new worker/);
+});
+
+test("warm cache reads acknowledge cancellation instead of completing", async () => {
+  const memoryCacheStorage = new Map();
+  const server = fixtureServer();
+  await run(server, {}, { cacheMode: "memory", memoryCacheStorage });
+  const binaryRequestsAfterCold = server.binaryRequests.length;
+  const controller = new AbortController();
+
+  await rejectsWithCode(
+    run(
+      server,
+      {
+        onState: (phase) => {
+          if (phase === "probing_source") controller.abort();
+        },
+      },
+      {
+        cacheMode: "memory",
+        memoryCacheStorage,
+        signal: controller.signal,
+      },
+    ),
+    "cancelled",
+  );
+  assert.equal(server.binaryRequests.length, binaryRequestsAfterCold);
+});
+
+test("decode yields between batches so cancellation cannot race completion", async () => {
+  const controller = new AbortController();
+  let publishedBatches = 0;
+
+  await rejectsWithCode(
+    run(
+      fixtureServer(),
+      {
+        onBatch: () => {
+          publishedBatches += 1;
+          setTimeout(() => controller.abort(), 0);
+        },
+      },
+      { signal: controller.signal },
+    ),
+    "cancelled",
+  );
+  assert.equal(publishedBatches, 1);
 });
 
 test("unsupported bare or mismatched deployments fail before binary Fetch", async () => {

@@ -116,6 +116,7 @@ export async function runStreamingOperation(configuration, hooks = {}) {
   );
   const deployment = validateManifest(manifest, configuration.manifestUrl);
   hooks.onDeployment?.(deployment);
+  assertNotCancelled(configuration.signal);
   const transport = new RangeTransport({
     deployment,
     cacheMode: configuration.cacheMode,
@@ -128,6 +129,7 @@ export async function runStreamingOperation(configuration, hooks = {}) {
     delay: configuration.delay,
   });
   await transport.initialize();
+  assertNotCancelled(configuration.signal);
   hooks.onState?.("probing_source", transport.snapshot());
   await transport.fetchRange("source", deployment.source.probe, true);
   hooks.onState?.("validating_index", transport.snapshot());
@@ -143,7 +145,12 @@ export async function runStreamingOperation(configuration, hooks = {}) {
     deployment.index.root.sampleRange,
     false,
   );
-  const decodeFacts = decodeRootSamples(samples, deployment, hooks.onBatch);
+  const decodeFacts = await decodeRootSamples(
+    samples,
+    deployment,
+    hooks.onBatch,
+    configuration.signal,
+  );
   transport.recordDecode(decodeFacts);
   return {
     deployment,
@@ -164,7 +171,13 @@ export async function loadManifest(url, fetchImplementation, signal) {
     if (!response.ok || response.status !== 200) {
       throw new StreamingFailure("manifest_invalid", `manifest returned HTTP ${response.status}`);
     }
-    const bytes = await readBoundedBody(response, LIMITS.manifestBytes, "manifest");
+    const bytes = await readBoundedBody(
+      response,
+      LIMITS.manifestBytes,
+      "manifest",
+      "manifest_invalid",
+      signal,
+    );
     return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
   } catch (error) {
     throw classifyThrown(error, "manifest_invalid");
@@ -379,6 +392,7 @@ export class RangeTransport {
   }
 
   async fetchRange(kind, range, requireAcceptRanges) {
+    assertNotCancelled(this.signal);
     const resource = kind === "source" ? this.deployment.source : this.deployment.index;
     const key = cacheEntryUrl(this.deployment, kind, range);
     const cached = await this.readCache(key, kind, resource, range);
@@ -388,6 +402,7 @@ export class RangeTransport {
     }
     const bytes = await this.fetchNetwork(kind, resource, range, requireAcceptRanges);
     await this.writeCache(key, kind, resource, range, bytes);
+    assertNotCancelled(this.signal);
     this.recordNetwork(kind, bytes.byteLength);
     return bytes;
   }
@@ -418,6 +433,7 @@ export class RangeTransport {
           range.length,
           "Range response",
           "range_truncated",
+          this.signal,
         );
         this.recordResponse(kind, bytes.byteLength);
         if (bytes.byteLength !== range.length) throw new StreamingFailure("range_truncated", `received ${bytes.byteLength} bytes instead of ${range.length}`);
@@ -438,15 +454,18 @@ export class RangeTransport {
   }
 
   async readCache(key, kind, resource, range) {
+    assertNotCancelled(this.signal);
     if (this.cacheMode === "none") return undefined;
     if (this.cacheMode === "memory") {
       const value = this.memory.get(key);
       if (!value) return undefined;
       await verifyDigest(value, range.sha256);
+      assertNotCancelled(this.signal);
       return value.slice();
     }
     try {
       const response = await this.persistent.match(key);
+      assertNotCancelled(this.signal);
       if (!response) return undefined;
       validateCachedMetadata(response, this.deployment, kind, resource, range);
       const bytes = await readBoundedBody(
@@ -454,9 +473,11 @@ export class RangeTransport {
         range.length,
         "cached range",
         "range_corrupt",
+        this.signal,
       );
       if (bytes.byteLength !== range.length) throw new StreamingFailure("range_corrupt", "cached range length differs");
       await verifyDigest(bytes, range.sha256);
+      assertNotCancelled(this.signal);
       return bytes;
     } catch (error) {
       if (error instanceof StreamingFailure) throw error;
@@ -588,7 +609,13 @@ export function validateIndexHeaderAndRoot(bytes, deployment) {
   equal(hex(bytes.subarray(root + 136, root + 168)), deployment.index.root.diskChecksum, "index_incompatible", "root disk sample checksum");
 }
 
-export function decodeRootSamples(bytes, deployment, onBatch = () => {}) {
+export async function decodeRootSamples(
+  bytes,
+  deployment,
+  onBatch = () => {},
+  signal,
+) {
+  assertNotCancelled(signal);
   const root = deployment.index.root;
   equal(bytes.byteLength, root.sampleRange.length, "range_truncated", "root sample bytes");
   const outputBytesHighWater =
@@ -625,6 +652,8 @@ export function decodeRootSamples(bytes, deployment, onBatch = () => {}) {
     transferredBytes += output.byteLength;
     require(batchCount <= LIMITS.transferBatches, "resource_limit", "transferred batch count exceeds eight");
     onBatch(output, { batchIndex: batchCount - 1, pointCount: count });
+    await yieldForCancellation(signal);
+    assertNotCancelled(signal);
   }
   return {
     batchCount,
@@ -703,7 +732,9 @@ export async function readBoundedBody(
   maximumBytes,
   label,
   invalidLengthCode = "manifest_invalid",
+  signal,
 ) {
+  assertNotCancelled(signal);
   const declared = response.headers.get("content-length");
   if (declared !== null) {
     const length = Number(declared);
@@ -724,6 +755,7 @@ export async function readBoundedBody(
   let length = 0;
   while (true) {
     const { done, value } = await reader.read();
+    assertNotCancelled(signal);
     if (done) break;
     const nextLength = length + value.byteLength;
     if (nextLength > maximumBytes) {
@@ -907,6 +939,14 @@ function defaultDelay(milliseconds, signal) {
       reject(new DOMException("cancelled", "AbortError"));
     }, { once: true });
   });
+}
+
+async function yieldForCancellation(signal) {
+  try {
+    await defaultDelay(0, signal);
+  } catch (error) {
+    throw classifyThrown(error, "cancelled");
+  }
 }
 
 function resolvedHttpUrl(value, base, label) {
