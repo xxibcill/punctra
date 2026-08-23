@@ -6,6 +6,7 @@ import {
   StreamingFailure,
   cacheEntryUrl,
   cacheNamespace,
+  decodeRootSamples,
   runStreamingOperation,
   validateManifest,
   workerFailure,
@@ -53,6 +54,31 @@ test("cold stream verifies bounded ranges and transfers four ordered batches", a
     "bytes=0-407",
     "bytes=744-172775",
   ]);
+});
+
+test("worker RGB mapping matches the exact repository U16 conversion", () => {
+  const deployment = validateManifest(manifest, MANIFEST_URL);
+  const range = deployment.index.root.sampleRange;
+  const sampleBytes = indexBytes.subarray(range.offset, range.offset + range.length);
+  const batches = [];
+
+  decodeRootSamples(sampleBytes, deployment, (buffer) => batches.push(buffer));
+
+  let sampleIndex = 0;
+  for (const buffer of batches) {
+    const transferred = new DataView(buffer);
+    for (let offset = 0; offset < buffer.byteLength; offset += 24) {
+      for (let channel = 0; channel < 3; channel += 1) {
+        const value = indexBytes.readUInt16LE(
+          range.offset + sampleIndex * 42 + 36 + channel * 2,
+        );
+        const expected = Math.floor((value * 255 + 32_767) / 65_535);
+        assert.equal(transferred.getUint8(offset + 20 + channel), expected);
+      }
+      sampleIndex += 1;
+    }
+  }
+  assert.equal(sampleIndex, deployment.index.root.displayPointCount);
 });
 
 test("persistent warm stream reuses only the exact identity-versioned ranges", async () => {

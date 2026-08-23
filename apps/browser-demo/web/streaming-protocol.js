@@ -506,12 +506,16 @@ function decodeSample(view, offset, deployment, previousOrdinal) {
   const relative = world.map((value, axis) => Math.fround(value - deployment.index.root.worldOrigin[axis]));
   require(relative.every(Number.isFinite), "range_corrupt", "sample relative position is not finite f32");
   const color = [
-    view.getUint16(offset + 36, true) >>> 8,
-    view.getUint16(offset + 38, true) >>> 8,
-    view.getUint16(offset + 40, true) >>> 8,
+    rgb16ToRgb8(view.getUint16(offset + 36, true)),
+    rgb16ToRgb8(view.getUint16(offset + 38, true)),
+    rgb16ToRgb8(view.getUint16(offset + 40, true)),
     255,
   ];
   return { ordinal, relative, color };
+}
+
+function rgb16ToRgb8(value) {
+  return Math.floor((value * 255 + 32_767) / 65_535);
 }
 
 function encodeTransfer(view, offset, sample) {
