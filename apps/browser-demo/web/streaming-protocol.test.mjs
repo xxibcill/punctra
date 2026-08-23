@@ -41,6 +41,12 @@ test("cold stream verifies bounded ranges and transfers four ordered batches", a
   assert.equal(result.metrics.sourceNetworkBytes, 256);
   assert.equal(result.metrics.indexNetworkBytes, 172_440);
   assert.equal(result.metrics.networkBytes, 172_696);
+  assert.equal(result.metrics.sourceRequestedBytes, 256);
+  assert.equal(result.metrics.sourceReceivedBytes, 256);
+  assert.equal(result.metrics.indexRequestedBytes, 172_440);
+  assert.equal(result.metrics.indexReceivedBytes, 172_440);
+  assert.equal(result.metrics.requestedBytes, 172_696);
+  assert.equal(result.metrics.receivedBytes, 172_696);
   assert.ok(result.metrics.sourceNetworkBytes < result.deployment.source.byteLength);
   assert.equal(result.metrics.transferredBatches, 4);
   assert.equal(result.metrics.transferredPoints, 4_096);
@@ -167,6 +173,12 @@ test("retryable server failures stop at the declared bounded retry count", async
   const recovers = fixtureServer({ scenario: "retry_twice" });
   const result = await run(recovers, {}, { delay: async () => {} });
   assert.equal(result.metrics.retries, 2);
+  assert.equal(result.metrics.sourceRequestedBytes, 768);
+  assert.equal(result.metrics.sourceReceivedBytes, 256);
+  assert.equal(result.metrics.indexRequestedBytes, 172_440);
+  assert.equal(result.metrics.indexReceivedBytes, 172_440);
+  assert.equal(result.metrics.requestedBytes, 173_208);
+  assert.equal(result.metrics.receivedBytes, 172_696);
   assert.equal(recovers.attempts, 6);
 
   const exhausted = fixtureServer({ scenario: "retry_forever" });

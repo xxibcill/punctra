@@ -307,18 +307,19 @@ export class RangeTransport {
       this.recordCacheHit(kind, cached.byteLength);
       return cached;
     }
-    const bytes = await this.fetchNetwork(resource, range, requireAcceptRanges);
+    const bytes = await this.fetchNetwork(kind, resource, range, requireAcceptRanges);
     await this.writeCache(key, kind, resource, range, bytes);
     this.recordNetwork(kind, bytes.byteLength);
     return bytes;
   }
 
-  async fetchNetwork(resource, range, requireAcceptRanges) {
+  async fetchNetwork(kind, resource, range, requireAcceptRanges) {
     const start = range.offset;
     const end = start + range.length - 1;
     for (let attempt = 0; attempt <= LIMITS.retries; attempt += 1) {
       assertNotCancelled(this.signal);
       try {
+        this.recordRequest(kind, range.length);
         const response = await this.fetchImplementation(resource.url, {
           method: "GET",
           headers: { Range: `bytes=${start}-${end}` },
@@ -339,6 +340,7 @@ export class RangeTransport {
           "Range response",
           "range_truncated",
         );
+        this.recordResponse(kind, bytes.byteLength);
         if (bytes.byteLength !== range.length) throw new StreamingFailure("range_truncated", `received ${bytes.byteLength} bytes instead of ${range.length}`);
         await verifyDigest(bytes, range.sha256);
         return bytes;
@@ -416,6 +418,16 @@ export class RangeTransport {
     this.metrics.networkBytes += bytes;
     this.metrics[`${kind}NetworkBytes`] += bytes;
     this.metrics.concurrentResponseBytesHighWater = Math.max(this.metrics.concurrentResponseBytesHighWater, bytes);
+  }
+
+  recordRequest(kind, bytes) {
+    this.metrics.requestedBytes += bytes;
+    this.metrics[`${kind}RequestedBytes`] += bytes;
+  }
+
+  recordResponse(kind, bytes) {
+    this.metrics.receivedBytes += bytes;
+    this.metrics[`${kind}ReceivedBytes`] += bytes;
   }
 
   recordDecode(facts) {
@@ -664,6 +676,12 @@ function freshMetrics() {
     networkBytes: 0,
     sourceNetworkBytes: 0,
     indexNetworkBytes: 0,
+    requestedBytes: 0,
+    receivedBytes: 0,
+    sourceRequestedBytes: 0,
+    sourceReceivedBytes: 0,
+    indexRequestedBytes: 0,
+    indexReceivedBytes: 0,
     cacheHits: 0,
     cacheBytes: 0,
     sourceCacheBytes: 0,
