@@ -1,7 +1,7 @@
 # Punctra Roadmap
 
 Status: living guidance
-Last reviewed: 2026-08-22
+Last reviewed: 2026-08-23
 
 This roadmap communicates direction, not a delivery promise. It has no fixed
 dates. Candidate releases may be split, merged, reordered, renamed, or skipped
@@ -15,10 +15,10 @@ support gates remain historically accurate, but they do not determine the next
 product direction. The project now pivots from a desktop terrain-delivery
 hypothesis to an embeddable browser point-cloud rendering engine.
 
-v0.15 is the completed repository-verified browser-foundation release.
-Versions v0.16 through v0.30 remain uncommitted Candidate themes. v0.15–v0.20
-establish browser execution, streaming, the viewer API, embedding, and platform
-qualification. v0.21–v0.29
+v0.15 is the completed repository-verified browser-foundation release. v0.16
+is the Active HTTP Range streaming release. Versions v0.17 through v0.30
+remain uncommitted Candidate themes. v0.15–v0.20 establish browser execution,
+streaming, the viewer API, embedding, and platform qualification. v0.21–v0.29
 then improve and qualify visual quality. v0.30 is the earliest planned browser-
 engine release candidate; no earlier future release may be represented as a
 product release candidate. The historical v0.9 "Trust and v1 candidate" name
@@ -91,7 +91,7 @@ release can be Complete while every product gate remains outstanding.
 ## Current pivot checkpoint
 
 Status: **v0.15 complete and repository-verified for one bounded local browser-
-foundation slice; v0.16 remains Candidate without accepted scope**
+foundation slice; v0.16 Active under its accepted design**
 
 The completed v0.1–v0.14 contracts are inputs to the pivot, not permission to
 carry the old product sequence forward. In particular:
@@ -113,6 +113,13 @@ host ownership model, resource accounting, and local browser acceptance
 harness. Its generated in-memory scene intentionally precedes the remote
 representative LAS/LAZ Source and measured delivery behavior required to
 activate v0.16.
+
+The accepted [v0.16 HTTP Range streaming
+design](docs/design/http-range-streaming-v0.16.md) fixes one immutable remote
+LAS deployment profile, strict bounded HTTP Range behavior, disk-v2 index-root
+sample decoding in one worker, identity-versioned browser caching, and one
+cold/recreation/warm-cache local acceptance path. It intentionally remains in
+the private browser host and does not create the later public viewer or SDK.
 
 ## Pre-v0.13 renderer quality corrective checkpoint
 
@@ -1133,16 +1140,18 @@ Repository exit evidence:
 
 ### v0.16 — HTTP range streaming, browser caching, and worker decoding
 
-Status: **Candidate**
+Status: **Active**
 
 Candidate outcome: progressively view a remote LAS/LAZ Source without loading
 the complete file or blocking the browser main thread.
 
 Activation gate:
 
-- the v0.15 host records a representative remote Source, hosting behavior, CORS
-  policy, byte-range behavior, compatible prebuilt Spatial Index, cache needs,
-  and main-thread latency baseline.
+- satisfied by the accepted [HTTP Range Streaming, Browser Caching, and Worker
+  Decoding design](docs/design/http-range-streaming-v0.16.md), which records one
+  representative immutable LAS fixture, exact hosting/CORS/Range behavior, a
+  compatible disk-v2 Spatial Index, explicit cache policy, fixed per-task work
+  ceilings, and the required local browser observations.
 
 Likely scope:
 
