@@ -318,6 +318,7 @@ export class RangeTransport {
         "resource_limit",
         `logical memory cache exceeds ${LIMITS.memoryCacheBytes} bytes`,
       );
+      this.metrics.logicalCacheBytes = this.cachedBytes;
       return;
     }
     if (this.cacheMode !== "persistent") return;
@@ -326,6 +327,30 @@ export class RangeTransport {
       if (this.invalidate) await this.cacheStorage.delete(namespace);
       this.persistent = await this.cacheStorage.open(namespace);
     } catch (error) {
+      throw cacheFailure(error);
+    }
+    this.cachedBytes = await this.measurePersistentCacheBytes();
+    this.metrics.logicalCacheBytes = this.cachedBytes;
+  }
+
+  async measurePersistentCacheBytes() {
+    try {
+      const requests = await this.persistent.keys();
+      let total = 0;
+      for (const request of requests) {
+        const response = await this.persistent.match(request);
+        if (!response) continue;
+        const bytes = validateStoredCacheEntry(request, response, this.deployment);
+        total += bytes;
+        require(
+          total <= LIMITS.persistentCacheBytes,
+          "resource_limit",
+          `logical persistent cache exceeds ${LIMITS.persistentCacheBytes} bytes`,
+        );
+      }
+      return total;
+    } catch (error) {
+      if (error instanceof StreamingFailure) throw error;
       throw cacheFailure(error);
     }
   }
@@ -440,7 +465,6 @@ export class RangeTransport {
   recordCacheHit(kind, bytes) {
     this.metrics.cacheHits += 1;
     this.metrics.cacheBytes += bytes;
-    this.metrics.logicalCacheBytes += bytes;
     this.metrics[`${kind}CacheBytes`] += bytes;
   }
 
@@ -676,6 +700,37 @@ function validateCachedMetadata(response, deployment, kind, resource, range) {
       `cache ${field.name}`,
     );
   }
+}
+
+function validateStoredCacheEntry(request, response, deployment) {
+  const key = typeof request === "string" ? request : request.url;
+  const url = new URL(key);
+  const kind = url.searchParams.get("__punctra_kind");
+  require(kind === "source" || kind === "index", "range_corrupt", "cache kind is invalid");
+  const resource = kind === "source" ? deployment.source : deployment.index;
+  const encodedRange = url.searchParams.get("__punctra_range") ?? "";
+  const matchedRange = /^(0|[1-9]\d*):([1-9]\d*)$/.exec(encodedRange);
+  require(matchedRange, "range_corrupt", "cache range is invalid");
+  const offset = Number(matchedRange[1]);
+  const length = Number(matchedRange[2]);
+  require(
+    Number.isSafeInteger(offset) && Number.isSafeInteger(length),
+    "range_corrupt",
+    "cache range is not safely addressable",
+  );
+  require(length <= LIMITS.rangeBytes, "resource_limit", "cached range exceeds 256 KiB");
+  require(offset + length <= resource.byteLength, "range_corrupt", "cached range exceeds its representation");
+  const sha256 = response.headers.get("x-punctra-digest");
+  require(
+    typeof sha256 === "string" && /^[0-9a-f]{64}$/.test(sha256),
+    "range_corrupt",
+    "cache digest is invalid",
+  );
+  const range = Object.freeze({ offset, length, sha256 });
+  equal(key, cacheEntryUrl(deployment, kind, range), "range_corrupt", "cache key");
+  validateCachedMetadata(response, deployment, kind, resource, range);
+  equal(response.headers.get("content-length"), String(length), "range_corrupt", "cache Content-Length");
+  return length;
 }
 
 export function cacheNamespace(deployment) {

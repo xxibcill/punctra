@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
@@ -130,6 +131,26 @@ test("persistent warm stream reuses only the exact identity-versioned ranges", a
   assert.notEqual(
     cacheEntryUrl(deployment, "source", deployment.source.probe),
     cacheEntryUrl(changed, "source", changed.source.probe),
+  );
+});
+
+test("persistent cache ceiling includes compatible ranges from prior operations", async () => {
+  const cacheStorage = new TestCacheStorage();
+  for (let offset = 0; offset < 15; offset += 1) {
+    const rangedManifest = manifestWithSourceProbe(offset, 256 * 1024);
+    await run(fixtureServer({ manifestOverride: rangedManifest }), {}, {
+      cacheMode: "persistent",
+      cacheStorage,
+    });
+  }
+
+  const overLimitManifest = manifestWithSourceProbe(15, 256 * 1024);
+  await rejectsWithCode(
+    run(fixtureServer({ manifestOverride: overLimitManifest }), {}, {
+      cacheMode: "persistent",
+      cacheStorage,
+    }),
+    "resource_limit",
   );
 });
 
@@ -316,6 +337,17 @@ function fixtureServer(options = {}) {
   return state;
 }
 
+function manifestWithSourceProbe(offset, length) {
+  const rangedManifest = structuredClone(manifest);
+  const bytes = sourceBytes.subarray(offset, offset + length);
+  rangedManifest.source.probe = {
+    offset,
+    length,
+    sha256: createHash("sha256").update(bytes).digest("hex"),
+  };
+  return rangedManifest;
+}
+
 function binaryDescriptor(url, servedManifest) {
   const sourceUrl = new URL(servedManifest.source.url, MANIFEST_URL).href;
   const indexUrl = new URL(servedManifest.index.url, MANIFEST_URL).href;
@@ -380,7 +412,8 @@ class TestCacheStorage {
     const entries = this.namespaces.get(name) ?? new Map();
     this.namespaces.set(name, entries);
     return {
-      match: async (key) => entries.get(String(key))?.clone(),
+      keys: async () => Array.from(entries.keys(), (key) => new Request(key)),
+      match: async (key) => entries.get(typeof key === "string" ? key : key.url)?.clone(),
       put: async (key, response) => {
         if (this.quotaFailure) throw new DOMException("quota full", "QuotaExceededError");
         entries.set(String(key), response.clone());
