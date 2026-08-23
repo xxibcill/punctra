@@ -202,26 +202,33 @@ impl BrowserViewer {
         self.diagnostics_unchecked()
     }
 
-    /// Resets renderer state for one identity-bound sampled remote root.
-    #[wasm_bindgen(js_name = beginStream)]
-    pub fn begin_stream(
+    /// Validates and publishes the first batch with its identity-bound reset.
+    #[wasm_bindgen(js_name = beginStreamBatch)]
+    #[allow(clippy::too_many_arguments)] // The private Wasm ABI carries explicit deployment and batch facts.
+    pub fn begin_stream_batch(
         &mut self,
         source_identity: &str,
         expected_points: u32,
         origin_x: f64,
         origin_y: f64,
         origin_z: f64,
+        batch_index: u32,
+        payload: &[u8],
     ) -> Result<String, JsValue> {
         self.ensure_ready()?;
         let mut next = self.stream.clone();
-        let update = next
-            .begin(
+        let (reset, upsert) = next
+            .begin_with_batch(
                 source_identity,
                 u64::from(expected_points),
                 [origin_x, origin_y, origin_z],
+                batch_index,
+                payload,
             )
             .map_err(stream_validation_failure)?;
-        self.resources_mut()?.apply_update(&update)?;
+        let resources = self.resources_mut()?;
+        resources.apply_update(&reset)?;
+        resources.apply_update(&upsert)?;
         self.stream = next;
         self.reset_interaction_facts();
         self.diagnostics()

@@ -168,6 +168,21 @@ impl StreamingScene {
         Ok(RenderUpdate::Reset { view_generation })
     }
 
+    pub(crate) fn begin_with_batch(
+        &mut self,
+        source_identity: &str,
+        expected_points: u64,
+        world_origin: [f64; 3],
+        batch_index: u32,
+        payload: &[u8],
+    ) -> Result<(RenderUpdate, RenderUpdate), StreamError> {
+        let mut next = self.clone();
+        let reset = next.begin(source_identity, expected_points, world_origin)?;
+        let upsert = next.publish(batch_index, payload)?;
+        *self = next;
+        Ok((reset, upsert))
+    }
+
     pub(crate) fn publish(
         &mut self,
         batch_index: u32,
@@ -514,6 +529,26 @@ mod tests {
             })
         ));
         assert_eq!(stream.facts().published_points, 0);
+    }
+
+    #[test]
+    fn first_batch_validation_is_transactional_with_stream_reset() {
+        let mut stream = StreamingScene::idle();
+        let facts_before = stream.facts();
+
+        assert!(matches!(
+            stream.begin_with_batch(SOURCE, 1, [0.0; 3], 0, &[]),
+            Err(StreamError::InvalidPayloadLength)
+        ));
+        assert_eq!(stream.facts(), facts_before);
+        assert_eq!(stream.view_generation(), None);
+
+        let updates = stream
+            .begin_with_batch(SOURCE, 1, [0.0; 3], 0, &payload(&[(0, [0.0; 3])]))
+            .unwrap();
+        assert!(matches!(updates.0, RenderUpdate::Reset { .. }));
+        assert!(matches!(updates.1, RenderUpdate::Upsert { .. }));
+        assert_eq!(stream.facts().published_points, 1);
     }
 
     #[test]

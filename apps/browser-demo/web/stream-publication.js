@@ -16,23 +16,26 @@ export function createDeferredStreamPublication({
     publishBatch(message) {
       assertFact(deployment !== undefined, "deployment precedes remote batches");
       assertFact(message.payload instanceof ArrayBuffer, "transferable worker batch");
+      let diagnostics;
       if (!begun) {
         const [x, y, z] = deployment.world_origin;
-        publishDiagnostics(parseDiagnostics(
-          viewer.beginStream(
+        diagnostics = parseDiagnostics(
+          viewer.beginStreamBatch(
             deployment.source_identity,
             deployment.root_display_point_count,
             x,
             y,
             z,
+            message.batch_index,
+            new Uint8Array(message.payload),
           ),
-        ));
+        );
         begun = true;
+      } else {
+        diagnostics = parseDiagnostics(
+          viewer.publishStreamBatch(message.batch_index, new Uint8Array(message.payload)),
+        );
       }
-
-      const diagnostics = parseDiagnostics(
-        viewer.publishStreamBatch(message.batch_index, new Uint8Array(message.payload)),
-      );
       assertFact(
         diagnostics.streaming.main_thread_batch_points_high_water <= 1_024,
         "main-thread Point work ceiling",

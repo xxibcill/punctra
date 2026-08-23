@@ -24,9 +24,21 @@ test("the first batch resets and publishes as one host event", () => {
     payload: new ArrayBuffer(24),
   });
 
-  assert.deepEqual(viewer.calls, ["begin", "publish", "render"]);
+  assert.deepEqual(viewer.calls, ["begin_batch", "render"]);
   assert.equal(rendered.frame, "replacement");
   assert.equal(published.at(-1).frame, "replacement");
+});
+
+test("an invalid first batch cannot reset the prior frame", () => {
+  const viewer = new FakeViewer();
+  const publication = createPublication(viewer);
+  publication.acceptDeployment(deployment());
+
+  assert.throws(
+    () => publication.publishBatch({ batch_index: 0, payload: new ArrayBuffer(0) }),
+    /invalid first batch/,
+  );
+  assert.equal(viewer.frame, "prior");
 });
 
 function createPublication(viewer, published = []) {
@@ -52,15 +64,15 @@ class FakeViewer {
     this.calls = [];
   }
 
-  beginStream() {
-    this.calls.push("begin");
-    this.frame = null;
+  beginStreamBatch(_source, _points, _x, _y, _z, _batchIndex, payload) {
+    this.calls.push("begin_batch");
+    if (payload.byteLength !== 24) throw new Error("invalid first batch");
+    this.frame = "replacement";
     return JSON.stringify({ streaming: streamingFacts() });
   }
 
   publishStreamBatch() {
     this.calls.push("publish");
-    this.frame = "replacement";
     return JSON.stringify({ streaming: streamingFacts() });
   }
 
