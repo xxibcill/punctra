@@ -363,6 +363,15 @@ test("offline, cancellation, quota, and worker failure have safe recovery codes"
   assert.match(failure.safe_action, /create a new worker/);
 });
 
+test("manifest network failures preserve the offline recovery outcome", async () => {
+  const server = fixtureServer({ scenario: "manifest_offline" });
+
+  await rejectsWithCode(run(server), "offline");
+
+  assert.equal(server.attempts, 1);
+  assert.equal(server.binaryRequests.length, 0);
+});
+
 test("warm cache reads acknowledge cancellation instead of completing", async () => {
   const memoryCacheStorage = new Map();
   const server = fixtureServer();
@@ -463,6 +472,7 @@ function fixtureServer(options = {}) {
     state.attempts += 1;
     const url = String(input);
     if (url === MANIFEST_URL) {
+      if (options.scenario === "manifest_offline") throw new TypeError("offline");
       return new Response(JSON.stringify(servedManifest), {
         status: 200,
         headers: { "Content-Type": "application/json" },

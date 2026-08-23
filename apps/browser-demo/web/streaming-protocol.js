@@ -161,26 +161,42 @@ export async function runStreamingOperation(configuration, hooks = {}) {
 
 export async function loadManifest(url, fetchImplementation, signal) {
   require(typeof fetchImplementation === "function", "manifest_invalid", "Fetch is unavailable");
+  const response = await fetchManifestResponse(url, fetchImplementation, signal);
+  if (!response.ok || response.status !== 200) {
+    throw new StreamingFailure("manifest_invalid", `manifest returned HTTP ${response.status}`);
+  }
+  const bytes = await readManifestBody(response, signal);
   try {
-    const response = await fetchImplementation(url, {
+    return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+  } catch (error) {
+    throw classifyThrown(error, "manifest_invalid");
+  }
+}
+
+async function fetchManifestResponse(url, fetchImplementation, signal) {
+  try {
+    return await fetchImplementation(url, {
       method: "GET",
       cache: "no-store",
       redirect: "error",
       signal,
     });
-    if (!response.ok || response.status !== 200) {
-      throw new StreamingFailure("manifest_invalid", `manifest returned HTTP ${response.status}`);
-    }
-    const bytes = await readBoundedBody(
+  } catch (error) {
+    throw classifyThrown(error, "offline");
+  }
+}
+
+async function readManifestBody(response, signal) {
+  try {
+    return await readBoundedBody(
       response,
       LIMITS.manifestBytes,
       "manifest",
       "manifest_invalid",
       signal,
     );
-    return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
   } catch (error) {
-    throw classifyThrown(error, "manifest_invalid");
+    throw classifyThrown(error, "offline");
   }
 }
 
