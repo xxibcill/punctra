@@ -119,14 +119,15 @@ policy or combines bytes from another Source binding.
 Run the deterministic transport and worker-protocol suite:
 
 ```bash
-node --test apps/browser-demo/web/streaming-protocol.test.mjs
+node --test apps/browser-demo/web/*.test.mjs
 ```
 
-It covers successful cold and warm paths, identity-separated cache keys, a
-full `200` response to a Range request, validator drift, truncation, digest
-corruption, bounded retry success/exhaustion, offline state, cancellation,
-quota failure, worker-failure mapping, and rejection of incomplete/bare
-deployments before binary Fetch.
+It covers the real local Range/CORS server, successful cold and warm paths,
+identity-separated cache keys, a full `200` response to a Range request,
+validator drift, truncation, digest corruption, bounded retry success/
+exhaustion, offline state, cancellation, quota failure, worker lifecycle and
+failure mapping, and rejection of incomplete/bare deployments before binary
+Fetch.
 
 The browser exposes one safe action for each terminal code. Recovery creates a
 new operation and, when required, a new Worker/viewer. It never downloads the

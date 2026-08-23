@@ -43,6 +43,9 @@ apps/
       stream-worker.js
       streaming-protocol.js
       streaming-protocol.test.mjs
+      worker-operation.js
+      worker-operation.test.mjs
+      range-server.test.mjs
       fixtures/v1/
         README.md
         deployment.json
@@ -343,7 +346,7 @@ cargo bench -p renderer-demo --bench viewing
 cargo bench -p point-view --bench planner
 cargo check -p browser-demo --target wasm32-unknown-unknown
 cargo run -p browser-demo --bin generate_stream_fixture
-node --test apps/browser-demo/web/streaming-protocol.test.mjs
+node --test apps/browser-demo/web/*.test.mjs
 scripts/build-browser-demo.sh
 cargo test -p renderer-demo --test headless_smoke
 PUNCTRA_REQUIRE_GPU=1 cargo test -p renderer-demo --test headless_smoke \

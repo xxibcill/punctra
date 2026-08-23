@@ -144,7 +144,8 @@ def arguments() -> argparse.Namespace:
 def main() -> None:
     options = arguments()
     server = ThreadingHTTPServer((options.host, options.port), BrowserDemoHandler)
-    print(f"Serving {WEB_ROOT} at http://{options.host}:{options.port}/", flush=True)
+    host, port = server.server_address[:2]
+    print(f"Serving {WEB_ROOT} at http://{host}:{port}/", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

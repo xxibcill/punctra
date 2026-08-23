@@ -553,10 +553,11 @@ The private v0.16 browser lane adds three independent local layers:
 1. `cargo run -p browser-demo --bin generate_stream_fixture` fully verifies
    and regenerates the deterministic LAS/SourceRecord/disk-v2 index/deployment
    family in an isolated directory, then compares the committed semantic files;
-2. `node --test apps/browser-demo/web/streaming-protocol.test.mjs` exercises
-   manifest validation, strict Range responses, retry/cancellation, changed-
-   Source, truncation, corruption, cache identity/invalidation/quota, disk-v2
-   decode, transferable batching, and worker-failure mapping; and
+2. `node --test apps/browser-demo/web/*.test.mjs` exercises the real local
+   Range/CORS server plus manifest validation, strict Range responses, retry/
+   cancellation, changed-Source, truncation, corruption, cache identity/
+   invalidation/quota, disk-v2 decode, transferable batching, and worker-
+   lifecycle/failure mapping; and
 3. the secure-context browser harness served by
    `scripts/serve-browser-demo.py` exercises real Fetch/CORS headers, one module
    Worker, Cache API persistence across worker/viewer recreation, WebAssembly,

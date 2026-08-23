@@ -125,7 +125,7 @@ cargo clippy -p browser-demo --all-targets --all-features -- -D warnings
 cargo clippy -p browser-demo --target wasm32-unknown-unknown --all-targets \
   --all-features -- -D warnings
 cargo run -p browser-demo --bin generate_stream_fixture
-node --test apps/browser-demo/web/streaming-protocol.test.mjs
+node --test apps/browser-demo/web/*.test.mjs
 scripts/build-browser-demo.sh
 cargo bench -p point-view --bench planner
 cargo bench -p source-memory --bench read
