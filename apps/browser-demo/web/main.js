@@ -5,6 +5,7 @@ import {
   preservesCurrentViewer,
 } from "./failure-policy.js?v=16-qualified";
 import { runWorkerOperation } from "./worker-operation.js?v=16-qualified";
+import { createDeferredStreamPublication } from "./stream-publication.js?v=16-qualified";
 
 const canvas = document.querySelector("#punctra-canvas");
 const canvasShell = document.querySelector("#canvas-shell");
@@ -497,6 +498,12 @@ function runWorkerStream({ cacheMode, invalidate }) {
   const operationId = `browser-v016-${Date.now()}-${streamSequence}`;
   streamSequence += 1;
   let deployment;
+  const publication = createDeferredStreamPublication({
+    viewer,
+    assertFact,
+    publishDiagnostics,
+    parseDiagnostics,
+  });
   let mainThreadMillisecondsHighWater = 0;
   return runWorkerOperation({
     workerUrl: `./stream-worker.js?v=${BUILD_CACHE_TOKEN}-${streamSequence}`,
@@ -521,18 +528,18 @@ function runWorkerStream({ cacheMode, invalidate }) {
       } else if (message.type === "state") {
         if (message.phase === "deployment") {
           deployment = message.deployment;
-          beginRemoteScene(deployment);
+          publication.acceptDeployment(deployment);
         }
         streamingFacts = message.metrics ?? streamingFacts;
       } else if (message.type === "batch") {
         const started = performance.now();
-        publishRemoteBatch(message);
+        publication.publishBatch(message);
         mainThreadMillisecondsHighWater = Math.max(
           mainThreadMillisecondsHighWater,
           performance.now() - started,
         );
       } else if (message.type === "complete") {
-        const diagnostics = completeRemoteScene();
+        const diagnostics = publication.complete();
         streamingFacts = message.metrics;
         publishDiagnostics(diagnostics);
         controls.resolve({
@@ -555,36 +562,6 @@ function workerFailureRecord(message) {
     message,
     safe_action: "Terminate the worker, keep the current frame, and create a new worker before retrying.",
   };
-}
-
-function beginRemoteScene(deployment) {
-  assertFact(deployment.root_coverage === "sampled", "remote root sampled Coverage");
-  const [x, y, z] = deployment.world_origin;
-  const diagnostics = parseDiagnostics(
-    viewer.beginStream(deployment.source_identity, deployment.root_display_point_count, x, y, z),
-  );
-  publishDiagnostics(diagnostics);
-}
-
-function publishRemoteBatch(message) {
-  assertFact(message.payload instanceof ArrayBuffer, "transferable worker batch");
-  const diagnostics = parseDiagnostics(
-    viewer.publishStreamBatch(message.batch_index, new Uint8Array(message.payload)),
-  );
-  assertFact(
-    diagnostics.streaming.main_thread_batch_points_high_water <= 1_024,
-    "main-thread Point work ceiling",
-  );
-  assertFact(
-    diagnostics.streaming.main_thread_batch_bytes_high_water <= 24_576,
-    "main-thread byte work ceiling",
-  );
-  publishDiagnostics(parseDiagnostics(viewer.render()));
-}
-
-function completeRemoteScene() {
-  parseDiagnostics(viewer.completeStream());
-  return parseDiagnostics(viewer.render());
 }
 
 function verifyStreamingResult(result, disposition) {

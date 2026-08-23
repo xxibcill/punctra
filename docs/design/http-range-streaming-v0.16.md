@@ -203,8 +203,10 @@ verified response-body bytes, not browser storage allocation measurements.
 
 ## Rendering and Coverage
 
-The first remote publication resets to a distinct v0.16 View generation. Each
-worker batch becomes one renderer batch with an increasing fixed version, the
+The host retains the last rendered frame while deployment, Source probe, and
+index validation run. The first validated remote batch resets to a distinct
+v0.16 View generation and publishes in the same host event. Each worker batch
+becomes one renderer batch with an increasing fixed version, the
 manifest Source identity, exact Source ordinals, one stable world origin, and
 bounded relative positions. The rendered batches together represent the root
 node's Sampled Coverage; they are not a complete Source, exact Query result, or
