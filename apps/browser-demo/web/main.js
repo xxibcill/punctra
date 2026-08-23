@@ -32,6 +32,7 @@ let smokeRecord = null;
 let moduleLoadAttempt = 0;
 let streamingFacts = null;
 let streamSequence = 0;
+let preserveViewerOnRestart = false;
 
 const WORKER_SCHEMA = "punctra-browser-worker-v1";
 const STREAM_MANIFEST_URL = "./fixtures/v1/deployment.json";
@@ -393,6 +394,7 @@ async function runSmokePath() {
   );
   smokePassed = true;
   smokeRunning = false;
+  preserveViewerOnRestart = false;
 }
 
 async function runStreamingSmoke() {
@@ -644,20 +646,17 @@ async function start() {
     }
     await runSmokePath();
   } catch (error) {
-    smokeRunning = false;
-    smokePassed = false;
-    const record = failureRecord(error);
-    const preserveViewer = preservesCurrentViewer(record);
-    if (!preserveViewer) {
-      discardViewer();
-    }
-    publishFailure(record, { disableControls: !preserveViewer });
+    handleSmokeFailure(error);
   }
 }
 
 async function restart() {
   if (smokeRunning) return;
   if (!smokePassed) {
+    if (preserveViewerOnRestart && viewer) {
+      await retryStreamingSmoke();
+      return;
+    }
     discardViewer();
     await start();
     return;
@@ -668,9 +667,39 @@ async function restart() {
     const diagnostics = parseDiagnostics(viewer.render());
     publishDiagnostics(diagnostics);
     setHarnessState("passed", "READY — viewer explicitly recreated.");
+    preserveViewerOnRestart = false;
   } catch (error) {
     publishFailure(error, { disableControls: true });
   }
+}
+
+async function retryStreamingSmoke() {
+  smokeRunning = true;
+  preserveViewerOnRestart = false;
+  try {
+    const streaming = await runStreamingSmoke();
+    smokeRecord.streaming = streaming;
+    pickButton.disabled = true;
+    pickButton.textContent = "Remote pick deferred";
+    smokePassed = true;
+    smokeRunning = false;
+    setHarnessState(
+      "passed",
+      "PASS — the replacement worker completed against the preserved viewer and fresh View generation.",
+    );
+  } catch (error) {
+    handleSmokeFailure(error);
+  }
+}
+
+function handleSmokeFailure(error) {
+  smokeRunning = false;
+  smokePassed = false;
+  const record = failureRecord(error);
+  const preserveViewer = preservesCurrentViewer(record);
+  preserveViewerOnRestart = preserveViewer && record.code === "worker_failed";
+  if (!preserveViewer) discardViewer();
+  publishFailure(record, { disableControls: !preserveViewer });
 }
 
 async function toggleVisibility() {

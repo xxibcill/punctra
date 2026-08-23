@@ -5,8 +5,9 @@ use render_protocol::{
 use serde::{Serialize, Serializer};
 use thiserror::Error;
 
+const STREAM_VIEW_ID: ViewId = ViewId::new(16);
 pub(crate) const STREAM_VIEW_GENERATION: ViewGenerationKey =
-    ViewGenerationKey::new(ViewId::new(16), 1);
+    ViewGenerationKey::new(STREAM_VIEW_ID, 1);
 pub(crate) const TRANSFER_RECORD_BYTES: usize = 24;
 pub(crate) const MAX_TRANSFER_BATCH_POINTS: u64 = 1_024;
 pub(crate) const MAX_TRANSFER_BATCH_BYTES: u64 =
@@ -117,6 +118,7 @@ pub(crate) struct StreamingScene {
     facts: StreamFacts,
     source: Option<SourceId>,
     last_ordinal: Option<u64>,
+    view_generation: Option<ViewGenerationKey>,
 }
 
 impl StreamingScene {
@@ -125,6 +127,7 @@ impl StreamingScene {
             facts: StreamFacts::idle(),
             source: None,
             last_ordinal: None,
+            view_generation: None,
         }
     }
 
@@ -136,8 +139,17 @@ impl StreamingScene {
     ) -> Result<RenderUpdate, StreamError> {
         let source = parse_source_identity(source_identity)?;
         validate_begin(expected_points, world_origin)?;
+        let generation = match self.view_generation {
+            Some(current) => current
+                .generation()
+                .checked_add(1)
+                .ok_or(StreamError::GenerationOverflow)?,
+            None => STREAM_VIEW_GENERATION.generation(),
+        };
+        let view_generation = ViewGenerationKey::new(STREAM_VIEW_ID, generation);
         self.source = Some(source);
         self.last_ordinal = None;
+        self.view_generation = Some(view_generation);
         self.facts = StreamFacts {
             phase: StreamPhase::Receiving,
             source_identity: Some(source),
@@ -150,9 +162,7 @@ impl StreamingScene {
             main_thread_batch_bytes_high_water: 0,
             world_origin: Some(world_origin),
         };
-        Ok(RenderUpdate::Reset {
-            view_generation: STREAM_VIEW_GENERATION,
-        })
+        Ok(RenderUpdate::Reset { view_generation })
     }
 
     pub(crate) fn publish(
@@ -167,7 +177,8 @@ impl StreamingScene {
         self.last_ordinal = points.last().map(|point| point.point_id().ordinal());
         self.record_batch(points.len(), payload.len())?;
         let batch = PointBatch::new(
-            STREAM_VIEW_GENERATION,
+            self.view_generation
+                .expect("receiving streams have a View generation"),
             BatchKey::new(u64::from(batch_index) + 1),
             BatchVersion::new(1),
             self.facts
@@ -191,10 +202,7 @@ impl StreamingScene {
     }
 
     pub(crate) const fn view_generation(&self) -> Option<ViewGenerationKey> {
-        match self.facts.phase {
-            StreamPhase::Idle => None,
-            StreamPhase::Receiving | StreamPhase::Complete => Some(STREAM_VIEW_GENERATION),
-        }
+        self.view_generation
     }
 
     pub(crate) const fn facts(&self) -> StreamFacts {
@@ -307,6 +315,8 @@ pub(crate) enum StreamError {
     Incomplete { expected: u64, actual: u64 },
     #[error("stream accounting overflowed")]
     SizeOverflow,
+    #[error("stream View generation overflowed")]
+    GenerationOverflow,
     #[error(transparent)]
     Protocol(#[from] ProtocolError),
 }
@@ -435,6 +445,28 @@ mod tests {
         assert_eq!(stream.facts().published_batches, 2);
         assert_eq!(stream.facts().main_thread_batch_points_high_water, 2);
         assert_eq!(stream.facts().main_thread_batch_bytes_high_water, 48);
+    }
+
+    #[test]
+    fn retry_advances_the_view_generation_and_resets_the_existing_renderer() {
+        let mut stream = StreamingScene::idle();
+        let first_reset = stream.begin(SOURCE, 1, [0.0; 3]).unwrap();
+        let first_batch = stream.publish(0, &payload(&[(0, [0.0; 3])])).unwrap();
+        stream.complete().unwrap();
+
+        let mut renderer = RenderStateModel::new(render_limits());
+        renderer.apply(&first_reset).unwrap();
+        renderer.apply(&first_batch).unwrap();
+        let retry_reset = stream.begin(SOURCE, 1, [0.0; 3]).unwrap();
+        renderer.apply(&retry_reset).unwrap();
+
+        let retry_generation = ViewGenerationKey::new(STREAM_VIEW_ID, 2);
+        assert_eq!(stream.view_generation(), Some(retry_generation));
+        assert_eq!(
+            renderer.snapshot().active_view_generation(),
+            Some(retry_generation)
+        );
+        assert_eq!(renderer.snapshot().resident().point_count(), 0);
     }
 
     #[test]
