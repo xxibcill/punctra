@@ -6,7 +6,7 @@ All notable changes to Punctra are documented here. The project follows
 ## Unreleased - 0.16.0-alpha.1
 
 - Completed and locally repository-verified the accepted v0.16 slice at
-  implementation commit `68020dc80e1a0ca95f6746df04862b3f3013ca13`. The
+  implementation commit `f9fc356ba583c48755d1406d1b099226d1c5f568`. The
   [v0.16 verification record](docs/releases/v0.16.0.md) pins the exact native
   and browser environments, complete local command matrix, bounded browser
   observations, generated benchmark intervals, and unsupported external exits.
@@ -22,8 +22,10 @@ All notable changes to Punctra are documented here. The project follows
 - Added host-selected none, memory, and persistent Cache API policies. Cache
   namespaces and entries include the deployment schema, Source identity,
   strong validator, index digest, resource, and exact range; explicit
-  invalidation is scoped to that namespace, and quota/API failures never
-  silently change policy.
+  invalidation is scoped to that namespace. A fixed versioned ledger bounds
+  each persistent namespace to 64 entries and its declared logical byte limit,
+  rejects orphaned namespace entries, and never silently changes policy after
+  quota or API failure.
 - Added a deterministic 70,000-Point LAS 1.2 fixture, its fully verified Source
   record, compatible 172,808-byte disk-v2 index, deployment manifest, fixture
   regeneration verifier, strict local Range/CORS server, and Node module tests
