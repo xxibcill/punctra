@@ -162,8 +162,8 @@ impl StreamingScene {
     ) -> Result<RenderUpdate, StreamError> {
         self.require_receiving()?;
         self.validate_batch_index(batch_index)?;
+        self.validate_payload_capacity(payload)?;
         let points = decode_points(payload, self.source(), self.last_ordinal)?;
-        self.validate_capacity(points.len(), payload.len())?;
         self.last_ordinal = points.last().map(|point| point.point_id().ordinal());
         self.record_batch(points.len(), payload.len())?;
         let batch = PointBatch::new(
@@ -239,6 +239,13 @@ impl StreamingScene {
             self.facts.expected_points,
             StreamLimit::ExpectedPoints,
         )
+    }
+
+    fn validate_payload_capacity(&self, payload: &[u8]) -> Result<(), StreamError> {
+        if payload.is_empty() || !payload.len().is_multiple_of(TRANSFER_RECORD_BYTES) {
+            return Err(StreamError::InvalidPayloadLength);
+        }
+        self.validate_capacity(payload.len() / TRANSFER_RECORD_BYTES, payload.len())
     }
 
     fn record_batch(&mut self, points: usize, bytes: usize) -> Result<(), StreamError> {
@@ -325,9 +332,6 @@ fn decode_points(
     source: SourceId,
     previous_ordinal: Option<u64>,
 ) -> Result<Vec<RenderPoint>, StreamError> {
-    if payload.is_empty() || !payload.len().is_multiple_of(TRANSFER_RECORD_BYTES) {
-        return Err(StreamError::InvalidPayloadLength);
-    }
     let mut points = Vec::with_capacity(payload.len() / TRANSFER_RECORD_BYTES);
     let mut last = previous_ordinal;
     for record in payload.chunks_exact(TRANSFER_RECORD_BYTES) {
@@ -458,6 +462,23 @@ mod tests {
             stream.complete(),
             Err(StreamError::Incomplete { .. })
         ));
+    }
+
+    #[test]
+    fn stream_rejects_an_oversized_batch_before_decoding_records() {
+        let mut stream = StreamingScene::idle();
+        stream.begin(SOURCE, MAX_STREAM_POINTS, [0.0; 3]).unwrap();
+        let payload = vec![0; (MAX_TRANSFER_BATCH_POINTS as usize + 1) * TRANSFER_RECORD_BYTES];
+
+        assert!(matches!(
+            stream.publish(0, &payload),
+            Err(StreamError::ResourceLimit {
+                limit: StreamLimit::BatchPoints,
+                actual: 1_025,
+                allowed: MAX_TRANSFER_BATCH_POINTS,
+            })
+        ));
+        assert_eq!(stream.facts().published_points, 0);
     }
 
     #[test]
