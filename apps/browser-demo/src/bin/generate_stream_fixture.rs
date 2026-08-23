@@ -351,6 +351,81 @@ mod native {
             }
         }
     }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn generated_manifest_binds_every_published_representation_and_range()
+        -> Result<(), Box<dyn Error>> {
+            let generated = TemporaryDirectory::create()?;
+            generate(generated.path())?;
+            let source = fs::read(generated.path().join(SOURCE_NAME))?;
+            let index = fs::read(generated.path().join(INDEX_NAME))?;
+            let manifest: Value =
+                serde_json::from_slice(&fs::read(generated.path().join(MANIFEST_NAME))?)?;
+
+            assert_eq!(manifest["schema"], "punctra-browser-stream-v1");
+            assert_eq!(manifest["source"]["byte_length"], source.len());
+            assert_eq!(manifest["source"]["sha256"], sha256_hex(&source));
+            assert_eq!(manifest["index"]["byte_length"], index.len());
+            assert_eq!(manifest["index"]["sha256"], sha256_hex(&index));
+            assert_eq!(
+                manifest["source"]["source_identity"],
+                manifest["index"]["source_identity"]
+            );
+            assert_eq!(
+                manifest["source"]["point_count"],
+                manifest["index"]["source_point_count"]
+            );
+            assert_eq!(
+                manifest["source"]["point_count"],
+                manifest["index"]["root"]["covered_point_count"]
+            );
+
+            let probe_length = usize::try_from(
+                manifest["source"]["probe"]["length"]
+                    .as_u64()
+                    .ok_or("missing probe length")?,
+            )?;
+            assert_eq!(probe_length, SOURCE_PROBE_BYTES);
+            assert_eq!(
+                manifest["source"]["probe"]["sha256"],
+                sha256_hex(&source[..probe_length])
+            );
+
+            let header_length = usize::try_from(
+                manifest["index"]["header_and_root"]["length"]
+                    .as_u64()
+                    .ok_or("missing header/root length")?,
+            )?;
+            assert_eq!(header_length, HEADER_AND_ROOT_BYTES);
+            assert_eq!(
+                manifest["index"]["header_and_root"]["sha256"],
+                sha256_hex(&index[..header_length])
+            );
+
+            let samples = &manifest["index"]["root"]["sample_range"];
+            let sample_offset = samples["offset"].as_u64().ok_or("missing sample offset")?;
+            let sample_length = samples["length"].as_u64().ok_or("missing sample length")?;
+            let sample_count = samples["count"].as_u64().ok_or("missing sample count")?;
+            assert_eq!(sample_length, sample_count * SAMPLE_RECORD_BYTES);
+            assert!(sample_length <= 256 * 1_024);
+            assert!(sample_count <= 8_192);
+            let sample_start = usize::try_from(sample_offset)?;
+            let sample_end = sample_start + usize::try_from(sample_length)?;
+            assert_eq!(
+                samples["sha256"],
+                sha256_hex(
+                    index
+                        .get(sample_start..sample_end)
+                        .ok_or("missing samples")?
+                )
+            );
+            Ok(())
+        }
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]

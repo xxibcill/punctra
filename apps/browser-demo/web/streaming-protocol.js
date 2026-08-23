@@ -557,15 +557,22 @@ export function validateIndexHeaderAndRoot(bytes, deployment) {
 export function decodeRootSamples(bytes, deployment, onBatch = () => {}) {
   const root = deployment.index.root;
   equal(bytes.byteLength, root.sampleRange.length, "range_truncated", "root sample bytes");
+  const outputBytesHighWater =
+    Math.min(root.displayPointCount, LIMITS.transferBatchPoints)
+    * LIMITS.transferRecordBytes;
+  const stagingBytesHighWater = bytes.byteLength + outputBytesHighWater;
+  require(
+    stagingBytesHighWater <= LIMITS.workerStagingBytes,
+    "resource_limit",
+    "worker decode staging exceeds 320 KiB",
+  );
   const view = dataView(bytes);
   let previousOrdinal = -1;
   let batchCount = 0;
   let transferredBytes = 0;
-  let outputBytesHighWater = 0;
   for (let first = 0; first < root.displayPointCount; first += LIMITS.transferBatchPoints) {
     const count = Math.min(LIMITS.transferBatchPoints, root.displayPointCount - first);
     const output = new ArrayBuffer(count * LIMITS.transferRecordBytes);
-    outputBytesHighWater = Math.max(outputBytesHighWater, output.byteLength);
     const encoded = new DataView(output);
     for (let row = 0; row < count; row += 1) {
       const decoded = decodeSample(view, (first + row) * SAMPLE_RECORD_BYTES, deployment, previousOrdinal);
@@ -577,8 +584,6 @@ export function decodeRootSamples(bytes, deployment, onBatch = () => {}) {
     require(batchCount <= LIMITS.transferBatches, "resource_limit", "transferred batch count exceeds eight");
     onBatch(output, { batchIndex: batchCount - 1, pointCount: count });
   }
-  const stagingBytesHighWater = bytes.byteLength + outputBytesHighWater;
-  require(stagingBytesHighWater <= LIMITS.workerStagingBytes, "resource_limit", "worker decode staging exceeds 320 KiB");
   return { batchCount, pointCount: root.displayPointCount, transferredBytes, stagingBytesHighWater };
 }
 

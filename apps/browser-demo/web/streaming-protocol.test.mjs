@@ -4,6 +4,8 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
+  LIMITS,
+  RangeTransport,
   StreamingFailure,
   cacheEntryUrl,
   cacheNamespace,
@@ -87,6 +89,43 @@ test("worker RGB mapping matches the exact repository U16 conversion", () => {
     }
   }
   assert.equal(sampleIndex, deployment.index.root.displayPointCount);
+});
+
+test("queued-range bytes accept the exact ceiling and reject one over", () => {
+  const deployment = structuredClone(validateManifest(manifest, MANIFEST_URL));
+  deployment.index.headerAndRoot.length = LIMITS.rangeBytes;
+  deployment.index.root.sampleRange.length = LIMITS.rangeBytes;
+  const options = {
+    deployment,
+    cacheMode: "none",
+    credentials: "omit",
+    fetchImplementation: () => {},
+  };
+
+  const exact = new RangeTransport(options);
+  assert.equal(exact.snapshot().queuedRangeBytesHighWater, LIMITS.queuedRangeBytes);
+
+  deployment.index.root.sampleRange.length += 1;
+  assert.throws(
+    () => new RangeTransport(options),
+    (error) => error instanceof StreamingFailure && error.code === "resource_limit",
+  );
+});
+
+test("decode staging rejects the first record-width step over its ceiling before allocation", () => {
+  const acceptedCount = 7_216;
+  const acceptedBytes = sampleRecords(acceptedCount);
+  const acceptedDeployment = decodeBoundaryDeployment(acceptedCount);
+  const accepted = decodeRootSamples(acceptedBytes, acceptedDeployment);
+  assert.equal(accepted.stagingBytesHighWater, LIMITS.workerStagingBytes - 32);
+  assert.equal(accepted.batchCount, LIMITS.transferBatches);
+
+  const rejectedCount = acceptedCount + 1;
+  const rejectedBytes = new Uint8Array(rejectedCount * 42);
+  assert.throws(
+    () => decodeRootSamples(rejectedBytes, decodeBoundaryDeployment(rejectedCount)),
+    (error) => error instanceof StreamingFailure && error.code === "resource_limit",
+  );
 });
 
 test("persistent warm stream reuses only the exact identity-versioned ranges", async () => {
@@ -346,6 +385,31 @@ function manifestWithSourceProbe(offset, length) {
     sha256: createHash("sha256").update(bytes).digest("hex"),
   };
   return rangedManifest;
+}
+
+function decodeBoundaryDeployment(pointCount) {
+  return {
+    index: {
+      transform: { offset: [0, 0, 0], scale: [1, 1, 1] },
+      root: {
+        displayPointCount: pointCount,
+        sampleRange: { length: pointCount * 42 },
+        bounds: { minimum: [0, 0, 0], maximum: [pointCount, 0, 0] },
+        worldOrigin: [0, 0, 0],
+      },
+    },
+  };
+}
+
+function sampleRecords(pointCount) {
+  const bytes = new Uint8Array(pointCount * 42);
+  const view = new DataView(bytes.buffer);
+  for (let ordinal = 0; ordinal < pointCount; ordinal += 1) {
+    const offset = ordinal * 42;
+    view.setBigUint64(offset, BigInt(ordinal), true);
+    view.setBigInt64(offset + 8, BigInt(ordinal), true);
+  }
+  return bytes;
 }
 
 function binaryDescriptor(url, servedManifest) {
