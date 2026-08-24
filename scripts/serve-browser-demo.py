@@ -5,8 +5,10 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import mimetypes
 import time
+from functools import lru_cache
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -15,6 +17,19 @@ from urllib.parse import parse_qs, unquote, urlsplit
 
 WEB_ROOT = (Path(__file__).resolve().parent.parent / "apps/browser-demo/web").resolve()
 EXPOSED_HEADERS = "Accept-Ranges, Content-Encoding, Content-Length, Content-Range, ETag"
+FILE_CHUNK_BYTES = 64 * 1024
+
+
+def fixture_validators() -> dict[Path, str]:
+    fixture_root = WEB_ROOT / "fixtures" / "v1"
+    manifest = json.loads((fixture_root / "deployment.json").read_text(encoding="utf-8"))
+    return {
+        (fixture_root / "representative.las").resolve(): manifest["source"]["strong_etag"],
+        (fixture_root / "representative.pidx").resolve(): manifest["index"]["strong_etag"],
+    }
+
+
+FIXTURE_VALIDATORS = fixture_validators()
 
 
 class BrowserDemoHandler(BaseHTTPRequestHandler):
@@ -40,7 +55,7 @@ class BrowserDemoHandler(BaseHTTPRequestHandler):
         try:
             delay_milliseconds = self._delay_milliseconds()
             path = self._resolve_path()
-            payload = path.read_bytes()
+            file_stat = path.stat()
         except FileNotFoundError:
             self.send_error(HTTPStatus.NOT_FOUND)
             return
@@ -49,7 +64,7 @@ class BrowserDemoHandler(BaseHTTPRequestHandler):
             return
 
         try:
-            start, end, partial = self._requested_range(len(payload))
+            start, end, partial = self._requested_range(file_stat.st_size)
         except ValueError as error:
             self.send_error(HTTPStatus.REQUESTED_RANGE_NOT_SATISFIABLE, str(error))
             return
@@ -57,20 +72,34 @@ class BrowserDemoHandler(BaseHTTPRequestHandler):
         if delay_milliseconds:
             time.sleep(delay_milliseconds / 1_000)
 
-        body = memoryview(payload)[start : end + 1]
+        body_length = end - start + 1
         self.send_response(HTTPStatus.PARTIAL_CONTENT if partial else HTTPStatus.OK)
         self._send_cors_headers()
         self.send_header("Accept-Ranges", "bytes")
         self.send_header("Cache-Control", cache_control(path))
         self.send_header("Content-Encoding", "identity")
-        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Content-Length", str(body_length))
         self.send_header("Content-Type", content_type(path))
-        self.send_header("ETag", strong_etag(payload))
+        self.send_header(
+            "ETag",
+            representation_etag(path, file_stat.st_size, file_stat.st_mtime_ns),
+        )
         if partial:
-            self.send_header("Content-Range", f"bytes {start}-{end}/{len(payload)}")
+            self.send_header("Content-Range", f"bytes {start}-{end}/{file_stat.st_size}")
         self.end_headers()
         if send_body:
-            self.wfile.write(body)
+            self._write_body(path, start, body_length)
+
+    def _write_body(self, path: Path, start: int, length: int) -> None:
+        remaining = length
+        with path.open("rb") as source:
+            source.seek(start)
+            while remaining:
+                chunk = source.read(min(remaining, FILE_CHUNK_BYTES))
+                if not chunk:
+                    return
+                self.wfile.write(chunk)
+                remaining -= len(chunk)
 
     def _resolve_path(self) -> Path:
         raw_path = unquote(urlsplit(self.path).path)
@@ -130,8 +159,20 @@ def cache_control(path: Path) -> str:
     return "no-store, no-transform"
 
 
-def strong_etag(payload: bytes) -> str:
-    return f'"sha256-{hashlib.sha256(payload).hexdigest()}"'
+def representation_etag(path: Path, length: int, modified_nanoseconds: int) -> str:
+    fixture_validator = FIXTURE_VALIDATORS.get(path)
+    if fixture_validator is not None:
+        return fixture_validator
+    return streamed_etag(path, length, modified_nanoseconds)
+
+
+@lru_cache(maxsize=128)
+def streamed_etag(path: Path, _length: int, _modified_nanoseconds: int) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        while chunk := source.read(FILE_CHUNK_BYTES):
+            digest.update(chunk)
+    return f'"sha256-{digest.hexdigest()}"'
 
 
 def arguments() -> argparse.Namespace:
