@@ -1,14 +1,18 @@
-import {
+const MODULE_CACHE_TOKEN = encodeURIComponent(
+  new URL(import.meta.url).searchParams.get("v") ?? "unversioned",
+);
+const {
   WORKER_FAILURE_SAFE_ACTION,
   WORKER_OUTPUT_TYPES,
   WORKER_SCHEMA,
-} from "./worker-protocol.js?v=16-qualified";
+  workerFailure,
+} = await import(`./worker-protocol.js?v=${MODULE_CACHE_TOKEN}`);
 
 export {
   WORKER_OUTPUT_TYPES,
   WORKER_SCHEMA,
   workerFailure,
-} from "./worker-protocol.js?v=16-qualified";
+};
 
 export const STREAM_SCHEMA = "punctra-browser-stream-v1";
 

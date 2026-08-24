@@ -1,20 +1,37 @@
-import {
-  StreamingFailure,
-  createWorkerMessage,
-  runStreamingOperation,
-} from "./streaming-protocol.js?v=16-qualified";
-import {
-  WORKER_SCHEMA,
-  boundedWorkerFailureMessage,
-  isWorkerOperationId,
-  workerFailure,
-  workerOperationId,
-} from "./worker-protocol.js?v=16-qualified";
+const WORKER_CACHE_TOKEN = encodeURIComponent(
+  new URL(import.meta.url).searchParams.get("v") ?? "unversioned",
+);
 
 let active;
 const memoryCacheStorage = new Map();
+let StreamingFailure;
+let createWorkerMessage;
+let runStreamingOperation;
+let WORKER_SCHEMA;
+let boundedWorkerFailureMessage;
+let isWorkerOperationId;
+let workerFailure;
+let workerOperationId;
+const dependenciesReady = Promise.all([
+  import(`./streaming-protocol.js?v=${WORKER_CACHE_TOKEN}`),
+  import(`./worker-protocol.js?v=${WORKER_CACHE_TOKEN}`),
+]).then(([streamingProtocol, workerProtocol]) => {
+  ({ StreamingFailure, createWorkerMessage, runStreamingOperation } = streamingProtocol);
+  ({
+    WORKER_SCHEMA,
+    boundedWorkerFailureMessage,
+    isWorkerOperationId,
+    workerFailure,
+    workerOperationId,
+  } = workerProtocol);
+});
 
 self.addEventListener("message", (event) => {
+  return handleMessage(event);
+});
+
+async function handleMessage(event) {
+  await dependenciesReady;
   const message = event.data;
   const operationId = workerOperationId(message?.operation_id);
   if (message?.schema !== WORKER_SCHEMA) {
@@ -50,7 +67,7 @@ self.addEventListener("message", (event) => {
     return;
   }
   void start(message, operationId);
-});
+}
 
 async function start(message, operationId) {
   const controller = new AbortController();

@@ -48,6 +48,12 @@ test("strict local server enforces the v0.16 Range and CORS contract", async () 
       headers: { Range: "bytes=0-99999999" },
     });
     assert.equal(invalid.status, 416);
+
+    const moduleResponse = await fetch(
+      `http://127.0.0.1:${port}/worker-protocol.js`,
+    );
+    assert.equal(moduleResponse.status, 200);
+    assert.equal(moduleResponse.headers.get("cache-control"), "no-store, no-transform");
   } finally {
     const exited = once(server, "exit");
     server.kill("SIGINT");

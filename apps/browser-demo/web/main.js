@@ -1,4 +1,8 @@
-import {
+const BUILD_CACHE_TOKEN = encodeURIComponent(
+  new URL(import.meta.url).searchParams.get("v") ?? "unversioned",
+);
+
+const {
   RECOVERABLE_VIEWER_FAILURE_CODES,
   UNSUPPORTED_INITIALIZATION_CODES,
   failureCause,
@@ -6,14 +10,20 @@ import {
   isPreserveViewerFailure,
   preserveViewerFailure,
   preservesCurrentViewer,
-} from "./failure-policy.js?v=16-qualified";
-import { runWorkerOperation } from "./worker-operation.js?v=16-qualified";
-import { createDeferredStreamPublication } from "./stream-publication.js?v=16-qualified";
-import {
+} = await import(`./failure-policy.js?v=${BUILD_CACHE_TOKEN}`);
+const { runWorkerOperation } = await import(
+  `./worker-operation.js?v=${BUILD_CACHE_TOKEN}`
+);
+const { createDeferredStreamPublication } = await import(
+  `./stream-publication.js?v=${BUILD_CACHE_TOKEN}`
+);
+const {
   appendTransferredOrdinals,
   samePointOrdinals,
-} from "./stream-ordinals.js?v=16-qualified";
-import { WORKER_SCHEMA, workerFailure } from "./worker-protocol.js?v=16-qualified";
+} = await import(`./stream-ordinals.js?v=${BUILD_CACHE_TOKEN}`);
+const { WORKER_SCHEMA, workerFailure } = await import(
+  `./worker-protocol.js?v=${BUILD_CACHE_TOKEN}`
+);
 
 const canvas = document.querySelector("#punctra-canvas");
 const canvasShell = document.querySelector("#canvas-shell");
@@ -44,7 +54,6 @@ let streamSequence = 0;
 let preserveViewerOnRestart = false;
 
 const STREAM_MANIFEST_URL = "./fixtures/v1/deployment.json";
-const BUILD_CACHE_TOKEN = "16-qualified";
 
 function requestedViewport() {
   const bounds = canvasShell.getBoundingClientRect();
@@ -456,7 +465,7 @@ function runCancellationProbe() {
   return runWorkerOperation({
     workerUrl: `./stream-worker.js?v=${BUILD_CACHE_TOKEN}-${streamSequence}`,
     workerName: operationId,
-    timeoutMilliseconds: 1_500,
+    timeoutMilliseconds: 5_000,
     timeoutFailure: new Error("stream worker did not acknowledge cancellation"),
     errorFailure: (event) => new Error(event.message),
     messageErrorFailure: new Error("the browser could not deserialize the cancellation response"),

@@ -19,16 +19,16 @@ globalThis.self = {
 };
 await import(`./stream-worker.js?test=${Date.now()}`);
 
-test("worker rejects unbounded inbound diagnostics with bounded output", () => {
+test("worker rejects unbounded inbound diagnostics with bounded output", async () => {
   const unbounded = "external".repeat(1_000);
-  listeners.get("message")({
+  await listeners.get("message")({
     data: {
       schema: WORKER_SCHEMA,
       type: unbounded,
       operation_id: "operation-1",
     },
   });
-  listeners.get("message")({
+  await listeners.get("message")({
     data: {
       schema: WORKER_SCHEMA,
       type: "start",
