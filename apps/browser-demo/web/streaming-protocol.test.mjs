@@ -280,6 +280,7 @@ test("full response to a Range request fails before its body is read", async () 
   const server = fixtureServer({ scenario: "full_response" });
   await rejectsWithCode(run(server), "range_unsupported");
   assert.equal(server.bodyReads, 0);
+  assert.equal(server.terminalBodyCancellations, 1);
 });
 
 test("redirects and non-retryable HTTP statuses are terminal Range failures", async () => {
@@ -466,6 +467,7 @@ function fixtureServer(options = {}) {
     overlappingRetry: false,
     retryBodyCancellations: 0,
     retryBodyOpen: false,
+    terminalBodyCancellations: 0,
   };
   const servedManifest = options.manifestOverride ?? manifest;
   state.fetch = async (input, init = {}) => {
@@ -508,7 +510,14 @@ function fixtureServer(options = {}) {
     }
     if (options.scenario === "not_found") return new Response(null, { status: 404 });
     if (options.scenario === "full_response") {
-      return unreadResponse(200, descriptor.bytes, {}, state);
+      return unreadResponse(
+        200,
+        cancellableBody(descriptor.bytes, () => {
+          state.terminalBodyCancellations += 1;
+        }),
+        {},
+        state,
+      );
     }
     let body = original;
     if (options.scenario === "truncated") body = original.subarray(0, original.length - 1);
@@ -608,6 +617,15 @@ function unreadResponse(status, body, headers, state) {
     return read();
   };
   return response;
+}
+
+function cancellableBody(bytes, onCancel) {
+  return new ReadableStream({
+    pull(controller) {
+      controller.enqueue(bytes);
+    },
+    cancel: onCancel,
+  });
 }
 
 function strictlyIncreasingOrdinals(batches) {

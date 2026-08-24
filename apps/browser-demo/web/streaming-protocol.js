@@ -459,12 +459,18 @@ export class RangeTransport {
           signal: this.signal,
         });
         if (RETRYABLE_STATUS.has(response.status)) {
-          await cancelResponseBody(response, this.signal);
+          await cancelRetryableResponseBody(response, this.signal);
           if (attempt === LIMITS.retries) throw new StreamingFailure("retry_exhausted", `HTTP ${response.status} persisted after ${attempt + 1} attempts`);
           await this.retry(attempt);
           continue;
         }
-        validateRangeResponse(response, resource, range, requireAcceptRanges);
+        await validateRangeResponseOrCancel(
+          response,
+          resource,
+          range,
+          requireAcceptRanges,
+          this.signal,
+        );
         const bytes = await readBoundedBody(
           response,
           range.length,
@@ -597,8 +603,12 @@ export class RangeTransport {
 
 async function cancelResponseBody(response, signal) {
   if (!response.body) return;
+  await awaitWithCancellation(response.body.cancel(), signal);
+}
+
+async function cancelRetryableResponseBody(response, signal) {
   try {
-    await awaitWithCancellation(response.body.cancel(), signal);
+    await cancelResponseBody(response, signal);
   } catch (error) {
     assertNotCancelled(signal);
     throw new StreamingFailure(
@@ -606,6 +616,31 @@ async function cancelResponseBody(response, signal) {
       "the retryable response body could not be cancelled safely",
       { cause: error },
     );
+  }
+}
+
+async function validateRangeResponseOrCancel(
+  response,
+  resource,
+  range,
+  requireAcceptRanges,
+  signal,
+) {
+  try {
+    validateRangeResponse(response, resource, range, requireAcceptRanges);
+  } catch (error) {
+    const failure = classifyThrown(error, "range_unsupported");
+    try {
+      await cancelResponseBody(response, signal);
+    } catch (cancellationError) {
+      assertNotCancelled(signal);
+      throw new StreamingFailure(
+        failure.code,
+        "the terminal Range response body could not be cancelled safely",
+        { cause: cancellationError },
+      );
+    }
+    throw failure;
   }
 }
 
