@@ -436,7 +436,7 @@ export class RangeTransport {
 
   async fetchRange(kind, range, requireAcceptRanges) {
     assertNotCancelled(this.signal);
-    const resource = kind === "source" ? this.deployment.source : this.deployment.index;
+    const resource = resourceForKind(this.deployment, kind);
     const context = createRangeContext(this.deployment, kind, resource, range);
     const key = cacheEntryUrl(this.deployment, kind, range);
     const cached = await this.readCache(key, context);
@@ -1008,7 +1008,7 @@ function cacheLedgerUrl(deployment) {
 }
 
 export function cacheEntryUrl(deployment, kind, range) {
-  const resource = kind === "source" ? deployment.source : deployment.index;
+  const resource = resourceForKind(deployment, kind);
   const context = createRangeContext(deployment, kind, resource, range);
   const identity = cacheIdentity(context);
   const url = new URL(resource.url);
@@ -1020,6 +1020,15 @@ export function cacheEntryUrl(deployment, kind, range) {
 
 function createRangeContext(deployment, kind, resource, range) {
   return Object.freeze({ deployment, kind, resource, range });
+}
+
+function resourceForKind(deployment, kind) {
+  require(
+    kind === "source" || kind === "index",
+    "manifest_invalid",
+    "unsupported resource kind",
+  );
+  return deployment[kind];
 }
 
 function cacheIdentity({ deployment, kind, resource, range }) {
