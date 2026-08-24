@@ -40,13 +40,19 @@ apps/
       index.html
       main.js
       styles.css
-      stream-worker.js
-      streaming-protocol.js
-      streaming-protocol.test.mjs
       failure-policy.js
       failure-policy.test.mjs
+      stream-ordinals.js
+      stream-ordinals.test.mjs
+      stream-publication.js
+      stream-publication.test.mjs
+      stream-worker.js
+      stream-worker.test.mjs
+      streaming-protocol.js
+      streaming-protocol.test.mjs
       worker-operation.js
       worker-operation.test.mjs
+      worker-protocol.js
       worker-protocol.test.mjs
       range-server.test.mjs
       fixtures/v1/
