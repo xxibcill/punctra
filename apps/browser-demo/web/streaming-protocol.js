@@ -338,11 +338,21 @@ export class RangeTransport {
     this.cachedEntries = 0;
     this.cachedBytes = 0;
     this.metrics = freshMetrics();
-    this.metrics.queuedRangeBytesHighWater =
-      this.deployment.index.headerAndRoot.length +
-      this.deployment.index.root.sampleRange.length;
+    const queuedRanges = [
+      this.deployment.index.headerAndRoot,
+      this.deployment.index.root.sampleRange,
+    ];
+    this.queuedRangeCapacityBytes = queuedRanges.reduce(
+      (total, range) => total + range.length,
+      0,
+    );
     require(
-      this.metrics.queuedRangeBytesHighWater <= LIMITS.queuedRangeBytes,
+      queuedRanges.length <= LIMITS.queuedRanges,
+      "resource_limit",
+      "queued index ranges exceed 2 requests",
+    );
+    require(
+      this.queuedRangeCapacityBytes <= LIMITS.queuedRangeBytes,
       "resource_limit",
       "queued index ranges exceed 512 KiB",
     );
@@ -1067,7 +1077,7 @@ function freshMetrics() {
     retries: 0,
     concurrentRequestsHighWater: 1,
     concurrentResponseBytesHighWater: 0,
-    queuedRangesHighWater: 2,
+    queuedRangesHighWater: 0,
     queuedRangeBytesHighWater: 0,
     decodedStagingBytesHighWater: 0,
     transferredBatches: 0,

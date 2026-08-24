@@ -52,6 +52,8 @@ test("cold stream verifies bounded ranges and transfers four ordered batches", a
   assert.equal(result.metrics.indexReceivedBytes, 172_440);
   assert.equal(result.metrics.requestedBytes, 172_696);
   assert.equal(result.metrics.receivedBytes, 172_696);
+  assert.equal(result.metrics.queuedRangesHighWater, 0);
+  assert.equal(result.metrics.queuedRangeBytesHighWater, 0);
   assert.ok(result.metrics.sourceNetworkBytes < result.deployment.source.byteLength);
   assert.equal(result.metrics.transferredBatches, 4);
   assert.equal(result.metrics.transferredPoints, 4_096);
@@ -108,7 +110,8 @@ test("queued-range bytes accept the exact ceiling and reject one over", () => {
   };
 
   const exact = new RangeTransport(options);
-  assert.equal(exact.snapshot().queuedRangeBytesHighWater, LIMITS.queuedRangeBytes);
+  assert.equal(exact.queuedRangeCapacityBytes, LIMITS.queuedRangeBytes);
+  assert.equal(exact.snapshot().queuedRangeBytesHighWater, 0);
 
   deployment.index.root.sampleRange.length += 1;
   assert.throws(
