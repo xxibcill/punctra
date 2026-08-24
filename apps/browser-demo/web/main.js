@@ -6,6 +6,10 @@ import {
 } from "./failure-policy.js?v=16-qualified";
 import { runWorkerOperation } from "./worker-operation.js?v=16-qualified";
 import { createDeferredStreamPublication } from "./stream-publication.js?v=16-qualified";
+import {
+  appendTransferredOrdinals,
+  samePointOrdinals,
+} from "./stream-ordinals.js?v=16-qualified";
 import { WORKER_SCHEMA, workerFailure } from "./worker-protocol.js?v=16-qualified";
 
 const canvas = document.querySelector("#punctra-canvas");
@@ -414,13 +418,18 @@ async function runStreamingSmoke() {
     cold.deployment.source_identity === warm.deployment.source_identity,
     "cold and warm Source identity",
   );
+  const ordinalIdentity = {
+    matches: samePointOrdinals(cold.point_ordinals, warm.point_ordinals),
+    point_count: warm.point_ordinals.length,
+  };
+  assertFact(ordinalIdentity.matches, "cold and warm Point ordinals");
   assertFact(warm.metrics.requestCount === 0, "warm binary network request count");
   assertFact(warm.metrics.cacheHits === 3, "warm verified cache hits");
-  publishAcceptanceEvidence(warm.renderer, cancellation, cold, warm);
-  return { cancellation, cold, warm };
+  publishAcceptanceEvidence(warm.renderer, cancellation, cold, warm, ordinalIdentity);
+  return { cancellation, cold, warm, ordinal_identity: ordinalIdentity };
 }
 
-function publishAcceptanceEvidence(renderer, cancellation, cold, warm) {
+function publishAcceptanceEvidence(renderer, cancellation, cold, warm, ordinalIdentity) {
   diagnosticOutput.textContent = JSON.stringify(
     {
       schema: "punctra-browser-streaming-acceptance-v1",
@@ -429,6 +438,7 @@ function publishAcceptanceEvidence(renderer, cancellation, cold, warm) {
         cancellation,
         cold: compactStreamResult(cold),
         warm: compactStreamResult(warm),
+        ordinal_identity: ordinalIdentity,
       },
     },
     null,
@@ -490,6 +500,7 @@ function compactStreamResult(result) {
     deployment: result.deployment,
     metrics: result.metrics,
     decode: result.decode,
+    ordinal_count: result.point_ordinals.length,
     main_thread_milliseconds_high_water: result.main_thread_milliseconds_high_water,
   };
 }
@@ -505,6 +516,7 @@ function runWorkerStream({ cacheMode, invalidate }) {
     parseDiagnostics,
   });
   let mainThreadMillisecondsHighWater = 0;
+  const pointOrdinals = [];
   return runWorkerOperation({
     workerUrl: `./stream-worker.js?v=${BUILD_CACHE_TOKEN}-${streamSequence}`,
     workerName: operationId,
@@ -534,6 +546,7 @@ function runWorkerStream({ cacheMode, invalidate }) {
       } else if (message.type === "batch") {
         const started = performance.now();
         publication.publishBatch(message);
+        appendTransferredOrdinals(pointOrdinals, message.payload);
         mainThreadMillisecondsHighWater = Math.max(
           mainThreadMillisecondsHighWater,
           performance.now() - started,
@@ -546,6 +559,7 @@ function runWorkerStream({ cacheMode, invalidate }) {
           deployment: message.deployment,
           metrics: message.metrics,
           decode: message.decode,
+          point_ordinals: pointOrdinals,
           main_thread_milliseconds_high_water: mainThreadMillisecondsHighWater,
           renderer: diagnostics,
         });
@@ -565,6 +579,7 @@ function verifyStreamingResult(result, disposition) {
   assertFact(diagnostics.streaming.coverage === "sampled", `${disposition} Sampled Coverage`);
   assertFact(diagnostics.streaming.expected_points === 4_096, `${disposition} expected Points`);
   assertFact(diagnostics.streaming.published_points === 4_096, `${disposition} published Points`);
+  assertFact(result.point_ordinals.length === 4_096, `${disposition} captured Point ordinals`);
   assertFact(diagnostics.streaming.published_batches === 4, `${disposition} published batches`);
   assertFact(diagnostics.frame.drawn_points === 4_096, `${disposition} drawn Points`);
   assertFact(diagnostics.frame.draw_calls === 4, `${disposition} draw calls`);
