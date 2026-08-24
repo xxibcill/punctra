@@ -9,6 +9,7 @@ test("a pre-batch worker failure leaves the prior frame untouched", () => {
 
   publication.acceptDeployment(deployment());
 
+  assert.equal(publication.hasBegun(), false);
   assert.equal(viewer.frame, "prior");
   assert.deepEqual(viewer.calls, []);
 });
@@ -24,6 +25,7 @@ test("the first batch resets and publishes as one host event", () => {
     payload: new ArrayBuffer(24),
   });
 
+  assert.equal(publication.hasBegun(), true);
   assert.deepEqual(viewer.calls, ["begin_batch", "render"]);
   assert.equal(rendered.frame, "replacement");
   assert.equal(published.at(-1).frame, "replacement");

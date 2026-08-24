@@ -1,7 +1,10 @@
 import {
   RECOVERABLE_VIEWER_FAILURE_CODES,
   UNSUPPORTED_INITIALIZATION_CODES,
+  failureCause,
   failureState,
+  isPreserveViewerFailure,
+  preserveViewerFailure,
   preservesCurrentViewer,
 } from "./failure-policy.js?v=16-qualified";
 import { runWorkerOperation } from "./worker-operation.js?v=16-qualified";
@@ -565,6 +568,9 @@ function runWorkerStream({ cacheMode, invalidate }) {
         });
       }
     },
+  }).catch((error) => {
+    if (!publication.hasBegun()) throw preserveViewerFailure(error);
+    throw error;
   });
 }
 
@@ -684,9 +690,10 @@ async function retryStreamingSmoke() {
 function handleSmokeFailure(error) {
   smokeRunning = false;
   smokePassed = false;
-  const record = failureRecord(error);
-  const preserveViewer = preservesCurrentViewer(record);
-  preserveViewerOnRestart = preserveViewer && record.code === "worker_failed";
+  const record = failureRecord(failureCause(error));
+  const preserveViewer = preservesCurrentViewer(record, error);
+  preserveViewerOnRestart = preserveViewer
+    && (record.code === "worker_failed" || isPreserveViewerFailure(error));
   if (!preserveViewer) discardViewer();
   publishFailure(record, { disableControls: !preserveViewer });
 }

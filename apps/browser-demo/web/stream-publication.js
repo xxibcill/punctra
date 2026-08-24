@@ -8,6 +8,10 @@ export function createDeferredStreamPublication({
   let begun = false;
 
   return Object.freeze({
+    hasBegun() {
+      return begun;
+    },
+
     acceptDeployment(nextDeployment) {
       assertFact(nextDeployment.root_coverage === "sampled", "remote root sampled Coverage");
       deployment = nextDeployment;

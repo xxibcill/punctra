@@ -22,11 +22,28 @@ export const RECOVERABLE_VIEWER_FAILURE_CODES = Object.freeze([
 
 const unsupportedInitializationCodes = new Set(UNSUPPORTED_INITIALIZATION_CODES);
 const recoverableViewerFailureCodes = new Set(RECOVERABLE_VIEWER_FAILURE_CODES);
+const PRESERVE_VIEWER_FAILURE = Symbol("preserve-viewer-failure");
 
 export function failureState(record) {
   return unsupportedInitializationCodes.has(record.code) ? "unsupported" : "failed";
 }
 
-export function preservesCurrentViewer(record) {
-  return recoverableViewerFailureCodes.has(record.code);
+export function preserveViewerFailure(cause) {
+  return Object.freeze({
+    [PRESERVE_VIEWER_FAILURE]: true,
+    cause,
+  });
+}
+
+export function failureCause(error) {
+  return isPreserveViewerFailure(error) ? error.cause : error;
+}
+
+export function isPreserveViewerFailure(error) {
+  return error?.[PRESERVE_VIEWER_FAILURE] === true;
+}
+
+export function preservesCurrentViewer(record, error = record) {
+  return isPreserveViewerFailure(error)
+    || recoverableViewerFailureCodes.has(record.code);
 }
