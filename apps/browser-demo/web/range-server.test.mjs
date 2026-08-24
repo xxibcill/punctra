@@ -5,16 +5,14 @@ import { once } from "node:events";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
+import { runStreamingOperation } from "./streaming-protocol.js";
+
 const serverPath = fileURLToPath(
   new URL("../../../scripts/serve-browser-demo.py", import.meta.url),
 );
 
 test("strict local server enforces the v0.16 Range and CORS contract", async () => {
-  const server = spawn("python3", [serverPath, "--host", "127.0.0.1", "--port", "0"], {
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  server.stderr.on("data", () => {});
-  const port = await listeningPort(server);
+  const { server, port } = await startServer();
 
   try {
     assert.ok(port > 0, "server must report its assigned ephemeral port");
@@ -55,11 +53,68 @@ test("strict local server enforces the v0.16 Range and CORS contract", async () 
     assert.equal(moduleResponse.status, 200);
     assert.equal(moduleResponse.headers.get("cache-control"), "no-store, no-transform");
   } finally {
-    const exited = once(server, "exit");
-    server.kill("SIGINT");
-    await exited;
+    await stopServer(server);
   }
 });
+
+test("real local server exposes bounded protocol fault routes", async () => {
+  const { server, port } = await startServer();
+  const manifestUrl = `http://127.0.0.1:${port}/fixtures/v1/deployment.json`;
+
+  try {
+    const manifestResponse = await fetch(manifestUrl);
+    const manifest = await manifestResponse.json();
+    for (const [fault, expectedCode] of [
+      ["redirect", "range_unsupported"],
+      ["retry", "retry_exhausted"],
+      ["truncated", "range_truncated"],
+      ["corrupt", "range_corrupt"],
+      ["validator_drift", "source_changed"],
+    ]) {
+      const faultManifest = structuredClone(manifest);
+      faultManifest.source.url = `./representative.las?fault=${fault}`;
+      const fetchImplementation = async (input, init) => {
+        if (String(input) === manifestUrl) {
+          return new Response(JSON.stringify(faultManifest), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        return fetch(input, init);
+      };
+
+      await assert.rejects(
+        runStreamingOperation({
+          manifestUrl,
+          cacheMode: "none",
+          credentials: "omit",
+          delay: async () => {},
+          fetchImplementation,
+        }),
+        (error) => {
+          assert.equal(error.code, expectedCode, `${fault} fault classification`);
+          return true;
+        },
+      );
+    }
+  } finally {
+    await stopServer(server);
+  }
+});
+
+async function startServer() {
+  const server = spawn("python3", [serverPath, "--host", "127.0.0.1", "--port", "0"], {
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  server.stderr.on("data", () => {});
+  return { server, port: await listeningPort(server) };
+}
+
+async function stopServer(server) {
+  const exited = once(server, "exit");
+  server.kill("SIGINT");
+  await exited;
+}
 
 async function listeningPort(server) {
   let output = "";

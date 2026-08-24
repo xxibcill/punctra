@@ -18,6 +18,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 WEB_ROOT = (Path(__file__).resolve().parent.parent / "apps/browser-demo/web").resolve()
 EXPOSED_HEADERS = "Accept-Ranges, Content-Encoding, Content-Length, Content-Range, ETag"
 FILE_CHUNK_BYTES = 64 * 1024
+FAULTS = {"redirect", "retry", "truncated", "corrupt", "validator_drift"}
 
 
 def fixture_validators() -> dict[Path, str]:
@@ -54,6 +55,7 @@ class BrowserDemoHandler(BaseHTTPRequestHandler):
     def _serve(self, *, send_body: bool) -> None:
         try:
             delay_milliseconds = self._delay_milliseconds()
+            fault = self._fault()
             path = self._resolve_path()
             file_stat = path.stat()
         except FileNotFoundError:
@@ -61,6 +63,20 @@ class BrowserDemoHandler(BaseHTTPRequestHandler):
             return
         except ValueError as error:
             self.send_error(HTTPStatus.BAD_REQUEST, str(error))
+            return
+
+        if fault == "redirect":
+            self.send_response(HTTPStatus.FOUND)
+            self._send_cors_headers()
+            self.send_header("Location", "/fixtures/v1/representative.las")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        if fault == "retry":
+            self.send_response(HTTPStatus.SERVICE_UNAVAILABLE)
+            self._send_cors_headers()
+            self.send_header("Content-Length", "0")
+            self.end_headers()
             return
 
         try:
@@ -73,6 +89,8 @@ class BrowserDemoHandler(BaseHTTPRequestHandler):
             time.sleep(delay_milliseconds / 1_000)
 
         body_length = end - start + 1
+        if fault == "truncated":
+            body_length -= 1
         self.send_response(HTTPStatus.PARTIAL_CONTENT if partial else HTTPStatus.OK)
         self._send_cors_headers()
         self.send_header("Accept-Ranges", "bytes")
@@ -82,22 +100,28 @@ class BrowserDemoHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", content_type(path))
         self.send_header(
             "ETag",
-            representation_etag(path, file_stat.st_size, file_stat.st_mtime_ns),
+            '"changed"'
+            if fault == "validator_drift"
+            else representation_etag(path, file_stat.st_size, file_stat.st_mtime_ns),
         )
         if partial:
             self.send_header("Content-Range", f"bytes {start}-{end}/{file_stat.st_size}")
         self.end_headers()
         if send_body:
-            self._write_body(path, start, body_length)
+            self._write_body(path, start, body_length, corrupt=fault == "corrupt")
 
-    def _write_body(self, path: Path, start: int, length: int) -> None:
+    def _write_body(self, path: Path, start: int, length: int, *, corrupt: bool = False) -> None:
         remaining = length
+        first_chunk = True
         with path.open("rb") as source:
             source.seek(start)
             while remaining:
-                chunk = source.read(min(remaining, FILE_CHUNK_BYTES))
+                chunk = bytearray(source.read(min(remaining, FILE_CHUNK_BYTES)))
                 if not chunk:
                     return
+                if corrupt and first_chunk:
+                    chunk[0] ^= 0xFF
+                    first_chunk = False
                 self.wfile.write(chunk)
                 remaining -= len(chunk)
 
@@ -135,6 +159,14 @@ class BrowserDemoHandler(BaseHTTPRequestHandler):
         if delay > 1_000:
             raise ValueError("delay_ms exceeds the 1,000 millisecond fault ceiling")
         return delay
+
+    def _fault(self) -> str | None:
+        values = parse_qs(urlsplit(self.path).query).get("fault", [])
+        if not values:
+            return None
+        if len(values) != 1 or values[0] not in FAULTS:
+            raise ValueError("fault must be one supported bounded fault route")
+        return values[0]
 
     def _send_cors_headers(self) -> None:
         self.send_header("Access-Control-Allow-Origin", "*")
