@@ -28,6 +28,10 @@ export function failureState(record) {
   return unsupportedInitializationCodes.has(record.code) ? "unsupported" : "failed";
 }
 
+export function failureLabel(state) {
+  return state === "unsupported" ? "UNSUPPORTED" : "FAIL";
+}
+
 export function preserveViewerFailure(cause) {
   return Object.freeze({
     [PRESERVE_VIEWER_FAILURE]: true,

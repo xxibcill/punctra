@@ -6,6 +6,7 @@ const {
   RECOVERABLE_VIEWER_FAILURE_CODES,
   UNSUPPORTED_INITIALIZATION_CODES,
   failureCause,
+  failureLabel,
   failureState,
   isPreserveViewerFailure,
   preserveViewerFailure,
@@ -186,7 +187,7 @@ function publishFailure(error, { disableControls = false, state } = {}) {
   const publishedState = state ?? failureState(record);
   diagnosticOutput.textContent = JSON.stringify(record, null, 2);
   if (disableControls) setControls(false);
-  const label = publishedState === "unsupported" ? "UNSUPPORTED" : "FAILED";
+  const label = failureLabel(publishedState);
   setHarnessState(publishedState, `${label} — ${record.message}`, record.safe_action);
 }
 

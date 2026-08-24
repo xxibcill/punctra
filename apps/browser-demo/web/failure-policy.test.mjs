@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   failureCause,
+  failureLabel,
   failureState,
   isPreserveViewerFailure,
   preserveViewerFailure,
@@ -30,4 +31,9 @@ test("a host-marked pre-publication failure preserves its viewer", () => {
 test("only initialization capability failures publish unsupported state", () => {
   assert.equal(failureState({ code: "webgpu_unavailable" }), "unsupported");
   assert.equal(failureState({ code: "worker_failed" }), "failed");
+});
+
+test("failure labels publish the closed browser harness tokens", () => {
+  assert.equal(failureLabel("unsupported"), "UNSUPPORTED");
+  assert.equal(failureLabel("failed"), "FAIL");
 });
