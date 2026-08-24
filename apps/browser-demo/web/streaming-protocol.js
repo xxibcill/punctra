@@ -437,14 +437,15 @@ export class RangeTransport {
   async fetchRange(kind, range, requireAcceptRanges) {
     assertNotCancelled(this.signal);
     const resource = kind === "source" ? this.deployment.source : this.deployment.index;
+    const context = createRangeContext(this.deployment, kind, resource, range);
     const key = cacheEntryUrl(this.deployment, kind, range);
-    const cached = await this.readCache(key, kind, resource, range);
+    const cached = await this.readCache(key, context);
     if (cached) {
       this.recordCacheHit(kind, cached.byteLength);
       return cached;
     }
     const bytes = await this.fetchNetwork(kind, resource, range, requireAcceptRanges);
-    await this.writeCache(key, kind, resource, range, bytes);
+    await this.writeCache(key, context, bytes);
     assertNotCancelled(this.signal);
     this.recordNetwork(kind, bytes.byteLength);
     return bytes;
@@ -503,7 +504,8 @@ export class RangeTransport {
     await this.delay(LIMITS.retryDelayMilliseconds * (attempt + 1), this.signal);
   }
 
-  async readCache(key, kind, resource, range) {
+  async readCache(key, context) {
+    const { range } = context;
     assertNotCancelled(this.signal);
     if (this.cacheMode === "none") return undefined;
     if (this.cacheMode === "memory") {
@@ -511,10 +513,7 @@ export class RangeTransport {
       if (!value) return undefined;
       const bytes = validateMemoryCacheEntry(
         value,
-        this.deployment,
-        kind,
-        resource,
-        range,
+        context,
       );
       await verifyDigest(bytes, range.sha256, this.signal);
       assertNotCancelled(this.signal);
@@ -527,7 +526,7 @@ export class RangeTransport {
       );
       assertNotCancelled(this.signal);
       if (!response) return undefined;
-      validateCachedMetadata(response, this.deployment, kind, resource, range);
+      validateCachedMetadata(response, context);
       const bytes = await readBoundedBody(
         response,
         range.length,
@@ -545,7 +544,7 @@ export class RangeTransport {
     }
   }
 
-  async writeCache(key, kind, resource, range, bytes) {
+  async writeCache(key, context, bytes) {
     if (this.cacheMode === "none") return;
     const ceiling = this.cacheMode === "memory" ? LIMITS.memoryCacheBytes : LIMITS.persistentCacheBytes;
     const nextEntries = this.cachedEntries + 1;
@@ -555,7 +554,7 @@ export class RangeTransport {
     if (this.cacheMode === "memory") {
       this.memory.set(
         key,
-        memoryCacheEntry(this.deployment, kind, resource, range, bytes),
+        memoryCacheEntry(context, bytes),
       );
     } else {
       try {
@@ -565,7 +564,7 @@ export class RangeTransport {
         await awaitWithCancellation(
           this.persistent.put(
             key,
-            cachedResponse(this.deployment, kind, resource, range, bytes),
+            cachedResponse(context, bytes),
           ),
           this.signal,
         );
@@ -881,8 +880,8 @@ export async function readBoundedBody(
   return bytes.subarray(0, length);
 }
 
-function cachedResponse(deployment, kind, resource, range, bytes) {
-  const identity = cacheIdentity(deployment, kind, range, resource);
+function cachedResponse(context, bytes) {
+  const identity = cacheIdentity(context);
   const headers = new Headers({ "Content-Length": String(bytes.byteLength) });
   for (const field of CACHE_IDENTITY_FIELDS) {
     headers.set(field.header, identity[field.name]);
@@ -893,9 +892,9 @@ function cachedResponse(deployment, kind, resource, range, bytes) {
   });
 }
 
-function memoryCacheEntry(deployment, kind, resource, range, bytes) {
+function memoryCacheEntry(context, bytes) {
   return Object.freeze({
-    identity: cacheIdentity(deployment, kind, range, resource),
+    identity: cacheIdentity(context),
     bytes: bytes.slice(),
   });
 }
@@ -909,7 +908,8 @@ function memoryCacheBytes(entry) {
   return entry.bytes;
 }
 
-function validateMemoryCacheEntry(entry, deployment, kind, resource, range) {
+function validateMemoryCacheEntry(entry, context) {
+  const { range } = context;
   const bytes = memoryCacheBytes(entry);
   require(
     entry.identity && typeof entry.identity === "object",
@@ -918,7 +918,7 @@ function validateMemoryCacheEntry(entry, deployment, kind, resource, range) {
   );
   validateCacheIdentity(
     entry.identity,
-    cacheIdentity(deployment, kind, range, resource),
+    cacheIdentity(context),
     "memory cache",
   );
   equal(bytes.byteLength, range.length, "range_corrupt", "memory cache length");
@@ -926,7 +926,7 @@ function validateMemoryCacheEntry(entry, deployment, kind, resource, range) {
 }
 
 function cacheLedgerResponse(deployment, entries, bytes) {
-  const identity = cacheIdentity(deployment);
+  const identity = cacheIdentity({ deployment });
   const headers = new Headers({
     "Content-Length": "0",
     [CACHE_LEDGER_ENTRIES_HEADER]: String(entries),
@@ -939,7 +939,7 @@ function cacheLedgerResponse(deployment, entries, bytes) {
 }
 
 function validateCacheLedger(response, deployment) {
-  const identity = cacheIdentity(deployment);
+  const identity = cacheIdentity({ deployment });
   validateCacheIdentity(
     cacheResponseIdentity(response),
     identity,
@@ -962,8 +962,8 @@ function cacheLedgerInteger(response, header, ceiling) {
   return value;
 }
 
-function validateCachedMetadata(response, deployment, kind, resource, range) {
-  const identity = cacheIdentity(deployment, kind, range, resource);
+function validateCachedMetadata(response, context) {
+  const identity = cacheIdentity(context);
   validateCacheIdentity(cacheResponseIdentity(response), identity, "cache");
 }
 
@@ -990,7 +990,7 @@ function validateCacheIdentity(
 }
 
 export function cacheNamespace(deployment) {
-  const identity = cacheIdentity(deployment);
+  const identity = cacheIdentity({ deployment });
   return CACHE_IDENTITY_FIELDS
     .filter((field) => field.namespace)
     .map((field) => identity[field.name])
@@ -998,7 +998,7 @@ export function cacheNamespace(deployment) {
 }
 
 function cacheLedgerUrl(deployment) {
-  const identity = cacheIdentity(deployment);
+  const identity = cacheIdentity({ deployment });
   const url = new URL(deployment.source.url);
   for (const field of CACHE_IDENTITY_FIELDS.filter((candidate) => candidate.namespace)) {
     url.searchParams.set(field.query, identity[field.name]);
@@ -1009,7 +1009,8 @@ function cacheLedgerUrl(deployment) {
 
 export function cacheEntryUrl(deployment, kind, range) {
   const resource = kind === "source" ? deployment.source : deployment.index;
-  const identity = cacheIdentity(deployment, kind, range, resource);
+  const context = createRangeContext(deployment, kind, resource, range);
+  const identity = cacheIdentity(context);
   const url = new URL(resource.url);
   for (const field of CACHE_IDENTITY_FIELDS) {
     if (field.query) url.searchParams.set(field.query, identity[field.name]);
@@ -1017,7 +1018,11 @@ export function cacheEntryUrl(deployment, kind, range) {
   return url.href;
 }
 
-function cacheIdentity(deployment, kind, range, resource) {
+function createRangeContext(deployment, kind, resource, range) {
+  return Object.freeze({ deployment, kind, resource, range });
+}
+
+function cacheIdentity({ deployment, kind, resource, range }) {
   return Object.freeze({
     layout: CACHE_LAYOUT,
     schema: STREAM_SCHEMA,
