@@ -10,6 +10,7 @@ true out-of-core adoption, independent adoption, partner validation, and
 support qualification outstanding; v0.14 bounded exact Terrain QA and
 correction-loop slice Complete and repository-verified; v0.15 bounded local
 WebAssembly/WebGPU browser-foundation slice Complete and repository-verified;
+v0.16 bounded HTTP Range/cache/worker slice Complete and repository-verified;
 all gates run locally**
 
 Verification follows public contracts first. Private tests are used for fault
@@ -545,6 +546,38 @@ accounting; they are not browser heap or observed GPU-allocation measurements.
 Remote Sources, independent embedding, broad compatibility, SDK stability, and
 support qualification remain external or later-version exits.
 
+## v0.16 HTTP Range streaming verification lane
+
+The private v0.16 browser lane adds three independent local layers:
+
+1. `cargo run -p browser-demo --bin generate_stream_fixture` fully verifies
+   and regenerates the deterministic LAS/SourceRecord/disk-v2 index/deployment
+   family in an isolated directory, then compares the committed semantic files;
+2. `node --test apps/browser-demo/web/*.test.mjs` exercises the real local
+   Range/CORS server plus manifest validation, strict Range responses, retry/
+   cancellation, changed-Source, truncation, corruption, cache identity/
+   invalidation/quota, disk-v2 decode, transferable batching, and worker-
+   lifecycle/failure mapping; and
+3. the secure-context browser harness served by
+   `scripts/serve-browser-demo.py` exercises real Fetch/CORS headers, one module
+   Worker, Cache API persistence across worker/viewer recreation, WebAssembly,
+   WebGPU publication, and cold/warm evidence.
+
+The Rust `browser-demo` tests independently pin Source-identity parsing,
+strictly increasing transferred ordinals, sampled Coverage, View generation,
+renderer publication, completion, and every deterministic resource ceiling.
+The browser lane must report cold network bytes below the complete Source
+length and a warm run with three verified cache hits and zero binary network
+requests. It must also cancel one deliberately delayed Fetch and receive the
+worker's `cancelled` acknowledgement within 1,000 milliseconds. Observed
+main-thread milliseconds are recorded but are not a stable
+gate; one task is deterministically capped at 1,024 Points and 24,576 bytes.
+
+This lane supplements rather than replaces the workspace, package, fuzz,
+benchmark, example, and forced-native-GPU checks. One local fixture/browser pass
+does not establish hostile-server authenticity, broad browser support, process
+memory, cache allocation, exact browser Queries, or SDK stability.
+
 ## Local verification lanes
 
 ### Change qualification
@@ -555,10 +588,10 @@ command list; this architecture guide does not duplicate it. Required local GPU
 lanes use `PUNCTRA_REQUIRE_GPU=1`, including renderer appearance, corpus,
 offscreen, planner, display-mapping, and public-host acceptance.
 
-The v0.15 browser lane is separate from native GPU acceptance. It uses the
-build and local-host steps in `CONTRIBUTING.md`, requires the document itself to
-publish `PASS`, and records the exact browser/adapter facts rather than claiming
-a browser support matrix.
+The v0.15/v0.16 browser lane is separate from native GPU acceptance. It uses
+the build and strict local-Range-host steps in `CONTRIBUTING.md`, requires the
+document itself to publish `PASS`, and records the exact browser/adapter facts
+rather than claiming a browser support matrix.
 
 Opt-in larger generated Workspace runs use:
 

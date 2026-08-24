@@ -13,10 +13,11 @@ verified while permitted field execution remains outstanding; v0.13:
 Complete and repository-verified for the bounded persistent-terrain slice;
 field activation, production-scale accuracy, true out-of-core adoption,
 independent adoption, partner validation, and support qualification
-outstanding; v0.14 exact Terrain QA/correction and v0.15 local browser-
-foundation slices are Complete and repository-verified while their declared
-external exits remain outstanding; broader selection, constrained terrain,
-remote browser delivery, supported SDK, and product terms remain deferred
+outstanding; v0.14 exact Terrain QA/correction, v0.15 local browser-foundation,
+and v0.16 bounded HTTP Range streaming slices are Complete and repository-
+verified while their declared external exits remain outstanding; broader
+selection, arbitrary browser Source delivery, supported SDK, and product terms
+remain deferred
 
 Punctra v0.11 builds on the reusable render engine, renderer-neutral View
 planner, and verified Source path described in the accepted [v0.1 renderer
@@ -108,6 +109,17 @@ as the host of `render-wgpu`. Browser display and picking remain progressive
 and provisional. Local generated execution does not mean remote LAS/LAZ
 delivery, a supported SDK, broad Browser Qualification, or exact CPU Query.
 
+The completed [v0.16 HTTP Range Streaming, Browser Caching, and Worker Decoding
+design](docs/design/http-range-streaming-v0.16.md) fixes Remote Deployment as a
+trusted versioned binding between one immutable LAS representation, its strong
+HTTP validator and Source identity, and one compatible disk-v2 Spatial Index.
+The private worker may publish only the root node's bounded Sampled Coverage;
+the manifest and cache do not become Source authority, and browser display does
+not repeat the complete `source-las` verification used to prepare the binding.
+An arbitrary raw URL is not a Remote Deployment.
+The [v0.16 repository verification record](docs/releases/v0.16.0.md) owns the
+exact local implementation, environment, command, browser, and nonclaim facts.
+
 ## Artifact
 
 An immutable result produced from a Source, Snapshot, or explicitly detached input with recorded construction parameters, such as a Spatial Index, Terrain Surface, or Profile. Its provenance identifies the Source and either the Workspace Revision or detached input content that was used, plus its construction version. A rebuildable persistent Artifact may be deleted and reproduced from that authority; persistence does not make it Workspace state.
@@ -136,6 +148,18 @@ public renderer remains submission-neutral.
 
 _Avoid:_ browser SDK when referring to the private v0.15 acceptance adapter,
 Punctra UI when the host owns application policy
+
+## Remote Deployment
+
+A trusted, versioned browser-host statement binding one immutable HTTP LAS/LAZ
+representation to its exact byte length, strong validator, Punctra Source
+identity, compatible Spatial Index, display-sample recipe, and integrity facts.
+It authorizes only the declared bounded progressive display path. It is not
+Source authority, URL discovery, a credential policy, or permission to scan or
+download an arbitrary file in full.
+
+_Avoid:_ remote Source when the binding is absent, URL loader, browser Source
+adapter, cache manifest
 
 ## Check Point
 

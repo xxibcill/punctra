@@ -1,3 +1,31 @@
+const BUILD_CACHE_TOKEN = encodeURIComponent(
+  new URL(import.meta.url).searchParams.get("v") ?? "unversioned",
+);
+
+const {
+  RECOVERABLE_VIEWER_FAILURE_CODES,
+  UNSUPPORTED_INITIALIZATION_CODES,
+  failureCause,
+  failureLabel,
+  failureState,
+  isPreserveViewerFailure,
+  preserveViewerFailure,
+  preservesCurrentViewer,
+} = await import(`./failure-policy.js?v=${BUILD_CACHE_TOKEN}`);
+const { runWorkerOperation } = await import(
+  `./worker-operation.js?v=${BUILD_CACHE_TOKEN}`
+);
+const { createDeferredStreamPublication } = await import(
+  `./stream-publication.js?v=${BUILD_CACHE_TOKEN}`
+);
+const {
+  appendTransferredOrdinals,
+  samePointOrdinals,
+} = await import(`./stream-ordinals.js?v=${BUILD_CACHE_TOKEN}`);
+const { WORKER_SCHEMA, workerFailure } = await import(
+  `./worker-protocol.js?v=${BUILD_CACHE_TOKEN}`
+);
+
 const canvas = document.querySelector("#punctra-canvas");
 const canvasShell = document.querySelector("#canvas-shell");
 const statusBlock = document.querySelector("#status-block");
@@ -22,27 +50,11 @@ let smokePassed = false;
 let resizeFrame = null;
 let smokeRecord = null;
 let moduleLoadAttempt = 0;
+let streamingFacts = null;
+let streamSequence = 0;
+let preserveViewerOnRestart = false;
 
-const UNSUPPORTED_INITIALIZATION_CODES = new Set([
-  "missing_window",
-  "insecure_context",
-  "webgpu_unavailable",
-  "capability_inspection",
-  "canvas_surface",
-  "webgpu_adapter",
-  "webgpu_device",
-  "surface_format",
-  "presentation_mode",
-  "surface_alpha_mode",
-  "surface_configuration",
-  "renderer_capability",
-]);
-
-const RECOVERABLE_VIEWER_FAILURE_CODES = new Set([
-  "surface_timeout",
-  "surface_occluded",
-  "surface_outdated",
-]);
+const STREAM_MANIFEST_URL = "./fixtures/v1/deployment.json";
 
 function requestedViewport() {
   const bounds = canvasShell.getBoundingClientRect();
@@ -98,9 +110,22 @@ function publishDiagnostics(diagnostics) {
     ],
     ["Physical viewport", `${diagnostics.viewport.physical_width} × ${diagnostics.viewport.physical_height}`],
   ]);
+  const streamActive = diagnostics.streaming.phase !== "idle";
+  const residentPoints = streamActive
+    ? diagnostics.streaming.published_points
+    : diagnostics.scene.point_count;
+  const residentBytes = streamActive
+    ? diagnostics.frame?.resident_bytes
+    : diagnostics.scene.estimated_gpu_bytes;
   replaceFacts(resourceFacts, [
-    ["Resident Points", `${diagnostics.scene.point_count} / ${diagnostics.limits.points}`],
-    ["Logical vertex bytes", `${formatBytes(diagnostics.scene.estimated_gpu_bytes)} / ${formatBytes(diagnostics.limits.estimated_gpu_bytes)}`],
+    ["Resident Points", `${residentPoints} / ${diagnostics.limits.points}`],
+    ["Logical vertex bytes", `${formatBytes(residentBytes)} / ${formatBytes(diagnostics.limits.estimated_gpu_bytes)}`],
+    ["Stream Coverage", streamActive ? diagnostics.streaming.coverage : "generated fixture"],
+    ["Range requested bytes", formatBytes(streamingFacts?.requestedBytes)],
+    ["Range received bytes", formatBytes(streamingFacts?.receivedBytes)],
+    ["Verified cache bytes", formatBytes(streamingFacts?.cacheBytes)],
+    ["Worker staging high-water", formatBytes(streamingFacts?.decodedStagingBytesHighWater)],
+    ["Main-task batch high-water", formatBytes(diagnostics.streaming.main_thread_batch_bytes_high_water)],
     ["Surface bytes / pixel", diagnostics.limits.surface_bytes_per_pixel],
     ["Canvas bytes", formatBytes(diagnostics.viewport.surface_bytes)],
     ["Transient texture bytes", formatBytes(diagnostics.frame?.transient_texture_bytes)],
@@ -143,6 +168,7 @@ function discardViewer() {
 
 function failureRecord(error) {
   if (error?.schema === "punctra-browser-failure-v1") return error;
+  if (error?.schema === WORKER_SCHEMA && error?.type === "failure") return error;
   const message = typeof error === "string" ? error : String(error?.message ?? error);
   try {
     return JSON.parse(message);
@@ -156,20 +182,12 @@ function failureRecord(error) {
   }
 }
 
-function failureState(record) {
-  return UNSUPPORTED_INITIALIZATION_CODES.has(record.code) ? "unsupported" : "failed";
-}
-
-function preservesCurrentViewer(record) {
-  return RECOVERABLE_VIEWER_FAILURE_CODES.has(record.code);
-}
-
 function publishFailure(error, { disableControls = false, state } = {}) {
   const record = failureRecord(error);
   const publishedState = state ?? failureState(record);
   diagnosticOutput.textContent = JSON.stringify(record, null, 2);
   if (disableControls) setControls(false);
-  const label = publishedState === "unsupported" ? "UNSUPPORTED" : "FAILED";
+  const label = failureLabel(publishedState);
   setHarnessState(publishedState, `${label} — ${record.message}`, record.safe_action);
 }
 
@@ -237,7 +255,9 @@ async function initializeViewer() {
   );
   viewer = next;
   suspended = false;
+  streamingFacts = null;
   visibilityButton.textContent = "Suspend rendering";
+  pickButton.textContent = "Check centre pick";
   setControls(true);
   return requested;
 }
@@ -296,7 +316,8 @@ async function runSmokePath() {
 
   let diagnostics = parseDiagnostics(viewer.render());
   publishDiagnostics(diagnostics);
-  assertFact(diagnostics.schema === "punctra-browser-foundation-v1", "diagnostic schema");
+  assertFact(diagnostics.schema === "punctra-browser-streaming-v1", "diagnostic schema");
+  assertFact(diagnostics.package_version === "0.16.0-alpha.1", "browser package version");
   verifyFailureStateClassification();
   verifyCapabilityDiagnostics(diagnostics);
   assertFact(diagnostics.scene.point_count === 1089, "fixed scene Point count");
@@ -308,9 +329,9 @@ async function runSmokePath() {
   assertFact(diagnostics.frame.drawn_points === 1089, "drawn Point count");
   assertFact(diagnostics.frame.draw_calls === 1, "single generated draw call");
   assertFact(diagnostics.frame.resident_bytes === 26_136, "fixed resident bytes");
-  assertFact(diagnostics.limits.estimated_gpu_bytes === 49_152, "logical byte ceiling");
-  assertFact(diagnostics.limits.points === 2_048, "Point ceiling");
-  assertFact(diagnostics.limits.batches === 4, "batch ceiling");
+  assertFact(diagnostics.limits.estimated_gpu_bytes === 196_608, "logical byte ceiling");
+  assertFact(diagnostics.limits.points === 8_192, "Point ceiling");
+  assertFact(diagnostics.limits.batches === 8, "batch ceiling");
   assertFact(diagnostics.limits.highlight_points === 32, "highlight ceiling");
   assertFact(diagnostics.limits.canvas_dimension === 4_096, "canvas dimension ceiling");
   assertFact(diagnostics.limits.canvas_pixels === 8_388_608, "canvas area ceiling");
@@ -326,6 +347,10 @@ async function runSmokePath() {
   );
   assertFact(diagnostics.limits.surface_bytes_per_pixel === 4, "surface byte factor");
   assertFact(diagnostics.limits.presentation_latency_frames === 2, "presentation latency hint");
+  assertFact(
+    diagnostics.streaming_limits.cancellation_milliseconds === 1_000,
+    "cancellation acknowledgement ceiling",
+  );
   assertFact(
     diagnostics.frame.transient_texture_bytes === diagnostics.viewport.surface_bytes,
     "exact pre-pick transient texture accounting",
@@ -377,9 +402,214 @@ async function runSmokePath() {
   diagnostics = parseDiagnostics(viewer.render());
   publishDiagnostics(diagnostics);
   assertFact(diagnostics.phase === "ready", "explicit recreation");
-  setHarnessState("passed", "PASS — browser WebGPU lifecycle and invariants verified locally.");
-  smokePassed = true;
-  smokeRunning = false;
+  const streaming = await runStreamingSmoke();
+  completeStreamingSmoke(
+    streaming,
+    "PASS — WebGPU lifecycle, bounded remote ranges, worker decode, and warm-cache isolation verified locally.",
+  );
+}
+
+async function runStreamingSmoke() {
+  setHarnessState("checking", "Proving that an in-flight Fetch cancels within the fixed deadline…");
+  const cancellation = await runCancellationProbe();
+  setHarnessState("checking", "Streaming the cold immutable LAS deployment through one bounded worker…");
+  const cold = await runWorkerStream({ cacheMode: "persistent", invalidate: true });
+  verifyStreamingResult(cold, "cold");
+
+  discardViewer();
+  await initializeViewer();
+  setHarnessState("checking", "Recreating the worker and proving identity-safe warm-cache delivery…");
+  const warm = await runWorkerStream({ cacheMode: "persistent", invalidate: false });
+  verifyStreamingResult(warm, "warm");
+  assertFact(
+    cold.deployment.source_identity === warm.deployment.source_identity,
+    "cold and warm Source identity",
+  );
+  const ordinalIdentity = {
+    matches: samePointOrdinals(cold.point_ordinals, warm.point_ordinals),
+    point_count: warm.point_ordinals.length,
+  };
+  assertFact(ordinalIdentity.matches, "cold and warm Point ordinals");
+  assertFact(warm.metrics.requestCount === 0, "warm binary network request count");
+  assertFact(warm.metrics.cacheHits === 3, "warm verified cache hits");
+  publishAcceptanceEvidence(warm.renderer, cancellation, cold, warm, ordinalIdentity);
+  return { cancellation, cold, warm, ordinal_identity: ordinalIdentity };
+}
+
+function publishAcceptanceEvidence(renderer, cancellation, cold, warm, ordinalIdentity) {
+  diagnosticOutput.textContent = JSON.stringify(
+    {
+      schema: "punctra-browser-streaming-acceptance-v1",
+      renderer,
+      streaming: {
+        cancellation,
+        cold: compactStreamResult(cold),
+        warm: compactStreamResult(warm),
+        ordinal_identity: ordinalIdentity,
+      },
+    },
+    null,
+    2,
+  );
+}
+
+function runCancellationProbe() {
+  const operationId = `browser-v016-cancel-${Date.now()}-${streamSequence}`;
+  streamSequence += 1;
+  let cancelStarted;
+  return runWorkerOperation({
+    workerUrl: `./stream-worker.js?v=${BUILD_CACHE_TOKEN}-${streamSequence}`,
+    workerName: operationId,
+    timeoutMilliseconds: 5_000,
+    timeoutFailure: new Error("stream worker did not acknowledge cancellation"),
+    errorFailure: (event) => new Error(event.message),
+    messageErrorFailure: new Error("the browser could not deserialize the cancellation response"),
+    initialMessage: {
+      schema: WORKER_SCHEMA,
+      type: "start",
+      operation_id: operationId,
+      manifest_url: `${STREAM_MANIFEST_URL}?delay_ms=200`,
+      cache_mode: "none",
+      invalidate: false,
+      credentials: "same-origin",
+    },
+    onMessage(message, controls) {
+      if (message?.schema !== WORKER_SCHEMA || message.operation_id !== operationId) return;
+      if (message.type === "state" && message.phase === "starting" && cancelStarted === undefined) {
+        cancelStarted = performance.now();
+        controls.postMessage({
+          schema: WORKER_SCHEMA,
+          type: "cancel",
+          operation_id: operationId,
+        });
+      } else if (message.type === "failure") {
+        assertFact(cancelStarted !== undefined, "cancellation followed worker start");
+        assertFact(message.code === "cancelled", "deterministic cancellation code");
+        const acknowledgementMilliseconds = performance.now() - cancelStarted;
+        assertFact(
+          acknowledgementMilliseconds <= 1_000,
+          "cancellation acknowledgement deadline",
+        );
+        controls.resolve({
+          code: message.code,
+          acknowledgement_milliseconds: acknowledgementMilliseconds,
+          limit_milliseconds: 1_000,
+        });
+      } else if (message.type === "complete") {
+        controls.reject(new Error("cancelled stream operation completed"));
+      }
+    },
+  });
+}
+
+function compactStreamResult(result) {
+  return {
+    deployment: result.deployment,
+    metrics: result.metrics,
+    decode: result.decode,
+    ordinal_count: result.point_ordinals.length,
+    main_thread_milliseconds_high_water: result.main_thread_milliseconds_high_water,
+  };
+}
+
+function runWorkerStream({ cacheMode, invalidate }) {
+  const operationId = `browser-v016-${Date.now()}-${streamSequence}`;
+  streamSequence += 1;
+  let deployment;
+  const publication = createDeferredStreamPublication({
+    viewer,
+    assertFact,
+    publishDiagnostics,
+    parseDiagnostics,
+  });
+  let mainThreadMillisecondsHighWater = 0;
+  const pointOrdinals = [];
+  return runWorkerOperation({
+    workerUrl: `./stream-worker.js?v=${BUILD_CACHE_TOKEN}-${streamSequence}`,
+    workerName: operationId,
+    timeoutMilliseconds: 30_000,
+    timeoutFailure: workerFailure("stream worker did not complete within 30 seconds"),
+    errorFailure: (event) => workerFailure(event.message),
+    messageErrorFailure: workerFailure("the browser could not deserialize a worker message"),
+    initialMessage: {
+      schema: WORKER_SCHEMA,
+      type: "start",
+      operation_id: operationId,
+      manifest_url: STREAM_MANIFEST_URL,
+      cache_mode: cacheMode,
+      invalidate,
+      credentials: "same-origin",
+    },
+    onMessage(message, controls) {
+      if (message?.schema !== WORKER_SCHEMA || message.operation_id !== operationId) return;
+      if (message.type === "failure") {
+        controls.reject(message);
+      } else if (message.type === "state") {
+        if (message.phase === "deployment") {
+          deployment = message.deployment;
+          publication.acceptDeployment(deployment);
+        }
+        streamingFacts = message.metrics ?? streamingFacts;
+      } else if (message.type === "batch") {
+        const started = performance.now();
+        publication.publishBatch(message);
+        appendTransferredOrdinals(pointOrdinals, message.payload);
+        mainThreadMillisecondsHighWater = Math.max(
+          mainThreadMillisecondsHighWater,
+          performance.now() - started,
+        );
+      } else if (message.type === "complete") {
+        const diagnostics = publication.complete();
+        streamingFacts = message.metrics;
+        publishDiagnostics(diagnostics);
+        controls.resolve({
+          deployment: message.deployment,
+          metrics: message.metrics,
+          decode: message.decode,
+          point_ordinals: pointOrdinals,
+          main_thread_milliseconds_high_water: mainThreadMillisecondsHighWater,
+          renderer: diagnostics,
+        });
+      }
+    },
+  }).catch((error) => {
+    if (!publication.hasBegun()) throw preserveViewerFailure(error);
+    throw error;
+  });
+}
+
+function verifyStreamingResult(result, disposition) {
+  const metrics = result.metrics;
+  const diagnostics = result.renderer;
+  assertFact(diagnostics.streaming.phase === "complete", `${disposition} stream completion`);
+  assertFact(
+    diagnostics.streaming.source_identity === result.deployment.source_identity,
+    `${disposition} renderer Source identity`,
+  );
+  assertFact(diagnostics.streaming.coverage === "sampled", `${disposition} Sampled Coverage`);
+  assertFact(diagnostics.streaming.expected_points === 4_096, `${disposition} expected Points`);
+  assertFact(diagnostics.streaming.published_points === 4_096, `${disposition} published Points`);
+  assertFact(result.point_ordinals.length === 4_096, `${disposition} captured Point ordinals`);
+  assertFact(diagnostics.streaming.published_batches === 4, `${disposition} published batches`);
+  assertFact(diagnostics.frame.drawn_points === 4_096, `${disposition} drawn Points`);
+  assertFact(diagnostics.frame.draw_calls === 4, `${disposition} draw calls`);
+  assertFact(diagnostics.frame.resident_bytes === 98_304, `${disposition} resident bytes`);
+  assertFact(metrics.concurrentResponseBytesHighWater <= 262_144, `${disposition} response-byte ceiling`);
+  assertFact(metrics.queuedRangesHighWater <= 2, `${disposition} queue-count ceiling`);
+  assertFact(metrics.queuedRangeBytesHighWater <= 524_288, `${disposition} queue-byte ceiling`);
+  assertFact(metrics.decodedStagingBytesHighWater <= 327_680, `${disposition} decode staging ceiling`);
+  assertFact(metrics.transferredBatches <= 8, `${disposition} transfer-batch ceiling`);
+  assertFact(metrics.logicalCacheEntries <= 64, `${disposition} cache-entry ceiling`);
+  assertFact(result.decode.intensityMinimum === 22, `${disposition} decoded intensity minimum`);
+  assertFact(result.decode.intensityMaximum === 65_519, `${disposition} decoded intensity maximum`);
+  assertFact(
+    result.decode.classificationMinimum === 2 && result.decode.classificationMaximum === 2,
+    `${disposition} decoded Ground classification`,
+  );
+  assertFact(
+    metrics.sourceNetworkBytes < result.deployment.source_byte_length,
+    `${disposition} first frame precedes complete Source transfer`,
+  );
 }
 
 async function start() {
@@ -401,27 +631,31 @@ async function start() {
     if (!wasmReady) {
       const attempt = moduleLoadAttempt;
       moduleLoadAttempt += 1;
-      const browserBindings = await import(`./pkg/browser_demo.js?attempt=${attempt}`);
-      await browserBindings.default();
+      const browserBindings = await import(
+        `./pkg/browser_demo.js?v=${BUILD_CACHE_TOKEN}-${attempt}`
+      );
+      await browserBindings.default({
+        module_or_path: new URL(
+          `./pkg/browser_demo_bg.wasm?v=${BUILD_CACHE_TOKEN}-${attempt}`,
+          import.meta.url,
+        ),
+      });
       createViewer = browserBindings.createViewer;
       wasmReady = true;
     }
     await runSmokePath();
   } catch (error) {
-    smokeRunning = false;
-    smokePassed = false;
-    const record = failureRecord(error);
-    const preserveViewer = preservesCurrentViewer(record);
-    if (!preserveViewer) {
-      discardViewer();
-    }
-    publishFailure(record, { disableControls: !preserveViewer });
+    handleSmokeFailure(error);
   }
 }
 
 async function restart() {
   if (smokeRunning) return;
   if (!smokePassed) {
+    if (preserveViewerOnRestart && viewer) {
+      await retryStreamingSmoke();
+      return;
+    }
     discardViewer();
     await start();
     return;
@@ -432,9 +666,45 @@ async function restart() {
     const diagnostics = parseDiagnostics(viewer.render());
     publishDiagnostics(diagnostics);
     setHarnessState("passed", "READY — viewer explicitly recreated.");
+    preserveViewerOnRestart = false;
   } catch (error) {
     publishFailure(error, { disableControls: true });
   }
+}
+
+async function retryStreamingSmoke() {
+  smokeRunning = true;
+  preserveViewerOnRestart = false;
+  try {
+    const streaming = await runStreamingSmoke();
+    completeStreamingSmoke(
+      streaming,
+      "PASS — the replacement worker completed against the preserved viewer and fresh View generation.",
+    );
+  } catch (error) {
+    handleSmokeFailure(error);
+  }
+}
+
+function completeStreamingSmoke(streaming, message) {
+  smokeRecord.streaming = streaming;
+  pickButton.disabled = true;
+  pickButton.textContent = "Remote pick deferred";
+  smokePassed = true;
+  smokeRunning = false;
+  preserveViewerOnRestart = false;
+  setHarnessState("passed", message);
+}
+
+function handleSmokeFailure(error) {
+  smokeRunning = false;
+  smokePassed = false;
+  const record = failureRecord(failureCause(error));
+  const preserveViewer = preservesCurrentViewer(record, error);
+  preserveViewerOnRestart = preserveViewer
+    && (record.code === "worker_failed" || isPreserveViewerFailure(error));
+  if (!preserveViewer) discardViewer();
+  publishFailure(record, { disableControls: !preserveViewer });
 }
 
 async function toggleVisibility() {
@@ -504,6 +774,12 @@ new ResizeObserver(scheduleResize).observe(canvasShell);
 window.__PUNCTRA_BROWSER_FOUNDATION__ = {
   diagnostics: () => viewer ? parseDiagnostics(viewer.diagnostics()) : null,
   smoke: () => smokeRecord,
+  state: () => document.body.dataset.browserSmoke,
+};
+
+window.__PUNCTRA_BROWSER_STREAMING__ = {
+  diagnostics: () => viewer ? parseDiagnostics(viewer.diagnostics()) : null,
+  smoke: () => smokeRecord?.streaming ?? null,
   state: () => document.body.dataset.browserSmoke,
 };
 

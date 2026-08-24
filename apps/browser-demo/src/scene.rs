@@ -16,9 +16,9 @@ pub(crate) const BATCH_VERSION: BatchVersion = BatchVersion::new(1);
 pub(crate) const SCENE_SIDE: u64 = 33;
 pub(crate) const SCENE_POINT_COUNT: u64 = SCENE_SIDE * SCENE_SIDE;
 pub(crate) const CENTRE_POINT_ORDINAL: u64 = SCENE_POINT_COUNT / 2;
-pub(crate) const MAX_RESIDENT_POINTS: u64 = 2_048;
+pub(crate) const MAX_RESIDENT_POINTS: u64 = crate::streaming::MAX_STREAM_POINTS;
 pub(crate) const MAX_RESIDENT_BYTES: u64 = MAX_RESIDENT_POINTS * ESTIMATED_GPU_BYTES_PER_POINT;
-pub(crate) const MAX_RESIDENT_BATCHES: u64 = 4;
+pub(crate) const MAX_RESIDENT_BATCHES: u64 = crate::streaming::MAX_TRANSFER_BATCHES;
 pub(crate) const MAX_HIGHLIGHT_POINTS: u64 = 32;
 
 const SOURCE_ID: SourceId = SourceId::new([0x15; 32]);
@@ -102,9 +102,13 @@ impl PreparedScene {
         }
     }
 
-    pub(crate) fn frame(&self, viewport: Viewport) -> Result<Frame, FrameError> {
+    pub(crate) fn frame(
+        &self,
+        viewport: Viewport,
+        view_generation: ViewGenerationKey,
+    ) -> Result<Frame, FrameError> {
         let style = PointStyle::new(7.0, [0.78, 0.66, 0.2], [0.075, 0.078, 0.075, 1.0])?;
-        Ok(Frame::new(VIEW_GENERATION, self.camera, viewport)?.with_style(style))
+        Ok(Frame::new(view_generation, self.camera, viewport)?.with_style(style))
     }
 
     pub(crate) const fn facts(&self) -> SceneFacts {
@@ -285,7 +289,9 @@ mod tests {
     fn generated_scene_has_fixed_identity_planning_and_resource_facts() {
         let mut scene = PreparedScene::new().unwrap();
         let initial_facts = scene.facts();
-        let frame = scene.frame(Viewport::new(960, 600).unwrap()).unwrap();
+        let frame = scene
+            .frame(Viewport::new(960, 600).unwrap(), VIEW_GENERATION)
+            .unwrap();
 
         assert_eq!(initial_facts.point_count, 1_089);
         assert_eq!(initial_facts.estimated_gpu_bytes, 26_136);

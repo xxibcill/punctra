@@ -12,7 +12,9 @@ qualification outstanding. The explicit-AOI persistent Surface preparation
 preserves those authority boundaries and frozen Run-v1; v0.14 bounded exact
 Terrain QA and correction-loop slice Complete and repository-verified; v0.15
 bounded local WebAssembly/WebGPU browser-host workflow Complete and repository-
-verified; remote browser delivery and broader workflows remain outstanding**
+verified; v0.16 bounded immutable-LAS Range/cache/Worker workflow Complete and
+repository-verified; arbitrary remote browser
+delivery and broader workflows remain outstanding**
 
 The host composes sibling modules explicitly. Lower crates never call back into
 an application, discover a Source for a Workspace, submit a GPU queue, or infer
@@ -615,6 +617,54 @@ requires a caller-requested bounded resize before another frame. Neither layer
 silently retries. The pick is progressive display evidence, never an exact
 empty or selected Source Query.
 
+## 11c. Stream one private immutable browser deployment
+
+The v0.16 path keeps networking and storage policy in the private JavaScript
+host. The deployment manifest is trusted configuration derived from a complete
+native `source-las` verification and compatible `point-index` build; browser
+display does not reopen a public Source capability.
+
+~~~mermaid
+sequenceDiagram
+    participant JS as JavaScript host
+    participant WK as module Worker
+    participant HTTP as immutable HTTP server
+    participant CACHE as host-selected cache
+    participant WASM as private browser-demo adapter
+    participant GPU as render-wgpu / WebGPU
+
+    JS->>WK: start delayed acceptance probe, then cancel
+    WK-->>JS: cancelled within 1,000 ms; publish no completion
+    JS->>WK: start(operation, manifest URL, cache policy)
+    WK->>HTTP: GET bounded deployment manifest
+    WK->>CACHE: invalidate exact namespace when requested
+    WK->>HTTP: Range Source probe (validator + digest)
+    WK->>HTTP: Range index header and root record
+    WK->>WK: validate disk-v2 binding and Sampled Coverage
+    WK->>HTTP: Range root sample block
+    WK->>WK: decode bounded attributed samples
+    WK-->>JS: deployment identity and transferable batches
+    JS->>WASM: beginStream + bounded publishStreamBatch
+    WASM->>GPU: Reset v0.16 generation + validated Upserts
+    JS->>WASM: render progressive Sampled Coverage
+    WK->>CACHE: retain verified identity-versioned ranges
+    JS->>JS: destroy and recreate viewer and Worker
+    WK->>CACHE: revalidate exact warm entries
+    WK-->>JS: same Source identity; zero binary network requests
+~~~
+
+The worker permits one operation and one request at a time. Cancellation aborts
+the current Fetch, publishes no completion, and is acknowledged within the
+fixed 1,000-millisecond acceptance limit. Every transferred batch is
+strictly Source-ordinal ordered and detached from worker memory. A cache entry
+is reachable only through the deployment schema, Source identity, strong
+validator, index digest, resource kind, and exact range; quota or Cache API
+failure cannot silently change the caller's policy. A versioned fixed-size
+ledger enforces both the response-body and 64-entry namespace ceilings without
+enumerating Cache API keys. The main thread yields
+between at-most-1,024-Point publications. All output remains non-authoritative
+Sampled Coverage.
+
 ## 12. Cancellation and crash matrix
 
 | Operation | Safe cancellation boundary | Permitted residue | Published truth |
@@ -635,6 +685,7 @@ empty or selected Source Query.
 | View planning | Before returning a plan | None | Old planner history or one complete new plan |
 | GPU frame | Host-controlled frame/device boundary | Disposable GPU allocations | Workspace unchanged |
 | Browser acceptance host | Before viewer return and at explicit frame/pick boundaries; shutdown is fused | Disposable WebGPU resources and ignored generated bindings | No viewer, one active private viewer, or one shut-down viewer; Workspace and Sources unchanged |
+| Browser streaming worker | Abortable between manifest, Source probe, index-header, and sample ranges; late operation messages are ignored | Verified identity-versioned cache entries selected by caller policy | No remote generation, bounded partial sampled renderer batches for the active identity, or one complete sampled root; never a complete or authoritative Source result |
 | Viewing Report | Before no-replace link of a synced, read-back-verified owned stage | Recognized identity-checked owned stage, or one complete target | No report, exact-existing reconciliation, one complete new report, or conflict without replacement |
 
 ## 13. Staleness

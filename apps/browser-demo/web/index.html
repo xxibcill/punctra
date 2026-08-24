@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <meta name="color-scheme" content="light">
-    <title>Punctra browser foundation</title>
+    <title>Punctra browser streaming</title>
     <link rel="stylesheet" href="./styles.css">
   </head>
   <body data-browser-smoke="pending">
@@ -12,12 +12,12 @@
 
     <header class="masthead">
       <div>
-        <p class="eyebrow">Punctra / browser execution record</p>
-        <h1>WebGPU foundation console</h1>
+        <p class="eyebrow">Punctra / remote execution record</p>
+        <h1>Range streaming console</h1>
       </div>
       <div class="release-stamp" aria-label="Release and harness">
-        <span>v0.15</span>
-        <span>LOCAL HARNESS 01</span>
+        <span>v0.16</span>
+        <span>LOCAL HARNESS 02</span>
       </div>
     </header>
 
@@ -26,7 +26,7 @@
         <div class="section-heading">
           <div>
             <p class="index-label">STATION A</p>
-            <h2 id="viewport-heading">Generated point view</h2>
+            <h2 id="viewport-heading">Progressive remote point view</h2>
           </div>
           <p id="authority-label" class="authority-label">
             Progressive GPU display · non-authoritative
@@ -36,7 +36,7 @@
         <div id="canvas-shell" class="canvas-shell">
           <canvas
             id="punctra-canvas"
-            aria-label="Deterministic generated Punctra point-cloud scene. Display and picking are provisional GPU evidence."
+            aria-label="Progressive Punctra point-cloud scene from an immutable local HTTP Range deployment. Display remains provisional GPU evidence."
           >
             This browser does not provide a usable canvas.
           </canvas>
@@ -57,7 +57,7 @@
       <aside class="instrument-panel" aria-labelledby="instrument-heading">
         <div class="panel-header">
           <p class="index-label">INSTRUMENT RECORD</p>
-          <h2 id="instrument-heading">Browser acceptance</h2>
+          <h2 id="instrument-heading">Streaming acceptance</h2>
         </div>
 
         <div id="status-block" class="status-block" data-state="checking">
@@ -92,8 +92,8 @@
         <section class="fact-section" aria-labelledby="authority-heading">
           <h3 id="authority-heading">Authority boundary</h3>
           <p class="boundary-copy">
-            Coverage and picks describe one recorded GPU frame. Confirm Point identity and
-            exact values against a caller-owned CPU Source before inspection or editing.
+            Sampled Coverage describes one identity-bound GPU frame. The browser does not
+            promote index samples to an exact Source Query or editing authority.
           </p>
           <dl id="pick-facts" class="fact-list compact">
             <div><dt>Pick state</dt><dd>not requested</dd></div>
@@ -114,10 +114,10 @@
     </main>
 
     <footer>
-      <p>Generated in-memory data only. No network Source, cache, framework, or exact Query.</p>
+      <p>Bounded local HTTP Range fixture. No arbitrary URL, full-file fallback, framework, or exact Query.</p>
       <p>Repository browser evidence is not a broad browser-support claim.</p>
     </footer>
 
-    <script type="module" src="./main.js"></script>
+    <script type="module" src="./main.js?v=16-qualified"></script>
   </body>
 </html>

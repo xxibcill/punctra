@@ -1,0 +1,207 @@
+{
+  "adapter_name": "source-las",
+  "adapter_version": "1",
+  "content_hash": [
+    148,
+    78,
+    96,
+    85,
+    35,
+    178,
+    87,
+    200,
+    121,
+    71,
+    117,
+    125,
+    144,
+    103,
+    92,
+    137,
+    25,
+    86,
+    116,
+    255,
+    178,
+    66,
+    156,
+    76,
+    1,
+    99,
+    3,
+    71,
+    237,
+    137,
+    102,
+    48
+  ],
+  "fast_token": [
+    102,
+    117,
+    108,
+    108,
+    45,
+    111,
+    110,
+    108,
+    121,
+    45,
+    118,
+    49
+  ],
+  "logical_order": "LAS/LAZ point-record order v1",
+  "metadata": {
+    "attributes": {
+      "definitions": [
+        {
+          "data_type": "U16",
+          "id": 1,
+          "name": "intensity"
+        },
+        {
+          "data_type": "U8",
+          "id": 2,
+          "name": "return_number"
+        },
+        {
+          "data_type": "U8",
+          "id": 3,
+          "name": "number_of_returns"
+        },
+        {
+          "data_type": "U8",
+          "id": 4,
+          "name": "scan_direction"
+        },
+        {
+          "data_type": "U8",
+          "id": 5,
+          "name": "edge_of_flight_line"
+        },
+        {
+          "data_type": "U8",
+          "id": 6,
+          "name": "classification"
+        },
+        {
+          "data_type": "U8",
+          "id": 7,
+          "name": "synthetic"
+        },
+        {
+          "data_type": "U8",
+          "id": 8,
+          "name": "key_point"
+        },
+        {
+          "data_type": "U8",
+          "id": 9,
+          "name": "withheld"
+        },
+        {
+          "data_type": "U8",
+          "id": 10,
+          "name": "overlap"
+        },
+        {
+          "data_type": "I8",
+          "id": 12,
+          "name": "scan_angle"
+        },
+        {
+          "data_type": "U8",
+          "id": 13,
+          "name": "user_data"
+        },
+        {
+          "data_type": "U16",
+          "id": 14,
+          "name": "point_source_id"
+        },
+        {
+          "data_type": "F64",
+          "id": 15,
+          "name": "gps_time"
+        },
+        {
+          "data_type": "U16",
+          "id": 16,
+          "name": "red"
+        },
+        {
+          "data_type": "U16",
+          "id": 17,
+          "name": "green"
+        },
+        {
+          "data_type": "U16",
+          "id": 18,
+          "name": "blue"
+        }
+      ]
+    },
+    "coordinate_reference": "Unknown",
+    "format_name": "LAS",
+    "metadata_records": [],
+    "point_count": 70000,
+    "position_transform": {
+      "offset": [
+        500000.0,
+        4600000.0,
+        100.0
+      ],
+      "scale": [
+        0.01,
+        0.01,
+        0.01
+      ]
+    },
+    "world_bounds": {
+      "max": [
+        500043.75,
+        4600024.75,
+        102.39
+      ],
+      "min": [
+        499956.5,
+        4599975.0,
+        99.22
+      ]
+    }
+  },
+  "source": [
+    196,
+    89,
+    255,
+    57,
+    113,
+    123,
+    125,
+    105,
+    148,
+    170,
+    235,
+    243,
+    68,
+    100,
+    31,
+    90,
+    58,
+    221,
+    127,
+    175,
+    101,
+    226,
+    73,
+    184,
+    89,
+    51,
+    235,
+    208,
+    102,
+    209,
+    194,
+    110
+  ],
+  "version": 1
+}

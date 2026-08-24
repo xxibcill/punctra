@@ -19,6 +19,7 @@ use crate::host::{
 use crate::scene::{
     BATCH_KEY, BATCH_VERSION, PreparedScene, VIEW_GENERATION, centre_point_id, render_limits,
 };
+use crate::streaming::{StreamingLimitFacts, StreamingScene};
 
 const INITIALIZATION_ACTION: &str = "Keep the canvas unavailable, use a secure context with a WebGPU-capable browser and device, then retry initialization.";
 const INITIAL_VIEWPORT_ACTION: &str = "Keep the canvas unavailable, choose finite positive CSS dimensions and a device-pixel ratio at most four so the physical canvas remains within 4,096 pixels per dimension and 8,388,608 pixels total, then retry initialization.";
@@ -61,6 +62,7 @@ pub async fn create_viewer(
         capabilities,
         last_frame: None,
         pick: PickFacts::not_requested(),
+        stream: StreamingScene::idle(),
     })
 }
 
@@ -77,6 +79,7 @@ pub struct BrowserViewer {
     capabilities: CapabilityFacts,
     last_frame: Option<FrameFacts>,
     pick: PickFacts,
+    stream: StreamingScene,
 }
 
 #[wasm_bindgen]
@@ -137,6 +140,13 @@ impl BrowserViewer {
     #[wasm_bindgen(js_name = beginPick)]
     pub fn begin_pick(&mut self, x: u32, y: u32) -> Result<String, JsValue> {
         self.ensure_ready()?;
+        if self.stream.view_generation().is_some() {
+            return Err(failure(
+                FailureCode::StreamPickUnsupported,
+                "the v0.16 streaming slice does not define a stable provisional-pick fixture",
+                "Keep the progressive frame visible and wait for the later browser viewer API before relying on remote picking.",
+            ));
+        }
         let dimensions = self.viewport.dimensions();
         if x >= dimensions[0] || y >= dimensions[1] {
             return Err(failure(
@@ -191,6 +201,64 @@ impl BrowserViewer {
         self.pick = PickFacts::not_requested();
         self.diagnostics_unchecked()
     }
+
+    /// Validates and publishes the first batch with its identity-bound reset.
+    #[wasm_bindgen(js_name = beginStreamBatch)]
+    #[allow(clippy::too_many_arguments)] // The private Wasm ABI carries explicit deployment and batch facts.
+    pub fn begin_stream_batch(
+        &mut self,
+        source_identity: &str,
+        expected_points: u32,
+        origin_x: f64,
+        origin_y: f64,
+        origin_z: f64,
+        batch_index: u32,
+        payload: &[u8],
+    ) -> Result<String, JsValue> {
+        self.ensure_ready()?;
+        let mut next = self.stream.clone();
+        let (reset, upsert) = next
+            .begin_with_batch(
+                source_identity,
+                u64::from(expected_points),
+                [origin_x, origin_y, origin_z],
+                batch_index,
+                payload,
+            )
+            .map_err(stream_validation_failure)?;
+        let resources = self.resources_mut()?;
+        resources.apply_update(&reset)?;
+        resources.apply_update(&upsert)?;
+        self.stream = next;
+        self.reset_interaction_facts();
+        self.diagnostics()
+    }
+
+    /// Publishes one bounded worker-decoded transfer batch.
+    #[wasm_bindgen(js_name = publishStreamBatch)]
+    pub fn publish_stream_batch(
+        &mut self,
+        batch_index: u32,
+        payload: &[u8],
+    ) -> Result<String, JsValue> {
+        self.ensure_ready()?;
+        let mut next = self.stream.clone();
+        let update = next
+            .publish(batch_index, payload)
+            .map_err(stream_validation_failure)?;
+        self.resources_mut()?.apply_update(&update)?;
+        self.stream = next;
+        self.reset_interaction_facts();
+        self.diagnostics()
+    }
+
+    /// Seals the sampled root after every declared Point is published.
+    #[wasm_bindgen(js_name = completeStream)]
+    pub fn complete_stream(&mut self) -> Result<String, JsValue> {
+        self.ensure_ready()?;
+        self.stream.complete().map_err(stream_validation_failure)?;
+        self.diagnostics()
+    }
 }
 
 impl BrowserViewer {
@@ -200,7 +268,7 @@ impl BrowserViewer {
         }
         let limits = LimitFacts::new(render_limits());
         let diagnostics = Diagnostics {
-            schema: "punctra-browser-foundation-v1",
+            schema: "punctra-browser-streaming-v1",
             package_version: env!("CARGO_PKG_VERSION"),
             phase: self.lifecycle.phase(),
             rendered_frames: self.lifecycle.rendered_frames(),
@@ -209,6 +277,8 @@ impl BrowserViewer {
             limits,
             viewport: self.viewport,
             scene: self.scene.facts(),
+            streaming: self.stream.facts(),
+            streaming_limits: StreamingLimitFacts::fixed(),
             frame: self.last_frame,
             pick: &self.pick,
             display_authority: "progressive_gpu_non_authoritative",
@@ -246,9 +316,15 @@ impl BrowserViewer {
                 "Choose a nonzero bounded canvas size.",
             )
         })?;
+        let view_generation = self.stream.view_generation().unwrap_or(VIEW_GENERATION);
         self.scene
-            .frame(viewport)
+            .frame(viewport, view_generation)
             .map_err(|error| failure(FailureCode::FrameValidation, error, RECREATE_ACTION))
+    }
+
+    fn reset_interaction_facts(&mut self) {
+        self.last_frame = None;
+        self.pick = PickFacts::not_requested();
     }
 
     fn accept_pick(&mut self, hit: PickHit) -> Result<(), JsValue> {
@@ -372,6 +448,15 @@ impl BrowserResources {
         self.queue.present(surface_texture);
         self.recorded_frame = Some(recorded);
         Ok((report, suboptimal))
+    }
+
+    fn apply_update(&mut self, update: &render_protocol::RenderUpdate) -> Result<(), JsValue> {
+        self.ensure_device_available()?;
+        self.discard_interaction_state();
+        self.renderer
+            .apply(update)
+            .map(|_| ())
+            .map_err(|error| failure(FailureCode::StreamPublication, error, RECREATE_ACTION))
     }
 
     fn begin_pick(&mut self, pixel: [u32; 2]) -> Result<(), JsValue> {
@@ -693,6 +778,14 @@ fn missing_recorded_frame_failure() -> JsValue {
         FailureCode::MissingRecordedFrame,
         "no recorded frame is available for provisional picking",
         "Render a visible frame before beginning a provisional pick.",
+    )
+}
+
+fn stream_validation_failure(error: crate::streaming::StreamError) -> JsValue {
+    failure(
+        FailureCode::StreamValidation,
+        error,
+        "Terminate the current worker operation, keep the last complete frame, and start a new identity-bound stream.",
     )
 }
 

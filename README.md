@@ -214,15 +214,37 @@ exact implementation commit, local native/browser environments, command
 outcomes, bounded browser diagnostics, benchmark observations, and unsupported
 external exits.
 
+Version 0.16.0-alpha.1 adds one bounded private remote-delivery slice under the
+[HTTP Range Streaming, Browser Caching, and Worker Decoding
+design](docs/design/http-range-streaming-v0.16.md). A checked-in deployment
+manifest binds one immutable 70,000-Point LAS fixture to its strong validator,
+Source identity, exact byte length, and compatible disk-v2 Spatial Index. One
+Web Worker validates strict 206 responses and per-range SHA-256 digests,
+decodes the index root's Sampled Coverage, and transfers four bounded batches
+to the existing WebAssembly/WebGPU renderer.
+
+The private host exposes explicit none, memory, and persistent cache policies,
+identity-versioned cache keys, invalidation, retry/cancellation, changed-Source,
+truncation, corruption, offline, quota, and worker-failure outcomes. Follow the
+[local browser streaming guide](docs/guides/browser-streaming.md) for fixture
+verification, build, strict Range serving, and the automatic cold/recreation/
+warm-cache acceptance path. This is not arbitrary LAS/LAZ URL support, an
+exact browser Query path, a supported SDK, or broad browser qualification.
+
+The [v0.16 repository verification record](docs/releases/v0.16.0.md) pins the
+exact implementation commit, strict local server/browser evidence, complete
+native and forced-GPU command results, generated benchmark observations, and
+remaining external exits.
+
 To try the implemented View safely, follow the five-minute [first LAS/LAZ
 guide](docs/guides/first-las-laz.md). It separates position-only disk-v1 and
 attributed disk-v2 caches and explains what progressive Coverage does and does
 not mean.
 
 Later direction and the exact external product gates are described in the
-[living roadmap](ROADMAP.md). The linked v0.15 design defines the completed
-bounded repository scope. Later Candidate themes do not expand accepted scope
-by themselves.
+[living roadmap](ROADMAP.md). The linked v0.15 and v0.16 designs define the
+completed bounded repository scopes. Later Candidate themes do not expand
+accepted scope by themselves.
 
 ## Embedding model
 

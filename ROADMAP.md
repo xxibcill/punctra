@@ -1,7 +1,7 @@
 # Punctra Roadmap
 
 Status: living guidance
-Last reviewed: 2026-08-22
+Last reviewed: 2026-08-23
 
 This roadmap communicates direction, not a delivery promise. It has no fixed
 dates. Candidate releases may be split, merged, reordered, renamed, or skipped
@@ -9,16 +9,16 @@ as technical and customer evidence changes. Milestone outcomes and dependency
 order matter more than version numbers.
 
 Among incomplete releases, only an **Active** release has accepted
-implementation scope. Punctra v0.1 through v0.15 are Complete repository
+implementation scope. Punctra v0.1 through v0.16 are Complete repository
 technical slices. Their recorded external field, adoption, partner, and
 support gates remain historically accurate, but they do not determine the next
 product direction. The project now pivots from a desktop terrain-delivery
 hypothesis to an embeddable browser point-cloud rendering engine.
 
-v0.15 is the completed repository-verified browser-foundation release.
-Versions v0.16 through v0.30 remain uncommitted Candidate themes. v0.15–v0.20
-establish browser execution, streaming, the viewer API, embedding, and platform
-qualification. v0.21–v0.29
+v0.15 is the completed repository-verified browser-foundation release. v0.16
+is the completed repository-verified HTTP Range streaming release. Versions
+v0.17 through v0.30 remain uncommitted Candidate themes. v0.15–v0.20 establish browser execution,
+streaming, the viewer API, embedding, and platform qualification. v0.21–v0.29
 then improve and qualify visual quality. v0.30 is the earliest planned browser-
 engine release candidate; no earlier future release may be represented as a
 product release candidate. The historical v0.9 "Trust and v1 candidate" name
@@ -90,8 +90,8 @@ release can be Complete while every product gate remains outstanding.
 
 ## Current pivot checkpoint
 
-Status: **v0.15 complete and repository-verified for one bounded local browser-
-foundation slice; v0.16 remains Candidate without accepted scope**
+Status: **v0.15 and v0.16 complete and repository-verified for their bounded
+local browser-foundation and immutable-LAS streaming slices**
 
 The completed v0.1–v0.14 contracts are inputs to the pivot, not permission to
 carry the old product sequence forward. In particular:
@@ -113,6 +113,13 @@ host ownership model, resource accounting, and local browser acceptance
 harness. Its generated in-memory scene intentionally precedes the remote
 representative LAS/LAZ Source and measured delivery behavior required to
 activate v0.16.
+
+The completed [v0.16 HTTP Range streaming
+design](docs/design/http-range-streaming-v0.16.md) fixes one immutable remote
+LAS deployment profile, strict bounded HTTP Range behavior, disk-v2 index-root
+sample decoding in one worker, identity-versioned browser caching, and one
+cold/recreation/warm-cache local acceptance path. It intentionally remains in
+the private browser host and does not create the later public viewer or SDK.
 
 ## Pre-v0.13 renderer quality corrective checkpoint
 
@@ -1133,18 +1140,23 @@ Repository exit evidence:
 
 ### v0.16 — HTTP range streaming, browser caching, and worker decoding
 
-Status: **Candidate**
+Status: **Complete and repository-verified for one bounded immutable-LAS HTTP
+Range, browser-cache, and worker-decoding slice; arbitrary Source delivery,
+exact browser Queries, broad browser qualification, independent adoption, SDK
+stability, and support qualification outstanding**
 
-Candidate outcome: progressively view a remote LAS/LAZ Source without loading
+Outcome: progressively view a remote LAS/LAZ Source without loading
 the complete file or blocking the browser main thread.
 
-Activation gate:
+Activation:
 
-- the v0.15 host records a representative remote Source, hosting behavior, CORS
-  policy, byte-range behavior, compatible prebuilt Spatial Index, cache needs,
-  and main-thread latency baseline.
+- satisfied by the accepted [HTTP Range Streaming, Browser Caching, and Worker
+  Decoding design](docs/design/http-range-streaming-v0.16.md), which records one
+  representative immutable LAS fixture, exact hosting/CORS/Range behavior, a
+  compatible disk-v2 Spatial Index, explicit cache policy, fixed per-task work
+  ceilings, and the required local browser observations.
 
-Likely scope:
+Implemented scope:
 
 - bounded Fetch/HTTP Range reads with explicit status, length, validator, CORS,
   content-encoding, cancellation, retry, and changed-Source handling;
@@ -1156,7 +1168,7 @@ Likely scope:
 - progressive index/sample delivery that preserves Coverage and Point Identity
   contracts.
 
-Candidate exit evidence:
+Repository exit evidence:
 
 - request count, concurrent bytes, decoded staging, worker queues, cache bytes,
   cancellation latency, and main-thread work stay under independent limits;
@@ -1588,7 +1600,7 @@ nor completion of v0.20 is a reason to publish v1.
 | Renderer quality corrective checkpoint | pre-v0.13 | Complete; repository-verified only, with permitted field execution outstanding | Stationary LOD converges, bounded density/depth treatments and truthful inspection context are implemented, and the private permitted-source lane records settled evidence without manufacturing field claims. |
 | Spatial contract and production terrain | v0.12–v0.13 | v0.12 bounded repository contract complete; v0.13 bounded persistent-terrain slice complete and repository-verified; external spatial, production-scale, out-of-core, adoption, partner, and support exits outstanding | Make reference semantics explicit, then persist one bounded-AOI Surface without confusing repository durability with field-scale qualification. |
 | Terrain acceptance tooling | v0.14 | Complete and repository-verified for the bounded slice; external historical exits outstanding | Preserve exact Terrain QA and correction as an available module without extending it in the current browser-engine path. |
-| Browser execution and streaming | v0.15–v0.16 | Candidate | Establish WebAssembly/WebGPU execution, then bounded remote Source delivery, browser caching, and worker decoding. |
+| Browser execution and streaming | v0.15–v0.16 | Complete and repository-verified for the bounded private slices; arbitrary delivery and external qualification outstanding | Establish WebAssembly/WebGPU execution, then bounded remote Source delivery, browser caching, and worker decoding. |
 | Browser viewer and embedding | v0.17–v0.20 | Candidate | Expose the viewer API, package the SDK, qualify the browser/device envelope, and consolidate a stable integration baseline without release-candidate status. |
 | Measured visual quality | v0.21–v0.25 | Candidate | Establish visual evidence, then improve point footprints, LOD continuity, depth, and color. |
 | Visual interaction and qualification | v0.26–v0.29 | Candidate | Improve temporal, selection, and composition clarity, then freeze and qualify the visual surface without release-candidate status. |
