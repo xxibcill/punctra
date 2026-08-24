@@ -402,16 +402,10 @@ async function runSmokePath() {
   publishDiagnostics(diagnostics);
   assertFact(diagnostics.phase === "ready", "explicit recreation");
   const streaming = await runStreamingSmoke();
-  smokeRecord.streaming = streaming;
-  pickButton.disabled = true;
-  pickButton.textContent = "Remote pick deferred";
-  setHarnessState(
-    "passed",
+  completeStreamingSmoke(
+    streaming,
     "PASS — WebGPU lifecycle, bounded remote ranges, worker decode, and warm-cache isolation verified locally.",
   );
-  smokePassed = true;
-  smokeRunning = false;
-  preserveViewerOnRestart = false;
 }
 
 async function runStreamingSmoke() {
@@ -682,18 +676,23 @@ async function retryStreamingSmoke() {
   preserveViewerOnRestart = false;
   try {
     const streaming = await runStreamingSmoke();
-    smokeRecord.streaming = streaming;
-    pickButton.disabled = true;
-    pickButton.textContent = "Remote pick deferred";
-    smokePassed = true;
-    smokeRunning = false;
-    setHarnessState(
-      "passed",
+    completeStreamingSmoke(
+      streaming,
       "PASS — the replacement worker completed against the preserved viewer and fresh View generation.",
     );
   } catch (error) {
     handleSmokeFailure(error);
   }
+}
+
+function completeStreamingSmoke(streaming, message) {
+  smokeRecord.streaming = streaming;
+  pickButton.disabled = true;
+  pickButton.textContent = "Remote pick deferred";
+  smokePassed = true;
+  smokeRunning = false;
+  preserveViewerOnRestart = false;
+  setHarnessState("passed", message);
 }
 
 function handleSmokeFailure(error) {
