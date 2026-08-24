@@ -256,6 +256,11 @@ public surface and local acceptance path. This checked-in integration boundary
 is not an npm SDK, arbitrary LAS/LAZ loader, framework adapter, stable API
 promise, broad browser qualification, or release candidate.
 
+The [v0.17 repository verification record](docs/releases/v0.17.0.md) pins the
+exact implementation commit, native and browser environments, complete local
+command matrix, public viewer observations, exact record evidence, generated
+benchmarks, and remaining external exits.
+
 To try the implemented View safely, follow the five-minute [first LAS/LAZ
 guide](docs/guides/first-las-laz.md). It separates position-only disk-v1 and
 attributed disk-v2 caches and explains what progressive Coverage does and does

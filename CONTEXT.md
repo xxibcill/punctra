@@ -129,6 +129,9 @@ semantics, and exact-Query handoff. The host owns interaction policy; exact
 Point values come only from the separate immutable-LAS record bridge. This is
 not SDK packaging, an arbitrary-Source adapter, a framework promise, or broad
 browser qualification.
+The [v0.17 repository verification record](docs/releases/v0.17.0.md) owns the
+exact local implementation, environment, command, browser, exact-record, and
+nonclaim facts.
 
 ## Artifact
 

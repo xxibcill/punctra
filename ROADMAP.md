@@ -130,6 +130,9 @@ inherited display modes, host-owned camera/input policy, generation-safe
 provisional pick/highlight presentation, and a separate immutable-LAS exact-
 Point bridge. It is a checked-in integration boundary, not an installable SDK,
 framework adapter, arbitrary-Source loader, or browser-support declaration.
+Its exact local environment, command matrix, browser facts, and nonclaims are
+recorded in the [v0.17 repository verification
+record](docs/releases/v0.17.0.md).
 
 ## Pre-v0.13 renderer quality corrective checkpoint
 
