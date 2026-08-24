@@ -88,9 +88,9 @@ trusted deployment statement, not a discoverable Source format. It contains:
 - one absolute-or-manifest-relative Source URL, media type, exact byte length,
   strong ETag, SHA-256 content digest, Punctra Source identity, and a small
   independently hashed probe range;
-- one absolute-or-manifest-relative disk-v2 index URL, exact byte length,
-  SHA-256 content digest, disk/recipe/schema versions, Source identity, Source
-  Point count, position transform, and one root-node descriptor;
+- one absolute-or-manifest-relative disk-v2 index URL, exact byte length, strong
+  ETag, SHA-256 content digest, disk/recipe/schema versions, Source identity,
+  Source Point count, position transform, and one root-node descriptor;
 - the root header/node byte range and root sample byte range with exact offsets,
   lengths, counts, record width, SHA-256 digests, sampled Coverage, and world
   bounds; and
