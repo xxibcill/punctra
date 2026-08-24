@@ -351,7 +351,10 @@ export class RangeTransport {
       this.memory = this.memoryCacheStorage.get(namespace) ?? new Map();
       this.memoryCacheStorage.set(namespace, this.memory);
       for (const value of this.memory.values()) {
-        this.recordExistingCacheEntry(value.byteLength, LIMITS.memoryCacheBytes);
+        this.recordExistingCacheEntry(
+          memoryCacheBytes(value).byteLength,
+          LIMITS.memoryCacheBytes,
+        );
       }
       this.recordLogicalCacheSize();
       return;
@@ -502,9 +505,16 @@ export class RangeTransport {
     if (this.cacheMode === "memory") {
       const value = this.memory.get(key);
       if (!value) return undefined;
-      await verifyDigest(value, range.sha256, this.signal);
+      const bytes = validateMemoryCacheEntry(
+        value,
+        this.deployment,
+        kind,
+        resource,
+        range,
+      );
+      await verifyDigest(bytes, range.sha256, this.signal);
       assertNotCancelled(this.signal);
-      return value.slice();
+      return bytes.slice();
     }
     try {
       const response = await awaitWithCancellation(
@@ -539,7 +549,10 @@ export class RangeTransport {
     require(nextEntries <= LIMITS.cacheEntries, "resource_limit", `logical ${this.cacheMode} cache exceeds ${LIMITS.cacheEntries} entries`);
     require(nextBytes <= ceiling, "resource_limit", `logical ${this.cacheMode} cache exceeds ${ceiling} bytes`);
     if (this.cacheMode === "memory") {
-      this.memory.set(key, bytes.slice());
+      this.memory.set(
+        key,
+        memoryCacheEntry(this.deployment, kind, resource, range, bytes),
+      );
     } else {
       try {
         // Reserve first so an interrupted or quota-failed body write can only
@@ -876,6 +889,38 @@ function cachedResponse(deployment, kind, resource, range, bytes) {
   });
 }
 
+function memoryCacheEntry(deployment, kind, resource, range, bytes) {
+  return Object.freeze({
+    identity: cacheIdentity(deployment, kind, range, resource),
+    bytes: bytes.slice(),
+  });
+}
+
+function memoryCacheBytes(entry) {
+  require(
+    entry && typeof entry === "object" && entry.bytes instanceof Uint8Array,
+    "range_corrupt",
+    "memory cache entry is invalid",
+  );
+  return entry.bytes;
+}
+
+function validateMemoryCacheEntry(entry, deployment, kind, resource, range) {
+  const bytes = memoryCacheBytes(entry);
+  require(
+    entry.identity && typeof entry.identity === "object",
+    "range_corrupt",
+    "memory cache identity is invalid",
+  );
+  validateCacheIdentity(
+    entry.identity,
+    cacheIdentity(deployment, kind, range, resource),
+    "memory cache",
+  );
+  equal(bytes.byteLength, range.length, "range_corrupt", "memory cache length");
+  return bytes;
+}
+
 function cacheLedgerResponse(deployment, entries, bytes) {
   const identity = cacheIdentity(deployment);
   const headers = new Headers({
@@ -891,14 +936,12 @@ function cacheLedgerResponse(deployment, entries, bytes) {
 
 function validateCacheLedger(response, deployment) {
   const identity = cacheIdentity(deployment);
-  for (const field of CACHE_IDENTITY_FIELDS.filter((candidate) => candidate.namespace)) {
-    equal(
-      response.headers.get(field.header),
-      identity[field.name],
-      "range_corrupt",
-      `cache ledger ${field.name}`,
-    );
-  }
+  validateCacheIdentity(
+    cacheResponseIdentity(response),
+    identity,
+    "cache ledger",
+    (field) => field.namespace,
+  );
   equal(response.headers.get("content-length"), "0", "range_corrupt", "cache ledger Content-Length");
   return {
     entries: cacheLedgerInteger(response, CACHE_LEDGER_ENTRIES_HEADER, LIMITS.cacheEntries),
@@ -917,12 +960,27 @@ function cacheLedgerInteger(response, header, ceiling) {
 
 function validateCachedMetadata(response, deployment, kind, resource, range) {
   const identity = cacheIdentity(deployment, kind, range, resource);
-  for (const field of CACHE_IDENTITY_FIELDS) {
+  validateCacheIdentity(cacheResponseIdentity(response), identity, "cache");
+}
+
+function cacheResponseIdentity(response) {
+  return Object.fromEntries(
+    CACHE_IDENTITY_FIELDS.map((field) => [field.name, response.headers.get(field.header)]),
+  );
+}
+
+function validateCacheIdentity(
+  actual,
+  expected,
+  label,
+  include = () => true,
+) {
+  for (const field of CACHE_IDENTITY_FIELDS.filter(include)) {
     equal(
-      response.headers.get(field.header),
-      identity[field.name],
+      actual[field.name],
+      expected[field.name],
       "range_corrupt",
-      `cache ${field.name}`,
+      `${label} ${field.name}`,
     );
   }
 }

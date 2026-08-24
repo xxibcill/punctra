@@ -276,6 +276,42 @@ test("memory cache survives sequential operations in one worker and invalidates 
   assert.equal(server.binaryRequests.length, requestsAfterCold + 3);
 });
 
+test("memory cache repeats and revalidates every identity fact", async () => {
+  const memoryCacheStorage = new Map();
+  const server = fixtureServer();
+  await run(server, {}, { cacheMode: "memory", memoryCacheStorage });
+  const deployment = validateManifest(manifest, MANIFEST_URL);
+  const entries = memoryCacheStorage.get(cacheNamespace(deployment));
+  const sourceKey = Array.from(entries.keys()).find((key) =>
+    new URL(key).searchParams.get("__punctra_kind") === "source"
+  );
+  assert.ok(sourceKey);
+  const sourceEntry = entries.get(sourceKey);
+  assert.ok(sourceEntry);
+
+  assert.equal(sourceEntry.identity.schema, deployment.schema);
+  assert.equal(sourceEntry.identity.deployment, deployment.deploymentId);
+  assert.equal(sourceEntry.identity.source, deployment.source.sourceIdentity);
+  assert.equal(sourceEntry.identity.sourceValidator, deployment.source.etag);
+  assert.equal(sourceEntry.identity.index, deployment.index.sha256);
+  assert.equal(sourceEntry.identity.kind, "source");
+  assert.equal(sourceEntry.identity.resourceValidator, deployment.source.etag);
+  assert.equal(
+    sourceEntry.identity.byteRange,
+    `${deployment.source.probe.offset}:${deployment.source.probe.length}`,
+  );
+  assert.equal(sourceEntry.identity.digest, deployment.source.probe.sha256);
+
+  entries.set(sourceKey, {
+    ...sourceEntry,
+    identity: { ...sourceEntry.identity, source: "aa".repeat(32) },
+  });
+  await rejectsWithCode(
+    run(server, {}, { cacheMode: "memory", memoryCacheStorage }),
+    "range_corrupt",
+  );
+});
+
 test("full response to a Range request fails before its body is read", async () => {
   const server = fixtureServer({ scenario: "full_response" });
   await rejectsWithCode(run(server), "range_unsupported");
