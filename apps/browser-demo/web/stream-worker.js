@@ -3,36 +3,59 @@ import {
   createWorkerMessage,
   runStreamingOperation,
 } from "./streaming-protocol.js?v=16-qualified";
-import { WORKER_SCHEMA, workerFailure } from "./worker-protocol.js?v=16-qualified";
+import {
+  WORKER_SCHEMA,
+  boundedWorkerFailureMessage,
+  isWorkerOperationId,
+  workerFailure,
+  workerOperationId,
+} from "./worker-protocol.js?v=16-qualified";
 
 let active;
 const memoryCacheStorage = new Map();
 
 self.addEventListener("message", (event) => {
   const message = event.data;
+  const operationId = workerOperationId(message?.operation_id);
   if (message?.schema !== WORKER_SCHEMA) {
-    publishFailure(message?.operation_id, new StreamingFailure("manifest_invalid", "worker message schema differs"));
+    publishFailure(
+      operationId,
+      new StreamingFailure("manifest_invalid", "worker message schema differs"),
+    );
+    return;
+  }
+  if (!isWorkerOperationId(message.operation_id)) {
+    publishFailure(
+      operationId,
+      new StreamingFailure("manifest_invalid", "worker operation identity is invalid"),
+    );
     return;
   }
   if (message.type === "cancel") {
-    if (active?.operationId === message.operation_id) active.controller.abort();
+    if (active?.operationId === operationId) active.controller.abort();
     return;
   }
   if (message.type !== "start") {
-    publishFailure(message.operation_id, new StreamingFailure("manifest_invalid", `unsupported worker message ${message.type}`));
+    publishFailure(
+      operationId,
+      new StreamingFailure("manifest_invalid", "unsupported worker message type"),
+    );
     return;
   }
   if (active) {
-    publishFailure(message.operation_id, new StreamingFailure("resource_limit", "one worker operation is already active"));
+    publishFailure(
+      operationId,
+      new StreamingFailure("resource_limit", "one worker operation is already active"),
+    );
     return;
   }
-  void start(message);
+  void start(message, operationId);
 });
 
-async function start(message) {
+async function start(message, operationId) {
   const controller = new AbortController();
-  active = { operationId: message.operation_id, controller };
-  publish(message.operation_id, "state", { phase: "starting" });
+  active = { operationId, controller };
+  publish(operationId, "state", { phase: "starting" });
   try {
     const result = await runStreamingOperation(
       {
@@ -44,21 +67,21 @@ async function start(message) {
         signal: controller.signal,
       },
       {
-        onDeployment: (deployment) => publish(message.operation_id, "state", {
+        onDeployment: (deployment) => publish(operationId, "state", {
           phase: "deployment",
           deployment: publicDeployment(deployment),
         }),
-        onState: (phase, metrics) => publish(message.operation_id, "state", { phase, metrics }),
-        onBatch: (buffer, facts) => publishBatch(message.operation_id, buffer, facts),
+        onState: (phase, metrics) => publish(operationId, "state", { phase, metrics }),
+        onBatch: (buffer, facts) => publishBatch(operationId, buffer, facts),
       },
     );
-    publish(message.operation_id, "complete", {
+    publish(operationId, "complete", {
       deployment: publicDeployment(result.deployment),
       metrics: result.metrics,
       decode: result.decode,
     });
   } catch (error) {
-    publishFailure(message.operation_id, error);
+    publishFailure(operationId, error);
   } finally {
     active = undefined;
   }
@@ -80,10 +103,12 @@ function publish(operationId, type, facts) {
 }
 
 function publishFailure(operationId, error) {
-  const failure = error instanceof StreamingFailure ? error.toJSON() : workerFailure(error?.message ?? String(error));
+  const failure = error instanceof StreamingFailure
+    ? error.toJSON()
+    : workerFailure(error?.message ?? String(error));
   self.postMessage(createWorkerMessage(operationId, "failure", {
     code: failure.code,
-    message: failure.message,
+    message: boundedWorkerFailureMessage(failure.message),
     safe_action: failure.safe_action,
   }));
 }
