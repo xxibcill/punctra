@@ -57,8 +57,8 @@ test("cold stream verifies bounded ranges and transfers four ordered batches", a
   assert.ok(result.metrics.sourceNetworkBytes < result.deployment.source.byteLength);
   assert.equal(result.metrics.transferredBatches, 4);
   assert.equal(result.metrics.transferredPoints, 4_096);
-  assert.equal(result.metrics.transferredBytes, 98_304);
-  assert.equal(result.metrics.decodedStagingBytesHighWater, 196_608);
+  assert.equal(result.metrics.transferredBytes, 131_072);
+  assert.equal(result.metrics.decodedStagingBytesHighWater, 204_800);
   assert.equal(result.decode.intensityMinimum, 22);
   assert.equal(result.decode.intensityMaximum, 65_519);
   assert.equal(result.decode.classificationMinimum, 2);
@@ -73,7 +73,7 @@ test("cold stream verifies bounded ranges and transfers four ordered batches", a
   ]);
 });
 
-test("worker RGB mapping matches the exact repository U16 conversion", async () => {
+test("worker preserves raw inspection attributes in transfer-v2 records", async () => {
   const deployment = validateManifest(manifest, MANIFEST_URL);
   const range = deployment.index.root.sampleRange;
   const sampleBytes = indexBytes.subarray(range.offset, range.offset + range.length);
@@ -84,14 +84,16 @@ test("worker RGB mapping matches the exact repository U16 conversion", async () 
   let sampleIndex = 0;
   for (const buffer of batches) {
     const transferred = new DataView(buffer);
-    for (let offset = 0; offset < buffer.byteLength; offset += 24) {
+    for (let offset = 0; offset < buffer.byteLength; offset += 32) {
+      const sampleOffset = range.offset + sampleIndex * 42;
+      assert.equal(transferred.getUint16(offset + 20, true), indexBytes.readUInt16LE(sampleOffset + 32));
+      assert.equal(transferred.getUint8(offset + 22), indexBytes.readUInt8(sampleOffset + 34));
+      assert.equal(transferred.getUint8(offset + 23), 0);
       for (let channel = 0; channel < 3; channel += 1) {
-        const value = indexBytes.readUInt16LE(
-          range.offset + sampleIndex * 42 + 36 + channel * 2,
-        );
-        const expected = Math.floor((value * 255 + 32_767) / 65_535);
-        assert.equal(transferred.getUint8(offset + 20 + channel), expected);
+        const expected = indexBytes.readUInt16LE(sampleOffset + 36 + channel * 2);
+        assert.equal(transferred.getUint16(offset + 24 + channel * 2, true), expected);
       }
+      assert.equal(transferred.getUint16(offset + 30, true), 0);
       sampleIndex += 1;
     }
   }
@@ -121,12 +123,12 @@ test("queued-range bytes accept the exact ceiling and reject one over", () => {
 });
 
 test("decode staging rejects the first record-width step over its ceiling before allocation", async () => {
-  const acceptedCount = 7_216;
+  const acceptedCount = 7_021;
   const acceptedBytes = sampleRecords(acceptedCount);
   const acceptedDeployment = decodeBoundaryDeployment(acceptedCount);
   const accepted = await decodeRootSamples(acceptedBytes, acceptedDeployment);
-  assert.equal(accepted.stagingBytesHighWater, LIMITS.workerStagingBytes - 32);
-  assert.equal(accepted.batchCount, LIMITS.transferBatches);
+  assert.equal(accepted.stagingBytesHighWater, LIMITS.workerStagingBytes - 30);
+  assert.equal(accepted.batchCount, 7);
 
   const rejectedCount = acceptedCount + 1;
   const rejectedBytes = new Uint8Array(rejectedCount * 42);
@@ -671,7 +673,7 @@ function strictlyIncreasingOrdinals(batches) {
   let previous = -1n;
   for (const { buffer } of batches) {
     const view = new DataView(buffer);
-    for (let offset = 0; offset < buffer.byteLength; offset += 24) {
+    for (let offset = 0; offset < buffer.byteLength; offset += 32) {
       const ordinal = view.getBigUint64(offset, true);
       if (ordinal <= previous) return false;
       previous = ordinal;

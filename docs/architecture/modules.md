@@ -10,7 +10,9 @@ independent adoption, partner validation, and support qualification
 outstanding; v0.14 bounded exact Terrain QA and correction-loop slice Complete
 and repository-verified; v0.15 bounded local WebAssembly/WebGPU browser-
 foundation slice Complete and repository-verified; v0.16 private HTTP Range,
-cache, and worker streaming slice Complete and repository-verified
+cache, and worker streaming slice Complete and repository-verified; v0.17
+framework-neutral viewer API and exact-Point bridge Complete and repository-
+verified
 
 This is the ownership map for implemented crates. Each crate has one public
 job. Several private files may cooperate behind one deep interface; private
@@ -36,17 +38,18 @@ limits, and recovery modes are frozen in the
 | `render-protocol` | Define generation-safe renderer-neutral point display state. | Camera and display values | Validated updates and frame values |
 | `point-view` | Plan one frozen View over a host-owned hierarchy without I/O. | Camera, viewport, hierarchy/residency, budget | Demand, requests, retention, retirements |
 | `render-wgpu` | Maintain and draw one wgpu representation of render-protocol state. | Render updates, frame, host target | Recorded commands, report, provisional picks |
-| `browser-demo` | Verify one private bounded browser composition without defining the later supported SDK. | Caller-owned canvas/lifecycle and cache policy, generated scene, or trusted immutable-LAS deployment | WebGPU frame, provisional generated pick, sampled remote Coverage, structured local diagnostics |
+| `browser-demo` | Verify one bounded browser composition and coherent checked-in viewer integration boundary without defining the later packaged SDK. | Caller-owned canvas/lifecycle/navigation/cache policy, generated scene, or trusted immutable-LAS deployment | WebGPU frame, bounded viewer state, provisional pick/highlight, exact fixture record, sampled remote Coverage, structured errors |
 | `renderer-demo` | Exercise indexed LAS/LAZ View-to-render composition, exact review/correction, and local viewing measurement. | CLI, permitted corpus manifest, generated inputs, or an existing Workspace | Interactive demo, exact review outcome, GPU-free process smoke, or canonical Viewing Report |
 | `terrain-demo` | Own one recoverable headless LAS/LAZ-to-terrain Workflow Run and its private post-Run qualification. | Caller-owned paths, identities, baseline, correction/QA intent, limits, and returned LandXML declaration | Eight-frame journal, Revision, Terrain/QA evidence, LandXML/report, and separate Round-Trip Evidence |
 
 `source-copc`, constrained or true out-of-core terrain, general LandXML,
-general application UI, supported browser bindings, a public remote Source
-adapter, and remote-storage policy are not implemented modules. The v0.16
-Range transport, cache, Worker, deployment manifest, and `wasm-bindgen`
-boundary remain private to `browser-demo`; display policy remains private to
-application hosts, and correction remains existing `point-workspace` commit
-policy.
+general application UI, a packaged browser SDK, a public remote Source adapter,
+and remote-storage policy are not implemented modules. The v0.16 Range
+transport, cache, Worker, deployment manifest, and raw `wasm-bindgen` boundary
+remain private to `browser-demo`; v0.17 exposes only their coherent viewer
+composition and fixture-specific exact bridge. Navigation/display policy
+remains private to application hosts, and correction remains existing
+`point-workspace` commit policy.
 
 ## 1. point-contracts
 

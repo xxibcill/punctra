@@ -103,12 +103,16 @@ impl PreparedScene {
     }
 
     pub(crate) fn frame(
-        &self,
         viewport: Viewport,
         view_generation: ViewGenerationKey,
+        camera: Camera,
     ) -> Result<Frame, FrameError> {
         let style = PointStyle::new(7.0, [0.78, 0.66, 0.2], [0.075, 0.078, 0.075, 1.0])?;
-        Ok(Frame::new(view_generation, self.camera, viewport)?.with_style(style))
+        Ok(Frame::new(view_generation, camera, viewport)?.with_style(style))
+    }
+
+    pub(crate) const fn camera(&self) -> Camera {
+        self.camera
     }
 
     pub(crate) const fn facts(&self) -> SceneFacts {
@@ -289,9 +293,12 @@ mod tests {
     fn generated_scene_has_fixed_identity_planning_and_resource_facts() {
         let mut scene = PreparedScene::new().unwrap();
         let initial_facts = scene.facts();
-        let frame = scene
-            .frame(Viewport::new(960, 600).unwrap(), VIEW_GENERATION)
-            .unwrap();
+        let frame = PreparedScene::frame(
+            Viewport::new(960, 600).unwrap(),
+            VIEW_GENERATION,
+            scene.camera(),
+        )
+        .unwrap();
 
         assert_eq!(initial_facts.point_count, 1_089);
         assert_eq!(initial_facts.estimated_gpu_bytes, 26_136);

@@ -23,6 +23,10 @@ export function createDeferredStreamPublication({
       let diagnostics;
       if (!begun) {
         const [x, y, z] = deployment.world_origin;
+        const [minimumZ, maximumZ] = [
+          deployment.source_bounds.min[2],
+          deployment.source_bounds.max[2],
+        ];
         diagnostics = parseDiagnostics(
           viewer.beginStreamBatch(
             deployment.source_identity,
@@ -30,6 +34,8 @@ export function createDeferredStreamPublication({
             x,
             y,
             z,
+            minimumZ,
+            maximumZ,
             message.batch_index,
             new Uint8Array(message.payload),
           ),
@@ -45,7 +51,7 @@ export function createDeferredStreamPublication({
         "main-thread Point work ceiling",
       );
       assertFact(
-        diagnostics.streaming.main_thread_batch_bytes_high_water <= 24_576,
+        diagnostics.streaming.main_thread_batch_bytes_high_water <= 32_768,
         "main-thread byte work ceiling",
       );
       const rendered = parseDiagnostics(viewer.render());

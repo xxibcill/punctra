@@ -3,6 +3,40 @@
 All notable changes to Punctra are documented here. The project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased - 0.17.0-alpha.1
+
+- Completed the accepted [v0.17 Browser Viewer API
+  slice](docs/design/browser-viewer-api-v0.17.md): one framework-neutral
+  JavaScript viewer façade and matching TypeScript declarations now own typed
+  lifecycle, bounded state, viewport/visibility, perspective and orthographic
+  cameras, immediate and coalesced rendering, Source loading, provisional
+  picking, complete highlights, exact handoff, and fused destruction.
+- Added neutral, elevation, RGB, intensity, and classification presentation to
+  the browser viewer. Worker transfer record v2 carries raw intensity,
+  classification, and RGB in 32 bytes; Wasm retains at most eight bounded
+  batches and performs complete version-increasing recolor replacements without
+  changing Point Identity, generation, geometry, Coverage, or highlights.
+- Added the separate cancellable immutable-LAS exact-Point bridge. It validates
+  the deployment, 256-byte Source probe, LAS 1.2 format-3/34-byte layout,
+  strong validator, identity encoding, strict `206` range, and exact record
+  length before returning Source ticks, world position, intensity,
+  classification, and RGB with `exact_source_record` authority.
+- Added optional bounded pointer, two-touch, wheel, and keyboard normalization
+  while leaving navigation, gesture, key binding, and application UI policy in
+  the plain host. The host now demonstrates public-only navigation, all five
+  displays, projection switching, pick/highlight/clear, exact confirmation,
+  cancellation, stale-generation rejection, and explicit recreation.
+- Added deterministic Rust and JavaScript coverage for transfer decoding,
+  display mapping/replacement, camera and highlight generation checks, viewer
+  ownership and scheduled rendering, TypeScript/runtime agreement, input
+  disposal, exact-record validation, cancellation, and stale results. The
+  [browser viewer guide](docs/guides/browser-viewer.md) records the integration
+  and evidence boundary.
+- Kept the scope bounded: v0.17 does not add npm/registry packaging, a bundler
+  or framework adapter, arbitrary LAS/LAZ loading, general exact Queries,
+  editing, terrain, export, broad browser qualification, API stability,
+  independent adoption, support qualification, or release-candidate status.
+
 ## Unreleased - 0.16.0-alpha.1
 
 - Completed and locally repository-verified the accepted v0.16 slice at

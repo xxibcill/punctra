@@ -15,8 +15,10 @@ slice Complete and repository-verified with field activation, observed workflow
 timing, independent adoption, partner validation, and support qualification
 outstanding; v0.15 local WebAssembly/WebGPU browser-foundation slice Complete
 and repository-verified; v0.16 bounded immutable-LAS HTTP Range, browser-cache,
-and worker-decoding slice Complete and repository-verified; arbitrary Source
-delivery, broad browser qualification, independent adoption, SDK stability,
+and worker-decoding slice Complete and repository-verified; v0.17 bounded
+framework-neutral browser viewer API and immutable-LAS exact-Point bridge
+Complete and repository-verified; arbitrary Source delivery, broad browser
+qualification, independent adoption, SDK stability,
 and support qualification outstanding; broader terrain, export, external
 interoperability evidence, and product layers remain deferred
 
@@ -38,6 +40,7 @@ The accepted versioned designs are authoritative:
 - [v0.14 Exact Terrain QA and Correction Loop](../design/exact-terrain-qa-correction-v0.14.md)
 - [v0.15 WebAssembly and WebGPU Browser Foundation](../design/browser-foundation-v0.15.md)
 - [v0.16 HTTP Range Streaming, Browser Caching, and Worker Decoding](../design/http-range-streaming-v0.16.md)
+- [v0.17 Browser Viewer API](../design/browser-viewer-api-v0.17.md)
 
 The current foundation is headless and embeddable. It reads immutable Sources,
 prepares a complete rebuildable Spatial Index, resolves progressive display,
@@ -73,6 +76,15 @@ decodes the index root's Sampled Coverage; the Rust Wasm host validates and
 publishes bounded renderer batches. Native fixture generation depends on
 `source-las` and `point-index`, but the browser runtime adds no foundation-crate
 dependency and exposes no public networking or viewer seam.
+
+The v0.17 implementation stays inside `browser-demo` but adds its first
+coherent framework-neutral host seam: `viewer-api.js` plus matching TypeScript
+declarations own lifecycle, camera, rendering, streaming, state, pick,
+highlight, and exact-handoff composition. Raw worker and Wasm publication
+methods remain private. `viewer-input.js` normalizes bounded input facts without
+owning navigation policy, and `exact-query.js` supplies only the fixture's
+separate one-record LAS authority. Packaging and framework integration remain
+v0.18 concerns.
 
 The frozen [v0.9 public interface review](v0.9-interface-review.md) classifies
 reusable, adapter-author, test-support, and private application surfaces. The

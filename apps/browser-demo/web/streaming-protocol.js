@@ -26,7 +26,7 @@ export const LIMITS = Object.freeze({
   concurrentResponseBytes: 256 * 1024,
   workerStagingBytes: 320 * 1024,
   transferBatchPoints: 1024,
-  transferRecordBytes: 24,
+  transferRecordBytes: 32,
   transferBatches: 8,
   streamPoints: 8192,
   cacheEntries: 64,
@@ -797,23 +797,22 @@ function decodeSample(view, offset, deployment, previousOrdinal) {
   require(withinBounds(world, deployment.index.root.bounds), "range_corrupt", "sample is outside root bounds");
   const relative = world.map((value, axis) => Math.fround(value - deployment.index.root.worldOrigin[axis]));
   require(relative.every(Number.isFinite), "range_corrupt", "sample relative position is not finite f32");
-  const color = [
-    rgb16ToRgb8(view.getUint16(offset + 36, true)),
-    rgb16ToRgb8(view.getUint16(offset + 38, true)),
-    rgb16ToRgb8(view.getUint16(offset + 40, true)),
-    255,
+  const rgb = [
+    view.getUint16(offset + 36, true),
+    view.getUint16(offset + 38, true),
+    view.getUint16(offset + 40, true),
   ];
-  return { ordinal, relative, intensity, classification, color };
-}
-
-function rgb16ToRgb8(value) {
-  return Math.floor((value * 255 + 32_767) / 65_535);
+  return { ordinal, relative, intensity, classification, rgb };
 }
 
 function encodeTransfer(view, offset, sample) {
   view.setBigUint64(offset, BigInt(sample.ordinal), true);
   sample.relative.forEach((value, axis) => view.setFloat32(offset + 8 + axis * 4, value, true));
-  sample.color.forEach((value, channel) => view.setUint8(offset + 20 + channel, value));
+  view.setUint16(offset + 20, sample.intensity, true);
+  view.setUint8(offset + 22, sample.classification);
+  view.setUint8(offset + 23, 0);
+  sample.rgb.forEach((value, channel) => view.setUint16(offset + 24 + channel * 2, value, true));
+  view.setUint16(offset + 30, 0, true);
 }
 
 function validateRangeResponse(response, resource, range, requireAcceptRanges) {

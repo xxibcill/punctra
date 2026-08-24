@@ -7,6 +7,8 @@ export function runWorkerOperation({
   errorFailure,
   messageErrorFailure,
   initialMessage,
+  signal,
+  cancellationMessage,
   onMessage,
 }) {
   return new Promise((resolve, reject) => {
@@ -16,11 +18,16 @@ export function runWorkerOperation({
       () => settle(reject, timeoutFailure),
       timeoutMilliseconds,
     );
+    const onAbort = () => {
+      if (cancellationMessage !== undefined) worker.postMessage(cancellationMessage);
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
 
     function settle(callback, value) {
       if (settled) return;
       settled = true;
       globalThis.clearTimeout(timeout);
+      signal?.removeEventListener("abort", onAbort);
       worker.terminate();
       callback(value);
     }
@@ -40,5 +47,6 @@ export function runWorkerOperation({
       }
     });
     worker.postMessage(initialMessage);
+    if (signal?.aborted) onAbort();
   });
 }

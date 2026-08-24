@@ -53,6 +53,33 @@ test("worker operation maps errors and terminates", async () => {
   assert.equal(worker.terminations, 1);
 });
 
+test("worker operation forwards cancellation and still owns terminal settlement", async () => {
+  const worker = new FakeWorker();
+  const controller = new AbortController();
+  const cancellationMessage = { type: "cancel" };
+  const pending = runWorkerOperation({
+    WorkerConstructor: class { constructor() { return worker; } },
+    workerUrl: "worker.js",
+    workerName: "operation-3",
+    timeoutMilliseconds: 100,
+    timeoutFailure: { code: "timeout" },
+    errorFailure: (event) => ({ code: "error", message: event.message }),
+    messageErrorFailure: { code: "message_error" },
+    initialMessage: { type: "start" },
+    signal: controller.signal,
+    cancellationMessage,
+    onMessage(message, controls) {
+      if (message.type === "cancelled") controls.reject({ code: "cancelled" });
+    },
+  });
+
+  controller.abort();
+  assert.deepEqual(worker.messages, [{ type: "start" }, cancellationMessage]);
+  worker.emit("message", { data: { type: "cancelled" } });
+  await assert.rejects(pending, (error) => error.code === "cancelled");
+  assert.equal(worker.terminations, 1);
+});
+
 class FakeWorker {
   constructor() {
     this.listeners = new Map();
