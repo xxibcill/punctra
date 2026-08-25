@@ -222,6 +222,7 @@ export class BrowserViewer {
   #renderRequest;
   #loadController;
   #loadFacts;
+  #lastFailure;
 
   constructor(raw, options = {}) {
     this.#raw = raw;
@@ -243,50 +244,60 @@ export class BrowserViewer {
   }
 
   subscribe(listener) {
-    this.#ensureActive();
-    if (typeof listener !== "function") throw invalidArgument("state listener must be a function");
-    this.#listeners.add(listener);
-    listener(this.#state);
-    return () => this.#listeners.delete(listener);
+    return this.#execute(() => {
+      this.#ensureActive();
+      if (typeof listener !== "function") throw invalidArgument("state listener must be a function");
+      this.#listeners.add(listener);
+      listener(this.#state);
+      return () => this.#listeners.delete(listener);
+    });
   }
 
   resize(viewport) {
-    const value = viewportInput(viewport);
-    return this.#callRaw(
-      "resize",
-      value.cssWidth,
-      value.cssHeight,
-      value.devicePixelRatio,
-    );
+    return this.#execute(() => {
+      const value = viewportInput(viewport);
+      return this.#callRaw(
+        "resize",
+        value.cssWidth,
+        value.cssHeight,
+        value.devicePixelRatio,
+      );
+    });
   }
 
   setVisible(visible) {
-    if (typeof visible !== "boolean") throw invalidArgument("visible must be boolean");
-    return this.#callRaw("setVisible", visible);
+    return this.#execute(() => {
+      if (typeof visible !== "boolean") throw invalidArgument("visible must be boolean");
+      return this.#callRaw("setVisible", visible);
+    });
   }
 
   setCamera(camera) {
-    const value = cameraInput(camera);
-    const policy = cameraProjectionPolicy(value.projection);
-    const shared = [
-      ...value.eye,
-      ...value.target,
-      ...value.up,
-    ];
-    return this.#callRaw(
-      policy.rawMethod,
-      ...shared,
-      value[policy.extentProperty],
-      value.nearDistance,
-      value.farDistance,
-    );
+    return this.#execute(() => {
+      const value = cameraInput(camera);
+      const policy = cameraProjectionPolicy(value.projection);
+      const shared = [
+        ...value.eye,
+        ...value.target,
+        ...value.up,
+      ];
+      return this.#callRaw(
+        policy.rawMethod,
+        ...shared,
+        value[policy.extentProperty],
+        value.nearDistance,
+        value.farDistance,
+      );
+    });
   }
 
   setDisplayMode(mode) {
-    if (!DISPLAY_MODES.includes(mode)) {
-      throw invalidArgument(`display mode must be one of ${DISPLAY_MODES.join(", ")}`);
-    }
-    return this.#callRaw("setDisplayMode", mode);
+    return this.#execute(() => {
+      if (!DISPLAY_MODES.includes(mode)) {
+        throw invalidArgument(`display mode must be one of ${DISPLAY_MODES.join(", ")}`);
+      }
+      return this.#callRaw("setDisplayMode", mode);
+    });
   }
 
   render() {
@@ -318,6 +329,10 @@ export class BrowserViewer {
   }
 
   async loadSource(options) {
+    return this.#executeAsync(() => this.#loadSource(options));
+  }
+
+  async #loadSource(options) {
     this.#ensureActive();
     if (this.#loadController) throw new ViewerError("load_busy", "one Source load is already active");
     if (typeof this.#WorkerConstructor !== "function") {
@@ -425,6 +440,10 @@ export class BrowserViewer {
   }
 
   async pick(request) {
+    return this.#executeAsync(() => this.#pick(request));
+  }
+
+  async #pick(request) {
     this.#ensureActive();
     const x = nonnegativeInteger(request?.x, "pick x");
     const y = nonnegativeInteger(request?.y, "pick y");
@@ -440,28 +459,37 @@ export class BrowserViewer {
   }
 
   setHighlights(points, generation = this.#state.generation) {
-    this.#ensureActive();
-    if (!Array.isArray(points)) throw invalidArgument("highlights must be an array");
-    const identities = points.map(pointIdentityInput);
-    const sourceIdentity = identities[0]?.sourceIdentity ?? this.#state.source?.identity;
-    if (!sourceIdentity) throw invalidArgument("the active View has no Source identity");
-    if (identities.some((point) => point.sourceIdentity !== sourceIdentity)) {
-      throw invalidArgument("all highlights must belong to one Source");
-    }
-    const ordinals = new BigUint64Array(identities.map((point) => point.pointOrdinal));
-    return this.#callRaw(
-      "setHighlights",
-      sourceIdentity,
-      BigInt(positiveInteger(generation, "generation")),
-      ordinals,
-    );
+    return this.#execute(() => {
+      this.#ensureActive();
+      if (!Array.isArray(points)) throw invalidArgument("highlights must be an array");
+      const identities = points.map(pointIdentityInput);
+      const sourceIdentity = identities[0]?.sourceIdentity ?? this.#state.source?.identity;
+      if (!sourceIdentity) throw invalidArgument("the active View has no Source identity");
+      if (identities.some((point) => point.sourceIdentity !== sourceIdentity)) {
+        throw invalidArgument("all highlights must belong to one Source");
+      }
+      const ordinals = new BigUint64Array(identities.map((point) => point.pointOrdinal));
+      return this.#callRaw(
+        "setHighlights",
+        sourceIdentity,
+        BigInt(positiveInteger(generation, "generation")),
+        ordinals,
+      );
+    });
   }
 
   clearHighlights(generation = this.#state.generation) {
-    return this.#callRaw("clearHighlights", BigInt(positiveInteger(generation, "generation")));
+    return this.#execute(() => this.#callRaw(
+      "clearHighlights",
+      BigInt(positiveInteger(generation, "generation")),
+    ));
   }
 
   async confirmPoint(point, options = {}) {
+    return this.#executeAsync(() => this.#confirmPoint(point, options));
+  }
+
+  async #confirmPoint(point, options) {
     this.#ensureActive();
     if (typeof this.#exactQueryBridge?.confirm !== "function") {
       throw new ViewerError("exact_query_unavailable", "no exact-Query bridge was supplied");
@@ -560,13 +588,14 @@ export class BrowserViewer {
   }
 
   #refreshState(failure) {
+    if (failure) this.#lastFailure = failure;
     this.#state = publicState(
       this.#diagnostics,
       this.#destroyed,
       this.#renderRequest !== undefined,
       this.#loadController !== undefined,
       this.#loadFacts,
-      failure,
+      this.#lastFailure,
     );
     for (const listener of this.#listeners) {
       try {
@@ -578,7 +607,10 @@ export class BrowserViewer {
   }
 
   #ensureActive() {
-    if (this.#destroyed) throw new ViewerError("viewer_destroyed", "viewer has been destroyed");
+    if (!this.#destroyed) return;
+    const failure = new ViewerError("viewer_destroyed", "viewer has been destroyed");
+    this.#recordFailure(failure);
+    throw failure;
   }
 
   #fuseViewer() {
@@ -588,6 +620,28 @@ export class BrowserViewer {
       // The raw viewer may already be fused by the failing operation.
     }
     this.#destroyed = true;
+  }
+
+  #execute(operation) {
+    try {
+      return operation();
+    } catch (error) {
+      throw this.#recordFailure(error);
+    }
+  }
+
+  async #executeAsync(operation) {
+    try {
+      return await operation();
+    } catch (error) {
+      throw this.#recordFailure(error);
+    }
+  }
+
+  #recordFailure(error) {
+    const viewerError = toViewerError(error);
+    if (this.#lastFailure !== viewerError) this.#refreshState(viewerError);
+    return viewerError;
   }
 
   #requireCurrentPoint(identity, generation) {

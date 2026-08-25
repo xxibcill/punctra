@@ -82,6 +82,7 @@ test("viewer exposes typed lifecycle, camera, display, state subscription, and c
     () => viewer.render(),
     (error) => error instanceof ViewerError && error.code === "viewer_destroyed",
   );
+  assert.equal(viewer.state().failure.code, "viewer_destroyed");
 });
 
 test("viewer owns worker publication, streamed picking, highlights, and exact handoff", async () => {
@@ -185,6 +186,15 @@ test("viewer normalizes cancellation and bounds external failures", async () => 
     }),
     (error) => error.code === "exact_query_cancelled",
   );
+  assert.equal(viewer.state().failure.code, "exact_query_cancelled");
+  viewer.setVisible(true);
+  assert.equal(viewer.state().failure.code, "exact_query_cancelled");
+
+  assert.throws(
+    () => viewer.setCamera({ projection: "invalid" }),
+    (error) => error.code === "invalid_argument",
+  );
+  assert.equal(viewer.state().failure.code, "invalid_argument");
   const bounded = new ViewerError("internal", "x".repeat(1_000));
   assert.equal(bounded.message.length, 512);
 });
