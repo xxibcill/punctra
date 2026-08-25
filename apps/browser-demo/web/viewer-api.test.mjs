@@ -146,6 +146,27 @@ test("viewer owns worker publication, streamed picking, highlights, and exact ha
   );
 });
 
+test("a Source failure after partial publication fuses the viewer", async () => {
+  const raw = new FakeRawViewer();
+  const viewer = await createBrowserViewer({
+    bindings: { createViewer: async () => raw },
+    canvas: {},
+    viewport: viewport(),
+    WorkerConstructor: PartialFailureWorker,
+    workerUrl: "https://fixtures.test/stream-worker.js",
+  });
+
+  await assert.rejects(
+    viewer.loadSource({ manifestUrl: "https://fixtures.test/deployment.json" }),
+    (error) => error.code === "cancelled" && error.recoverable === false,
+  );
+  assert.equal(viewer.state().lifecycle, "destroyed");
+  assert.throws(
+    () => viewer.render(),
+    (error) => error.code === "viewer_destroyed",
+  );
+});
+
 test("viewer normalizes cancellation and bounds external failures", async () => {
   const raw = new FakeRawViewer();
   raw.beginStreamBatch(SOURCE, 1, 0, 0, 0, -1, 1, 0, new Uint8Array(32));
@@ -194,17 +215,7 @@ class FixtureWorker {
       return;
     }
     queueMicrotask(() => {
-      const deployment = {
-        schema: "punctra-browser-stream-v1",
-        deployment_id: "fixture",
-        source_identity: SOURCE,
-        source_byte_length: 1_000,
-        source_point_count: 10,
-        root_display_point_count: 1,
-        root_coverage: "sampled",
-        world_origin: [500_000, 4_600_000, 100],
-        source_bounds: { min: [0, 0, 99], max: [0, 0, 103] },
-      };
+      const deployment = fixtureDeployment();
       this.emit({
         schema: WORKER_SCHEMA,
         type: "state",
@@ -236,6 +247,55 @@ class FixtureWorker {
   emit(data) {
     this.listeners.get("message")?.({ data });
   }
+}
+
+class PartialFailureWorker extends FixtureWorker {
+  postMessage(message) {
+    if (message.type === "cancel") {
+      super.postMessage(message);
+      return;
+    }
+    queueMicrotask(() => {
+      const deployment = fixtureDeployment();
+      this.emit({
+        schema: WORKER_SCHEMA,
+        type: "state",
+        operation_id: message.operation_id,
+        phase: "deployment",
+        deployment,
+      });
+      this.emit({
+        schema: WORKER_SCHEMA,
+        type: "batch",
+        operation_id: message.operation_id,
+        batch_index: 0,
+        point_count: 1,
+        payload: transferPayload(7n),
+      });
+      this.emit({
+        schema: WORKER_SCHEMA,
+        type: "failure",
+        operation_id: message.operation_id,
+        code: "cancelled",
+        message: "cancelled after publication",
+        safe_action: "retry",
+      });
+    });
+  }
+}
+
+function fixtureDeployment() {
+  return {
+    schema: "punctra-browser-stream-v1",
+    deployment_id: "fixture",
+    source_identity: SOURCE,
+    source_byte_length: 1_000,
+    source_point_count: 10,
+    root_display_point_count: 1,
+    root_coverage: "sampled",
+    world_origin: [500_000, 4_600_000, 100],
+    source_bounds: { min: [0, 0, 99], max: [0, 0, 103] },
+  };
 }
 
 function transferPayload(ordinal) {

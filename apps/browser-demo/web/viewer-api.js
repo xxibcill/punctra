@@ -167,6 +167,8 @@ const STATE_SCHEMA = "punctra-viewer-state-v1";
 const MAX_PICK_POLLS = 180;
 const MAX_ERROR_MESSAGE_CHARACTERS = 512;
 const LOAD_TIMEOUT_MILLISECONDS = 30_000;
+const PARTIAL_PUBLICATION_SAFE_ACTION =
+  "Destroy the partially published viewer and explicitly create a new viewer before loading another Source.";
 let operationSequence = 0;
 
 export class ViewerError extends Error {
@@ -404,7 +406,15 @@ export class BrowserViewer {
       this.#refreshState();
       return deepFreeze({ ...result, state: this.#state });
     } catch (error) {
-      throw toViewerError(error, begun ? "stream_publication" : "worker_failed");
+      const viewerError = toViewerError(error, begun ? "stream_publication" : "worker_failed");
+      if (!begun) throw viewerError;
+      const fusedError = new ViewerError(viewerError.code, viewerError.message, {
+        safeAction: PARTIAL_PUBLICATION_SAFE_ACTION,
+        recoverable: false,
+      });
+      this.#fuseViewer();
+      this.#refreshState(fusedError);
+      throw fusedError;
     } finally {
       if (this.#loadController === controller) {
         this.#loadController = undefined;
@@ -534,12 +544,7 @@ export class BrowserViewer {
     } catch (error) {
       const viewerError = toViewerError(error);
       if (FUSED_CODES.has(viewerError.code)) {
-        try {
-          this.#raw.shutdown();
-        } catch {
-          // The raw viewer may already be fused by the failing operation.
-        }
-        this.#destroyed = true;
+        this.#fuseViewer();
       }
       this.#refreshState(viewerError);
       throw viewerError;
@@ -574,6 +579,15 @@ export class BrowserViewer {
 
   #ensureActive() {
     if (this.#destroyed) throw new ViewerError("viewer_destroyed", "viewer has been destroyed");
+  }
+
+  #fuseViewer() {
+    try {
+      this.#raw.shutdown();
+    } catch {
+      // The raw viewer may already be fused by the failing operation.
+    }
+    this.#destroyed = true;
   }
 
   #requireCurrentPoint(identity, generation) {
