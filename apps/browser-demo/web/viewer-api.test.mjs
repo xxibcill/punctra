@@ -629,6 +629,26 @@ test("a Source failure after partial publication fuses the viewer", async () => 
   );
 });
 
+test("a Worker crash after partial publication fuses the viewer", async () => {
+  const viewer = await createBrowserViewer({
+    bindings: { createViewer: async () => new FakeRawViewer() },
+    canvas: {},
+    viewport: viewport(),
+    WorkerConstructor: PartialCrashWorker,
+    workerUrl: "https://fixtures.test/stream-worker.js",
+  });
+
+  await assert.rejects(
+    viewer.loadSource({ manifestUrl: "https://fixtures.test/deployment.json" }),
+    (error) => error.code === "worker_failed" && error.recoverable === false,
+  );
+  assert.equal(viewer.state().lifecycle, "destroyed");
+  assert.throws(
+    () => viewer.render(),
+    (error) => error.code === "viewer_destroyed",
+  );
+});
+
 test("viewer normalizes cancellation and bounds external failures", async () => {
   const raw = new FakeRawViewer();
   raw.beginStreamBatch(SOURCE, 1, 0, 0, 0, -1, 1, 0, new Uint8Array(32));
@@ -796,22 +816,7 @@ class PartialFailureWorker extends FixtureWorker {
       return;
     }
     queueMicrotask(() => {
-      const deployment = fixtureDeployment();
-      this.emit({
-        schema: WORKER_SCHEMA,
-        type: "state",
-        operation_id: message.operation_id,
-        phase: "deployment",
-        deployment,
-      });
-      this.emit({
-        schema: WORKER_SCHEMA,
-        type: "batch",
-        operation_id: message.operation_id,
-        batch_index: 0,
-        point_count: 1,
-        payload: transferPayload(7n),
-      });
+      publishFixtureBatch(this, message);
       this.emit({
         schema: WORKER_SCHEMA,
         type: "failure",
@@ -822,6 +827,33 @@ class PartialFailureWorker extends FixtureWorker {
       });
     });
   }
+}
+
+class PartialCrashWorker extends FixtureWorker {
+  postMessage(message) {
+    queueMicrotask(() => {
+      publishFixtureBatch(this, message);
+      this.listeners.get("error")?.({ message: "fixture post-publication worker crash" });
+    });
+  }
+}
+
+function publishFixtureBatch(worker, message) {
+  worker.emit({
+    schema: WORKER_SCHEMA,
+    type: "state",
+    operation_id: message.operation_id,
+    phase: "deployment",
+    deployment: fixtureDeployment(),
+  });
+  worker.emit({
+    schema: WORKER_SCHEMA,
+    type: "batch",
+    operation_id: message.operation_id,
+    batch_index: 0,
+    point_count: 1,
+    payload: transferPayload(7n),
+  });
 }
 
 class ManifestCaptureWorker extends FixtureWorker {
