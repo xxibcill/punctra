@@ -43,6 +43,15 @@ test("viewer exposes typed lifecycle, camera, display, state subscription, and c
   assert.equal(viewer.state().schema, "punctra-viewer-state-v1");
   assert.equal(Object.isFrozen(viewer.state()), true);
   viewer.setCamera({
+    projection: "perspective",
+    eye: [500_000, 4_599_969, 122],
+    target: [500_000, 4_600_000, 100],
+    up: [0, 0, 1],
+    verticalFieldOfViewRadians: Math.PI / 3,
+    nearDistance: 0.1,
+    farDistance: 250,
+  });
+  viewer.setCamera({
     projection: "orthographic",
     eye: [500_000, 4_599_969, 122],
     target: [500_000, 4_600_000, 100],

@@ -19,6 +19,17 @@ export const DISPLAY_MODES = Object.freeze([
   "classification",
 ]);
 
+const CAMERA_PROJECTION_POLICIES = Object.freeze({
+  perspective: Object.freeze({
+    extentProperty: "verticalFieldOfViewRadians",
+    rawMethod: "setPerspectiveCamera",
+  }),
+  orthographic: Object.freeze({
+    extentProperty: "verticalWorldHeight",
+    rawMethod: "setOrthographicCamera",
+  }),
+});
+
 export const VIEWER_ERROR_CODES = Object.freeze([
   "invalid_argument",
   "viewer_destroyed",
@@ -254,24 +265,16 @@ export class BrowserViewer {
 
   setCamera(camera) {
     const value = cameraInput(camera);
+    const policy = cameraProjectionPolicy(value.projection);
     const shared = [
       ...value.eye,
       ...value.target,
       ...value.up,
     ];
-    if (value.projection === "perspective") {
-      return this.#callRaw(
-        "setPerspectiveCamera",
-        ...shared,
-        value.verticalFieldOfViewRadians,
-        value.nearDistance,
-        value.farDistance,
-      );
-    }
     return this.#callRaw(
-      "setOrthographicCamera",
+      policy.rawMethod,
       ...shared,
-      value.verticalWorldHeight,
+      value[policy.extentProperty],
       value.nearDistance,
       value.farDistance,
     );
@@ -682,9 +685,7 @@ function publicState(diagnostics, destroyed, renderScheduled, loadActive, loadFa
 function cameraInput(value) {
   if (!value || typeof value !== "object") throw invalidArgument("camera must be an object");
   const projection = value.projection;
-  if (projection !== "perspective" && projection !== "orthographic") {
-    throw invalidArgument("camera projection must be perspective or orthographic");
-  }
+  const policy = cameraProjectionPolicy(projection);
   const camera = {
     projection,
     eye: finiteTriple(value.eye, "camera eye"),
@@ -696,15 +697,17 @@ function cameraInput(value) {
   if (camera.farDistance <= camera.nearDistance) {
     throw invalidArgument("farDistance must be greater than nearDistance");
   }
-  if (projection === "perspective") {
-    camera.verticalFieldOfViewRadians = positiveNumber(
-      value.verticalFieldOfViewRadians,
-      "verticalFieldOfViewRadians",
-    );
-  } else {
-    camera.verticalWorldHeight = positiveNumber(value.verticalWorldHeight, "verticalWorldHeight");
-  }
+  camera[policy.extentProperty] = positiveNumber(
+    value[policy.extentProperty],
+    policy.extentProperty,
+  );
   return camera;
+}
+
+function cameraProjectionPolicy(projection) {
+  const policy = CAMERA_PROJECTION_POLICIES[projection];
+  if (!policy) throw invalidArgument("camera projection must be perspective or orthographic");
+  return policy;
 }
 
 function viewportInput(value) {

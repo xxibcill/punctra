@@ -32,6 +32,30 @@ const shutdownButton = document.querySelector("#shutdown-button");
 
 const STREAM_MANIFEST_URL = "./fixtures/v1/deployment.json";
 const EXACT_QUERY_AUTHORITY = "exact_source_record";
+const CAMERA_PROJECTION_POLICIES = Object.freeze({
+  perspective: Object.freeze({
+    extentProperty: "verticalFieldOfViewRadians",
+    visibleHeight: perspectiveVisibleHeight,
+    zoom: (camera, factor) => ({
+      ...camera,
+      eye: add(camera.target, scaleVector(subtract(camera.eye, camera.target), factor)),
+    }),
+    alternate: (camera) => cameraWithProjection(
+      camera,
+      "orthographic",
+      perspectiveVisibleHeight(camera),
+    ),
+  }),
+  orthographic: Object.freeze({
+    extentProperty: "verticalWorldHeight",
+    visibleHeight: (camera) => camera.verticalWorldHeight,
+    zoom: (camera, factor) => ({
+      ...camera,
+      verticalWorldHeight: Math.max(0.01, camera.verticalWorldHeight * factor),
+    }),
+    alternate: (camera) => cameraWithProjection(camera, "perspective", Math.PI / 3),
+  }),
+});
 let bindings;
 let viewer;
 let viewerSubscription;
@@ -419,26 +443,25 @@ async function expectCode(promise, code) {
 
 function cameraInputFromState(state) {
   const camera = state.camera;
-  if (camera.projection === "orthographic") {
-    return {
-      projection: "orthographic",
-      eye: [...camera.eye],
-      target: [...camera.target],
-      up: [...camera.up],
-      verticalWorldHeight: camera.verticalWorldHeight,
-      nearDistance: camera.nearDistance,
-      farDistance: camera.farDistance,
-    };
-  }
+  const policy = cameraProjectionPolicy(camera.projection);
+  return cameraWithProjection(camera, camera.projection, camera[policy.extentProperty]);
+}
+
+function cameraWithProjection(camera, projection, extent) {
+  const policy = cameraProjectionPolicy(projection);
   return {
-    projection: "perspective",
+    projection,
     eye: [...camera.eye],
     target: [...camera.target],
     up: [...camera.up],
-    verticalFieldOfViewRadians: camera.verticalFieldOfViewRadians,
+    [policy.extentProperty]: extent,
     nearDistance: camera.nearDistance,
     farDistance: camera.farDistance,
   };
+}
+
+function cameraProjectionPolicy(projection) {
+  return CAMERA_PROJECTION_POLICIES[projection];
 }
 
 function perspectiveVisibleHeight(camera) {
@@ -485,44 +508,20 @@ function panCamera(camera, horizontalPixels, verticalPixels, viewportHeight) {
   const forward = normalize(subtract(camera.target, camera.eye));
   const right = normalize(cross(forward, camera.up));
   const up = normalize(cross(right, forward));
-  const verticalHeight = camera.projection === "orthographic"
-    ? camera.verticalWorldHeight
-    : perspectiveVisibleHeight(camera);
+  const verticalHeight = cameraProjectionPolicy(camera.projection).visibleHeight(camera);
   const scale = verticalHeight / Math.max(1, viewportHeight);
   const movement = add(scaleVector(right, -horizontalPixels * scale), scaleVector(up, verticalPixels * scale));
   return { ...camera, eye: add(camera.eye, movement), target: add(camera.target, movement) };
 }
 
 function zoomCamera(camera, lines) {
-  const offset = subtract(camera.eye, camera.target);
   const factor = Math.exp(lines * 0.12);
-  if (camera.projection === "orthographic") {
-    return { ...camera, verticalWorldHeight: Math.max(0.01, camera.verticalWorldHeight * factor) };
-  }
-  return { ...camera, eye: add(camera.target, scaleVector(offset, factor)) };
+  return cameraProjectionPolicy(camera.projection).zoom(camera, factor);
 }
 
 function keyboardCamera(camera, code) {
   if (code !== "KeyP") return undefined;
-  return camera.projection === "perspective"
-    ? {
-        projection: "orthographic",
-        eye: camera.eye,
-        target: camera.target,
-        up: camera.up,
-        verticalWorldHeight: perspectiveVisibleHeight(camera),
-        nearDistance: camera.nearDistance,
-        farDistance: camera.farDistance,
-      }
-    : {
-        projection: "perspective",
-        eye: camera.eye,
-        target: camera.target,
-        up: camera.up,
-        verticalFieldOfViewRadians: Math.PI / 3,
-        nearDistance: camera.nearDistance,
-        farDistance: camera.farDistance,
-      };
+  return cameraProjectionPolicy(camera.projection).alternate(camera);
 }
 
 function add(left, right) {
