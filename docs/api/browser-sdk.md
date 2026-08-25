@@ -73,8 +73,6 @@ export interface CreateViewerOptions {
   readonly requestAnimationFrame?: typeof requestAnimationFrame;
   readonly cancelAnimationFrame?: typeof cancelAnimationFrame;
   readonly assets?: ViewerAssetOptions;
-  /** Advanced host seam used only when the host owns Worker construction. */
-  readonly workerFactory?: (url: string | URL, options: WorkerOptions) => Worker;
 }
 
 /** Resolve package-relative or explicitly deployed Wasm and Worker assets. */

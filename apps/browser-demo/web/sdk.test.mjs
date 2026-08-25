@@ -32,6 +32,7 @@ test("SDK exports the public viewer surface and package-relative assets", async 
   assert.match(declaration, /createViewer\(options: CreateViewerOptions\)/);
   assert.doesNotMatch(declaration, /createInputNormalizer|createLasExactQueryBridge/);
   assert.doesNotMatch(declaration, /createBrowserViewer/);
+  assert.doesNotMatch(declaration, /workerFactory/);
 });
 
 test("explicit SDK assets preserve deployment URLs and bounded cache busting", () => {

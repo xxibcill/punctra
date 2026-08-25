@@ -244,7 +244,6 @@ export interface BrowserViewerOptions {
   readonly exactQueryBridge?: ExactQueryBridge;
   readonly WorkerConstructor?: typeof Worker;
   readonly workerUrl?: string | URL;
-  readonly workerFactory?: (url: string | URL, options: WorkerOptions) => Worker;
   readonly requestAnimationFrame?: typeof requestAnimationFrame;
   readonly cancelAnimationFrame?: typeof cancelAnimationFrame;
 }

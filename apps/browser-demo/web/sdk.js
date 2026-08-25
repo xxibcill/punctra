@@ -49,8 +49,7 @@ export async function createViewer(options) {
     ...options,
     bindings,
     workerUrl: assets.workerUrl,
-    workerFactory: options.workerFactory
-      ?? (defaultWorkerAsset ? createBundledWorker : undefined),
+    workerFactory: defaultWorkerAsset ? createBundledWorker : undefined,
   });
 }
 
