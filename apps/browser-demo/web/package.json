@@ -31,6 +31,7 @@
     "camera-policy.js",
     "exact-query.d.ts",
     "exact-query.js",
+    "module-loader.js",
     "pkg/browser_demo.d.ts",
     "pkg/browser_demo.js",
     "pkg/browser_demo_bg.wasm",

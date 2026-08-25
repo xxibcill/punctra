@@ -20,6 +20,7 @@ verifyPackedFiles(viewerArtifact, [
   "package/camera-policy.js",
   "package/exact-query.d.ts",
   "package/exact-query.js",
+  "package/module-loader.js",
   "package/package.json",
   "package/pkg/browser_demo.d.ts",
   "package/pkg/browser_demo.js",
