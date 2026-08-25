@@ -166,6 +166,35 @@ test("surface_outdated preserves the viewer for bounded recovery", async () => {
   assert.equal(viewer.state().failure.code, "surface_outdated");
 });
 
+test("every recreation-required renderer failure fuses the viewer", async () => {
+  for (const code of [
+    "pick_recording",
+    "pick_readback",
+    "pick_invariant",
+    "transient_texture_limit",
+  ]) {
+    const cancelledFrames = [];
+    const viewer = await createBrowserViewer({
+      bindings: { createViewer: async () => new FusedRawViewer(code) },
+      canvas: {},
+      viewport: viewport(),
+      requestAnimationFrame: () => 7,
+      cancelAnimationFrame: (id) => cancelledFrames.push(id),
+    });
+    const scheduled = viewer.requestRender();
+    const scheduledRejection = assert.rejects(
+      scheduled,
+      (error) => error.code === "render_cancelled",
+    );
+
+    assert.throws(() => viewer.setDisplayMode("rgb"), (error) => error.code === code);
+    await scheduledRejection;
+    assert.deepEqual(cancelledFrames, [7]);
+    assert.equal(viewer.state().lifecycle, "destroyed");
+    assert.equal(viewer.state().failure.code, code);
+  }
+});
+
 test("viewer owns worker publication, streamed picking, highlights, and exact handoff", async () => {
   const raw = new FakeRawViewer();
   const exactRequests = [];
@@ -637,8 +666,13 @@ class FakeRawViewer {
 }
 
 class FusedRawViewer extends FakeRawViewer {
+  constructor(code = "device_lost") {
+    super();
+    this.code = code;
+  }
+
   setDisplayMode() {
-    throw new Error(JSON.stringify({ code: "device_lost", message: "fixture device loss" }));
+    throw new Error(JSON.stringify({ code: this.code, message: "fixture fused failure" }));
   }
 }
 

@@ -145,6 +145,9 @@ const FUSED_CODES = new Set([
   "device_poll",
   "frame_recording",
   "host_model",
+  "pick_invariant",
+  "pick_readback",
+  "pick_recording",
   "renderer_capability",
   "scene_publication",
   "stream_publication",
@@ -152,6 +155,7 @@ const FUSED_CODES = new Set([
   "surface_lost",
   "surface_reconfiguration",
   "surface_validation",
+  "transient_texture_limit",
 ]);
 const ERROR_SCHEMA = "punctra-viewer-error-v1";
 const STATE_SCHEMA = "punctra-viewer-state-v1";
