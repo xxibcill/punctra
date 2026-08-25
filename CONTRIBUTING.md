@@ -144,7 +144,7 @@ cargo clippy -p browser-demo --all-targets --all-features -- -D warnings
 cargo clippy -p browser-demo --target wasm32-unknown-unknown --all-targets \
   --all-features -- -D warnings
 cargo run -p browser-demo --bin generate_stream_fixture
-node --test apps/browser-demo/web/*.test.mjs packages/react/*.test.mjs
+node --test apps/browser-demo/web/*.test.mjs packages/react/*.test.mjs scripts/*.test.mjs
 scripts/build-browser-sdk.sh
 node scripts/verify-browser-sdk.mjs
 node scripts/generate-browser-sdk-reference.mjs --check

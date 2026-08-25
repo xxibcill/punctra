@@ -11,8 +11,11 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { captureChildExit } from "./child-process.mjs";
+
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const artifactDirectory = path.join(repositoryRoot, "target/npm");
+let developmentServerSequence = 0;
 const viewerArtifact = onlyArtifact("punctra-viewer-");
 const reactArtifact = onlyArtifact("punctra-react-");
 
@@ -172,31 +175,61 @@ function literalRelativeImports(source) {
 }
 
 async function verifyDevelopmentServer(directory) {
-  const port = 41_000 + (process.pid % 1_000);
+  const port = 41_000 + ((process.pid + developmentServerSequence) % 1_000);
+  developmentServerSequence += 1;
+  const viteEntry = path.join(directory, "node_modules/vite/bin/vite.js");
   const child = spawn(
-    "npm",
-    ["exec", "vite", "--", "--host", "127.0.0.1", "--port", String(port), "--strictPort"],
+    process.execPath,
+    [viteEntry, "--host", "127.0.0.1", "--port", String(port), "--strictPort"],
     { cwd: directory, stdio: ["ignore", "pipe", "pipe"] },
   );
+  const output = collectChildOutput(child);
+  const serverExit = captureChildExit(child);
   try {
-    const root = await fetchUntilReady(`http://127.0.0.1:${port}/`);
-    assert.match(root, /<script type="module"/);
-    const source = await fetchUntilReady(
-      `http://127.0.0.1:${port}/${directory.endsWith("browser-react") ? "src/main.tsx" : "src/main.ts"}`,
-    );
-    assert.match(source, /@punctra|punctra/i);
-    const sdk = await fetchUntilReady(
-      `http://127.0.0.1:${port}/node_modules/@punctra/viewer/sdk.js`,
-    );
-    assert.match(sdk, /createViewer/);
-    const worker = await fetchUntilReady(
-      `http://127.0.0.1:${port}/node_modules/@punctra/viewer/stream-worker.js?punctra-v=development-trial`,
-    );
-    assert.match(worker, /development-trial|WORKER_CACHE_TOKEN/);
+    await Promise.race([
+      verifyDevelopmentResponses(directory, port),
+      serverExit.then((settlement) => {
+        throw developmentServerExitError(settlement, output);
+      }),
+    ]);
   } finally {
-    child.kill("SIGTERM");
-    await new Promise((resolve) => child.once("exit", resolve));
+    if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
+    await serverExit.catch(() => {});
   }
+}
+
+async function verifyDevelopmentResponses(directory, port) {
+  const root = await fetchUntilReady(`http://127.0.0.1:${port}/`);
+  assert.match(root, /<script type="module"/);
+  const source = await fetchUntilReady(
+    `http://127.0.0.1:${port}/${directory.endsWith("browser-react") ? "src/main.tsx" : "src/main.ts"}`,
+  );
+  assert.match(source, /@punctra|punctra/i);
+  const sdk = await fetchUntilReady(
+    `http://127.0.0.1:${port}/node_modules/@punctra/viewer/sdk.js`,
+  );
+  assert.match(sdk, /createViewer/);
+  const worker = await fetchUntilReady(
+    `http://127.0.0.1:${port}/node_modules/@punctra/viewer/stream-worker.js?punctra-v=development-trial`,
+  );
+  assert.match(worker, /development-trial|WORKER_CACHE_TOKEN/);
+}
+
+function collectChildOutput(child) {
+  const output = { stdout: "", stderr: "" };
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
+  child.stdout.on("data", (chunk) => { output.stdout += chunk; });
+  child.stderr.on("data", (chunk) => { output.stderr += chunk; });
+  return output;
+}
+
+function developmentServerExitError(settlement, output) {
+  const reason = settlement.signal === null
+    ? `code ${settlement.code}`
+    : `signal ${settlement.signal}`;
+  const diagnostics = `${output.stdout}\n${output.stderr}`.trim();
+  return new Error(`Vite development server exited with ${reason}${diagnostics ? `:\n${diagnostics}` : ""}`);
 }
 
 async function fetchUntilReady(url) {
