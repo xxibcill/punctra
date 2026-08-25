@@ -7,13 +7,17 @@ import {
   ViewerError,
   createBrowserViewer,
 } from "./viewer-api.js";
+import { createWasmModuleLoader } from "./wasm-loader.js";
 
 const DEFAULT_WASM_URL = new URL("./pkg/browser_demo_bg.wasm", import.meta.url);
 const DEFAULT_WORKER_URL = new URL("./stream-worker.js", import.meta.url);
 const MAX_CACHE_KEY_CHARACTERS = 128;
 
-let initializedWasmUrl;
-let wasmInitialization;
+const loadBindings = createWasmModuleLoader({
+  createRawViewer,
+  initializeWasm,
+  ViewerError,
+});
 
 export { DISPLAY_MODES, VIEWER_ERROR_CODES, ViewerError };
 
@@ -45,37 +49,6 @@ export async function createViewer(options) {
     workerFactory: options.workerFactory
       ?? (defaultWorkerAsset ? createBundledWorker : undefined),
   });
-}
-
-async function loadBindings(wasmUrl) {
-  const requestedUrl = wasmUrl.href;
-  if (initializedWasmUrl !== undefined && initializedWasmUrl !== requestedUrl) {
-    throw new ViewerError(
-      "invalid_argument",
-      "one imported SDK module cannot be initialized from two different Wasm asset URLs",
-      {
-        safeAction: "Reuse the first Wasm URL or import an independently versioned SDK module.",
-      },
-    );
-  }
-  if (!wasmInitialization) {
-    initializedWasmUrl = requestedUrl;
-    wasmInitialization = initializeWasm({ module_or_path: wasmUrl }).catch((error) => {
-      initializedWasmUrl = undefined;
-      wasmInitialization = undefined;
-      throw error;
-    });
-  }
-  try {
-    await wasmInitialization;
-  } catch (error) {
-    throw error instanceof ViewerError
-      ? error
-      : new ViewerError("internal", error?.message ?? "WebAssembly initialization failed", {
-          safeAction: "Verify the Wasm asset URL, MIME type, Content Security Policy, and response body before retrying.",
-        });
-  }
-  return { createViewer: createRawViewer };
 }
 
 function createBundledWorker(_workerUrl, _options) {

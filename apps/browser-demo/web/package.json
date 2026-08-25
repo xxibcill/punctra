@@ -45,6 +45,7 @@
     "viewer-api.js",
     "viewer-input.d.ts",
     "viewer-input.js",
+    "wasm-loader.js",
     "worker-operation.js",
     "worker-protocol.js"
   ],

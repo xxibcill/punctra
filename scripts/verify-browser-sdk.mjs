@@ -35,6 +35,7 @@ verifyPackedFiles(viewerArtifact, [
   "package/viewer-api.js",
   "package/viewer-input.d.ts",
   "package/viewer-input.js",
+  "package/wasm-loader.js",
   "package/worker-operation.js",
   "package/worker-protocol.js",
 ]);
