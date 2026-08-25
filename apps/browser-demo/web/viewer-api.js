@@ -221,6 +221,7 @@ export class BrowserViewer {
   #cancelAnimationFrame;
   #renderRequest;
   #loadController;
+  #exactController;
   #loadFacts;
   #lastFailure;
 
@@ -497,36 +498,50 @@ export class BrowserViewer {
     if (typeof this.#exactQueryBridge?.confirm !== "function") {
       throw new ViewerError("exact_query_unavailable", "no exact-Query bridge was supplied");
     }
+    if (this.#exactController) {
+      throw new ViewerError("exact_query_busy", "one exact-Query handoff is already active");
+    }
     const identity = pointIdentityInput(point);
     const generation = positiveInteger(point?.generation ?? this.#state.generation, "generation");
     this.#requireCurrentPoint(identity, generation);
-    assertNotCancelled(options.signal, "exact_query_cancelled");
-    let result;
+    const controller = linkedAbortController(options.signal);
+    this.#exactController = controller;
     try {
-      result = await this.#exactQueryBridge.confirm({
-        sourceIdentity: identity.sourceIdentity,
-        pointOrdinal: identity.pointOrdinal,
-        generation,
-        signal: options.signal,
-      });
-    } catch (error) {
-      throw toViewerError(error, "exact_query_failed");
+      assertNotCancelled(controller.signal, "exact_query_cancelled");
+      let result;
+      try {
+        result = await this.#exactQueryBridge.confirm({
+          sourceIdentity: identity.sourceIdentity,
+          pointOrdinal: identity.pointOrdinal,
+          generation,
+          signal: controller.signal,
+        });
+      } catch (error) {
+        this.#ensureActive();
+        assertNotCancelled(controller.signal, "exact_query_cancelled");
+        throw toViewerError(error, "exact_query_failed");
+      }
+      this.#ensureActive();
+      assertNotCancelled(controller.signal, "exact_query_cancelled");
+      this.#requireCurrentPoint(identity, generation);
+      if (result?.sourceIdentity !== identity.sourceIdentity
+        || BigInt(result?.pointOrdinal) !== identity.pointOrdinal
+        || result?.generation !== generation
+        || result?.authority !== "exact_source_record") {
+        throw new ViewerError("exact_query_source_mismatch", "exact bridge returned a mismatched Point result");
+      }
+      return deepFreeze(result);
+    } finally {
+      if (this.#exactController === controller) this.#exactController = undefined;
+      controller.dispose();
     }
-    this.#ensureActive();
-    this.#requireCurrentPoint(identity, generation);
-    if (result?.sourceIdentity !== identity.sourceIdentity
-      || BigInt(result?.pointOrdinal) !== identity.pointOrdinal
-      || result?.generation !== generation
-      || result?.authority !== "exact_source_record") {
-      throw new ViewerError("exact_query_source_mismatch", "exact bridge returned a mismatched Point result");
-    }
-    return deepFreeze(result);
   }
 
   destroy() {
     if (this.#destroyed) return;
     this.#destroyed = true;
     this.#loadController?.abort();
+    this.#exactController?.abort();
     if (this.#renderRequest) {
       const request = this.#renderRequest;
       this.#renderRequest = undefined;

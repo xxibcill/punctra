@@ -201,8 +201,52 @@ test("viewer normalizes cancellation and bounds external failures", async () => 
   assert.equal(bounded.message.length, 512);
 });
 
+test("viewer owns cancellation for exact handoffs already in flight", async () => {
+  const raw = new FakeRawViewer();
+  raw.beginStreamBatch(SOURCE, 1, 0, 0, 0, -1, 1, 0, new Uint8Array(32));
+  let resolveExact;
+  let exactSignal;
+  const viewer = await createBrowserViewer({
+    bindings: { createViewer: async () => raw },
+    canvas: {},
+    viewport: viewport(),
+    exactQueryBridge: {
+      confirm(request) {
+        exactSignal = request.signal;
+        return new Promise((resolve) => { resolveExact = resolve; });
+      },
+    },
+  });
+  const point = { sourceIdentity: SOURCE, pointOrdinal: 0, generation: 1 };
+  const externalController = new AbortController();
+  const cancelled = viewer.confirmPoint(point, { signal: externalController.signal });
+  await Promise.resolve();
+
+  assert.notEqual(exactSignal, externalController.signal);
+  externalController.abort();
+  assert.equal(exactSignal.aborted, true);
+  resolveExact(exactResult(point));
+  await assert.rejects(cancelled, (error) => error.code === "exact_query_cancelled");
+
+  const destroyed = viewer.confirmPoint(point);
+  await Promise.resolve();
+  viewer.destroy();
+  assert.equal(exactSignal.aborted, true);
+  resolveExact(exactResult(point));
+  await assert.rejects(destroyed, (error) => error.code === "viewer_destroyed");
+});
+
 function viewport() {
   return { cssWidth: 800, cssHeight: 500, devicePixelRatio: 2 };
+}
+
+function exactResult(point) {
+  return {
+    authority: "exact_source_record",
+    sourceIdentity: point.sourceIdentity,
+    pointOrdinal: String(point.pointOrdinal),
+    generation: point.generation,
+  };
 }
 
 class FixtureWorker {
