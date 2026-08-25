@@ -161,6 +161,9 @@ only the recorded Codex in-app Chromium 151/macOS 26.5.2/Apple M5 Pro lane.
 Other browsers/devices, forced physical device loss or memory pressure,
 independent adoption, stable API, visual-quality expansion, support
 qualification, and release-candidate status remain outside this meaning.
+The [v0.19 repository verification record](docs/releases/v0.19.0.md) owns the
+exact implementation, environment, command, browser, GPU, benchmark, and
+nonclaim facts.
 
 ## Artifact
 

@@ -134,3 +134,7 @@ mobile, registry/CDN deployment, authentication, offline-first behavior,
 independent adoption, API stability, visual quality, or support operations.
 Those remain external evidence or later accepted work; this release is not a
 beta or release candidate.
+
+The [v0.19 repository verification record](../releases/v0.19.0.md) pins the
+exact implementation commit, environment, attended observations, full local
+command matrix, and outstanding exits.

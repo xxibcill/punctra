@@ -301,6 +301,10 @@ Safari, other platforms, independent adoption, physical memory/device-loss
 stress, API stability, visual quality, support qualification, and release-
 candidate status remain explicitly outstanding.
 
+The [v0.19 repository verification record](docs/releases/v0.19.0.md) pins the
+exact implementation commit, local command matrix, attended browser evidence,
+GPU acceptance, benchmarks, and remaining external exits.
+
 To try the implemented View safely, follow the five-minute [first LAS/LAZ
 guide](docs/guides/first-las-laz.md). It separates position-only disk-v1 and
 attributed disk-v2 caches and explains what progressive Coverage does and does

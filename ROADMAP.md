@@ -157,7 +157,9 @@ Installed Chrome, Safari, other platforms, forced physical device loss or
 memory pressure, independent adoption, API stability, broad support, and
 release-candidate status remain outstanding. The exact observed entry and its
 nonclaims are recorded in the [v0.19 browser
-matrix](docs/releases/v0.19-browser-matrix.json).
+matrix](docs/releases/v0.19-browser-matrix.json), with the complete local
+command, benchmark, GPU, and provenance evidence in the [v0.19 repository
+verification record](docs/releases/v0.19.0.md).
 
 ## Pre-v0.13 renderer quality corrective checkpoint
 
@@ -1353,6 +1355,9 @@ browser qualification/recovery guide. Only the recorded Codex in-app Chromium
 151/macOS 26.5.2/Apple M5 Pro lane is Browser-qualified. Installed Chrome,
 Safari, other browsers, operating systems, adapters, devices, mobile, registry
 delivery, and independent adoption remain unqualified.
+The exact implementation, local verification matrix, browser observations,
+benchmarks, and remaining exits are pinned in the [v0.19 repository
+verification record](docs/releases/v0.19.0.md).
 
 ### v0.20 — Stable browser-engine integration baseline
 

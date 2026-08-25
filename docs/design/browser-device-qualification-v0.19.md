@@ -1,6 +1,7 @@
 # Browser and Device Qualification Design (v0.19)
 
-Status: **Active — accepted for the bounded local qualification slice**
+Status: **Complete and repository-verified for the bounded local qualification
+slice**
 
 This design is authoritative for the bounded Punctra v0.19 repository slice.
 The maintainer's request to continue through v0.19 activates the scope below.
