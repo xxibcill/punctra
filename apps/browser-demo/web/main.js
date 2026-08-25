@@ -11,6 +11,9 @@ const { createLasExactQueryBridge } = await import(
 const { createInputNormalizer } = await import(
   `./viewer-input.js?v=${BUILD_CACHE_TOKEN}`
 );
+const { CAMERA_PROJECTION_POLICIES: BASE_CAMERA_PROJECTION_POLICIES } = await import(
+  `./camera-policy.js?v=${BUILD_CACHE_TOKEN}`
+);
 
 const canvas = document.querySelector("#punctra-canvas");
 const canvasShell = document.querySelector("#canvas-shell");
@@ -32,9 +35,9 @@ const shutdownButton = document.querySelector("#shutdown-button");
 
 const STREAM_MANIFEST_URL = "./fixtures/v1/deployment.json";
 const EXACT_QUERY_AUTHORITY = "exact_source_record";
-const CAMERA_PROJECTION_POLICIES = Object.freeze({
+const HOST_CAMERA_PROJECTION_POLICIES = Object.freeze({
   perspective: Object.freeze({
-    extentProperty: "verticalFieldOfViewRadians",
+    ...BASE_CAMERA_PROJECTION_POLICIES.perspective,
     visibleHeight: perspectiveVisibleHeight,
     zoom: (camera, factor) => ({
       ...camera,
@@ -47,7 +50,7 @@ const CAMERA_PROJECTION_POLICIES = Object.freeze({
     ),
   }),
   orthographic: Object.freeze({
-    extentProperty: "verticalWorldHeight",
+    ...BASE_CAMERA_PROJECTION_POLICIES.orthographic,
     visibleHeight: (camera) => camera.verticalWorldHeight,
     zoom: (camera, factor) => ({
       ...camera,
@@ -461,7 +464,7 @@ function cameraWithProjection(camera, projection, extent) {
 }
 
 function cameraProjectionPolicy(projection) {
-  return CAMERA_PROJECTION_POLICIES[projection];
+  return HOST_CAMERA_PROJECTION_POLICIES[projection];
 }
 
 function perspectiveVisibleHeight(camera) {

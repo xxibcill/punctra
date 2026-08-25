@@ -5,10 +5,12 @@ const [
   { appendTransferredOrdinals },
   { runWorkerOperation },
   { WORKER_SCHEMA, workerFailure },
+  { CAMERA_PROJECTION_POLICIES },
 ] = await Promise.all([
   import(`./stream-ordinals.js?v=${MODULE_CACHE_TOKEN}`),
   import(`./worker-operation.js?v=${MODULE_CACHE_TOKEN}`),
   import(`./worker-protocol.js?v=${MODULE_CACHE_TOKEN}`),
+  import(`./camera-policy.js?v=${MODULE_CACHE_TOKEN}`),
 ]);
 
 export const DISPLAY_MODES = Object.freeze([
@@ -18,17 +20,6 @@ export const DISPLAY_MODES = Object.freeze([
   "intensity",
   "classification",
 ]);
-
-const CAMERA_PROJECTION_POLICIES = Object.freeze({
-  perspective: Object.freeze({
-    extentProperty: "verticalFieldOfViewRadians",
-    rawMethod: "setPerspectiveCamera",
-  }),
-  orthographic: Object.freeze({
-    extentProperty: "verticalWorldHeight",
-    rawMethod: "setOrthographicCamera",
-  }),
-});
 
 export const VIEWER_ERROR_CODES = Object.freeze([
   "invalid_argument",
