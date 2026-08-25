@@ -182,9 +182,9 @@ The v0.18 verification adds:
   installation, strict TypeScript, development/production Vite builds,
   code-split output, content-hashed Wasm/Worker output, and development-server
   transforms in both trials; and
-- the inherited browser acceptance host importing only `sdk.js`, exercising
-  packaged lifecycle and public behavior, and reporting package version
-  `0.18.0-alpha.1`.
+- the inherited browser acceptance host importing only the supported SDK entry
+  modules, exercising packaged lifecycle and public behavior, and reporting
+  package version `0.18.0-alpha.1`.
 
 All prior native, Wasm, fixture, documentation, fuzz, benchmark, example, and
 required GPU lanes remain inherited. v0.18 changes packaging and lifecycle

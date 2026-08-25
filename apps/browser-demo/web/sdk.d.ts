@@ -13,32 +13,18 @@ import type {
   ViewerState,
   ViewportInput,
 } from "./viewer-api.js";
-import type {
-  InputNormalizer,
-  InputNormalizerOptions,
-  NormalizedViewerInput,
-} from "./viewer-input.js";
-import type {
-  LasExactQueryBridgeOptions,
-} from "./exact-query.js";
 
 export {
   DISPLAY_MODES,
   VIEWER_ERROR_CODES,
   ViewerError,
 } from "./viewer-api.js";
-export { createInputNormalizer } from "./viewer-input.js";
-export { createLasExactQueryBridge } from "./exact-query.js";
 
 export type {
   BrowserViewer,
   DisplayMode,
   ExactPoint,
   ExactQueryBridge,
-  InputNormalizer,
-  InputNormalizerOptions,
-  LasExactQueryBridgeOptions,
-  NormalizedViewerInput,
   OrthographicCamera,
   PerspectiveCamera,
   PointIdentity,

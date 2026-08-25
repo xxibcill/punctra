@@ -2,15 +2,15 @@ const BUILD_CACHE_TOKEN = encodeURIComponent(
   new URL(import.meta.url).searchParams.get("v") ?? "unversioned",
 );
 
-const {
-  DISPLAY_MODES,
-  ViewerError,
-  createInputNormalizer,
-  createLasExactQueryBridge,
-  createViewer,
-} = await import(
-  `./sdk.js?v=${BUILD_CACHE_TOKEN}`
-);
+const [
+  { DISPLAY_MODES, ViewerError, createViewer },
+  { createInputNormalizer },
+  { createLasExactQueryBridge },
+] = await Promise.all([
+  import(`./sdk.js?v=${BUILD_CACHE_TOKEN}`),
+  import(`./viewer-input.js?v=${BUILD_CACHE_TOKEN}`),
+  import(`./exact-query.js?v=${BUILD_CACHE_TOKEN}`),
+]);
 const canvas = document.querySelector("#punctra-canvas");
 const canvasShell = document.querySelector("#canvas-shell");
 const statusBlock = document.querySelector("#status-block");

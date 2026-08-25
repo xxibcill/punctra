@@ -16,8 +16,6 @@ let initializedWasmUrl;
 let wasmInitialization;
 
 export { DISPLAY_MODES, VIEWER_ERROR_CODES, ViewerError };
-export { createInputNormalizer } from "./viewer-input.js";
-export { createLasExactQueryBridge } from "./exact-query.js";
 
 /**
  * Resolves the two deployable SDK assets without assuming a public path.

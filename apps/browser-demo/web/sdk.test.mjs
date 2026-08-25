@@ -11,6 +11,7 @@ import {
 test("SDK exports the public viewer surface and package-relative assets", async () => {
   const packageManifest = JSON.parse(await readFile(new URL("package.json", import.meta.url)));
   const declaration = await readFile(new URL("sdk.d.ts", import.meta.url), "utf8");
+  const sdk = await import("./sdk.js");
   const assets = resolveViewerAssets();
 
   assert.equal(packageManifest.name, "@punctra/viewer");
@@ -19,7 +20,15 @@ test("SDK exports the public viewer surface and package-relative assets", async 
   assert.equal(assets.wasmUrl.pathname.endsWith("/pkg/browser_demo_bg.wasm"), true);
   assert.equal(assets.workerUrl.pathname.endsWith("/stream-worker.js"), true);
   assert.equal(Object.isFrozen(assets), true);
+  assert.deepEqual(Object.keys(sdk).sort(), [
+    "DISPLAY_MODES",
+    "VIEWER_ERROR_CODES",
+    "ViewerError",
+    "createViewer",
+    "resolveViewerAssets",
+  ]);
   assert.match(declaration, /createViewer\(options: CreateViewerOptions\)/);
+  assert.doesNotMatch(declaration, /createInputNormalizer|createLasExactQueryBridge/);
   assert.doesNotMatch(declaration, /createBrowserViewer/);
 });
 
