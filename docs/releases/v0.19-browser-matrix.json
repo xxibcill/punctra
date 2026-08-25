@@ -1,7 +1,8 @@
 {
   "schema": "punctra-browser-qualification-matrix-v1",
   "release": "0.19.0-alpha.1",
-  "observed_on": "2026-08-25",
+  "implementation_commit": "38ada7f0d350560bfb5eb1d700d40229e673c93e",
+  "observed_on": "2026-08-26",
   "qualified_entries": [
     {
       "id": "codex-iab-chromium-151-macos-26-apple-m5-pro",
@@ -67,9 +68,9 @@
       "observations": {
         "acceptance_schema": "punctra-browser-qualification-v1",
         "cold": {
-          "first_coverage_milliseconds": 17.799999952316284,
-          "settled_view_milliseconds": 19.799999952316284,
-          "main_thread_batch_milliseconds_high_water": 0.5,
+          "first_coverage_milliseconds": 49.80000019073486,
+          "settled_view_milliseconds": 52.5,
+          "main_thread_batch_milliseconds_high_water": 1,
           "binary_requests": 3,
           "requested_bytes": 172696,
           "received_bytes": 172696,
@@ -78,9 +79,9 @@
           "worker_staging_bytes_high_water": 204800
         },
         "warm": {
-          "first_coverage_milliseconds": 15.699999809265137,
-          "settled_view_milliseconds": 19.199999809265137,
-          "main_thread_batch_milliseconds_high_water": 0.9000000953674316,
+          "first_coverage_milliseconds": 15.400000095367432,
+          "settled_view_milliseconds": 18.799999952316284,
+          "main_thread_batch_milliseconds_high_water": 0.5,
           "binary_requests": 0,
           "requested_bytes": 0,
           "received_bytes": 0,
@@ -92,11 +93,11 @@
         "foreground_frames": {
           "sample_count": 30,
           "callback_interval_p50_milliseconds": 8.300000000000011,
-          "callback_interval_p95_milliseconds": 9.399999999999977,
-          "callback_interval_max_milliseconds": 10.299999999999955,
+          "callback_interval_p95_milliseconds": 10.300000000000011,
+          "callback_interval_max_milliseconds": 10.300000000000011,
           "submission_p50_milliseconds": 0.20000004768371582,
-          "submission_p95_milliseconds": 0.3000001907348633,
-          "submission_max_milliseconds": 0.3000001907348633
+          "submission_p95_milliseconds": 0.40000009536743164,
+          "submission_max_milliseconds": 0.5
         },
         "resources": {
           "retained_record_bytes": 131072,
@@ -104,7 +105,7 @@
           "transient_texture_bytes": 15293256,
           "javascript_heap_api": "performance.memory.usedJSHeapSize",
           "javascript_heap_status": "non_standard_observation",
-          "javascript_heap_high_water_bytes": 9124395,
+          "javascript_heap_high_water_bytes": 8047123,
           "process_resident_bytes": null,
           "physical_cache_allocation_bytes": null,
           "physical_gpu_allocation_bytes": null
@@ -115,7 +116,7 @@
           "hidden_frame_skipped_and_resumed": true,
           "prepublication_worker_crash_preserved_viewer": true,
           "prepublication_offline_failure_preserved_viewer": true,
-          "cancellation_acknowledgement_milliseconds": 7.400000095367432,
+          "cancellation_acknowledgement_milliseconds": 15.299999952316284,
           "warm_cache_recreation_zero_binary_requests": true,
           "stale_generation_rejected": true,
           "partial_publication_failure_fuses_in_deterministic_tests": true,

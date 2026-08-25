@@ -9,10 +9,13 @@ import {
 } from "../apps/browser-demo/web/qualification.js";
 
 const matrixUrl = new URL("../docs/releases/v0.19-browser-matrix.json", import.meta.url);
+const releaseRecordUrl = new URL("../docs/releases/v0.19.0.md", import.meta.url);
 
-export function verifyBrowserQualificationMatrix(matrix) {
+export function verifyBrowserQualificationMatrix(matrix, implementationCommit) {
   assert.equal(matrix.schema, "punctra-browser-qualification-matrix-v1");
   assert.equal(matrix.release, "0.19.0-alpha.1");
+  assert.match(matrix.implementation_commit, /^[0-9a-f]{40}$/);
+  assert.equal(matrix.implementation_commit, implementationCommit);
   assert.match(matrix.observed_on, /^\d{4}-\d{2}-\d{2}$/);
   assert.equal(matrix.qualified_entries.length, 1);
   assert.ok(matrix.unqualified_entries.length >= 1);
@@ -68,6 +71,12 @@ export function verifyBrowserQualificationMatrix(matrix) {
   assert.equal(matrix.external_evidence.support_qualified, false);
   assert.equal(matrix.external_evidence.release_candidate, false);
   return true;
+}
+
+export function releaseImplementationCommit(releaseRecord) {
+  const match = releaseRecord.match(/^- Implementation commit: `([0-9a-f]{40})`$/m);
+  assert.ok(match, "release record must contain one full implementation commit SHA");
+  return match[1];
 }
 
 function evaluationRecord(entry) {
@@ -179,7 +188,11 @@ function assertNonnegativeNumbers(value, path) {
 }
 
 if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
-  const matrix = JSON.parse(await readFile(matrixUrl, "utf8"));
-  verifyBrowserQualificationMatrix(matrix);
+  const [matrixSource, releaseRecord] = await Promise.all([
+    readFile(matrixUrl, "utf8"),
+    readFile(releaseRecordUrl, "utf8"),
+  ]);
+  const matrix = JSON.parse(matrixSource);
+  verifyBrowserQualificationMatrix(matrix, releaseImplementationCommit(releaseRecord));
   console.log("browser qualification matrix passed");
 }
