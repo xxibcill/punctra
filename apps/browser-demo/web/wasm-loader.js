@@ -3,7 +3,7 @@ export function createWasmModuleLoader({ createRawViewer, initializeWasm, Viewer
   let wasmInitialization;
 
   return async function loadBindings(wasmUrl) {
-    const requestedUrl = wasmUrl.href;
+    const requestedUrl = String(wasmUrl);
     if (initializedWasmUrl !== undefined && initializedWasmUrl !== requestedUrl) {
       throw new ViewerError(
         "invalid_argument",

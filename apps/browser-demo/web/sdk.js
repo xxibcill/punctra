@@ -74,5 +74,5 @@ function versionedUrl(value, cacheKey) {
     throw new ViewerError("invalid_argument", "SDK asset URLs must be valid absolute or package-relative URLs");
   }
   if (cacheKey !== undefined) url.searchParams.set("punctra-v", cacheKey);
-  return url;
+  return url.href;
 }

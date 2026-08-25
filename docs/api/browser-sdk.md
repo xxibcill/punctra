@@ -61,8 +61,8 @@ export interface ViewerAssetOptions {
 }
 
 export interface ViewerAssetUrls {
-  readonly wasmUrl: URL;
-  readonly workerUrl: URL;
+  readonly wasmUrl: string;
+  readonly workerUrl: string;
 }
 
 export interface CreateViewerOptions {

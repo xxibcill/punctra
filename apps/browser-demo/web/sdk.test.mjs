@@ -17,8 +17,10 @@ test("SDK exports the public viewer surface and package-relative assets", async 
   assert.equal(packageManifest.name, "@punctra/viewer");
   assert.equal(packageManifest.version, "0.18.0-alpha.1");
   assert.deepEqual(DISPLAY_MODES, ["neutral", "elevation", "rgb", "intensity", "classification"]);
-  assert.equal(assets.wasmUrl.pathname.endsWith("/pkg/browser_demo_bg.wasm"), true);
-  assert.equal(assets.workerUrl.pathname.endsWith("/stream-worker.js"), true);
+  assert.equal(typeof assets.wasmUrl, "string");
+  assert.equal(typeof assets.workerUrl, "string");
+  assert.equal(new URL(assets.wasmUrl).pathname.endsWith("/pkg/browser_demo_bg.wasm"), true);
+  assert.equal(new URL(assets.workerUrl).pathname.endsWith("/stream-worker.js"), true);
   assert.equal(Object.isFrozen(assets), true);
   assert.deepEqual(Object.keys(sdk).sort(), [
     "DISPLAY_MODES",
@@ -39,9 +41,9 @@ test("explicit SDK assets preserve deployment URLs and bounded cache busting", (
     cacheKey: "release-42",
   });
 
-  assert.equal(assets.wasmUrl.searchParams.get("immutable"), "1");
-  assert.equal(assets.wasmUrl.searchParams.get("punctra-v"), "release-42");
-  assert.equal(assets.workerUrl.searchParams.get("punctra-v"), "release-42");
+  assert.equal(new URL(assets.wasmUrl).searchParams.get("immutable"), "1");
+  assert.equal(new URL(assets.wasmUrl).searchParams.get("punctra-v"), "release-42");
+  assert.equal(new URL(assets.workerUrl).searchParams.get("punctra-v"), "release-42");
   assert.throws(
     () => resolveViewerAssets({ cacheKey: "" }),
     (error) => error instanceof ViewerError && error.code === "invalid_argument",
