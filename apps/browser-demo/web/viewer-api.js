@@ -448,8 +448,8 @@ class BrowserViewer {
     if (this.#pickController) {
       throw new ViewerError("pick_pending", "one provisional pick is already active");
     }
-    const x = nonnegativeInteger(request?.x, "pick x");
-    const y = nonnegativeInteger(request?.y, "pick y");
+    const x = pickCoordinate(request?.x, this.#state.viewport.physicalWidth, "pick x");
+    const y = pickCoordinate(request?.y, this.#state.viewport.physicalHeight, "pick y");
     const controller = linkedAbortController(request?.signal);
     this.#pickController = controller;
     try {
@@ -948,6 +948,18 @@ function positiveNumber(value, label) {
 function nonnegativeInteger(value, label) {
   if (!Number.isSafeInteger(value) || value < 0) throw invalidArgument(`${label} must be a nonnegative safe integer`);
   return value;
+}
+
+function pickCoordinate(value, dimension, label) {
+  const coordinate = nonnegativeInteger(value, label);
+  if (coordinate >= dimension) {
+    throw new ViewerError(
+      "pick_outside_viewport",
+      `${label} ${coordinate} is outside the ${dimension}-pixel viewport dimension`,
+      { safeAction: "Choose a physical pixel inside the current viewport and retry." },
+    );
+  }
+  return coordinate;
 }
 
 function positiveInteger(value, label) {

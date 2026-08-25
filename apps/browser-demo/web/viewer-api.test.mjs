@@ -364,6 +364,27 @@ test("viewer rejects oversized highlights before inspecting Point identities", a
   assert.equal(inspectedIdentities, 0);
 });
 
+test("viewer rejects pick coordinates before the Wasm u32 boundary", async () => {
+  const raw = new FakeRawViewer();
+  const viewer = await createBrowserViewer({
+    bindings: { createViewer: async () => raw },
+    canvas: {},
+    viewport: viewport(),
+    requestAnimationFrame: (callback) => {
+      queueMicrotask(() => callback(1));
+      return 1;
+    },
+    cancelAnimationFrame: () => {},
+  });
+  viewer.render();
+
+  await assert.rejects(
+    viewer.pick({ x: 2 ** 32, y: 0 }),
+    (error) => error.code === "pick_outside_viewport",
+  );
+  assert.equal(raw.data.pick.status, "not_requested");
+});
+
 test("a Source failure after partial publication fuses the viewer", async () => {
   const raw = new FakeRawViewer();
   const viewer = await createBrowserViewer({
