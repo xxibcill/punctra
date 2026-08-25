@@ -297,38 +297,20 @@ async function runSmokePath() {
   };
 
   await initializeViewer({ workerUrl: QUALIFICATION_WORKER_URL });
-  const generationBeforeWorkerCrash = viewer.state().generation;
-  const workerCrash = await expectCode(viewer.loadSource({
+  const workerRecovery = await exercisePrepublicationRecovery({
     manifestUrl: `${STREAM_MANIFEST_URL}?worker_fault=crash`,
-    cacheMode: "none",
-    credentials: "same-origin",
-  }), "worker_failed");
-  assertFact(viewer.state().lifecycle === "ready", "pre-publication worker crash retains viewer");
-  assertFact(viewer.state().generation === generationBeforeWorkerCrash, "worker crash preserves generation");
-  const workerRecovery = {
-    code: workerCrash.code,
-    recoverable: workerCrash.recoverable,
-    viewer_retained: true,
-    generation_preserved: true,
-  };
+    expectedCode: "worker_failed",
+    label: "pre-publication worker crash",
+  });
   discardViewer();
 
   await initializeViewer();
   const cancellation = await cancellationProbe();
-  const generationBeforeOffline = viewer.state().generation;
-  const offline = await expectCode(viewer.loadSource({
+  const networkRecovery = await exercisePrepublicationRecovery({
     manifestUrl: `${STREAM_MANIFEST_URL}?fault=disconnect`,
-    cacheMode: "none",
-    credentials: "same-origin",
-  }), "offline");
-  assertFact(viewer.state().lifecycle === "ready", "pre-publication offline failure retains viewer");
-  assertFact(viewer.state().generation === generationBeforeOffline, "offline failure preserves generation");
-  const networkRecovery = {
-    code: offline.code,
-    recoverable: offline.recoverable,
-    viewer_retained: true,
-    generation_preserved: true,
-  };
+    expectedCode: "offline",
+    label: "pre-publication offline failure",
+  });
   setHarnessState("checking", "Loading the cold immutable deployment through the public viewer API…");
   const cold = await viewer.loadSource({
     manifestUrl: STREAM_MANIFEST_URL,
@@ -484,6 +466,23 @@ async function cancellationProbe() {
   const acknowledgementMilliseconds = performance.now() - started;
   assertFact(acknowledgementMilliseconds <= 1_000, "load cancellation deadline");
   return { code: "cancelled", acknowledgement_milliseconds: acknowledgementMilliseconds, limit_milliseconds: 1_000 };
+}
+
+async function exercisePrepublicationRecovery({ manifestUrl, expectedCode, label }) {
+  const generationBeforeFailure = viewer.state().generation;
+  const failure = await expectCode(viewer.loadSource({
+    manifestUrl,
+    cacheMode: "none",
+    credentials: "same-origin",
+  }), expectedCode);
+  assertFact(viewer.state().lifecycle === "ready", `${label} retains viewer`);
+  assertFact(viewer.state().generation === generationBeforeFailure, `${label} preserves generation`);
+  return {
+    code: failure.code,
+    recoverable: failure.recoverable,
+    viewer_retained: true,
+    generation_preserved: true,
+  };
 }
 
 function verifyStreamingResult(result, label) {
