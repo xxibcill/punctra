@@ -198,6 +198,13 @@ test("viewer owns worker publication, streamed picking, highlights, and exact ha
   assert.equal(pick.pointOrdinal, "7");
   viewer.setHighlights([pick], pick.generation);
   assert.equal(viewer.state().highlights.pointCount, 1);
+  assert.throws(
+    () => viewer.setHighlights([{
+      sourceIdentity: SOURCE,
+      pointOrdinal: (1n << 64n) + 1n,
+    }], pick.generation),
+    (error) => error.code === "invalid_argument",
+  );
   const exact = await viewer.confirmPoint(pick);
   assert.equal(exact.authority, "exact_source_record");
   assert.equal(exact.pointOrdinal, "7");

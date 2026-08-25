@@ -167,6 +167,7 @@ const STATE_SCHEMA = "punctra-viewer-state-v1";
 const MAX_PICK_POLLS = 180;
 const MAX_ERROR_MESSAGE_CHARACTERS = 512;
 const LOAD_TIMEOUT_MILLISECONDS = 30_000;
+const MAX_POINT_ORDINAL = (1n << 64n) - 1n;
 const PARTIAL_PUBLICATION_SAFE_ACTION =
   "Destroy the partially published viewer and explicitly create a new viewer before loading another Source.";
 let operationSequence = 0;
@@ -826,6 +827,9 @@ function pointIdentityInput(value) {
     throw invalidArgument("Point ordinal must be a nonnegative integer");
   }
   if (pointOrdinal < 0n) throw invalidArgument("Point ordinal must be nonnegative");
+  if (pointOrdinal > MAX_POINT_ORDINAL) {
+    throw invalidArgument("Point ordinal must fit in an unsigned 64-bit integer");
+  }
   return { sourceIdentity: value.sourceIdentity, pointOrdinal };
 }
 
