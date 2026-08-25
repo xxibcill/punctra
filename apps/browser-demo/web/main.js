@@ -258,8 +258,16 @@ async function runSmokePath() {
   const generatedPick = await pickCentre();
   assertFact(generatedPick?.pointOrdinal === "544", "generated centre pick identity");
   const generatedEvidence = { state: viewer.state(), pick: generatedPick };
+  const destroyedViewer = viewer;
+  const stalePresentation = destroyedViewer.requestRender();
   discardViewer();
+  await expectCode(stalePresentation, "render_cancelled");
+  expectSynchronousCode(() => destroyedViewer.render(), "viewer_destroyed");
   assertFact(viewer === undefined, "explicit viewer disposal");
+  const destructionEvidence = {
+    stale_presentation_cancelled: true,
+    work_after_destruction_rejected: true,
+  };
 
   await initializeViewer();
   const cancellation = await cancellationProbe();
@@ -337,6 +345,7 @@ async function runSmokePath() {
   smokeRecord = {
     schema: "punctra-browser-viewer-acceptance-v1",
     generated: generatedEvidence,
+    destruction: destructionEvidence,
     cancellation,
     cold: compactLoad(cold),
     warm: compactLoad(warm),
@@ -433,6 +442,16 @@ function sameOrdinals(left, right) {
 async function expectCode(promise, code) {
   try {
     await promise;
+  } catch (error) {
+    assertFact(error instanceof ViewerError && error.code === code, `${code} failure classification`);
+    return;
+  }
+  throw new Error(`Browser acceptance invariant failed: expected ${code}`);
+}
+
+function expectSynchronousCode(operation, code) {
+  try {
+    operation();
   } catch (error) {
     assertFact(error instanceof ViewerError && error.code === code, `${code} failure classification`);
     return;

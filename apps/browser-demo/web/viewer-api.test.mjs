@@ -28,6 +28,8 @@ test("runtime error codes and display modes agree with TypeScript declarations",
   assert.equal("BrowserViewer" in runtime, false);
   assert.match(declaration, /export interface BrowserViewer \{/);
   assert.doesNotMatch(host, /camera-policy\.js/);
+  assert.match(host, /"render_cancelled"/);
+  assert.match(host, /"viewer_destroyed"/);
 });
 
 test("viewer exposes typed lifecycle, camera, display, state subscription, and coalesced rendering", async () => {
