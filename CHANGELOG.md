@@ -6,7 +6,7 @@ All notable changes to Punctra are documented here. The project follows
 ## Unreleased - 0.18.0-alpha.1
 
 - Completed and locally repository-verified the accepted v0.18 slice at
-  implementation commit `334f01cfb60e224f35db648972fa24d6b2b55949`. The
+  implementation commit `6c1e0eb60ad8a3e575fd4bde1784d96d5747a04b`. The
   [v0.18 verification record](docs/releases/v0.18.0.md) pins the exact package,
   clean-consumer, native, GPU, benchmark, and Chrome WebGPU evidence plus the
   remaining external exits.
