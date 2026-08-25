@@ -106,6 +106,15 @@ an optional policy-free input normalizer, and a separately injected exact-
 Point bridge for the immutable LAS fixture. It does not authorize SDK/registry
 packaging, a framework adapter, arbitrary Source delivery, general exact
 Queries, editing, terrain, export, API stability, or broad browser support.
+The completed [v0.18 Embeddable SDK and Framework Integration
+scope](docs/design/embeddable-sdk-v0.18.md) packages that same façade as the
+`@punctra/viewer` ESM/Wasm tarball, adds explicit bundler/copied-asset
+resolution, generated API reference, lifecycle aliases, two clean
+TypeScript/Vite embedding trials, and only the thin `@punctra/react` lifecycle
+adapter justified by those trials. It does not authorize registry/CDN
+publication, another framework adapter, arbitrary Source delivery, API
+stability, broad bundler/browser support, independent adoption, support
+qualification, or release-candidate claims.
 Apart from the explicit v0.8 reader exception, the v0.17 browser-demo
 exact-query bridge is a narrowly scoped exception for the trusted immutable
 LAS fixture described by the accepted design. All other external format
@@ -135,8 +144,10 @@ cargo clippy -p browser-demo --all-targets --all-features -- -D warnings
 cargo clippy -p browser-demo --target wasm32-unknown-unknown --all-targets \
   --all-features -- -D warnings
 cargo run -p browser-demo --bin generate_stream_fixture
-node --test apps/browser-demo/web/*.test.mjs
-scripts/build-browser-demo.sh
+node --test apps/browser-demo/web/*.test.mjs packages/react/*.test.mjs
+scripts/build-browser-sdk.sh
+node scripts/verify-browser-sdk.mjs
+node scripts/generate-browser-sdk-reference.mjs --check
 cargo bench -p point-view --bench planner
 cargo bench -p source-memory --bench read
 cargo bench -p source-las --bench read
@@ -179,15 +190,17 @@ test -f docs/guides/exact-terrain-qa.md
 test -f docs/guides/browser-foundation.md
 test -f docs/guides/browser-streaming.md
 test -f docs/guides/browser-viewer.md
+test -f docs/guides/browser-sdk.md
+test -f docs/api/browser-sdk.md
 ruby -rjson -e 'JSON.parse(File.read(ARGV.fetch(0)))' \
   docs/guides/field-corpus.example.json
 git diff --check
 ```
 
-After `scripts/build-browser-demo.sh`, run
+After `scripts/build-browser-sdk.sh`, run
 `scripts/serve-browser-demo.py --port 8000` and open
 `http://127.0.0.1:8000/` in a secure-context WebGPU browser. A generic static
-server is insufficient for the v0.16/v0.17 acceptance fixture because exact Range,
+server is insufficient for the v0.16–v0.18 acceptance fixture because exact Range,
 strong-validator, identity-encoding, and exposed CORS-header behavior is part
 of the contract. The document must publish `PASS` after the inherited v0.15
 lifecycle checks, cold bounded Source/index requests, worker decode and
@@ -197,14 +210,17 @@ network requests. The v0.17 continuation must additionally exercise the typed
 public viewer only, all five inherited display modes, both projections,
 normalized-input wiring, provisional pick/highlight/clear, exact confirmation
 of the same immutable Source record, cancelled exact confirmation, and stale-
-generation rejection. The harness must also acknowledge its deliberately
+generation rejection. The v0.18 continuation must import the packaged SDK
+entry, exercise pause/resume/dispose lifecycle spelling, and report package
+version `0.18.0-alpha.1`. The harness must also acknowledge its deliberately
 delayed Fetch cancellation within 1,000 milliseconds. Record the exact browser,
 operating system, adapter, surface
 format, viewport, and reported transport/cache/worker/main-thread plus
 logical/surface/transient resource facts. The step qualifies only that exact
 local browser environment. See the [browser streaming
 guide](docs/guides/browser-streaming.md) and [browser viewer API
-guide](docs/guides/browser-viewer.md).
+guide](docs/guides/browser-viewer.md), and [browser SDK
+guide](docs/guides/browser-sdk.md).
 
 The default `point-index` benchmark generates one million Points. Use only the
 documented scale values when a larger local run is intended, for example:

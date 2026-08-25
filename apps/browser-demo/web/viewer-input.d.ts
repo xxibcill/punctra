@@ -22,8 +22,16 @@ export type NormalizedViewerInput =
       }>;
     }>;
 
+export interface InputNormalizerOptions {
+  readonly preventDefault?: boolean;
+}
+
+export interface InputNormalizer {
+  dispose(): void;
+}
+
 export function createInputNormalizer(
   target: EventTarget,
   listener: (input: NormalizedViewerInput) => void,
-  options?: { readonly preventDefault?: boolean },
-): Readonly<{ dispose(): void }>;
+  options?: InputNormalizerOptions,
+): Readonly<InputNormalizer>;

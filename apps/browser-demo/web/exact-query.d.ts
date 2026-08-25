@@ -52,11 +52,15 @@ export interface LasExactQueryBridge {
   }): Promise<ExactPoint>;
 }
 
-export function createLasExactQueryBridge(options: {
+export interface LasExactQueryBridgeOptions {
   readonly manifestUrl: string | URL;
   readonly fetchImplementation?: typeof fetch;
   readonly credentials?: RequestCredentials;
-}): Readonly<LasExactQueryBridge>;
+}
+
+export function createLasExactQueryBridge(
+  options: LasExactQueryBridgeOptions,
+): Readonly<LasExactQueryBridge>;
 
 export function decodeLasLayout(
   bytes: Uint8Array,

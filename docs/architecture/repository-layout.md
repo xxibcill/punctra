@@ -11,8 +11,8 @@ outstanding; v0.14 bounded exact Terrain QA and correction-loop slice Complete
 and repository-verified; v0.15 bounded local WebAssembly/WebGPU browser-
 foundation slice Complete and repository-verified; v0.16 private HTTP Range,
 cache, and worker streaming slice Complete and repository-verified; v0.17
-framework-neutral viewer API and exact-Point bridge Complete and repository-
-verified; later
+framework-neutral viewer API and exact-Point bridge plus v0.18 packed SDK and
+thin React adapter Complete and repository-verified; later
 crates are created only with accepted behavior
 and a caller
 
@@ -40,6 +40,10 @@ apps/
       streaming.rs
       bin/generate_stream_fixture.rs
     web/
+      package.json
+      sdk.js
+      sdk.d.ts
+      sdk.test.mjs
       index.html
       main.js
       styles.css
@@ -76,6 +80,30 @@ apps/
         representative.las
         representative.pidx
         source-record.json
+
+examples/
+  browser-typescript/
+    package.json
+    package-lock.json
+    tsconfig.json
+    vite.config.ts
+    index.html
+    src/main.ts
+  browser-react/
+    package.json
+    package-lock.json
+    tsconfig.json
+    vite.config.ts
+    index.html
+    src/main.tsx
+
+packages/
+  react/
+    package.json
+    index.js
+    index.d.ts
+    lifecycle.js
+    lifecycle.test.mjs
 
   renderer-demo/
     src/
@@ -524,11 +552,15 @@ versions, and LandXML/journal/report format versions are separate axes. A Cargo
 `0.9` version does not imply Workspace disk schema or terrain algorithm version
 9.
 
-The v0.17 work advances all public libraries as one `0.17.0-alpha.1` package
+The v0.18 work advances all public Rust libraries as one `0.18.0-alpha.1` package
 set with exact inter-Punctra registry requirements and
 local development paths. Their empty default features, dependency roles,
 MSRV, publication order, and pre-v1 policy are documented in the [library
-packaging guide](../guides/library-packaging.md).
+packaging guide](../guides/library-packaging.md). The separately versioned
+`@punctra/viewer` and `@punctra/react` npm tarballs use the same
+`0.18.0-alpha.1` release identity but remain local packed artifacts governed by
+the [browser SDK guide](../guides/browser-sdk.md); Cargo and npm publication
+remain separate decisions.
 
 - Unknown persisted major versions fail explicitly.
 - Identity and persisted schema values remain opaque outside their owner.

@@ -1,0 +1,54 @@
+{
+  "name": "@punctra/viewer",
+  "version": "0.18.0-alpha.1",
+  "description": "Framework-neutral Punctra WebGPU point-cloud viewer SDK.",
+  "type": "module",
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xxibcill/punctra.git",
+    "directory": "apps/browser-demo/web"
+  },
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./sdk.d.ts",
+      "import": "./sdk.js"
+    },
+    "./input": {
+      "types": "./viewer-input.d.ts",
+      "import": "./viewer-input.js"
+    },
+    "./exact-query": {
+      "types": "./exact-query.d.ts",
+      "import": "./exact-query.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "main": "./sdk.js",
+  "types": "./sdk.d.ts",
+  "files": [
+    "camera-policy.js",
+    "exact-query.d.ts",
+    "exact-query.js",
+    "pkg/browser_demo.d.ts",
+    "pkg/browser_demo.js",
+    "pkg/browser_demo_bg.wasm",
+    "pkg/browser_demo_bg.wasm.d.ts",
+    "range-response.js",
+    "sdk.d.ts",
+    "sdk.js",
+    "stream-ordinals.js",
+    "stream-worker.js",
+    "streaming-protocol.js",
+    "viewer-api.d.ts",
+    "viewer-api.js",
+    "viewer-input.d.ts",
+    "viewer-input.js",
+    "worker-operation.js",
+    "worker-protocol.js"
+  ],
+  "engines": {
+    "node": ">=20"
+  }
+}

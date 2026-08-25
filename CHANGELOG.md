@@ -3,6 +3,39 @@
 All notable changes to Punctra are documented here. The project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased - 0.18.0-alpha.1
+
+- Completed the bounded [v0.18 Embeddable SDK and Framework Integration
+  slice](docs/design/embeddable-sdk-v0.18.md): the v0.17 viewer now ships from
+  a versioned local npm tarball as `@punctra/viewer`, with a closed ESM export
+  map, exact TypeScript declarations, generated API reference, packaged Wasm,
+  and module-Worker assets.
+- Added package-relative and explicit copied-asset resolution. Qualified Vite
+  builds discover the Wasm and Worker through static `import.meta.url` paths;
+  callers can instead supply immutable URLs plus one bounded cache token
+  without losing existing query parameters.
+- Added lifecycle-safe `pause`, `resume`, and idempotent `dispose` aliases over
+  the same viewer core. Worker construction now accepts the narrow factory
+  required for bundler-owned module Workers while preserving the explicit
+  host-owned Worker constructor/URL path.
+- Added the thin `@punctra/react` hook. It creates no canvas or UI, disposes
+  viewers that resolve after unmount, unsubscribes before teardown, survives
+  Strict Mode and hot-replacement replay, updates viewport/active state without
+  recreation, and requires an explicit `mountKey` for creation-option changes.
+- Added clean plain-TypeScript and React embedding trials. The local SDK gate
+  packs exact artifacts, installs them into fresh temporary applications,
+  checks declarations, builds development and production Vite outputs,
+  verifies code splitting plus content-hashed Wasm/Worker assets, serves the
+  development transforms, and repeats abandoned/mounted lifecycle cleanup.
+- Added the [browser SDK deployment guide](docs/guides/browser-sdk.md),
+  generated [API reference](docs/api/browser-sdk.md), architecture/workflow
+  updates, and explicit CSP, CORS, Wasm MIME, Worker-origin, copied-asset, and
+  cross-origin-isolation guidance.
+- Kept the evidence boundary explicit: local tarballs are not npm registry or
+  CDN publication; the two maintainer-run Vite trials do not establish broad
+  bundler/framework/browser compatibility, independent adoption, API
+  stability, support qualification, or browser-engine release-candidate status.
+
 ## Unreleased - 0.17.0-alpha.1
 
 - Completed and locally repository-verified the accepted v0.17 slice at

@@ -9,16 +9,17 @@ as technical and customer evidence changes. Milestone outcomes and dependency
 order matter more than version numbers.
 
 Among incomplete releases, only an **Active** release has accepted
-implementation scope. Punctra v0.1 through v0.17 are Complete repository
+implementation scope. Punctra v0.1 through v0.18 are Complete repository
 technical slices. Their recorded external field, adoption, partner, and
 support gates remain historically accurate, but they do not determine the next
 product direction. The project now pivots from a desktop terrain-delivery
 hypothesis to an embeddable browser point-cloud rendering engine.
 
 v0.15 is the completed repository-verified browser-foundation release, v0.16
-is the completed repository-verified HTTP Range streaming release, and v0.17
-is the completed repository-verified browser-viewer-API release. Versions
-v0.18 through v0.30 remain uncommitted Candidate themes. v0.15–v0.20 establish
+is the completed repository-verified HTTP Range streaming release, v0.17 is the
+completed repository-verified browser-viewer-API release, and v0.18 is the
+completed repository-verified SDK-embedding release. Versions v0.19 through
+v0.30 remain uncommitted Candidate themes. v0.15–v0.20 establish
 browser execution, streaming, the viewer API, embedding, and platform qualification. v0.21–v0.29
 then improve and qualify visual quality. v0.30 is the earliest planned browser-
 engine release candidate; no earlier future release may be represented as a
@@ -91,9 +92,9 @@ release can be Complete while every product gate remains outstanding.
 
 ## Current pivot checkpoint
 
-Status: **v0.15 through v0.17 complete and repository-verified for their
+Status: **v0.15 through v0.18 complete and repository-verified for their
 bounded local browser-foundation, immutable-LAS streaming, and browser viewer
-API slices**
+API/SDK embedding slices**
 
 The completed v0.1–v0.14 contracts are inputs to the pivot, not permission to
 carry the old product sequence forward. In particular:
@@ -133,6 +134,15 @@ framework adapter, arbitrary-Source loader, or browser-support declaration.
 Its exact local environment, command matrix, browser facts, and nonclaims are
 recorded in the [v0.17 repository verification
 record](docs/releases/v0.17.0.md).
+
+The completed [v0.18 Embeddable SDK and Framework Integration
+design](docs/design/embeddable-sdk-v0.18.md) packages that exact viewer as
+`@punctra/viewer`, adds explicit bundler/copied-asset resolution, generated API
+reference, lifecycle aliases, two clean packed-artifact TypeScript/Vite trials,
+and the one thin `@punctra/react` adapter justified by the React lifecycle
+trial. Those maintainer-run trials are repository embedding evidence, not
+registry publication, broad bundler/framework support, browser qualification,
+or independent adoption.
 
 ## Pre-v0.13 renderer quality corrective checkpoint
 
@@ -1233,27 +1243,37 @@ Repository exit evidence:
 
 ### v0.18 — Embeddable SDK and framework integration
 
-Status: **Candidate**
+Status: **Complete and repository-verified for the bounded packed-artifact,
+Vite, plain-TypeScript, and thin-React slice; registry publication, broad
+bundler/framework/browser qualification, independent adoption, API stability,
+and support qualification outstanding**
 
-Candidate outcome: make the browser viewer repeatable to install, bundle,
+Outcome: make the browser viewer repeatable to install, bundle,
 instantiate, and dispose inside real web applications.
 
-Activation gate:
+Activation:
 
-- at least two embedding trials identify the actual package, bundler, worker,
-  asset-URL, and framework-lifecycle requirements.
+- satisfied by the two clean packed-artifact embedding trials recorded in the
+  accepted [Embeddable SDK and Framework Integration
+  design](docs/design/embeddable-sdk-v0.18.md); the trials identify the exact
+  ESM, declaration, Vite, static module-Worker, Wasm URL, cache-busting, code-
+  split, React Strict Mode, resize, pause/resume, and teardown requirements.
 
-Likely scope:
+Implemented scope:
 
-- versioned ES-module/WebAssembly packages with generated TypeScript types;
-- one framework-neutral integration and only the framework adapters justified
-  by observed adopters;
-- explicit worker and WebAssembly asset resolution for supported bundlers;
-- lifecycle-safe mount, resize, pause, resume, and dispose behavior; and
-- Content Security Policy, cross-origin isolation, and deployment guidance for
-  the features that actually require them.
+- a versioned `@punctra/viewer` ES-module/Wasm tarball with exact TypeScript
+  declarations, generated API reference, closed exports, and private raw
+  bindings/protocols;
+- one dynamically imported framework-neutral TypeScript integration and the
+  one thin `@punctra/react` lifecycle adapter justified by the React trial;
+- static bundler-discoverable Worker/Wasm assets plus explicit copied-asset
+  URLs and bounded query cache tokens;
+- lifecycle-safe asynchronous creation, explicit resize, pause, resume, and
+  idempotent disposal behavior; and
+- CSP, same-origin module-Worker, CORS, Wasm MIME, copied-asset, and explicit
+  cross-origin-isolation nonrequirement guidance.
 
-Candidate exit evidence:
+Repository exit evidence:
 
 - clean example applications install from packed artifacts rather than
   repository-relative paths;
@@ -1262,6 +1282,12 @@ Candidate exit evidence:
 - repeated mount/unmount and hot-reload trials leak no owned worker, listener,
   canvas resource, or GPU allocation; and
 - framework adapters remain thin translations over the same viewer API.
+
+The repository gate is satisfied locally by exact tarball inspection, strict
+TypeScript, Vite development/production output, content-hashed Wasm/Worker
+assets, repeated abandoned and mounted React lifecycle tests, and the inherited
+browser acceptance host importing the SDK entry. No npm registry, CDN,
+independent host, support matrix, or compatibility promise is inferred.
 
 ### v0.19 — Browser and device qualification
 
@@ -1619,7 +1645,7 @@ nor completion of v0.20 is a reason to publish v1.
 | Spatial contract and production terrain | v0.12–v0.13 | v0.12 bounded repository contract complete; v0.13 bounded persistent-terrain slice complete and repository-verified; external spatial, production-scale, out-of-core, adoption, partner, and support exits outstanding | Make reference semantics explicit, then persist one bounded-AOI Surface without confusing repository durability with field-scale qualification. |
 | Terrain acceptance tooling | v0.14 | Complete and repository-verified for the bounded slice; external historical exits outstanding | Preserve exact Terrain QA and correction as an available module without extending it in the current browser-engine path. |
 | Browser execution and streaming | v0.15–v0.16 | Complete and repository-verified for the bounded private slices; arbitrary delivery and external qualification outstanding | Establish WebAssembly/WebGPU execution, then bounded remote Source delivery, browser caching, and worker decoding. |
-| Browser viewer and embedding | v0.17–v0.20 | v0.17 bounded viewer API complete and repository-verified; v0.18–v0.20 Candidate | Expose the viewer API, package the SDK, qualify the browser/device envelope, and consolidate a stable integration baseline without release-candidate status. |
+| Browser viewer and embedding | v0.17–v0.20 | v0.17 bounded viewer API and v0.18 packed SDK/embedding slices complete and repository-verified; v0.19–v0.20 Candidate | Expose the viewer API, package the SDK, qualify the browser/device envelope, and consolidate a stable integration baseline without release-candidate status. |
 | Measured visual quality | v0.21–v0.25 | Candidate | Establish visual evidence, then improve point footprints, LOD continuity, depth, and color. |
 | Visual interaction and qualification | v0.26–v0.29 | Candidate | Improve temporal, selection, and composition clarity, then freeze and qualify the visual surface without release-candidate status. |
 | Browser-engine release candidate | v0.30 | Candidate; earliest planned release candidate | Freeze, soak, and explicitly decide whether the supported browser engine should ship or narrow. |

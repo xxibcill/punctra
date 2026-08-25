@@ -14,10 +14,11 @@ Complete and repository-verified for the bounded persistent-terrain slice;
 field activation, production-scale accuracy, true out-of-core adoption,
 independent adoption, partner validation, and support qualification
 outstanding; v0.14 exact Terrain QA/correction, v0.15 local browser-foundation,
-v0.16 bounded HTTP Range streaming, and v0.17 bounded framework-neutral browser
-viewer API slices are Complete and repository-verified while their declared
-external exits remain outstanding; broader selection, arbitrary browser Source
-delivery, supported SDK packaging, and product terms remain deferred
+v0.16 bounded HTTP Range streaming, v0.17 bounded framework-neutral browser
+viewer API, and v0.18 packed SDK/React lifecycle slices are Complete and
+repository-verified while their declared external exits remain outstanding;
+broader selection, arbitrary browser Source delivery, broad platform/support
+qualification, and product terms remain deferred
 
 Punctra v0.11 builds on the reusable render engine, renderer-neutral View
 planner, and verified Source path described in the accepted [v0.1 renderer
@@ -133,6 +134,17 @@ The [v0.17 repository verification record](docs/releases/v0.17.0.md) owns the
 exact local implementation, environment, command, browser, exact-record, and
 nonclaim facts.
 
+The completed [v0.18 Embeddable SDK and Framework Integration
+design](docs/design/embeddable-sdk-v0.18.md) fixes `@punctra/viewer` as the
+versioned ESM/Wasm distribution boundary over that same viewer, including
+explicit package/copy asset resolution, lifecycle aliases, declarations, and a
+generated API reference. It fixes `@punctra/react` as one thin translation of
+React asynchronous mount, viewport, active, Strict Mode, and teardown behavior;
+the adapter owns no UI or application policy. The clean TypeScript and React
+Vite trials are maintainer-run repository evidence, not registry publication,
+broad compatibility, independent adoption, API stability, or browser
+qualification.
+
 ## Artifact
 
 An immutable result produced from a Source, Snapshot, or explicitly detached input with recorded construction parameters, such as a Spatial Index, Terrain Surface, or Profile. Its provenance identifies the Source and either the Workspace Revision or detached input content that was used, plus its construction version. A rebuildable persistent Artifact may be deleted and reproduced from that authority; persistence does not make it Workspace state.
@@ -161,6 +173,18 @@ public renderer remains submission-neutral.
 
 _Avoid:_ browser SDK when referring to the private v0.15 acceptance adapter,
 Punctra UI when the host owns application policy
+
+## Browser SDK
+
+The versioned `@punctra/viewer` ESM/Wasm package that creates and disposes the
+bounded Browser Viewer through declared TypeScript exports and explicit asset
+resolution. Packed raw bindings, Worker protocols, and cache modules remain
+private implementation assets. A repository tarball or maintainer-run embedding
+trial does not mean registry publication, stable API, independent adoption, or
+broad browser support.
+
+_Avoid:_ SDK when referring to the raw `wasm-bindgen` module, supported package
+when only a repository-relative demo file is used
 
 ## Remote Deployment
 

@@ -26,6 +26,9 @@ test("runtime error codes and display modes agree with TypeScript declarations",
   assert.equal(new Set(VIEWER_ERROR_CODES).size, VIEWER_ERROR_CODES.length);
   assert.equal("BrowserViewer" in runtime, false);
   assert.match(declaration, /export interface BrowserViewer \{/);
+  assert.match(declaration, /pause\(\): ViewerState;/);
+  assert.match(declaration, /resume\(\): ViewerState;/);
+  assert.match(declaration, /dispose\(\): void;/);
 });
 
 test("failed facade construction shuts down the raw viewer", async () => {
@@ -87,6 +90,8 @@ test("viewer exposes typed lifecycle, camera, display, state subscription, and c
   assert.equal(viewer.state().schema, "punctra-viewer-state-v1");
   assert.equal(Object.isFrozen(viewer.state()), true);
   assert.equal(viewer.state().source.identity, GENERATED_SOURCE);
+  assert.equal(viewer.pause().lifecycle, "hidden");
+  assert.equal(viewer.resume().lifecycle, "ready");
   viewer.setHighlights([]);
   assert.equal(viewer.state().highlights.pointCount, 0);
   viewer.setCamera({
@@ -123,8 +128,8 @@ test("viewer exposes typed lifecycle, camera, display, state subscription, and c
   assert.ok(observed.length >= 4);
   assert.equal(unsubscribe(), true);
 
-  viewer.destroy();
-  viewer.destroy();
+  viewer.dispose();
+  viewer.dispose();
   assert.equal(viewer.state().lifecycle, "destroyed");
   assert.throws(
     () => viewer.render(),
@@ -966,7 +971,7 @@ class PendingRawViewer extends FakeRawViewer {
 function diagnosticsFixture() {
   return {
     schema: "punctra-browser-viewer-v1",
-    package_version: "0.17.0-alpha.1",
+    package_version: "0.18.0-alpha.1",
     phase: "ready",
     rendered_frames: 0,
     hidden_frame_skips: 0,

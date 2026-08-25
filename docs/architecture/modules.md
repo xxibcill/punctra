@@ -11,8 +11,8 @@ outstanding; v0.14 bounded exact Terrain QA and correction-loop slice Complete
 and repository-verified; v0.15 bounded local WebAssembly/WebGPU browser-
 foundation slice Complete and repository-verified; v0.16 private HTTP Range,
 cache, and worker streaming slice Complete and repository-verified; v0.17
-framework-neutral viewer API and exact-Point bridge Complete and repository-
-verified
+framework-neutral viewer API and exact-Point bridge plus v0.18 packed SDK and
+thin React lifecycle adapter Complete and repository-verified
 
 This is the ownership map for implemented crates. Each crate has one public
 job. Several private files may cooperate behind one deep interface; private
@@ -38,16 +38,18 @@ limits, and recovery modes are frozen in the
 | `render-protocol` | Define generation-safe renderer-neutral point display state. | Camera and display values | Validated updates and frame values |
 | `point-view` | Plan one frozen View over a host-owned hierarchy without I/O. | Camera, viewport, hierarchy/residency, budget | Demand, requests, retention, retirements |
 | `render-wgpu` | Maintain and draw one wgpu representation of render-protocol state. | Render updates, frame, host target | Recorded commands, report, provisional picks |
-| `browser-demo` | Verify one bounded browser composition and coherent checked-in viewer integration boundary without defining the later packaged SDK. | Caller-owned canvas/lifecycle/navigation/cache policy, generated scene, or trusted immutable-LAS deployment | WebGPU frame, bounded viewer state, provisional pick/highlight, exact fixture record, sampled remote Coverage, structured errors |
+| `browser-demo` / `@punctra/viewer` | Package and verify one bounded framework-neutral browser viewer composition without owning application policy. | Caller-owned canvas/lifecycle/navigation/cache policy, generated scene, or trusted immutable-LAS deployment | Disposable viewer handle, WebGPU frame, bounded state, provisional pick/highlight, exact fixture record, sampled remote Coverage, structured errors |
+| `@punctra/react` | Translate React mount, resize, active, unmount, and replay lifecycle into the framework-neutral viewer. | Caller-owned canvas, viewport, active flag, viewer creation options | React binding state over the same disposable viewer handle |
 | `renderer-demo` | Exercise indexed LAS/LAZ View-to-render composition, exact review/correction, and local viewing measurement. | CLI, permitted corpus manifest, generated inputs, or an existing Workspace | Interactive demo, exact review outcome, GPU-free process smoke, or canonical Viewing Report |
 | `terrain-demo` | Own one recoverable headless LAS/LAZ-to-terrain Workflow Run and its private post-Run qualification. | Caller-owned paths, identities, baseline, correction/QA intent, limits, and returned LandXML declaration | Eight-frame journal, Revision, Terrain/QA evidence, LandXML/report, and separate Round-Trip Evidence |
 
 `source-copc`, constrained or true out-of-core terrain, general LandXML,
-general application UI, a packaged browser SDK, a public remote Source adapter,
-and remote-storage policy are not implemented modules. The v0.16 Range
+general application UI, another framework adapter, a public remote Source
+adapter, and remote-storage policy are not implemented modules. The v0.16 Range
 transport, cache, Worker, deployment manifest, and raw `wasm-bindgen` boundary
 remain private to `browser-demo`; v0.17 exposes only their coherent viewer
-composition and fixture-specific exact bridge. Navigation/display policy
+composition and fixture-specific exact bridge, and v0.18 packages that
+composition without exporting those internals. Navigation/display policy
 remains private to application hosts, and correction remains existing
 `point-workspace` commit policy.
 
@@ -512,6 +514,7 @@ The allowlist is stricter than what Cargo can compile:
 | `point-view` | `render-protocol` and narrow math/value dependencies |
 | `render-wgpu` | `render-protocol`, `point-contracts` |
 | `browser-demo` | runtime: `point-view`, `render-protocol`, `render-wgpu`, and narrow private serialization/browser/WebGPU dependencies; native fixture generator: `source-las`, `point-index`, `point-contracts` |
+| `@punctra/react` | `@punctra/viewer` and React peer APIs only |
 | `renderer-demo` | only the Source/index/Workspace/review/View/render crates it composes |
 | `terrain-demo` | `source-las`, `point-source`, `point-index`, `point-workspace`, `point-terrain`, `point-contracts`, `foundation-runtime`, and narrow checksum, identity-generation, and error dependencies |
 
@@ -540,7 +543,10 @@ The implemented reusable seams are:
    supported deliverable ensure in `point-terrain`;
 8. generation-safe `render-protocol` values;
 9. deterministic `point-view` planning; and
-10. host-owned-lifecycle `render-wgpu` recording.
+10. host-owned-lifecycle `render-wgpu` recording;
+11. the versioned `@punctra/viewer` ESM/Wasm composition over the private
+    browser adapter; and
+12. the thin `@punctra/react` lifecycle translation over that same viewer.
 
 Index pages, decoder buffers, Point Set frames, overlay tables, Operation
 records, Revision blocks, triangulation arenas, XML encoder state, scheduling

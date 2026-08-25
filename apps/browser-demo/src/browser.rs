@@ -75,7 +75,7 @@ pub async fn create_viewer(
 /// Example-only browser viewer handle.
 ///
 /// The JavaScript host owns lifecycle policy and calls these explicit methods.
-/// This private acceptance boundary is not the supported SDK planned for v0.18.
+/// The supported JavaScript SDK wraps this low-level generated binding.
 #[wasm_bindgen]
 pub struct BrowserViewer {
     resources: Option<BrowserResources>,

@@ -1,6 +1,6 @@
 # Library Packaging and Compatibility
 
-Punctra v0.17.0-alpha.1 carries forward the local crates.io/docs.rs packaging
+Punctra v0.18.0-alpha.1 carries forward the local crates.io/docs.rs packaging
 path for the twelve public library crates. It does not publish them. The three
 demo applications remain private workspace packages.
 
@@ -28,7 +28,7 @@ exists for conformance and fault tests, not production behavior.
 
 ## Version and compatibility policy
 
-All libraries in the bounded v0.17 slice use `0.17.0-alpha.1`, require
+All libraries in the bounded v0.18 slice use `0.18.0-alpha.1`, require
 Rust 1.90, and pin inter-Punctra registry dependencies
 to exactly that version while retaining local workspace paths. This local
 qualification is not publication. If a later explicit decision publishes the
@@ -40,7 +40,7 @@ Persisted formats do not inherit that freedom from the Cargo version. A frozen
 persisted version continues to reproduce its documented bytes and semantics or
 fails closed; migration and rebuild rules belong to the format owner. Source
 Record v1, Workspace v1, and the other frozen v1 fixtures therefore remain
-compatibility evidence after the Cargo version moves to v0.17. Surface
+compatibility evidence after the Cargo version moves to v0.18. Surface
 disk/work-v1 is a separate rebuildable format: its frozen fixtures govern its
 reader/rebuild behavior without changing Terrain algorithm or Workflow Run-v1.
 

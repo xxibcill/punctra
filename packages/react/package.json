@@ -1,0 +1,34 @@
+{
+  "name": "@punctra/react",
+  "version": "0.18.0-alpha.1",
+  "description": "Thin React lifecycle adapter for @punctra/viewer.",
+  "type": "module",
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xxibcill/punctra.git",
+    "directory": "packages/react"
+  },
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "import": "./index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "main": "./index.js",
+  "types": "./index.d.ts",
+  "files": [
+    "index.d.ts",
+    "index.js",
+    "lifecycle.js"
+  ],
+  "peerDependencies": {
+    "@punctra/viewer": "0.18.0-alpha.1",
+    "react": ">=18.2.0 <20"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

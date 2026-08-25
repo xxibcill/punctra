@@ -2,14 +2,14 @@ const BUILD_CACHE_TOKEN = encodeURIComponent(
   new URL(import.meta.url).searchParams.get("v") ?? "unversioned",
 );
 
-const { DISPLAY_MODES, ViewerError, createBrowserViewer } = await import(
-  `./viewer-api.js?v=${BUILD_CACHE_TOKEN}`
-);
-const { createLasExactQueryBridge } = await import(
-  `./exact-query.js?v=${BUILD_CACHE_TOKEN}`
-);
-const { createInputNormalizer } = await import(
-  `./viewer-input.js?v=${BUILD_CACHE_TOKEN}`
+const {
+  DISPLAY_MODES,
+  ViewerError,
+  createInputNormalizer,
+  createLasExactQueryBridge,
+  createViewer,
+} = await import(
+  `./sdk.js?v=${BUILD_CACHE_TOKEN}`
 );
 const canvas = document.querySelector("#punctra-canvas");
 const canvasShell = document.querySelector("#canvas-shell");
@@ -55,7 +55,6 @@ const HOST_CAMERA_PROJECTION_POLICIES = Object.freeze({
     alternate: (camera) => cameraWithProjection(camera, "perspective", Math.PI / 3),
   }),
 });
-let bindings;
 let viewer;
 let viewerSubscription;
 let inputNormalizer;
@@ -182,27 +181,19 @@ function assertFact(condition, message) {
   if (!condition) throw new Error(`Browser acceptance invariant failed: ${message}`);
 }
 
-async function loadBindings() {
-  if (bindings) return;
-  const module = await import(`./pkg/browser_demo.js?v=${BUILD_CACHE_TOKEN}`);
-  await module.default({
-    module_or_path: new URL(`./pkg/browser_demo_bg.wasm?v=${BUILD_CACHE_TOKEN}`, import.meta.url),
-  });
-  bindings = module;
-}
-
 async function initializeViewer() {
-  await loadBindings();
   const exactQueryBridge = createLasExactQueryBridge({
     manifestUrl: STREAM_MANIFEST_URL,
     credentials: "same-origin",
   });
-  viewer = await createBrowserViewer({
-    bindings,
+  viewer = await createViewer({
     canvas,
     viewport: requestedViewport(),
     exactQueryBridge,
-    workerUrl: new URL("./stream-worker.js", import.meta.url),
+    assets: {
+      workerUrl: new URL("./stream-worker.js", import.meta.url),
+      cacheKey: BUILD_CACHE_TOKEN,
+    },
   });
   viewerSubscription = viewer.subscribe(publishState);
   inputNormalizer = createInputNormalizer(canvas, applyNormalizedInput, {
@@ -223,18 +214,18 @@ function discardViewer() {
   viewerSubscription = undefined;
   inputNormalizer?.dispose();
   inputNormalizer = undefined;
-  viewer?.destroy();
+  viewer?.dispose();
   viewer = undefined;
 }
 
 async function runSmokePath() {
   smokeRunning = true;
   smokePassed = false;
-  smokeRecord = { schema: "punctra-browser-viewer-acceptance-v1" };
+  smokeRecord = { schema: "punctra-browser-sdk-acceptance-v1" };
   setHarnessState("checking", "Running public viewer lifecycle checks…");
   const initial = await initializeViewer();
   let state = viewer.render();
-  assertFact(state.packageVersion === "0.17.0-alpha.1", "v0.17 package version");
+  assertFact(state.packageVersion === "0.18.0-alpha.1", "v0.18 package version");
   assertFact(state.capabilities.secure_context === true, "secure context");
   assertFact(state.capabilities.webgpu === true, "WebGPU capability");
   assertFact(state.source.publishedPoints === 1_089, "generated fixture Points");
@@ -249,10 +240,10 @@ async function runSmokePath() {
   state = viewer.resize(resized);
   assertFact(state.viewport.physicalWidth === Math.round(resized.cssWidth * resized.devicePixelRatio), "bounded resize");
   viewer.render();
-  viewer.setVisible(false);
+  viewer.pause();
   state = viewer.render();
   assertFact(state.lifecycle === "hidden", "hidden lifecycle");
-  viewer.setVisible(true);
+  viewer.resume();
   viewer.render();
 
   const generatedPick = await pickCentre();
@@ -343,7 +334,7 @@ async function runSmokePath() {
   await expectCode(viewer.confirmPoint(provisional), "stale_generation");
 
   smokeRecord = {
-    schema: "punctra-browser-viewer-acceptance-v1",
+    schema: "punctra-browser-sdk-acceptance-v1",
     generated: generatedEvidence,
     destruction: destructionEvidence,
     cancellation,
@@ -359,8 +350,9 @@ async function runSmokePath() {
     final_state: viewer.state(),
     nonclaims: [
       "no arbitrary Source or Query support",
-      "no SDK packaging or framework qualification",
-      "no broad browser, adoption, support, or release-candidate claim",
+      "no npm registry publication or production hosting qualification",
+      "no browser, device, or framework matrix beyond the checked-in trials",
+      "no independent adoption, stable-API, support, or release-candidate claim",
     ],
   };
   smokePassed = true;
@@ -598,7 +590,8 @@ function toggleVisibility() {
   if (!viewer || smokeRunning) return;
   try {
     suspended = !suspended;
-    viewer.setVisible(!suspended);
+    if (suspended) viewer.pause();
+    else viewer.resume();
     visibilityButton.textContent = suspended ? "Resume rendering" : "Suspend rendering";
     if (!suspended) viewer.render();
   } catch (error) {
@@ -674,7 +667,8 @@ function synchronizeDocumentVisibility() {
   if (!viewer || smokeRunning) return;
   try {
     const visible = document.visibilityState === "visible" && !suspended;
-    viewer.setVisible(visible);
+    if (visible) viewer.resume();
+    else viewer.pause();
     if (visible) viewer.render();
   } catch (error) {
     publishFailure(error, true);
@@ -696,6 +690,7 @@ window.__PUNCTRA_BROWSER_VIEWER_API__ = {
   smoke: () => smokeRecord ?? null,
   harness: () => document.body.dataset.browserSmoke,
 };
+window.__PUNCTRA_BROWSER_SDK__ = window.__PUNCTRA_BROWSER_VIEWER_API__;
 window.__PUNCTRA_BROWSER_FOUNDATION__ = window.__PUNCTRA_BROWSER_VIEWER_API__;
 window.__PUNCTRA_BROWSER_STREAMING__ = window.__PUNCTRA_BROWSER_VIEWER_API__;
 
