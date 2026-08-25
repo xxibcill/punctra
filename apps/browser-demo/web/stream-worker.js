@@ -140,6 +140,10 @@ function publicDeployment(deployment) {
     root_display_point_count: deployment.index.root.displayPointCount,
     root_coverage: deployment.index.root.coverage,
     world_origin: deployment.index.root.worldOrigin,
+    source_bounds: {
+      min: deployment.index.root.bounds.minimum,
+      max: deployment.index.root.bounds.maximum,
+    },
   };
 }
 

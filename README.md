@@ -236,13 +236,38 @@ exact implementation commit, strict local server/browser evidence, complete
 native and forced-GPU command results, generated benchmark observations, and
 remaining external exits.
 
+Version 0.17.0-alpha.1 completes the bounded [Browser Viewer API
+design](docs/design/browser-viewer-api-v0.17.md). The checked-in browser host
+now uses one framework-neutral viewer façade and matching TypeScript
+declarations for lifecycle, resize/visibility, perspective and orthographic
+cameras, coalesced rendering, Source loading, five inherited display modes,
+bounded state subscriptions, provisional picking, and complete presentation-
+only highlights. The worker transfers raw display attributes in a fixed
+32-byte record so presentation modes can change without changing Point
+Identity, generation, geometry, or Coverage.
+
+The separate exact-Query bridge reads exactly one validated 34-byte record
+from the immutable LAS 1.2 fixture and returns exact ticks, position,
+intensity, classification, and RGB without promoting sampled GPU data to
+authority. The optional input normalizer reports bounded pointer, touch,
+wheel, and keyboard facts while navigation policy stays in the plain host.
+Follow the [browser viewer API guide](docs/guides/browser-viewer.md) for the
+public surface and local acceptance path. This checked-in integration boundary
+is not an npm SDK, arbitrary LAS/LAZ loader, framework adapter, stable API
+promise, broad browser qualification, or release candidate.
+
+The [v0.17 repository verification record](docs/releases/v0.17.0.md) pins the
+exact implementation commit, native and browser environments, complete local
+command matrix, public viewer observations, exact record evidence, generated
+benchmarks, and remaining external exits.
+
 To try the implemented View safely, follow the five-minute [first LAS/LAZ
 guide](docs/guides/first-las-laz.md). It separates position-only disk-v1 and
 attributed disk-v2 caches and explains what progressive Coverage does and does
 not mean.
 
 Later direction and the exact external product gates are described in the
-[living roadmap](ROADMAP.md). The linked v0.15 and v0.16 designs define the
+[living roadmap](ROADMAP.md). The linked v0.15 through v0.17 designs define the
 completed bounded repository scopes. Later Candidate themes do not expand
 accepted scope by themselves.
 

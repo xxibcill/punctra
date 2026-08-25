@@ -98,8 +98,18 @@ recreation/warm-cache local acceptance path. It does not authorize arbitrary
 LAS/LAZ URLs, complete browser Source decoding, exact browser Queries, a public
 network/viewer seam, credentials policy, service-worker ownership, a supported
 SDK, or broad browser qualification.
-Apart from the explicit v0.8 reader exception,
-external format decoding belongs only in accepted Source adapter crates.
+The completed [v0.17 Browser Viewer API
+scope](docs/design/browser-viewer-api-v0.17.md) adds one framework-neutral
+viewer façade and matching TypeScript declaration inside `browser-demo`, five
+inherited display modes, generation-safe provisional pick/highlight behavior,
+an optional policy-free input normalizer, and a separately injected exact-
+Point bridge for the immutable LAS fixture. It does not authorize SDK/registry
+packaging, a framework adapter, arbitrary Source delivery, general exact
+Queries, editing, terrain, export, API stability, or broad browser support.
+Apart from the explicit v0.8 reader exception, the v0.17 browser-demo
+exact-query bridge is a narrowly scoped exception for the trusted immutable
+LAS fixture described by the accepted design. All other external format
+decoding belongs only in accepted Source adapter crates.
 Networking, polygon/brush/visible-only/occlusion selection, arbitrary
 Attribute or position edits, constrained or true out-of-core terrain, general
 export, Source rewriting, automatic recovery, and general host UI remain in
@@ -168,6 +178,7 @@ test -f docs/guides/persistent-terrain.md
 test -f docs/guides/exact-terrain-qa.md
 test -f docs/guides/browser-foundation.md
 test -f docs/guides/browser-streaming.md
+test -f docs/guides/browser-viewer.md
 ruby -rjson -e 'JSON.parse(File.read(ARGV.fetch(0)))' \
   docs/guides/field-corpus.example.json
 git diff --check
@@ -176,19 +187,24 @@ git diff --check
 After `scripts/build-browser-demo.sh`, run
 `scripts/serve-browser-demo.py --port 8000` and open
 `http://127.0.0.1:8000/` in a secure-context WebGPU browser. A generic static
-server is insufficient for the v0.16 acceptance fixture because exact Range,
+server is insufficient for the v0.16/v0.17 acceptance fixture because exact Range,
 strong-validator, identity-encoding, and exposed CORS-header behavior is part
 of the contract. The document must publish `PASS` after the inherited v0.15
 lifecycle checks, cold bounded Source/index requests, worker decode and
 transfer, progressive render before complete Source transfer, explicit viewer
 and Worker recreation, and an identity-matched warm-cache run with zero binary
-network requests. The harness must also acknowledge its deliberately delayed
-Fetch cancellation within 1,000 milliseconds. Record the exact browser,
+network requests. The v0.17 continuation must additionally exercise the typed
+public viewer only, all five inherited display modes, both projections,
+normalized-input wiring, provisional pick/highlight/clear, exact confirmation
+of the same immutable Source record, cancelled exact confirmation, and stale-
+generation rejection. The harness must also acknowledge its deliberately
+delayed Fetch cancellation within 1,000 milliseconds. Record the exact browser,
 operating system, adapter, surface
 format, viewport, and reported transport/cache/worker/main-thread plus
 logical/surface/transient resource facts. The step qualifies only that exact
 local browser environment. See the [browser streaming
-guide](docs/guides/browser-streaming.md).
+guide](docs/guides/browser-streaming.md) and [browser viewer API
+guide](docs/guides/browser-viewer.md).
 
 The default `point-index` benchmark generates one million Points. Use only the
 documented scale values when a larger local run is intended, for example:

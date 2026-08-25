@@ -11,6 +11,7 @@ support qualification outstanding; v0.14 bounded exact Terrain QA and
 correction-loop slice Complete and repository-verified; v0.15 bounded local
 WebAssembly/WebGPU browser-foundation slice Complete and repository-verified;
 v0.16 bounded HTTP Range/cache/worker slice Complete and repository-verified;
+v0.17 bounded viewer API/exact-Point slice Complete and repository-verified;
 all gates run locally**
 
 Verification follows public contracts first. Private tests are used for fault
@@ -578,6 +579,26 @@ benchmark, example, and forced-native-GPU checks. One local fixture/browser pass
 does not establish hostile-server authenticity, broad browser support, process
 memory, cache allocation, exact browser Queries, or SDK stability.
 
+## v0.17 browser viewer API verification lane
+
+The v0.17 lane adds direct JavaScript contract tests for lifecycle, immutable
+state snapshots, scheduled-render coalescing, camera and viewport validation,
+Source-load ownership, structured errors, declaration/runtime agreement,
+generation-safe pick/highlight/exact handoff, cancellation, and normalized
+input disposal. Rust tests independently pin the transfer-v2 layout, all five
+inherited mappings, replacement batch versions, camera diagnostics, highlight
+limits, and stale Source/generation rejection.
+
+The real browser path drives the same checked-in public façade used by the
+plain host. It renders all five modes and both projections, obtains a
+provisional streamed identity, publishes and clears one presentation-only
+highlight, confirms the same ordinal from one exact 34-byte LAS record, and
+rejects cancelled and stale-generation confirmation. It also preserves the
+v0.15 lifecycle and v0.16 cold/recreation/warm evidence. A passing local Chrome
+151/WebGPU run proves only that exact recorded environment; it does not prove
+SDK packaging, framework compatibility, arbitrary Sources or Queries, API
+stability, or a browser support matrix.
+
 ## Local verification lanes
 
 ### Change qualification
@@ -588,7 +609,7 @@ command list; this architecture guide does not duplicate it. Required local GPU
 lanes use `PUNCTRA_REQUIRE_GPU=1`, including renderer appearance, corpus,
 offscreen, planner, display-mapping, and public-host acceptance.
 
-The v0.15/v0.16 browser lane is separate from native GPU acceptance. It uses
+The v0.15–v0.17 browser lane is separate from native GPU acceptance. It uses
 the build and strict local-Range-host steps in `CONTRIBUTING.md`, requires the
 document itself to publish `PASS`, and records the exact browser/adapter facts
 rather than claiming a browser support matrix.

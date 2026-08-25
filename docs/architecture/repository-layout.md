@@ -10,7 +10,9 @@ independent adoption, partner validation, and support qualification
 outstanding; v0.14 bounded exact Terrain QA and correction-loop slice Complete
 and repository-verified; v0.15 bounded local WebAssembly/WebGPU browser-
 foundation slice Complete and repository-verified; v0.16 private HTTP Range,
-cache, and worker streaming slice Complete and repository-verified; later
+cache, and worker streaming slice Complete and repository-verified; v0.17
+framework-neutral viewer API and exact-Point bridge Complete and repository-
+verified; later
 crates are created only with accepted behavior
 and a caller
 
@@ -31,6 +33,7 @@ apps/
     src/
       lib.rs
       browser.rs
+      display.rs
       diagnostics.rs
       host.rs
       scene.rs
@@ -40,6 +43,18 @@ apps/
       index.html
       main.js
       styles.css
+      camera-policy.js
+      viewer-api.js
+      viewer-api.d.ts
+      viewer-api.test.mjs
+      viewer-input.js
+      viewer-input.d.ts
+      viewer-input.test.mjs
+      exact-query.js
+      exact-query.d.ts
+      exact-query.test.mjs
+      range-response.js
+      range-response.test.mjs
       failure-policy.js
       failure-policy.test.mjs
       stream-ordinals.js
@@ -509,7 +524,7 @@ versions, and LandXML/journal/report format versions are separate axes. A Cargo
 `0.9` version does not imply Workspace disk schema or terrain algorithm version
 9.
 
-The v0.16 work advances all public libraries as one `0.16.0-alpha.1` package
+The v0.17 work advances all public libraries as one `0.17.0-alpha.1` package
 set with exact inter-Punctra registry requirements and
 local development paths. Their empty default features, dependency roles,
 MSRV, publication order, and pre-v1 policy are documented in the [library

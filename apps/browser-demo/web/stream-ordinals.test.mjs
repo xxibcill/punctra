@@ -25,8 +25,8 @@ test("cold and warm ordinal sequences compare exactly", () => {
 });
 
 function payload(ordinals) {
-  const bytes = new ArrayBuffer(ordinals.length * 24);
+  const bytes = new ArrayBuffer(ordinals.length * 32);
   const view = new DataView(bytes);
-  ordinals.forEach((ordinal, index) => view.setBigUint64(index * 24, ordinal, true));
+  ordinals.forEach((ordinal, index) => view.setBigUint64(index * 32, ordinal, true));
   return bytes;
 }

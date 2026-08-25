@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 
 use js_sys::Reflect;
-use render_protocol::Viewport;
+use render_protocol::{Camera, PointId, RenderUpdate, ViewGenerationKey, Viewport};
 use render_wgpu::{
     Frame, FrameReport, PickHit, PickPoll, PickRequest, PickTicket, RecordedFrame, RendererConfig,
     WgpuRenderer,
@@ -10,16 +10,19 @@ use wasm_bindgen::prelude::*;
 use web_sys::HtmlCanvasElement;
 
 use crate::diagnostics::{
-    CapabilityFacts, Diagnostics, Failure, FailureCode, FrameFacts, LimitFacts, PickFacts,
+    CameraFacts, CapabilityFacts, Diagnostics, Failure, FailureCode, FrameFacts, HighlightFacts,
+    LimitFacts, PickFacts,
 };
+use crate::display::DisplayMode;
 use crate::host::{
     CssViewportRequest, HostModelError, Lifecycle, MAX_RENDER_TRANSIENT_BYTES,
     PRESENTATION_LATENCY_FRAMES, PhysicalViewport, RESIZE_VIEWPORT_ACTION, RenderDisposition,
 };
 use crate::scene::{
-    BATCH_KEY, BATCH_VERSION, PreparedScene, VIEW_GENERATION, centre_point_id, render_limits,
+    BATCH_KEY, BATCH_VERSION, MAX_HIGHLIGHT_POINTS, PreparedScene, VIEW_GENERATION,
+    centre_point_id, render_limits,
 };
-use crate::streaming::{StreamingLimitFacts, StreamingScene};
+use crate::streaming::{StreamingLimitFacts, StreamingScene, parse_source_identity};
 
 const INITIALIZATION_ACTION: &str = "Keep the canvas unavailable, use a secure context with a WebGPU-capable browser and device, then retry initialization.";
 const INITIAL_VIEWPORT_ACTION: &str = "Keep the canvas unavailable, choose finite positive CSS dimensions and a device-pixel ratio at most four so the physical canvas remains within 4,096 pixels per dimension and 8,388,608 pixels total, then retry initialization.";
@@ -54,6 +57,7 @@ pub async fn create_viewer(
         .map_err(|error| failure(FailureCode::SceneValidation, error, INITIALIZATION_ACTION))?;
     let (resources, capabilities) =
         BrowserResources::initialize(&canvas, viewport, &mut scene).await?;
+    let camera = scene.camera();
     Ok(BrowserViewer {
         resources: Some(resources),
         scene,
@@ -62,6 +66,8 @@ pub async fn create_viewer(
         capabilities,
         last_frame: None,
         pick: PickFacts::not_requested(),
+        camera,
+        highlights: HighlightFacts::empty(),
         stream: StreamingScene::idle(),
     })
 }
@@ -79,6 +85,8 @@ pub struct BrowserViewer {
     capabilities: CapabilityFacts,
     last_frame: Option<FrameFacts>,
     pick: PickFacts,
+    camera: Camera,
+    highlights: HighlightFacts,
     stream: StreamingScene,
 }
 
@@ -140,13 +148,6 @@ impl BrowserViewer {
     #[wasm_bindgen(js_name = beginPick)]
     pub fn begin_pick(&mut self, x: u32, y: u32) -> Result<String, JsValue> {
         self.ensure_ready()?;
-        if self.stream.view_generation().is_some() {
-            return Err(failure(
-                FailureCode::StreamPickUnsupported,
-                "the v0.16 streaming slice does not define a stable provisional-pick fixture",
-                "Keep the progressive frame visible and wait for the later browser viewer API before relying on remote picking.",
-            ));
-        }
         let dimensions = self.viewport.dimensions();
         if x >= dimensions[0] || y >= dimensions[1] {
             return Err(failure(
@@ -185,6 +186,15 @@ impl BrowserViewer {
         self.diagnostics()
     }
 
+    /// Cancels one pending provisional pick while preserving its recorded frame.
+    #[wasm_bindgen(js_name = cancelPick)]
+    pub fn cancel_pick(&mut self) -> Result<String, JsValue> {
+        self.ensure_active()?;
+        self.resources_mut()?.cancel_pick();
+        self.pick = PickFacts::not_requested();
+        self.diagnostics()
+    }
+
     /// Returns the complete bounded host diagnostics as JSON.
     #[wasm_bindgen]
     pub fn diagnostics(&self) -> Result<String, JsValue> {
@@ -199,7 +209,139 @@ impl BrowserViewer {
         self.resources.take();
         self.last_frame = None;
         self.pick = PickFacts::not_requested();
+        self.highlights = HighlightFacts::empty();
         self.diagnostics_unchecked()
+    }
+
+    /// Replaces the active camera with one validated perspective camera.
+    #[wasm_bindgen(js_name = setPerspectiveCamera)]
+    #[allow(clippy::too_many_arguments)] // The private Wasm ABI carries one explicit camera value.
+    pub fn set_perspective_camera(
+        &mut self,
+        eye_x: f64,
+        eye_y: f64,
+        eye_z: f64,
+        target_x: f64,
+        target_y: f64,
+        target_z: f64,
+        up_x: f64,
+        up_y: f64,
+        up_z: f64,
+        vertical_field_of_view_radians: f32,
+        near_distance: f32,
+        far_distance: f32,
+    ) -> Result<String, JsValue> {
+        let camera = Camera::perspective(
+            [eye_x, eye_y, eye_z],
+            [target_x, target_y, target_z],
+            [up_x, up_y, up_z],
+            vertical_field_of_view_radians,
+            near_distance,
+            far_distance,
+        )
+        .map_err(camera_failure)?;
+        self.set_camera(camera)
+    }
+
+    /// Replaces the active camera with one validated orthographic camera.
+    #[wasm_bindgen(js_name = setOrthographicCamera)]
+    #[allow(clippy::too_many_arguments)] // The private Wasm ABI carries one explicit camera value.
+    pub fn set_orthographic_camera(
+        &mut self,
+        eye_x: f64,
+        eye_y: f64,
+        eye_z: f64,
+        target_x: f64,
+        target_y: f64,
+        target_z: f64,
+        up_x: f64,
+        up_y: f64,
+        up_z: f64,
+        vertical_world_height: f64,
+        near_distance: f32,
+        far_distance: f32,
+    ) -> Result<String, JsValue> {
+        let camera = Camera::orthographic(
+            [eye_x, eye_y, eye_z],
+            [target_x, target_y, target_z],
+            [up_x, up_y, up_z],
+            vertical_world_height,
+            near_distance,
+            far_distance,
+        )
+        .map_err(camera_failure)?;
+        self.set_camera(camera)
+    }
+
+    /// Selects one inherited presentation-only display mapping.
+    #[wasm_bindgen(js_name = setDisplayMode)]
+    pub fn set_display_mode(&mut self, mode: &str) -> Result<String, JsValue> {
+        self.ensure_ready()?;
+        let mode = mode.parse::<DisplayMode>().map_err(|error| {
+            failure(
+                FailureCode::DisplayMode,
+                error,
+                "Choose neutral, elevation, rgb, intensity, or classification and retry.",
+            )
+        })?;
+        let mut next = self.stream.clone();
+        let updates = next
+            .set_display_mode(mode)
+            .map_err(stream_validation_failure)?;
+        self.apply_updates(&updates)?;
+        self.stream = next;
+        self.reset_interaction_facts();
+        self.diagnostics()
+    }
+
+    /// Replaces the complete presentation-only highlight set.
+    #[wasm_bindgen(js_name = setHighlights)]
+    pub fn set_highlights(
+        &mut self,
+        source_identity: &str,
+        generation: u64,
+        ordinals: &[u64],
+    ) -> Result<String, JsValue> {
+        self.ensure_ready()?;
+        let view_generation = self.require_active_generation(generation)?;
+        let source = parse_source_identity(source_identity).map_err(highlight_failure)?;
+        if Some(source) != self.active_source() {
+            return Err(highlight_failure("highlight Source identity is not active"));
+        }
+        if ordinals.len() > usize::try_from(MAX_HIGHLIGHT_POINTS).unwrap_or(usize::MAX) {
+            return Err(highlight_failure(format!(
+                "highlight input contains {} Points above the {MAX_HIGHLIGHT_POINTS}-Point ceiling",
+                ordinals.len()
+            )));
+        }
+        if ordinals
+            .iter()
+            .enumerate()
+            .any(|(index, ordinal)| ordinals[..index].contains(ordinal))
+        {
+            return Err(highlight_failure("highlight Point ordinals must be unique"));
+        }
+        let point_ids = ordinals
+            .iter()
+            .map(|ordinal| PointId::new(source, *ordinal))
+            .collect::<Vec<_>>();
+        self.resources_mut()?
+            .apply_update(&RenderUpdate::SetHighlights {
+                view_generation,
+                point_ids,
+            })?;
+        self.highlights = HighlightFacts::complete(view_generation, source, ordinals.len())
+            .map_err(highlight_failure)?;
+        self.diagnostics()
+    }
+
+    /// Clears every presentation-only highlight for the active generation.
+    #[wasm_bindgen(js_name = clearHighlights)]
+    pub fn clear_highlights(&mut self, generation: u64) -> Result<String, JsValue> {
+        let source = self
+            .active_source()
+            .ok_or_else(|| highlight_failure("the active View has no Source identity"))?;
+        self.set_highlights(&source.to_string(), generation, &[])
     }
 
     /// Validates and publishes the first batch with its identity-bound reset.
@@ -212,16 +354,19 @@ impl BrowserViewer {
         origin_x: f64,
         origin_y: f64,
         origin_z: f64,
+        source_min_z: f64,
+        source_max_z: f64,
         batch_index: u32,
         payload: &[u8],
     ) -> Result<String, JsValue> {
-        self.ensure_ready()?;
+        self.ensure_source_publication()?;
         let mut next = self.stream.clone();
         let (reset, upsert) = next
             .begin_with_batch(
                 source_identity,
                 u64::from(expected_points),
                 [origin_x, origin_y, origin_z],
+                [source_min_z, source_max_z],
                 batch_index,
                 payload,
             )
@@ -231,6 +376,7 @@ impl BrowserViewer {
         resources.apply_update(&upsert)?;
         self.stream = next;
         self.reset_interaction_facts();
+        self.highlights = HighlightFacts::empty();
         self.diagnostics()
     }
 
@@ -241,7 +387,7 @@ impl BrowserViewer {
         batch_index: u32,
         payload: &[u8],
     ) -> Result<String, JsValue> {
-        self.ensure_ready()?;
+        self.ensure_source_publication()?;
         let mut next = self.stream.clone();
         let update = next
             .publish(batch_index, payload)
@@ -255,7 +401,7 @@ impl BrowserViewer {
     /// Seals the sampled root after every declared Point is published.
     #[wasm_bindgen(js_name = completeStream)]
     pub fn complete_stream(&mut self) -> Result<String, JsValue> {
-        self.ensure_ready()?;
+        self.ensure_source_publication()?;
         self.stream.complete().map_err(stream_validation_failure)?;
         self.diagnostics()
     }
@@ -268,7 +414,7 @@ impl BrowserViewer {
         }
         let limits = LimitFacts::new(render_limits());
         let diagnostics = Diagnostics {
-            schema: "punctra-browser-streaming-v1",
+            schema: "punctra-browser-viewer-v1",
             package_version: env!("CARGO_PKG_VERSION"),
             phase: self.lifecycle.phase(),
             rendered_frames: self.lifecycle.rendered_frames(),
@@ -281,6 +427,9 @@ impl BrowserViewer {
             streaming_limits: StreamingLimitFacts::fixed(),
             frame: self.last_frame,
             pick: &self.pick,
+            camera: CameraFacts::from_camera(self.camera),
+            display_mode: self.stream.display_mode(),
+            highlights: self.highlights,
             display_authority: "progressive_gpu_non_authoritative",
             safe_shutdown_action: RECREATE_ACTION,
         };
@@ -301,6 +450,12 @@ impl BrowserViewer {
         self.lifecycle.ensure_ready().map_err(interaction_failure)
     }
 
+    fn ensure_source_publication(&self) -> Result<(), JsValue> {
+        self.lifecycle
+            .ensure_source_publication()
+            .map_err(model_failure)
+    }
+
     fn resources_mut(&mut self) -> Result<&mut BrowserResources, JsValue> {
         self.resources
             .as_mut()
@@ -317,8 +472,7 @@ impl BrowserViewer {
             )
         })?;
         let view_generation = self.stream.view_generation().unwrap_or(VIEW_GENERATION);
-        self.scene
-            .frame(viewport, view_generation)
+        PreparedScene::frame(viewport, view_generation, self.camera)
             .map_err(|error| failure(FailureCode::FrameValidation, error, RECREATE_ACTION))
     }
 
@@ -328,19 +482,69 @@ impl BrowserViewer {
     }
 
     fn accept_pick(&mut self, hit: PickHit) -> Result<(), JsValue> {
-        let invariant_matches = hit.view_generation() == VIEW_GENERATION
-            && hit.batch() == BATCH_KEY
-            && hit.version() == BATCH_VERSION
-            && hit.point() == centre_point_id();
-        if !invariant_matches {
+        let active_generation = self.active_view_generation();
+        let pick_belongs_to_active_content = self.stream.view_generation().is_some()
+            || (hit.batch() == BATCH_KEY
+                && hit.version() == BATCH_VERSION
+                && hit.point() == centre_point_id());
+        let pick_matches_active_view = hit.view_generation() == active_generation
+            && Some(hit.point().source()) == self.active_source()
+            && pick_belongs_to_active_content;
+        if !pick_matches_active_view {
             return Err(failure(
                 FailureCode::PickInvariant,
-                "the centre-pixel hit did not preserve the fixed generation, batch, version, and Point identity",
+                "the provisional hit did not preserve the active generation, Source, batch, version, and Point identity",
                 RECREATE_ACTION,
             ));
         }
         self.pick = PickFacts::hit(hit);
         Ok(())
+    }
+
+    fn set_camera(&mut self, camera: Camera) -> Result<String, JsValue> {
+        self.ensure_ready()?;
+        let dimensions = self.viewport.dimensions();
+        let viewport = Viewport::new(dimensions[0], dimensions[1])
+            .map_err(|error| failure(FailureCode::ViewportValidation, error, RECREATE_ACTION))?;
+        PreparedScene::frame(viewport, self.active_view_generation(), camera)
+            .map_err(camera_failure)?;
+        self.camera = camera;
+        self.reset_interaction_facts();
+        self.resources_mut()?.discard_interaction_state();
+        self.diagnostics()
+    }
+
+    fn apply_updates(&mut self, updates: &[RenderUpdate]) -> Result<(), JsValue> {
+        for update in updates {
+            self.resources_mut()?.apply_update(update)?;
+        }
+        Ok(())
+    }
+
+    fn active_view_generation(&self) -> ViewGenerationKey {
+        self.stream.view_generation().unwrap_or(VIEW_GENERATION)
+    }
+
+    fn active_source(&self) -> Option<render_protocol::SourceId> {
+        self.stream
+            .source()
+            .or_else(|| Some(centre_point_id().source()))
+    }
+
+    fn require_active_generation(&self, generation: u64) -> Result<ViewGenerationKey, JsValue> {
+        let active = self.active_view_generation();
+        if active.generation() == generation {
+            Ok(active)
+        } else {
+            Err(failure(
+                FailureCode::StaleGeneration,
+                format!(
+                    "requested generation {generation} differs from active generation {}",
+                    active.generation()
+                ),
+                "Discard stale interaction state and retry against the current viewer state.",
+            ))
+        }
     }
 }
 
@@ -503,8 +707,12 @@ impl BrowserResources {
         Ok(outcome)
     }
 
-    fn discard_interaction_state(&mut self) {
+    fn cancel_pick(&mut self) {
         self.pick_ticket = None;
+    }
+
+    fn discard_interaction_state(&mut self) {
+        self.cancel_pick();
         self.recorded_frame = None;
     }
 
@@ -786,6 +994,22 @@ fn stream_validation_failure(error: crate::streaming::StreamError) -> JsValue {
         FailureCode::StreamValidation,
         error,
         "Terminate the current worker operation, keep the last complete frame, and start a new identity-bound stream.",
+    )
+}
+
+fn camera_failure(error: impl std::fmt::Display) -> JsValue {
+    failure(
+        FailureCode::CameraValidation,
+        error,
+        "Keep the current frame, provide one finite nondegenerate camera and valid clipping range, then retry.",
+    )
+}
+
+fn highlight_failure(error: impl std::fmt::Display) -> JsValue {
+    failure(
+        FailureCode::HighlightValidation,
+        error,
+        "Keep the current frame and retry with a unique bounded Point set from the active Source generation.",
     )
 }
 

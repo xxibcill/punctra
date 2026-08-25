@@ -1,12 +1,18 @@
 const MODULE_CACHE_TOKEN = encodeURIComponent(
   new URL(import.meta.url).searchParams.get("v") ?? "unversioned",
 );
-const {
-  WORKER_FAILURE_SAFE_ACTION,
-  WORKER_OUTPUT_TYPES,
-  WORKER_SCHEMA,
-  workerFailure,
-} = await import(`./worker-protocol.js?v=${MODULE_CACHE_TOKEN}`);
+const [
+  {
+    WORKER_FAILURE_SAFE_ACTION,
+    WORKER_OUTPUT_TYPES,
+    WORKER_SCHEMA,
+    workerFailure,
+  },
+  { RangeResponseError, validateBoundRangeResponse },
+] = await Promise.all([
+  import(`./worker-protocol.js?v=${MODULE_CACHE_TOKEN}`),
+  import(`./range-response.js?v=${MODULE_CACHE_TOKEN}`),
+]);
 
 export {
   WORKER_OUTPUT_TYPES,
@@ -26,7 +32,7 @@ export const LIMITS = Object.freeze({
   concurrentResponseBytes: 256 * 1024,
   workerStagingBytes: 320 * 1024,
   transferBatchPoints: 1024,
-  transferRecordBytes: 24,
+  transferRecordBytes: 32,
   transferBatches: 8,
   streamPoints: 8192,
   cacheEntries: 64,
@@ -114,10 +120,12 @@ export function createWorkerMessage(operationId, type, facts = {}) {
 export async function runStreamingOperation(configuration, hooks = {}) {
   const fetchImplementation =
     configuration.fetchImplementation ?? globalThis.fetch?.bind(globalThis);
+  const credentials = credentialMode(configuration.credentials);
   const manifest = await loadManifest(
     configuration.manifestUrl,
     fetchImplementation,
     configuration.signal,
+    credentials,
   );
   const deployment = validateManifest(manifest, configuration.manifestUrl);
   hooks.onDeployment?.(deployment);
@@ -126,7 +134,7 @@ export async function runStreamingOperation(configuration, hooks = {}) {
     deployment,
     cacheMode: configuration.cacheMode,
     invalidate: configuration.invalidate,
-    credentials: configuration.credentials,
+    credentials,
     fetchImplementation,
     cacheStorage: configuration.cacheStorage ?? globalThis.caches,
     memoryCacheStorage: configuration.memoryCacheStorage,
@@ -164,9 +172,19 @@ export async function runStreamingOperation(configuration, hooks = {}) {
   };
 }
 
-export async function loadManifest(url, fetchImplementation, signal) {
+export async function loadManifest(
+  url,
+  fetchImplementation,
+  signal,
+  credentials = "same-origin",
+) {
   require(typeof fetchImplementation === "function", "manifest_invalid", "Fetch is unavailable");
-  const response = await fetchManifestResponse(url, fetchImplementation, signal);
+  const response = await fetchManifestResponse(
+    url,
+    fetchImplementation,
+    signal,
+    credentialMode(credentials),
+  );
   if (!response.ok || response.status !== 200) {
     throw new StreamingFailure("manifest_invalid", `manifest returned HTTP ${response.status}`);
   }
@@ -178,11 +196,12 @@ export async function loadManifest(url, fetchImplementation, signal) {
   }
 }
 
-async function fetchManifestResponse(url, fetchImplementation, signal) {
+async function fetchManifestResponse(url, fetchImplementation, signal, credentials) {
   try {
     return await fetchImplementation(url, {
       method: "GET",
       cache: "no-store",
+      credentials,
       redirect: "error",
       signal,
     });
@@ -797,45 +816,48 @@ function decodeSample(view, offset, deployment, previousOrdinal) {
   require(withinBounds(world, deployment.index.root.bounds), "range_corrupt", "sample is outside root bounds");
   const relative = world.map((value, axis) => Math.fround(value - deployment.index.root.worldOrigin[axis]));
   require(relative.every(Number.isFinite), "range_corrupt", "sample relative position is not finite f32");
-  const color = [
-    rgb16ToRgb8(view.getUint16(offset + 36, true)),
-    rgb16ToRgb8(view.getUint16(offset + 38, true)),
-    rgb16ToRgb8(view.getUint16(offset + 40, true)),
-    255,
+  const rgb = [
+    view.getUint16(offset + 36, true),
+    view.getUint16(offset + 38, true),
+    view.getUint16(offset + 40, true),
   ];
-  return { ordinal, relative, intensity, classification, color };
-}
-
-function rgb16ToRgb8(value) {
-  return Math.floor((value * 255 + 32_767) / 65_535);
+  return { ordinal, relative, intensity, classification, rgb };
 }
 
 function encodeTransfer(view, offset, sample) {
   view.setBigUint64(offset, BigInt(sample.ordinal), true);
   sample.relative.forEach((value, axis) => view.setFloat32(offset + 8 + axis * 4, value, true));
-  sample.color.forEach((value, channel) => view.setUint8(offset + 20 + channel, value));
+  view.setUint16(offset + 20, sample.intensity, true);
+  view.setUint8(offset + 22, sample.classification);
+  view.setUint8(offset + 23, 0);
+  sample.rgb.forEach((value, channel) => view.setUint16(offset + 24 + channel * 2, value, true));
+  view.setUint16(offset + 30, 0, true);
 }
 
 function validateRangeResponse(response, resource, range, requireAcceptRanges) {
-  if (
-    response.type === "opaqueredirect"
-    || response.redirected
-    || (response.status >= 300 && response.status < 400)
-  ) {
-    throw new StreamingFailure("range_unsupported", "Range request was redirected");
+  try {
+    validateBoundRangeResponse(response, {
+      etag: resource.etag,
+      offset: range.offset,
+      length: range.length,
+      totalLength: resource.byteLength,
+      requireAcceptRanges,
+    });
+  } catch (error) {
+    if (!(error instanceof RangeResponseError)) throw error;
+    throw streamingRangeFailure(error);
   }
-  if (response.status === 200) throw new StreamingFailure("range_unsupported", "server returned a full 200 response to a Range request");
-  if (response.status !== 206) throw new StreamingFailure("range_unsupported", `Range request returned terminal HTTP ${response.status}`);
-  const headers = response.headers;
-  const required = ["content-length", "content-range", "etag"];
-  if (required.some((name) => headers.get(name) === null)) throw new StreamingFailure("cors_headers_hidden", "required Range response headers are unavailable");
-  equal(headers.get("etag"), resource.etag, "source_changed", "representation ETag");
-  equal(headers.get("content-length"), String(range.length), "range_truncated", "Content-Length");
-  const end = range.offset + range.length - 1;
-  equal(headers.get("content-range"), `bytes ${range.offset}-${end}/${resource.byteLength}`, "range_truncated", "Content-Range");
-  const encoding = headers.get("content-encoding");
-  if (encoding !== null && encoding.toLowerCase() !== "identity") throw new StreamingFailure("content_encoding", `unexpected Content-Encoding ${encoding}`);
-  if (requireAcceptRanges && headers.get("accept-ranges")?.toLowerCase() !== "bytes") throw new StreamingFailure("range_unsupported", "Source response does not declare Accept-Ranges: bytes");
+}
+
+function streamingRangeFailure(error) {
+  const code = {
+    header_unavailable: "cors_headers_hidden",
+    etag_mismatch: "source_changed",
+    content_length_mismatch: "range_truncated",
+    content_range_mismatch: "range_truncated",
+    content_encoding: "content_encoding",
+  }[error.kind] ?? "range_unsupported";
+  return new StreamingFailure(code, error.message);
 }
 
 async function verifyDigest(bytes, expected, signal) {

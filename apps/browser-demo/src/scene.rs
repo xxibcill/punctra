@@ -10,6 +10,8 @@ use render_wgpu::{Frame, FrameError, PointStyle};
 use serde::Serialize;
 use thiserror::Error;
 
+use crate::diagnostics::serialize_required_source_identity;
+
 pub(crate) const VIEW_GENERATION: ViewGenerationKey = ViewGenerationKey::new(ViewId::new(15), 1);
 pub(crate) const BATCH_KEY: BatchKey = BatchKey::new(1);
 pub(crate) const BATCH_VERSION: BatchVersion = BatchVersion::new(1);
@@ -48,6 +50,7 @@ impl PreparedScene {
         let camera = scene_camera()?;
         let planner = plan_missing_root(&batch, &camera)?;
         let facts = SceneFacts {
+            source_identity: SOURCE_ID,
             point_count: batch.point_count(),
             estimated_gpu_bytes: batch.estimated_gpu_bytes(),
             initial_requests: 1,
@@ -103,12 +106,16 @@ impl PreparedScene {
     }
 
     pub(crate) fn frame(
-        &self,
         viewport: Viewport,
         view_generation: ViewGenerationKey,
+        camera: Camera,
     ) -> Result<Frame, FrameError> {
         let style = PointStyle::new(7.0, [0.78, 0.66, 0.2], [0.075, 0.078, 0.075, 1.0])?;
-        Ok(Frame::new(view_generation, self.camera, viewport)?.with_style(style))
+        Ok(Frame::new(view_generation, camera, viewport)?.with_style(style))
+    }
+
+    pub(crate) const fn camera(&self) -> Camera {
+        self.camera
     }
 
     pub(crate) const fn facts(&self) -> SceneFacts {
@@ -118,6 +125,8 @@ impl PreparedScene {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 pub(crate) struct SceneFacts {
+    #[serde(serialize_with = "serialize_required_source_identity")]
+    pub(crate) source_identity: SourceId,
     pub(crate) point_count: u64,
     pub(crate) estimated_gpu_bytes: u64,
     pub(crate) initial_requests: u64,
@@ -289,9 +298,12 @@ mod tests {
     fn generated_scene_has_fixed_identity_planning_and_resource_facts() {
         let mut scene = PreparedScene::new().unwrap();
         let initial_facts = scene.facts();
-        let frame = scene
-            .frame(Viewport::new(960, 600).unwrap(), VIEW_GENERATION)
-            .unwrap();
+        let frame = PreparedScene::frame(
+            Viewport::new(960, 600).unwrap(),
+            VIEW_GENERATION,
+            scene.camera(),
+        )
+        .unwrap();
 
         assert_eq!(initial_facts.point_count, 1_089);
         assert_eq!(initial_facts.estimated_gpu_bytes, 26_136);

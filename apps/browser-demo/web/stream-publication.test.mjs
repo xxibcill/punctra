@@ -22,7 +22,7 @@ test("the first batch resets and publishes as one host event", () => {
 
   const rendered = publication.publishBatch({
     batch_index: 0,
-    payload: new ArrayBuffer(24),
+    payload: new ArrayBuffer(32),
   });
 
   assert.equal(publication.hasBegun(), true);
@@ -57,6 +57,7 @@ function deployment() {
     source_identity: "01".repeat(32),
     root_display_point_count: 1,
     world_origin: [0, 0, 0],
+    source_bounds: { min: [0, 0, -1], max: [0, 0, 1] },
   };
 }
 
@@ -66,9 +67,19 @@ class FakeViewer {
     this.calls = [];
   }
 
-  beginStreamBatch(_source, _points, _x, _y, _z, _batchIndex, payload) {
+  beginStreamBatch(
+    _source,
+    _points,
+    _x,
+    _y,
+    _z,
+    _minimumZ,
+    _maximumZ,
+    _batchIndex,
+    payload,
+  ) {
     this.calls.push("begin_batch");
-    if (payload.byteLength !== 24) throw new Error("invalid first batch");
+    if (payload.byteLength !== 32) throw new Error("invalid first batch");
     this.frame = "replacement";
     return JSON.stringify({ streaming: streamingFacts() });
   }
@@ -92,6 +103,6 @@ class FakeViewer {
 function streamingFacts() {
   return {
     main_thread_batch_points_high_water: 1,
-    main_thread_batch_bytes_high_water: 24,
+    main_thread_batch_bytes_high_water: 32,
   };
 }

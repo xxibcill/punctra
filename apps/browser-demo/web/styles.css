@@ -40,6 +40,7 @@ body {
 }
 
 button,
+select,
 summary {
   font: inherit;
 }
@@ -186,6 +187,25 @@ canvas {
   margin-top: var(--space-lg);
 }
 
+.control-field {
+  display: grid;
+  gap: var(--space-xs);
+  color: var(--grey-700);
+  font-family: "Avenir Next Condensed", "Helvetica Neue Condensed", sans-serif;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+select {
+  min-height: 2.75rem;
+  padding: var(--space-sm) var(--space-xl) var(--space-sm) var(--space-sm);
+  border: 1px solid var(--grey-850);
+  color: var(--grey-950);
+  background: var(--grey-100);
+}
+
 button {
   min-height: 2.75rem;
   padding: var(--space-sm) var(--space-lg);
@@ -208,6 +228,7 @@ button:active:not(:disabled) {
 }
 
 button:focus-visible,
+select:focus-visible,
 summary:focus-visible {
   outline: 3px solid var(--signal);
   outline-offset: 2px;

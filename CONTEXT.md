@@ -14,10 +14,10 @@ Complete and repository-verified for the bounded persistent-terrain slice;
 field activation, production-scale accuracy, true out-of-core adoption,
 independent adoption, partner validation, and support qualification
 outstanding; v0.14 exact Terrain QA/correction, v0.15 local browser-foundation,
-and v0.16 bounded HTTP Range streaming slices are Complete and repository-
-verified while their declared external exits remain outstanding; broader
-selection, arbitrary browser Source delivery, supported SDK, and product terms
-remain deferred
+v0.16 bounded HTTP Range streaming, and v0.17 bounded framework-neutral browser
+viewer API slices are Complete and repository-verified while their declared
+external exits remain outstanding; broader selection, arbitrary browser Source
+delivery, supported SDK packaging, and product terms remain deferred
 
 Punctra v0.11 builds on the reusable render engine, renderer-neutral View
 planner, and verified Source path described in the accepted [v0.1 renderer
@@ -119,6 +119,19 @@ not repeat the complete `source-las` verification used to prepare the binding.
 An arbitrary raw URL is not a Remote Deployment.
 The [v0.16 repository verification record](docs/releases/v0.16.0.md) owns the
 exact local implementation, environment, command, browser, and nonclaim facts.
+
+The completed [v0.17 Browser Viewer API
+design](docs/design/browser-viewer-api-v0.17.md) fixes a coherent checked-in
+JavaScript and TypeScript integration boundary over the private WebAssembly
+viewer and streaming worker. It owns lifecycle, viewport, camera, five display
+modes, render scheduling, bounded state, provisional pick/highlight generation
+semantics, and exact-Query handoff. The host owns interaction policy; exact
+Point values come only from the separate immutable-LAS record bridge. This is
+not SDK packaging, an arbitrary-Source adapter, a framework promise, or broad
+browser qualification.
+The [v0.17 repository verification record](docs/releases/v0.17.0.md) owns the
+exact local implementation, environment, command, browser, exact-record, and
+nonclaim facts.
 
 ## Artifact
 

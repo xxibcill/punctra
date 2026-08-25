@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <meta name="color-scheme" content="light">
-    <title>Punctra browser streaming</title>
+    <title>Punctra browser viewer API</title>
     <link rel="stylesheet" href="./styles.css">
   </head>
   <body data-browser-smoke="pending">
@@ -12,12 +12,12 @@
 
     <header class="masthead">
       <div>
-        <p class="eyebrow">Punctra / remote execution record</p>
-        <h1>Range streaming console</h1>
+        <p class="eyebrow">Punctra / browser integration record</p>
+        <h1>Viewer API console</h1>
       </div>
       <div class="release-stamp" aria-label="Release and harness">
-        <span>v0.16</span>
-        <span>LOCAL HARNESS 02</span>
+        <span>v0.17</span>
+        <span>LOCAL HARNESS 03</span>
       </div>
     </header>
 
@@ -36,6 +36,7 @@
         <div id="canvas-shell" class="canvas-shell">
           <canvas
             id="punctra-canvas"
+            tabindex="0"
             aria-label="Progressive Punctra point-cloud scene from an immutable local HTTP Range deployment. Display remains provisional GPU evidence."
           >
             This browser does not provide a usable canvas.
@@ -49,7 +50,19 @@
         <div class="controls" aria-label="Viewer controls">
           <button id="restart-button" type="button">Recreate viewer</button>
           <button id="visibility-button" type="button" disabled>Suspend rendering</button>
-          <button id="pick-button" type="button" disabled>Check centre pick</button>
+          <button id="pick-button" type="button" disabled>Check visible point</button>
+          <label class="control-field" for="display-mode">
+            Display
+            <select id="display-mode" disabled>
+              <option value="neutral">Neutral</option>
+              <option value="elevation">Elevation</option>
+              <option value="rgb" selected>RGB</option>
+              <option value="intensity">Intensity</option>
+              <option value="classification">Classification</option>
+            </select>
+          </label>
+          <button id="projection-button" type="button" disabled>Orthographic</button>
+          <button id="clear-button" type="button" disabled>Clear highlight</button>
           <button id="shutdown-button" type="button" disabled>Shut down viewer</button>
         </div>
       </section>
@@ -57,7 +70,7 @@
       <aside class="instrument-panel" aria-labelledby="instrument-heading">
         <div class="panel-header">
           <p class="index-label">INSTRUMENT RECORD</p>
-          <h2 id="instrument-heading">Streaming acceptance</h2>
+          <h2 id="instrument-heading">Viewer API acceptance</h2>
         </div>
 
         <div id="status-block" class="status-block" data-state="checking">
@@ -92,8 +105,8 @@
         <section class="fact-section" aria-labelledby="authority-heading">
           <h3 id="authority-heading">Authority boundary</h3>
           <p class="boundary-copy">
-            Sampled Coverage describes one identity-bound GPU frame. The browser does not
-            promote index samples to an exact Source Query or editing authority.
+            Sampled Coverage describes one identity-bound GPU frame. A provisional pick
+            reaches exact authority only through the separate immutable-LAS Query bridge.
           </p>
           <dl id="pick-facts" class="fact-list compact">
             <div><dt>Pick state</dt><dd>not requested</dd></div>
@@ -114,10 +127,10 @@
     </main>
 
     <footer>
-      <p>Bounded local HTTP Range fixture. No arbitrary URL, full-file fallback, framework, or exact Query.</p>
+      <p>Bounded local HTTP Range fixture and one exact LAS record bridge. No arbitrary URL, framework, or editing authority.</p>
       <p>Repository browser evidence is not a broad browser-support claim.</p>
     </footer>
 
-    <script type="module" src="./main.js?v=16-qualified"></script>
+    <script type="module" src="./main.js?v=17-api"></script>
   </body>
 </html>

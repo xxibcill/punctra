@@ -11,6 +11,8 @@
 #[cfg(any(target_arch = "wasm32", test))]
 mod diagnostics;
 #[cfg(any(target_arch = "wasm32", test))]
+mod display;
+#[cfg(any(target_arch = "wasm32", test))]
 mod host;
 #[cfg(any(target_arch = "wasm32", test))]
 mod scene;

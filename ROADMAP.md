@@ -1,7 +1,7 @@
 # Punctra Roadmap
 
 Status: living guidance
-Last reviewed: 2026-08-23
+Last reviewed: 2026-08-25
 
 This roadmap communicates direction, not a delivery promise. It has no fixed
 dates. Candidate releases may be split, merged, reordered, renamed, or skipped
@@ -9,16 +9,17 @@ as technical and customer evidence changes. Milestone outcomes and dependency
 order matter more than version numbers.
 
 Among incomplete releases, only an **Active** release has accepted
-implementation scope. Punctra v0.1 through v0.16 are Complete repository
+implementation scope. Punctra v0.1 through v0.17 are Complete repository
 technical slices. Their recorded external field, adoption, partner, and
 support gates remain historically accurate, but they do not determine the next
 product direction. The project now pivots from a desktop terrain-delivery
 hypothesis to an embeddable browser point-cloud rendering engine.
 
-v0.15 is the completed repository-verified browser-foundation release. v0.16
-is the completed repository-verified HTTP Range streaming release. Versions
-v0.17 through v0.30 remain uncommitted Candidate themes. v0.15–v0.20 establish browser execution,
-streaming, the viewer API, embedding, and platform qualification. v0.21–v0.29
+v0.15 is the completed repository-verified browser-foundation release, v0.16
+is the completed repository-verified HTTP Range streaming release, and v0.17
+is the completed repository-verified browser-viewer-API release. Versions
+v0.18 through v0.30 remain uncommitted Candidate themes. v0.15–v0.20 establish
+browser execution, streaming, the viewer API, embedding, and platform qualification. v0.21–v0.29
 then improve and qualify visual quality. v0.30 is the earliest planned browser-
 engine release candidate; no earlier future release may be represented as a
 product release candidate. The historical v0.9 "Trust and v1 candidate" name
@@ -90,8 +91,9 @@ release can be Complete while every product gate remains outstanding.
 
 ## Current pivot checkpoint
 
-Status: **v0.15 and v0.16 complete and repository-verified for their bounded
-local browser-foundation and immutable-LAS streaming slices**
+Status: **v0.15 through v0.17 complete and repository-verified for their
+bounded local browser-foundation, immutable-LAS streaming, and browser viewer
+API slices**
 
 The completed v0.1–v0.14 contracts are inputs to the pivot, not permission to
 carry the old product sequence forward. In particular:
@@ -120,6 +122,17 @@ LAS deployment profile, strict bounded HTTP Range behavior, disk-v2 index-root
 sample decoding in one worker, identity-versioned browser caching, and one
 cold/recreation/warm-cache local acceptance path. It intentionally remains in
 the private browser host and does not create the later public viewer or SDK.
+
+The completed [v0.17 Browser Viewer API
+design](docs/design/browser-viewer-api-v0.17.md) fixes one framework-neutral
+viewer façade inside `browser-demo`, matching TypeScript declarations, five
+inherited display modes, host-owned camera/input policy, generation-safe
+provisional pick/highlight presentation, and a separate immutable-LAS exact-
+Point bridge. It is a checked-in integration boundary, not an installable SDK,
+framework adapter, arbitrary-Source loader, or browser-support declaration.
+Its exact local environment, command matrix, browser facts, and nonclaims are
+recorded in the [v0.17 repository verification
+record](docs/releases/v0.17.0.md).
 
 ## Pre-v0.13 renderer quality corrective checkpoint
 
@@ -1182,17 +1195,22 @@ Repository exit evidence:
 
 ### v0.17 — Browser viewer API
 
-Status: **Candidate**
+Status: **Complete and repository-verified for one bounded framework-neutral
+browser viewer API and immutable-LAS exact-Point bridge; SDK packaging,
+arbitrary Sources and Queries, broad browser qualification, independent
+adoption, API stability, and support qualification outstanding**
 
-Candidate outcome: expose one coherent browser API for camera control, display
+Outcome: expose one coherent browser API for camera control, display
 modes, picking, highlighting, and exact Query handoff.
 
-Activation gate:
+Activation:
 
-- the v0.16 example identifies the smallest API a real browser host needs
-  without exposing renderer, planner, worker, or Source internals separately.
+- satisfied by the accepted [Browser Viewer API
+  design](docs/design/browser-viewer-api-v0.17.md), derived from the v0.16
+  example's smallest real-host needs without exposing renderer, planner,
+  worker, or Source-publication internals separately.
 
-Likely scope:
+Implemented scope:
 
 - typed lifecycle, camera, perspective/orthographic projection, viewport,
   display-mode, render scheduling, and bounded state-report interfaces;
@@ -1203,7 +1221,7 @@ Likely scope:
 - normalized pointer, wheel, keyboard, and touch inputs as optional mechanisms,
   while host applications retain interaction policy.
 
-Candidate exit evidence:
+Repository exit evidence:
 
 - a plain browser host implements navigation, five inherited display modes,
   pick, highlight, clear, and exact confirmation using only the public API;
@@ -1601,7 +1619,7 @@ nor completion of v0.20 is a reason to publish v1.
 | Spatial contract and production terrain | v0.12–v0.13 | v0.12 bounded repository contract complete; v0.13 bounded persistent-terrain slice complete and repository-verified; external spatial, production-scale, out-of-core, adoption, partner, and support exits outstanding | Make reference semantics explicit, then persist one bounded-AOI Surface without confusing repository durability with field-scale qualification. |
 | Terrain acceptance tooling | v0.14 | Complete and repository-verified for the bounded slice; external historical exits outstanding | Preserve exact Terrain QA and correction as an available module without extending it in the current browser-engine path. |
 | Browser execution and streaming | v0.15–v0.16 | Complete and repository-verified for the bounded private slices; arbitrary delivery and external qualification outstanding | Establish WebAssembly/WebGPU execution, then bounded remote Source delivery, browser caching, and worker decoding. |
-| Browser viewer and embedding | v0.17–v0.20 | Candidate | Expose the viewer API, package the SDK, qualify the browser/device envelope, and consolidate a stable integration baseline without release-candidate status. |
+| Browser viewer and embedding | v0.17–v0.20 | v0.17 bounded viewer API complete and repository-verified; v0.18–v0.20 Candidate | Expose the viewer API, package the SDK, qualify the browser/device envelope, and consolidate a stable integration baseline without release-candidate status. |
 | Measured visual quality | v0.21–v0.25 | Candidate | Establish visual evidence, then improve point footprints, LOD continuity, depth, and color. |
 | Visual interaction and qualification | v0.26–v0.29 | Candidate | Improve temporal, selection, and composition clarity, then freeze and qualify the visual surface without release-candidate status. |
 | Browser-engine release candidate | v0.30 | Candidate; earliest planned release candidate | Freeze, soak, and explicitly decide whether the supported browser engine should ship or narrow. |

@@ -13,6 +13,7 @@ preserves those authority boundaries and frozen Run-v1; v0.14 bounded exact
 Terrain QA and correction-loop slice Complete and repository-verified; v0.15
 bounded local WebAssembly/WebGPU browser-host workflow Complete and repository-
 verified; v0.16 bounded immutable-LAS Range/cache/Worker workflow Complete and
+repository-verified; v0.17 bounded viewer API/exact-Point workflow Complete and
 repository-verified; arbitrary remote browser
 delivery and broader workflows remain outstanding**
 
@@ -665,6 +666,43 @@ enumerating Cache API keys. The main thread yields
 between at-most-1,024-Point publications. All output remains non-authoritative
 Sampled Coverage.
 
+## 11d. Drive the browser through one coherent viewer API
+
+The v0.17 façade owns composition, not application policy. The host supplies a
+canvas, camera/navigation choices, cache/credential policy, and a separate
+exact bridge; it does not coordinate raw worker messages or Wasm publication.
+
+~~~mermaid
+sequenceDiagram
+    participant HOST as plain browser host
+    participant API as viewer-api.js
+    participant WK as streaming Worker
+    participant WASM as browser-demo Wasm
+    participant QUERY as exact-Point bridge
+
+    HOST->>API: create / subscribe / loadSource
+    API->>WK: one bounded operation
+    WK-->>API: deployment + transfer-v2 batches
+    API->>WASM: begin/publish active generation
+    HOST->>API: camera / display / render
+    API->>WASM: validated complete presentation changes
+    HOST->>API: pick physical pixel
+    WASM-->>API: provisional Source identity + ordinal + generation
+    HOST->>API: setHighlights(complete set)
+    API->>WASM: presentation-only replacement
+    HOST->>API: confirmPoint(provisional)
+    API->>QUERY: exact identity request + AbortSignal
+    QUERY-->>API: exact immutable LAS record
+    API-->>HOST: exact result only if generation is still active
+    HOST->>API: clear / destroy
+~~~
+
+A new Source generation clears recorded-pick and highlight presentation. Exact
+completion rechecks generation and Source identity after the asynchronous
+bridge returns. Cancellation preserves the last complete frame; fused device,
+surface, or partial-publication failures destroy the viewer before returning a
+bounded structured error.
+
 ## 12. Cancellation and crash matrix
 
 | Operation | Safe cancellation boundary | Permitted residue | Published truth |
@@ -686,6 +724,7 @@ Sampled Coverage.
 | GPU frame | Host-controlled frame/device boundary | Disposable GPU allocations | Workspace unchanged |
 | Browser acceptance host | Before viewer return and at explicit frame/pick boundaries; shutdown is fused | Disposable WebGPU resources and ignored generated bindings | No viewer, one active private viewer, or one shut-down viewer; Workspace and Sources unchanged |
 | Browser streaming worker | Abortable between manifest, Source probe, index-header, and sample ranges; late operation messages are ignored | Verified identity-versioned cache entries selected by caller policy | No remote generation, bounded partial sampled renderer batches for the active identity, or one complete sampled root; never a complete or authoritative Source result |
+| Browser viewer/exact bridge | Abortable before and after worker or exact-record waits; generation and Source identity rechecked before presentation | Last complete frame plus caller-selected verified cache entries | No viewer, one complete active generation with provisional presentation, or one independently confirmed exact Point; stale work is never current |
 | Viewing Report | Before no-replace link of a synced, read-back-verified owned stage | Recognized identity-checked owned stage, or one complete target | No report, exact-existing reconciliation, one complete new report, or conflict without replacement |
 
 ## 13. Staleness

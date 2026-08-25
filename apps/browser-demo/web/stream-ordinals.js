@@ -1,4 +1,4 @@
-const TRANSFER_RECORD_BYTES = 24;
+const TRANSFER_RECORD_BYTES = 32;
 
 export function appendTransferredOrdinals(target, payload) {
   if (!(payload instanceof ArrayBuffer) || payload.byteLength % TRANSFER_RECORD_BYTES !== 0) {

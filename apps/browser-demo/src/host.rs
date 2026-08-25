@@ -157,6 +157,10 @@ impl Lifecycle {
         }
     }
 
+    pub(crate) fn ensure_source_publication(self) -> Result<(), HostModelError> {
+        self.ensure_active()
+    }
+
     pub(crate) fn ensure_ready(self) -> Result<(), HostModelError> {
         self.ensure_active()?;
         if self.phase == ViewerPhase::Hidden {
@@ -271,6 +275,7 @@ mod tests {
             RenderDisposition::SkipHidden
         );
         assert_eq!(lifecycle.ensure_ready(), Err(HostModelError::ViewerHidden));
+        lifecycle.ensure_source_publication().unwrap();
         assert_eq!(lifecycle.hidden_frame_skips(), 1);
 
         lifecycle.set_visible(true).unwrap();
@@ -290,5 +295,9 @@ mod tests {
             Err(HostModelError::ViewerShutdown)
         );
         assert_eq!(lifecycle.shutdown(), Err(HostModelError::ViewerShutdown));
+        assert_eq!(
+            lifecycle.ensure_source_publication(),
+            Err(HostModelError::ViewerShutdown)
+        );
     }
 }

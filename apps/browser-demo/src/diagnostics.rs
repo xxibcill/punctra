@@ -1,4 +1,4 @@
-use render_protocol::RenderLimits;
+use render_protocol::{Camera, CameraProjection, RenderLimits, SourceId, ViewGenerationKey};
 #[cfg(target_arch = "wasm32")]
 use render_wgpu::{FrameReport, PickHit};
 use serde::Serialize;
@@ -6,6 +6,7 @@ use serde::Serialize;
 #[cfg(test)]
 use crate::host::CssViewportRequest;
 use crate::{
+    display::DisplayMode,
     host::{
         MAX_CANVAS_DIMENSION, MAX_CANVAS_PIXELS, MAX_DEVICE_PIXEL_RATIO,
         MAX_RENDER_TRANSIENT_BYTES, PRESENTATION_LATENCY_FRAMES, PhysicalViewport,
@@ -30,8 +31,104 @@ pub(crate) struct Diagnostics<'a> {
     pub(crate) streaming_limits: StreamingLimitFacts,
     pub(crate) frame: Option<FrameFacts>,
     pub(crate) pick: &'a PickFacts,
+    pub(crate) camera: CameraFacts,
+    pub(crate) display_mode: DisplayMode,
+    pub(crate) highlights: HighlightFacts,
     pub(crate) display_authority: &'static str,
     pub(crate) safe_shutdown_action: &'static str,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+pub(crate) struct CameraFacts {
+    eye: [f64; 3],
+    target: [f64; 3],
+    up: [f64; 3],
+    projection: &'static str,
+    vertical_field_of_view_radians: Option<f32>,
+    vertical_world_height: Option<f64>,
+    near_distance: f32,
+    far_distance: f32,
+}
+
+impl CameraFacts {
+    pub(crate) const fn from_camera(camera: Camera) -> Self {
+        let (projection, vertical_field_of_view_radians, vertical_world_height) =
+            match camera.projection() {
+                CameraProjection::Perspective {
+                    vertical_field_of_view_radians,
+                } => ("perspective", Some(vertical_field_of_view_radians), None),
+                CameraProjection::Orthographic {
+                    vertical_world_height,
+                } => ("orthographic", None, Some(vertical_world_height)),
+            };
+        Self {
+            eye: camera.eye(),
+            target: camera.target(),
+            up: camera.up(),
+            projection,
+            vertical_field_of_view_radians,
+            vertical_world_height,
+            near_distance: camera.near_distance(),
+            far_distance: camera.far_distance(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+pub(crate) struct HighlightFacts {
+    generation: Option<u64>,
+    #[serde(serialize_with = "serialize_source_identity")]
+    source_identity: Option<SourceId>,
+    point_count: u64,
+    authority: &'static str,
+}
+
+impl HighlightFacts {
+    pub(crate) const fn empty() -> Self {
+        Self {
+            generation: None,
+            source_identity: None,
+            point_count: 0,
+            authority: "presentation_only",
+        }
+    }
+
+    pub(crate) fn complete(
+        view_generation: ViewGenerationKey,
+        source_identity: SourceId,
+        point_count: usize,
+    ) -> Result<Self, std::num::TryFromIntError> {
+        Ok(Self {
+            generation: Some(view_generation.generation()),
+            source_identity: Some(source_identity),
+            point_count: u64::try_from(point_count)?,
+            authority: "presentation_only",
+        })
+    }
+}
+
+#[allow(clippy::ref_option)] // serde's serialize_with contract passes a field by reference.
+pub(crate) fn serialize_source_identity<S>(
+    source: &Option<SourceId>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    match source {
+        Some(source) => serializer.serialize_some(&source.to_string()),
+        None => serializer.serialize_none(),
+    }
+}
+
+pub(crate) fn serialize_required_source_identity<S>(
+    source: &SourceId,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    serializer.serialize_str(&source.to_string())
 }
 
 impl Diagnostics<'_> {
@@ -192,7 +289,8 @@ pub(crate) struct PickFacts {
     generation: Option<u64>,
     batch_key: Option<u64>,
     batch_version: Option<u64>,
-    point_ordinal: Option<u64>,
+    source_identity: Option<String>,
+    point_ordinal: Option<String>,
 }
 
 impl PickFacts {
@@ -217,19 +315,21 @@ impl PickFacts {
             generation: None,
             batch_key: None,
             batch_version: None,
+            source_identity: None,
             point_ordinal: None,
         }
     }
 
     #[cfg(target_arch = "wasm32")]
-    pub(crate) const fn hit(hit: PickHit) -> Self {
+    pub(crate) fn hit(hit: PickHit) -> Self {
         Self {
             status: PickStatus::Hit,
             authority: "provisional_gpu_hint",
             generation: Some(hit.view_generation().generation()),
             batch_key: Some(hit.batch().get()),
             batch_version: Some(hit.version().get()),
-            point_ordinal: Some(hit.point().ordinal()),
+            source_identity: Some(hit.point().source().to_string()),
+            point_ordinal: Some(hit.point().ordinal().to_string()),
         }
     }
 }
@@ -244,6 +344,7 @@ pub(crate) enum FailureCode {
     DiagnosticSerialization,
     FrameRecording,
     FrameValidation,
+    CameraValidation,
     HostModel,
     InitialViewport,
     InsecureContext,
@@ -255,15 +356,17 @@ pub(crate) enum FailureCode {
     PickPending,
     PickReadback,
     PickRecording,
+    HighlightValidation,
     PresentationMode,
     RendererCapability,
     ResizeViewport,
     ScenePlanning,
     ScenePublication,
     SceneValidation,
-    StreamPickUnsupported,
     StreamPublication,
     StreamValidation,
+    StaleGeneration,
+    DisplayMode,
     SurfaceAlphaMode,
     SurfaceConfiguration,
     SurfaceFormat,
@@ -349,6 +452,9 @@ mod tests {
             streaming_limits: StreamingLimitFacts::fixed(),
             frame: None,
             pick: &pick,
+            camera: CameraFacts::from_camera(scene.camera()),
+            display_mode: DisplayMode::Rgb,
+            highlights: HighlightFacts::empty(),
             display_authority: "progressive_gpu_non_authoritative",
             safe_shutdown_action: "recreate",
         };
@@ -361,6 +467,7 @@ mod tests {
             "progressive_gpu_non_authoritative"
         );
         assert_eq!(value["scene"]["point_count"], 1_089);
+        assert_eq!(value["scene"]["source_identity"], "15".repeat(32));
         assert_eq!(value["limits"]["points"], 8_192);
         assert_eq!(value["limits"]["estimated_gpu_bytes"], 196_608);
         assert_eq!(value["limits"]["surface_bytes_per_pixel"], 4);
@@ -431,6 +538,7 @@ mod tests {
                     FailureCode::DiagnosticSerialization,
                     FailureCode::FrameRecording,
                     FailureCode::FrameValidation,
+                    FailureCode::CameraValidation,
                     FailureCode::HostModel,
                     FailureCode::InitialViewport,
                     FailureCode::InsecureContext,
@@ -442,15 +550,17 @@ mod tests {
                     FailureCode::PickPending,
                     FailureCode::PickReadback,
                     FailureCode::PickRecording,
+                    FailureCode::HighlightValidation,
                     FailureCode::PresentationMode,
                     FailureCode::RendererCapability,
                     FailureCode::ResizeViewport,
                     FailureCode::ScenePlanning,
                     FailureCode::ScenePublication,
                     FailureCode::SceneValidation,
-                    FailureCode::StreamPickUnsupported,
                     FailureCode::StreamPublication,
                     FailureCode::StreamValidation,
+                    FailureCode::StaleGeneration,
+                    FailureCode::DisplayMode,
                     FailureCode::SurfaceAlphaMode,
                     FailureCode::SurfaceConfiguration,
                     FailureCode::SurfaceFormat,
@@ -477,6 +587,7 @@ mod tests {
                 "diagnostic_serialization",
                 "frame_recording",
                 "frame_validation",
+                "camera_validation",
                 "host_model",
                 "initial_viewport",
                 "insecure_context",
@@ -488,15 +599,17 @@ mod tests {
                 "pick_pending",
                 "pick_readback",
                 "pick_recording",
+                "highlight_validation",
                 "presentation_mode",
                 "renderer_capability",
                 "resize_viewport",
                 "scene_planning",
                 "scene_publication",
                 "scene_validation",
-                "stream_pick_unsupported",
                 "stream_publication",
                 "stream_validation",
+                "stale_generation",
+                "display_mode",
                 "surface_alpha_mode",
                 "surface_configuration",
                 "surface_format",
@@ -545,6 +658,19 @@ mod tests {
 
         let value = serde_json::to_value(frame).unwrap();
         assert_eq!(value["transient_texture_bytes"], 15_293_256);
+    }
+
+    #[test]
+    fn highlight_facts_bind_one_generation_and_source() {
+        let source = SourceId::new([0x17; 32]);
+        let generation = ViewGenerationKey::new(render_protocol::ViewId::new(17), 3);
+        let value =
+            serde_json::to_value(HighlightFacts::complete(generation, source, 2).unwrap()).unwrap();
+
+        assert_eq!(value["generation"], 3);
+        assert_eq!(value["source_identity"], "17".repeat(32));
+        assert_eq!(value["point_count"], 2);
+        assert_eq!(value["authority"], "presentation_only");
     }
 
     fn capability_fixture() -> CapabilityFacts {
