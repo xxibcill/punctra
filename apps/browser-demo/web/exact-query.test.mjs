@@ -19,7 +19,7 @@ test("exact bridge reads one immutable LAS record without using display samples"
   const requests = [];
   const bridge = createLasExactQueryBridge({
     manifestUrl,
-    fetchImplementation: fixtureFetch(requests),
+    fetchImplementation: fixtureFetch(requests, { credentials: "omit" }),
     credentials: "omit",
   });
 
@@ -137,6 +137,9 @@ test("exact-query errors do not expose raw external exceptions", async () => {
 
 function fixtureFetch(requests, options = {}) {
   return async (input, init = {}) => {
+    if (options.credentials !== undefined) {
+      assert.equal(init.credentials, options.credentials);
+    }
     const url = String(input);
     if (url === manifestUrl) {
       requests.push("manifest");

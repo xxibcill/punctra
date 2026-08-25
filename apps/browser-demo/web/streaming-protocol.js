@@ -114,10 +114,12 @@ export function createWorkerMessage(operationId, type, facts = {}) {
 export async function runStreamingOperation(configuration, hooks = {}) {
   const fetchImplementation =
     configuration.fetchImplementation ?? globalThis.fetch?.bind(globalThis);
+  const credentials = credentialMode(configuration.credentials);
   const manifest = await loadManifest(
     configuration.manifestUrl,
     fetchImplementation,
     configuration.signal,
+    credentials,
   );
   const deployment = validateManifest(manifest, configuration.manifestUrl);
   hooks.onDeployment?.(deployment);
@@ -126,7 +128,7 @@ export async function runStreamingOperation(configuration, hooks = {}) {
     deployment,
     cacheMode: configuration.cacheMode,
     invalidate: configuration.invalidate,
-    credentials: configuration.credentials,
+    credentials,
     fetchImplementation,
     cacheStorage: configuration.cacheStorage ?? globalThis.caches,
     memoryCacheStorage: configuration.memoryCacheStorage,
@@ -164,9 +166,19 @@ export async function runStreamingOperation(configuration, hooks = {}) {
   };
 }
 
-export async function loadManifest(url, fetchImplementation, signal) {
+export async function loadManifest(
+  url,
+  fetchImplementation,
+  signal,
+  credentials = "same-origin",
+) {
   require(typeof fetchImplementation === "function", "manifest_invalid", "Fetch is unavailable");
-  const response = await fetchManifestResponse(url, fetchImplementation, signal);
+  const response = await fetchManifestResponse(
+    url,
+    fetchImplementation,
+    signal,
+    credentialMode(credentials),
+  );
   if (!response.ok || response.status !== 200) {
     throw new StreamingFailure("manifest_invalid", `manifest returned HTTP ${response.status}`);
   }
@@ -178,11 +190,12 @@ export async function loadManifest(url, fetchImplementation, signal) {
   }
 }
 
-async function fetchManifestResponse(url, fetchImplementation, signal) {
+async function fetchManifestResponse(url, fetchImplementation, signal, credentials) {
   try {
     return await fetchImplementation(url, {
       method: "GET",
       cache: "no-store",
+      credentials,
       redirect: "error",
       signal,
     });

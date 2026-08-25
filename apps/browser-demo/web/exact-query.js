@@ -72,7 +72,12 @@ export function createLasExactQueryBridge(options) {
 }
 
 async function loadBinding(manifestUrl, fetchImplementation, credentials, signal) {
-  const manifest = await loadManifest(manifestUrl, fetchImplementation, signal);
+  const manifest = await loadManifest(
+    manifestUrl,
+    fetchImplementation,
+    signal,
+    credentials,
+  );
   const deployment = validateManifest(manifest, manifestUrl);
   const probe = await fetchExactRange(
     deployment.source,
