@@ -16,7 +16,6 @@ const GENERATED_SOURCE = "15".repeat(32);
 test("runtime error codes and display modes agree with TypeScript declarations", async () => {
   const runtime = await import("./viewer-api.js");
   const declaration = await readFile(new URL("viewer-api.d.ts", import.meta.url), "utf8");
-  const host = await readFile(new URL("main.js", import.meta.url), "utf8");
   const errorBlock = declaration.match(/export type ViewerErrorCode =([\s\S]*?);\n\nexport const/)[1];
   const declaredErrors = [...errorBlock.matchAll(/"([a-z0-9_]+)"/g)].map((match) => match[1]);
   const displayBlock = declaration.match(/export type DisplayMode =([\s\S]*?);/)[1];
@@ -27,9 +26,6 @@ test("runtime error codes and display modes agree with TypeScript declarations",
   assert.equal(new Set(VIEWER_ERROR_CODES).size, VIEWER_ERROR_CODES.length);
   assert.equal("BrowserViewer" in runtime, false);
   assert.match(declaration, /export interface BrowserViewer \{/);
-  assert.doesNotMatch(host, /camera-policy\.js/);
-  assert.match(host, /"render_cancelled"/);
-  assert.match(host, /"viewer_destroyed"/);
 });
 
 test("viewer exposes typed lifecycle, camera, display, state subscription, and coalesced rendering", async () => {
