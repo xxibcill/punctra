@@ -73,6 +73,7 @@
           "binary_requests": 3,
           "requested_bytes": 172696,
           "received_bytes": 172696,
+          "verified_cache_bytes": 172696,
           "concurrent_response_bytes_high_water": 172032,
           "worker_staging_bytes_high_water": 204800
         },
@@ -81,6 +82,10 @@
           "settled_view_milliseconds": 19.199999809265137,
           "main_thread_batch_milliseconds_high_water": 0.9000000953674316,
           "binary_requests": 0,
+          "requested_bytes": 0,
+          "received_bytes": 0,
+          "concurrent_response_bytes_high_water": 0,
+          "worker_staging_bytes_high_water": 204800,
           "verified_cache_hits": 3,
           "verified_cache_bytes": 172696
         },
