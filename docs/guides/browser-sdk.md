@@ -125,11 +125,11 @@ const viewer = await createViewer({
 ```
 
 Copy the exact same-version Wasm file. When overriding `workerUrl`, also copy
-the Worker's relative module graph from the package: `streaming-protocol.js`,
-`worker-protocol.js`, and `range-response.js`. Keep those files together and
-immutable. The explicit Worker is currently qualified only from the host's
-origin. Existing query parameters are preserved when `cacheKey` adds the
-bounded `punctra-v` token.
+the Worker's relative module graph from the package: `module-loader.js`,
+`streaming-protocol.js`, `worker-protocol.js`, and `range-response.js`. Keep
+those files together and immutable. The explicit Worker is currently qualified
+only from the host's origin. Existing query parameters are preserved when
+`cacheKey` adds the bounded `punctra-v` token.
 
 Serve Wasm as `application/wasm` and JavaScript as a JavaScript MIME type. A
 cross-origin Wasm or Source request needs CORS. Remote Source delivery still
