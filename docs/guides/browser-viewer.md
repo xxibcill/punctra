@@ -18,8 +18,11 @@ The plain host imports these checked-in modules:
   errors;
 - `viewer-input.js` and `viewer-input.d.ts` optionally normalize pointer,
   two-touch, wheel, and keyboard input without choosing navigation policy; and
-- `exact-query.js` implements the local fixture's separately injected exact-
-  Point bridge.
+- `exact-query.js` and `exact-query.d.ts` implement and declare the local
+  fixture's separately injected exact-Point bridge. The public surface is
+  `ExactQueryError`, `createLasExactQueryBridge`, `decodeLasLayout`, and
+  `decodeLasPointRecord`; the two decoder helpers support bounded fixture and
+  integration validation without widening the accepted Source profile.
 
 Generated `wasm-bindgen` methods, worker messages, transfer records, cache keys,
 renderer updates, and raw diagnostics remain implementation details.

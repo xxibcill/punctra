@@ -56,6 +56,21 @@ test("LAS layout and record decoders reject incompatible widths and preserve exa
   );
 });
 
+test("exact-query public exports are declared and documented", async () => {
+  const declaration = await readFile(new URL("exact-query.d.ts", import.meta.url), "utf8");
+  const guide = await readFile(new URL("../../../docs/guides/browser-viewer.md", import.meta.url), "utf8");
+
+  for (const name of [
+    "ExactQueryError",
+    "createLasExactQueryBridge",
+    "decodeLasLayout",
+    "decodeLasPointRecord",
+  ]) {
+    assert.match(declaration, new RegExp(`export (?:class|function) ${name}\\b`));
+    assert.ok(guide.includes(`\`${name}\``));
+  }
+});
+
 test("exact confirmation classifies validator drift, cancellation, and stale Source input", async () => {
   const drift = createLasExactQueryBridge({
     manifestUrl,
