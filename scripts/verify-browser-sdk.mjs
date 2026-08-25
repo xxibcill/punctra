@@ -98,14 +98,21 @@ function verifyProductionAssets(distribution, requireCodeSplit) {
     files.filter((file) => /-[A-Za-z0-9_-]{6,}\.(?:js|wasm)$/.test(file)).length >= 2,
     "production assets are not content-hashed",
   );
-  if (requireCodeSplit) {
-    assert(files.filter((file) => file.endsWith(".js")).length >= 3, "dynamic SDK import was not code-split");
-  }
   const manifest = JSON.parse(readFileSync(path.join(distribution, ".vite", "manifest.json"), "utf8"));
+  if (requireCodeSplit) verifyCodeSplitSdk(manifest);
   const copiedWorker = manifest["node_modules/@punctra/viewer/stream-worker.js"]?.file;
   assert(copiedWorker, "production manifest omitted copied-asset Worker resolution");
   verifyBundledWorker(distribution, files, manifest);
   verifyEmittedModuleGraph(distribution, files, new Set([copiedWorker]));
+}
+
+function verifyCodeSplitSdk(manifest) {
+  const sdkEntry = "node_modules/@punctra/viewer/sdk.js";
+  assert(
+    manifest["index.html"]?.dynamicImports?.includes(sdkEntry),
+    "application entry does not retain the SDK dynamic-import boundary",
+  );
+  assert.equal(manifest[sdkEntry]?.isDynamicEntry, true, "SDK is not a production dynamic entry");
 }
 
 function verifyBundledWorker(distribution, files, manifest) {
