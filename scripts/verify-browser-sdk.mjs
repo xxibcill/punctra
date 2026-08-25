@@ -104,11 +104,11 @@ function verifyProductionAssets(distribution, requireCodeSplit) {
   const manifest = JSON.parse(readFileSync(path.join(distribution, ".vite", "manifest.json"), "utf8"));
   const copiedWorker = manifest["node_modules/@punctra/viewer/stream-worker.js"]?.file;
   assert(copiedWorker, "production manifest omitted copied-asset Worker resolution");
-  verifyBundledWorker(distribution, files);
+  verifyBundledWorker(distribution, files, manifest);
   verifyEmittedModuleGraph(distribution, files, new Set([copiedWorker]));
 }
 
-function verifyBundledWorker(distribution, files) {
+function verifyBundledWorker(distribution, files, manifest) {
   const emitted = new Set(files.map((file) => file.split(path.sep).join("/")));
   const match = files
     .filter((file) => file.endsWith(".js"))
@@ -118,6 +118,13 @@ function verifyBundledWorker(distribution, files) {
   assert(match, "production SDK does not construct the bundled module Worker");
   const bundledWorker = match[1].replace(/^\//, "");
   assert(emitted.has(bundledWorker), `production SDK references missing Worker ${bundledWorker}`);
+  const resolvedWorkerModule = manifest["node_modules/@punctra/viewer/stream-worker.js?worker&url"]?.file;
+  assert(resolvedWorkerModule, "production manifest omitted the public resolved Worker URL");
+  const resolvedWorkerSource = readFileSync(path.join(distribution, resolvedWorkerModule), "utf8");
+  assert(
+    resolvedWorkerSource.includes(bundledWorker),
+    "public Worker resolution differs from the bundled default Worker",
+  );
 }
 
 function verifyEmittedModuleGraph(distribution, files, ignoredFiles) {
