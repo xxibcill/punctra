@@ -50,6 +50,18 @@ test("LAS layout and record decoders reject incompatible widths and preserve exa
   assert.equal(layout.pointRecordBytes, 34);
   assert.equal(layout.pointCount, 70_000);
   assert.equal(decodeLasPointRecord(record, deployment.source.sourceIdentity, 0, 1, layout).classification, 2);
+  const highClassificationRecord = new Uint8Array(record);
+  highClassificationRecord[15] = 200;
+  assert.equal(
+    decodeLasPointRecord(
+      highClassificationRecord,
+      deployment.source.sourceIdentity,
+      0,
+      1,
+      layout,
+    ).classification,
+    200,
+  );
   assert.throws(
     () => decodeLasPointRecord(record.subarray(0, 33), deployment.source.sourceIdentity, 0, 1, layout),
     (error) => error instanceof ExactQueryError && error.code === "exact_query_truncated",

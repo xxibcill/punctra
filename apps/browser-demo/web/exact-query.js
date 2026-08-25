@@ -190,7 +190,7 @@ function exactPointResult(bytes, sourceIdentity, pointOrdinal, generation, layou
     ticks,
     position,
     intensity: view.getUint16(12, true),
-    classification: view.getUint8(15) & 0x1f,
+    classification: view.getUint8(15),
     rgb: [
       view.getUint16(28, true),
       view.getUint16(30, true),
