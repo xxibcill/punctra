@@ -165,6 +165,7 @@ const LOAD_TIMEOUT_MILLISECONDS = 30_000;
 const MAX_POINT_ORDINAL = (1n << 64n) - 1n;
 const PARTIAL_PUBLICATION_SAFE_ACTION =
   "Destroy the partially published viewer and explicitly create a new viewer before loading another Source.";
+const VIEWER_DESTROYED_ABORT = Symbol("viewer_destroyed");
 let operationSequence = 0;
 
 export class ViewerError extends Error {
@@ -218,6 +219,7 @@ class BrowserViewer {
   #renderRequest;
   #loadController;
   #exactController;
+  #pickController;
   #loadFacts;
   #lastFailure;
 
@@ -426,8 +428,7 @@ class BrowserViewer {
         safeAction: PARTIAL_PUBLICATION_SAFE_ACTION,
         recoverable: false,
       });
-      this.#fuseViewer();
-      this.#refreshState(fusedError);
+      this.#fuseViewer(fusedError);
       throw fusedError;
     } finally {
       if (this.#loadController === controller) {
@@ -444,17 +445,31 @@ class BrowserViewer {
 
   async #pick(request) {
     this.#ensureActive();
+    if (this.#pickController) {
+      throw new ViewerError("pick_pending", "one provisional pick is already active");
+    }
     const x = nonnegativeInteger(request?.x, "pick x");
     const y = nonnegativeInteger(request?.y, "pick y");
-    assertNotCancelled(request?.signal, "cancelled");
-    this.#callRaw("beginPick", x, y);
-    for (let attempt = 0; attempt < MAX_PICK_POLLS; attempt += 1) {
-      await animationFrame(this.#requestAnimationFrame, request?.signal);
-      const state = this.#callRaw("pollPick");
-      if (state.pick.status === "miss") return null;
-      if (state.pick.status === "hit") return deepFreeze({ ...state.pick });
+    const controller = linkedAbortController(request?.signal);
+    this.#pickController = controller;
+    try {
+      assertNotCancelled(controller.signal, "cancelled");
+      this.#callRaw("beginPick", x, y);
+      for (let attempt = 0; attempt < MAX_PICK_POLLS; attempt += 1) {
+        await animationFrame(
+          this.#requestAnimationFrame,
+          this.#cancelAnimationFrame,
+          controller.signal,
+        );
+        const state = this.#callRaw("pollPick");
+        if (state.pick.status === "miss") return null;
+        if (state.pick.status === "hit") return deepFreeze({ ...state.pick });
+      }
+      throw new ViewerError("pick_pending", "provisional pick exceeded 180 animation frames");
+    } finally {
+      if (this.#pickController === controller) this.#pickController = undefined;
+      controller.dispose();
     }
-    throw new ViewerError("pick_pending", "provisional pick exceeded 180 animation frames");
   }
 
   setHighlights(points, generation = this.#state.generation) {
@@ -534,19 +549,30 @@ class BrowserViewer {
 
   destroy() {
     if (this.#destroyed) return;
-    this.#destroyed = true;
-    this.#loadController?.abort();
-    this.#exactController?.abort();
     const renderFailure = this.#cancelScheduledRender(
       "scheduled render was cancelled by viewer destruction",
       false,
     );
+    this.#destroyViewer(renderFailure);
+  }
+
+  #destroyViewer(failure) {
+    if (this.#destroyed) return;
+    this.#destroyed = true;
+    const controllers = [this.#loadController, this.#exactController, this.#pickController];
+    this.#loadController = undefined;
+    this.#exactController = undefined;
+    this.#pickController = undefined;
+    for (const controller of controllers) {
+      controller?.abort(VIEWER_DESTROYED_ABORT);
+      controller?.dispose();
+    }
     try {
       this.#diagnostics = parseDiagnostics(this.#raw.shutdown());
     } catch {
       // A fused raw viewer already owns no safe continuation.
     }
-    this.#refreshState(renderFailure);
+    this.#refreshState(failure);
     this.#listeners.clear();
   }
 
@@ -584,10 +610,10 @@ class BrowserViewer {
     } catch (error) {
       const viewerError = toViewerError(error);
       if (FUSED_CODES.has(viewerError.code)) {
-        this.#cancelScheduledRender("scheduled render was cancelled by a fused viewer failure", false);
-        this.#fuseViewer();
+        this.#fuseViewer(viewerError);
+      } else {
+        this.#refreshState(viewerError);
       }
-      this.#refreshState(viewerError);
       throw viewerError;
     }
   }
@@ -626,13 +652,9 @@ class BrowserViewer {
     throw failure;
   }
 
-  #fuseViewer() {
-    try {
-      this.#raw.shutdown();
-    } catch {
-      // The raw viewer may already be fused by the failing operation.
-    }
-    this.#destroyed = true;
+  #fuseViewer(failure) {
+    this.#cancelScheduledRender("scheduled render was cancelled by a fused viewer failure", false);
+    this.#destroyViewer(failure);
   }
 
   #execute(operation) {
@@ -877,24 +899,34 @@ function linkedAbortController(externalSignal) {
   return controller;
 }
 
-function animationFrame(requestAnimationFrame, signal) {
+function animationFrame(requestAnimationFrame, cancelAnimationFrame, signal) {
   return new Promise((resolve, reject) => {
     assertNotCancelled(signal, "cancelled");
     let settled = false;
+    let frameId;
     const finish = (callback, value) => {
       if (settled) return;
       settled = true;
       signal?.removeEventListener("abort", onAbort);
       callback(value);
     };
-    const onAbort = () => finish(reject, new ViewerError("cancelled", "operation was cancelled"));
+    const onAbort = () => {
+      cancelAnimationFrame(frameId);
+      finish(reject, cancellationFailure(signal, "cancelled"));
+    };
     signal?.addEventListener("abort", onAbort, { once: true });
-    requestAnimationFrame(() => finish(resolve));
+    frameId = requestAnimationFrame(() => finish(resolve));
   });
 }
 
 function assertNotCancelled(signal, code) {
-  if (signal?.aborted) throw new ViewerError(code, "operation was cancelled");
+  if (signal?.aborted) throw cancellationFailure(signal, code);
+}
+
+function cancellationFailure(signal, code) {
+  return signal?.reason === VIEWER_DESTROYED_ABORT
+    ? new ViewerError("viewer_destroyed", "viewer has been destroyed")
+    : new ViewerError(code, "operation was cancelled");
 }
 
 function finiteTriple(value, label) {

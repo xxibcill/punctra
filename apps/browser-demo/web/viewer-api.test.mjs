@@ -161,6 +161,74 @@ test("viewer cancels stale scheduled rendering on hide, Source replacement, and 
   assert.equal(fusedRaw.data.rendered_frames, 0);
 });
 
+test("normal and fused destruction cancel every owned operation", async () => {
+  const pendingFrames = [];
+  const cancelledFrames = [];
+  const pendingPickViewer = await createBrowserViewer({
+    bindings: { createViewer: async () => new FakeRawViewer() },
+    canvas: {},
+    viewport: viewport(),
+    requestAnimationFrame: (callback) => {
+      pendingFrames.push(callback);
+      return 7;
+    },
+    cancelAnimationFrame: (id) => cancelledFrames.push(id),
+  });
+  pendingPickViewer.render();
+  const pickFailure = pendingPickViewer.pick({ x: 10, y: 20 }).then(
+    () => undefined,
+    (error) => error,
+  );
+  await Promise.resolve();
+
+  pendingPickViewer.destroy();
+  assert.equal((await pickFailure)?.code, "viewer_destroyed");
+  assert.equal(pendingFrames.length, 1);
+  assert.deepEqual(cancelledFrames, [7]);
+
+  let exactSignal;
+  let resolveExact;
+  const fusedViewer = await createBrowserViewer({
+    bindings: { createViewer: async () => new FusedRawViewer() },
+    canvas: {},
+    viewport: viewport(),
+    WorkerConstructor: OwnedWorkWorker,
+    workerUrl: "https://fixtures.test/stream-worker.js",
+    exactQueryBridge: {
+      confirm(request) {
+        exactSignal = request.signal;
+        return new Promise((resolve) => { resolveExact = resolve; });
+      },
+    },
+  });
+  const observed = [];
+  const unsubscribe = fusedViewer.subscribe((state) => observed.push(state));
+  const point = { sourceIdentity: GENERATED_SOURCE, pointOrdinal: 0, generation: 1 };
+  const exactOperation = fusedViewer.confirmPoint(point);
+  const loadOperation = fusedViewer.loadSource({
+    manifestUrl: "https://fixtures.test/deployment.json",
+  });
+  await Promise.resolve();
+
+  assert.throws(() => fusedViewer.setDisplayMode("rgb"), (error) => error.code === "device_lost");
+  const factsAfterFuse = {
+    exactAborted: exactSignal.aborted,
+    loadActive: fusedViewer.state().load.active,
+    workerMessages: OwnedWorkWorker.current.messages.map((message) => message.type),
+    unsubscribed: unsubscribe(),
+    observedStates: observed.length,
+  };
+  OwnedWorkWorker.current.fail();
+  resolveExact(exactResult(point));
+  await Promise.allSettled([exactOperation, loadOperation]);
+
+  assert.equal(factsAfterFuse.exactAborted, true);
+  assert.equal(factsAfterFuse.loadActive, false);
+  assert.deepEqual(factsAfterFuse.workerMessages, ["start", "cancel"]);
+  assert.equal(factsAfterFuse.unsubscribed, false);
+  assert.equal(observed.length, factsAfterFuse.observedStates);
+});
+
 test("surface_outdated preserves the viewer for bounded recovery", async () => {
   const viewer = await createBrowserViewer({
     bindings: { createViewer: async () => new OutdatedRawViewer() },
@@ -486,6 +554,32 @@ class PartialFailureWorker extends FixtureWorker {
         message: "cancelled after publication",
         safe_action: "retry",
       });
+    });
+  }
+}
+
+class OwnedWorkWorker extends FixtureWorker {
+  static current;
+
+  constructor() {
+    super();
+    this.messages = [];
+    OwnedWorkWorker.current = this;
+  }
+
+  postMessage(message) {
+    this.messages.push(message);
+  }
+
+  fail() {
+    const operation = this.messages.find((message) => message.type === "start");
+    this.emit({
+      schema: WORKER_SCHEMA,
+      type: "failure",
+      operation_id: operation.operation_id,
+      code: "cancelled",
+      message: "cancelled",
+      safe_action: "retry",
     });
   }
 }
