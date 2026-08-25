@@ -143,6 +143,9 @@ and the one thin `@punctra/react` adapter justified by the React lifecycle
 trial. Those maintainer-run trials are repository embedding evidence, not
 registry publication, broad bundler/framework support, browser qualification,
 or independent adoption.
+The exact implementation, environment, tarball contents, clean trials, command
+matrix, Chrome WebGPU facts, benchmarks, and nonclaims are recorded in the
+[v0.18 repository verification record](docs/releases/v0.18.0.md).
 
 ## Pre-v0.13 renderer quality corrective checkpoint
 
@@ -1288,6 +1291,8 @@ TypeScript, Vite development/production output, content-hashed Wasm/Worker
 assets, repeated abandoned and mounted React lifecycle tests, and the inherited
 browser acceptance host importing the SDK entry. No npm registry, CDN,
 independent host, support matrix, or compatibility promise is inferred.
+The [v0.18 repository verification record](docs/releases/v0.18.0.md) pins this
+evidence to the exact implementation commit and local environment.
 
 ### v0.19 — Browser and device qualification
 

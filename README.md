@@ -279,6 +279,11 @@ CORS, Wasm MIME, and isolation guidance. This repository evidence is not npm
 registry publication, broad bundler/framework/browser qualification,
 independent adoption, API stability, or release-candidate status.
 
+The [v0.18 repository verification record](docs/releases/v0.18.0.md) pins the
+exact implementation commit, packed-artifact contents, clean-consumer builds,
+native and GPU command matrix, Chrome WebGPU observations, generated
+benchmarks, and remaining external exits.
+
 To try the implemented View safely, follow the five-minute [first LAS/LAZ
 guide](docs/guides/first-las-laz.md). It separates position-only disk-v1 and
 attributed disk-v2 caches and explains what progressive Coverage does and does

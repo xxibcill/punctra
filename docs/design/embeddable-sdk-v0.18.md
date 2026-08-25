@@ -10,6 +10,9 @@ Vite, Worker, Wasm-URL, React Strict Mode, and teardown requirements. They are
 maintainer-run trials, not independent adoption, registry publication, or broad
 bundler/browser qualification.
 
+The completed local evidence is pinned to an exact implementation commit in the
+[v0.18 repository verification record](../releases/v0.18.0.md).
+
 ## Outcome
 
 Punctra v0.18 packages the v0.17 browser viewer as the versioned

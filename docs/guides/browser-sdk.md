@@ -156,7 +156,8 @@ node scripts/generate-browser-sdk-reference.mjs --check
 ```
 
 The [generated API reference](../api/browser-sdk.md) is derived from the exact
-packed declarations. The repository currently qualifies the two checked-in
-Vite trials and the exact local browser acceptance environment recorded for
-v0.18. Other bundlers, frameworks, browsers, devices, hosting stacks, and CSP
-deployments require their own evidence and are not implied by ESM compatibility.
+packed declarations. The [v0.18 repository verification
+record](../releases/v0.18.0.md) pins the two checked-in Vite trials and exact
+local browser acceptance environment. Other bundlers, frameworks, browsers,
+devices, hosting stacks, and CSP deployments require their own evidence and are
+not implied by ESM compatibility.

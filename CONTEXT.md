@@ -144,6 +144,9 @@ the adapter owns no UI or application policy. The clean TypeScript and React
 Vite trials are maintainer-run repository evidence, not registry publication,
 broad compatibility, independent adoption, API stability, or browser
 qualification.
+The [v0.18 repository verification record](docs/releases/v0.18.0.md) owns the
+exact local implementation, environment, packed-artifact, clean-consumer,
+native, GPU, browser, benchmark, and nonclaim facts.
 
 ## Artifact
 

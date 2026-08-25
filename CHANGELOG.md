@@ -5,6 +5,11 @@ All notable changes to Punctra are documented here. The project follows
 
 ## Unreleased - 0.18.0-alpha.1
 
+- Completed and locally repository-verified the accepted v0.18 slice at
+  implementation commit `37a2d79b60fe92520a53bc259716d0dfd5be3f68`. The
+  [v0.18 verification record](docs/releases/v0.18.0.md) pins the exact package,
+  clean-consumer, native, GPU, benchmark, and Chrome WebGPU evidence plus the
+  remaining external exits.
 - Completed the bounded [v0.18 Embeddable SDK and Framework Integration
   slice](docs/design/embeddable-sdk-v0.18.md): the v0.17 viewer now ships from
   a versioned local npm tarball as `@punctra/viewer`, with a closed ESM export
