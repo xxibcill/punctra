@@ -26,6 +26,9 @@ test("runtime error codes and display modes agree with TypeScript declarations",
   assert.equal(new Set(VIEWER_ERROR_CODES).size, VIEWER_ERROR_CODES.length);
   assert.equal("BrowserViewer" in runtime, false);
   assert.match(declaration, /export interface BrowserViewer \{/);
+  assert.match(declaration, /pause\(\): ViewerState;/);
+  assert.match(declaration, /resume\(\): ViewerState;/);
+  assert.match(declaration, /dispose\(\): void;/);
 });
 
 test("failed facade construction shuts down the raw viewer", async () => {
@@ -87,6 +90,8 @@ test("viewer exposes typed lifecycle, camera, display, state subscription, and c
   assert.equal(viewer.state().schema, "punctra-viewer-state-v1");
   assert.equal(Object.isFrozen(viewer.state()), true);
   assert.equal(viewer.state().source.identity, GENERATED_SOURCE);
+  assert.equal(viewer.pause().lifecycle, "hidden");
+  assert.equal(viewer.resume().lifecycle, "ready");
   viewer.setHighlights([]);
   assert.equal(viewer.state().highlights.pointCount, 0);
   viewer.setCamera({
@@ -123,8 +128,8 @@ test("viewer exposes typed lifecycle, camera, display, state subscription, and c
   assert.ok(observed.length >= 4);
   assert.equal(unsubscribe(), true);
 
-  viewer.destroy();
-  viewer.destroy();
+  viewer.dispose();
+  viewer.dispose();
   assert.equal(viewer.state().lifecycle, "destroyed");
   assert.throws(
     () => viewer.render(),
@@ -396,6 +401,33 @@ test("viewer owns worker publication, streamed picking, highlights, and exact ha
     viewer.confirmPoint(pick),
     (error) => error.code === "stale_generation",
   );
+});
+
+test("relative Source manifests keep the caller document base across Worker paths", async () => {
+  const originalDocument = globalThis.document;
+  globalThis.document = { baseURI: "https://caller.test/application/index.html" };
+  try {
+    const viewer = await createBrowserViewer({
+      bindings: { createViewer: async () => new FakeRawViewer() },
+      canvas: {},
+      viewport: viewport(),
+      WorkerConstructor: ManifestCaptureWorker,
+      workerUrl: "https://caller.test/assets/stream-worker-hashed.js",
+    });
+
+    await viewer.loadSource({ manifestUrl: "./deployment.json" });
+
+    const start = ManifestCaptureWorker.current.messages.find(
+      (message) => message.type === "start",
+    );
+    assert.equal(
+      start.manifest_url,
+      "https://caller.test/application/deployment.json",
+    );
+  } finally {
+    if (originalDocument === undefined) delete globalThis.document;
+    else globalThis.document = originalDocument;
+  }
 });
 
 test("viewer rejects oversized highlights before inspecting Point identities", async () => {
@@ -698,6 +730,21 @@ class PartialFailureWorker extends FixtureWorker {
   }
 }
 
+class ManifestCaptureWorker extends FixtureWorker {
+  static current;
+
+  constructor() {
+    super();
+    this.messages = [];
+    ManifestCaptureWorker.current = this;
+  }
+
+  postMessage(message) {
+    this.messages.push(message);
+    super.postMessage(message);
+  }
+}
+
 class OwnedWorkWorker extends FixtureWorker {
   static current;
 
@@ -966,7 +1013,7 @@ class PendingRawViewer extends FakeRawViewer {
 function diagnosticsFixture() {
   return {
     schema: "punctra-browser-viewer-v1",
-    package_version: "0.17.0-alpha.1",
+    package_version: "0.18.0-alpha.1",
     phase: "ready",
     rendered_frames: 0,
     hidden_frame_skips: 0,

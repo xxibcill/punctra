@@ -255,6 +255,8 @@ export interface BrowserViewer {
   subscribe(listener: (state: ViewerState) => void): () => boolean;
   resize(viewport: ViewportInput): ViewerState;
   setVisible(visible: boolean): ViewerState;
+  pause(): ViewerState;
+  resume(): ViewerState;
   setCamera(camera: ViewerCamera): ViewerState;
   setDisplayMode(mode: DisplayMode): ViewerState;
   render(): ViewerState;
@@ -271,4 +273,5 @@ export interface BrowserViewer {
   clearHighlights(generation?: number): ViewerState;
   confirmPoint(point: PointIdentity & { readonly generation?: number }, options?: { readonly signal?: AbortSignal }): Promise<ExactPoint>;
   destroy(): void;
+  dispose(): void;
 }

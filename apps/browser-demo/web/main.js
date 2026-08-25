@@ -2,15 +2,15 @@ const BUILD_CACHE_TOKEN = encodeURIComponent(
   new URL(import.meta.url).searchParams.get("v") ?? "unversioned",
 );
 
-const { DISPLAY_MODES, ViewerError, createBrowserViewer } = await import(
-  `./viewer-api.js?v=${BUILD_CACHE_TOKEN}`
-);
-const { createLasExactQueryBridge } = await import(
-  `./exact-query.js?v=${BUILD_CACHE_TOKEN}`
-);
-const { createInputNormalizer } = await import(
-  `./viewer-input.js?v=${BUILD_CACHE_TOKEN}`
-);
+const [
+  { DISPLAY_MODES, ViewerError, createViewer },
+  { createInputNormalizer },
+  { createLasExactQueryBridge },
+] = await Promise.all([
+  import(`./sdk.js?v=${BUILD_CACHE_TOKEN}`),
+  import(`./viewer-input.js?v=${BUILD_CACHE_TOKEN}`),
+  import(`./exact-query.js?v=${BUILD_CACHE_TOKEN}`),
+]);
 const canvas = document.querySelector("#punctra-canvas");
 const canvasShell = document.querySelector("#canvas-shell");
 const statusBlock = document.querySelector("#status-block");
@@ -55,7 +55,6 @@ const HOST_CAMERA_PROJECTION_POLICIES = Object.freeze({
     alternate: (camera) => cameraWithProjection(camera, "perspective", Math.PI / 3),
   }),
 });
-let bindings;
 let viewer;
 let viewerSubscription;
 let inputNormalizer;
@@ -63,6 +62,7 @@ let suspended = false;
 let smokeRunning = false;
 let smokePassed = false;
 let smokeRecord;
+let inputAcceptanceFacts;
 let latestLoad;
 let exactPoint;
 let resizeFrame;
@@ -182,27 +182,18 @@ function assertFact(condition, message) {
   if (!condition) throw new Error(`Browser acceptance invariant failed: ${message}`);
 }
 
-async function loadBindings() {
-  if (bindings) return;
-  const module = await import(`./pkg/browser_demo.js?v=${BUILD_CACHE_TOKEN}`);
-  await module.default({
-    module_or_path: new URL(`./pkg/browser_demo_bg.wasm?v=${BUILD_CACHE_TOKEN}`, import.meta.url),
-  });
-  bindings = module;
-}
-
 async function initializeViewer() {
-  await loadBindings();
   const exactQueryBridge = createLasExactQueryBridge({
     manifestUrl: STREAM_MANIFEST_URL,
     credentials: "same-origin",
   });
-  viewer = await createBrowserViewer({
-    bindings,
+  viewer = await createViewer({
     canvas,
     viewport: requestedViewport(),
     exactQueryBridge,
-    workerUrl: new URL("./stream-worker.js", import.meta.url),
+    assets: {
+      cacheKey: BUILD_CACHE_TOKEN,
+    },
   });
   viewerSubscription = viewer.subscribe(publishState);
   inputNormalizer = createInputNormalizer(canvas, applyNormalizedInput, {
@@ -223,18 +214,18 @@ function discardViewer() {
   viewerSubscription = undefined;
   inputNormalizer?.dispose();
   inputNormalizer = undefined;
-  viewer?.destroy();
+  viewer?.dispose();
   viewer = undefined;
 }
 
 async function runSmokePath() {
   smokeRunning = true;
   smokePassed = false;
-  smokeRecord = { schema: "punctra-browser-viewer-acceptance-v1" };
+  smokeRecord = { schema: "punctra-browser-sdk-acceptance-v1" };
   setHarnessState("checking", "Running public viewer lifecycle checks…");
   const initial = await initializeViewer();
   let state = viewer.render();
-  assertFact(state.packageVersion === "0.17.0-alpha.1", "v0.17 package version");
+  assertFact(state.packageVersion === "0.18.0-alpha.1", "v0.18 package version");
   assertFact(state.capabilities.secure_context === true, "secure context");
   assertFact(state.capabilities.webgpu === true, "WebGPU capability");
   assertFact(state.source.publishedPoints === 1_089, "generated fixture Points");
@@ -249,10 +240,10 @@ async function runSmokePath() {
   state = viewer.resize(resized);
   assertFact(state.viewport.physicalWidth === Math.round(resized.cssWidth * resized.devicePixelRatio), "bounded resize");
   viewer.render();
-  viewer.setVisible(false);
+  viewer.pause();
   state = viewer.render();
   assertFact(state.lifecycle === "hidden", "hidden lifecycle");
-  viewer.setVisible(true);
+  viewer.resume();
   viewer.render();
 
   const generatedPick = await pickCentre();
@@ -315,6 +306,7 @@ async function runSmokePath() {
   assertFact(viewer.render().camera.projection === "orthographic", "orthographic camera");
   viewer.setCamera(perspective);
   assertFact(viewer.render().camera.projection === "perspective", "perspective camera");
+  const normalizedInput = await exerciseNormalizedInput();
 
   const provisional = await pickResidentPoint();
   assertFact(provisional !== undefined, "streamed provisional pick");
@@ -343,7 +335,7 @@ async function runSmokePath() {
   await expectCode(viewer.confirmPoint(provisional), "stale_generation");
 
   smokeRecord = {
-    schema: "punctra-browser-viewer-acceptance-v1",
+    schema: "punctra-browser-sdk-acceptance-v1",
     generated: generatedEvidence,
     destruction: destructionEvidence,
     cancellation,
@@ -351,7 +343,7 @@ async function runSmokePath() {
     warm: compactLoad(warm),
     display_modes: displayEvidence,
     projections: ["orthographic", "perspective"],
-    input_normalizer: ["pointer", "wheel", "keyboard", "touch"],
+    input_normalizer: normalizedInput,
     provisional,
     exact: exactPoint,
     stale_generation_rejected: true,
@@ -359,8 +351,9 @@ async function runSmokePath() {
     final_state: viewer.state(),
     nonclaims: [
       "no arbitrary Source or Query support",
-      "no SDK packaging or framework qualification",
-      "no broad browser, adoption, support, or release-candidate claim",
+      "no npm registry publication or production hosting qualification",
+      "no browser, device, or framework matrix beyond the checked-in trials",
+      "no independent adoption, stable-API, support, or release-candidate claim",
     ],
   };
   smokePassed = true;
@@ -368,7 +361,7 @@ async function runSmokePath() {
   publishState(viewer.state());
   setHarnessState(
     "passed",
-    "PASS — public lifecycle, streaming, five displays, two projections, pick, highlight, exact confirmation, cancellation, and stale-generation rejection verified locally.",
+    "PASS — public lifecycle, streaming, five displays, two projections, normalized input, pick, highlight, exact confirmation, cancellation, and stale-generation rejection verified locally.",
   );
 }
 
@@ -488,7 +481,7 @@ function perspectiveVisibleHeight(camera) {
 }
 
 function applyNormalizedInput(input) {
-  if (!viewer || smokeRunning || suspended) return;
+  if (!viewer || suspended || (smokeRunning && inputAcceptanceFacts === undefined)) return;
   try {
     const camera = cameraInputFromState(viewer.state());
     const next = input.kind === "orbit"
@@ -500,11 +493,138 @@ function applyNormalizedInput(input) {
           : keyboardCamera(camera, input.code);
     if (!next) return;
     viewer.setCamera(next);
+    recordInputAcceptance(input, next);
     void viewer.requestRender().catch((error) => publishFailure(error));
     projectionButton.textContent = next.projection === "perspective" ? "Orthographic" : "Perspective";
   } catch (error) {
     publishFailure(error);
   }
+}
+
+async function exerciseNormalizedInput() {
+  const initialCamera = cameraInputFromState(viewer.state());
+  inputAcceptanceFacts = [];
+  try {
+    const preventedEvents = [
+      exercisePointerInput(),
+      exerciseTouchInput(),
+      exerciseWheelInput(),
+      exerciseKeyboardInput(),
+    ];
+    await viewer.requestRender();
+
+    const channels = new Set(inputAcceptanceFacts.map((fact) => fact.channel));
+    for (const channel of ["pointer", "touch", "wheel", "keyboard"]) {
+      assertFact(channels.has(channel), `normalized ${channel} input`);
+    }
+    for (const [channel, event] of preventedEvents) {
+      assertFact(event.defaultPrevented, `normalized ${channel} default prevention`);
+    }
+    return inputAcceptanceFacts;
+  } finally {
+    inputAcceptanceFacts = undefined;
+    viewer.setCamera(initialCamera);
+    viewer.render();
+  }
+}
+
+function exercisePointerInput() {
+  dispatchPointer("pointerdown", {
+    pointerId: 101,
+    pointerType: "mouse",
+    clientX: 100,
+    clientY: 100,
+    buttons: 1,
+  });
+  const move = dispatchPointer("pointermove", {
+    pointerId: 101,
+    pointerType: "mouse",
+    clientX: 112,
+    clientY: 107,
+    buttons: 1,
+  });
+  dispatchPointer("pointerup", {
+    pointerId: 101,
+    pointerType: "mouse",
+    clientX: 112,
+    clientY: 107,
+  });
+  return ["pointer", move];
+}
+
+function exerciseTouchInput() {
+  dispatchPointer("pointerdown", {
+    pointerId: 201,
+    pointerType: "touch",
+    clientX: 100,
+    clientY: 100,
+    buttons: 1,
+  });
+  dispatchPointer("pointerdown", {
+    pointerId: 202,
+    pointerType: "touch",
+    clientX: 120,
+    clientY: 100,
+    buttons: 1,
+  });
+  const move = dispatchPointer("pointermove", {
+    pointerId: 202,
+    pointerType: "touch",
+    clientX: 140,
+    clientY: 100,
+    buttons: 1,
+  });
+  dispatchPointer("pointerup", { pointerId: 201, pointerType: "touch" });
+  dispatchPointer("pointerup", { pointerId: 202, pointerType: "touch" });
+  return ["touch", move];
+}
+
+function exerciseWheelInput() {
+  const event = new WheelEvent("wheel", {
+    bubbles: true,
+    cancelable: true,
+    deltaY: 100,
+    deltaMode: WheelEvent.DOM_DELTA_PIXEL,
+  });
+  canvas.dispatchEvent(event);
+  return ["wheel", event];
+}
+
+function exerciseKeyboardInput() {
+  const event = new KeyboardEvent("keydown", {
+    bubbles: true,
+    cancelable: true,
+    code: "KeyP",
+  });
+  canvas.dispatchEvent(event);
+  return ["keyboard", event];
+}
+
+function dispatchPointer(type, options) {
+  const event = new PointerEvent(type, {
+    bubbles: true,
+    cancelable: true,
+    ...options,
+  });
+  canvas.dispatchEvent(event);
+  return event;
+}
+
+function recordInputAcceptance(input, camera) {
+  if (inputAcceptanceFacts === undefined) return;
+  const channel = input.kind === "keyboard"
+    ? "keyboard"
+    : input.source === "touch"
+      ? "touch"
+      : input.source === "wheel"
+        ? "wheel"
+        : "pointer";
+  inputAcceptanceFacts.push(Object.freeze({
+    channel,
+    kind: input.kind,
+    source: input.source ?? "keyboard",
+    camera_projection: camera.projection,
+  }));
 }
 
 function orbitCamera(camera, horizontalPixels, verticalPixels) {
@@ -598,7 +718,8 @@ function toggleVisibility() {
   if (!viewer || smokeRunning) return;
   try {
     suspended = !suspended;
-    viewer.setVisible(!suspended);
+    if (suspended) viewer.pause();
+    else viewer.resume();
     visibilityButton.textContent = suspended ? "Resume rendering" : "Suspend rendering";
     if (!suspended) viewer.render();
   } catch (error) {
@@ -674,7 +795,8 @@ function synchronizeDocumentVisibility() {
   if (!viewer || smokeRunning) return;
   try {
     const visible = document.visibilityState === "visible" && !suspended;
-    viewer.setVisible(visible);
+    if (visible) viewer.resume();
+    else viewer.pause();
     if (visible) viewer.render();
   } catch (error) {
     publishFailure(error, true);
@@ -696,6 +818,7 @@ window.__PUNCTRA_BROWSER_VIEWER_API__ = {
   smoke: () => smokeRecord ?? null,
   harness: () => document.body.dataset.browserSmoke,
 };
+window.__PUNCTRA_BROWSER_SDK__ = window.__PUNCTRA_BROWSER_VIEWER_API__;
 window.__PUNCTRA_BROWSER_FOUNDATION__ = window.__PUNCTRA_BROWSER_VIEWER_API__;
 window.__PUNCTRA_BROWSER_STREAMING__ = window.__PUNCTRA_BROWSER_VIEWER_API__;
 

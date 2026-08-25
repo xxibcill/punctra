@@ -1,6 +1,6 @@
 [package]
 name = "browser-demo"
-description = "Private local WebAssembly/WebGPU browser acceptance host for Punctra."
+description = "WebAssembly/WebGPU host packaged by the Punctra browser SDK."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

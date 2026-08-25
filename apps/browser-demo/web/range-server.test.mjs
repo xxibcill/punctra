@@ -5,7 +5,9 @@ import { once } from "node:events";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-import { runStreamingOperation } from "./streaming-protocol.js";
+import { loadStreamingProtocol } from "./module-loader.js";
+
+const { runStreamingOperation } = await loadStreamingProtocol("range-server-test");
 
 const serverPath = fileURLToPath(
   new URL("../../../scripts/serve-browser-demo.py", import.meta.url),

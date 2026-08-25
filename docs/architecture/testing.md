@@ -11,7 +11,8 @@ support qualification outstanding; v0.14 bounded exact Terrain QA and
 correction-loop slice Complete and repository-verified; v0.15 bounded local
 WebAssembly/WebGPU browser-foundation slice Complete and repository-verified;
 v0.16 bounded HTTP Range/cache/worker slice Complete and repository-verified;
-v0.17 bounded viewer API/exact-Point slice Complete and repository-verified;
+v0.17 bounded viewer API/exact-Point and v0.18 packed SDK/React lifecycle
+slices Complete and repository-verified;
 all gates run locally**
 
 Verification follows public contracts first. Private tests are used for fault
@@ -599,6 +600,29 @@ v0.15 lifecycle and v0.16 cold/recreation/warm evidence. A passing local Chrome
 SDK packaging, framework compatibility, arbitrary Sources or Queries, API
 stability, or a browser support matrix.
 
+## v0.18 packed browser SDK verification lane
+
+The v0.18 lane first tests asset resolution, cache-token bounds, lifecycle
+aliases, bundler-aware Worker construction, declaration exports, and repeated
+React asynchronous mount/cleanup behavior directly in Node. The generated API
+reference must match the exact packed declaration sources.
+
+`scripts/build-browser-sdk.sh` builds the release Wasm binding and creates exact
+`@punctra/viewer` and `@punctra/react` npm tarballs. The verification runner
+inspects their contents, copies both checked-in trials to new temporary
+directories, installs the tarballs rather than repository paths, and runs
+strict TypeScript. It executes Vite development and production builds, verifies
+the plain SDK dynamic-import split, content-hashed Wasm and module-Worker
+assets, and development-server transforms. The React lifecycle test repeats 64
+abandoned async mounts and additionally proves mounted unsubscribe-before-
+dispose ordering and idempotent cleanup.
+
+The real browser host now imports the package SDK entry rather than coordinating
+raw Wasm bindings. A pass qualifies only these exact local packed artifacts,
+Vite/TypeScript versions, and recorded browser environment. It does not prove
+npm publication, other bundlers/frameworks, independent adoption, CSP-host
+compatibility, API stability, broad browser support, or a release candidate.
+
 ## Local verification lanes
 
 ### Change qualification
@@ -609,7 +633,7 @@ command list; this architecture guide does not duplicate it. Required local GPU
 lanes use `PUNCTRA_REQUIRE_GPU=1`, including renderer appearance, corpus,
 offscreen, planner, display-mapping, and public-host acceptance.
 
-The v0.15–v0.17 browser lane is separate from native GPU acceptance. It uses
+The v0.15–v0.18 browser lane is separate from native GPU acceptance. It uses
 the build and strict local-Range-host steps in `CONTRIBUTING.md`, requires the
 document itself to publish `PASS`, and records the exact browser/adapter facts
 rather than claiming a browser support matrix.

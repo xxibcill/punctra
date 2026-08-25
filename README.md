@@ -261,13 +261,36 @@ exact implementation commit, native and browser environments, complete local
 command matrix, public viewer observations, exact record evidence, generated
 benchmarks, and remaining external exits.
 
+Version 0.18.0-alpha.1 completes the bounded [Embeddable SDK and Framework
+Integration design](docs/design/embeddable-sdk-v0.18.md). The same viewer is
+now packed as `@punctra/viewer` with an ESM entry, exact TypeScript
+declarations, package-relative Wasm and module-Worker resolution, explicit
+copied-asset URLs, bounded cache tokens, and lifecycle-safe `pause`, `resume`,
+and idempotent `dispose`. A generated [browser SDK API
+reference](docs/api/browser-sdk.md) records the supported exports.
+
+Two clean applications install only locally packed tarballs and pass strict
+TypeScript plus Vite development/production builds. The plain integration
+dynamically imports the SDK; the React trial uses the thin `@punctra/react`
+hook and verifies asynchronous unmount, Strict Mode/hot-replacement cleanup,
+resize, and pause/resume translation over the same viewer API. Follow the
+[browser SDK guide](docs/guides/browser-sdk.md) for installation, asset, CSP,
+CORS, Wasm MIME, and isolation guidance. This repository evidence is not npm
+registry publication, broad bundler/framework/browser qualification,
+independent adoption, API stability, or release-candidate status.
+
+The [v0.18 repository verification record](docs/releases/v0.18.0.md) pins the
+exact implementation commit, packed-artifact contents, clean-consumer builds,
+native and GPU command matrix, Chrome WebGPU observations, generated
+benchmarks, and remaining external exits.
+
 To try the implemented View safely, follow the five-minute [first LAS/LAZ
 guide](docs/guides/first-las-laz.md). It separates position-only disk-v1 and
 attributed disk-v2 caches and explains what progressive Coverage does and does
 not mean.
 
 Later direction and the exact external product gates are described in the
-[living roadmap](ROADMAP.md). The linked v0.15 through v0.17 designs define the
+[living roadmap](ROADMAP.md). The linked v0.15 through v0.18 designs define the
 completed bounded repository scopes. Later Candidate themes do not expand
 accepted scope by themselves.
 

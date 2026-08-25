@@ -1,17 +1,15 @@
+import { loadViewerModules } from "./module-loader.js";
+
 const MODULE_CACHE_TOKEN = encodeURIComponent(
   new URL(import.meta.url).searchParams.get("v") ?? "unversioned",
 );
+const dependencyModules = loadViewerModules(MODULE_CACHE_TOKEN);
 const [
   { appendTransferredOrdinals },
   { runWorkerOperation },
   { WORKER_SCHEMA, workerFailure },
   { CAMERA_PROJECTION_POLICIES },
-] = await Promise.all([
-  import(`./stream-ordinals.js?v=${MODULE_CACHE_TOKEN}`),
-  import(`./worker-operation.js?v=${MODULE_CACHE_TOKEN}`),
-  import(`./worker-protocol.js?v=${MODULE_CACHE_TOKEN}`),
-  import(`./camera-policy.js?v=${MODULE_CACHE_TOKEN}`),
-]);
+] = await dependencyModules;
 
 export const DISPLAY_MODES = Object.freeze([
   "neutral",
@@ -222,6 +220,7 @@ class BrowserViewer {
   #destroyed = false;
   #exactQueryBridge;
   #WorkerConstructor;
+  #workerFactory;
   #workerUrl;
   #requestAnimationFrame;
   #cancelAnimationFrame;
@@ -236,6 +235,7 @@ class BrowserViewer {
     this.#raw = raw;
     this.#exactQueryBridge = options.exactQueryBridge;
     this.#WorkerConstructor = options.WorkerConstructor ?? globalThis.Worker;
+    this.#workerFactory = options.workerFactory;
     this.#workerUrl = String(options.workerUrl ?? new URL("./stream-worker.js", import.meta.url));
     this.#requestAnimationFrame = options.requestAnimationFrame
       ?? globalThis.requestAnimationFrame?.bind(globalThis)
@@ -280,6 +280,14 @@ class BrowserViewer {
       if (!visible) this.#cancelScheduledRender("scheduled render was cancelled because the viewer was hidden");
       return this.#state;
     });
+  }
+
+  pause() {
+    return this.setVisible(false);
+  }
+
+  resume() {
+    return this.setVisible(true);
   }
 
   setCamera(camera) {
@@ -345,10 +353,10 @@ class BrowserViewer {
   async #loadSource(options) {
     this.#ensureActive();
     if (this.#loadController) throw new ViewerError("load_busy", "one Source load is already active");
-    if (typeof this.#WorkerConstructor !== "function") {
+    if (typeof this.#workerFactory !== "function" && typeof this.#WorkerConstructor !== "function") {
       throw new ViewerError("worker_failed", "Web Worker construction is unavailable");
     }
-    const manifestUrl = requiredString(options?.manifestUrl, "manifestUrl");
+    const manifestUrl = callerOwnedUrl(options?.manifestUrl, "manifestUrl");
     const cacheMode = cacheModeInput(options?.cacheMode ?? "none");
     const credentials = credentialsInput(options?.credentials ?? "same-origin");
     const invalidate = options?.invalidate === true;
@@ -365,6 +373,7 @@ class BrowserViewer {
     try {
       const result = await runWorkerOperation({
         WorkerConstructor: this.#WorkerConstructor,
+        workerFactory: this.#workerFactory,
         workerUrl,
         workerName: operationId,
         timeoutMilliseconds: LOAD_TIMEOUT_MILLISECONDS,
@@ -579,6 +588,10 @@ class BrowserViewer {
       false,
     );
     this.#destroyViewer(renderFailure);
+  }
+
+  dispose() {
+    this.destroy();
   }
 
   #destroyViewer(failure) {
@@ -995,9 +1008,18 @@ function positiveInteger(value, label) {
   return value;
 }
 
-function requiredString(value, label) {
-  if (typeof value !== "string" || value.length === 0) throw invalidArgument(`${label} must be a nonempty string`);
-  return value;
+function callerOwnedUrl(value, label) {
+  if (typeof value !== "string" || value.length === 0) {
+    throw invalidArgument(`${label} must be a nonempty string`);
+  }
+  try {
+    const callerBase = globalThis.document?.baseURI
+      ?? globalThis.location?.href
+      ?? import.meta.url;
+    return new URL(value, callerBase).href;
+  } catch {
+    throw invalidArgument(`${label} must be a valid URL`);
+  }
 }
 
 function cacheModeInput(value) {

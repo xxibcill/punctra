@@ -16,9 +16,10 @@ timing, independent adoption, partner validation, and support qualification
 outstanding; v0.15 local WebAssembly/WebGPU browser-foundation slice Complete
 and repository-verified; v0.16 bounded immutable-LAS HTTP Range, browser-cache,
 and worker-decoding slice Complete and repository-verified; v0.17 bounded
-framework-neutral browser viewer API and immutable-LAS exact-Point bridge
-Complete and repository-verified; arbitrary Source delivery, broad browser
-qualification, independent adoption, SDK stability,
+framework-neutral browser viewer API and immutable-LAS exact-Point bridge plus
+v0.18 packed viewer SDK and thin React lifecycle adapter Complete and
+repository-verified; arbitrary Source delivery, broad bundler/framework/browser
+qualification, independent adoption, API stability,
 and support qualification outstanding; broader terrain, export, external
 interoperability evidence, and product layers remain deferred
 
@@ -41,6 +42,7 @@ The accepted versioned designs are authoritative:
 - [v0.15 WebAssembly and WebGPU Browser Foundation](../design/browser-foundation-v0.15.md)
 - [v0.16 HTTP Range Streaming, Browser Caching, and Worker Decoding](../design/http-range-streaming-v0.16.md)
 - [v0.17 Browser Viewer API](../design/browser-viewer-api-v0.17.md)
+- [v0.18 Embeddable SDK and Framework Integration](../design/embeddable-sdk-v0.18.md)
 
 The current foundation is headless and embeddable. It reads immutable Sources,
 prepares a complete rebuildable Spatial Index, resolves progressive display,
@@ -77,14 +79,22 @@ publishes bounded renderer batches. Native fixture generation depends on
 `source-las` and `point-index`, but the browser runtime adds no foundation-crate
 dependency and exposes no public networking or viewer seam.
 
-The v0.17 implementation stays inside `browser-demo` but adds its first
+The v0.17 implementation added its first
 coherent framework-neutral host seam: `viewer-api.js` plus matching TypeScript
 declarations own lifecycle, camera, rendering, streaming, state, pick,
 highlight, and exact-handoff composition. Raw worker and Wasm publication
 methods remain private. `viewer-input.js` normalizes bounded input facts without
 owning navigation policy, and `exact-query.js` supplies only the fixture's
-separate one-record LAS authority. Packaging and framework integration remain
-v0.18 concerns.
+separate one-record LAS authority.
+
+The v0.18 implementation gives `apps/browser-demo/web` the closed
+`@punctra/viewer` package entry, package-relative or explicit Wasm/Worker asset
+resolution, packed declarations, generated API documentation, and lifecycle
+aliases over the same viewer. `packages/react` may depend only on that package
+and React; its hook translates asynchronous mount, resize, active state,
+unmount, and replay cleanup without adding UI or another viewer model. The two
+checked-in applications under `examples/` are clean packed-artifact trials,
+not application modules or broad compatibility claims.
 
 The frozen [v0.9 public interface review](v0.9-interface-review.md) classifies
 reusable, adapter-author, test-support, and private application surfaces. The

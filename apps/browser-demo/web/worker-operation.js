@@ -1,5 +1,6 @@
 export function runWorkerOperation({
   WorkerConstructor = globalThis.Worker,
+  workerFactory,
   workerUrl,
   workerName,
   timeoutMilliseconds,
@@ -12,7 +13,10 @@ export function runWorkerOperation({
   onMessage,
 }) {
   return new Promise((resolve, reject) => {
-    const worker = new WorkerConstructor(workerUrl, { type: "module", name: workerName });
+    const workerOptions = { type: "module", name: workerName };
+    const worker = workerFactory
+      ? workerFactory(workerUrl, workerOptions)
+      : new WorkerConstructor(workerUrl, workerOptions);
     let settled = false;
     const timeout = globalThis.setTimeout(
       () => settle(reject, timeoutFailure),

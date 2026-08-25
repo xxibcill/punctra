@@ -13,8 +13,8 @@ preserves those authority boundaries and frozen Run-v1; v0.14 bounded exact
 Terrain QA and correction-loop slice Complete and repository-verified; v0.15
 bounded local WebAssembly/WebGPU browser-host workflow Complete and repository-
 verified; v0.16 bounded immutable-LAS Range/cache/Worker workflow Complete and
-repository-verified; v0.17 bounded viewer API/exact-Point workflow Complete and
-repository-verified; arbitrary remote browser
+repository-verified; v0.17 bounded viewer API/exact-Point workflow and v0.18
+packed SDK/React lifecycle workflow Complete and repository-verified; arbitrary remote browser
 delivery and broader workflows remain outstanding**
 
 The host composes sibling modules explicitly. Lower crates never call back into
@@ -702,6 +702,40 @@ completion rechecks generation and Source identity after the asynchronous
 bridge returns. Cancellation preserves the last complete frame; fused device,
 surface, or partial-publication failures destroy the viewer before returning a
 bounded structured error.
+
+## 11e. Install and own the packaged SDK lifecycle
+
+The v0.18 package adds no second viewer state model. It resolves deployable
+assets and then enters the same v0.17 façade. The framework adapter translates
+only its host lifecycle:
+
+~~~mermaid
+sequenceDiagram
+    participant APP as TypeScript or React host
+    participant SDK as @punctra/viewer
+    participant ASSET as Wasm / module Worker assets
+    participant API as BrowserViewer
+    participant RA as @punctra/react
+
+    APP->>SDK: import packed artifact
+    SDK->>ASSET: resolve import.meta.url or explicit URLs
+    APP->>SDK: createViewer(canvas, viewport)
+    SDK->>ASSET: initialize one matching Wasm module
+    SDK-->>APP: independent disposable BrowserViewer
+    APP->>API: resize / pause / resume / render
+    APP->>API: dispose
+    RA->>SDK: create after caller canvas mounts
+    RA->>API: resize / pause / resume
+    RA->>API: unsubscribe then dispose on cleanup
+    SDK-->>RA: late async viewer after cleanup
+    RA->>API: dispose without publication
+~~~
+
+Bundler-owned Worker construction uses the static module-Worker form so the
+qualified build can include its private dependency graph and content hash.
+Explicit Worker URLs opt out of that build behavior and make co-located asset
+deployment a host obligation. Neither path changes Source URL, credentials,
+cache consent, interaction policy, exact authority, or recovery ownership.
 
 ## 12. Cancellation and crash matrix
 

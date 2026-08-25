@@ -1,0 +1,23 @@
+{
+  "name": "punctra-browser-react-trial",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --import ./hook-test-loader.mjs --test hook.test.mjs",
+    "typecheck": "tsc --noEmit",
+    "build": "vite build",
+    "build:development": "vite build --mode development"
+  },
+  "dependencies": {
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.5",
+    "jsdom": "30.0.1",
+    "typescript": "7.0.2",
+    "vite": "8.2.2"
+  }
+}

@@ -1,9 +1,9 @@
-//! Private WebAssembly/WebGPU browser acceptance host.
+//! WebAssembly/WebGPU host behind the packaged browser SDK.
 //!
-//! This package is a repository verification application, not the supported
-//! JavaScript SDK planned by the roadmap. The target-neutral host and scene
-//! models retain native unit coverage while the browser adapter is compiled
-//! only for `wasm32`.
+//! The supported JavaScript SDK owns the public distribution boundary while
+//! this Rust package retains the private low-level renderer adapter. The
+//! target-neutral host and scene models retain native unit coverage while the
+//! browser adapter is compiled only for `wasm32`.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
