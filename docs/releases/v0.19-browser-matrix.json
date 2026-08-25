@@ -1,0 +1,162 @@
+{
+  "schema": "punctra-browser-qualification-matrix-v1",
+  "release": "0.19.0-alpha.1",
+  "observed_on": "2026-08-25",
+  "qualified_entries": [
+    {
+      "id": "codex-iab-chromium-151-macos-26-apple-m5-pro",
+      "status": "repository_qualified_exact_lane",
+      "browser": {
+        "surface": "Codex in-app browser",
+        "engine": "Chromium",
+        "user_agent_version": "151.0.0.0",
+        "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36",
+        "language": "en-US",
+        "logical_processors": 15
+      },
+      "operating_system": {
+        "name": "macOS",
+        "version": "26.5.2",
+        "build": "25F84",
+        "architecture": "arm64",
+        "user_agent_platform": "MacIntel",
+        "note": "The browser's reduced user-agent OS token is not the operating-system version authority."
+      },
+      "device": {
+        "class": "Apple silicon laptop",
+        "gpu": "Apple M5 Pro",
+        "gpu_cores": 16,
+        "gpu_class": "integrated",
+        "metal_support": "Metal 4",
+        "mapping_note": "The browser exposed only a generic WebGPU adapter name; the physical GPU mapping is a local-system inference from the sole installed GPU."
+      },
+      "webgpu": {
+        "adapter_name": "browser WebGPU adapter",
+        "backend": "BrowserWebGpu",
+        "device_type": "Other",
+        "surface_format": "Bgra8Unorm",
+        "composite_alpha_mode": "Opaque",
+        "present_mode": "fifo",
+        "render_attachment": true,
+        "blendable": true,
+        "required_feature_count": 0,
+        "max_buffer_size": 4294967292,
+        "max_texture_dimension_2d": 16384,
+        "max_bind_groups": 4,
+        "max_vertex_buffers": 8,
+        "max_color_attachments": 8
+      },
+      "display": {
+        "physical_viewport": [1749, 1093],
+        "css_viewport": [874.28125, 546.421875],
+        "device_pixel_ratio": 2,
+        "screen_css_pixels": [1512, 982],
+        "color_depth": 30,
+        "pixel_depth": 30,
+        "canvas_bytes": 7646628,
+        "display_path": "built-in Retina display"
+      },
+      "workload": {
+        "deployment_id": "repository-las-v1",
+        "source_identity": "c459ff39717b7d6994aaebf344641f5a3add7faf65e249b85933ebd066d1c26e",
+        "source_points": 70000,
+        "coverage": "sampled",
+        "displayed_points": 4096,
+        "displayed_batches": 4
+      },
+      "observations": {
+        "acceptance_schema": "punctra-browser-qualification-v1",
+        "cold": {
+          "first_coverage_milliseconds": 17.799999952316284,
+          "settled_view_milliseconds": 19.799999952316284,
+          "main_thread_batch_milliseconds_high_water": 0.5,
+          "binary_requests": 3,
+          "requested_bytes": 172696,
+          "received_bytes": 172696,
+          "concurrent_response_bytes_high_water": 172032,
+          "worker_staging_bytes_high_water": 204800
+        },
+        "warm": {
+          "first_coverage_milliseconds": 15.699999809265137,
+          "settled_view_milliseconds": 19.199999809265137,
+          "main_thread_batch_milliseconds_high_water": 0.9000000953674316,
+          "binary_requests": 0,
+          "verified_cache_hits": 3,
+          "verified_cache_bytes": 172696
+        },
+        "foreground_frames": {
+          "sample_count": 30,
+          "callback_interval_p50_milliseconds": 8.300000000000011,
+          "callback_interval_p95_milliseconds": 9.399999999999977,
+          "callback_interval_max_milliseconds": 10.299999999999955,
+          "submission_p50_milliseconds": 0.20000004768371582,
+          "submission_p95_milliseconds": 0.3000001907348633,
+          "submission_max_milliseconds": 0.3000001907348633
+        },
+        "resources": {
+          "retained_record_bytes": 131072,
+          "renderer_resident_bytes": 98304,
+          "transient_texture_bytes": 15293256,
+          "javascript_heap_api": "performance.memory.usedJSHeapSize",
+          "javascript_heap_status": "non_standard_observation",
+          "javascript_heap_high_water_bytes": 9124395,
+          "process_resident_bytes": null,
+          "physical_cache_allocation_bytes": null,
+          "physical_gpu_allocation_bytes": null
+        },
+        "recovery": {
+          "invalid_resize_preserved_viewport": true,
+          "dpr_change_and_restore": true,
+          "hidden_frame_skipped_and_resumed": true,
+          "prepublication_worker_crash_preserved_viewer": true,
+          "prepublication_offline_failure_preserved_viewer": true,
+          "cancellation_acknowledgement_milliseconds": 7.400000095367432,
+          "warm_cache_recreation_zero_binary_requests": true,
+          "stale_generation_rejected": true,
+          "partial_publication_failure_fuses_in_deterministic_tests": true,
+          "device_loss_fuses_in_deterministic_tests": true,
+          "physical_device_loss_forced": false,
+          "memory_pressure_forced": false
+        },
+        "limits": {
+          "firstCoverageMilliseconds": 10000,
+          "settledViewMilliseconds": 15000,
+          "frameIntervalP95Milliseconds": 50,
+          "frameSubmissionP95Milliseconds": 16.7,
+          "cancellationAcknowledgementMilliseconds": 1000,
+          "physicalDimensionPixels": 4096,
+          "physicalAreaPixels": 8388608,
+          "residentPoints": 8192,
+          "residentBytes": 196608,
+          "canvasBytes": 33554432,
+          "transientTextureBytes": 67108864,
+          "retainedRecordBytes": 262144,
+          "workerStagingBytes": 327680,
+          "concurrentResponseBytes": 262144,
+          "persistentCacheBytes": 4194304
+        },
+        "passed": true
+      }
+    }
+  ],
+  "unqualified_entries": [
+    {
+      "browser": "Google Chrome 150.0.7871.115",
+      "reason": "Installed locally but no connected browser-control surface was available for an attended WebGPU run."
+    },
+    {
+      "browser": "Safari 26.5.2",
+      "reason": "Installed locally but no supported browser-control surface was available for an attended WebGPU run."
+    },
+    {
+      "browser": "All other browser, OS, adapter, and mobile combinations",
+      "reason": "Not executed in the v0.19 repository qualification lane."
+    }
+  ],
+  "external_evidence": {
+    "independent_adopter": false,
+    "registry_install": false,
+    "support_qualified": false,
+    "release_candidate": false
+  }
+}

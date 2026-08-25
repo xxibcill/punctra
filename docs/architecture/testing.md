@@ -11,8 +11,8 @@ support qualification outstanding; v0.14 bounded exact Terrain QA and
 correction-loop slice Complete and repository-verified; v0.15 bounded local
 WebAssembly/WebGPU browser-foundation slice Complete and repository-verified;
 v0.16 bounded HTTP Range/cache/worker slice Complete and repository-verified;
-v0.17 bounded viewer API/exact-Point and v0.18 packed SDK/React lifecycle
-slices Complete and repository-verified;
+v0.17 bounded viewer API/exact-Point, v0.18 packed SDK/React lifecycle, and
+v0.19 exact local browser/device qualification slices Complete and repository-verified;
 all gates run locally**
 
 Verification follows public contracts first. Private tests are used for fault
@@ -623,6 +623,30 @@ Vite/TypeScript versions, and recorded browser environment. It does not prove
 npm publication, other bundlers/frameworks, independent adoption, CSP-host
 compatibility, API stability, broad browser support, or a release candidate.
 
+## v0.19 browser/device qualification lane
+
+The v0.19 lane preserves the v0.18 packed-artifact path and adds one private
+qualification layer. Node tests pin Source-load timing capture, deterministic
+frame percentiles, nullable JavaScript heap facts, exact ceiling evaluation,
+atomic resize retry, pre-publication Worker recovery, partial-publication
+fusion, device-loss fusion, and matrix shape. The strict server adds one
+bounded disconnect route so the real Worker returns the existing `offline`
+outcome without a synthetic Fetch implementation.
+
+The attended browser run rejects an over-limit viewport without mutation,
+changes and restores DPR, skips a hidden frame, resumes, recreates after normal
+disposal, survives a deliberate Worker crash and disconnected manifest before
+publication, acknowledges cancellation, completes cold and zero-request warm
+delivery, and repeats all v0.17-v0.18 functional checks. After settlement it
+samples 30 foreground callbacks and viewer submissions and evaluates every
+accepted latency and resource ceiling.
+
+`node scripts/verify-browser-qualification.mjs` binds the machine-readable
+matrix to the checked-in qualification constants and exact workload/recovery
+facts. The recorded Codex in-app Chromium/macOS/Apple-GPU entry is one exact
+repository-qualified lane, not installed-Chrome, Safari, mobile, broad support,
+or independent-adopter evidence.
+
 ## Local verification lanes
 
 ### Change qualification
@@ -633,10 +657,10 @@ command list; this architecture guide does not duplicate it. Required local GPU
 lanes use `PUNCTRA_REQUIRE_GPU=1`, including renderer appearance, corpus,
 offscreen, planner, display-mapping, and public-host acceptance.
 
-The v0.15–v0.18 browser lane is separate from native GPU acceptance. It uses
+The v0.15–v0.19 browser lane is separate from native GPU acceptance. It uses
 the build and strict local-Range-host steps in `CONTRIBUTING.md`, requires the
-document itself to publish `PASS`, and records the exact browser/adapter facts
-rather than claiming a browser support matrix.
+document itself to publish `PASS`, and records exact browser/adapter facts in
+the bounded v0.19 matrix rather than inferring support for an unexecuted entry.
 
 Opt-in larger generated Workspace runs use:
 

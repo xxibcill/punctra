@@ -148,6 +148,20 @@ The [v0.18 repository verification record](docs/releases/v0.18.0.md) owns the
 exact local implementation, environment, packed-artifact, clean-consumer,
 native, GPU, browser, benchmark, and nonclaim facts.
 
+The completed [v0.19 Browser and Device Qualification
+design](docs/design/browser-device-qualification-v0.19.md) fixes one exact
+repository qualification lane around the packed SDK. It adds immutable
+first-Coverage, settled-View, and main-thread publication timings, fixed
+functional/latency/resource gates, settled foreground frame samples, optional
+non-standard JavaScript heap observations, and explicit recovery evidence for
+resize/DPR, visibility, pre-publication network/Worker failure, cancellation,
+cache recreation, partial publication, device loss, and stale generations.
+The [machine-readable matrix](docs/releases/v0.19-browser-matrix.json) qualifies
+only the recorded Codex in-app Chromium 151/macOS 26.5.2/Apple M5 Pro lane.
+Other browsers/devices, forced physical device loss or memory pressure,
+independent adoption, stable API, visual-quality expansion, support
+qualification, and release-candidate status remain outside this meaning.
+
 ## Artifact
 
 An immutable result produced from a Source, Snapshot, or explicitly detached input with recorded construction parameters, such as a Spatial Index, Terrain Surface, or Profile. Its provenance identifies the Source and either the Workspace Revision or detached input content that was used, plus its construction version. A rebuildable persistent Artifact may be deleted and reproduced from that authority; persistence does not make it Workspace state.

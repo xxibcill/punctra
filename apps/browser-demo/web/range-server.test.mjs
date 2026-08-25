@@ -67,6 +67,7 @@ test("real local server exposes bounded protocol fault routes", async () => {
     const manifestResponse = await fetch(manifestUrl);
     const manifest = await manifestResponse.json();
     for (const [fault, expectedCode] of [
+      ["disconnect", "offline"],
       ["redirect", "range_unsupported"],
       ["retry", "retry_exhausted"],
       ["truncated", "range_truncated"],

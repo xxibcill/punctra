@@ -224,6 +224,7 @@ class BrowserViewer {
   #workerUrl;
   #requestAnimationFrame;
   #cancelAnimationFrame;
+  #monotonicNow;
   #renderRequest;
   #loadController;
   #exactController;
@@ -243,6 +244,8 @@ class BrowserViewer {
     this.#cancelAnimationFrame = options.cancelAnimationFrame
       ?? globalThis.cancelAnimationFrame?.bind(globalThis)
       ?? globalThis.clearTimeout.bind(globalThis);
+    this.#monotonicNow = options.monotonicNow
+      ?? globalThis.performance.now.bind(globalThis.performance);
     this.#diagnostics = this.#readRawDiagnostics();
     this.#refreshState();
   }
@@ -364,10 +367,12 @@ class BrowserViewer {
     this.#loadController = controller;
     const operationId = `punctra-viewer-${Date.now()}-${operationSequence}`;
     operationSequence += 1;
+    const loadStarted = this.#monotonicNow();
     const workerUrl = `${this.#workerUrl}${this.#workerUrl.includes("?") ? "&" : "?"}operation=${encodeURIComponent(operationId)}`;
     let deployment;
     let begun = false;
     let mainThreadMillisecondsHighWater = 0;
+    let firstCoverageMilliseconds;
     const pointOrdinals = [];
 
     try {
@@ -406,23 +411,38 @@ class BrowserViewer {
           } else if (message.type === "state") {
             if (message.phase === "deployment") deployment = message.deployment;
           } else if (message.type === "batch") {
-            const started = performance.now();
+            const started = this.#monotonicNow();
             this.#publishWorkerBatch(deployment, message, begun);
             begun = true;
             appendTransferredOrdinals(pointOrdinals, message.payload);
             this.render();
+            const finished = this.#monotonicNow();
             mainThreadMillisecondsHighWater = Math.max(
               mainThreadMillisecondsHighWater,
-              performance.now() - started,
+              finished - started,
             );
+            firstCoverageMilliseconds ??= finished - loadStarted;
           } else if (message.type === "complete") {
+            if (firstCoverageMilliseconds === undefined) {
+              controls.reject(new ViewerError(
+                "stream_validation",
+                "worker completed before publishing first sampled Coverage",
+              ));
+              return;
+            }
             this.#callRaw("completeStream");
             const state = this.render();
+            const timings = {
+              firstCoverageMilliseconds,
+              settledViewMilliseconds: this.#monotonicNow() - loadStarted,
+              mainThreadBatchMillisecondsHighWater: mainThreadMillisecondsHighWater,
+            };
             controls.resolve({
               deployment: message.deployment,
               metrics: message.metrics,
               decode: message.decode,
               pointOrdinals,
+              timings,
               mainThreadMillisecondsHighWater,
               state,
             });
@@ -433,6 +453,7 @@ class BrowserViewer {
         deployment: result.deployment,
         metrics: result.metrics,
         decode: result.decode,
+        timings: result.timings,
         mainThreadMillisecondsHighWater: result.mainThreadMillisecondsHighWater,
       };
       this.#loadController = undefined;

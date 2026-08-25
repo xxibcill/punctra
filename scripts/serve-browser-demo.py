@@ -18,7 +18,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 WEB_ROOT = (Path(__file__).resolve().parent.parent / "apps/browser-demo/web").resolve()
 EXPOSED_HEADERS = "Accept-Ranges, Content-Encoding, Content-Length, Content-Range, ETag"
 FILE_CHUNK_BYTES = 64 * 1024
-FAULTS = {"redirect", "retry", "truncated", "corrupt", "validator_drift"}
+FAULTS = {"disconnect", "redirect", "retry", "truncated", "corrupt", "validator_drift"}
 
 
 def fixture_validators() -> dict[Path, str]:
@@ -71,6 +71,9 @@ class BrowserDemoHandler(BaseHTTPRequestHandler):
             self.send_header("Location", "/fixtures/v1/representative.las")
             self.send_header("Content-Length", "0")
             self.end_headers()
+            return
+        if fault == "disconnect":
+            self.close_connection = True
             return
         if fault == "retry":
             self.send_response(HTTPStatus.SERVICE_UNAVAILABLE)

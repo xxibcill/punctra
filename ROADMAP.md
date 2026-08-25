@@ -1,7 +1,7 @@
 # Punctra Roadmap
 
 Status: living guidance
-Last reviewed: 2026-08-25
+Last reviewed: 2026-08-26
 
 This roadmap communicates direction, not a delivery promise. It has no fixed
 dates. Candidate releases may be split, merged, reordered, renamed, or skipped
@@ -9,7 +9,7 @@ as technical and customer evidence changes. Milestone outcomes and dependency
 order matter more than version numbers.
 
 Among incomplete releases, only an **Active** release has accepted
-implementation scope. Punctra v0.1 through v0.18 are Complete repository
+implementation scope. Punctra v0.1 through v0.19 are Complete repository
 technical slices. Their recorded external field, adoption, partner, and
 support gates remain historically accurate, but they do not determine the next
 product direction. The project now pivots from a desktop terrain-delivery
@@ -17,9 +17,10 @@ hypothesis to an embeddable browser point-cloud rendering engine.
 
 v0.15 is the completed repository-verified browser-foundation release, v0.16
 is the completed repository-verified HTTP Range streaming release, v0.17 is the
-completed repository-verified browser-viewer-API release, and v0.18 is the
-completed repository-verified SDK-embedding release. Versions v0.19 through
-v0.30 remain uncommitted Candidate themes. v0.15–v0.20 establish
+completed repository-verified browser-viewer-API release, v0.18 is the
+completed repository-verified SDK-embedding release, and v0.19 is the completed
+exact local browser/device qualification release. Versions v0.20 through v0.30
+remain uncommitted Candidate themes. v0.15–v0.20 establish
 browser execution, streaming, the viewer API, embedding, and platform qualification. v0.21–v0.29
 then improve and qualify visual quality. v0.30 is the earliest planned browser-
 engine release candidate; no earlier future release may be represented as a
@@ -92,9 +93,9 @@ release can be Complete while every product gate remains outstanding.
 
 ## Current pivot checkpoint
 
-Status: **v0.15 through v0.18 complete and repository-verified for their
+Status: **v0.15 through v0.19 complete and repository-verified for their
 bounded local browser-foundation, immutable-LAS streaming, and browser viewer
-API/SDK embedding slices**
+API/SDK embedding and exact local qualification slices**
 
 The completed v0.1–v0.14 contracts are inputs to the pivot, not permission to
 carry the old product sequence forward. In particular:
@@ -146,6 +147,17 @@ or independent adoption.
 The exact implementation, environment, tarball contents, clean trials, command
 matrix, Chrome WebGPU facts, benchmarks, and nonclaims are recorded in the
 [v0.18 repository verification record](docs/releases/v0.18.0.md).
+
+The completed [v0.19 Browser and Device Qualification
+design](docs/design/browser-device-qualification-v0.19.md) adds Source-load
+timings, fixed functional/latency/resource gates, explicit recovery probes,
+nullable heap observations, and one machine-readable supported matrix entry
+for the exact Codex in-app Chromium/macOS/Apple-GPU lane that was executed.
+Installed Chrome, Safari, other platforms, forced physical device loss or
+memory pressure, independent adoption, API stability, broad support, and
+release-candidate status remain outstanding. The exact observed entry and its
+nonclaims are recorded in the [v0.19 browser
+matrix](docs/releases/v0.19-browser-matrix.json).
 
 ## Pre-v0.13 renderer quality corrective checkpoint
 
@@ -1296,30 +1308,35 @@ evidence to the exact implementation commit and local environment.
 
 ### v0.19 — Browser and device qualification
 
-Status: **Candidate**
+Status: **Complete and repository-verified for one exact local browser/device
+lane; broader qualification and independent adoption outstanding**
 
-Candidate outcome: define and reproduce the functional, performance, recovery,
+Accepted outcome: define and reproduce the functional, performance, recovery,
 and support envelope of the browser engine before visual-quality expansion.
 
-Activation gate:
+Repository activation decision:
 
-- v0.18 adopters provide a bounded set of browsers, operating systems, GPU
-  classes, integrated/discrete devices, and mobile expectations worth
-  supporting.
+- the maintainer activated one exact locally executable Codex in-app Chromium,
+  macOS, and integrated Apple-GPU lane on 2026-08-25 rather than inferring a
+  broader matrix from absent adopter evidence. The original independent-adopter
+  exit remains unsatisfied and does not expand this one-entry matrix.
 
-Likely scope:
+Accepted scope:
 
 - an explicit browser/OS/adapter/capability matrix with tested fallback and
   unsupported states;
 - repeatable first-Coverage, settled-View, frame-time, network, worker, CPU,
   JavaScript heap, retained GPU, and cache measurements where the platform can
   report them truthfully;
-- device-loss, tab-backgrounding, resize, zoom, DPR change, network loss,
-  offline/cache, memory-pressure, and worker-crash recovery; and
+- deterministic device-loss and partial-publication fusion plus real browser
+  tab visibility, resize/DPR, network-disconnect, offline/cache, cancellation,
+  and pre-publication Worker-crash recovery; physical device loss and memory
+  pressure are recorded as unforced because no safe portable trigger exists;
+  and
 - browser-facing diagnostics, issue evidence, support playbooks, and security
   review for remote Source handling.
 
-Candidate exit evidence:
+Repository exit evidence:
 
 - the declared functional suite passes on every supported matrix entry and
   unsupported entries fail before use;
@@ -1328,6 +1345,14 @@ Candidate exit evidence:
   and
 - v0.19 preserves the inherited visual baseline rather than introducing new
   appearance policies.
+
+The gate is satisfied by the packed `0.19.0-alpha.1` browser run, deterministic
+recovery tests, strict Range/fault server, fixed ceiling evaluator, 30-frame
+settled sample, generated API reference, exact machine-readable matrix, and
+browser qualification/recovery guide. Only the recorded Codex in-app Chromium
+151/macOS 26.5.2/Apple M5 Pro lane is Browser-qualified. Installed Chrome,
+Safari, other browsers, operating systems, adapters, devices, mobile, registry
+delivery, and independent adoption remain unqualified.
 
 ### v0.20 — Stable browser-engine integration baseline
 
@@ -1650,7 +1675,7 @@ nor completion of v0.20 is a reason to publish v1.
 | Spatial contract and production terrain | v0.12–v0.13 | v0.12 bounded repository contract complete; v0.13 bounded persistent-terrain slice complete and repository-verified; external spatial, production-scale, out-of-core, adoption, partner, and support exits outstanding | Make reference semantics explicit, then persist one bounded-AOI Surface without confusing repository durability with field-scale qualification. |
 | Terrain acceptance tooling | v0.14 | Complete and repository-verified for the bounded slice; external historical exits outstanding | Preserve exact Terrain QA and correction as an available module without extending it in the current browser-engine path. |
 | Browser execution and streaming | v0.15–v0.16 | Complete and repository-verified for the bounded private slices; arbitrary delivery and external qualification outstanding | Establish WebAssembly/WebGPU execution, then bounded remote Source delivery, browser caching, and worker decoding. |
-| Browser viewer and embedding | v0.17–v0.20 | v0.17 bounded viewer API and v0.18 packed SDK/embedding slices complete and repository-verified; v0.19–v0.20 Candidate | Expose the viewer API, package the SDK, qualify the browser/device envelope, and consolidate a stable integration baseline without release-candidate status. |
+| Browser viewer and embedding | v0.17–v0.20 | v0.17 bounded viewer API, v0.18 packed SDK/embedding, and v0.19 exact local qualification slices complete and repository-verified; v0.20 Candidate | Expose the viewer API, package the SDK, qualify the browser/device envelope, and consolidate a stable integration baseline without release-candidate status. |
 | Measured visual quality | v0.21–v0.25 | Candidate | Establish visual evidence, then improve point footprints, LOD continuity, depth, and color. |
 | Visual interaction and qualification | v0.26–v0.29 | Candidate | Improve temporal, selection, and composition clarity, then freeze and qualify the visual surface without release-candidate status. |
 | Browser-engine release candidate | v0.30 | Candidate; earliest planned release candidate | Freeze, soak, and explicitly decide whether the supported browser engine should ship or narrow. |

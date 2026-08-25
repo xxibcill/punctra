@@ -6,10 +6,17 @@ const [
   { DISPLAY_MODES, ViewerError, createViewer },
   { createInputNormalizer },
   { createLasExactQueryBridge },
+  {
+    captureEnvironment,
+    captureJsHeap,
+    evaluateQualification,
+    measureForegroundFrames,
+  },
 ] = await Promise.all([
   import(`./sdk.js?v=${BUILD_CACHE_TOKEN}`),
   import(`./viewer-input.js?v=${BUILD_CACHE_TOKEN}`),
   import(`./exact-query.js?v=${BUILD_CACHE_TOKEN}`),
+  import(`./qualification.js?v=${BUILD_CACHE_TOKEN}`),
 ]);
 const canvas = document.querySelector("#punctra-canvas");
 const canvasShell = document.querySelector("#canvas-shell");
@@ -30,7 +37,9 @@ const clearButton = document.querySelector("#clear-button");
 const shutdownButton = document.querySelector("#shutdown-button");
 
 const STREAM_MANIFEST_URL = "./fixtures/v1/deployment.json";
+const QUALIFICATION_WORKER_URL = new URL("./qualification-worker.js", import.meta.url);
 const EXACT_QUERY_AUTHORITY = "exact_source_record";
+const ACCEPTANCE_SCHEMA = "punctra-browser-qualification-v1";
 const HOST_CAMERA_PROJECTION_POLICIES = Object.freeze({
   perspective: Object.freeze({
     extentProperty: "verticalFieldOfViewRadians",
@@ -182,7 +191,7 @@ function assertFact(condition, message) {
   if (!condition) throw new Error(`Browser acceptance invariant failed: ${message}`);
 }
 
-async function initializeViewer() {
+async function initializeViewer(assetOverrides = {}) {
   const exactQueryBridge = createLasExactQueryBridge({
     manifestUrl: STREAM_MANIFEST_URL,
     credentials: "same-origin",
@@ -193,6 +202,7 @@ async function initializeViewer() {
     exactQueryBridge,
     assets: {
       cacheKey: BUILD_CACHE_TOKEN,
+      ...assetOverrides,
     },
   });
   viewerSubscription = viewer.subscribe(publishState);
@@ -221,11 +231,13 @@ function discardViewer() {
 async function runSmokePath() {
   smokeRunning = true;
   smokePassed = false;
-  smokeRecord = { schema: "punctra-browser-sdk-acceptance-v1" };
-  setHarnessState("checking", "Running public viewer lifecycle checks…");
+  smokeRecord = { schema: ACCEPTANCE_SCHEMA };
+  const environment = captureEnvironment();
+  const heap = { before: captureJsHeap(performance) };
+  setHarnessState("checking", "Running browser/device qualification checks…");
   const initial = await initializeViewer();
   let state = viewer.render();
-  assertFact(state.packageVersion === "0.18.0-alpha.1", "v0.18 package version");
+  assertFact(state.packageVersion === "0.19.0-alpha.1", "v0.19 package version");
   assertFact(state.capabilities.secure_context === true, "secure context");
   assertFact(state.capabilities.webgpu === true, "WebGPU capability");
   assertFact(state.source.publishedPoints === 1_089, "generated fixture Points");
@@ -237,14 +249,38 @@ async function runSmokePath() {
     cssHeight: Math.max(1, initial.viewport.cssHeight * 0.75),
     devicePixelRatio: initial.viewport.devicePixelRatio,
   };
+  const resizeBeforeFailure = viewer.state().viewport;
+  const resizeFailure = expectSynchronousCode(() => viewer.resize({
+    cssWidth: 4_096,
+    cssHeight: 4_096,
+    devicePixelRatio: 4,
+  }), "resize_viewport");
+  assertFact(
+    sameViewport(viewer.state().viewport, resizeBeforeFailure),
+    "over-limit resize preserves the prior viewport",
+  );
   state = viewer.resize(resized);
   assertFact(state.viewport.physicalWidth === Math.round(resized.cssWidth * resized.devicePixelRatio), "bounded resize");
+  const alternateDpr = resized.devicePixelRatio === 1 ? 1.25 : 1;
+  state = viewer.resize({ ...resized, devicePixelRatio: alternateDpr });
+  assertFact(state.viewport.devicePixelRatio === alternateDpr, "bounded DPR change");
+  state = viewer.resize(resized);
   viewer.render();
+  const hiddenSkipsBefore = viewer.state().render.hiddenFrameSkips;
   viewer.pause();
   state = viewer.render();
   assertFact(state.lifecycle === "hidden", "hidden lifecycle");
+  assertFact(state.render.hiddenFrameSkips === hiddenSkipsBefore + 1, "hidden frame skip");
   viewer.resume();
   viewer.render();
+  const lifecycleRecovery = {
+    invalid_resize_code: resizeFailure.code,
+    invalid_resize_safe_action: resizeFailure.safeAction,
+    prior_viewport_preserved: true,
+    alternate_device_pixel_ratio: alternateDpr,
+    hidden_frame_skips: 1,
+    resumed: viewer.state().lifecycle === "ready",
+  };
 
   const generatedPick = await pickCentre();
   assertFact(generatedPick?.pointOrdinal === "544", "generated centre pick identity");
@@ -260,8 +296,39 @@ async function runSmokePath() {
     work_after_destruction_rejected: true,
   };
 
+  await initializeViewer({ workerUrl: QUALIFICATION_WORKER_URL });
+  const generationBeforeWorkerCrash = viewer.state().generation;
+  const workerCrash = await expectCode(viewer.loadSource({
+    manifestUrl: `${STREAM_MANIFEST_URL}?worker_fault=crash`,
+    cacheMode: "none",
+    credentials: "same-origin",
+  }), "worker_failed");
+  assertFact(viewer.state().lifecycle === "ready", "pre-publication worker crash retains viewer");
+  assertFact(viewer.state().generation === generationBeforeWorkerCrash, "worker crash preserves generation");
+  const workerRecovery = {
+    code: workerCrash.code,
+    recoverable: workerCrash.recoverable,
+    viewer_retained: true,
+    generation_preserved: true,
+  };
+  discardViewer();
+
   await initializeViewer();
   const cancellation = await cancellationProbe();
+  const generationBeforeOffline = viewer.state().generation;
+  const offline = await expectCode(viewer.loadSource({
+    manifestUrl: `${STREAM_MANIFEST_URL}?fault=disconnect`,
+    cacheMode: "none",
+    credentials: "same-origin",
+  }), "offline");
+  assertFact(viewer.state().lifecycle === "ready", "pre-publication offline failure retains viewer");
+  assertFact(viewer.state().generation === generationBeforeOffline, "offline failure preserves generation");
+  const networkRecovery = {
+    code: offline.code,
+    recoverable: offline.recoverable,
+    viewer_retained: true,
+    generation_preserved: true,
+  };
   setHarnessState("checking", "Loading the cold immutable deployment through the public viewer API…");
   const cold = await viewer.loadSource({
     manifestUrl: STREAM_MANIFEST_URL,
@@ -270,6 +337,7 @@ async function runSmokePath() {
     credentials: "same-origin",
   });
   verifyStreamingResult(cold, "cold");
+  heap.afterCold = captureJsHeap(performance);
 
   discardViewer();
   await initializeViewer();
@@ -283,6 +351,7 @@ async function runSmokePath() {
   assertFact(warm.metrics.requestCount === 0, "warm binary network request count");
   assertFact(sameOrdinals(cold.pointOrdinals, warm.pointOrdinals), "cold/warm Point identities");
   latestLoad = warm;
+  heap.afterWarm = captureJsHeap(performance);
 
   const displayEvidence = [];
   for (const mode of DISPLAY_MODES) {
@@ -334,13 +403,48 @@ async function runSmokePath() {
   verifyStreamingResult(nextGeneration, "generation retry");
   await expectCode(viewer.confirmPoint(provisional), "stale_generation");
 
+  const frames = await measureForegroundFrames({
+    frameCount: 30,
+    render: () => viewer.render(),
+    requestAnimationFrame: window.requestAnimationFrame.bind(window),
+    monotonicNow: performance.now.bind(performance),
+  });
+  heap.afterFrames = captureJsHeap(performance);
+  const finalState = viewer.state();
+  const qualification = evaluateQualification({
+    cold,
+    warm,
+    frames,
+    cancellation: {
+      acknowledgementMilliseconds: cancellation.acknowledgement_milliseconds,
+    },
+    viewport: finalState.viewport,
+    state: finalState,
+  });
+  assertFact(
+    qualification.passed,
+    `qualification ceilings: ${qualification.failures.join("; ")}`,
+  );
+
   smokeRecord = {
-    schema: "punctra-browser-sdk-acceptance-v1",
+    schema: ACCEPTANCE_SCHEMA,
+    package_version: finalState.packageVersion,
+    environment,
+    heap: completeHeapRecord(heap),
     generated: generatedEvidence,
     destruction: destructionEvidence,
+    recovery: {
+      lifecycle: lifecycleRecovery,
+      worker: workerRecovery,
+      network: networkRecovery,
+      device_loss: "deterministic facade/raw-viewer test; not forced on physical adapter",
+      memory_pressure: "no portable signal; independent fixed ceilings enforced",
+    },
     cancellation,
     cold: compactLoad(cold),
     warm: compactLoad(warm),
+    foreground_frames: frames,
+    qualification,
     display_modes: displayEvidence,
     projections: ["orthographic", "perspective"],
     input_normalizer: normalizedInput,
@@ -348,12 +452,13 @@ async function runSmokePath() {
     exact: exactPoint,
     stale_generation_rejected: true,
     cancelled_query_rejected: true,
-    final_state: viewer.state(),
+    final_state: finalState,
     nonclaims: [
       "no arbitrary Source or Query support",
-      "no npm registry publication or production hosting qualification",
-      "no browser, device, or framework matrix beyond the checked-in trials",
-      "no independent adoption, stable-API, support, or release-candidate claim",
+      "no npm registry publication, production hosting, or offline-first support",
+      "no browser or device support beyond the exact recorded qualification lane",
+      "no physical cache, process RSS, driver, or GPU allocation claim",
+      "no independent adoption, stable API, visual-quality, support, or release-candidate claim",
     ],
   };
   smokePassed = true;
@@ -361,7 +466,7 @@ async function runSmokePath() {
   publishState(viewer.state());
   setHarnessState(
     "passed",
-    "PASS — public lifecycle, streaming, five displays, two projections, normalized input, pick, highlight, exact confirmation, cancellation, and stale-generation rejection verified locally.",
+    "PASS — the declared browser/device lane satisfied functional, latency, resource, and recovery qualification locally.",
   );
 }
 
@@ -399,6 +504,7 @@ function compactLoad(result) {
     deployment: result.deployment,
     metrics: result.metrics,
     decode: result.decode,
+    timings: result.timings,
     ordinal_count: result.pointOrdinals.length,
     main_thread_milliseconds_high_water: result.mainThreadMillisecondsHighWater,
     generation: result.state.generation,
@@ -437,7 +543,7 @@ async function expectCode(promise, code) {
     await promise;
   } catch (error) {
     assertFact(error instanceof ViewerError && error.code === code, `${code} failure classification`);
-    return;
+    return error;
   }
   throw new Error(`Browser acceptance invariant failed: expected ${code}`);
 }
@@ -447,9 +553,30 @@ function expectSynchronousCode(operation, code) {
     operation();
   } catch (error) {
     assertFact(error instanceof ViewerError && error.code === code, `${code} failure classification`);
-    return;
+    return error;
   }
   throw new Error(`Browser acceptance invariant failed: expected ${code}`);
+}
+
+function sameViewport(left, right) {
+  return left.cssWidth === right.cssWidth
+    && left.cssHeight === right.cssHeight
+    && left.devicePixelRatio === right.devicePixelRatio
+    && left.physicalWidth === right.physicalWidth
+    && left.physicalHeight === right.physicalHeight;
+}
+
+function completeHeapRecord(observations) {
+  const available = Object.values(observations)
+    .map((observation) => observation.usedBytes)
+    .filter((usedBytes) => usedBytes !== null);
+  return {
+    ...observations,
+    highWaterBytes: available.length === 0 ? null : Math.max(...available),
+    processResidentBytes: null,
+    physicalCacheAllocationBytes: null,
+    physicalGpuAllocationBytes: null,
+  };
 }
 
 function cameraInputFromState(state) {
