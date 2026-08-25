@@ -3,7 +3,7 @@ import test from "node:test";
 
 import {
   loadExactQueryModules,
-  loadStreamingProtocolModules,
+  loadStreamingProtocol,
   loadViewerModules,
   loadWorkerModules,
 } from "./module-loader.js";
@@ -11,15 +11,14 @@ import {
 test("central module loaders return every dependency graph", async () => {
   const [exactQuery, streamingProtocol, viewer, worker] = await Promise.all([
     loadExactQueryModules("module-loader-test"),
-    loadStreamingProtocolModules("module-loader-test"),
+    loadStreamingProtocol("module-loader-test"),
     loadViewerModules("module-loader-test"),
     loadWorkerModules("module-loader-test"),
   ]);
 
   assert.equal(typeof exactQuery[0].validateManifest, "function");
   assert.equal(typeof exactQuery[1].validateBoundRangeResponse, "function");
-  assert.equal(typeof streamingProtocol[0].workerFailure, "function");
-  assert.equal(typeof streamingProtocol[1].validateBoundRangeResponse, "function");
+  assert.equal(typeof streamingProtocol.workerFailure, "function");
   assert.equal(typeof viewer[0].appendTransferredOrdinals, "function");
   assert.equal(typeof viewer[1].runWorkerOperation, "function");
   assert.equal(typeof viewer[2].workerFailure, "function");

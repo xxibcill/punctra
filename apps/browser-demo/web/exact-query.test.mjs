@@ -8,7 +8,9 @@ import {
   decodeLasLayout,
   decodeLasPointRecord,
 } from "./exact-query.js";
-import { validateManifest } from "./streaming-protocol.js";
+import { loadStreamingProtocol } from "./module-loader.js";
+
+const { validateManifest } = await loadStreamingProtocol("exact-query-test");
 
 const fixtureDirectory = new URL("./fixtures/v1/", import.meta.url);
 const manifest = JSON.parse(await readFile(new URL("deployment.json", fixtureDirectory), "utf8"));

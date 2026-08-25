@@ -1,27 +1,13 @@
 const PRODUCTION_BUNDLE = typeof import.meta.env !== "undefined" && import.meta.env.PROD;
 
-export function loadExactQueryModules(cacheToken) {
-  return PRODUCTION_BUNDLE
-    ? Promise.all([
-        import("./streaming-protocol.js"),
-        import("./range-response.js"),
-      ])
-    : Promise.all([
-        import(`./streaming-protocol.js?v=${cacheToken}`),
-        import(`./range-response.js?v=${cacheToken}`),
-      ]);
+export async function loadExactQueryModules(cacheToken) {
+  const [streamingProtocol, , rangeResponse] = await loadStreamingGraph(cacheToken);
+  return [streamingProtocol, rangeResponse];
 }
 
-export function loadStreamingProtocolModules(cacheToken) {
-  return PRODUCTION_BUNDLE
-    ? Promise.all([
-        import("./worker-protocol.js"),
-        import("./range-response.js"),
-      ])
-    : Promise.all([
-        import(`./worker-protocol.js?v=${cacheToken}`),
-        import(`./range-response.js?v=${cacheToken}`),
-      ]);
+export async function loadStreamingProtocol(cacheToken) {
+  const [streamingProtocol] = await loadStreamingGraph(cacheToken);
+  return streamingProtocol;
 }
 
 export function loadViewerModules(cacheToken) {
@@ -40,14 +26,24 @@ export function loadViewerModules(cacheToken) {
       ]);
 }
 
-export function loadWorkerModules(cacheToken) {
-  return PRODUCTION_BUNDLE
+export async function loadWorkerModules(cacheToken) {
+  const [streamingProtocol, workerProtocol] = await loadStreamingGraph(cacheToken);
+  return [streamingProtocol, workerProtocol];
+}
+
+async function loadStreamingGraph(cacheToken) {
+  const modules = await (PRODUCTION_BUNDLE
     ? Promise.all([
         import("./streaming-protocol.js"),
         import("./worker-protocol.js"),
+        import("./range-response.js"),
       ])
     : Promise.all([
         import(`./streaming-protocol.js?v=${cacheToken}`),
         import(`./worker-protocol.js?v=${cacheToken}`),
-      ]);
+        import(`./range-response.js?v=${cacheToken}`),
+      ]));
+  const [streamingProtocol, workerProtocol, rangeResponse] = modules;
+  streamingProtocol.initializeStreamingProtocol(workerProtocol, rangeResponse);
+  return modules;
 }

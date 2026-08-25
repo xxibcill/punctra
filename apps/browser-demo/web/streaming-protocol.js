@@ -1,24 +1,36 @@
-import { loadStreamingProtocolModules } from "./module-loader.js";
-
-const MODULE_CACHE_TOKEN = encodeURIComponent(
-  new URL(import.meta.url).searchParams.get("v") ?? "unversioned",
-);
-const dependencyModules = loadStreamingProtocolModules(MODULE_CACHE_TOKEN);
-const [
-  {
-    WORKER_FAILURE_SAFE_ACTION,
-    WORKER_OUTPUT_TYPES,
-    WORKER_SCHEMA,
-    workerFailure,
-  },
-  { RangeResponseError, validateBoundRangeResponse },
-] = await dependencyModules;
+let WORKER_FAILURE_SAFE_ACTION;
+let WORKER_OUTPUT_TYPES;
+let WORKER_SCHEMA;
+let workerFailure;
+let RangeResponseError;
+let validateBoundRangeResponse;
+let initialized = false;
 
 export {
   WORKER_OUTPUT_TYPES,
   WORKER_SCHEMA,
   workerFailure,
 };
+
+export function initializeStreamingProtocol(workerProtocol, rangeResponse) {
+  if (initialized) {
+    if (
+      workerFailure !== workerProtocol.workerFailure
+      || validateBoundRangeResponse !== rangeResponse.validateBoundRangeResponse
+    ) {
+      throw new Error("streaming protocol already uses a different module graph");
+    }
+    return;
+  }
+  ({
+    WORKER_FAILURE_SAFE_ACTION,
+    WORKER_OUTPUT_TYPES,
+    WORKER_SCHEMA,
+    workerFailure,
+  } = workerProtocol);
+  ({ RangeResponseError, validateBoundRangeResponse } = rangeResponse);
+  initialized = true;
+}
 
 export const STREAM_SCHEMA = "punctra-browser-stream-v1";
 
@@ -80,7 +92,9 @@ const SAFE_ACTIONS = Object.freeze({
   cache_quota: "Free origin storage or explicitly retry with memory or no cache.",
   cache_unavailable: "Explicitly retry with memory or no cache.",
   cancelled: "Start a new operation only if the caller still wants the progressive View.",
-  worker_failed: WORKER_FAILURE_SAFE_ACTION,
+  get worker_failed() {
+    return WORKER_FAILURE_SAFE_ACTION;
+  },
   resource_limit: "Select a deployment inside the fixed browser streaming ceilings.",
 });
 

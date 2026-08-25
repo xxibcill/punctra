@@ -63,6 +63,10 @@ test("explicit SDK assets preserve deployment URLs and bounded cache busting", (
 
 test("copied Worker propagates the SDK cache token to its dependencies", async () => {
   const workerSource = await readFile(new URL("stream-worker.js", import.meta.url), "utf8");
+  const streamingSource = await readFile(
+    new URL("streaming-protocol.js", import.meta.url),
+    "utf8",
+  );
 
   assert.match(workerSource, /searchParams\.get\("punctra-v"\)/);
   assert.match(
@@ -70,5 +74,6 @@ test("copied Worker propagates the SDK cache token to its dependencies", async (
     /import\(`\.\/module-loader\.js\?punctra-v=\$\{WORKER_CACHE_TOKEN\}`\)/,
   );
   assert.doesNotMatch(workerSource, /from "\.\/module-loader\.js"/);
+  assert.doesNotMatch(streamingSource, /from "\.\/module-loader\.js"/);
   assert.doesNotMatch(workerSource, /searchParams\.get\("v"\)/);
 });

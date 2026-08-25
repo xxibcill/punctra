@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { loadStreamingProtocol } from "./module-loader.js";
 import {
   INVALID_WORKER_OPERATION_ID,
   MAX_WORKER_FAILURE_MESSAGE_CHARACTERS,
@@ -11,7 +12,8 @@ import {
   workerFailure,
   workerOperationId,
 } from "./worker-protocol.js";
-import { createWorkerMessage } from "./streaming-protocol.js";
+
+const { createWorkerMessage } = await loadStreamingProtocol("worker-protocol-test");
 
 test("worker output is limited to the documented four message types", () => {
   assert.equal(WORKER_SCHEMA, "punctra-browser-worker-v1");

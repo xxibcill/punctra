@@ -3,7 +3,9 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-import {
+import { loadStreamingProtocol } from "./module-loader.js";
+
+const {
   LIMITS,
   RangeTransport,
   StreamingFailure,
@@ -14,7 +16,7 @@ import {
   runStreamingOperation,
   validateManifest,
   workerFailure,
-} from "./streaming-protocol.js";
+} = await loadStreamingProtocol("streaming-protocol-test");
 
 const MANIFEST_URL = "https://fixtures.test/v1/deployment.json";
 const fixtureDirectory = new URL("./fixtures/v1/", import.meta.url);
