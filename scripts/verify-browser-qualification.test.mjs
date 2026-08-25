@@ -28,3 +28,9 @@ test("the recorded pass flag must agree with the derived result", () => {
   tampered.qualified_entries[0].observations.passed = false;
   assert.throws(() => verifyBrowserQualificationMatrix(tampered));
 });
+
+test("cold network delivery is not mislabeled as a cache hit", () => {
+  const tampered = structuredClone(matrix);
+  tampered.qualified_entries[0].observations.cold.verified_cache_bytes = 172_696;
+  assert.throws(() => verifyBrowserQualificationMatrix(tampered));
+});

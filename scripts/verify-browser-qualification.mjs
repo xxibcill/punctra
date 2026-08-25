@@ -126,13 +126,13 @@ function verifyTransportObservations(observations) {
   const { cold, warm } = observations;
   assert.equal(cold.binary_requests, 3);
   assert.equal(cold.requested_bytes, cold.received_bytes);
-  assert.equal(cold.received_bytes, cold.verified_cache_bytes);
+  assert.equal(cold.verified_cache_bytes, 0);
   assert.equal(warm.binary_requests, 0);
   assert.equal(warm.requested_bytes, 0);
   assert.equal(warm.received_bytes, 0);
   assert.equal(warm.concurrent_response_bytes_high_water, 0);
   assert.equal(warm.verified_cache_hits, cold.binary_requests);
-  assert.equal(warm.verified_cache_bytes, cold.verified_cache_bytes);
+  assert.equal(warm.verified_cache_bytes, cold.received_bytes);
 }
 
 function verifyFrameObservations(frames) {

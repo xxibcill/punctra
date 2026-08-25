@@ -73,7 +73,7 @@
           "binary_requests": 3,
           "requested_bytes": 172696,
           "received_bytes": 172696,
-          "verified_cache_bytes": 172696,
+          "verified_cache_bytes": 0,
           "concurrent_response_bytes_high_water": 172032,
           "worker_staging_bytes_high_water": 204800
         },
