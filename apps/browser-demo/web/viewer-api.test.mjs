@@ -87,6 +87,70 @@ test("viewer exposes typed lifecycle, camera, display, state subscription, and c
   assert.equal(viewer.state().failure.code, "viewer_destroyed");
 });
 
+test("viewer cancels stale scheduled rendering on hide, Source replacement, and fused failure", async () => {
+  const raw = new FakeRawViewer();
+  const frames = [];
+  const cancelledFrames = [];
+  const viewer = await createBrowserViewer({
+    bindings: { createViewer: async () => raw },
+    canvas: {},
+    viewport: viewport(),
+    WorkerConstructor: FixtureWorker,
+    workerUrl: "https://fixtures.test/stream-worker.js",
+    requestAnimationFrame: (callback) => {
+      frames.push(callback);
+      return frames.length;
+    },
+    cancelAnimationFrame: (id) => cancelledFrames.push(id),
+  });
+
+  const hiddenRender = viewer.requestRender();
+  const hiddenRejection = assert.rejects(hiddenRender, (error) => error.code === "render_cancelled");
+  viewer.setVisible(false);
+  await hiddenRejection;
+  assert.equal(viewer.state().render.scheduled, false);
+  assert.deepEqual(cancelledFrames, [1]);
+  const renderedBeforeStaleFrame = raw.data.rendered_frames;
+  frames.shift()(1);
+  assert.equal(raw.data.rendered_frames, renderedBeforeStaleFrame);
+
+  viewer.setVisible(true);
+  const generationRender = viewer.requestRender();
+  const generationRejection = assert.rejects(
+    generationRender,
+    (error) => error.code === "render_cancelled",
+  );
+  await viewer.loadSource({ manifestUrl: "https://fixtures.test/deployment.json" });
+  await generationRejection;
+  assert.deepEqual(cancelledFrames, [1, 1]);
+  const renderedAfterLoad = raw.data.rendered_frames;
+  frames.shift()(2);
+  assert.equal(raw.data.rendered_frames, renderedAfterLoad);
+
+  const fusedRaw = new FusedRawViewer();
+  const fusedFrames = [];
+  const fusedCancellations = [];
+  const fusedViewer = await createBrowserViewer({
+    bindings: { createViewer: async () => fusedRaw },
+    canvas: {},
+    viewport: viewport(),
+    requestAnimationFrame: (callback) => {
+      fusedFrames.push(callback);
+      return 7;
+    },
+    cancelAnimationFrame: (id) => fusedCancellations.push(id),
+  });
+  const fusedRender = fusedViewer.requestRender();
+  const fusedRejection = assert.rejects(fusedRender, (error) => error.code === "render_cancelled");
+  assert.throws(() => fusedViewer.setDisplayMode("rgb"), (error) => error.code === "device_lost");
+  await fusedRejection;
+  assert.deepEqual(fusedCancellations, [7]);
+  assert.equal(fusedViewer.state().lifecycle, "destroyed");
+  assert.equal(fusedViewer.state().failure.code, "device_lost");
+  fusedFrames.shift()(3);
+  assert.equal(fusedRaw.data.rendered_frames, 0);
+});
+
 test("viewer owns worker publication, streamed picking, highlights, and exact handoff", async () => {
   const raw = new FakeRawViewer();
   const exactRequests = [];
@@ -547,6 +611,12 @@ class FakeRawViewer {
 
   json() {
     return JSON.stringify(this.data);
+  }
+}
+
+class FusedRawViewer extends FakeRawViewer {
+  setDisplayMode() {
+    throw new Error(JSON.stringify({ code: "device_lost", message: "fixture device loss" }));
   }
 }
 

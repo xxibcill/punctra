@@ -269,7 +269,9 @@ export class BrowserViewer {
   setVisible(visible) {
     return this.#execute(() => {
       if (typeof visible !== "boolean") throw invalidArgument("visible must be boolean");
-      return this.#callRaw("setVisible", visible);
+      this.#callRaw("setVisible", visible);
+      if (!visible) this.#cancelScheduledRender("scheduled render was cancelled because the viewer was hidden");
+      return this.#state;
     });
   }
 
@@ -539,18 +541,16 @@ export class BrowserViewer {
     this.#destroyed = true;
     this.#loadController?.abort();
     this.#exactController?.abort();
-    if (this.#renderRequest) {
-      const request = this.#renderRequest;
-      this.#renderRequest = undefined;
-      this.#cancelAnimationFrame(request.id);
-      request.reject(new ViewerError("render_cancelled", "scheduled render was cancelled by viewer destruction"));
-    }
+    const renderFailure = this.#cancelScheduledRender(
+      "scheduled render was cancelled by viewer destruction",
+      false,
+    );
     try {
       this.#diagnostics = parseDiagnostics(this.#raw.shutdown());
     } catch {
       // A fused raw viewer already owns no safe continuation.
     }
-    this.#refreshState();
+    this.#refreshState(renderFailure);
     this.#listeners.clear();
   }
 
@@ -560,6 +560,7 @@ export class BrowserViewer {
     }
     const payload = new Uint8Array(message.payload);
     if (!begun) {
+      this.#cancelScheduledRender("scheduled render was cancelled by a new Source generation");
       const [x, y, z] = deployment.world_origin;
       this.#callRaw(
         "beginStreamBatch",
@@ -587,6 +588,7 @@ export class BrowserViewer {
     } catch (error) {
       const viewerError = toViewerError(error);
       if (FUSED_CODES.has(viewerError.code)) {
+        this.#cancelScheduledRender("scheduled render was cancelled by a fused viewer failure", false);
         this.#fuseViewer();
       }
       this.#refreshState(viewerError);
@@ -657,6 +659,17 @@ export class BrowserViewer {
     const viewerError = toViewerError(error);
     if (this.#lastFailure !== viewerError) this.#refreshState(viewerError);
     return viewerError;
+  }
+
+  #cancelScheduledRender(message, publishFailure = true) {
+    if (!this.#renderRequest) return undefined;
+    const request = this.#renderRequest;
+    const failure = new ViewerError("render_cancelled", message);
+    this.#renderRequest = undefined;
+    this.#cancelAnimationFrame(request.id);
+    request.reject(failure);
+    if (publishFailure) this.#refreshState(failure);
+    return failure;
   }
 
   #requireCurrentPoint(identity, generation) {
