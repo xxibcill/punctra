@@ -403,6 +403,33 @@ test("viewer owns worker publication, streamed picking, highlights, and exact ha
   );
 });
 
+test("relative Source manifests keep the caller document base across Worker paths", async () => {
+  const originalDocument = globalThis.document;
+  globalThis.document = { baseURI: "https://caller.test/application/index.html" };
+  try {
+    const viewer = await createBrowserViewer({
+      bindings: { createViewer: async () => new FakeRawViewer() },
+      canvas: {},
+      viewport: viewport(),
+      WorkerConstructor: ManifestCaptureWorker,
+      workerUrl: "https://caller.test/assets/stream-worker-hashed.js",
+    });
+
+    await viewer.loadSource({ manifestUrl: "./deployment.json" });
+
+    const start = ManifestCaptureWorker.current.messages.find(
+      (message) => message.type === "start",
+    );
+    assert.equal(
+      start.manifest_url,
+      "https://caller.test/application/deployment.json",
+    );
+  } finally {
+    if (originalDocument === undefined) delete globalThis.document;
+    else globalThis.document = originalDocument;
+  }
+});
+
 test("viewer rejects oversized highlights before inspecting Point identities", async () => {
   const viewer = await createBrowserViewer({
     bindings: { createViewer: async () => new FakeRawViewer() },
@@ -700,6 +727,21 @@ class PartialFailureWorker extends FixtureWorker {
         safe_action: "retry",
       });
     });
+  }
+}
+
+class ManifestCaptureWorker extends FixtureWorker {
+  static current;
+
+  constructor() {
+    super();
+    this.messages = [];
+    ManifestCaptureWorker.current = this;
+  }
+
+  postMessage(message) {
+    this.messages.push(message);
+    super.postMessage(message);
   }
 }
 

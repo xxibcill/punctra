@@ -367,7 +367,7 @@ class BrowserViewer {
     if (typeof this.#workerFactory !== "function" && typeof this.#WorkerConstructor !== "function") {
       throw new ViewerError("worker_failed", "Web Worker construction is unavailable");
     }
-    const manifestUrl = requiredString(options?.manifestUrl, "manifestUrl");
+    const manifestUrl = callerOwnedUrl(options?.manifestUrl, "manifestUrl");
     const cacheMode = cacheModeInput(options?.cacheMode ?? "none");
     const credentials = credentialsInput(options?.credentials ?? "same-origin");
     const invalidate = options?.invalidate === true;
@@ -1019,9 +1019,18 @@ function positiveInteger(value, label) {
   return value;
 }
 
-function requiredString(value, label) {
-  if (typeof value !== "string" || value.length === 0) throw invalidArgument(`${label} must be a nonempty string`);
-  return value;
+function callerOwnedUrl(value, label) {
+  if (typeof value !== "string" || value.length === 0) {
+    throw invalidArgument(`${label} must be a nonempty string`);
+  }
+  try {
+    const callerBase = globalThis.document?.baseURI
+      ?? globalThis.location?.href
+      ?? import.meta.url;
+    return new URL(value, callerBase).href;
+  } catch {
+    throw invalidArgument(`${label} must be a valid URL`);
+  }
 }
 
 function cacheModeInput(value) {
