@@ -127,6 +127,7 @@ const RECOVERABLE_CODES = new Set([
   "display_mode",
   "surface_timeout",
   "surface_occluded",
+  "surface_outdated",
   "viewer_hidden",
   "stream_validation",
   "manifest_invalid",
@@ -158,7 +159,6 @@ const FUSED_CODES = new Set([
   "stream_publication",
   "surface_configuration",
   "surface_lost",
-  "surface_outdated",
   "surface_reconfiguration",
   "surface_validation",
 ]);

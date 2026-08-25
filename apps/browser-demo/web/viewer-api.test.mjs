@@ -151,6 +151,21 @@ test("viewer cancels stale scheduled rendering on hide, Source replacement, and 
   assert.equal(fusedRaw.data.rendered_frames, 0);
 });
 
+test("surface_outdated preserves the viewer for bounded recovery", async () => {
+  const viewer = await createBrowserViewer({
+    bindings: { createViewer: async () => new OutdatedRawViewer() },
+    canvas: {},
+    viewport: viewport(),
+  });
+
+  assert.throws(
+    () => viewer.setDisplayMode("rgb"),
+    (error) => error.code === "surface_outdated" && error.recoverable === true,
+  );
+  assert.equal(viewer.state().lifecycle, "ready");
+  assert.equal(viewer.state().failure.code, "surface_outdated");
+});
+
 test("viewer owns worker publication, streamed picking, highlights, and exact handoff", async () => {
   const raw = new FakeRawViewer();
   const exactRequests = [];
@@ -624,6 +639,15 @@ class FakeRawViewer {
 class FusedRawViewer extends FakeRawViewer {
   setDisplayMode() {
     throw new Error(JSON.stringify({ code: "device_lost", message: "fixture device loss" }));
+  }
+}
+
+class OutdatedRawViewer extends FakeRawViewer {
+  setDisplayMode() {
+    throw new Error(JSON.stringify({
+      code: "surface_outdated",
+      message: "fixture surface needs a bounded resize",
+    }));
   }
 }
 
