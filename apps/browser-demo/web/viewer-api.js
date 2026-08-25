@@ -476,6 +476,10 @@ class BrowserViewer {
     return this.#execute(() => {
       this.#ensureActive();
       if (!Array.isArray(points)) throw invalidArgument("highlights must be an array");
+      const pointLimit = this.#state.resources.highlightPointLimit;
+      if (points.length > pointLimit) {
+        throw invalidArgument(`highlights exceed the ${pointLimit}-Point ceiling`);
+      }
       if (points.length === 0) {
         return this.#callRaw(
           "clearHighlights",

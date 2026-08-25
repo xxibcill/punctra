@@ -342,6 +342,28 @@ test("viewer owns worker publication, streamed picking, highlights, and exact ha
   );
 });
 
+test("viewer rejects oversized highlights before inspecting Point identities", async () => {
+  const viewer = await createBrowserViewer({
+    bindings: { createViewer: async () => new FakeRawViewer() },
+    canvas: {},
+    viewport: viewport(),
+  });
+  let inspectedIdentities = 0;
+  const points = Array.from({ length: 33 }, () => ({
+    get sourceIdentity() {
+      inspectedIdentities += 1;
+      return GENERATED_SOURCE;
+    },
+    pointOrdinal: 0,
+  }));
+
+  assert.throws(
+    () => viewer.setHighlights(points, 1),
+    (error) => error.code === "invalid_argument" && error.message.includes("32-Point ceiling"),
+  );
+  assert.equal(inspectedIdentities, 0);
+});
+
 test("a Source failure after partial publication fuses the viewer", async () => {
   const raw = new FakeRawViewer();
   const viewer = await createBrowserViewer({
