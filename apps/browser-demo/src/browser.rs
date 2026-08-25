@@ -186,6 +186,15 @@ impl BrowserViewer {
         self.diagnostics()
     }
 
+    /// Cancels one pending provisional pick while preserving its recorded frame.
+    #[wasm_bindgen(js_name = cancelPick)]
+    pub fn cancel_pick(&mut self) -> Result<String, JsValue> {
+        self.ensure_active()?;
+        self.resources_mut()?.cancel_pick();
+        self.pick = PickFacts::not_requested();
+        self.diagnostics()
+    }
+
     /// Returns the complete bounded host diagnostics as JSON.
     #[wasm_bindgen]
     pub fn diagnostics(&self) -> Result<String, JsValue> {
@@ -698,8 +707,12 @@ impl BrowserResources {
         Ok(outcome)
     }
 
-    fn discard_interaction_state(&mut self) {
+    fn cancel_pick(&mut self) {
         self.pick_ticket = None;
+    }
+
+    fn discard_interaction_state(&mut self) {
+        self.cancel_pick();
         self.recorded_frame = None;
     }
 

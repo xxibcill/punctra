@@ -398,6 +398,30 @@ test("viewer rejects pick coordinates before the Wasm u32 boundary", async () =>
   assert.equal(raw.data.pick.status, "not_requested");
 });
 
+test("viewer disposes a cancelled raw pick before accepting another", async () => {
+  const raw = new PendingRawViewer();
+  const viewer = await createBrowserViewer({
+    bindings: { createViewer: async () => raw },
+    canvas: {},
+    viewport: viewport(),
+    requestAnimationFrame: () => 7,
+    cancelAnimationFrame: () => {},
+  });
+  const firstController = new AbortController();
+  const first = viewer.pick({ x: 10, y: 20, signal: firstController.signal });
+  await Promise.resolve();
+  firstController.abort();
+  await assert.rejects(first, (error) => error.code === "cancelled");
+
+  const secondController = new AbortController();
+  const second = viewer.pick({ x: 10, y: 20, signal: secondController.signal });
+  await Promise.resolve();
+  assert.equal(raw.pickBegins, 2);
+  secondController.abort();
+  await assert.rejects(second, (error) => error.code === "cancelled");
+  assert.equal(raw.pickCancellations, 2);
+});
+
 test("a Source failure after partial publication fuses the viewer", async () => {
   const raw = new FakeRawViewer();
   const viewer = await createBrowserViewer({
@@ -842,6 +866,36 @@ class OutdatedRawViewer extends FakeRawViewer {
       code: "surface_outdated",
       message: "fixture surface needs a bounded resize",
     }));
+  }
+}
+
+class PendingRawViewer extends FakeRawViewer {
+  constructor() {
+    super();
+    this.pickActive = false;
+    this.pickBegins = 0;
+    this.pickCancellations = 0;
+  }
+
+  beginPick() {
+    if (this.pickActive) {
+      throw new Error(JSON.stringify({ code: "pick_pending", message: "fixture pick is pending" }));
+    }
+    this.pickActive = true;
+    this.pickBegins += 1;
+    this.data.pick = { ...emptyPick(), status: "pending" };
+    return this.json();
+  }
+
+  pollPick() {
+    return this.json();
+  }
+
+  cancelPick() {
+    this.pickActive = false;
+    this.pickCancellations += 1;
+    this.data.pick = emptyPick();
+    return this.json();
   }
 }
 

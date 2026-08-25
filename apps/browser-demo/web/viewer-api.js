@@ -452,9 +452,11 @@ class BrowserViewer {
     const y = pickCoordinate(request?.y, this.#state.viewport.physicalHeight, "pick y");
     const controller = linkedAbortController(request?.signal);
     this.#pickController = controller;
+    let rawPickActive = false;
     try {
       assertNotCancelled(controller.signal, "cancelled");
       this.#callRaw("beginPick", x, y);
+      rawPickActive = true;
       for (let attempt = 0; attempt < MAX_PICK_POLLS; attempt += 1) {
         await animationFrame(
           this.#requestAnimationFrame,
@@ -462,11 +464,18 @@ class BrowserViewer {
           controller.signal,
         );
         const state = this.#callRaw("pollPick");
-        if (state.pick.status === "miss") return null;
-        if (state.pick.status === "hit") return deepFreeze({ ...state.pick });
+        if (state.pick.status === "miss") {
+          rawPickActive = false;
+          return null;
+        }
+        if (state.pick.status === "hit") {
+          rawPickActive = false;
+          return deepFreeze({ ...state.pick });
+        }
       }
       throw new ViewerError("pick_pending", "provisional pick exceeded 180 animation frames");
     } finally {
+      if (rawPickActive && !this.#destroyed) this.#callRaw("cancelPick");
       if (this.#pickController === controller) this.#pickController = undefined;
       controller.dispose();
     }
