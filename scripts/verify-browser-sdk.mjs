@@ -17,17 +17,32 @@ const viewerArtifact = onlyArtifact("punctra-viewer-");
 const reactArtifact = onlyArtifact("punctra-react-");
 
 verifyPackedFiles(viewerArtifact, [
+  "package/camera-policy.js",
+  "package/exact-query.d.ts",
+  "package/exact-query.js",
   "package/package.json",
-  "package/sdk.js",
-  "package/sdk.d.ts",
-  "package/stream-worker.js",
+  "package/pkg/browser_demo.d.ts",
   "package/pkg/browser_demo.js",
+  "package/pkg/browser_demo_bg.wasm.d.ts",
   "package/pkg/browser_demo_bg.wasm",
+  "package/range-response.js",
+  "package/sdk.d.ts",
+  "package/sdk.js",
+  "package/stream-ordinals.js",
+  "package/stream-worker.js",
+  "package/streaming-protocol.js",
+  "package/viewer-api.d.ts",
+  "package/viewer-api.js",
+  "package/viewer-input.d.ts",
+  "package/viewer-input.js",
+  "package/worker-operation.js",
+  "package/worker-protocol.js",
 ]);
 verifyPackedFiles(reactArtifact, [
-  "package/package.json",
-  "package/index.js",
   "package/index.d.ts",
+  "package/index.js",
+  "package/lifecycle.js",
+  "package/package.json",
 ]);
 
 run("node", ["--test", "packages/react/lifecycle.test.mjs"], repositoryRoot);
@@ -44,11 +59,11 @@ function onlyArtifact(prefix) {
 }
 
 function verifyPackedFiles(artifact, expectedFiles) {
-  const listing = run("tar", ["-tzf", artifact], repositoryRoot).stdout;
-  for (const expected of expectedFiles) {
-    assert.match(listing, new RegExp(`^${escapePattern(expected)}$`, "m"), `${expected} is not packed`);
-  }
-  assert.doesNotMatch(listing, /(?:^|\/)\.env(?:$|\.)|node_modules|\.test\./);
+  const actualFiles = run("tar", ["-tzf", artifact], repositoryRoot).stdout
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .sort();
+  assert.deepEqual(actualFiles, [...expectedFiles].sort(), `${artifact} contents differ`);
 }
 
 async function verifyTrial(name, artifacts, requireCodeSplit) {
@@ -137,8 +152,4 @@ function run(command, arguments_, cwd) {
     throw new Error(`${command} ${arguments_.join(" ")} failed with ${result.status}`);
   }
   return result;
-}
-
-function escapePattern(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
