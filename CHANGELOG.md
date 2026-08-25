@@ -6,7 +6,7 @@ All notable changes to Punctra are documented here. The project follows
 ## Unreleased - 0.18.0-alpha.1
 
 - Completed and locally repository-verified the accepted v0.18 slice at
-  implementation commit `6c1e0eb60ad8a3e575fd4bde1784d96d5747a04b`. The
+  implementation commit `6ac935659daf19ba94c972e9286cf16b63ed187a`. The
   [v0.18 verification record](docs/releases/v0.18.0.md) pins the exact package,
   clean-consumer, native, GPU, benchmark, and Chrome WebGPU evidence plus the
   remaining external exits.
@@ -16,9 +16,9 @@ All notable changes to Punctra are documented here. The project follows
   map, exact TypeScript declarations, generated API reference, packaged Wasm,
   and module-Worker assets.
 - Added package-relative and explicit copied-asset resolution. Qualified Vite
-  builds discover the Wasm and Worker through static `import.meta.url` paths;
-  callers can instead supply immutable URLs plus one bounded cache token
-  without losing existing query parameters.
+  builds discover the Wasm and bundled Worker through `import.meta.url`-relative
+  asset expressions; callers can instead supply immutable URLs plus one bounded
+  cache token without losing existing query parameters.
 - Added lifecycle-safe `pause`, `resume`, and idempotent `dispose` aliases over
   the same viewer core. Worker construction now accepts the narrow factory
   required for bundler-owned module Workers while preserving the explicit
