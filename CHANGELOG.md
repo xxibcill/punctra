@@ -6,7 +6,7 @@ All notable changes to Punctra are documented here. The project follows
 ## Unreleased - 0.18.0-alpha.1
 
 - Completed and locally repository-verified the accepted v0.18 slice at
-  implementation commit `37a2d79b60fe92520a53bc259716d0dfd5be3f68`. The
+  implementation commit `a3feb0f9a59680904af19c46d9def77c92bd81d3`. The
   [v0.18 verification record](docs/releases/v0.18.0.md) pins the exact package,
   clean-consumer, native, GPU, benchmark, and Chrome WebGPU evidence plus the
   remaining external exits.
@@ -31,7 +31,8 @@ All notable changes to Punctra are documented here. The project follows
   packs exact artifacts, installs them into fresh temporary applications,
   checks declarations, builds development and production Vite outputs,
   verifies code splitting plus content-hashed Wasm/Worker assets, serves the
-  development transforms, and repeats abandoned/mounted lifecycle cleanup.
+  development transforms, and runs the packed React hook through Strict Mode,
+  update, explicit-key recreation, and cleanup.
 - Added the [browser SDK deployment guide](docs/guides/browser-sdk.md),
   generated [API reference](docs/api/browser-sdk.md), architecture/workflow
   updates, and explicit CSP, CORS, Wasm MIME, Worker-origin, copied-asset, and
