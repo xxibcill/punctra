@@ -11,6 +11,7 @@ const [
     captureJsHeap,
     evaluateQualification,
     measureForegroundFrames,
+    recreationRequiredRecoveryEvidence,
   },
 ] = await Promise.all([
   import(`./sdk.js?v=${BUILD_CACHE_TOKEN}`),
@@ -419,7 +420,8 @@ async function runSmokePath() {
       lifecycle: lifecycleRecovery,
       worker: workerRecovery,
       network: networkRecovery,
-      device_loss: "deterministic facade/raw-viewer test; not forced on physical adapter",
+      recreation_required: recreationRequiredRecoveryEvidence(),
+      physical_device_loss: "not forced on the physical adapter",
       memory_pressure: "no portable signal; independent fixed ceilings enforced",
     },
     cancellation,

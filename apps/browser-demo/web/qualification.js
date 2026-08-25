@@ -110,6 +110,21 @@ export function evaluateQualification(record) {
   return deepFreeze({ passed: failures.length === 0, failures, limits: QUALIFICATION_LIMITS });
 }
 
+export function recreationRequiredRecoveryEvidence() {
+  return deepFreeze({
+    partial_publication: {
+      outcome: "viewer_destroyed",
+      safe_action: "Dispose the fused viewer and create a new one before any Source load.",
+      test_scope: "deterministic post-publication Worker failure",
+    },
+    device_loss: {
+      outcome: "viewer_destroyed",
+      safe_action: "Dispose the fused viewer and explicitly recreate the viewer and device.",
+      test_scope: "deterministic facade and raw-viewer failure",
+    },
+  });
+}
+
 function createFrameMeasurement(frameCount, render, requestFrame, now, resolve, reject) {
   const callbackIntervals = [];
   const submissionTimes = [];

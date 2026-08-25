@@ -7,6 +7,7 @@ import {
   captureJsHeap,
   evaluateQualification,
   measureForegroundFrames,
+  recreationRequiredRecoveryEvidence,
   summarizeSamples,
 } from "./qualification.js";
 
@@ -124,6 +125,25 @@ test("qualification evaluation reports every violated fixed ceiling and exact fa
     "cold first sampled Coverage exceeded 10000 ms",
     "warm binary network request count differed from 0",
   ]);
+});
+
+test("recreation-required evidence names the outcome and safe host action", () => {
+  const evidence = recreationRequiredRecoveryEvidence();
+  assert.deepEqual(evidence, {
+    partial_publication: {
+      outcome: "viewer_destroyed",
+      safe_action: "Dispose the fused viewer and create a new one before any Source load.",
+      test_scope: "deterministic post-publication Worker failure",
+    },
+    device_loss: {
+      outcome: "viewer_destroyed",
+      safe_action: "Dispose the fused viewer and explicitly recreate the viewer and device.",
+      test_scope: "deterministic facade and raw-viewer failure",
+    },
+  });
+  assert.equal(Object.isFrozen(evidence), true);
+  assert.equal(Object.isFrozen(evidence.partial_publication), true);
+  assert.equal(Object.isFrozen(evidence.device_loss), true);
 });
 
 function qualificationFixture() {

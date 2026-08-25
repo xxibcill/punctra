@@ -115,6 +115,18 @@
           "stale_generation_rejected": true,
           "partial_publication_failure_fuses_in_deterministic_tests": true,
           "device_loss_fuses_in_deterministic_tests": true,
+          "recreation_required": {
+            "partial_publication": {
+              "outcome": "viewer_destroyed",
+              "safe_action": "Dispose the fused viewer and create a new one before any Source load.",
+              "test_scope": "deterministic post-publication Worker failure"
+            },
+            "device_loss": {
+              "outcome": "viewer_destroyed",
+              "safe_action": "Dispose the fused viewer and explicitly recreate the viewer and device.",
+              "test_scope": "deterministic facade and raw-viewer failure"
+            }
+          },
           "physical_device_loss_forced": false,
           "memory_pressure_forced": false
         },
