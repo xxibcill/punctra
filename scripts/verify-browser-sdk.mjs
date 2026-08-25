@@ -39,6 +39,7 @@ verifyPackedFiles(viewerArtifact, [
   "package/worker-protocol.js",
 ]);
 verifyPackedFiles(reactArtifact, [
+  "package/hook.js",
   "package/index.d.ts",
   "package/index.js",
   "package/lifecycle.js",
@@ -46,8 +47,8 @@ verifyPackedFiles(reactArtifact, [
 ]);
 
 run("node", ["--test", "packages/react/lifecycle.test.mjs"], repositoryRoot);
-await verifyTrial("browser-typescript", [viewerArtifact], true);
-await verifyTrial("browser-react", [viewerArtifact, reactArtifact], false);
+await verifyTrial("browser-typescript", [viewerArtifact], { requireCodeSplit: true });
+await verifyTrial("browser-react", [viewerArtifact, reactArtifact], { runPackageTests: true });
 
 console.log("browser SDK packed-artifact trials passed");
 
@@ -66,13 +67,14 @@ function verifyPackedFiles(artifact, expectedFiles) {
   assert.deepEqual(actualFiles, [...expectedFiles].sort(), `${artifact} contents differ`);
 }
 
-async function verifyTrial(name, artifacts, requireCodeSplit) {
+async function verifyTrial(name, artifacts, { requireCodeSplit = false, runPackageTests = false }) {
   const temporaryRoot = mkdtempSync(path.join(tmpdir(), `punctra-${name}-`));
   const trial = path.join(temporaryRoot, name);
   try {
     cpSync(path.join(repositoryRoot, "examples", name), trial, { recursive: true });
     run("npm", ["ci", "--ignore-scripts", "--no-audit", "--no-fund"], trial);
     run("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund", "--no-save", ...artifacts], trial);
+    if (runPackageTests) run("npm", ["test"], trial);
     run("npm", ["run", "typecheck"], trial);
     run("npm", ["run", "build:development"], trial);
     verifyProductionAssets(path.join(trial, "dist"), requireCodeSplit);
