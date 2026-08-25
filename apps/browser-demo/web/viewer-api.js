@@ -422,6 +422,9 @@ class BrowserViewer {
       this.#refreshState();
       return deepFreeze({ ...result, state: this.#state });
     } catch (error) {
+      if (this.#destroyed) {
+        throw new ViewerError("viewer_destroyed", "viewer was destroyed during Source loading");
+      }
       const viewerError = toViewerError(error, begun ? "stream_publication" : "worker_failed");
       if (!begun) throw viewerError;
       const fusedError = new ViewerError(viewerError.code, viewerError.message, {

@@ -225,6 +225,26 @@ test("normal and fused destruction cancel every owned operation", async () => {
   assert.equal(observed.length, factsAfterFuse.observedStates);
 });
 
+test("an in-flight Source load reports viewer destruction after a worker error", async () => {
+  const viewer = await createBrowserViewer({
+    bindings: { createViewer: async () => new FakeRawViewer() },
+    canvas: {},
+    viewport: viewport(),
+    WorkerConstructor: OwnedWorkWorker,
+    workerUrl: "https://fixtures.test/stream-worker.js",
+  });
+  const load = viewer.loadSource({
+    manifestUrl: "https://fixtures.test/deployment.json",
+  });
+  await Promise.resolve();
+
+  viewer.destroy();
+  OwnedWorkWorker.current.crash();
+
+  await assert.rejects(load, (error) => error.code === "viewer_destroyed");
+  assert.equal(viewer.state().failure.code, "viewer_destroyed");
+});
+
 test("surface_outdated preserves the viewer for bounded recovery", async () => {
   const viewer = await createBrowserViewer({
     bindings: { createViewer: async () => new OutdatedRawViewer() },
@@ -661,6 +681,10 @@ class OwnedWorkWorker extends FixtureWorker {
       message: "cancelled",
       safe_action: "retry",
     });
+  }
+
+  crash() {
+    this.listeners.get("error")?.({ message: "fixture worker crashed" });
   }
 }
 
