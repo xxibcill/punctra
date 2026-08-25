@@ -17,7 +17,7 @@ export type ExactQueryErrorCode =
 export class ExactQueryError extends Error {
   readonly code: ExactQueryErrorCode;
   readonly safeAction: string;
-  constructor(code: ExactQueryErrorCode, message: string, options?: { cause?: unknown });
+  constructor(code: ExactQueryErrorCode, message: string);
 }
 
 export interface LasExactQueryLayout {

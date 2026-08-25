@@ -96,7 +96,7 @@ export class ViewerError extends Error {
   constructor(
     code: ViewerErrorCode,
     message: string,
-    options?: { cause?: unknown; safeAction?: string; recoverable?: boolean },
+    options?: { safeAction?: string; recoverable?: boolean },
   );
 }
 

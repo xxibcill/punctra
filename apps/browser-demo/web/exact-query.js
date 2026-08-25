@@ -14,8 +14,8 @@ const EXACT_QUERY_SAFE_ACTION =
   "Keep the current display as non-authoritative and retry exact confirmation against the active immutable Source.";
 
 export class ExactQueryError extends Error {
-  constructor(code, message, options = {}) {
-    super(message, options);
+  constructor(code, message) {
+    super(message);
     this.name = "ExactQueryError";
     this.code = code;
     this.safeAction = EXACT_QUERY_SAFE_ACTION;
@@ -57,15 +57,12 @@ export function createLasExactQueryBridge(options) {
         );
       } catch (error) {
         if (error?.name === "AbortError" || request?.signal?.aborted) {
-          throw new ExactQueryError("exact_query_cancelled", "exact Point confirmation was cancelled", {
-            cause: error,
-          });
+          throw new ExactQueryError("exact_query_cancelled", "exact Point confirmation was cancelled");
         }
         if (error instanceof ExactQueryError) throw error;
         throw new ExactQueryError(
           "exact_query_failed",
           boundedMessage(error?.message ?? String(error)),
-          { cause: error },
         );
       } finally {
         active = false;

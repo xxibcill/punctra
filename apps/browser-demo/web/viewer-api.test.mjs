@@ -197,8 +197,33 @@ test("viewer normalizes cancellation and bounds external failures", async () => 
     (error) => error.code === "invalid_argument",
   );
   assert.equal(viewer.state().failure.code, "invalid_argument");
-  const bounded = new ViewerError("internal", "x".repeat(1_000));
+  const bounded = new ViewerError("internal", "x".repeat(1_000), { cause: new Error("private") });
   assert.equal(bounded.message.length, 512);
+  assert.equal("cause" in bounded, false);
+});
+
+test("viewer keeps malformed exact results inside the structured error boundary", async () => {
+  const raw = new FakeRawViewer();
+  raw.beginStreamBatch(SOURCE, 1, 0, 0, 0, -1, 1, 0, new Uint8Array(32));
+  const viewer = await createBrowserViewer({
+    bindings: { createViewer: async () => raw },
+    canvas: {},
+    viewport: viewport(),
+    exactQueryBridge: {
+      confirm: async () => ({
+        authority: "exact_source_record",
+        sourceIdentity: SOURCE,
+        generation: 1,
+      }),
+    },
+  });
+
+  await assert.rejects(
+    viewer.confirmPoint({ sourceIdentity: SOURCE, pointOrdinal: 0, generation: 1 }),
+    (error) => error instanceof ViewerError
+      && error.code === "exact_query_source_mismatch"
+      && !("cause" in error),
+  );
 });
 
 test("viewer owns cancellation for exact handoffs already in flight", async () => {

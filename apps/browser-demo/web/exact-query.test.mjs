@@ -105,6 +105,24 @@ test("exact confirmation classifies validator drift, cancellation, and stale Sou
   );
 });
 
+test("exact-query errors do not expose raw external exceptions", async () => {
+  const bridge = createLasExactQueryBridge({
+    manifestUrl,
+    fetchImplementation: async () => { throw new Error("private transport details"); },
+  });
+
+  await assert.rejects(
+    bridge.confirm({
+      sourceIdentity: manifest.source.source_identity,
+      pointOrdinal: 0,
+      generation: 1,
+    }),
+    (error) => error instanceof ExactQueryError
+      && error.code === "exact_query_failed"
+      && !("cause" in error),
+  );
+});
+
 function fixtureFetch(requests, options = {}) {
   return async (input, init = {}) => {
     const url = String(input);

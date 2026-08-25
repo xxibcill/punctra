@@ -174,7 +174,7 @@ let operationSequence = 0;
 export class ViewerError extends Error {
   constructor(code, message, options = {}) {
     const normalizedCode = ERROR_CODE_SET.has(code) ? code : "internal";
-    super(boundedMessage(message), { cause: options.cause });
+    super(boundedMessage(message));
     this.name = "ViewerError";
     this.schema = ERROR_SCHEMA;
     this.code = normalizedCode;
@@ -524,10 +524,7 @@ export class BrowserViewer {
       this.#ensureActive();
       assertNotCancelled(controller.signal, "exact_query_cancelled");
       this.#requireCurrentPoint(identity, generation);
-      if (result?.sourceIdentity !== identity.sourceIdentity
-        || BigInt(result?.pointOrdinal) !== identity.pointOrdinal
-        || result?.generation !== generation
-        || result?.authority !== "exact_source_record") {
+      if (!matchesExactPoint(result, identity, generation)) {
         throw new ViewerError("exact_query_source_mismatch", "exact bridge returned a mismatched Point result");
       }
       return deepFreeze(result);
@@ -823,8 +820,8 @@ function parseDiagnostics(value) {
   if (typeof value !== "string") throw new ViewerError("internal", "raw viewer returned non-string diagnostics");
   try {
     return JSON.parse(value);
-  } catch (error) {
-    throw new ViewerError("diagnostic_serialization", "raw viewer diagnostics are invalid JSON", { cause: error });
+  } catch {
+    throw new ViewerError("diagnostic_serialization", "raw viewer diagnostics are invalid JSON");
   }
 }
 
@@ -841,10 +838,22 @@ function toViewerError(error, fallbackCode = "internal") {
   }
   const code = ERROR_CODE_SET.has(record?.code) ? record.code : fallbackCode;
   return new ViewerError(code, record?.message ?? String(error), {
-    cause: error,
     safeAction: record?.safe_action ?? record?.safeAction,
     recoverable: record?.recoverable,
   });
+}
+
+function matchesExactPoint(result, identity, generation) {
+  if (result?.sourceIdentity !== identity.sourceIdentity
+    || result?.generation !== generation
+    || result?.authority !== "exact_source_record") {
+    return false;
+  }
+  try {
+    return BigInt(result.pointOrdinal) === identity.pointOrdinal;
+  } catch {
+    return false;
+  }
 }
 
 function linkedAbortController(externalSignal) {
