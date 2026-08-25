@@ -11,6 +11,7 @@ import {
 import { WORKER_SCHEMA } from "./worker-protocol.js";
 
 const SOURCE = "ab".repeat(32);
+const GENERATED_SOURCE = "15".repeat(32);
 
 test("runtime error codes and display modes agree with TypeScript declarations", async () => {
   const runtime = await import("./viewer-api.js");
@@ -45,6 +46,7 @@ test("viewer exposes typed lifecycle, camera, display, state subscription, and c
 
   assert.equal(viewer.state().schema, "punctra-viewer-state-v1");
   assert.equal(Object.isFrozen(viewer.state()), true);
+  assert.equal(viewer.state().source.identity, GENERATED_SOURCE);
   viewer.setHighlights([]);
   assert.equal(viewer.state().highlights.pointCount, 0);
   viewer.setCamera({
@@ -77,6 +79,7 @@ test("viewer exposes typed lifecycle, camera, display, state subscription, and c
   assert.equal(rendered.render.renderedFrames, 1);
   assert.equal(rendered.camera.projection, "orthographic");
   assert.equal(rendered.displayMode, "classification");
+  assert.equal(rendered.source.identity, GENERATED_SOURCE);
   assert.ok(observed.length >= 4);
   assert.equal(unsubscribe(), true);
 
@@ -710,7 +713,11 @@ function diagnosticsFixture() {
       physical_height: 1_000,
       surface_bytes: 6_400_000,
     },
-    scene: { point_count: 1_089, generation: 1 },
+    scene: {
+      source_identity: GENERATED_SOURCE,
+      point_count: 1_089,
+      generation: 1,
+    },
     streaming: {
       phase: "idle",
       source_identity: null,

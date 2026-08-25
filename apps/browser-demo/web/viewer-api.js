@@ -693,7 +693,7 @@ function publicState(diagnostics, destroyed, renderScheduled, loadActive, loadFa
         retainedRecordBytes: stream.retained_record_bytes,
       }
     : {
-        identity: diagnostics.pick.source_identity ?? null,
+        identity: diagnostics.scene.source_identity,
         coverage: "generated_fixture",
         expectedPoints: diagnostics.scene.point_count,
         publishedPoints: diagnostics.scene.point_count,

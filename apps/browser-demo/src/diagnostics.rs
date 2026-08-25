@@ -121,6 +121,16 @@ where
     }
 }
 
+pub(crate) fn serialize_required_source_identity<S>(
+    source: &SourceId,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    serializer.serialize_str(&source.to_string())
+}
+
 impl Diagnostics<'_> {
     pub(crate) fn to_json(&self) -> Result<String, serde_json::Error> {
         serde_json::to_string(self)
@@ -457,6 +467,7 @@ mod tests {
             "progressive_gpu_non_authoritative"
         );
         assert_eq!(value["scene"]["point_count"], 1_089);
+        assert_eq!(value["scene"]["source_identity"], "15".repeat(32));
         assert_eq!(value["limits"]["points"], 8_192);
         assert_eq!(value["limits"]["estimated_gpu_bytes"], 196_608);
         assert_eq!(value["limits"]["surface_bytes_per_pixel"], 4);

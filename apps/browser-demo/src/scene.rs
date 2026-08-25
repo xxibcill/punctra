@@ -10,6 +10,8 @@ use render_wgpu::{Frame, FrameError, PointStyle};
 use serde::Serialize;
 use thiserror::Error;
 
+use crate::diagnostics::serialize_required_source_identity;
+
 pub(crate) const VIEW_GENERATION: ViewGenerationKey = ViewGenerationKey::new(ViewId::new(15), 1);
 pub(crate) const BATCH_KEY: BatchKey = BatchKey::new(1);
 pub(crate) const BATCH_VERSION: BatchVersion = BatchVersion::new(1);
@@ -48,6 +50,7 @@ impl PreparedScene {
         let camera = scene_camera()?;
         let planner = plan_missing_root(&batch, &camera)?;
         let facts = SceneFacts {
+            source_identity: SOURCE_ID,
             point_count: batch.point_count(),
             estimated_gpu_bytes: batch.estimated_gpu_bytes(),
             initial_requests: 1,
@@ -122,6 +125,8 @@ impl PreparedScene {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 pub(crate) struct SceneFacts {
+    #[serde(serialize_with = "serialize_required_source_identity")]
+    pub(crate) source_identity: SourceId,
     pub(crate) point_count: u64,
     pub(crate) estimated_gpu_bytes: u64,
     pub(crate) initial_requests: u64,
