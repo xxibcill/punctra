@@ -462,6 +462,12 @@ export class BrowserViewer {
     return this.#execute(() => {
       this.#ensureActive();
       if (!Array.isArray(points)) throw invalidArgument("highlights must be an array");
+      if (points.length === 0) {
+        return this.#callRaw(
+          "clearHighlights",
+          BigInt(positiveInteger(generation, "generation")),
+        );
+      }
       const identities = points.map(pointIdentityInput);
       const sourceIdentity = identities[0]?.sourceIdentity ?? this.#state.source?.identity;
       if (!sourceIdentity) throw invalidArgument("the active View has no Source identity");
@@ -479,10 +485,7 @@ export class BrowserViewer {
   }
 
   clearHighlights(generation = this.#state.generation) {
-    return this.#execute(() => this.#callRaw(
-      "clearHighlights",
-      BigInt(positiveInteger(generation, "generation")),
-    ));
+    return this.setHighlights([], generation);
   }
 
   async confirmPoint(point, options = {}) {

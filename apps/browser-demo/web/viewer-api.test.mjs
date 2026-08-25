@@ -42,6 +42,8 @@ test("viewer exposes typed lifecycle, camera, display, state subscription, and c
 
   assert.equal(viewer.state().schema, "punctra-viewer-state-v1");
   assert.equal(Object.isFrozen(viewer.state()), true);
+  viewer.setHighlights([]);
+  assert.equal(viewer.state().highlights.pointCount, 0);
   viewer.setCamera({
     projection: "perspective",
     eye: [500_000, 4_599_969, 122],
