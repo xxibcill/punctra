@@ -185,7 +185,7 @@ async function verifyDevelopmentServer(directory) {
   const viteEntry = path.join(directory, "node_modules/vite/bin/vite.js");
   const child = spawn(
     process.execPath,
-    [viteEntry, "--host", "127.0.0.1", "--port", String(port), "--strictPort"],
+    [viteEntry, "--force", "--host", "127.0.0.1", "--port", String(port), "--strictPort"],
     { cwd: directory, stdio: ["ignore", "pipe", "pipe"] },
   );
   const output = collectChildOutput(child);

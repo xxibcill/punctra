@@ -1,6 +1,9 @@
 import { defineConfig } from "vite";
 
 export default defineConfig({
+  optimizeDeps: {
+    exclude: ["@punctra/viewer"],
+  },
   worker: {
     format: "es",
   },

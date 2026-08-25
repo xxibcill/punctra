@@ -109,9 +109,17 @@ format:
 
 ```ts
 export default defineConfig({
+  optimizeDeps: {
+    exclude: ["@punctra/viewer"],
+  },
   worker: { format: "es" },
 });
 ```
+
+The viewer is already valid ESM. Excluding it from development dependency
+pre-bundling lets Vite transform the package-local Worker URL suffix directly,
+including on a cold optimizer start. Production builds still bundle and hash
+the complete Worker module graph.
 
 The clean trials verify the emitted SDK and bundled-Worker module graph so a
 build fails when a relative production dependency is absent.
