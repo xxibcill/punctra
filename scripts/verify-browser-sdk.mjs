@@ -106,19 +106,23 @@ function verifyProductionAssets(distribution, requireCodeSplit) {
   if (requireCodeSplit) verifyCodeSplitSdk(manifest);
   const copiedWorker = manifest["node_modules/@punctra/viewer/stream-worker.js"]?.file;
   assert(copiedWorker, "production manifest omitted copied-asset Worker resolution");
-  verifyResolvedWorker(distribution, files, copiedWorker);
-  verifyBundledWorker(distribution, files);
+  const bundledWorker = verifyBundledWorker(distribution, files);
+  verifyResolvedWorker(distribution, manifest, bundledWorker);
   verifyEmittedModuleGraph(distribution, files, new Set([copiedWorker]));
 }
 
-function verifyResolvedWorker(distribution, files, copiedWorker) {
-  const sdkSource = files
-    .filter((file) => file.endsWith(".js"))
-    .map((file) => readFileSync(path.join(distribution, file), "utf8"))
-    .find((source) => source.includes(copiedWorker));
+function verifyResolvedWorker(distribution, manifest, bundledWorker) {
+  const resolvedWorkerModule = manifest[
+    "node_modules/@punctra/viewer/stream-worker.js?worker&url"
+  ]?.file;
   assert(
-    sdkSource,
-    "public Worker resolution does not use the statically emitted Worker asset",
+    resolvedWorkerModule,
+    "production manifest omitted the public resolved Worker URL",
+  );
+  const resolvedWorkerSource = readFileSync(path.join(distribution, resolvedWorkerModule), "utf8");
+  assert(
+    resolvedWorkerSource.includes(bundledWorker),
+    "public Worker resolution differs from the bundled default Worker",
   );
 }
 
@@ -141,6 +145,7 @@ function verifyBundledWorker(distribution, files) {
   assert(match, "production SDK does not construct the bundled module Worker");
   const bundledWorker = match[1].replace(/^\//, "");
   assert(emitted.has(bundledWorker), `production SDK references missing Worker ${bundledWorker}`);
+  return bundledWorker;
 }
 
 function verifyEmittedModuleGraph(distribution, files, ignoredFiles) {

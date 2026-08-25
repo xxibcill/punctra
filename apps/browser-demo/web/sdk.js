@@ -11,7 +11,10 @@ import { createWasmModuleLoader } from "./wasm-loader.js";
 
 const PRODUCTION_BUNDLE = typeof import.meta.env !== "undefined" && import.meta.env.PROD;
 const DEFAULT_WASM_URL = new URL("./pkg/browser_demo_bg.wasm", import.meta.url);
-const DEFAULT_WORKER_URL = new URL("./stream-worker.js", import.meta.url);
+const DEFAULT_WORKER_SOURCE_URL = new URL("./stream-worker.js", import.meta.url);
+const DEFAULT_WORKER_URL = PRODUCTION_BUNDLE
+  ? new URL((await import("./stream-worker.js?worker&url")).default, import.meta.url)
+  : DEFAULT_WORKER_SOURCE_URL;
 const MAX_CACHE_KEY_CHARACTERS = 128;
 
 const loadBindings = createWasmModuleLoader({

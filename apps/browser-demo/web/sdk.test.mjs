@@ -36,9 +36,9 @@ test("SDK exports the public viewer surface and package-relative assets", async 
   assert.doesNotMatch(declaration, /workerFactory/);
   assert.match(
     source,
-    /const DEFAULT_WORKER_URL = new URL\("\.\/stream-worker\.js", import\.meta\.url\);/,
+    /const DEFAULT_WORKER_SOURCE_URL = new URL\("\.\/stream-worker\.js", import\.meta\.url\);/,
   );
-  assert.doesNotMatch(source, /stream-worker\.js\?worker&url/);
+  assert.match(source, /import\("\.\/stream-worker\.js\?worker&url"\)/);
 });
 
 test("explicit SDK assets preserve deployment URLs and bounded cache busting", () => {
