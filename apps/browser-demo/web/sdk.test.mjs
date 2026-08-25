@@ -34,6 +34,17 @@ test("SDK exports the public viewer surface and package-relative assets", async 
   assert.doesNotMatch(declaration, /createInputNormalizer|createLasExactQueryBridge/);
   assert.doesNotMatch(declaration, /createBrowserViewer/);
   assert.doesNotMatch(declaration, /workerFactory/);
+  assert.doesNotMatch(source, /\.\.\.options/);
+  for (const option of [
+    "canvas",
+    "viewport",
+    "exactQueryBridge",
+    "WorkerConstructor",
+    "requestAnimationFrame",
+    "cancelAnimationFrame",
+  ]) {
+    assert.match(source, new RegExp(`${option}: options\\.${option}`));
+  }
   assert.match(
     source,
     /const DEFAULT_WORKER_SOURCE_URL = new URL\("\.\/stream-worker\.js", import\.meta\.url\);/,
