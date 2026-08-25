@@ -1,5 +1,5 @@
 const WORKER_CACHE_TOKEN = encodeURIComponent(
-  new URL(import.meta.url).searchParams.get("v") ?? "unversioned",
+  new URL(import.meta.url).searchParams.get("punctra-v") ?? "unversioned",
 );
 
 let active;

@@ -42,3 +42,10 @@ test("explicit SDK assets preserve deployment URLs and bounded cache busting", (
     (error) => error instanceof ViewerError && error.code === "invalid_argument",
   );
 });
+
+test("copied Worker propagates the SDK cache token to its dependencies", async () => {
+  const workerSource = await readFile(new URL("stream-worker.js", import.meta.url), "utf8");
+
+  assert.match(workerSource, /searchParams\.get\("punctra-v"\)/);
+  assert.doesNotMatch(workerSource, /searchParams\.get\("v"\)/);
+});
