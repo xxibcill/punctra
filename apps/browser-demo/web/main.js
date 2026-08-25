@@ -62,6 +62,7 @@ let suspended = false;
 let smokeRunning = false;
 let smokePassed = false;
 let smokeRecord;
+let inputAcceptanceFacts;
 let latestLoad;
 let exactPoint;
 let resizeFrame;
@@ -305,6 +306,7 @@ async function runSmokePath() {
   assertFact(viewer.render().camera.projection === "orthographic", "orthographic camera");
   viewer.setCamera(perspective);
   assertFact(viewer.render().camera.projection === "perspective", "perspective camera");
+  const normalizedInput = await exerciseNormalizedInput();
 
   const provisional = await pickResidentPoint();
   assertFact(provisional !== undefined, "streamed provisional pick");
@@ -341,7 +343,7 @@ async function runSmokePath() {
     warm: compactLoad(warm),
     display_modes: displayEvidence,
     projections: ["orthographic", "perspective"],
-    input_normalizer: ["pointer", "wheel", "keyboard", "touch"],
+    input_normalizer: normalizedInput,
     provisional,
     exact: exactPoint,
     stale_generation_rejected: true,
@@ -359,7 +361,7 @@ async function runSmokePath() {
   publishState(viewer.state());
   setHarnessState(
     "passed",
-    "PASS — public lifecycle, streaming, five displays, two projections, pick, highlight, exact confirmation, cancellation, and stale-generation rejection verified locally.",
+    "PASS — public lifecycle, streaming, five displays, two projections, normalized input, pick, highlight, exact confirmation, cancellation, and stale-generation rejection verified locally.",
   );
 }
 
@@ -479,7 +481,7 @@ function perspectiveVisibleHeight(camera) {
 }
 
 function applyNormalizedInput(input) {
-  if (!viewer || smokeRunning || suspended) return;
+  if (!viewer || suspended || (smokeRunning && inputAcceptanceFacts === undefined)) return;
   try {
     const camera = cameraInputFromState(viewer.state());
     const next = input.kind === "orbit"
@@ -491,11 +493,138 @@ function applyNormalizedInput(input) {
           : keyboardCamera(camera, input.code);
     if (!next) return;
     viewer.setCamera(next);
+    recordInputAcceptance(input, next);
     void viewer.requestRender().catch((error) => publishFailure(error));
     projectionButton.textContent = next.projection === "perspective" ? "Orthographic" : "Perspective";
   } catch (error) {
     publishFailure(error);
   }
+}
+
+async function exerciseNormalizedInput() {
+  const initialCamera = cameraInputFromState(viewer.state());
+  inputAcceptanceFacts = [];
+  try {
+    const preventedEvents = [
+      exercisePointerInput(),
+      exerciseTouchInput(),
+      exerciseWheelInput(),
+      exerciseKeyboardInput(),
+    ];
+    await viewer.requestRender();
+
+    const channels = new Set(inputAcceptanceFacts.map((fact) => fact.channel));
+    for (const channel of ["pointer", "touch", "wheel", "keyboard"]) {
+      assertFact(channels.has(channel), `normalized ${channel} input`);
+    }
+    for (const [channel, event] of preventedEvents) {
+      assertFact(event.defaultPrevented, `normalized ${channel} default prevention`);
+    }
+    return inputAcceptanceFacts;
+  } finally {
+    inputAcceptanceFacts = undefined;
+    viewer.setCamera(initialCamera);
+    viewer.render();
+  }
+}
+
+function exercisePointerInput() {
+  dispatchPointer("pointerdown", {
+    pointerId: 101,
+    pointerType: "mouse",
+    clientX: 100,
+    clientY: 100,
+    buttons: 1,
+  });
+  const move = dispatchPointer("pointermove", {
+    pointerId: 101,
+    pointerType: "mouse",
+    clientX: 112,
+    clientY: 107,
+    buttons: 1,
+  });
+  dispatchPointer("pointerup", {
+    pointerId: 101,
+    pointerType: "mouse",
+    clientX: 112,
+    clientY: 107,
+  });
+  return ["pointer", move];
+}
+
+function exerciseTouchInput() {
+  dispatchPointer("pointerdown", {
+    pointerId: 201,
+    pointerType: "touch",
+    clientX: 100,
+    clientY: 100,
+    buttons: 1,
+  });
+  dispatchPointer("pointerdown", {
+    pointerId: 202,
+    pointerType: "touch",
+    clientX: 120,
+    clientY: 100,
+    buttons: 1,
+  });
+  const move = dispatchPointer("pointermove", {
+    pointerId: 202,
+    pointerType: "touch",
+    clientX: 140,
+    clientY: 100,
+    buttons: 1,
+  });
+  dispatchPointer("pointerup", { pointerId: 201, pointerType: "touch" });
+  dispatchPointer("pointerup", { pointerId: 202, pointerType: "touch" });
+  return ["touch", move];
+}
+
+function exerciseWheelInput() {
+  const event = new WheelEvent("wheel", {
+    bubbles: true,
+    cancelable: true,
+    deltaY: 100,
+    deltaMode: WheelEvent.DOM_DELTA_PIXEL,
+  });
+  canvas.dispatchEvent(event);
+  return ["wheel", event];
+}
+
+function exerciseKeyboardInput() {
+  const event = new KeyboardEvent("keydown", {
+    bubbles: true,
+    cancelable: true,
+    code: "KeyP",
+  });
+  canvas.dispatchEvent(event);
+  return ["keyboard", event];
+}
+
+function dispatchPointer(type, options) {
+  const event = new PointerEvent(type, {
+    bubbles: true,
+    cancelable: true,
+    ...options,
+  });
+  canvas.dispatchEvent(event);
+  return event;
+}
+
+function recordInputAcceptance(input, camera) {
+  if (inputAcceptanceFacts === undefined) return;
+  const channel = input.kind === "keyboard"
+    ? "keyboard"
+    : input.source === "touch"
+      ? "touch"
+      : input.source === "wheel"
+        ? "wheel"
+        : "pointer";
+  inputAcceptanceFacts.push(Object.freeze({
+    channel,
+    kind: input.kind,
+    source: input.source ?? "keyboard",
+    camera_projection: camera.projection,
+  }));
 }
 
 function orbitCamera(camera, horizontalPixels, verticalPixels) {
