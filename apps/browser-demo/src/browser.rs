@@ -468,14 +468,14 @@ impl BrowserViewer {
 
     fn accept_pick(&mut self, hit: PickHit) -> Result<(), JsValue> {
         let active_generation = self.active_view_generation();
-        let generated_invariant = self.stream.view_generation().is_some()
+        let pick_belongs_to_active_content = self.stream.view_generation().is_some()
             || (hit.batch() == BATCH_KEY
                 && hit.version() == BATCH_VERSION
                 && hit.point() == centre_point_id());
-        let invariant_matches = hit.view_generation() == active_generation
+        let pick_matches_active_view = hit.view_generation() == active_generation
             && Some(hit.point().source()) == self.active_source()
-            && generated_invariant;
-        if !invariant_matches {
+            && pick_belongs_to_active_content;
+        if !pick_matches_active_view {
             return Err(failure(
                 FailureCode::PickInvariant,
                 "the provisional hit did not preserve the active generation, Source, batch, version, and Point identity",
