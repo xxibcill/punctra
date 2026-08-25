@@ -46,6 +46,8 @@ test("input normalizer emits bounded policy-free pointer, touch, wheel, and keyb
   assert.equal(orbit.prevented, true);
   assert.equal(Object.isFrozen(inputs[5]), true);
   assert.equal(Object.isFrozen(inputs[5].modifiers), true);
+  assert.deepEqual(target.capturedPointers, []);
+  assert.deepEqual(target.releasedPointers, []);
 
   normalizer.dispose();
   normalizer.dispose();
@@ -79,6 +81,8 @@ function pointer(pointerId, clientX, clientY, options = {}) {
 class FakeTarget {
   constructor() {
     this.listeners = new Map();
+    this.capturedPointers = [];
+    this.releasedPointers = [];
   }
 
   addEventListener(type, listener) {
@@ -87,6 +91,14 @@ class FakeTarget {
 
   removeEventListener(type, listener) {
     if (this.listeners.get(type) === listener) this.listeners.delete(type);
+  }
+
+  setPointerCapture(pointerId) {
+    this.capturedPointers.push(pointerId);
+  }
+
+  releasePointerCapture(pointerId) {
+    this.releasedPointers.push(pointerId);
   }
 
   dispatch(type, event) {

@@ -23,7 +23,6 @@ export function createInputNormalizer(target, listener, options = {}) {
   const pointerDown = (event) => {
     if (pointers.size >= MAX_POINTERS || !finitePointer(event)) return;
     pointers.set(event.pointerId, pointerPosition(event));
-    target.setPointerCapture?.(event.pointerId);
   };
 
   const pointerMove = (event) => {
@@ -49,7 +48,6 @@ export function createInputNormalizer(target, listener, options = {}) {
 
   const pointerEnd = (event) => {
     pointers.delete(event.pointerId);
-    target.releasePointerCapture?.(event.pointerId);
   };
 
   const wheel = (event) => {
