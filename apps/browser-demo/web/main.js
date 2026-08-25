@@ -191,7 +191,6 @@ async function initializeViewer() {
     viewport: requestedViewport(),
     exactQueryBridge,
     assets: {
-      workerUrl: new URL("./stream-worker.js", import.meta.url),
       cacheKey: BUILD_CACHE_TOKEN,
     },
   });
