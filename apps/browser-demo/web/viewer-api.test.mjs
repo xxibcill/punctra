@@ -28,6 +28,27 @@ test("runtime error codes and display modes agree with TypeScript declarations",
   assert.match(declaration, /export interface BrowserViewer \{/);
 });
 
+test("failed facade construction shuts down the raw viewer", async () => {
+  let shutdowns = 0;
+  const raw = {
+    diagnostics: () => "invalid diagnostics",
+    shutdown() {
+      shutdowns += 1;
+      return "invalid diagnostics";
+    },
+  };
+
+  await assert.rejects(
+    createBrowserViewer({
+      bindings: { createViewer: async () => raw },
+      canvas: {},
+      viewport: viewport(),
+    }),
+    (error) => error.code === "diagnostic_serialization",
+  );
+  assert.equal(shutdowns, 1);
+});
+
 test("viewer exposes typed lifecycle, camera, display, state subscription, and coalesced rendering", async () => {
   const raw = new FakeRawViewer();
   const frames = [];

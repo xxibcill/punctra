@@ -202,7 +202,16 @@ export async function createBrowserViewer(options) {
   } catch (error) {
     throw toViewerError(error, "internal");
   }
-  return new BrowserViewer(raw, options);
+  try {
+    return new BrowserViewer(raw, options);
+  } catch (error) {
+    try {
+      raw?.shutdown?.();
+    } catch {
+      // Preserve the construction failure that prevented a usable facade.
+    }
+    throw toViewerError(error, "internal");
+  }
 }
 
 class BrowserViewer {
