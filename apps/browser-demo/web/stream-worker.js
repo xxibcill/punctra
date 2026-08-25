@@ -1,6 +1,7 @@
 const WORKER_CACHE_TOKEN = encodeURIComponent(
   new URL(import.meta.url).searchParams.get("punctra-v") ?? "unversioned",
 );
+const PRODUCTION_BUNDLE = typeof import.meta.env !== "undefined" && import.meta.env.PROD;
 
 let active;
 const memoryCacheStorage = new Map();
@@ -12,10 +13,16 @@ let boundedWorkerFailureMessage;
 let isWorkerOperationId;
 let workerFailure;
 let workerOperationId;
-const dependenciesReady = Promise.all([
-  import(`./streaming-protocol.js?v=${WORKER_CACHE_TOKEN}`),
-  import(`./worker-protocol.js?v=${WORKER_CACHE_TOKEN}`),
-]).then(([streamingProtocol, workerProtocol]) => {
+const dependencyModules = PRODUCTION_BUNDLE
+  ? Promise.all([
+      import("./streaming-protocol.js"),
+      import("./worker-protocol.js"),
+    ])
+  : Promise.all([
+      import(`./streaming-protocol.js?v=${WORKER_CACHE_TOKEN}`),
+      import(`./worker-protocol.js?v=${WORKER_CACHE_TOKEN}`),
+    ]);
+const dependenciesReady = dependencyModules.then(([streamingProtocol, workerProtocol]) => {
   ({ StreamingFailure, createWorkerMessage, runStreamingOperation } = streamingProtocol);
   ({
     WORKER_SCHEMA,

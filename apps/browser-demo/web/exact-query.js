@@ -1,6 +1,16 @@
 const MODULE_CACHE_TOKEN = encodeURIComponent(
   new URL(import.meta.url).searchParams.get("v") ?? "unversioned",
 );
+const PRODUCTION_BUNDLE = typeof import.meta.env !== "undefined" && import.meta.env.PROD;
+const dependencyModules = PRODUCTION_BUNDLE
+  ? Promise.all([
+      import("./streaming-protocol.js"),
+      import("./range-response.js"),
+    ])
+  : Promise.all([
+      import(`./streaming-protocol.js?v=${MODULE_CACHE_TOKEN}`),
+      import(`./range-response.js?v=${MODULE_CACHE_TOKEN}`),
+    ]);
 const [
   {
     loadManifest,
@@ -8,10 +18,7 @@ const [
     validateManifest,
   },
   { RangeResponseError, validateBoundRangeResponse },
-] = await Promise.all([
-  import(`./streaming-protocol.js?v=${MODULE_CACHE_TOKEN}`),
-  import(`./range-response.js?v=${MODULE_CACHE_TOKEN}`),
-]);
+] = await dependencyModules;
 
 const LAS_HEADER_BYTES = 256;
 const LAS_POINT_FORMAT = 3;

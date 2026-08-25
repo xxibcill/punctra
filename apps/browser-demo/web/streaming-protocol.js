@@ -1,6 +1,16 @@
 const MODULE_CACHE_TOKEN = encodeURIComponent(
   new URL(import.meta.url).searchParams.get("v") ?? "unversioned",
 );
+const PRODUCTION_BUNDLE = typeof import.meta.env !== "undefined" && import.meta.env.PROD;
+const dependencyModules = PRODUCTION_BUNDLE
+  ? Promise.all([
+      import("./worker-protocol.js"),
+      import("./range-response.js"),
+    ])
+  : Promise.all([
+      import(`./worker-protocol.js?v=${MODULE_CACHE_TOKEN}`),
+      import(`./range-response.js?v=${MODULE_CACHE_TOKEN}`),
+    ]);
 const [
   {
     WORKER_FAILURE_SAFE_ACTION,
@@ -9,10 +19,7 @@ const [
     workerFailure,
   },
   { RangeResponseError, validateBoundRangeResponse },
-] = await Promise.all([
-  import(`./worker-protocol.js?v=${MODULE_CACHE_TOKEN}`),
-  import(`./range-response.js?v=${MODULE_CACHE_TOKEN}`),
-]);
+] = await dependencyModules;
 
 export {
   WORKER_OUTPUT_TYPES,

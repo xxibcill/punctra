@@ -12,6 +12,7 @@ import { createWasmModuleLoader } from "./wasm-loader.js";
 const DEFAULT_WASM_URL = new URL("./pkg/browser_demo_bg.wasm", import.meta.url);
 const DEFAULT_WORKER_URL = new URL("./stream-worker.js", import.meta.url);
 const MAX_CACHE_KEY_CHARACTERS = 128;
+const PRODUCTION_BUNDLE = typeof import.meta.env !== "undefined" && import.meta.env.PROD;
 
 const loadBindings = createWasmModuleLoader({
   createRawViewer,
@@ -51,8 +52,11 @@ export async function createViewer(options) {
   });
 }
 
-function createBundledWorker(_workerUrl, _options) {
-  return new Worker(new URL("./stream-worker.js", import.meta.url), { type: "module" });
+function createBundledWorker(workerUrl, options) {
+  if (PRODUCTION_BUNDLE) {
+    return new Worker(new URL("./stream-worker.js", import.meta.url), { type: "module" });
+  }
+  return new Worker(workerUrl, options);
 }
 
 function cacheKeyInput(value) {

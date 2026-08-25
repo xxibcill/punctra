@@ -101,6 +101,54 @@ function verifyProductionAssets(distribution, requireCodeSplit) {
   if (requireCodeSplit) {
     assert(files.filter((file) => file.endsWith(".js")).length >= 3, "dynamic SDK import was not code-split");
   }
+  const manifest = JSON.parse(readFileSync(path.join(distribution, ".vite", "manifest.json"), "utf8"));
+  const copiedWorker = manifest["node_modules/@punctra/viewer/stream-worker.js"]?.file;
+  assert(copiedWorker, "production manifest omitted copied-asset Worker resolution");
+  verifyBundledWorker(distribution, files);
+  verifyEmittedModuleGraph(distribution, files, new Set([copiedWorker]));
+}
+
+function verifyBundledWorker(distribution, files) {
+  const emitted = new Set(files.map((file) => file.split(path.sep).join("/")));
+  const match = files
+    .filter((file) => file.endsWith(".js"))
+    .map((file) => readFileSync(path.join(distribution, file), "utf8"))
+    .map((source) => source.match(/new Worker\(new URL\(["'`]([^"'`]*stream-worker-[^"'`]+\.js)["'`]/))
+    .find(Boolean);
+  assert(match, "production SDK does not construct the bundled module Worker");
+  const bundledWorker = match[1].replace(/^\//, "");
+  assert(emitted.has(bundledWorker), `production SDK references missing Worker ${bundledWorker}`);
+}
+
+function verifyEmittedModuleGraph(distribution, files, ignoredFiles) {
+  const emitted = new Set(files.map((file) => file.split(path.sep).join("/")));
+  for (const file of emitted) {
+    if (!file.endsWith(".js") || ignoredFiles.has(file)) continue;
+    const source = readFileSync(path.join(distribution, file), "utf8");
+    assert.doesNotMatch(
+      source,
+      /import\s*\(\s*`\.\/[^`]*\$\{/,
+      `${file} retains a computed relative module import`,
+    );
+    for (const specifier of literalRelativeImports(source)) {
+      const target = path.posix.normalize(path.posix.join(path.posix.dirname(file), specifier));
+      assert(emitted.has(target), `${file} imports missing production module ${target}`);
+    }
+  }
+}
+
+function literalRelativeImports(source) {
+  const imports = [];
+  const patterns = [
+    /\bfrom\s*["'](\.\/[^"']+)["']/g,
+    /\bimport\s*\(\s*["'`](\.\/[^"'`$]+)["'`]\s*\)/g,
+  ];
+  for (const pattern of patterns) {
+    for (const match of source.matchAll(pattern)) {
+      imports.push(match[1].split(/[?#]/, 1)[0]);
+    }
+  }
+  return imports;
 }
 
 async function verifyDevelopmentServer(directory) {
@@ -117,6 +165,14 @@ async function verifyDevelopmentServer(directory) {
       `http://127.0.0.1:${port}/${directory.endsWith("browser-react") ? "src/main.tsx" : "src/main.ts"}`,
     );
     assert.match(source, /@punctra|punctra/i);
+    const sdk = await fetchUntilReady(
+      `http://127.0.0.1:${port}/node_modules/@punctra/viewer/sdk.js`,
+    );
+    assert.match(sdk, /createViewer/);
+    const worker = await fetchUntilReady(
+      `http://127.0.0.1:${port}/node_modules/@punctra/viewer/stream-worker.js?punctra-v=development-trial`,
+    );
+    assert.match(worker, /development-trial|WORKER_CACHE_TOKEN/);
   } finally {
     child.kill("SIGTERM");
     await new Promise((resolve) => child.once("exit", resolve));

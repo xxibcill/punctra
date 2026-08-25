@@ -98,7 +98,17 @@ recovery decision.
 With the qualified Vite path, the default assets are discovered from
 `import.meta.url`. Production builds emit a content-hashed Wasm file and a
 content-hashed module Worker with its dependencies. No global public path is
-required.
+required. The qualified Vite 8.2.2 configuration keeps the module Worker in ESM
+format:
+
+```ts
+export default defineConfig({
+  worker: { format: "es" },
+});
+```
+
+The clean trials verify the emitted SDK and bundled-Worker module graph so a
+build fails when a relative production dependency is absent.
 
 For an explicit copied-asset deployment:
 

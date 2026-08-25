@@ -1,17 +1,26 @@
 const MODULE_CACHE_TOKEN = encodeURIComponent(
   new URL(import.meta.url).searchParams.get("v") ?? "unversioned",
 );
+const PRODUCTION_BUNDLE = typeof import.meta.env !== "undefined" && import.meta.env.PROD;
+const dependencyModules = PRODUCTION_BUNDLE
+  ? Promise.all([
+      import("./stream-ordinals.js"),
+      import("./worker-operation.js"),
+      import("./worker-protocol.js"),
+      import("./camera-policy.js"),
+    ])
+  : Promise.all([
+      import(`./stream-ordinals.js?v=${MODULE_CACHE_TOKEN}`),
+      import(`./worker-operation.js?v=${MODULE_CACHE_TOKEN}`),
+      import(`./worker-protocol.js?v=${MODULE_CACHE_TOKEN}`),
+      import(`./camera-policy.js?v=${MODULE_CACHE_TOKEN}`),
+    ]);
 const [
   { appendTransferredOrdinals },
   { runWorkerOperation },
   { WORKER_SCHEMA, workerFailure },
   { CAMERA_PROJECTION_POLICIES },
-] = await Promise.all([
-  import(`./stream-ordinals.js?v=${MODULE_CACHE_TOKEN}`),
-  import(`./worker-operation.js?v=${MODULE_CACHE_TOKEN}`),
-  import(`./worker-protocol.js?v=${MODULE_CACHE_TOKEN}`),
-  import(`./camera-policy.js?v=${MODULE_CACHE_TOKEN}`),
-]);
+] = await dependencyModules;
 
 export const DISPLAY_MODES = Object.freeze([
   "neutral",
