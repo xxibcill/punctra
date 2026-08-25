@@ -1,8 +1,10 @@
-import { loadWorkerModules } from "./module-loader.js";
-
 const WORKER_CACHE_TOKEN = encodeURIComponent(
   new URL(import.meta.url).searchParams.get("punctra-v") ?? "unversioned",
 );
+const PRODUCTION_BUNDLE = typeof import.meta.env !== "undefined" && import.meta.env.PROD;
+const moduleLoader = PRODUCTION_BUNDLE
+  ? import("./module-loader.js")
+  : import(`./module-loader.js?punctra-v=${WORKER_CACHE_TOKEN}`);
 
 let active;
 const memoryCacheStorage = new Map();
@@ -14,17 +16,18 @@ let boundedWorkerFailureMessage;
 let isWorkerOperationId;
 let workerFailure;
 let workerOperationId;
-const dependencyModules = loadWorkerModules(WORKER_CACHE_TOKEN);
-const dependenciesReady = dependencyModules.then(([streamingProtocol, workerProtocol]) => {
-  ({ StreamingFailure, createWorkerMessage, runStreamingOperation } = streamingProtocol);
-  ({
-    WORKER_SCHEMA,
-    boundedWorkerFailureMessage,
-    isWorkerOperationId,
-    workerFailure,
-    workerOperationId,
-  } = workerProtocol);
-});
+const dependenciesReady = moduleLoader
+  .then(({ loadWorkerModules }) => loadWorkerModules(WORKER_CACHE_TOKEN))
+  .then(([streamingProtocol, workerProtocol]) => {
+    ({ StreamingFailure, createWorkerMessage, runStreamingOperation } = streamingProtocol);
+    ({
+      WORKER_SCHEMA,
+      boundedWorkerFailureMessage,
+      isWorkerOperationId,
+      workerFailure,
+      workerOperationId,
+    } = workerProtocol);
+  });
 
 self.addEventListener("message", (event) => {
   return handleMessage(event);

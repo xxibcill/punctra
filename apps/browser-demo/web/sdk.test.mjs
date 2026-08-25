@@ -65,5 +65,10 @@ test("copied Worker propagates the SDK cache token to its dependencies", async (
   const workerSource = await readFile(new URL("stream-worker.js", import.meta.url), "utf8");
 
   assert.match(workerSource, /searchParams\.get\("punctra-v"\)/);
+  assert.match(
+    workerSource,
+    /import\(`\.\/module-loader\.js\?punctra-v=\$\{WORKER_CACHE_TOKEN\}`\)/,
+  );
+  assert.doesNotMatch(workerSource, /from "\.\/module-loader\.js"/);
   assert.doesNotMatch(workerSource, /searchParams\.get\("v"\)/);
 });
