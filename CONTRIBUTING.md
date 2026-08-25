@@ -106,8 +106,10 @@ an optional policy-free input normalizer, and a separately injected exact-
 Point bridge for the immutable LAS fixture. It does not authorize SDK/registry
 packaging, a framework adapter, arbitrary Source delivery, general exact
 Queries, editing, terrain, export, API stability, or broad browser support.
-Apart from the explicit v0.8 reader exception,
-external format decoding belongs only in accepted Source adapter crates.
+Apart from the explicit v0.8 reader exception, the v0.17 browser-demo
+exact-query bridge is a narrowly scoped exception for the trusted immutable
+LAS fixture described by the accepted design. All other external format
+decoding belongs only in accepted Source adapter crates.
 Networking, polygon/brush/visible-only/occlusion selection, arbitrary
 Attribute or position edits, constrained or true out-of-core terrain, general
 export, Source rewriting, automatic recovery, and general host UI remain in
