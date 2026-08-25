@@ -43,6 +43,7 @@ apps/
       index.html
       main.js
       styles.css
+      camera-policy.js
       viewer-api.js
       viewer-api.d.ts
       viewer-api.test.mjs
@@ -50,6 +51,7 @@ apps/
       viewer-input.d.ts
       viewer-input.test.mjs
       exact-query.js
+      exact-query.d.ts
       exact-query.test.mjs
       failure-policy.js
       failure-policy.test.mjs
