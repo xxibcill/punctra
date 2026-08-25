@@ -1,12 +1,18 @@
 const MODULE_CACHE_TOKEN = encodeURIComponent(
   new URL(import.meta.url).searchParams.get("v") ?? "unversioned",
 );
-const {
-  WORKER_FAILURE_SAFE_ACTION,
-  WORKER_OUTPUT_TYPES,
-  WORKER_SCHEMA,
-  workerFailure,
-} = await import(`./worker-protocol.js?v=${MODULE_CACHE_TOKEN}`);
+const [
+  {
+    WORKER_FAILURE_SAFE_ACTION,
+    WORKER_OUTPUT_TYPES,
+    WORKER_SCHEMA,
+    workerFailure,
+  },
+  { RangeResponseError, validateBoundRangeResponse },
+] = await Promise.all([
+  import(`./worker-protocol.js?v=${MODULE_CACHE_TOKEN}`),
+  import(`./range-response.js?v=${MODULE_CACHE_TOKEN}`),
+]);
 
 export {
   WORKER_OUTPUT_TYPES,
@@ -829,25 +835,29 @@ function encodeTransfer(view, offset, sample) {
 }
 
 function validateRangeResponse(response, resource, range, requireAcceptRanges) {
-  if (
-    response.type === "opaqueredirect"
-    || response.redirected
-    || (response.status >= 300 && response.status < 400)
-  ) {
-    throw new StreamingFailure("range_unsupported", "Range request was redirected");
+  try {
+    validateBoundRangeResponse(response, {
+      etag: resource.etag,
+      offset: range.offset,
+      length: range.length,
+      totalLength: resource.byteLength,
+      requireAcceptRanges,
+    });
+  } catch (error) {
+    if (!(error instanceof RangeResponseError)) throw error;
+    throw streamingRangeFailure(error);
   }
-  if (response.status === 200) throw new StreamingFailure("range_unsupported", "server returned a full 200 response to a Range request");
-  if (response.status !== 206) throw new StreamingFailure("range_unsupported", `Range request returned terminal HTTP ${response.status}`);
-  const headers = response.headers;
-  const required = ["content-length", "content-range", "etag"];
-  if (required.some((name) => headers.get(name) === null)) throw new StreamingFailure("cors_headers_hidden", "required Range response headers are unavailable");
-  equal(headers.get("etag"), resource.etag, "source_changed", "representation ETag");
-  equal(headers.get("content-length"), String(range.length), "range_truncated", "Content-Length");
-  const end = range.offset + range.length - 1;
-  equal(headers.get("content-range"), `bytes ${range.offset}-${end}/${resource.byteLength}`, "range_truncated", "Content-Range");
-  const encoding = headers.get("content-encoding");
-  if (encoding !== null && encoding.toLowerCase() !== "identity") throw new StreamingFailure("content_encoding", `unexpected Content-Encoding ${encoding}`);
-  if (requireAcceptRanges && headers.get("accept-ranges")?.toLowerCase() !== "bytes") throw new StreamingFailure("range_unsupported", "Source response does not declare Accept-Ranges: bytes");
+}
+
+function streamingRangeFailure(error) {
+  const code = {
+    header_unavailable: "cors_headers_hidden",
+    etag_mismatch: "source_changed",
+    content_length_mismatch: "range_truncated",
+    content_range_mismatch: "range_truncated",
+    content_encoding: "content_encoding",
+  }[error.kind] ?? "range_unsupported";
+  return new StreamingFailure(code, error.message);
 }
 
 async function verifyDigest(bytes, expected, signal) {

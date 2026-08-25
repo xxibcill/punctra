@@ -53,6 +53,8 @@ apps/
       exact-query.js
       exact-query.d.ts
       exact-query.test.mjs
+      range-response.js
+      range-response.test.mjs
       failure-policy.js
       failure-policy.test.mjs
       stream-ordinals.js

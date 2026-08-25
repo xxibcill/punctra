@@ -1,11 +1,17 @@
 const MODULE_CACHE_TOKEN = encodeURIComponent(
   new URL(import.meta.url).searchParams.get("v") ?? "unversioned",
 );
-const {
-  loadManifest,
-  readBoundedBody,
-  validateManifest,
-} = await import(`./streaming-protocol.js?v=${MODULE_CACHE_TOKEN}`);
+const [
+  {
+    loadManifest,
+    readBoundedBody,
+    validateManifest,
+  },
+  { RangeResponseError, validateBoundRangeResponse },
+] = await Promise.all([
+  import(`./streaming-protocol.js?v=${MODULE_CACHE_TOKEN}`),
+  import(`./range-response.js?v=${MODULE_CACHE_TOKEN}`),
+]);
 
 const LAS_HEADER_BYTES = 256;
 const LAS_POINT_FORMAT = 3;
@@ -223,7 +229,7 @@ async function fetchExactRange(
     redirect: "manual",
     signal,
   });
-  validateExactRangeResponse(response, source, offset, end, length, requireAcceptRanges);
+  validateExactRangeResponse(response, source, offset, length, requireAcceptRanges);
   const bytes = await readBoundedBody(
     response,
     length,
@@ -240,25 +246,30 @@ async function fetchExactRange(
   return bytes;
 }
 
-function validateExactRangeResponse(response, source, offset, end, length, requireAcceptRanges) {
-  if (response.status !== 206 || response.redirected || response.type === "opaqueredirect") {
-    throw new ExactQueryError("exact_query_range_unsupported", "exact Source request was not a direct 206 response");
+function validateExactRangeResponse(response, source, offset, length, requireAcceptRanges) {
+  try {
+    validateBoundRangeResponse(response, {
+      etag: source.etag,
+      offset,
+      length,
+      totalLength: source.byteLength,
+      requireAcceptRanges,
+    });
+  } catch (error) {
+    if (!(error instanceof RangeResponseError)) throw error;
+    throw exactRangeFailure(error);
   }
-  headerEquals(response, "Content-Range", `bytes ${offset}-${end}/${source.byteLength}`);
-  headerEquals(response, "Content-Length", String(length));
-  headerEquals(response, "ETag", source.etag, "exact_query_source_changed");
-  const encoding = response.headers.get("Content-Encoding");
-  if (encoding !== null && encoding.toLowerCase() !== "identity") {
-    throw new ExactQueryError("exact_query_content_encoding", "exact Source response was transformed");
-  }
-  if (requireAcceptRanges) headerEquals(response, "Accept-Ranges", "bytes");
 }
 
-function headerEquals(response, name, expected, code = "exact_query_range_unsupported") {
-  const actual = response.headers.get(name);
-  if (actual !== expected) {
-    throw new ExactQueryError(code, `${name} ${actual ?? "is unavailable"}; expected ${expected}`);
+function exactRangeFailure(error) {
+  if (error.kind === "etag_mismatch"
+    || (error.kind === "header_unavailable" && error.headerName === "ETag")) {
+    return new ExactQueryError("exact_query_source_changed", error.message);
   }
+  const code = error.kind === "content_encoding"
+    ? "exact_query_content_encoding"
+    : "exact_query_range_unsupported";
+  return new ExactQueryError(code, error.message);
 }
 
 function pointOrdinalValue(value, pointCount) {
