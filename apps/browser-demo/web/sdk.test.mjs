@@ -11,6 +11,7 @@ import {
 test("SDK exports the public viewer surface and package-relative assets", async () => {
   const packageManifest = JSON.parse(await readFile(new URL("package.json", import.meta.url)));
   const declaration = await readFile(new URL("sdk.d.ts", import.meta.url), "utf8");
+  const source = await readFile(new URL("sdk.js", import.meta.url), "utf8");
   const sdk = await import("./sdk.js");
   const assets = resolveViewerAssets();
 
@@ -33,6 +34,11 @@ test("SDK exports the public viewer surface and package-relative assets", async 
   assert.doesNotMatch(declaration, /createInputNormalizer|createLasExactQueryBridge/);
   assert.doesNotMatch(declaration, /createBrowserViewer/);
   assert.doesNotMatch(declaration, /workerFactory/);
+  assert.match(
+    source,
+    /const DEFAULT_WORKER_URL = new URL\("\.\/stream-worker\.js", import\.meta\.url\);/,
+  );
+  assert.doesNotMatch(source, /stream-worker\.js\?worker&url/);
 });
 
 test("explicit SDK assets preserve deployment URLs and bounded cache busting", () => {

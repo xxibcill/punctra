@@ -103,8 +103,20 @@ function verifyProductionAssets(distribution, requireCodeSplit) {
   if (requireCodeSplit) verifyCodeSplitSdk(manifest);
   const copiedWorker = manifest["node_modules/@punctra/viewer/stream-worker.js"]?.file;
   assert(copiedWorker, "production manifest omitted copied-asset Worker resolution");
-  verifyBundledWorker(distribution, files, manifest);
+  verifyResolvedWorker(distribution, files, copiedWorker);
+  verifyBundledWorker(distribution, files);
   verifyEmittedModuleGraph(distribution, files, new Set([copiedWorker]));
+}
+
+function verifyResolvedWorker(distribution, files, copiedWorker) {
+  const sdkSource = files
+    .filter((file) => file.endsWith(".js"))
+    .map((file) => readFileSync(path.join(distribution, file), "utf8"))
+    .find((source) => source.includes(copiedWorker));
+  assert(
+    sdkSource,
+    "public Worker resolution does not use the statically emitted Worker asset",
+  );
 }
 
 function verifyCodeSplitSdk(manifest) {
@@ -116,7 +128,7 @@ function verifyCodeSplitSdk(manifest) {
   assert.equal(manifest[sdkEntry]?.isDynamicEntry, true, "SDK is not a production dynamic entry");
 }
 
-function verifyBundledWorker(distribution, files, manifest) {
+function verifyBundledWorker(distribution, files) {
   const emitted = new Set(files.map((file) => file.split(path.sep).join("/")));
   const match = files
     .filter((file) => file.endsWith(".js"))
@@ -126,13 +138,6 @@ function verifyBundledWorker(distribution, files, manifest) {
   assert(match, "production SDK does not construct the bundled module Worker");
   const bundledWorker = match[1].replace(/^\//, "");
   assert(emitted.has(bundledWorker), `production SDK references missing Worker ${bundledWorker}`);
-  const resolvedWorkerModule = manifest["node_modules/@punctra/viewer/stream-worker.js?worker&url"]?.file;
-  assert(resolvedWorkerModule, "production manifest omitted the public resolved Worker URL");
-  const resolvedWorkerSource = readFileSync(path.join(distribution, resolvedWorkerModule), "utf8");
-  assert(
-    resolvedWorkerSource.includes(bundledWorker),
-    "public Worker resolution differs from the bundled default Worker",
-  );
 }
 
 function verifyEmittedModuleGraph(distribution, files, ignoredFiles) {
