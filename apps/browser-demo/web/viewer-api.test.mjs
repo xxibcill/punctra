@@ -49,6 +49,25 @@ test("failed facade construction shuts down the raw viewer", async () => {
   assert.equal(shutdowns, 1);
 });
 
+test("a throwing initial subscriber still receives an unsubscribe boundary", async () => {
+  const viewer = await createBrowserViewer({
+    bindings: { createViewer: async () => new FakeRawViewer() },
+    canvas: {},
+    viewport: viewport(),
+  });
+  let deliveries = 0;
+
+  const unsubscribe = viewer.subscribe(() => {
+    deliveries += 1;
+    throw new Error("fixture subscriber failure");
+  });
+
+  assert.equal(deliveries, 1);
+  assert.equal(unsubscribe(), true);
+  viewer.setVisible(true);
+  assert.equal(deliveries, 1);
+});
+
 test("viewer exposes typed lifecycle, camera, display, state subscription, and coalesced rendering", async () => {
   const raw = new FakeRawViewer();
   const frames = [];

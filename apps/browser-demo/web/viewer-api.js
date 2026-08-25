@@ -256,7 +256,7 @@ class BrowserViewer {
       this.#ensureActive();
       if (typeof listener !== "function") throw invalidArgument("state listener must be a function");
       this.#listeners.add(listener);
-      listener(this.#state);
+      this.#deliverState(listener);
       return () => this.#listeners.delete(listener);
     });
   }
@@ -662,11 +662,15 @@ class BrowserViewer {
       this.#lastFailure,
     );
     for (const listener of this.#listeners) {
-      try {
-        listener(this.#state);
-      } catch (error) {
-        globalThis.reportError?.(error);
-      }
+      this.#deliverState(listener);
+    }
+  }
+
+  #deliverState(listener) {
+    try {
+      listener(this.#state);
+    } catch (error) {
+      globalThis.reportError?.(error);
     }
   }
 
