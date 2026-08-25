@@ -350,7 +350,7 @@ impl BrowserViewer {
         batch_index: u32,
         payload: &[u8],
     ) -> Result<String, JsValue> {
-        self.ensure_ready()?;
+        self.ensure_source_publication()?;
         let mut next = self.stream.clone();
         let (reset, upsert) = next
             .begin_with_batch(
@@ -378,7 +378,7 @@ impl BrowserViewer {
         batch_index: u32,
         payload: &[u8],
     ) -> Result<String, JsValue> {
-        self.ensure_ready()?;
+        self.ensure_source_publication()?;
         let mut next = self.stream.clone();
         let update = next
             .publish(batch_index, payload)
@@ -392,7 +392,7 @@ impl BrowserViewer {
     /// Seals the sampled root after every declared Point is published.
     #[wasm_bindgen(js_name = completeStream)]
     pub fn complete_stream(&mut self) -> Result<String, JsValue> {
-        self.ensure_ready()?;
+        self.ensure_source_publication()?;
         self.stream.complete().map_err(stream_validation_failure)?;
         self.diagnostics()
     }
@@ -439,6 +439,12 @@ impl BrowserViewer {
 
     fn ensure_ready(&self) -> Result<(), JsValue> {
         self.lifecycle.ensure_ready().map_err(interaction_failure)
+    }
+
+    fn ensure_source_publication(&self) -> Result<(), JsValue> {
+        self.lifecycle
+            .ensure_source_publication()
+            .map_err(model_failure)
     }
 
     fn resources_mut(&mut self) -> Result<&mut BrowserResources, JsValue> {
