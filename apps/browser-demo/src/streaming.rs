@@ -2,10 +2,10 @@ use render_protocol::{
     BatchKey, BatchVersion, PointBatch, PointId, ProtocolError, RenderPoint, RenderUpdate,
     SourceId, ViewGenerationKey, ViewId,
 };
-use serde::{Serialize, Serializer};
+use serde::Serialize;
 use thiserror::Error;
 
-use crate::display::DisplayMode;
+use crate::{diagnostics::serialize_source_identity, display::DisplayMode};
 
 const STREAM_VIEW_ID: ViewId = ViewId::new(16);
 pub(crate) const STREAM_VIEW_GENERATION: ViewGenerationKey =
@@ -54,17 +54,6 @@ pub(crate) struct StreamFacts {
     source_z_range: Option<[f64; 2]>,
     display_mode: DisplayMode,
     presentation_version: u64,
-}
-
-#[allow(clippy::ref_option)] // serde's serialize_with contract passes a field by reference.
-fn serialize_source_identity<S>(source: &Option<SourceId>, serializer: S) -> Result<S::Ok, S::Error>
-where
-    S: Serializer,
-{
-    match source {
-        Some(source) => serializer.serialize_some(&source.to_string()),
-        None => serializer.serialize_none(),
-    }
 }
 
 impl StreamFacts {

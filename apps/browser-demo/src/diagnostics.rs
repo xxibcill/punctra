@@ -108,7 +108,10 @@ impl HighlightFacts {
 }
 
 #[allow(clippy::ref_option)] // serde's serialize_with contract passes a field by reference.
-fn serialize_source_identity<S>(source: &Option<SourceId>, serializer: S) -> Result<S::Ok, S::Error>
+pub(crate) fn serialize_source_identity<S>(
+    source: &Option<SourceId>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
 where
     S: serde::Serializer,
 {
