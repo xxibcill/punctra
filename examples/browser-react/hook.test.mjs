@@ -5,18 +5,17 @@ import { JSDOM } from "jsdom";
 import React, { StrictMode, act } from "react";
 import { createRoot } from "react-dom/client";
 
-import { createUsePunctraViewer } from "./node_modules/@punctra/react/hook.js";
+import { usePunctraViewer } from "@punctra/react";
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
 test("React hook owns Strict Mode replay and updates without implicit recreation", async () => {
   const viewers = [];
-  const createViewer = async () => {
+  globalThis.__PUNCTRA_TEST_CREATE_VIEWER__ = async () => {
     const viewer = fakeViewer();
     viewers.push(viewer);
     return viewer;
   };
-  const usePunctraViewer = createUsePunctraViewer(createViewer);
   const dom = new JSDOM("<main id=trial></main>");
   globalThis.document = dom.window.document;
   globalThis.window = dom.window;
@@ -81,6 +80,7 @@ test("React hook owns Strict Mode replay and updates without implicit recreation
   await act(async () => root.unmount());
   assert.equal(replacementViewer.unsubscribeCalls, 1);
   assert.equal(replacementViewer.disposeCalls, 1);
+  delete globalThis.__PUNCTRA_TEST_CREATE_VIEWER__;
   dom.window.close();
 });
 

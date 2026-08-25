@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test hook.test.mjs",
+    "test": "node --import ./hook-test-loader.mjs --test hook.test.mjs",
     "typecheck": "tsc --noEmit",
     "build": "vite build",
     "build:development": "vite build --mode development"
