@@ -13,6 +13,7 @@ import { WORKER_SCHEMA } from "./worker-protocol.js";
 const SOURCE = "ab".repeat(32);
 
 test("runtime error codes and display modes agree with TypeScript declarations", async () => {
+  const runtime = await import("./viewer-api.js");
   const declaration = await readFile(new URL("viewer-api.d.ts", import.meta.url), "utf8");
   const errorBlock = declaration.match(/export type ViewerErrorCode =([\s\S]*?);\n\nexport const/)[1];
   const declaredErrors = [...errorBlock.matchAll(/"([a-z0-9_]+)"/g)].map((match) => match[1]);
@@ -22,6 +23,8 @@ test("runtime error codes and display modes agree with TypeScript declarations",
   assert.deepEqual(declaredErrors, VIEWER_ERROR_CODES);
   assert.deepEqual(declaredModes, DISPLAY_MODES);
   assert.equal(new Set(VIEWER_ERROR_CODES).size, VIEWER_ERROR_CODES.length);
+  assert.equal("BrowserViewer" in runtime, false);
+  assert.match(declaration, /export interface BrowserViewer \{/);
 });
 
 test("viewer exposes typed lifecycle, camera, display, state subscription, and coalesced rendering", async () => {

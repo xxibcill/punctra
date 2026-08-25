@@ -204,7 +204,7 @@ export async function createBrowserViewer(options) {
   return new BrowserViewer(raw, options);
 }
 
-export class BrowserViewer {
+class BrowserViewer {
   #raw;
   #diagnostics;
   #state;

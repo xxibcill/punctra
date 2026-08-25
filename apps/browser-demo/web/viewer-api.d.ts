@@ -250,7 +250,7 @@ export interface BrowserViewerOptions {
 
 export function createBrowserViewer(options: BrowserViewerOptions): Promise<BrowserViewer>;
 
-export class BrowserViewer {
+export interface BrowserViewer {
   state(): ViewerState;
   subscribe(listener: (state: ViewerState) => void): () => boolean;
   resize(viewport: ViewportInput): ViewerState;
