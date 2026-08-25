@@ -841,6 +841,9 @@ function pointIdentityInput(value) {
   if (!value || typeof value !== "object" || !/^[0-9a-f]{64}$/.test(value.sourceIdentity ?? "")) {
     throw invalidArgument("Point identity requires a 64-character lowercase Source identity");
   }
+  if (typeof value.pointOrdinal === "number" && !Number.isSafeInteger(value.pointOrdinal)) {
+    throw invalidArgument("Point ordinal numbers must be safe integers");
+  }
   let pointOrdinal;
   try {
     pointOrdinal = BigInt(value.pointOrdinal);

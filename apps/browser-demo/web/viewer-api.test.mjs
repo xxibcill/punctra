@@ -360,6 +360,23 @@ test("viewer rejects oversized highlights before inspecting Point identities", a
   assert.equal(inspectedIdentities, 0);
 });
 
+test("viewer rejects unsafe numeric Point ordinals before changing identity", async () => {
+  const viewer = await createBrowserViewer({
+    bindings: { createViewer: async () => new FakeRawViewer() },
+    canvas: {},
+    viewport: viewport(),
+  });
+
+  assert.throws(
+    () => viewer.setHighlights([{
+      sourceIdentity: GENERATED_SOURCE,
+      pointOrdinal: Number.MAX_SAFE_INTEGER + 1,
+    }], 1),
+    (error) => error.code === "invalid_argument"
+      && error.message.includes("safe integer"),
+  );
+});
+
 test("viewer rejects pick coordinates before the Wasm u32 boundary", async () => {
   const raw = new FakeRawViewer();
   const viewer = await createBrowserViewer({
