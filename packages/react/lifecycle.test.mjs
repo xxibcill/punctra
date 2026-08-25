@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { startViewerLifecycle } from "./lifecycle.js";
+import { applyViewerUpdate, startViewerLifecycle } from "./lifecycle.js";
 
 test("abandoned asynchronous mounts dispose every late viewer", async () => {
   const resolvers = [];
@@ -42,6 +42,23 @@ test("mounted lifecycle unsubscribes before idempotent viewer disposal", async (
 
   assert.deepEqual(order, ["subscribe", "unsubscribe", "dispose"]);
   assert.equal(publications.at(-1).status, "ready");
+});
+
+test("viewer updates publish one consistent failure binding", () => {
+  const error = new Error("resize failed");
+  const viewer = { state: () => ({ lifecycle: "ready" }) };
+  const publications = [];
+
+  applyViewerUpdate(viewer, () => {
+    throw error;
+  }, (value) => publications.push(value));
+
+  assert.deepEqual(publications, [{
+    status: "failed",
+    viewer,
+    state: { lifecycle: "ready" },
+    error,
+  }]);
 });
 
 function fakeViewer(order = []) {

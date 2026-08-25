@@ -38,3 +38,11 @@ export function startViewerLifecycle(createViewer, options, publish) {
     },
   });
 }
+
+export function applyViewerUpdate(viewer, update, publish) {
+  try {
+    update(viewer);
+  } catch (error) {
+    publish({ status: "failed", viewer, state: viewer.state(), error });
+  }
+}

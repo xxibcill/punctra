@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { createViewer } from "@punctra/viewer";
-import { startViewerLifecycle } from "./lifecycle.js";
+import { applyViewerUpdate, startViewerLifecycle } from "./lifecycle.js";
 
 const IDLE_BINDING = Object.freeze({
   status: "idle",
@@ -40,11 +40,7 @@ export function usePunctraViewer(options) {
 
   useEffect(() => {
     if (!binding.viewer) return;
-    try {
-      binding.viewer.resize(options.viewport);
-    } catch (error) {
-      setBinding({ status: "failed", viewer: binding.viewer, state: binding.viewer.state(), error });
-    }
+    applyViewerUpdate(binding.viewer, (viewer) => viewer.resize(options.viewport), setBinding);
   }, [
     binding.viewer,
     options.viewport.cssWidth,
@@ -54,12 +50,10 @@ export function usePunctraViewer(options) {
 
   useEffect(() => {
     if (!binding.viewer) return;
-    try {
-      if (options.active === false) binding.viewer.pause();
-      else binding.viewer.resume();
-    } catch (error) {
-      setBinding({ status: "failed", viewer: binding.viewer, state: binding.viewer.state(), error });
-    }
+    applyViewerUpdate(binding.viewer, (viewer) => {
+      if (options.active === false) viewer.pause();
+      else viewer.resume();
+    }, setBinding);
   }, [binding.viewer, options.active]);
 
   return binding;
