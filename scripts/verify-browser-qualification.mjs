@@ -12,6 +12,69 @@ import {
 const matrixUrl = new URL("../docs/releases/v0.19-browser-matrix.json", import.meta.url);
 const releaseRecordUrl = new URL("../docs/releases/v0.19.0.md", import.meta.url);
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
+const EXPECTED_OBSERVATION_DATE = "2026-08-26";
+const EXPECTED_QUALIFIED_LANE = {
+  id: "codex-iab-chromium-151-macos-26-apple-m5-pro",
+  status: "repository_qualified_exact_lane",
+  browser: {
+    surface: "Codex in-app browser",
+    engine: "Chromium",
+    user_agent_version: "151.0.0.0",
+    user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36",
+    language: "en-US",
+    logical_processors: 15,
+  },
+  operating_system: {
+    name: "macOS",
+    version: "26.5.2",
+    build: "25F84",
+    architecture: "arm64",
+    user_agent_platform: "MacIntel",
+    note: "The browser's reduced user-agent OS token is not the operating-system version authority.",
+  },
+  device: {
+    class: "Apple silicon laptop",
+    gpu: "Apple M5 Pro",
+    gpu_cores: 16,
+    gpu_class: "integrated",
+    metal_support: "Metal 4",
+    mapping_note: "The browser exposed only a generic WebGPU adapter name; the physical GPU mapping is a local-system inference from the sole installed GPU.",
+  },
+  webgpu: {
+    adapter_name: "browser WebGPU adapter",
+    backend: "BrowserWebGpu",
+    device_type: "Other",
+    surface_format: "Bgra8Unorm",
+    composite_alpha_mode: "Opaque",
+    present_mode: "fifo",
+    render_attachment: true,
+    blendable: true,
+    required_feature_count: 0,
+    max_buffer_size: 4_294_967_292,
+    max_texture_dimension_2d: 16_384,
+    max_bind_groups: 4,
+    max_vertex_buffers: 8,
+    max_color_attachments: 8,
+  },
+  display: {
+    physical_viewport: [1_749, 1_093],
+    css_viewport: [874.28125, 546.421875],
+    device_pixel_ratio: 2,
+    screen_css_pixels: [1_512, 982],
+    color_depth: 30,
+    pixel_depth: 30,
+    canvas_bytes: 7_646_628,
+    display_path: "built-in Retina display",
+  },
+  workload: {
+    deployment_id: "repository-las-v1",
+    source_identity: "c459ff39717b7d6994aaebf344641f5a3add7faf65e249b85933ebd066d1c26e",
+    source_points: 70_000,
+    coverage: "sampled",
+    displayed_points: 4_096,
+    displayed_batches: 4,
+  },
+};
 
 export function verifyBrowserQualificationMatrix(matrix, implementationCommit) {
   assert.equal(matrix.schema, "punctra-browser-qualification-matrix-v1");
@@ -19,21 +82,13 @@ export function verifyBrowserQualificationMatrix(matrix, implementationCommit) {
   assert.match(matrix.implementation_commit, /^[0-9a-f]{40}$/);
   assert.equal(matrix.implementation_commit, implementationCommit);
   verifyImplementationCommit(matrix.implementation_commit);
-  assert.match(matrix.observed_on, /^\d{4}-\d{2}-\d{2}$/);
+  assert.equal(matrix.observed_on, EXPECTED_OBSERVATION_DATE);
   assert.equal(matrix.qualified_entries.length, 1);
   assert.ok(matrix.unqualified_entries.length >= 1);
 
   const entry = matrix.qualified_entries[0];
   const observations = entry.observations;
-  assert.equal(entry.status, "repository_qualified_exact_lane");
-  assert.equal(entry.browser.surface, "Codex in-app browser");
-  assert.match(entry.browser.user_agent, /Chrome\/151\.0\.0\.0/);
-  assert.equal(entry.operating_system.architecture, "arm64");
-  assert.equal(entry.webgpu.backend, "BrowserWebGpu");
-  assert.equal(entry.webgpu.render_attachment, true);
-  assert.equal(entry.workload.coverage, "sampled");
-  assert.equal(entry.workload.displayed_points, 4_096);
-  assert.equal(entry.workload.displayed_batches, 4);
+  verifyQualifiedLane(entry);
 
   assertNonnegativeNumbers(observations, "observations");
   assert.equal(observations.acceptance_schema, "punctra-browser-qualification-v1");
@@ -138,6 +193,25 @@ function evaluationRecord(entry) {
       },
     },
   };
+}
+
+function verifyQualifiedLane(entry) {
+  assert.equal(entry.id, EXPECTED_QUALIFIED_LANE.id);
+  assert.equal(entry.status, EXPECTED_QUALIFIED_LANE.status);
+  for (const section of [
+    "browser",
+    "operating_system",
+    "device",
+    "webgpu",
+    "display",
+    "workload",
+  ]) {
+    assert.deepEqual(
+      entry[section],
+      EXPECTED_QUALIFIED_LANE[section],
+      `qualified ${section} facts must match the exact recorded lane`,
+    );
+  }
 }
 
 function loadRecord(load) {

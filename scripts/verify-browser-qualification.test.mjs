@@ -61,3 +61,26 @@ test("matching records cannot pin a nonexistent implementation commit", () => {
     /does not resolve to a repository commit/,
   );
 });
+
+test("the qualified entry rejects exact lane and workload drift", () => {
+  const mutations = [
+    ["operating-system version", (entry) => { entry.operating_system.version = "0.0"; }],
+    ["operating-system build", (entry) => { entry.operating_system.build = "tampered"; }],
+    ["device GPU", (entry) => { entry.device.gpu = "Different GPU"; }],
+    ["device class", (entry) => { entry.device.class = "Different device"; }],
+    ["display DPR", (entry) => { entry.display.device_pixel_ratio = 1; }],
+    ["display path", (entry) => { entry.display.display_path = "external display"; }],
+    ["deployment identity", (entry) => { entry.workload.deployment_id = "other"; }],
+    ["Source identity", (entry) => { entry.workload.source_identity = "00".repeat(32); }],
+  ];
+
+  for (const [label, mutate] of mutations) {
+    const tampered = structuredClone(matrix);
+    mutate(tampered.qualified_entries[0]);
+    assert.throws(
+      () => verifyBrowserQualificationMatrix(tampered, implementationCommit),
+      undefined,
+      `${label} drift must fail verification`,
+    );
+  }
+});
