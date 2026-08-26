@@ -5,6 +5,7 @@ import test from "node:test";
 import {
   DISPLAY_MODES,
   ViewerError,
+  createViewer,
   resolveViewerAssets,
 } from "./sdk.js";
 
@@ -34,22 +35,35 @@ test("SDK exports the public viewer surface and package-relative assets", async 
   assert.doesNotMatch(declaration, /createInputNormalizer|createLasExactQueryBridge/);
   assert.doesNotMatch(declaration, /createBrowserViewer/);
   assert.doesNotMatch(declaration, /workerFactory/);
-  assert.doesNotMatch(source, /\.\.\.options/);
-  for (const option of [
-    "canvas",
-    "viewport",
-    "exactQueryBridge",
-    "WorkerConstructor",
-    "requestAnimationFrame",
-    "cancelAnimationFrame",
-  ]) {
-    assert.match(source, new RegExp(`${option}: options\\.${option}`));
-  }
   assert.match(
     source,
     /const DEFAULT_WORKER_SOURCE_URL = new URL\("\.\/stream-worker\.js", import\.meta\.url\);/,
   );
   assert.match(source, /import\("\.\/stream-worker\.js\?worker&url"\)/);
+});
+
+test("SDK does not inspect or forward internal viewer options", async () => {
+  const wasm = await readFile(new URL("pkg/browser_demo_bg.wasm", import.meta.url));
+  const wasmUrl = `data:application/wasm;base64,${wasm.toString("base64")}`;
+  let internalOptionRead = false;
+  const options = {
+    assets: { wasmUrl, workerUrl: "https://fixtures.test/stream-worker.js" },
+    canvas: {},
+    viewport: { cssWidth: 1, cssHeight: 1, devicePixelRatio: 1 },
+  };
+  Object.defineProperty(options, "monotonicNow", {
+    enumerable: true,
+    get() {
+      internalOptionRead = true;
+      return () => 0;
+    },
+  });
+
+  await assert.rejects(
+    createViewer(options),
+    (error) => error instanceof ViewerError && error.code === "missing_window",
+  );
+  assert.equal(internalOptionRead, false);
 });
 
 test("explicit SDK assets preserve deployment URLs and bounded cache busting", () => {
