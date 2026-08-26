@@ -377,8 +377,6 @@ async function runSmokePath() {
     viewer.confirmPoint(provisional, { signal: cancelledQuery.signal }),
     "exact_query_cancelled",
   );
-  viewer.clearHighlights();
-  assertFact(viewer.state().highlights.pointCount === 0, "complete highlight clear");
 
   const nextGeneration = await viewer.loadSource({
     manifestUrl: STREAM_MANIFEST_URL,
@@ -386,7 +384,20 @@ async function runSmokePath() {
     credentials: "same-origin",
   });
   verifyStreamingResult(nextGeneration, "generation retry");
+  assertFact(
+    nextGeneration.state.pick.status === "not_requested",
+    "generation replacement clears provisional pick state",
+  );
+  assertFact(
+    nextGeneration.state.highlights.pointCount === 0,
+    "generation replacement clears presentation highlights",
+  );
   await expectCode(viewer.confirmPoint(provisional), "stale_generation");
+  const generationRecovery = {
+    provisional_pick_cleared: true,
+    presentation_highlights_cleared: true,
+    stale_exact_request_rejected: true,
+  };
 
   const frames = await measureForegroundFrames({
     frameCount: 30,
@@ -422,6 +433,7 @@ async function runSmokePath() {
       lifecycle: lifecycleRecovery,
       worker: workerRecovery,
       network: networkRecovery,
+      generation: generationRecovery,
       recreation_required: recreationRequiredRecoveryEvidence(),
       physical_device_loss: "not forced on the physical adapter",
       memory_pressure: "no portable signal; independent fixed ceilings enforced",

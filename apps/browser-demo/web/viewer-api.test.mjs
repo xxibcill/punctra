@@ -403,9 +403,10 @@ test("every recreation-required renderer failure fuses the viewer", async () => 
   }
 });
 
-test("viewer owns worker publication, streamed picking, highlights, and exact handoff", async () => {
+test("viewer keeps streamed interaction and exact handoff generation-safe", async () => {
   const raw = new FakeRawViewer();
   const exactRequests = [];
+  let resolveLateExact;
   const viewer = await createBrowserViewer({
     bindings: { createViewer: async () => raw },
     canvas: {},
@@ -418,9 +419,12 @@ test("viewer owns worker publication, streamed picking, highlights, and exact ha
     },
     cancelAnimationFrame: () => {},
     exactQueryBridge: {
-      async confirm(request) {
+      confirm(request) {
         exactRequests.push(request);
-        return {
+        if (exactRequests.length > 1) {
+          return new Promise((resolve) => { resolveLateExact = resolve; });
+        }
+        return Promise.resolve({
           authority: "exact_source_record",
           sourceIdentity: request.sourceIdentity,
           pointOrdinal: String(request.pointOrdinal),
@@ -430,7 +434,7 @@ test("viewer owns worker publication, streamed picking, highlights, and exact ha
           intensity: 4,
           classification: 2,
           rgb: [5, 6, 7],
-        };
+        });
       },
     },
   });
@@ -467,13 +471,20 @@ test("viewer owns worker publication, streamed picking, highlights, and exact ha
   assert.equal(exact.authority, "exact_source_record");
   assert.equal(exact.pointOrdinal, "7");
   assert.equal(exactRequests.length, 1);
-  viewer.clearHighlights();
-  assert.equal(viewer.state().highlights.pointCount, 0);
 
-  raw.advanceGeneration();
-  viewer.render();
+  const lateExact = viewer.confirmPoint(pick);
+  await Promise.resolve();
+  const replaced = await viewer.loadSource({
+    manifestUrl: "https://fixtures.test/deployment.json",
+    cacheMode: "memory",
+  });
+  assert.equal(replaced.state.generation, pick.generation + 1);
+  assert.equal(replaced.state.pick.status, "not_requested");
+  assert.equal(replaced.state.highlights.pointCount, 0);
+
+  resolveLateExact(exactResult(pick));
   await assert.rejects(
-    viewer.confirmPoint(pick),
+    lateExact,
     (error) => error.code === "stale_generation",
   );
 });
@@ -1044,6 +1055,7 @@ class FakeRawViewer {
 
   beginStreamBatch(source, points, _x, _y, _z, minimumZ, maximumZ, _batch, payload) {
     assert.equal(payload.byteLength, 32);
+    if (this.data.streaming.phase !== "idle") this.generation += 1;
     this.data.streaming = {
       phase: "receiving",
       source_identity: source,
@@ -1063,6 +1075,8 @@ class FakeRawViewer {
       presentation_version: 1,
     };
     this.data.frame = null;
+    this.data.pick = emptyPick();
+    this.data.highlights = emptyHighlights();
     return this.json();
   }
 
@@ -1116,11 +1130,6 @@ class FakeRawViewer {
   shutdown() {
     this.data.phase = "shutdown";
     return this.json();
-  }
-
-  advanceGeneration() {
-    this.generation += 1;
-    this.data.streaming.generation = this.generation;
   }
 
   camera(values, projection) {
@@ -1266,12 +1275,7 @@ function diagnosticsFixture() {
       far_distance: 250,
     },
     display_mode: "rgb",
-    highlights: {
-      generation: null,
-      source_identity: null,
-      point_count: 0,
-      authority: "presentation_only",
-    },
+    highlights: emptyHighlights(),
   };
 }
 
@@ -1284,5 +1288,14 @@ function emptyPick() {
     point_ordinal: null,
     batch_key: null,
     batch_version: null,
+  };
+}
+
+function emptyHighlights() {
+  return {
+    generation: null,
+    source_identity: null,
+    point_count: 0,
+    authority: "presentation_only",
   };
 }
