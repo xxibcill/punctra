@@ -50,3 +50,14 @@ test("the JSON matrix and Markdown record pin the same implementation", () => {
     () => verifyBrowserQualificationMatrix(matrix, "0000000000000000000000000000000000000000"),
   );
 });
+
+test("matching records cannot pin a nonexistent implementation commit", () => {
+  const nonexistentCommit = "f".repeat(40);
+  const tampered = structuredClone(matrix);
+  tampered.implementation_commit = nonexistentCommit;
+
+  assert.throws(
+    () => verifyBrowserQualificationMatrix(tampered, nonexistentCommit),
+    /does not resolve to a repository commit/,
+  );
+});

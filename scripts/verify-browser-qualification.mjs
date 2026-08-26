@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
   QUALIFICATION_LIMITS,
@@ -10,12 +11,14 @@ import {
 
 const matrixUrl = new URL("../docs/releases/v0.19-browser-matrix.json", import.meta.url);
 const releaseRecordUrl = new URL("../docs/releases/v0.19.0.md", import.meta.url);
+const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
 
 export function verifyBrowserQualificationMatrix(matrix, implementationCommit) {
   assert.equal(matrix.schema, "punctra-browser-qualification-matrix-v1");
   assert.equal(matrix.release, "0.19.0-alpha.1");
   assert.match(matrix.implementation_commit, /^[0-9a-f]{40}$/);
   assert.equal(matrix.implementation_commit, implementationCommit);
+  verifyImplementationCommit(matrix.implementation_commit);
   assert.match(matrix.observed_on, /^\d{4}-\d{2}-\d{2}$/);
   assert.equal(matrix.qualified_entries.length, 1);
   assert.ok(matrix.unqualified_entries.length >= 1);
@@ -77,6 +80,27 @@ export function releaseImplementationCommit(releaseRecord) {
   const match = releaseRecord.match(/^- Implementation commit: `([0-9a-f]{40})`$/m);
   assert.ok(match, "release record must contain one full implementation commit SHA");
   return match[1];
+}
+
+export function verifyImplementationCommit(commit) {
+  const resolution = runGit("rev-parse", "--verify", `${commit}^{commit}`);
+  assert.equal(
+    resolution.status,
+    0,
+    `implementation commit ${commit} does not resolve to a repository commit`,
+  );
+  assert.equal(
+    resolution.stdout.trim(),
+    commit,
+    "implementation commit must resolve to the exact recorded object",
+  );
+
+  const ancestry = runGit("merge-base", "--is-ancestor", commit, "HEAD");
+  assert.equal(
+    ancestry.status,
+    0,
+    `implementation commit ${commit} is not an ancestor of the verified checkout`,
+  );
 }
 
 function evaluationRecord(entry) {
@@ -185,6 +209,14 @@ function assertNonnegativeNumbers(value, path) {
   for (const [key, nested] of Object.entries(value)) {
     assertNonnegativeNumbers(nested, `${path}.${key}`);
   }
+}
+
+function runGit(...arguments_) {
+  return spawnSync("git", arguments_, {
+    cwd: repositoryRoot,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
 }
 
 if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
