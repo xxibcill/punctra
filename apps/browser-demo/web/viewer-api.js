@@ -354,10 +354,11 @@ class BrowserViewer {
   }
 
   async loadSource(options) {
-    return this.#executeAsync(() => this.#loadSource(options));
+    const loadStarted = this.#monotonicNow();
+    return this.#executeAsync(() => this.#loadSource(options, loadStarted));
   }
 
-  async #loadSource(options) {
+  async #loadSource(options, loadStarted) {
     this.#ensureActive();
     if (this.#loadController) throw new ViewerError("load_busy", "one Source load is already active");
     if (typeof this.#workerFactory !== "function" && typeof this.#WorkerConstructor !== "function") {
@@ -371,7 +372,6 @@ class BrowserViewer {
     this.#loadController = controller;
     const operationId = `punctra-viewer-${Date.now()}-${operationSequence}`;
     operationSequence += 1;
-    const loadStarted = this.#monotonicNow();
     const workerUrl = `${this.#workerUrl}${this.#workerUrl.includes("?") ? "&" : "?"}operation=${encodeURIComponent(operationId)}`;
     let deployment;
     let begun = false;

@@ -480,18 +480,27 @@ test("viewer owns worker publication, streamed picking, highlights, and exact ha
 
 test("Source timing uses one monotonic load origin and preserves the compatibility alias", async () => {
   const samples = [100, 125, 128, 180];
+  const events = [];
   const viewer = await createBrowserViewer({
     bindings: { createViewer: async () => new FakeRawViewer() },
     canvas: {},
     viewport: viewport(),
     WorkerConstructor: FixtureWorker,
     workerUrl: "https://fixtures.test/stream-worker.js",
-    monotonicNow: () => samples.shift(),
+    monotonicNow: () => {
+      events.push("clock");
+      return samples.shift();
+    },
+  });
+  const sourceOptions = {};
+  Object.defineProperty(sourceOptions, "manifestUrl", {
+    get() {
+      events.push("manifest");
+      return "https://fixtures.test/deployment.json";
+    },
   });
 
-  const loaded = await viewer.loadSource({
-    manifestUrl: "https://fixtures.test/deployment.json",
-  });
+  const loaded = await viewer.loadSource(sourceOptions);
 
   assert.deepEqual(loaded.timings, {
     firstCoverageMilliseconds: 28,
@@ -500,6 +509,7 @@ test("Source timing uses one monotonic load origin and preserves the compatibili
   });
   assert.equal(loaded.mainThreadMillisecondsHighWater, 3);
   assert.deepEqual(samples, []);
+  assert.deepEqual(events.slice(0, 2), ["clock", "manifest"]);
 });
 
 test("relative Source manifests keep the caller document base across Worker paths", async () => {
