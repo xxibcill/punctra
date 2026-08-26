@@ -7,6 +7,7 @@ import {
   changelogImplementationCommit,
   releaseImplementationCommit,
   verifyBrowserQualificationMatrix,
+  verifyImplementationCommit,
 } from "./verify-browser-qualification.mjs";
 
 const changelogUrl = new URL("../CHANGELOG.md", import.meta.url);
@@ -66,6 +67,13 @@ test("matching records cannot pin a nonexistent implementation commit", () => {
   assert.throws(
     () => verifyBrowserQualificationMatrix(tampered, nonexistentCommit),
     /does not resolve to a repository commit/,
+  );
+});
+
+test("the implementation pin rejects later changes to qualified browser files", () => {
+  assert.throws(
+    () => verifyImplementationCommit("7c3ceec11fc2cc4d3eae5db9ebd2399271c0cb18"),
+    /qualified implementation files changed after/,
   );
 });
 

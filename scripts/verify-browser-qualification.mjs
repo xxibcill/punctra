@@ -14,6 +14,19 @@ const matrixUrl = new URL("../docs/releases/v0.19-browser-matrix.json", import.m
 const releaseRecordUrl = new URL("../docs/releases/v0.19.0.md", import.meta.url);
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
 const EXPECTED_OBSERVATION_DATE = "2026-08-26";
+const QUALIFIED_IMPLEMENTATION_PATHS = [
+  "Cargo.toml",
+  "Cargo.lock",
+  "crates",
+  "examples",
+  "apps/browser-demo/web",
+  "packages",
+  "scripts/build-browser-demo.sh",
+  "scripts/build-browser-sdk.sh",
+  "scripts/generate-browser-sdk-reference.mjs",
+  "scripts/serve-browser-demo.py",
+  "scripts/verify-browser-sdk.mjs",
+];
 const EXPECTED_QUALIFIED_LANE = {
   id: "codex-iab-chromium-151-macos-26-apple-m5-pro",
   status: "repository_qualified_exact_lane",
@@ -106,6 +119,9 @@ export function verifyBrowserQualificationMatrix(matrix, implementationCommit) {
     "prepublication_offline_failure_preserved_viewer",
     "warm_cache_recreation_zero_binary_requests",
     "stale_generation_rejected",
+    "generation_replacement_cleared_provisional_pick",
+    "generation_replacement_cleared_presentation_highlights",
+    "stale_exact_request_rejected",
     "partial_publication_failure_fuses_in_deterministic_tests",
     "device_loss_fuses_in_deterministic_tests",
   ]) {
@@ -162,6 +178,34 @@ export function verifyImplementationCommit(commit) {
     ancestry.status,
     0,
     `implementation commit ${commit} is not an ancestor of the verified checkout`,
+  );
+
+  const committedChanges = runGit(
+    "diff",
+    "--name-only",
+    `${commit}..HEAD`,
+    "--",
+    ...QUALIFIED_IMPLEMENTATION_PATHS,
+  );
+  assert.equal(committedChanges.status, 0, "could not compare qualified implementation files");
+  assert.equal(
+    committedChanges.stdout.trim(),
+    "",
+    `qualified implementation files changed after ${commit}:\n${committedChanges.stdout.trim()}`,
+  );
+
+  const workingChanges = runGit(
+    "diff",
+    "--name-only",
+    "HEAD",
+    "--",
+    ...QUALIFIED_IMPLEMENTATION_PATHS,
+  );
+  assert.equal(workingChanges.status, 0, "could not inspect qualified implementation files");
+  assert.equal(
+    workingChanges.stdout.trim(),
+    "",
+    `qualified implementation files have uncommitted changes:\n${workingChanges.stdout.trim()}`,
   );
 }
 
