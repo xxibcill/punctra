@@ -161,8 +161,12 @@ const MAX_PICK_POLLS = 180;
 const MAX_ERROR_MESSAGE_CHARACTERS = 512;
 const LOAD_TIMEOUT_MILLISECONDS = 30_000;
 const MAX_POINT_ORDINAL = (1n << 64n) - 1n;
-const PARTIAL_PUBLICATION_SAFE_ACTION =
-  "Destroy the partially published viewer and explicitly create a new viewer before loading another Source.";
+export const RECREATION_REQUIRED_SAFE_ACTIONS = deepFreeze({
+  partialPublication:
+    "Dispose the fused viewer and create a new one before any Source load.",
+  deviceLoss:
+    "Dispose the fused viewer and explicitly recreate the viewer and device.",
+});
 const VIEWER_DESTROYED_ABORT = Symbol("viewer_destroyed");
 let operationSequence = 0;
 
@@ -467,7 +471,7 @@ class BrowserViewer {
       const viewerError = toViewerError(error, begun ? "stream_publication" : "worker_failed");
       if (!begun) throw viewerError;
       const fusedError = new ViewerError(viewerError.code, viewerError.message, {
-        safeAction: PARTIAL_PUBLICATION_SAFE_ACTION,
+        safeAction: RECREATION_REQUIRED_SAFE_ACTIONS.partialPublication,
         recoverable: false,
       });
       this.#fuseViewer(fusedError);
@@ -669,10 +673,14 @@ class BrowserViewer {
     } catch (error) {
       const viewerError = toViewerError(error);
       if (FUSED_CODES.has(viewerError.code)) {
-        this.#fuseViewer(viewerError);
-      } else {
-        this.#refreshState(viewerError);
+        const fusedError = new ViewerError(viewerError.code, viewerError.message, {
+          safeAction: RECREATION_REQUIRED_SAFE_ACTIONS.deviceLoss,
+          recoverable: false,
+        });
+        this.#fuseViewer(fusedError);
+        throw fusedError;
       }
+      this.#refreshState(viewerError);
       throw viewerError;
     }
   }

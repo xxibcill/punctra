@@ -4,6 +4,7 @@ import test from "node:test";
 
 import {
   DISPLAY_MODES,
+  RECREATION_REQUIRED_SAFE_ACTIONS,
   VIEWER_ERROR_CODES,
   ViewerError,
   createBrowserViewer,
@@ -196,7 +197,11 @@ test("viewer cancels stale scheduled rendering on hide, Source replacement, and 
   });
   const fusedRender = fusedViewer.requestRender();
   const fusedRejection = assert.rejects(fusedRender, (error) => error.code === "render_cancelled");
-  assert.throws(() => fusedViewer.setDisplayMode("rgb"), (error) => error.code === "device_lost");
+  assert.throws(
+    () => fusedViewer.setDisplayMode("rgb"),
+    (error) => error.code === "device_lost"
+      && error.safeAction === RECREATION_REQUIRED_SAFE_ACTIONS.deviceLoss,
+  );
   await fusedRejection;
   assert.deepEqual(fusedCancellations, [7]);
   assert.equal(fusedViewer.state().lifecycle, "destroyed");
@@ -620,7 +625,9 @@ test("a Source failure after partial publication fuses the viewer", async () => 
 
   await assert.rejects(
     viewer.loadSource({ manifestUrl: "https://fixtures.test/deployment.json" }),
-    (error) => error.code === "cancelled" && error.recoverable === false,
+    (error) => error.code === "cancelled"
+      && error.recoverable === false
+      && error.safeAction === RECREATION_REQUIRED_SAFE_ACTIONS.partialPublication,
   );
   assert.equal(viewer.state().lifecycle, "destroyed");
   assert.throws(

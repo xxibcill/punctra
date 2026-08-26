@@ -10,6 +10,7 @@ import {
   recreationRequiredRecoveryEvidence,
   summarizeSamples,
 } from "./qualification.js";
+import { RECREATION_REQUIRED_SAFE_ACTIONS } from "./viewer-api.js";
 
 test("sample summaries use deterministic nearest-rank percentiles", () => {
   assert.deepEqual(summarizeSamples([7, 1, 5, 3, 9]), {
@@ -144,6 +145,11 @@ test("recreation-required evidence names the outcome and safe host action", () =
   assert.equal(Object.isFrozen(evidence), true);
   assert.equal(Object.isFrozen(evidence.partial_publication), true);
   assert.equal(Object.isFrozen(evidence.device_loss), true);
+  assert.equal(
+    evidence.partial_publication.safe_action,
+    RECREATION_REQUIRED_SAFE_ACTIONS.partialPublication,
+  );
+  assert.equal(evidence.device_loss.safe_action, RECREATION_REQUIRED_SAFE_ACTIONS.deviceLoss);
 });
 
 function qualificationFixture() {
