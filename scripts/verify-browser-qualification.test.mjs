@@ -4,13 +4,16 @@ import test from "node:test";
 
 import { QUALIFICATION_LIMITS } from "../apps/browser-demo/web/qualification.js";
 import {
+  changelogImplementationCommit,
   releaseImplementationCommit,
   verifyBrowserQualificationMatrix,
 } from "./verify-browser-qualification.mjs";
 
+const changelogUrl = new URL("../CHANGELOG.md", import.meta.url);
 const matrixUrl = new URL("../docs/releases/v0.19-browser-matrix.json", import.meta.url);
 const releaseRecordUrl = new URL("../docs/releases/v0.19.0.md", import.meta.url);
-const [matrixSource, releaseRecord] = await Promise.all([
+const [changelog, matrixSource, releaseRecord] = await Promise.all([
+  readFile(changelogUrl, "utf8"),
   readFile(matrixUrl, "utf8"),
   readFile(releaseRecordUrl, "utf8"),
 ]);
@@ -49,6 +52,10 @@ test("the JSON matrix and Markdown record pin the same implementation", () => {
   assert.throws(
     () => verifyBrowserQualificationMatrix(matrix, "0000000000000000000000000000000000000000"),
   );
+});
+
+test("the changelog pins the same implementation as the evidence records", () => {
+  assert.equal(changelogImplementationCommit(changelog), implementationCommit);
 });
 
 test("matching records cannot pin a nonexistent implementation commit", () => {

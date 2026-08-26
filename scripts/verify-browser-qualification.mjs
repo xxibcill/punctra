@@ -9,6 +9,7 @@ import {
   recreationRequiredRecoveryEvidence,
 } from "../apps/browser-demo/web/qualification.js";
 
+const changelogUrl = new URL("../CHANGELOG.md", import.meta.url);
 const matrixUrl = new URL("../docs/releases/v0.19-browser-matrix.json", import.meta.url);
 const releaseRecordUrl = new URL("../docs/releases/v0.19.0.md", import.meta.url);
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
@@ -134,6 +135,12 @@ export function verifyBrowserQualificationMatrix(matrix, implementationCommit) {
 export function releaseImplementationCommit(releaseRecord) {
   const match = releaseRecord.match(/^- Implementation commit: `([0-9a-f]{40})`$/m);
   assert.ok(match, "release record must contain one full implementation commit SHA");
+  return match[1];
+}
+
+export function changelogImplementationCommit(changelog) {
+  const match = changelog.match(/implementation commit `([0-9a-f]{40})`/);
+  assert.ok(match, "changelog must contain one full v0.19 implementation commit SHA");
   return match[1];
 }
 
@@ -294,11 +301,18 @@ function runGit(...arguments_) {
 }
 
 if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
-  const [matrixSource, releaseRecord] = await Promise.all([
+  const [changelog, matrixSource, releaseRecord] = await Promise.all([
+    readFile(changelogUrl, "utf8"),
     readFile(matrixUrl, "utf8"),
     readFile(releaseRecordUrl, "utf8"),
   ]);
   const matrix = JSON.parse(matrixSource);
-  verifyBrowserQualificationMatrix(matrix, releaseImplementationCommit(releaseRecord));
+  const implementationCommit = releaseImplementationCommit(releaseRecord);
+  assert.equal(
+    changelogImplementationCommit(changelog),
+    implementationCommit,
+    "changelog and evidence records must pin the same implementation commit",
+  );
+  verifyBrowserQualificationMatrix(matrix, implementationCommit);
   console.log("browser qualification matrix passed");
 }
