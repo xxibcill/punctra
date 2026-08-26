@@ -11,6 +11,8 @@ const [
     captureJsHeap,
     evaluateQualification,
     measureForegroundFrames,
+    QUALIFICATION_LIMITS,
+    QUALIFICATION_WORKLOAD,
     recreationRequiredRecoveryEvidence,
   },
 ] = await Promise.all([
@@ -252,8 +254,8 @@ async function runSmokePath() {
   };
   const resizeBeforeFailure = viewer.state().viewport;
   const resizeFailure = expectSynchronousCode(() => viewer.resize({
-    cssWidth: 4_096,
-    cssHeight: 4_096,
+    cssWidth: QUALIFICATION_LIMITS.physicalDimensionPixels,
+    cssHeight: QUALIFICATION_LIMITS.physicalDimensionPixels,
     devicePixelRatio: 4,
   }), "resize_viewport");
   assertFact(
@@ -488,16 +490,46 @@ async function exercisePrepublicationRecovery({ manifestUrl, expectedCode, label
 }
 
 function verifyStreamingResult(result, label) {
-  assertFact(result.state.source.coverage === "sampled", `${label} Sampled Coverage`);
-  assertFact(result.state.source.publishedPoints === 4_096, `${label} published Points`);
-  assertFact(result.state.source.publishedBatches === 4, `${label} published batches`);
-  assertFact(result.state.source.retainedRecordBytes === 131_072, `${label} retained records`);
-  assertFact(result.state.render.drawnPoints === 4_096, `${label} drawn Points`);
-  assertFact(result.state.render.residentBytes === 98_304, `${label} GPU vertex bytes`);
-  assertFact(result.pointOrdinals.length === 4_096, `${label} Point identities`);
-  assertFact(result.metrics.concurrentResponseBytesHighWater <= 262_144, `${label} response ceiling`);
-  assertFact(result.metrics.decodedStagingBytesHighWater <= 327_680, `${label} staging ceiling`);
-  assertFact(result.metrics.transferredBytes === 131_072, `${label} transfer-v2 bytes`);
+  assertFact(
+    result.state.source.coverage === QUALIFICATION_WORKLOAD.coverage,
+    `${label} Sampled Coverage`,
+  );
+  assertFact(
+    result.state.source.publishedPoints === QUALIFICATION_WORKLOAD.sampledPoints,
+    `${label} published Points`,
+  );
+  assertFact(
+    result.state.source.publishedBatches === QUALIFICATION_WORKLOAD.publishedBatches,
+    `${label} published batches`,
+  );
+  assertFact(
+    result.state.source.retainedRecordBytes === QUALIFICATION_WORKLOAD.transferRecordBytes,
+    `${label} retained records`,
+  );
+  assertFact(
+    result.state.render.drawnPoints === QUALIFICATION_WORKLOAD.sampledPoints,
+    `${label} drawn Points`,
+  );
+  assertFact(
+    result.state.render.residentBytes === QUALIFICATION_WORKLOAD.rendererResidentBytes,
+    `${label} GPU vertex bytes`,
+  );
+  assertFact(
+    result.pointOrdinals.length === QUALIFICATION_WORKLOAD.sampledPoints,
+    `${label} Point identities`,
+  );
+  assertFact(
+    result.metrics.concurrentResponseBytesHighWater <= QUALIFICATION_LIMITS.concurrentResponseBytes,
+    `${label} response ceiling`,
+  );
+  assertFact(
+    result.metrics.decodedStagingBytesHighWater <= QUALIFICATION_LIMITS.workerStagingBytes,
+    `${label} staging ceiling`,
+  );
+  assertFact(
+    result.metrics.transferredBytes === QUALIFICATION_WORKLOAD.transferRecordBytes,
+    `${label} transfer-v2 bytes`,
+  );
 }
 
 function compactLoad(result) {

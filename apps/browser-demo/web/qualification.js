@@ -18,12 +18,13 @@ export const QUALIFICATION_LIMITS = deepFreeze({
   persistentCacheBytes: 4 * 1024 * 1024,
 });
 
-const EXPECTED_WORKLOAD = Object.freeze({
-  publishedPoints: 4_096,
+export const QUALIFICATION_WORKLOAD = deepFreeze({
+  coverage: "sampled",
+  sampledPoints: 4_096,
   publishedBatches: 4,
-  retainedRecordBytes: 131_072,
-  residentBytes: 98_304,
-  warmRequestCount: 0,
+  transferRecordBytes: 131_072,
+  rendererResidentBytes: 98_304,
+  warmBinaryRequestCount: 0,
 });
 
 export function summarizeSamples(samples) {
@@ -106,7 +107,7 @@ export function evaluateQualification(record) {
   checkDifferent(
     failures,
     record.warm.metrics.requestCount,
-    EXPECTED_WORKLOAD.warmRequestCount,
+    QUALIFICATION_WORKLOAD.warmBinaryRequestCount,
     "warm binary network request count",
   );
   return deepFreeze({ passed: failures.length === 0, failures, limits: QUALIFICATION_LIMITS });
@@ -221,10 +222,30 @@ function evaluateViewport(viewport, failures) {
 }
 
 function evaluateState(state, failures) {
-  checkDifferent(failures, state.source.publishedPoints, EXPECTED_WORKLOAD.publishedPoints, "published Points");
-  checkDifferent(failures, state.source.publishedBatches, EXPECTED_WORKLOAD.publishedBatches, "published batches");
-  checkDifferent(failures, state.source.retainedRecordBytes, EXPECTED_WORKLOAD.retainedRecordBytes, "retained record bytes");
-  checkDifferent(failures, state.render.residentBytes, EXPECTED_WORKLOAD.residentBytes, "renderer resident bytes");
+  checkDifferent(
+    failures,
+    state.source.publishedPoints,
+    QUALIFICATION_WORKLOAD.sampledPoints,
+    "published Points",
+  );
+  checkDifferent(
+    failures,
+    state.source.publishedBatches,
+    QUALIFICATION_WORKLOAD.publishedBatches,
+    "published batches",
+  );
+  checkDifferent(
+    failures,
+    state.source.retainedRecordBytes,
+    QUALIFICATION_WORKLOAD.transferRecordBytes,
+    "retained record bytes",
+  );
+  checkDifferent(
+    failures,
+    state.render.residentBytes,
+    QUALIFICATION_WORKLOAD.rendererResidentBytes,
+    "renderer resident bytes",
+  );
   checkAbove(failures, state.source.publishedPoints, QUALIFICATION_LIMITS.residentPoints, "resident Points", "Points");
   checkAbove(failures, state.source.retainedRecordBytes, QUALIFICATION_LIMITS.retainedRecordBytes, "retained record bytes", "bytes");
   checkAbove(failures, state.render.residentBytes, QUALIFICATION_LIMITS.residentBytes, "renderer resident bytes", "bytes");

@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   QUALIFICATION_LIMITS,
+  QUALIFICATION_WORKLOAD,
   captureEnvironment,
   captureJsHeap,
   evaluateQualification,
@@ -96,6 +97,18 @@ test("environment capture bounds caller-visible browser facts", () => {
     secureContext: true,
   });
   assert.equal(Object.isFrozen(environment), true);
+});
+
+test("the exact qualification workload has one immutable source", () => {
+  assert.deepEqual(QUALIFICATION_WORKLOAD, {
+    coverage: "sampled",
+    sampledPoints: 4_096,
+    publishedBatches: 4,
+    transferRecordBytes: 131_072,
+    rendererResidentBytes: 98_304,
+    warmBinaryRequestCount: 0,
+  });
+  assert.equal(Object.isFrozen(QUALIFICATION_WORKLOAD), true);
 });
 
 test("qualification evaluation reports every violated fixed ceiling and exact fact", () => {
