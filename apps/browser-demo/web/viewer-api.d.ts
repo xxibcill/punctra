@@ -233,6 +233,12 @@ export interface SourceLoadResult {
   readonly metrics: Readonly<Record<string, number>>;
   readonly decode: Readonly<Record<string, number>>;
   readonly pointOrdinals: readonly number[];
+  readonly timings: Readonly<{
+    readonly firstCoverageMilliseconds: number;
+    readonly settledViewMilliseconds: number;
+    readonly mainThreadBatchMillisecondsHighWater: number;
+  }>;
+  /** @deprecated Use timings.mainThreadBatchMillisecondsHighWater. */
   readonly mainThreadMillisecondsHighWater: number;
   readonly state: ViewerState;
 }

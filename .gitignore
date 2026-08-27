@@ -3,5 +3,6 @@
 /fuzz/artifacts/
 /fuzz/target/
 /apps/browser-demo/web/pkg/
+/apps/browser-demo/web/node_modules/
 *.profraw
 *.profdata

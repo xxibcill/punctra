@@ -47,8 +47,13 @@ export async function createViewer(options) {
   const bindings = await loadBindings(assets.wasmUrl);
   const defaultWorkerAsset = options.assets?.workerUrl === undefined;
   return createBrowserViewer({
-    ...options,
     bindings,
+    canvas: options.canvas,
+    viewport: options.viewport,
+    exactQueryBridge: options.exactQueryBridge,
+    WorkerConstructor: options.WorkerConstructor,
+    requestAnimationFrame: options.requestAnimationFrame,
+    cancelAnimationFrame: options.cancelAnimationFrame,
     workerUrl: assets.workerUrl,
     workerFactory: defaultWorkerAsset ? createBundledWorker : undefined,
   });

@@ -16,8 +16,8 @@
         <h1>Viewer API console</h1>
       </div>
       <div class="release-stamp" aria-label="Release and harness">
-        <span>v0.18</span>
-        <span>LOCAL HARNESS 03</span>
+        <span>v0.19</span>
+        <span>LOCAL QUALIFICATION 04</span>
       </div>
     </header>
 
@@ -131,6 +131,15 @@
       <p>Repository browser evidence is not a broad browser-support claim.</p>
     </footer>
 
-    <script type="module" src="./main.js?v=18-sdk"></script>
+    <script type="importmap">
+      {
+        "imports": {
+          "@punctra/viewer": "./node_modules/@punctra/viewer/sdk.js",
+          "@punctra/viewer/input": "./node_modules/@punctra/viewer/viewer-input.js",
+          "@punctra/viewer/exact-query": "./node_modules/@punctra/viewer/exact-query.js"
+        }
+      }
+    </script>
+    <script type="module" src="./main.js?v=19-qualification"></script>
   </body>
 </html>

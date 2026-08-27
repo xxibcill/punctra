@@ -13,8 +13,8 @@ preserves those authority boundaries and frozen Run-v1; v0.14 bounded exact
 Terrain QA and correction-loop slice Complete and repository-verified; v0.15
 bounded local WebAssembly/WebGPU browser-host workflow Complete and repository-
 verified; v0.16 bounded immutable-LAS Range/cache/Worker workflow Complete and
-repository-verified; v0.17 bounded viewer API/exact-Point workflow and v0.18
-packed SDK/React lifecycle workflow Complete and repository-verified; arbitrary remote browser
+repository-verified; v0.17 bounded viewer API/exact-Point, v0.18 packed SDK/React
+lifecycle, and v0.19 exact local qualification workflows Complete and repository-verified; arbitrary remote browser
 delivery and broader workflows remain outstanding**
 
 The host composes sibling modules explicitly. Lower crates never call back into
@@ -736,6 +736,38 @@ qualified build can include its private dependency graph and content hash.
 Explicit Worker URLs opt out of that build behavior and make co-located asset
 deployment a host obligation. Neither path changes Source URL, credentials,
 cache consent, interaction policy, exact authority, or recovery ownership.
+
+## 11f. Qualify one exact browser/device lane
+
+The v0.19 qualification runner observes the existing SDK without taking over
+Browser Host policy:
+
+~~~mermaid
+sequenceDiagram
+    participant HOST as qualification host
+    participant SDK as @punctra/viewer
+    participant WORKER as module Worker
+    participant SERVER as strict Range server
+    participant MATRIX as local evidence matrix
+
+    HOST->>SDK: create packed viewer
+    HOST->>SDK: invalid resize, DPR change, hide/resume
+    HOST->>WORKER: deliberate pre-publication crash
+    WORKER-->>HOST: worker_failed, retain viewer
+    HOST->>SERVER: disconnected manifest request
+    SERVER-->>HOST: offline, retain viewer
+    HOST->>SDK: cold load, settle, dispose, recreate
+    SDK->>SERVER: three bounded 206 requests
+    HOST->>SDK: warm load and 30 settled frames
+    SDK-->>HOST: timings, state, resource facts
+    HOST->>MATRIX: evaluate fixed ceilings and record exact lane
+~~~
+
+The host recreates explicitly after device loss, another fused renderer error,
+or any failure after partial Source publication. It retries in place only when
+the structured failure is recoverable and the active generation was never
+changed. The runner uploads nothing and cannot convert a passing unlisted
+browser into a supported matrix entry without a new recorded trial.
 
 ## 12. Cancellation and crash matrix
 

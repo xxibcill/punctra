@@ -4,6 +4,7 @@ import test from "node:test";
 
 import {
   DISPLAY_MODES,
+  RECREATION_REQUIRED_SAFE_ACTIONS,
   VIEWER_ERROR_CODES,
   ViewerError,
   createBrowserViewer,
@@ -29,6 +30,9 @@ test("runtime error codes and display modes agree with TypeScript declarations",
   assert.match(declaration, /pause\(\): ViewerState;/);
   assert.match(declaration, /resume\(\): ViewerState;/);
   assert.match(declaration, /dispose\(\): void;/);
+  assert.match(declaration, /readonly firstCoverageMilliseconds: number;/);
+  assert.match(declaration, /readonly settledViewMilliseconds: number;/);
+  assert.match(declaration, /readonly mainThreadBatchMillisecondsHighWater: number;/);
 });
 
 test("failed facade construction shuts down the raw viewer", async () => {
@@ -193,7 +197,11 @@ test("viewer cancels stale scheduled rendering on hide, Source replacement, and 
   });
   const fusedRender = fusedViewer.requestRender();
   const fusedRejection = assert.rejects(fusedRender, (error) => error.code === "render_cancelled");
-  assert.throws(() => fusedViewer.setDisplayMode("rgb"), (error) => error.code === "device_lost");
+  assert.throws(
+    () => fusedViewer.setDisplayMode("rgb"),
+    (error) => error.code === "device_lost"
+      && error.safeAction === RECREATION_REQUIRED_SAFE_ACTIONS.deviceLoss,
+  );
   await fusedRejection;
   assert.deepEqual(fusedCancellations, [7]);
   assert.equal(fusedViewer.state().lifecycle, "destroyed");
@@ -305,6 +313,117 @@ test("surface_outdated preserves the viewer for bounded recovery", async () => {
   assert.equal(viewer.state().failure.code, "surface_outdated");
 });
 
+test("an over-limit raw resize preserves the previous viewport and accepts a valid retry", async () => {
+  const viewer = await createBrowserViewer({
+    bindings: { createViewer: async () => new BoundedResizeRawViewer() },
+    canvas: {},
+    viewport: viewport(),
+  });
+  const before = viewer.state().viewport;
+
+  assert.throws(
+    () => viewer.resize({ cssWidth: 4_096, cssHeight: 4_096, devicePixelRatio: 4 }),
+    (error) => error.code === "resize_viewport" && error.recoverable === true,
+  );
+  assert.deepEqual(viewer.state().viewport, before);
+
+  const recovered = viewer.resize({ cssWidth: 640, cssHeight: 480, devicePixelRatio: 1.5 });
+  assert.equal(recovered.lifecycle, "ready");
+  assert.equal(recovered.viewport.physicalWidth, 960);
+  assert.equal(recovered.viewport.physicalHeight, 720);
+});
+
+test("a worker crash before publication retains the viewer for a successful retry", async () => {
+  RecoveringWorker.reset();
+  const viewer = await createBrowserViewer({
+    bindings: { createViewer: async () => new FakeRawViewer() },
+    canvas: {},
+    viewport: viewport(),
+    WorkerConstructor: RecoveringWorker,
+    workerUrl: "https://fixtures.test/stream-worker.js",
+  });
+
+  await assert.rejects(
+    viewer.loadSource({ manifestUrl: "https://fixtures.test/deployment.json" }),
+    (error) => error.code === "worker_failed" && error.recoverable === true,
+  );
+  assert.equal(viewer.state().lifecycle, "ready");
+  assert.equal(viewer.state().generation, 1);
+
+  const recovered = await viewer.loadSource({
+    manifestUrl: "https://fixtures.test/deployment.json",
+  });
+  assert.equal(recovered.state.source.identity, SOURCE);
+  assert.equal(recovered.state.lifecycle, "ready");
+});
+
+test("worker completion without first Coverage fails before changing the viewer", async () => {
+  const viewer = await createBrowserViewer({
+    bindings: { createViewer: async () => new FakeRawViewer() },
+    canvas: {},
+    viewport: viewport(),
+    WorkerConstructor: CompleteWithoutBatchWorker,
+    workerUrl: "https://fixtures.test/stream-worker.js",
+  });
+
+  await assert.rejects(
+    viewer.loadSource({ manifestUrl: "https://fixtures.test/deployment.json" }),
+    (error) => error.code === "stream_validation" && error.recoverable === true,
+  );
+  assert.equal(viewer.state().lifecycle, "ready");
+  assert.equal(viewer.state().source.identity, GENERATED_SOURCE);
+});
+
+test("Source timings wait for an actual frame after resuming from hidden", async () => {
+  const viewer = await createBrowserViewer({
+    bindings: { createViewer: async () => new HiddenRenderRawViewer() },
+    canvas: {},
+    viewport: viewport(),
+    WorkerConstructor: FixtureWorker,
+    workerUrl: "https://fixtures.test/stream-worker.js",
+  });
+  viewer.pause();
+  let settled = false;
+  const load = viewer.loadSource({ manifestUrl: "https://fixtures.test/deployment.json" }).then((result) => {
+    settled = true;
+    return result;
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(settled, false);
+  assert.equal(viewer.state().lifecycle, "hidden");
+
+  viewer.resume();
+  const loaded = await load;
+  assert.ok(loaded.timings.firstCoverageMilliseconds >= 0);
+  assert.ok(loaded.timings.settledViewMilliseconds >= loaded.timings.firstCoverageMilliseconds);
+  assert.equal(loaded.state.render.renderedFrames > 0, true);
+});
+
+test("hidden Source completion rejects promptly when its signal is aborted", async () => {
+  const viewer = await createBrowserViewer({
+    bindings: { createViewer: async () => new HiddenRenderRawViewer() },
+    canvas: {},
+    viewport: viewport(),
+    WorkerConstructor: HiddenCompletionWorker,
+    workerUrl: "https://fixtures.test/stream-worker.js",
+  });
+  viewer.pause();
+  const controller = new AbortController();
+  const load = viewer.loadSource({
+    manifestUrl: "https://fixtures.test/deployment.json",
+    signal: controller.signal,
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+  controller.abort();
+  await assert.rejects(
+    load,
+    (error) => error.code === "cancelled" && error.recoverable === false,
+  );
+  assert.equal(viewer.state().lifecycle, "destroyed");
+});
+
 test("every recreation-required renderer failure fuses the viewer", async () => {
   for (const code of [
     "pick_recording",
@@ -334,9 +453,10 @@ test("every recreation-required renderer failure fuses the viewer", async () => 
   }
 });
 
-test("viewer owns worker publication, streamed picking, highlights, and exact handoff", async () => {
+test("viewer keeps streamed interaction and exact handoff generation-safe", async () => {
   const raw = new FakeRawViewer();
   const exactRequests = [];
+  let resolveLateExact;
   const viewer = await createBrowserViewer({
     bindings: { createViewer: async () => raw },
     canvas: {},
@@ -349,9 +469,12 @@ test("viewer owns worker publication, streamed picking, highlights, and exact ha
     },
     cancelAnimationFrame: () => {},
     exactQueryBridge: {
-      async confirm(request) {
+      confirm(request) {
         exactRequests.push(request);
-        return {
+        if (exactRequests.length > 1) {
+          return new Promise((resolve) => { resolveLateExact = resolve; });
+        }
+        return Promise.resolve({
           authority: "exact_source_record",
           sourceIdentity: request.sourceIdentity,
           pointOrdinal: String(request.pointOrdinal),
@@ -361,7 +484,7 @@ test("viewer owns worker publication, streamed picking, highlights, and exact ha
           intensity: 4,
           classification: 2,
           rgb: [5, 6, 7],
-        };
+        });
       },
     },
   });
@@ -375,6 +498,12 @@ test("viewer owns worker publication, streamed picking, highlights, and exact ha
   assert.equal(loaded.state.source.identity, SOURCE);
   assert.equal(loaded.state.source.coverage, "sampled");
   assert.equal(loaded.state.source.retainedRecordBytes, 32);
+  assert.ok(loaded.timings.firstCoverageMilliseconds >= 0);
+  assert.ok(loaded.timings.settledViewMilliseconds >= loaded.timings.firstCoverageMilliseconds);
+  assert.equal(
+    loaded.mainThreadMillisecondsHighWater,
+    loaded.timings.mainThreadBatchMillisecondsHighWater,
+  );
 
   const pick = await viewer.pick({ x: 10, y: 20 });
   assert.equal(pick.sourceIdentity, SOURCE);
@@ -392,15 +521,62 @@ test("viewer owns worker publication, streamed picking, highlights, and exact ha
   assert.equal(exact.authority, "exact_source_record");
   assert.equal(exact.pointOrdinal, "7");
   assert.equal(exactRequests.length, 1);
+
+  const lateExact = viewer.confirmPoint(pick);
+  await Promise.resolve();
+  const replaced = await viewer.loadSource({
+    manifestUrl: "https://fixtures.test/deployment.json",
+    cacheMode: "memory",
+  });
+  assert.equal(replaced.state.generation, pick.generation + 1);
+  assert.equal(replaced.state.pick.status, "not_requested");
+  assert.equal(replaced.state.highlights.pointCount, 0);
+
+  const replacementPick = await viewer.pick({ x: 10, y: 20 });
+  viewer.setHighlights([replacementPick], replacementPick.generation);
+  assert.equal(viewer.state().highlights.pointCount, 1);
   viewer.clearHighlights();
   assert.equal(viewer.state().highlights.pointCount, 0);
 
-  raw.advanceGeneration();
-  viewer.render();
+  resolveLateExact(exactResult(pick));
   await assert.rejects(
-    viewer.confirmPoint(pick),
+    lateExact,
     (error) => error.code === "stale_generation",
   );
+});
+
+test("Source timing uses one monotonic load origin and preserves the compatibility alias", async () => {
+  const samples = [100, 125, 128, 180];
+  const events = [];
+  const viewer = await createBrowserViewer({
+    bindings: { createViewer: async () => new FakeRawViewer() },
+    canvas: {},
+    viewport: viewport(),
+    WorkerConstructor: FixtureWorker,
+    workerUrl: "https://fixtures.test/stream-worker.js",
+    monotonicNow: () => {
+      events.push("clock");
+      return samples.shift();
+    },
+  });
+  const sourceOptions = {};
+  Object.defineProperty(sourceOptions, "manifestUrl", {
+    get() {
+      events.push("manifest");
+      return "https://fixtures.test/deployment.json";
+    },
+  });
+
+  const loaded = await viewer.loadSource(sourceOptions);
+
+  assert.deepEqual(loaded.timings, {
+    firstCoverageMilliseconds: 28,
+    settledViewMilliseconds: 80,
+    mainThreadBatchMillisecondsHighWater: 3,
+  });
+  assert.equal(loaded.mainThreadMillisecondsHighWater, 3);
+  assert.deepEqual(samples, []);
+  assert.deepEqual(events.slice(0, 2), ["clock", "manifest"]);
 });
 
 test("relative Source manifests keep the caller document base across Worker paths", async () => {
@@ -526,7 +702,29 @@ test("a Source failure after partial publication fuses the viewer", async () => 
 
   await assert.rejects(
     viewer.loadSource({ manifestUrl: "https://fixtures.test/deployment.json" }),
-    (error) => error.code === "cancelled" && error.recoverable === false,
+    (error) => error.code === "cancelled"
+      && error.recoverable === false
+      && error.safeAction === RECREATION_REQUIRED_SAFE_ACTIONS.partialPublication,
+  );
+  assert.equal(viewer.state().lifecycle, "destroyed");
+  assert.throws(
+    () => viewer.render(),
+    (error) => error.code === "viewer_destroyed",
+  );
+});
+
+test("a Worker crash after partial publication fuses the viewer", async () => {
+  const viewer = await createBrowserViewer({
+    bindings: { createViewer: async () => new FakeRawViewer() },
+    canvas: {},
+    viewport: viewport(),
+    WorkerConstructor: PartialCrashWorker,
+    workerUrl: "https://fixtures.test/stream-worker.js",
+  });
+
+  await assert.rejects(
+    viewer.loadSource({ manifestUrl: "https://fixtures.test/deployment.json" }),
+    (error) => error.code === "worker_failed" && error.recoverable === false,
   );
   assert.equal(viewer.state().lifecycle, "destroyed");
   assert.throws(
@@ -702,22 +900,7 @@ class PartialFailureWorker extends FixtureWorker {
       return;
     }
     queueMicrotask(() => {
-      const deployment = fixtureDeployment();
-      this.emit({
-        schema: WORKER_SCHEMA,
-        type: "state",
-        operation_id: message.operation_id,
-        phase: "deployment",
-        deployment,
-      });
-      this.emit({
-        schema: WORKER_SCHEMA,
-        type: "batch",
-        operation_id: message.operation_id,
-        batch_index: 0,
-        point_count: 1,
-        payload: transferPayload(7n),
-      });
+      publishFixtureBatch(this, message);
       this.emit({
         schema: WORKER_SCHEMA,
         type: "failure",
@@ -728,6 +911,33 @@ class PartialFailureWorker extends FixtureWorker {
       });
     });
   }
+}
+
+class PartialCrashWorker extends FixtureWorker {
+  postMessage(message) {
+    queueMicrotask(() => {
+      publishFixtureBatch(this, message);
+      this.listeners.get("error")?.({ message: "fixture post-publication worker crash" });
+    });
+  }
+}
+
+function publishFixtureBatch(worker, message) {
+  worker.emit({
+    schema: WORKER_SCHEMA,
+    type: "state",
+    operation_id: message.operation_id,
+    phase: "deployment",
+    deployment: fixtureDeployment(),
+  });
+  worker.emit({
+    schema: WORKER_SCHEMA,
+    type: "batch",
+    operation_id: message.operation_id,
+    batch_index: 0,
+    point_count: 1,
+    payload: transferPayload(7n),
+  });
 }
 
 class ManifestCaptureWorker extends FixtureWorker {
@@ -772,6 +982,45 @@ class OwnedWorkWorker extends FixtureWorker {
 
   crash() {
     this.listeners.get("error")?.({ message: "fixture worker crashed" });
+  }
+}
+
+class RecoveringWorker extends FixtureWorker {
+  static constructions = 0;
+
+  static reset() {
+    RecoveringWorker.constructions = 0;
+  }
+
+  constructor() {
+    super();
+    this.crashes = RecoveringWorker.constructions === 0;
+    RecoveringWorker.constructions += 1;
+  }
+
+  postMessage(message) {
+    if (!this.crashes || message.type === "cancel") {
+      super.postMessage(message);
+      return;
+    }
+    queueMicrotask(() => {
+      this.listeners.get("error")?.({ message: "fixture pre-publication worker crash" });
+    });
+  }
+}
+
+class CompleteWithoutBatchWorker extends FixtureWorker {
+  postMessage(message) {
+    queueMicrotask(() => {
+      this.emit({
+        schema: WORKER_SCHEMA,
+        type: "complete",
+        operation_id: message.operation_id,
+        deployment: fixtureDeployment(),
+        metrics: {},
+        decode: {},
+      });
+    });
   }
 }
 
@@ -862,6 +1111,7 @@ class FakeRawViewer {
 
   beginStreamBatch(source, points, _x, _y, _z, minimumZ, maximumZ, _batch, payload) {
     assert.equal(payload.byteLength, 32);
+    if (this.data.streaming.phase !== "idle") this.generation += 1;
     this.data.streaming = {
       phase: "receiving",
       source_identity: source,
@@ -881,6 +1131,8 @@ class FakeRawViewer {
       presentation_version: 1,
     };
     this.data.frame = null;
+    this.data.pick = emptyPick();
+    this.data.highlights = emptyHighlights();
     return this.json();
   }
 
@@ -936,11 +1188,6 @@ class FakeRawViewer {
     return this.json();
   }
 
-  advanceGeneration() {
-    this.generation += 1;
-    this.data.streaming.generation = this.generation;
-  }
-
   camera(values, projection) {
     this.data.camera = {
       eye: values.slice(0, 3),
@@ -957,6 +1204,49 @@ class FakeRawViewer {
 
   json() {
     return JSON.stringify(this.data);
+  }
+}
+
+class BoundedResizeRawViewer extends FakeRawViewer {
+  resize(cssWidth, cssHeight, dpr) {
+    const width = Math.round(cssWidth * dpr);
+    const height = Math.round(cssHeight * dpr);
+    if (width > 4_096 || height > 4_096 || width * height > 8_388_608) {
+      throw new Error(JSON.stringify({
+        code: "resize_viewport",
+        message: "fixture viewport exceeds the physical ceiling",
+        safe_action: "retry with bounded dimensions",
+      }));
+    }
+    return super.resize(cssWidth, cssHeight, dpr);
+  }
+}
+
+class HiddenRenderRawViewer extends FakeRawViewer {
+  render() {
+    if (this.data.phase === "hidden") {
+      this.data.hidden_frame_skips += 1;
+      return this.json();
+    }
+    return super.render();
+  }
+}
+
+class HiddenCompletionWorker extends FixtureWorker {
+  postMessage(message) {
+    if (message.type === "cancel") return;
+    queueMicrotask(() => {
+      publishFixtureBatch(this, message);
+      const deployment = fixtureDeployment();
+      this.emit({
+        schema: WORKER_SCHEMA,
+        type: "complete",
+        operation_id: message.operation_id,
+        deployment,
+        metrics: { requestCount: 3 },
+        decode: { pointCount: 1 },
+      });
+    });
   }
 }
 
@@ -1013,7 +1303,7 @@ class PendingRawViewer extends FakeRawViewer {
 function diagnosticsFixture() {
   return {
     schema: "punctra-browser-viewer-v1",
-    package_version: "0.18.0-alpha.1",
+    package_version: "0.19.0-alpha.1",
     phase: "ready",
     rendered_frames: 0,
     hidden_frame_skips: 0,
@@ -1069,12 +1359,7 @@ function diagnosticsFixture() {
       far_distance: 250,
     },
     display_mode: "rgb",
-    highlights: {
-      generation: null,
-      source_identity: null,
-      point_count: 0,
-      authority: "presentation_only",
-    },
+    highlights: emptyHighlights(),
   };
 }
 
@@ -1087,5 +1372,14 @@ function emptyPick() {
     point_ordinal: null,
     batch_key: null,
     batch_version: null,
+  };
+}
+
+function emptyHighlights() {
+  return {
+    generation: null,
+    source_identity: null,
+    point_count: 0,
+    authority: "presentation_only",
   };
 }

@@ -3,6 +3,40 @@
 All notable changes to Punctra are documented here. The project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased - 0.19.0-alpha.1
+
+- Completed and locally repository-verified the accepted v0.19 slice at
+  implementation commit `769a25d4ab33a42d00b533f745da3f84aeb95b76`. The
+  [v0.19 verification record](docs/releases/v0.19.0.md) pins the exact local
+  browser/device lane, native and GPU command matrix, benchmarks, and remaining
+  external exits.
+- Completed the bounded [v0.19 Browser and Device Qualification
+  slice](docs/design/browser-device-qualification-v0.19.md) for one exact Codex
+  in-app Chromium 151/macOS 26.5.2/Apple M5 Pro local lane. Other browser,
+  operating-system, adapter, and device combinations remain unqualified.
+- Added immutable Source-load timings for first sampled Coverage, settled View,
+  and main-thread batch publication while retaining the prior high-water field
+  as a deprecated compatibility alias.
+- Added deterministic qualification evaluation for latency, physical viewport,
+  canvas, decoded records, worker staging, network response, verified cache,
+  renderer residency, and transient texture ceilings; 30 foreground frame
+  samples distinguish callback cadence from synchronous submission time.
+- Added real browser recovery probes for atomic resize/DPR rejection and retry,
+  hidden-frame suspension/resume, a deliberate pre-publication Worker crash, a
+  disconnected manifest request, cancellation, cold/warm cache recreation, and
+  stale generation. Deterministic tests retain device-loss and partial-
+  publication fusion without forcing destructive physical faults.
+- Added nullable non-standard JavaScript heap observations without conflating
+  them with process RSS, physical cache allocation, or GPU/driver allocation.
+- Added the exact [machine-readable qualification
+  matrix](docs/releases/v0.19-browser-matrix.json), its local verifier, and the
+  [browser qualification and recovery guide](docs/guides/browser-qualification.md)
+  with support, security, and redacted issue-evidence playbooks.
+- Preserved the v0.18 package, viewer, Source, authority, and visual boundaries:
+  no registry publication, arbitrary Source support, automatic recovery,
+  independent adoption, stable API, new appearance policy, support
+  qualification, beta, or release-candidate claim is introduced.
+
 ## Unreleased - 0.18.0-alpha.1
 
 - Completed and locally repository-verified the accepted v0.18 slice at

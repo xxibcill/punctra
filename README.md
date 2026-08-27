@@ -284,13 +284,34 @@ exact implementation commit, packed-artifact contents, clean-consumer builds,
 native and GPU command matrix, Chrome WebGPU observations, generated
 benchmarks, and remaining external exits.
 
+Version 0.19.0-alpha.1 completes the bounded [Browser and Device Qualification
+design](docs/design/browser-device-qualification-v0.19.md). Source loads now
+report first sampled Coverage, settled View, and main-thread publication
+timings. The packed-SDK harness evaluates fixed latency and independent
+resource ceilings, 30 settled foreground frames, optional JavaScript heap
+facts, atomic resize/DPR and visibility behavior, disconnected-network and
+Worker recovery before publication, cache-safe recreation, cancellation, and
+stale-generation rejection.
+
+The exact [machine-readable browser matrix](docs/releases/v0.19-browser-matrix.json)
+and [browser qualification guide](docs/guides/browser-qualification.md) define
+what passed and how a host recovers. Only the recorded Codex in-app Chromium
+151/macOS 26.5.2/Apple M5 Pro lane is repository-qualified. Installed Chrome,
+Safari, other platforms, independent adoption, physical memory/device-loss
+stress, API stability, visual quality, support qualification, and release-
+candidate status remain explicitly outstanding.
+
+The [v0.19 repository verification record](docs/releases/v0.19.0.md) pins the
+exact implementation commit, local command matrix, attended browser evidence,
+GPU acceptance, benchmarks, and remaining external exits.
+
 To try the implemented View safely, follow the five-minute [first LAS/LAZ
 guide](docs/guides/first-las-laz.md). It separates position-only disk-v1 and
 attributed disk-v2 caches and explains what progressive Coverage does and does
 not mean.
 
 Later direction and the exact external product gates are described in the
-[living roadmap](ROADMAP.md). The linked v0.15 through v0.18 designs define the
+[living roadmap](ROADMAP.md). The linked v0.15 through v0.19 designs define the
 completed bounded repository scopes. Later Candidate themes do not expand
 accepted scope by themselves.
 

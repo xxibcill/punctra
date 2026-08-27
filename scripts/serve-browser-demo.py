@@ -7,6 +7,8 @@ import argparse
 import hashlib
 import json
 import mimetypes
+import platform
+import subprocess
 import time
 from functools import lru_cache
 from http import HTTPStatus
@@ -18,7 +20,8 @@ from urllib.parse import parse_qs, unquote, urlsplit
 WEB_ROOT = (Path(__file__).resolve().parent.parent / "apps/browser-demo/web").resolve()
 EXPOSED_HEADERS = "Accept-Ranges, Content-Encoding, Content-Length, Content-Range, ETag"
 FILE_CHUNK_BYTES = 64 * 1024
-FAULTS = {"redirect", "retry", "truncated", "corrupt", "validator_drift"}
+FAULTS = {"disconnect", "redirect", "retry", "truncated", "corrupt", "validator_drift"}
+QUALIFICATION_HOST_SCHEMA = "punctra-qualification-host-v1"
 
 
 def fixture_validators() -> dict[Path, str]:
@@ -31,6 +34,98 @@ def fixture_validators() -> dict[Path, str]:
 
 
 FIXTURE_VALIDATORS = fixture_validators()
+
+
+@lru_cache(maxsize=1)
+def qualification_host_facts() -> dict[str, object]:
+    hardware = first_system_profiler_record("SPHardwareDataType")
+    display_controller = first_system_profiler_record("SPDisplaysDataType")
+    primary_display = next(
+        (
+            display
+            for display in display_controller.get("spdisplays_ndrvs", [])
+            if display.get("spdisplays_main") == "spdisplays_yes"
+        ),
+        {},
+    )
+    chip = hardware.get("chip_type")
+    gpu = display_controller.get("sppci_model") or chip
+    return {
+        "schema": QUALIFICATION_HOST_SCHEMA,
+        "operating_system": {
+            "name": "macOS" if platform.system() == "Darwin" else platform.system(),
+            "version": command_text("sw_vers", "-productVersion") or platform.release(),
+            "build": command_text("sw_vers", "-buildVersion"),
+            "architecture": platform.machine(),
+        },
+        "device": {
+            "class": "Apple silicon laptop"
+            if chip and "MacBook" in hardware.get("machine_name", "")
+            else hardware.get("machine_name"),
+            "gpu": gpu,
+            "gpu_cores": integer_text(display_controller.get("sppci_cores")),
+            "gpu_class": "integrated" if display_controller.get("sppci_bus") == "spdisplays_builtin" else None,
+            "metal_support": metal_support(display_controller.get("spdisplays_mtlgpufamilysupport")),
+        },
+        "display_path": display_path(primary_display),
+        "package": {
+            "name": "@punctra/viewer",
+            "version": "0.19.0-alpha.1",
+        },
+    }
+
+
+def first_system_profiler_record(data_type: str) -> dict[str, object]:
+    try:
+        result = subprocess.run(
+            ["system_profiler", data_type, "-json"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        payload = json.loads(result.stdout)
+        records = payload.get(data_type, [])
+        return records[0] if records else {}
+    except (OSError, subprocess.SubprocessError, json.JSONDecodeError, IndexError, TypeError):
+        return {}
+
+
+def command_text(*arguments: str) -> str | None:
+    try:
+        result = subprocess.run(
+            list(arguments),
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    value = result.stdout.strip()
+    return value or None
+
+
+def integer_text(value: object) -> int | None:
+    try:
+        return int(str(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def metal_support(value: object) -> str | None:
+    if not isinstance(value, str) or not value.startswith("spdisplays_metal"):
+        return None
+    return value.removeprefix("spdisplays_").replace("metal", "Metal ").strip()
+
+
+def display_path(display: dict[str, object]) -> str | None:
+    connection = display.get("spdisplays_connection_type")
+    display_type = display.get("spdisplays_display_type")
+    if connection == "spdisplays_internal" and isinstance(display_type, str):
+        if "built-in" in display_type or "liquid-retina" in display_type:
+            return "built-in Retina display"
+    return None
 
 
 class BrowserDemoHandler(BaseHTTPRequestHandler):
@@ -53,6 +148,9 @@ class BrowserDemoHandler(BaseHTTPRequestHandler):
         self._serve(send_body=True)
 
     def _serve(self, *, send_body: bool) -> None:
+        if urlsplit(self.path).path == "/qualification-host.json":
+            self._serve_qualification_host(send_body=send_body)
+            return
         try:
             delay_milliseconds = self._delay_milliseconds()
             fault = self._fault()
@@ -71,6 +169,9 @@ class BrowserDemoHandler(BaseHTTPRequestHandler):
             self.send_header("Location", "/fixtures/v1/representative.las")
             self.send_header("Content-Length", "0")
             self.end_headers()
+            return
+        if fault == "disconnect":
+            self.close_connection = True
             return
         if fault == "retry":
             self.send_response(HTTPStatus.SERVICE_UNAVAILABLE)
@@ -109,6 +210,21 @@ class BrowserDemoHandler(BaseHTTPRequestHandler):
         self.end_headers()
         if send_body:
             self._write_body(path, start, body_length, corrupt=fault == "corrupt")
+
+    def _serve_qualification_host(self, *, send_body: bool) -> None:
+        body = json.dumps(
+            qualification_host_facts(),
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+        self.send_response(HTTPStatus.OK)
+        self._send_cors_headers()
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        if send_body:
+            self.wfile.write(body)
 
     def _write_body(self, path: Path, start: int, length: int, *, corrupt: bool = False) -> None:
         remaining = length

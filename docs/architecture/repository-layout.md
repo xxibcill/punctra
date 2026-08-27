@@ -12,7 +12,8 @@ and repository-verified; v0.15 bounded local WebAssembly/WebGPU browser-
 foundation slice Complete and repository-verified; v0.16 private HTTP Range,
 cache, and worker streaming slice Complete and repository-verified; v0.17
 framework-neutral viewer API and exact-Point bridge plus v0.18 packed SDK and
-thin React adapter Complete and repository-verified; later
+thin React adapter plus v0.19 exact local browser/device qualification Complete
+and repository-verified; later
 crates are created only with accepted behavior
 and a caller
 
@@ -46,6 +47,9 @@ apps/
       sdk.test.mjs
       index.html
       main.js
+      qualification.js
+      qualification.test.mjs
+      qualification-worker.js
       styles.css
       camera-policy.js
       viewer-api.js
@@ -314,6 +318,7 @@ docs/
 scripts/
   build-browser-demo.sh
   serve-browser-demo.py
+  verify-browser-qualification.mjs
 ~~~
 
 Files inside a crate are private locality, not additional public modules. In
@@ -400,6 +405,7 @@ cargo check -p browser-demo --target wasm32-unknown-unknown
 cargo run -p browser-demo --bin generate_stream_fixture
 node --test apps/browser-demo/web/*.test.mjs
 scripts/build-browser-demo.sh
+node scripts/verify-browser-qualification.mjs
 cargo test -p renderer-demo --test headless_smoke
 PUNCTRA_REQUIRE_GPU=1 cargo test -p renderer-demo --test headless_smoke \
   corpus_success_binds_trace_inputs_and_separate_resource_measurements -- --exact
@@ -552,13 +558,13 @@ versions, and LandXML/journal/report format versions are separate axes. A Cargo
 `0.9` version does not imply Workspace disk schema or terrain algorithm version
 9.
 
-The v0.18 work advances all public Rust libraries as one `0.18.0-alpha.1` package
+The v0.19 work advances all public Rust libraries as one `0.19.0-alpha.1` package
 set with exact inter-Punctra registry requirements and
 local development paths. Their empty default features, dependency roles,
 MSRV, publication order, and pre-v1 policy are documented in the [library
 packaging guide](../guides/library-packaging.md). The separately versioned
 `@punctra/viewer` and `@punctra/react` npm tarballs use the same
-`0.18.0-alpha.1` release identity but remain local packed artifacts governed by
+`0.19.0-alpha.1` release identity but remain local packed artifacts governed by
 the [browser SDK guide](../guides/browser-sdk.md); Cargo and npm publication
 remain separate decisions.
 

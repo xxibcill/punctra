@@ -161,8 +161,12 @@ const MAX_PICK_POLLS = 180;
 const MAX_ERROR_MESSAGE_CHARACTERS = 512;
 const LOAD_TIMEOUT_MILLISECONDS = 30_000;
 const MAX_POINT_ORDINAL = (1n << 64n) - 1n;
-const PARTIAL_PUBLICATION_SAFE_ACTION =
-  "Destroy the partially published viewer and explicitly create a new viewer before loading another Source.";
+export const RECREATION_REQUIRED_SAFE_ACTIONS = deepFreeze({
+  partialPublication:
+    "Dispose the fused viewer and create a new one before any Source load.",
+  deviceLoss:
+    "Dispose the fused viewer and explicitly recreate the viewer and device.",
+});
 const VIEWER_DESTROYED_ABORT = Symbol("viewer_destroyed");
 let operationSequence = 0;
 
@@ -224,8 +228,10 @@ class BrowserViewer {
   #workerUrl;
   #requestAnimationFrame;
   #cancelAnimationFrame;
+  #monotonicNow;
   #renderRequest;
   #loadController;
+  #pendingLoadCompletion;
   #exactController;
   #pickController;
   #loadFacts;
@@ -243,6 +249,8 @@ class BrowserViewer {
     this.#cancelAnimationFrame = options.cancelAnimationFrame
       ?? globalThis.cancelAnimationFrame?.bind(globalThis)
       ?? globalThis.clearTimeout.bind(globalThis);
+    this.#monotonicNow = options.monotonicNow
+      ?? globalThis.performance.now.bind(globalThis.performance);
     this.#diagnostics = this.#readRawDiagnostics();
     this.#refreshState();
   }
@@ -278,6 +286,7 @@ class BrowserViewer {
       if (typeof visible !== "boolean") throw invalidArgument("visible must be boolean");
       this.#callRaw("setVisible", visible);
       if (!visible) this.#cancelScheduledRender("scheduled render was cancelled because the viewer was hidden");
+      if (visible) this.#flushPendingLoadCompletion();
       return this.#state;
     });
   }
@@ -347,10 +356,11 @@ class BrowserViewer {
   }
 
   async loadSource(options) {
-    return this.#executeAsync(() => this.#loadSource(options));
+    const loadStarted = this.#monotonicNow();
+    return this.#executeAsync(() => this.#loadSource(options, loadStarted));
   }
 
-  async #loadSource(options) {
+  async #loadSource(options, loadStarted) {
     this.#ensureActive();
     if (this.#loadController) throw new ViewerError("load_busy", "one Source load is already active");
     if (typeof this.#workerFactory !== "function" && typeof this.#WorkerConstructor !== "function") {
@@ -366,8 +376,10 @@ class BrowserViewer {
     operationSequence += 1;
     const workerUrl = `${this.#workerUrl}${this.#workerUrl.includes("?") ? "&" : "?"}operation=${encodeURIComponent(operationId)}`;
     let deployment;
-    let begun = false;
+    let sourcePublicationStarted = false;
+    let sourceBatchReceived = false;
     let mainThreadMillisecondsHighWater = 0;
+    let firstCoverageMilliseconds;
     const pointOrdinals = [];
 
     try {
@@ -406,26 +418,72 @@ class BrowserViewer {
           } else if (message.type === "state") {
             if (message.phase === "deployment") deployment = message.deployment;
           } else if (message.type === "batch") {
-            const started = performance.now();
-            this.#publishWorkerBatch(deployment, message, begun);
-            begun = true;
+            const started = this.#monotonicNow();
+            this.#publishWorkerBatch(deployment, message, sourcePublicationStarted);
+            sourcePublicationStarted = true;
+            sourceBatchReceived = true;
             appendTransferredOrdinals(pointOrdinals, message.payload);
+            const renderedFramesBefore = this.#state.render.renderedFrames;
             this.render();
+            const finished = this.#monotonicNow();
             mainThreadMillisecondsHighWater = Math.max(
               mainThreadMillisecondsHighWater,
-              performance.now() - started,
+              finished - started,
             );
+            if (this.#state.render.renderedFrames > renderedFramesBefore) {
+              firstCoverageMilliseconds ??= finished - loadStarted;
+            }
           } else if (message.type === "complete") {
+            if (!sourceBatchReceived) {
+              controls.reject(new ViewerError(
+                "stream_validation",
+                "worker completed before publishing first sampled Coverage",
+              ));
+              return;
+            }
             this.#callRaw("completeStream");
-            const state = this.render();
-            controls.resolve({
-              deployment: message.deployment,
-              metrics: message.metrics,
-              decode: message.decode,
-              pointOrdinals,
-              mainThreadMillisecondsHighWater,
-              state,
-            });
+            controls.pauseTimeout();
+            let completion;
+            let onCompletionAbort;
+            completion = {
+              controller,
+              flush: () => {
+                const renderedFramesBefore = this.#state.render.renderedFrames;
+                const state = this.render();
+                const finished = this.#monotonicNow();
+                if (state.render.renderedFrames === renderedFramesBefore) {
+                  this.#pendingLoadCompletion = completion;
+                  return;
+                }
+                firstCoverageMilliseconds ??= finished - loadStarted;
+                this.#pendingLoadCompletion = undefined;
+                const timings = {
+                  firstCoverageMilliseconds,
+                  settledViewMilliseconds: finished - loadStarted,
+                  mainThreadBatchMillisecondsHighWater: mainThreadMillisecondsHighWater,
+                };
+                controller.signal.removeEventListener("abort", onCompletionAbort);
+                controls.resolve({
+                  deployment: message.deployment,
+                  metrics: message.metrics,
+                  decode: message.decode,
+                  pointOrdinals,
+                  timings,
+                  mainThreadMillisecondsHighWater,
+                  state,
+                });
+              },
+              reject: (error) => {
+                controller.signal.removeEventListener("abort", onCompletionAbort);
+                if (this.#pendingLoadCompletion === completion) this.#pendingLoadCompletion = undefined;
+                controls.reject(error);
+              },
+            };
+            onCompletionAbort = () => completion.reject(cancellationFailure(controller.signal, "cancelled"));
+            controller.signal.addEventListener("abort", onCompletionAbort, { once: true });
+            this.#pendingLoadCompletion = completion;
+            if (controller.signal.aborted) onCompletionAbort();
+            else completion.flush();
           }
         },
       });
@@ -433,6 +491,7 @@ class BrowserViewer {
         deployment: result.deployment,
         metrics: result.metrics,
         decode: result.decode,
+        timings: result.timings,
         mainThreadMillisecondsHighWater: result.mainThreadMillisecondsHighWater,
       };
       this.#loadController = undefined;
@@ -443,15 +502,21 @@ class BrowserViewer {
       if (this.#destroyed) {
         throw new ViewerError("viewer_destroyed", "viewer was destroyed during Source loading");
       }
-      const viewerError = toViewerError(error, begun ? "stream_publication" : "worker_failed");
-      if (!begun) throw viewerError;
+      const viewerError = toViewerError(
+        error,
+        sourcePublicationStarted ? "stream_publication" : "worker_failed",
+      );
+      if (!sourcePublicationStarted) throw viewerError;
       const fusedError = new ViewerError(viewerError.code, viewerError.message, {
-        safeAction: PARTIAL_PUBLICATION_SAFE_ACTION,
+        safeAction: RECREATION_REQUIRED_SAFE_ACTIONS.partialPublication,
         recoverable: false,
       });
       this.#fuseViewer(fusedError);
       throw fusedError;
     } finally {
+      if (this.#pendingLoadCompletion?.controller === controller) {
+        this.#pendingLoadCompletion = undefined;
+      }
       if (this.#loadController === controller) {
         this.#loadController = undefined;
         controller.dispose();
@@ -597,6 +662,12 @@ class BrowserViewer {
   #destroyViewer(failure) {
     if (this.#destroyed) return;
     this.#destroyed = true;
+    const pendingLoadCompletion = this.#pendingLoadCompletion;
+    this.#pendingLoadCompletion = undefined;
+    pendingLoadCompletion?.reject(new ViewerError(
+      "viewer_destroyed",
+      "viewer was destroyed during Source loading",
+    ));
     const controllers = [this.#loadController, this.#exactController, this.#pickController];
     this.#loadController = undefined;
     this.#exactController = undefined;
@@ -614,12 +685,12 @@ class BrowserViewer {
     this.#listeners.clear();
   }
 
-  #publishWorkerBatch(deployment, message, begun) {
+  #publishWorkerBatch(deployment, message, sourcePublicationStarted) {
     if (!deployment?.source_bounds || !(message.payload instanceof ArrayBuffer)) {
       throw new ViewerError("stream_validation", "worker batch preceded a complete deployment binding");
     }
     const payload = new Uint8Array(message.payload);
-    if (!begun) {
+    if (!sourcePublicationStarted) {
       this.#cancelScheduledRender("scheduled render was cancelled by a new Source generation");
       const [x, y, z] = deployment.world_origin;
       this.#callRaw(
@@ -648,10 +719,14 @@ class BrowserViewer {
     } catch (error) {
       const viewerError = toViewerError(error);
       if (FUSED_CODES.has(viewerError.code)) {
-        this.#fuseViewer(viewerError);
-      } else {
-        this.#refreshState(viewerError);
+        const fusedError = new ViewerError(viewerError.code, viewerError.message, {
+          safeAction: RECREATION_REQUIRED_SAFE_ACTIONS.deviceLoss,
+          recoverable: false,
+        });
+        this.#fuseViewer(fusedError);
+        throw fusedError;
       }
+      this.#refreshState(viewerError);
       throw viewerError;
     }
   }
@@ -730,6 +805,10 @@ class BrowserViewer {
     request.reject(failure);
     if (publishFailure) this.#refreshState(failure);
     return failure;
+  }
+
+  #flushPendingLoadCompletion() {
+    this.#pendingLoadCompletion?.flush();
   }
 
   #requireCurrentPoint(identity, generation) {

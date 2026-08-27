@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  UNSUPPORTED_INITIALIZATION_CODES,
   failureCause,
   failureLabel,
   failureState,
@@ -29,7 +30,9 @@ test("a host-marked pre-publication failure preserves its viewer", () => {
 });
 
 test("only initialization capability failures publish unsupported state", () => {
-  assert.equal(failureState({ code: "webgpu_unavailable" }), "unsupported");
+  for (const code of UNSUPPORTED_INITIALIZATION_CODES) {
+    assert.equal(failureState({ code }), "unsupported");
+  }
   assert.equal(failureState({ code: "worker_failed" }), "failed");
 });
 

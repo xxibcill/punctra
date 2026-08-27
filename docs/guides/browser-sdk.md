@@ -1,6 +1,6 @@
 # Browser SDK installation and deployment
 
-Punctra `0.18.0-alpha.1` packages the framework-neutral browser viewer as
+Punctra `0.19.0-alpha.1` packages the framework-neutral browser viewer as
 `@punctra/viewer` and the one qualified lifecycle adapter as `@punctra/react`.
 The repository verifies locally packed npm tarballs; it does not claim that
 either package has been published to a registry.
@@ -17,7 +17,7 @@ The artifacts are written under `target/npm/`. A clean application can install
 the exact viewer artifact directly:
 
 ```bash
-npm install /absolute/path/to/target/npm/punctra-viewer-0.18.0-alpha.1.tgz
+npm install /absolute/path/to/target/npm/punctra-viewer-0.19.0-alpha.1.tgz
 ```
 
 The checked-in `examples/browser-typescript` and `examples/browser-react`
@@ -51,6 +51,12 @@ viewer.resize(nextViewport);
 viewer.dispose();
 ```
 
+`loadSource()` returns immutable `timings` for first sampled Coverage, settled
+View, and main-thread batch high-water. The older
+`mainThreadMillisecondsHighWater` field remains a deprecated alias for the
+last value during this pre-1 release. These timings end at main-thread frame
+submission, not physical GPU completion.
+
 Creation is asynchronous. Do not publish the handle before the promise
 resolves. Always call `dispose()` during host teardown. `pause()` preserves the
 viewer and Source load; `resume()` does not start an animation loop, so request
@@ -68,8 +74,8 @@ Install both packed artifacts plus a qualified React version:
 
 ```bash
 npm install \
-  /absolute/path/to/target/npm/punctra-viewer-0.18.0-alpha.1.tgz \
-  /absolute/path/to/target/npm/punctra-react-0.18.0-alpha.1.tgz \
+  /absolute/path/to/target/npm/punctra-viewer-0.19.0-alpha.1.tgz \
+  /absolute/path/to/target/npm/punctra-react-0.19.0-alpha.1.tgz \
   react react-dom
 ```
 
@@ -103,9 +109,17 @@ format:
 
 ```ts
 export default defineConfig({
+  optimizeDeps: {
+    exclude: ["@punctra/viewer"],
+  },
   worker: { format: "es" },
 });
 ```
+
+The viewer is already valid ESM. Excluding it from development dependency
+pre-bundling lets Vite transform the package-local Worker URL suffix directly,
+including on a cold optimizer start. Production builds still bundle and hash
+the complete Worker module graph.
 
 The clean trials verify the emitted SDK and bundled-Worker module graph so a
 build fails when a relative production dependency is absent.
@@ -119,7 +133,7 @@ const viewer = await createViewer({
   assets: {
     wasmUrl: new URL("/assets/punctra/browser_demo_bg.wasm", location.origin),
     workerUrl: new URL("/assets/punctra/stream-worker.js", location.origin),
-    cacheKey: "0.18.0-alpha.1-build-7",
+    cacheKey: "0.19.0-alpha.1-build-7",
   },
 });
 ```
@@ -138,7 +152,7 @@ requires the exact Range and validator behavior in the
 
 ## Content Security Policy and isolation
 
-The v0.18 path uses a module Worker and WebAssembly, but no inline/evaluated
+The v0.19 path uses a module Worker and WebAssembly, but no inline/evaluated
 JavaScript, `blob:` Worker, `SharedArrayBuffer`, or service worker. It does not
 require COOP/COEP cross-origin isolation. A restrictive same-origin starting
 policy is:
@@ -167,7 +181,9 @@ node scripts/generate-browser-sdk-reference.mjs --check
 
 The [generated API reference](../api/browser-sdk.md) is derived from the exact
 packed declarations. The [v0.18 repository verification
-record](../releases/v0.18.0.md) pins the two checked-in Vite trials and exact
-local browser acceptance environment. Other bundlers, frameworks, browsers,
-devices, hosting stacks, and CSP deployments require their own evidence and are
-not implied by ESM compatibility.
+record](../releases/v0.18.0.md) pins the two checked-in Vite trials. The v0.19
+[browser matrix](../releases/v0.19-browser-matrix.json) and [qualification
+guide](browser-qualification.md) pin the only exact browser/device lane that
+has passed the new resource, latency, and recovery gates. Other bundlers,
+frameworks, browsers, devices, hosting stacks, and CSP deployments require
+their own evidence and are not implied by ESM compatibility.

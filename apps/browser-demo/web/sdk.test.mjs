@@ -5,6 +5,7 @@ import test from "node:test";
 import {
   DISPLAY_MODES,
   ViewerError,
+  createViewer,
   resolveViewerAssets,
 } from "./sdk.js";
 
@@ -16,7 +17,7 @@ test("SDK exports the public viewer surface and package-relative assets", async 
   const assets = resolveViewerAssets();
 
   assert.equal(packageManifest.name, "@punctra/viewer");
-  assert.equal(packageManifest.version, "0.18.0-alpha.1");
+  assert.equal(packageManifest.version, "0.19.0-alpha.1");
   assert.deepEqual(DISPLAY_MODES, ["neutral", "elevation", "rgb", "intensity", "classification"]);
   assert.equal(typeof assets.wasmUrl, "string");
   assert.equal(typeof assets.workerUrl, "string");
@@ -39,6 +40,30 @@ test("SDK exports the public viewer surface and package-relative assets", async 
     /const DEFAULT_WORKER_SOURCE_URL = new URL\("\.\/stream-worker\.js", import\.meta\.url\);/,
   );
   assert.match(source, /import\("\.\/stream-worker\.js\?worker&url"\)/);
+});
+
+test("SDK does not inspect or forward internal viewer options", async () => {
+  const wasm = await readFile(new URL("pkg/browser_demo_bg.wasm", import.meta.url));
+  const wasmUrl = `data:application/wasm;base64,${wasm.toString("base64")}`;
+  let internalOptionRead = false;
+  const options = {
+    assets: { wasmUrl, workerUrl: "https://fixtures.test/stream-worker.js" },
+    canvas: {},
+    viewport: { cssWidth: 1, cssHeight: 1, devicePixelRatio: 1 },
+  };
+  Object.defineProperty(options, "monotonicNow", {
+    enumerable: true,
+    get() {
+      internalOptionRead = true;
+      return () => 0;
+    },
+  });
+
+  await assert.rejects(
+    createViewer(options),
+    (error) => error instanceof ViewerError && error.code === "missing_window",
+  );
+  assert.equal(internalOptionRead, false);
 });
 
 test("explicit SDK assets preserve deployment URLs and bounded cache busting", () => {

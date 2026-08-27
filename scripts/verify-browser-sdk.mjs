@@ -43,6 +43,7 @@ verifyPackedFiles(viewerArtifact, [
   "package/worker-operation.js",
   "package/worker-protocol.js",
 ]);
+verifyQualificationConsumer();
 verifyPackedFiles(reactArtifact, [
   "package/hook.js",
   "package/index.d.ts",
@@ -56,6 +57,20 @@ await verifyTrial("browser-typescript", [viewerArtifact], { requireCodeSplit: tr
 await verifyTrial("browser-react", [viewerArtifact, reactArtifact], { runPackageTests: true });
 
 console.log("browser SDK packed-artifact trials passed");
+
+function verifyQualificationConsumer() {
+  const qualificationRoot = path.join(repositoryRoot, "apps/browser-demo/web");
+  const viewerPackage = path.join(qualificationRoot, "node_modules/@punctra/viewer");
+  const packageManifest = JSON.parse(readFileSync(path.join(viewerPackage, "package.json"), "utf8"));
+  assert.equal(packageManifest.name, "@punctra/viewer");
+  assert.equal(packageManifest.version, "0.19.0-alpha.1");
+  const index = readFileSync(path.join(qualificationRoot, "index.html"), "utf8");
+  assert.match(index, /"@punctra\/viewer":\s*"\.\/node_modules\/\@punctra\/viewer\/sdk\.js"/);
+  assert.match(index, /"@punctra\/viewer\/input":\s*"\.\/node_modules\/\@punctra\/viewer\/viewer-input\.js"/);
+  assert.match(index, /"@punctra\/viewer\/exact-query":\s*"\.\/node_modules\/\@punctra\/viewer\/exact-query\.js"/);
+  const worker = readFileSync(path.join(qualificationRoot, "qualification-worker.js"), "utf8");
+  assert.match(worker, /node_modules\/\@punctra\/viewer\/stream-worker\.js/);
+}
 
 function onlyArtifact(prefix) {
   const matches = readdirSync(artifactDirectory)
@@ -185,7 +200,7 @@ async function verifyDevelopmentServer(directory) {
   const viteEntry = path.join(directory, "node_modules/vite/bin/vite.js");
   const child = spawn(
     process.execPath,
-    [viteEntry, "--host", "127.0.0.1", "--port", String(port), "--strictPort"],
+    [viteEntry, "--force", "--host", "127.0.0.1", "--port", String(port), "--strictPort"],
     { cwd: directory, stdio: ["ignore", "pipe", "pipe"] },
   );
   const output = collectChildOutput(child);

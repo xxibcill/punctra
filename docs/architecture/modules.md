@@ -12,7 +12,8 @@ and repository-verified; v0.15 bounded local WebAssembly/WebGPU browser-
 foundation slice Complete and repository-verified; v0.16 private HTTP Range,
 cache, and worker streaming slice Complete and repository-verified; v0.17
 framework-neutral viewer API and exact-Point bridge plus v0.18 packed SDK and
-thin React lifecycle adapter Complete and repository-verified
+thin React lifecycle adapter plus v0.19 exact local browser/device qualification
+Complete and repository-verified
 
 This is the ownership map for implemented crates. Each crate has one public
 job. Several private files may cooperate behind one deep interface; private
@@ -38,7 +39,7 @@ limits, and recovery modes are frozen in the
 | `render-protocol` | Define generation-safe renderer-neutral point display state. | Camera and display values | Validated updates and frame values |
 | `point-view` | Plan one frozen View over a host-owned hierarchy without I/O. | Camera, viewport, hierarchy/residency, budget | Demand, requests, retention, retirements |
 | `render-wgpu` | Maintain and draw one wgpu representation of render-protocol state. | Render updates, frame, host target | Recorded commands, report, provisional picks |
-| `browser-demo` / `@punctra/viewer` | Package and verify one bounded framework-neutral browser viewer composition without owning application policy. | Caller-owned canvas/lifecycle/navigation/cache policy, generated scene, or trusted immutable-LAS deployment | Disposable viewer handle, WebGPU frame, bounded state, provisional pick/highlight, exact fixture record, sampled remote Coverage, structured errors |
+| `browser-demo` / `@punctra/viewer` | Package and qualify one bounded framework-neutral browser viewer composition without owning application policy. | Caller-owned canvas/lifecycle/navigation/cache/recovery policy, generated scene, or trusted immutable-LAS deployment | Disposable viewer handle, WebGPU frame, bounded state, Source-load timings, provisional pick/highlight, exact fixture record, sampled remote Coverage, structured errors, private qualification evidence |
 | `@punctra/react` | Translate React mount, resize, active, unmount, and replay lifecycle into the framework-neutral viewer. | Caller-owned canvas, viewport, active flag, viewer creation options | React binding state over the same disposable viewer handle |
 | `renderer-demo` | Exercise indexed LAS/LAZ View-to-render composition, exact review/correction, and local viewing measurement. | CLI, permitted corpus manifest, generated inputs, or an existing Workspace | Interactive demo, exact review outcome, GPU-free process smoke, or canonical Viewing Report |
 | `terrain-demo` | Own one recoverable headless LAS/LAZ-to-terrain Workflow Run and its private post-Run qualification. | Caller-owned paths, identities, baseline, correction/QA intent, limits, and returned LandXML declaration | Eight-frame journal, Revision, Terrain/QA evidence, LandXML/report, and separate Round-Trip Evidence |
@@ -49,7 +50,9 @@ adapter, and remote-storage policy are not implemented modules. The v0.16 Range
 transport, cache, Worker, deployment manifest, and raw `wasm-bindgen` boundary
 remain private to `browser-demo`; v0.17 exposes only their coherent viewer
 composition and fixture-specific exact bridge, and v0.18 packages that
-composition without exporting those internals. Navigation/display policy
+composition without exporting those internals. The private v0.19 qualification
+runner evaluates one exact local lane without becoming a package export,
+telemetry seam, or automatic recovery controller. Navigation/display policy
 remains private to application hosts, and correction remains existing
 `point-workspace` commit policy.
 
@@ -547,6 +550,11 @@ The implemented reusable seams are:
 11. the versioned `@punctra/viewer` ESM/Wasm composition over the private
     browser adapter; and
 12. the thin `@punctra/react` lifecycle translation over that same viewer.
+
+The v0.19 timing record is additive data returned by the existing Source-load
+operation. Qualification profiles, environment capture, frame sampling, fault
+workers, matrix evaluation, and issue evidence remain private repository-host
+policy rather than new SDK modules.
 
 Index pages, decoder buffers, Point Set frames, overlay tables, Operation
 records, Revision blocks, triangulation arenas, XML encoder state, scheduling
