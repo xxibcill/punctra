@@ -232,11 +232,24 @@ function discardViewer() {
   viewer = undefined;
 }
 
+async function loadQualificationHost() {
+  try {
+    const response = await fetch("./qualification-host.json", {
+      cache: "no-store",
+      credentials: "same-origin",
+    });
+    if (!response.ok) return null;
+    return await response.json();
+  } catch {
+    return null;
+  }
+}
+
 async function runSmokePath() {
   smokeRunning = true;
   smokePassed = false;
   smokeRecord = { schema: ACCEPTANCE_SCHEMA };
-  const environment = captureEnvironment();
+  const environment = captureEnvironment({ host: await loadQualificationHost() });
   const heap = { before: captureJsHeap(performance) };
   setHarnessState("checking", "Running browser/device qualification checks…");
   const initial = await initializeViewer();

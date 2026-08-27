@@ -113,6 +113,7 @@ test("runtime qualification requires the declared browser and device lane", () =
     screen: { ...lane.screen },
     visibilityState: "visible",
     secureContext: true,
+    host: structuredClone(lane.host),
   };
   const state = {
     viewport: { ...lane.display },
@@ -131,6 +132,19 @@ test("runtime qualification requires the declared browser and device lane", () =
   assert.equal(mismatch.passed, false);
   assert.deepEqual(mismatch.failures, [
     "browser user agent differed from the declared qualification lane",
+  ]);
+  const hostMismatch = evaluateQualificationLane(
+    {
+      ...environment,
+      host: {
+        ...environment.host,
+        operatingSystem: { ...environment.host.operatingSystem, build: "other" },
+      },
+    },
+    state,
+  );
+  assert.deepEqual(hostMismatch.failures, [
+    "host operatingSystem differed from the declared qualification lane",
   ]);
 });
 

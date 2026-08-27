@@ -29,6 +29,27 @@ export const QUALIFICATION_WORKLOAD = deepFreeze({
 
 export const QUALIFICATION_RUNTIME_LANE = deepFreeze({
   id: "codex-iab-chromium-151-macos-26-apple-m5-pro",
+  host: {
+    schema: "punctra-qualification-host-v1",
+    operatingSystem: {
+      name: "macOS",
+      version: "26.5.2",
+      build: "25F84",
+      architecture: "arm64",
+    },
+    device: {
+      class: "Apple silicon laptop",
+      gpu: "Apple M5 Pro",
+      gpuCores: 16,
+      gpuClass: "integrated",
+      metalSupport: "Metal 4",
+    },
+    displayPath: "built-in Retina display",
+    package: {
+      name: "@punctra/viewer",
+      version: "0.19.0-alpha.1",
+    },
+  },
   browser: {
     userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36",
     platform: "MacIntel",
@@ -116,7 +137,7 @@ export function captureEnvironment(options = {}) {
   const navigatorObject = options.navigator ?? globalThis.navigator ?? {};
   const screenObject = options.screen ?? globalThis.screen ?? {};
   const documentObject = options.document ?? globalThis.document ?? {};
-  return deepFreeze({
+  const environment = {
     userAgent: boundedText(navigatorObject.userAgent),
     platform: boundedText(navigatorObject.platform),
     language: boundedText(navigatorObject.language),
@@ -124,7 +145,9 @@ export function captureEnvironment(options = {}) {
     screen: screenFacts(screenObject),
     visibilityState: boundedText(documentObject.visibilityState),
     secureContext: options.secureContext ?? globalThis.isSecureContext === true,
-  });
+  };
+  if (Object.hasOwn(options, "host")) environment.host = hostFacts(options.host);
+  return deepFreeze(environment);
 }
 
 export function evaluateQualificationLane(environment, state) {
@@ -136,6 +159,9 @@ export function evaluateQualificationLane(environment, state) {
   checkSame(failures, environment?.logicalProcessors, lane.browser.logicalProcessors, "logical processor count");
   checkSame(failures, environment?.visibilityState, "visible", "document visibility");
   checkSame(failures, environment?.secureContext, true, "secure context");
+  for (const [key, expected] of Object.entries(lane.host)) {
+    checkSame(failures, environment?.host?.[key], expected, `host ${key}`);
+  }
   for (const [key, expected] of Object.entries(lane.screen)) {
     checkSame(failures, environment?.screen?.[key], expected, `screen ${key}`);
   }
@@ -409,6 +435,35 @@ function screenFacts(value) {
     height: optionalNonnegativeInteger(value.height),
     colorDepth: optionalNonnegativeInteger(value.colorDepth),
     pixelDepth: optionalNonnegativeInteger(value.pixelDepth),
+  };
+}
+
+function hostFacts(value) {
+  if (!value || typeof value !== "object") return null;
+  const operatingSystem = value.operatingSystem ?? value.operating_system;
+  const device = value.device ?? {};
+  const packageIdentity = value.package ?? {};
+  const displayPath = value.displayPath ?? value.display_path;
+  return {
+    schema: boundedText(value.schema),
+    operatingSystem: {
+      name: boundedText(operatingSystem?.name),
+      version: boundedText(operatingSystem?.version),
+      build: boundedText(operatingSystem?.build),
+      architecture: boundedText(operatingSystem?.architecture),
+    },
+    device: {
+      class: boundedText(device.class),
+      gpu: boundedText(device.gpu),
+      gpuCores: optionalPositiveInteger(device.gpuCores ?? device.gpu_cores),
+      gpuClass: boundedText(device.gpuClass ?? device.gpu_class),
+      metalSupport: boundedText(device.metalSupport ?? device.metal_support),
+    },
+    displayPath: boundedText(displayPath),
+    package: {
+      name: boundedText(packageIdentity.name),
+      version: boundedText(packageIdentity.version),
+    },
   };
 }
 
