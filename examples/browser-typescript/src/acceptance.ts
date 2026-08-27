@@ -1,5 +1,6 @@
-import type { DisplayMode, ViewerState } from "@punctra/viewer";
+import type { ViewerState } from "@punctra/viewer";
 
+import { QUICKSTART_DISPLAY_MODES } from "./display-modes.ts";
 import type { PackedRuntimeProof } from "./packed-runtime.ts";
 import { QuickstartController } from "./quickstart.ts";
 
@@ -24,14 +25,6 @@ export interface QuickstartAcceptanceRecord {
   readonly packedRuntime: PackedRuntimeProof;
 }
 
-const ACCEPTED_DISPLAY_MODES: readonly DisplayMode[] = Object.freeze([
-  "neutral",
-  "elevation",
-  "rgb",
-  "intensity",
-  "classification",
-]);
-
 export async function runQuickstartAcceptance(
   controller: QuickstartController,
   manifestUrl: string,
@@ -46,7 +39,7 @@ export async function runQuickstartAcceptance(
 
   const retry = await exerciseRecoverableRetry(controller, manifestUrl);
   const recreation = await exerciseRecreationRequiredRecovery(controller, manifestUrl);
-  for (const mode of ACCEPTED_DISPLAY_MODES) controller.setDisplayMode(mode);
+  for (const mode of QUICKSTART_DISPLAY_MODES) controller.setDisplayMode(mode);
   const projections = exerciseProjections(controller);
   exerciseNavigation(controller);
   await controller.settlePresentation();
@@ -70,7 +63,7 @@ export async function runQuickstartAcceptance(
     sourceIdentity: requiredSourceIdentity(settled),
     generation: settled.generation,
     displayedPoints: settled.source.publishedPoints,
-    displayModes: Object.freeze([...ACCEPTED_DISPLAY_MODES]),
+    displayModes: Object.freeze([...QUICKSTART_DISPLAY_MODES]),
     projections: Object.freeze(projections),
     cancellationRetainedViewer: true as const,
     ...retry,

@@ -3,18 +3,12 @@ import { createLasExactQueryBridge } from "@punctra/viewer/exact-query";
 import { createInputNormalizer } from "@punctra/viewer/input";
 
 import { runQuickstartAcceptance } from "./acceptance.ts";
+import { QUICKSTART_DISPLAY_MODES } from "./display-modes.ts";
 import { parsePackedRuntimeProof, type PackedRuntimeProof } from "./packed-runtime.ts";
 import { QuickstartController, type QuickstartSnapshot } from "./quickstart.ts";
 import "./styles.css";
 
 const manifestUrl = new URL("/fixtures/v1/deployment.json", location.href).href;
-const displayModes: readonly DisplayMode[] = [
-  "neutral",
-  "elevation",
-  "rgb",
-  "intensity",
-  "classification",
-];
 const canvas = requiredElement<HTMLCanvasElement>("viewer");
 const controller = new QuickstartController({
   canvas,
@@ -144,7 +138,7 @@ function viewport() {
 
 function populateDisplayModes(): void {
   const select = requiredElement<HTMLSelectElement>("display-mode");
-  select.replaceChildren(...displayModes.map((mode) => new Option(mode, mode)));
+  select.replaceChildren(...QUICKSTART_DISPLAY_MODES.map((mode) => new Option(mode, mode)));
   select.value = "rgb";
 }
 

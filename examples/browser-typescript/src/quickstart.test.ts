@@ -14,6 +14,7 @@ import type {
 
 import { runQuickstartAcceptance } from "./acceptance.ts";
 import type { PackedRuntimeProof } from "./packed-runtime.ts";
+import { QUICKSTART_DISPLAY_MODES } from "./display-modes.ts";
 import { QuickstartController } from "./quickstart.ts";
 
 const packedRuntime: PackedRuntimeProof = {
@@ -55,6 +56,7 @@ test("packed quickstart exercises the supported workflow and disposes", async ()
   assert.equal(record.schema, "punctra-browser-quickstart-acceptance-v1");
   assert.equal(record.packageVersion, "0.20.0-alpha.1");
   assert.equal(record.displayedPoints, 4_096);
+  assert.deepEqual(record.displayModes, QUICKSTART_DISPLAY_MODES);
   assert.deepEqual(record.projections, ["orthographic", "perspective"]);
   assert.equal(record.provisionalAuthority, "provisional_gpu_hint");
   assert.equal(record.exactAuthority, "exact_source_record");
