@@ -5,6 +5,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
   QUALIFICATION_LIMITS,
+  QUALIFICATION_RUNTIME_LANE,
   evaluateQualification,
   recreationRequiredRecoveryEvidence,
 } from "../apps/browser-demo/web/qualification.js";
@@ -283,6 +284,55 @@ function verifyQualifiedLane(entry) {
       `qualified ${section} facts must match the exact recorded lane`,
     );
   }
+  assert.deepEqual(
+    {
+      id: entry.id,
+      browser: {
+        userAgent: entry.browser.user_agent,
+        platform: entry.operating_system.user_agent_platform,
+        language: entry.browser.language,
+        logicalProcessors: entry.browser.logical_processors,
+      },
+      screen: {
+        width: entry.display.screen_css_pixels[0],
+        height: entry.display.screen_css_pixels[1],
+        colorDepth: entry.display.color_depth,
+        pixelDepth: entry.display.pixel_depth,
+      },
+      display: {
+        physicalWidth: entry.display.physical_viewport[0],
+        physicalHeight: entry.display.physical_viewport[1],
+        cssWidth: entry.display.css_viewport[0],
+        cssHeight: entry.display.css_viewport[1],
+        devicePixelRatio: entry.display.device_pixel_ratio,
+        surfaceBytes: entry.display.canvas_bytes,
+      },
+      capabilities: {
+        secure_context: true,
+        webgpu: true,
+        browser_user_agent: entry.browser.user_agent,
+        browser_platform: entry.operating_system.user_agent_platform,
+        adapter_name: entry.webgpu.adapter_name,
+        backend: entry.webgpu.backend,
+        device_type: entry.webgpu.device_type,
+        surface_format: entry.webgpu.surface_format,
+        composite_alpha_mode: entry.webgpu.composite_alpha_mode,
+        present_mode: entry.webgpu.present_mode,
+        surface_format_support: {
+          render_attachment: entry.webgpu.render_attachment,
+          blendable: entry.webgpu.blendable,
+        },
+        required_feature_count: entry.webgpu.required_feature_count,
+        adapter_max_buffer_size: entry.webgpu.max_buffer_size,
+        adapter_max_texture_dimension_2d: entry.webgpu.max_texture_dimension_2d,
+        adapter_max_bind_groups: entry.webgpu.max_bind_groups,
+        adapter_max_vertex_buffers: entry.webgpu.max_vertex_buffers,
+        adapter_max_color_attachments: entry.webgpu.max_color_attachments,
+      },
+    },
+    QUALIFICATION_RUNTIME_LANE,
+    "checked-in exact lane must match the runtime qualification gate",
+  );
 }
 
 function loadRecord(load) {

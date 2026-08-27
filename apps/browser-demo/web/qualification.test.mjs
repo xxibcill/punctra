@@ -7,7 +7,9 @@ import {
   captureEnvironment,
   captureJsHeap,
   evaluateQualification,
+  evaluateQualificationLane,
   measureForegroundFrames,
+  QUALIFICATION_RUNTIME_LANE,
   recreationRequiredRecoveryEvidence,
   summarizeSamples,
 } from "./qualification.js";
@@ -80,6 +82,7 @@ test("environment capture bounds caller-visible browser facts", () => {
   const environment = captureEnvironment({
     navigator: {
       userAgent: "Fixture Browser/19",
+      platform: "MacIntel",
       language: "en-US",
       hardwareConcurrency: 12,
     },
@@ -90,6 +93,7 @@ test("environment capture bounds caller-visible browser facts", () => {
 
   assert.deepEqual(environment, {
     userAgent: "Fixture Browser/19",
+    platform: "MacIntel",
     language: "en-US",
     logicalProcessors: 12,
     screen: { width: 1_920, height: 1_080, colorDepth: 30, pixelDepth: 30 },
@@ -97,6 +101,37 @@ test("environment capture bounds caller-visible browser facts", () => {
     secureContext: true,
   });
   assert.equal(Object.isFrozen(environment), true);
+});
+
+test("runtime qualification requires the declared browser and device lane", () => {
+  const lane = QUALIFICATION_RUNTIME_LANE;
+  const environment = {
+    userAgent: lane.browser.userAgent,
+    platform: lane.browser.platform,
+    language: lane.browser.language,
+    logicalProcessors: lane.browser.logicalProcessors,
+    screen: { ...lane.screen },
+    visibilityState: "visible",
+    secureContext: true,
+  };
+  const state = {
+    viewport: { ...lane.display },
+    capabilities: structuredClone(lane.capabilities),
+  };
+
+  assert.deepEqual(evaluateQualificationLane(environment, state), {
+    lane: lane.id,
+    passed: true,
+    failures: [],
+  });
+  const mismatch = evaluateQualificationLane(
+    { ...environment, userAgent: "Other Browser/1" },
+    state,
+  );
+  assert.equal(mismatch.passed, false);
+  assert.deepEqual(mismatch.failures, [
+    "browser user agent differed from the declared qualification lane",
+  ]);
 });
 
 test("the exact qualification workload has one immutable source", () => {

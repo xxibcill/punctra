@@ -9,6 +9,7 @@ const [
   {
     captureEnvironment,
     captureJsHeap,
+    evaluateQualificationLane,
     evaluateQualification,
     measureForegroundFrames,
     QUALIFICATION_LIMITS,
@@ -239,6 +240,11 @@ async function runSmokePath() {
   const heap = { before: captureJsHeap(performance) };
   setHarnessState("checking", "Running browser/device qualification checks…");
   const initial = await initializeViewer();
+  const runtimeLane = evaluateQualificationLane(environment, initial);
+  assertFact(
+    runtimeLane.passed,
+    `exact qualification lane: ${runtimeLane.failures.join("; ")}`,
+  );
   let state = viewer.render();
   assertFact(state.packageVersion === "0.19.0-alpha.1", "v0.19 package version");
   assertFact(state.capabilities.secure_context === true, "secure context");
@@ -435,6 +441,7 @@ async function runSmokePath() {
     schema: ACCEPTANCE_SCHEMA,
     package_version: finalState.packageVersion,
     environment,
+    runtime_lane: runtimeLane,
     heap: completeHeapRecord(heap),
     generated: generatedEvidence,
     destruction: destructionEvidence,

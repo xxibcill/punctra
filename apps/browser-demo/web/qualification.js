@@ -27,6 +27,49 @@ export const QUALIFICATION_WORKLOAD = deepFreeze({
   warmBinaryRequestCount: 0,
 });
 
+export const QUALIFICATION_RUNTIME_LANE = deepFreeze({
+  id: "codex-iab-chromium-151-macos-26-apple-m5-pro",
+  browser: {
+    userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36",
+    platform: "MacIntel",
+    language: "en-US",
+    logicalProcessors: 15,
+  },
+  screen: {
+    width: 1_512,
+    height: 982,
+    colorDepth: 30,
+    pixelDepth: 30,
+  },
+  display: {
+    physicalWidth: 1_749,
+    physicalHeight: 1_093,
+    cssWidth: 874.28125,
+    cssHeight: 546.421875,
+    devicePixelRatio: 2,
+    surfaceBytes: 7_646_628,
+  },
+  capabilities: {
+    secure_context: true,
+    webgpu: true,
+    browser_user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36",
+    browser_platform: "MacIntel",
+    adapter_name: "browser WebGPU adapter",
+    backend: "BrowserWebGpu",
+    device_type: "Other",
+    surface_format: "Bgra8Unorm",
+    composite_alpha_mode: "Opaque",
+    present_mode: "fifo",
+    surface_format_support: { render_attachment: true, blendable: true },
+    required_feature_count: 0,
+    adapter_max_buffer_size: 4_294_967_292,
+    adapter_max_texture_dimension_2d: 16_384,
+    adapter_max_bind_groups: 4,
+    adapter_max_vertex_buffers: 8,
+    adapter_max_color_attachments: 8,
+  },
+});
+
 export function summarizeSamples(samples) {
   if (!Array.isArray(samples)) throw new TypeError("samples must be an array");
   if (samples.some((sample) => !Number.isFinite(sample) || sample < 0)) {
@@ -75,12 +118,34 @@ export function captureEnvironment(options = {}) {
   const documentObject = options.document ?? globalThis.document ?? {};
   return deepFreeze({
     userAgent: boundedText(navigatorObject.userAgent),
+    platform: boundedText(navigatorObject.platform),
     language: boundedText(navigatorObject.language),
     logicalProcessors: optionalPositiveInteger(navigatorObject.hardwareConcurrency),
     screen: screenFacts(screenObject),
     visibilityState: boundedText(documentObject.visibilityState),
     secureContext: options.secureContext ?? globalThis.isSecureContext === true,
   });
+}
+
+export function evaluateQualificationLane(environment, state) {
+  const failures = [];
+  const lane = QUALIFICATION_RUNTIME_LANE;
+  checkSame(failures, environment?.userAgent, lane.browser.userAgent, "browser user agent");
+  checkSame(failures, environment?.platform, lane.browser.platform, "browser platform");
+  checkSame(failures, environment?.language, lane.browser.language, "browser language");
+  checkSame(failures, environment?.logicalProcessors, lane.browser.logicalProcessors, "logical processor count");
+  checkSame(failures, environment?.visibilityState, "visible", "document visibility");
+  checkSame(failures, environment?.secureContext, true, "secure context");
+  for (const [key, expected] of Object.entries(lane.screen)) {
+    checkSame(failures, environment?.screen?.[key], expected, `screen ${key}`);
+  }
+  for (const [key, expected] of Object.entries(lane.display)) {
+    checkSame(failures, state?.viewport?.[key], expected, `viewport ${key}`);
+  }
+  for (const [key, expected] of Object.entries(lane.capabilities)) {
+    checkSame(failures, state?.capabilities?.[key], expected, `capability ${key}`);
+  }
+  return deepFreeze({ lane: lane.id, passed: failures.length === 0, failures });
 }
 
 export function evaluateQualification(record) {
@@ -315,6 +380,13 @@ function checkAbove(failures, actual, limit, label, unit) {
 function checkDifferent(failures, actual, expected, label) {
   if (actual === expected) return;
   failures.push(`${label} differed from ${expected}`);
+}
+
+function checkSame(failures, actual, expected, label) {
+  if (Object.is(actual, expected)) return;
+  if (actual && expected && typeof actual === "object" && typeof expected === "object"
+    && JSON.stringify(actual) === JSON.stringify(expected)) return;
+  failures.push(`${label} differed from the declared qualification lane`);
 }
 
 function checkTrue(failures, actual, label) {
