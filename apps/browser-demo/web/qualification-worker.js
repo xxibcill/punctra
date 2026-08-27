@@ -1,4 +1,4 @@
-import "./stream-worker.js";
+import "./node_modules/@punctra/viewer/stream-worker.js";
 
 self.addEventListener("message", (event) => {
   const manifestUrl = event.data?.manifest_url;

@@ -16,9 +16,9 @@ const [
     recreationRequiredRecoveryEvidence,
   },
 ] = await Promise.all([
-  import(`./sdk.js?v=${BUILD_CACHE_TOKEN}`),
-  import(`./viewer-input.js?v=${BUILD_CACHE_TOKEN}`),
-  import(`./exact-query.js?v=${BUILD_CACHE_TOKEN}`),
+  import("@punctra/viewer"),
+  import("@punctra/viewer/input"),
+  import("@punctra/viewer/exact-query"),
   import(`./qualification.js?v=${BUILD_CACHE_TOKEN}`),
 ]);
 const canvas = document.querySelector("#punctra-canvas");
