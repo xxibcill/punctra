@@ -26,6 +26,10 @@ const qualificationViewerPackage = path.join(
   "apps/browser-demo/web/node_modules/@punctra/viewer",
 );
 const qualificationViewerSource = path.join(repositoryRoot, "apps/browser-demo/web");
+const qualificationViewerManifest = JSON.parse(await readFile(
+  path.join(qualificationViewerSource, "package.json"),
+  "utf8",
+));
 const qualificationFixtureRoot = path.join(
   repositoryRoot,
   "apps/browser-demo/web/fixtures/v1",
@@ -33,7 +37,7 @@ const qualificationFixtureRoot = path.join(
 const qualificationManifestPath = path.join(qualificationFixtureRoot, "deployment.json");
 const qualificationViewerArtifact = path.join(
   repositoryRoot,
-  "target/npm/punctra-viewer-0.20.0-alpha.1.tgz",
+  `target/npm/punctra-viewer-${qualificationViewerManifest.version}.tgz`,
 );
 const verifierSource = await readFile(new URL("./verify-browser-qualification.mjs", import.meta.url), "utf8");
 const QUALIFICATION_VERIFIER_SHA256 = createHash("sha256").update(verifierSource).digest("hex");
@@ -63,7 +67,7 @@ const JAVASCRIPT_HEAP_PHASE_FIELDS = Object.freeze([
 ]);
 export function verifyBrowserQualificationMatrix(matrix, implementationCommit) {
   assert.equal(matrix.schema, "punctra-browser-qualification-matrix-v1");
-  assert.equal(matrix.release, "0.20.0-alpha.1");
+  assert.equal(matrix.release, qualificationViewerManifest.version);
   assert.match(matrix.verifier_sha256, /^[0-9a-f]{64}$/);
   assert.equal(
     matrix.verifier_sha256,

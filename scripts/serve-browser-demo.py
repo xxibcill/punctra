@@ -18,6 +18,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 
 
 WEB_ROOT = (Path(__file__).resolve().parent.parent / "apps/browser-demo/web").resolve()
+VIEWER_PACKAGE = json.loads((WEB_ROOT / "package.json").read_text(encoding="utf-8"))
 EXPOSED_HEADERS = "Accept-Ranges, Content-Encoding, Content-Length, Content-Range, ETag"
 FILE_CHUNK_BYTES = 64 * 1024
 FAULTS = {"disconnect", "redirect", "retry", "truncated", "corrupt", "validator_drift"}
@@ -69,8 +70,8 @@ def qualification_host_facts() -> dict[str, object]:
         },
         "display_path": display_path(primary_display),
         "package": {
-            "name": "@punctra/viewer",
-            "version": "0.20.0-alpha.1",
+            "name": VIEWER_PACKAGE["name"],
+            "version": VIEWER_PACKAGE["version"],
         },
     }
 

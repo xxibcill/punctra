@@ -15,9 +15,9 @@ const baselineUrl = new URL("../docs/releases/v0.20-browser-baseline.json", impo
 
 export async function verifyBrowserIntegrationBaseline(baseline) {
   assert.equal(baseline.schema, "punctra-browser-integration-baseline-v1");
-  assert.equal(baseline.release, "0.20.0-alpha.1");
 
-  await verifyPackages(baseline.packages);
+  const packageVersion = await verifyPackages(baseline.packages);
+  assert.equal(baseline.release, packageVersion);
   await verifyDigestRecord(baseline.generated_api_reference);
   await verifyDeployment(baseline.immutable_deployment);
   await verifyGeneratedScene(baseline.generated_scene);
@@ -93,6 +93,7 @@ async function verifyPackages(packages) {
     assert.equal(viewerManifest.files.includes(privateModule), true, `${privateModule} must remain an internal shipped module`);
     assert.equal(Object.hasOwn(viewerManifest.exports, `./${privateModule.replace(/\.js$/, "")}`), false);
   }
+  return viewerManifest.version;
 }
 
 async function verifyDeployment(deploymentBaseline) {

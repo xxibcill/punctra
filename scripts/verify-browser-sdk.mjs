@@ -15,6 +15,10 @@ import { captureChildExit } from "./child-process.mjs";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const artifactDirectory = path.join(repositoryRoot, "target/npm");
+const sourceViewerManifest = JSON.parse(readFileSync(
+  path.join(repositoryRoot, "apps/browser-demo/web/package.json"),
+  "utf8",
+));
 let developmentServerSequence = 0;
 const viewerArtifact = onlyArtifact("punctra-viewer-");
 const reactArtifact = onlyArtifact("punctra-react-");
@@ -68,8 +72,8 @@ function verifyQualificationConsumer() {
   const qualificationRoot = path.join(repositoryRoot, "apps/browser-demo/web");
   const viewerPackage = path.join(qualificationRoot, "node_modules/@punctra/viewer");
   const packageManifest = JSON.parse(readFileSync(path.join(viewerPackage, "package.json"), "utf8"));
-  assert.equal(packageManifest.name, "@punctra/viewer");
-  assert.equal(packageManifest.version, "0.20.0-alpha.1");
+  assert.equal(packageManifest.name, sourceViewerManifest.name);
+  assert.equal(packageManifest.version, sourceViewerManifest.version);
   const index = readFileSync(path.join(qualificationRoot, "index.html"), "utf8");
   assert.match(index, /"@punctra\/viewer":\s*"\.\/node_modules\/\@punctra\/viewer\/sdk\.js"/);
   assert.match(index, /"@punctra\/viewer\/input":\s*"\.\/node_modules\/\@punctra\/viewer\/viewer-input\.js"/);
