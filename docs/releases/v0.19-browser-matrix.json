@@ -2,7 +2,7 @@
   "schema": "punctra-browser-qualification-matrix-v1",
   "release": "0.19.0-alpha.1",
   "implementation_commit": "e840c2210a0ad2f1300f1f0bdc4675bedaf5bb78",
-  "verifier_sha256": "728c236134800d06d817745461bfd776bf1c0ffe6c0fb5de1d0b1f8be499abe1",
+  "verifier_sha256": "1e042979dfd77575f343aac2ac56c991c1927b5cfa63bf7f3b13b023f4d33345",
   "observed_on": "2026-08-26",
   "qualified_entries": [
     {
@@ -95,6 +95,16 @@
           "secure_context": true
         },
         "cold": {
+          "workload": {
+            "deployment_id": "repository-las-v1",
+            "source_identity": "c459ff39717b7d6994aaebf344641f5a3add7faf65e249b85933ebd066d1c26e",
+            "source_points": 70000,
+            "coverage": "sampled",
+            "displayed_points": 4096,
+            "displayed_batches": 4,
+            "ordinal_count": 4096,
+            "transferred_bytes": 131072
+          },
           "first_coverage_milliseconds": 26.299999952316284,
           "settled_view_milliseconds": 28.59999990463257,
           "main_thread_batch_milliseconds_high_water": 1,
@@ -106,6 +116,16 @@
           "worker_staging_bytes_high_water": 204800
         },
         "warm": {
+          "workload": {
+            "deployment_id": "repository-las-v1",
+            "source_identity": "c459ff39717b7d6994aaebf344641f5a3add7faf65e249b85933ebd066d1c26e",
+            "source_points": 70000,
+            "coverage": "sampled",
+            "displayed_points": 4096,
+            "displayed_batches": 4,
+            "ordinal_count": 4096,
+            "transferred_bytes": 131072
+          },
           "first_coverage_milliseconds": 12.699999809265137,
           "settled_view_milliseconds": 15,
           "main_thread_batch_milliseconds_high_water": 0.5,

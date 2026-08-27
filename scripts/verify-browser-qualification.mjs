@@ -8,6 +8,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
   QUALIFICATION_LIMITS,
+  QUALIFICATION_WORKLOAD,
   evaluateQualification,
   recreationRequiredRecoveryEvidence,
 } from "../apps/browser-demo/web/qualification.js";
@@ -81,6 +82,7 @@ export function verifyBrowserQualificationMatrix(matrix, implementationCommit) {
   assert.deepEqual(observations.limits, QUALIFICATION_LIMITS);
   verifyEnvironmentObservations(entry);
   verifyWorkloadObservations(entry);
+  verifyLoadObservations(entry);
   verifyRenderObservations(entry);
   assert.deepEqual(
     observations.recovery.recreation_required,
@@ -498,9 +500,11 @@ function verifyEnvironmentObservations(entry) {
 
 function loadRecord(load) {
   return {
+    workload: load.workload,
     timings: {
       firstCoverageMilliseconds: load.first_coverage_milliseconds,
       settledViewMilliseconds: load.settled_view_milliseconds,
+      mainThreadBatchMillisecondsHighWater: load.main_thread_batch_milliseconds_high_water,
     },
     metrics: {
       requestCount: load.binary_requests,
@@ -511,9 +515,47 @@ function loadRecord(load) {
   };
 }
 
+function verifyLoadObservations(entry) {
+  const expectedWorkload = {
+    deployment_id: entry.workload.deployment_id,
+    source_identity: entry.workload.source_identity,
+    source_points: entry.workload.source_points,
+    coverage: entry.workload.coverage,
+    displayed_points: entry.workload.displayed_points,
+    displayed_batches: entry.workload.displayed_batches,
+    ordinal_count: entry.workload.displayed_points,
+    transferred_bytes: QUALIFICATION_WORKLOAD.transferRecordBytes,
+  };
+  for (const label of ["cold", "warm"]) {
+    const load = entry.observations[label];
+    assert.deepEqual(
+      load.workload,
+      expectedWorkload,
+      `${label} load workload facts must match the qualified deployment`,
+    );
+    for (const field of [
+      "first_coverage_milliseconds",
+      "settled_view_milliseconds",
+      "main_thread_batch_milliseconds_high_water",
+    ]) {
+      assert.equal(
+        Object.hasOwn(load, field),
+        true,
+        `${label} load must preserve ${field}`,
+      );
+    }
+  }
+}
+
 function verifyTransportObservations(observations) {
   const { cold, warm } = observations;
+  const deployment = JSON.parse(readFileSync(qualificationManifestPath, "utf8"));
+  const expectedColdRequestedBytes = deployment.source.probe.length
+    + deployment.index.header_and_root.length
+    + deployment.index.root.sample_range.length;
   assert.equal(cold.binary_requests, 3);
+  assert.equal(cold.requested_bytes, expectedColdRequestedBytes);
+  assert.equal(cold.received_bytes, expectedColdRequestedBytes);
   assert.equal(cold.requested_bytes, cold.received_bytes);
   assert.equal(cold.verified_cache_bytes, 0);
   assert.equal(warm.binary_requests, 0);
@@ -521,7 +563,7 @@ function verifyTransportObservations(observations) {
   assert.equal(warm.received_bytes, 0);
   assert.equal(warm.concurrent_response_bytes_high_water, 0);
   assert.equal(warm.verified_cache_hits, cold.binary_requests);
-  assert.equal(warm.verified_cache_bytes, cold.received_bytes);
+  assert.equal(warm.verified_cache_bytes, expectedColdRequestedBytes);
 }
 
 function verifyFrameObservations(frames) {

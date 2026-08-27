@@ -89,6 +89,43 @@ test("observed workload identity is bound to the qualified deployment", () => {
   }
 });
 
+test("cold and warm loads preserve exact workload and transport evidence", () => {
+  const missingWorkload = structuredClone(matrix);
+  delete missingWorkload.qualified_entries[0].observations.cold.workload;
+  assert.throws(
+    () => verifyBrowserQualificationMatrix(missingWorkload, implementationCommit),
+    /cold load workload facts must match the qualified deployment/,
+  );
+
+  const missingTiming = structuredClone(matrix);
+  delete missingTiming.qualified_entries[0].observations.warm.main_thread_batch_milliseconds_high_water;
+  assert.throws(
+    () => verifyBrowserQualificationMatrix(missingTiming, implementationCommit),
+    /warm load must preserve main_thread_batch_milliseconds_high_water/,
+  );
+
+  const mismatchedTransfer = structuredClone(matrix);
+  mismatchedTransfer.qualified_entries[0].observations.cold.workload.transferred_bytes = 0;
+  assert.throws(
+    () => verifyBrowserQualificationMatrix(mismatchedTransfer, implementationCommit),
+    /cold load workload facts must match the qualified deployment/,
+  );
+
+  const mismatchedNetwork = structuredClone(matrix);
+  mismatchedNetwork.qualified_entries[0].observations.cold.requested_bytes = 0;
+  assert.throws(
+    () => verifyBrowserQualificationMatrix(mismatchedNetwork, implementationCommit),
+    /Expected values to be strictly equal/,
+  );
+
+  const mismatchedWarmIdentity = structuredClone(matrix);
+  mismatchedWarmIdentity.qualified_entries[0].observations.warm.workload.source_identity = "other";
+  assert.throws(
+    () => verifyBrowserQualificationMatrix(mismatchedWarmIdentity, implementationCommit),
+    /warm load workload facts must match the qualified deployment/,
+  );
+});
+
 test("workload evidence is bound to the checked-in deployment bytes", () => {
   const tampered = structuredClone(matrix.qualified_entries[0]);
   tampered.workload.source_points = 1;
