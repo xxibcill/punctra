@@ -156,23 +156,23 @@ export function captureEnvironment(options = {}) {
 export function evaluateQualificationLane(environment, state) {
   const failures = [];
   const lane = QUALIFICATION_RUNTIME_LANE;
-  checkSame(failures, environment?.userAgent, lane.browser.userAgent, "browser user agent");
-  checkSame(failures, environment?.platform, lane.browser.platform, "browser platform");
-  checkSame(failures, environment?.language, lane.browser.language, "browser language");
-  checkSame(failures, environment?.logicalProcessors, lane.browser.logicalProcessors, "logical processor count");
-  checkSame(failures, environment?.visibilityState, "visible", "document visibility");
-  checkSame(failures, environment?.secureContext, true, "secure context");
+  checkLaneFact(failures, environment?.userAgent, lane.browser.userAgent, "browser user agent");
+  checkLaneFact(failures, environment?.platform, lane.browser.platform, "browser platform");
+  checkLaneFact(failures, environment?.language, lane.browser.language, "browser language");
+  checkLaneFact(failures, environment?.logicalProcessors, lane.browser.logicalProcessors, "logical processor count");
+  checkLaneFact(failures, environment?.visibilityState, "visible", "document visibility");
+  checkLaneFact(failures, environment?.secureContext, true, "secure context");
   for (const [key, expected] of Object.entries(lane.host)) {
-    checkSame(failures, environment?.host?.[key], expected, `host ${key}`);
+    checkLaneFact(failures, environment?.host?.[key], expected, `host ${key}`);
   }
   for (const [key, expected] of Object.entries(lane.screen)) {
-    checkSame(failures, environment?.screen?.[key], expected, `screen ${key}`);
+    checkLaneFact(failures, environment?.screen?.[key], expected, `screen ${key}`);
   }
   for (const [key, expected] of Object.entries(lane.display)) {
-    checkSame(failures, state?.viewport?.[key], expected, `viewport ${key}`);
+    checkLaneFact(failures, state?.viewport?.[key], expected, `viewport ${key}`);
   }
   for (const [key, expected] of Object.entries(lane.capabilities)) {
-    checkSame(failures, state?.capabilities?.[key], expected, `capability ${key}`);
+    checkLaneFact(failures, state?.capabilities?.[key], expected, `capability ${key}`);
   }
   return deepFreeze({ lane: lane.id, passed: failures.length === 0, failures });
 }
@@ -181,14 +181,14 @@ export function evaluateQualification(record) {
   const failures = [];
   evaluateLoad("cold", record.cold, failures);
   evaluateLoad("warm", record.warm, failures);
-  checkAbove(
+  checkAtMost(
     failures,
     record.frames.callbackIntervalMilliseconds.p95,
     QUALIFICATION_LIMITS.frameIntervalP95Milliseconds,
     "foreground frame interval p95",
     "ms",
   );
-  checkAbove(
+  checkAtMost(
     failures,
     record.frames.submissionMilliseconds.p95,
     QUALIFICATION_LIMITS.frameSubmissionP95Milliseconds,
@@ -199,7 +199,7 @@ export function evaluateQualification(record) {
   evaluateViewport(record.viewport, failures);
   evaluateState(record.state, failures);
   evaluateRecovery(record.recovery, failures);
-  checkDifferent(
+  checkEqual(
     failures,
     record.warm.metrics.requestCount,
     QUALIFICATION_WORKLOAD.warmBinaryRequestCount,
@@ -251,35 +251,35 @@ function frameMeasurement(frameCount, callbackIntervals, submissionTimes) {
 }
 
 function evaluateLoad(label, load, failures) {
-  checkAbove(
+  checkAtMost(
     failures,
     load.timings.firstCoverageMilliseconds,
     QUALIFICATION_LIMITS.firstCoverageMilliseconds,
     `${label} first sampled Coverage`,
     "ms",
   );
-  checkAbove(
+  checkAtMost(
     failures,
     load.timings.settledViewMilliseconds,
     QUALIFICATION_LIMITS.settledViewMilliseconds,
     `${label} settled View`,
     "ms",
   );
-  checkAbove(
+  checkAtMost(
     failures,
     load.metrics.concurrentResponseBytesHighWater,
     QUALIFICATION_LIMITS.concurrentResponseBytes,
     `${label} concurrent response bytes`,
     "bytes",
   );
-  checkAbove(
+  checkAtMost(
     failures,
     load.metrics.decodedStagingBytesHighWater,
     QUALIFICATION_LIMITS.workerStagingBytes,
     `${label} worker staging bytes`,
     "bytes",
   );
-  checkAbove(
+  checkAtMost(
     failures,
     load.metrics.cacheBytes,
     QUALIFICATION_LIMITS.persistentCacheBytes,
@@ -289,7 +289,7 @@ function evaluateLoad(label, load, failures) {
 }
 
 function evaluateCancellation(cancellation, failures) {
-  checkAbove(
+  checkAtMost(
     failures,
     cancellation.acknowledgementMilliseconds,
     QUALIFICATION_LIMITS.cancellationAcknowledgementMilliseconds,
@@ -347,64 +347,64 @@ function evaluateRecovery(recovery, failures) {
 }
 
 function evaluateViewport(viewport, failures) {
-  checkAbove(
+  checkAtMost(
     failures,
     Math.max(viewport.physicalWidth, viewport.physicalHeight),
     QUALIFICATION_LIMITS.physicalDimensionPixels,
     "physical canvas dimension",
     "px",
   );
-  checkAbove(
+  checkAtMost(
     failures,
     viewport.physicalWidth * viewport.physicalHeight,
     QUALIFICATION_LIMITS.physicalAreaPixels,
     "physical canvas area",
     "px",
   );
-  checkAbove(failures, viewport.surfaceBytes, QUALIFICATION_LIMITS.canvasBytes, "canvas bytes", "bytes");
+  checkAtMost(failures, viewport.surfaceBytes, QUALIFICATION_LIMITS.canvasBytes, "canvas bytes", "bytes");
 }
 
 function evaluateState(state, failures) {
-  checkDifferent(
+  checkEqual(
     failures,
     state.source.coverage,
     QUALIFICATION_WORKLOAD.coverage,
     "Source Coverage",
   );
-  checkDifferent(
+  checkEqual(
     failures,
     state.source.publishedPoints,
     QUALIFICATION_WORKLOAD.sampledPoints,
     "published Points",
   );
-  checkDifferent(
+  checkEqual(
     failures,
     state.source.publishedBatches,
     QUALIFICATION_WORKLOAD.publishedBatches,
     "published batches",
   );
-  checkDifferent(
+  checkEqual(
     failures,
     state.source.retainedRecordBytes,
     QUALIFICATION_WORKLOAD.transferRecordBytes,
     "retained record bytes",
   );
-  checkDifferent(
+  checkEqual(
     failures,
     state.render.residentBytes,
     QUALIFICATION_WORKLOAD.rendererResidentBytes,
     "renderer resident bytes",
   );
-  checkDifferent(
+  checkEqual(
     failures,
     state.render.drawnPoints,
     QUALIFICATION_WORKLOAD.sampledPoints,
     "drawn Points",
   );
-  checkAbove(failures, state.source.publishedPoints, QUALIFICATION_LIMITS.residentPoints, "resident Points", "Points");
-  checkAbove(failures, state.source.retainedRecordBytes, QUALIFICATION_LIMITS.retainedRecordBytes, "retained record bytes", "bytes");
-  checkAbove(failures, state.render.residentBytes, QUALIFICATION_LIMITS.residentBytes, "renderer resident bytes", "bytes");
-  checkAbove(
+  checkAtMost(failures, state.source.publishedPoints, QUALIFICATION_LIMITS.residentPoints, "resident Points", "Points");
+  checkAtMost(failures, state.source.retainedRecordBytes, QUALIFICATION_LIMITS.retainedRecordBytes, "retained record bytes", "bytes");
+  checkAtMost(failures, state.render.residentBytes, QUALIFICATION_LIMITS.residentBytes, "renderer resident bytes", "bytes");
+  checkAtMost(
     failures,
     state.render.transientTextureBytes,
     QUALIFICATION_LIMITS.transientTextureBytes,
@@ -413,17 +413,17 @@ function evaluateState(state, failures) {
   );
 }
 
-function checkAbove(failures, actual, limit, label, unit) {
+function checkAtMost(failures, actual, limit, label, unit) {
   if (Number.isFinite(actual) && actual <= limit) return;
   failures.push(`${label} exceeded ${limit} ${unit}`);
 }
 
-function checkDifferent(failures, actual, expected, label) {
+function checkEqual(failures, actual, expected, label) {
   if (actual === expected) return;
   failures.push(`${label} differed from ${expected}`);
 }
 
-function checkSame(failures, actual, expected, label) {
+function checkLaneFact(failures, actual, expected, label) {
   if (Object.is(actual, expected)) return;
   if (actual && expected && typeof actual === "object" && typeof expected === "object"
     && JSON.stringify(actual) === JSON.stringify(expected)) return;
