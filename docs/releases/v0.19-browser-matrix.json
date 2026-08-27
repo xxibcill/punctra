@@ -1,8 +1,8 @@
 {
   "schema": "punctra-browser-qualification-matrix-v1",
   "release": "0.19.0-alpha.1",
-  "implementation_commit": "e3119429aef998eab27ce4760025942a02bd3cd1",
-  "verifier_sha256": "7c4c41b64b12a8a8f5c09d5048f400987d37ad4b909017bace539eb233ba59e8",
+  "implementation_commit": "d891dec55b7a7076adcac78e9c40a9c49e476a83",
+  "verifier_sha256": "207545cb015732df00e037cf126a956607949662ed1ef1f5ead03911575a4d14",
   "observed_on": "2026-08-26",
   "qualified_entries": [
     {
@@ -117,9 +117,11 @@
           "hidden_frame_skipped_and_resumed": true,
           "prepublication_worker_crash_preserved_viewer": true,
           "prepublication_worker_recoverable": true,
+          "prepublication_worker_generation_preserved": true,
           "prepublication_worker_retry_succeeded": true,
           "prepublication_offline_failure_preserved_viewer": true,
           "prepublication_offline_recoverable": true,
+          "prepublication_offline_generation_preserved": true,
           "cancellation_acknowledgement_milliseconds": 7.599999904632568,
           "warm_cache_recreation_zero_binary_requests": true,
           "stale_generation_rejected": true,

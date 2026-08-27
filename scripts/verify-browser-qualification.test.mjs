@@ -56,6 +56,20 @@ test("the JSON matrix and Markdown record pin the same implementation", () => {
   );
 });
 
+test("generation preservation is independently required for pre-publication recovery", () => {
+  for (const field of [
+    "prepublication_worker_generation_preserved",
+    "prepublication_offline_generation_preserved",
+  ]) {
+    const tampered = structuredClone(matrix);
+    tampered.qualified_entries[0].observations.recovery[field] = false;
+    assert.throws(
+      () => verifyBrowserQualificationMatrix(tampered, implementationCommit),
+      new RegExp(`${field} must pass`),
+    );
+  }
+});
+
 test("the JSON matrix and Markdown record pin the same qualification verifier", () => {
   assert.equal(matrix.verifier_sha256, releaseVerifierSha256(releaseRecord));
   assert.match(matrix.verifier_sha256, /^[0-9a-f]{64}$/);
