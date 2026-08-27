@@ -9,8 +9,9 @@ import {
   releaseVerifierSha256,
   verifyBrowserQualificationMatrix,
   verifyImplementationCommit,
-  verifyWorkloadObservations,
   verifyQualificationRuntimeTree,
+  verifyUnqualifiedEntries,
+  verifyWorkloadObservations,
 } from "./verify-browser-qualification.mjs";
 
 const changelogUrl = new URL("../CHANGELOG.md", import.meta.url);
@@ -28,6 +29,23 @@ const implementationCommit = releaseImplementationCommit(releaseRecord);
 
 test("the checked-in browser qualification matrix derives a passing result", () => {
   assert.equal(verifyBrowserQualificationMatrix(matrix, implementationCommit), true);
+});
+
+test("the exact unqualified platform classes are frozen", () => {
+  assert.doesNotThrow(() => verifyUnqualifiedEntries(matrix.unqualified_entries));
+  for (const mutate of [
+    (entries) => { entries.shift(); },
+    (entries) => { entries[0].browser = "Other Chrome"; },
+    (entries) => { entries[1].reason = "Not recorded"; },
+    (entries) => { entries.push({ browser: "Other", reason: "Not run" }); },
+  ]) {
+    const entries = structuredClone(matrix.unqualified_entries);
+    mutate(entries);
+    assert.throws(
+      () => verifyUnqualifiedEntries(entries),
+      /unqualified platform classes must match the frozen v0.20 matrix/,
+    );
+  }
 });
 
 test("the qualification runtime package matches its packed and source files", () => {

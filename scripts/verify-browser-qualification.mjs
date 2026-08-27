@@ -42,6 +42,20 @@ const qualificationViewerArtifact = path.join(
 const verifierSource = await readFile(new URL("./verify-browser-qualification.mjs", import.meta.url), "utf8");
 const QUALIFICATION_VERIFIER_SHA256 = createHash("sha256").update(verifierSource).digest("hex");
 const EXPECTED_OBSERVATION_DATE = "2026-08-27";
+const EXPECTED_UNQUALIFIED_ENTRIES = Object.freeze([
+  Object.freeze({
+    browser: "Google Chrome 150.0.7871.115",
+    reason: "Installed locally but no connected browser-control surface was available for an attended packed-consumer WebGPU run.",
+  }),
+  Object.freeze({
+    browser: "Safari 26.5.2",
+    reason: "Installed locally but no supported browser-control surface was available for an attended packed-consumer WebGPU run.",
+  }),
+  Object.freeze({
+    browser: "All other browser, OS, adapter, display, and mobile combinations",
+    reason: "Not executed in the v0.20 repository qualification lane.",
+  }),
+]);
 const QUALIFIED_IMPLEMENTATION_PATHS = [
   "Cargo.toml",
   "Cargo.lock",
@@ -79,7 +93,7 @@ export function verifyBrowserQualificationMatrix(matrix, implementationCommit) {
   verifyImplementationCommit(matrix.implementation_commit);
   assert.equal(matrix.observed_on, EXPECTED_OBSERVATION_DATE);
   assert.equal(matrix.qualified_entries.length, 1);
-  assert.ok(matrix.unqualified_entries.length >= 1);
+  verifyUnqualifiedEntries(matrix.unqualified_entries);
 
   const entry = matrix.qualified_entries[0];
   const observations = entry.observations;
@@ -138,6 +152,14 @@ export function verifyBrowserQualificationMatrix(matrix, implementationCommit) {
   assert.equal(matrix.external_evidence.support_qualified, false);
   assert.equal(matrix.external_evidence.release_candidate, false);
   return true;
+}
+
+export function verifyUnqualifiedEntries(entries) {
+  assert.deepEqual(
+    entries,
+    EXPECTED_UNQUALIFIED_ENTRIES,
+    "unqualified platform classes must match the frozen v0.20 matrix",
+  );
 }
 
 export function releaseImplementationCommit(releaseRecord) {
