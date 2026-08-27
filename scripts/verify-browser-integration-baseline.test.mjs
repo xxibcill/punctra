@@ -47,6 +47,15 @@ test("fixture digest drift fails even when semantic facts are unchanged", async 
   );
 });
 
+test("qualification observations are byte-bound even when values remain in limits", async () => {
+  const tampered = structuredClone(baseline);
+  tampered.qualification.matrix_digest.sha256 = "00".repeat(32);
+  await assert.rejects(
+    () => verifyBrowserIntegrationBaseline(tampered),
+    /v0\.20-browser-matrix\.json SHA-256 drifted/,
+  );
+});
+
 test("the integration baseline binds the qualification observations", async () => {
   const tampered = structuredClone(qualificationMatrix);
   tampered.qualified_entries[0].observations.render.drawn_points = 1;

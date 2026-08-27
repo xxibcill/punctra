@@ -29,6 +29,8 @@ export async function verifyBrowserIntegrationBaseline(baseline, qualificationMa
   assert.equal(baseline.qualification.matrix_schema, "punctra-browser-qualification-matrix-v1");
   assert.equal(baseline.qualification.qualified_lane, QUALIFICATION_LANE.id);
   assert.deepEqual(baseline.qualification.limits, QUALIFICATION_LIMITS);
+  await verifyDigestRecord(baseline.qualification.matrix_digest);
+  assert.equal(baseline.qualification.matrix_digest.path, baseline.qualification.matrix_path);
   const matrix = qualificationMatrix ?? await readJson(baseline.qualification.matrix_path);
   assert.equal(matrix.schema, baseline.qualification.matrix_schema);
   assert.equal(matrix.release, baseline.release);

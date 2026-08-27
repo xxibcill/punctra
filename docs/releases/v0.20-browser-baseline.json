@@ -161,6 +161,11 @@
   },
   "qualification": {
     "matrix_path": "docs/releases/v0.20-browser-matrix.json",
+    "matrix_digest": {
+      "path": "docs/releases/v0.20-browser-matrix.json",
+      "byte_length": 10061,
+      "sha256": "921eb4c22d376f3016e28dd3e6187ed96d40e697792e65d7b2e23495578fa9e3"
+    },
     "matrix_schema": "punctra-browser-qualification-matrix-v1",
     "implementation_commit": "f7d080c87f4217bcea9164c8d848c87e7bd32afb",
     "qualified_lane": "codex-iab-chromium-151-macos-26-apple-m5-pro",
