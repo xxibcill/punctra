@@ -22,7 +22,9 @@ const reactArtifact = onlyArtifact("punctra-react-");
 verifyPackedFiles(viewerArtifact, [
   "package/camera-policy.js",
   "package/exact-query.d.ts",
+  "package/exact-query-error.js",
   "package/exact-query.js",
+  "package/las-exact-decoder.js",
   "package/module-loader.js",
   "package/package.json",
   "package/pkg/browser_demo.d.ts",
@@ -53,7 +55,11 @@ verifyPackedFiles(reactArtifact, [
 ]);
 
 run("node", ["--test", "packages/react/lifecycle.test.mjs"], repositoryRoot);
-await verifyTrial("browser-typescript", [viewerArtifact], { requireCodeSplit: true });
+await verifyTrial("browser-typescript", [viewerArtifact], {
+  publishDistribution: true,
+  requireCodeSplit: true,
+  runPackageTests: true,
+});
 await verifyTrial("browser-react", [viewerArtifact, reactArtifact], { runPackageTests: true });
 
 console.log("browser SDK packed-artifact trials passed");
@@ -63,7 +69,7 @@ function verifyQualificationConsumer() {
   const viewerPackage = path.join(qualificationRoot, "node_modules/@punctra/viewer");
   const packageManifest = JSON.parse(readFileSync(path.join(viewerPackage, "package.json"), "utf8"));
   assert.equal(packageManifest.name, "@punctra/viewer");
-  assert.equal(packageManifest.version, "0.19.0-alpha.1");
+  assert.equal(packageManifest.version, "0.20.0-alpha.1");
   const index = readFileSync(path.join(qualificationRoot, "index.html"), "utf8");
   assert.match(index, /"@punctra\/viewer":\s*"\.\/node_modules\/\@punctra\/viewer\/sdk\.js"/);
   assert.match(index, /"@punctra\/viewer\/input":\s*"\.\/node_modules\/\@punctra\/viewer\/viewer-input\.js"/);
@@ -87,11 +93,20 @@ function verifyPackedFiles(artifact, expectedFiles) {
   assert.deepEqual(actualFiles, [...expectedFiles].sort(), `${artifact} contents differ`);
 }
 
-async function verifyTrial(name, artifacts, { requireCodeSplit = false, runPackageTests = false }) {
+async function verifyTrial(
+  name,
+  artifacts,
+  {
+    publishDistribution = false,
+    requireCodeSplit = false,
+    runPackageTests = false,
+  },
+) {
   const temporaryRoot = mkdtempSync(path.join(tmpdir(), `punctra-${name}-`));
   const trial = path.join(temporaryRoot, name);
   try {
     cpSync(path.join(repositoryRoot, "examples", name), trial, { recursive: true });
+    if (publishDistribution) prepareQuickstartFixture(trial);
     run("npm", ["ci", "--ignore-scripts", "--no-audit", "--no-fund"], trial);
     run("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund", "--no-save", ...artifacts], trial);
     if (runPackageTests) run("npm", ["test"], trial);
@@ -100,10 +115,23 @@ async function verifyTrial(name, artifacts, { requireCodeSplit = false, runPacka
     verifyProductionAssets(path.join(trial, "dist"), requireCodeSplit);
     run("npm", ["run", "build"], trial);
     verifyProductionAssets(path.join(trial, "dist"), requireCodeSplit);
+    if (publishDistribution) publishQuickstart(path.join(trial, "dist"));
     await verifyDevelopmentServer(trial);
   } finally {
     rmSync(temporaryRoot, { recursive: true, force: true });
   }
+}
+
+function prepareQuickstartFixture(trial) {
+  const fixtureSource = path.join(repositoryRoot, "apps/browser-demo/web/fixtures/v1");
+  const fixtureTarget = path.join(trial, "public/fixtures/v1");
+  cpSync(fixtureSource, fixtureTarget, { recursive: true });
+}
+
+function publishQuickstart(distribution) {
+  const target = path.join(repositoryRoot, "target/browser-quickstart");
+  rmSync(target, { recursive: true, force: true });
+  cpSync(distribution, target, { recursive: true });
 }
 
 function verifyProductionAssets(distribution, requireCodeSplit) {

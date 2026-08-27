@@ -1,7 +1,7 @@
 # Punctra Roadmap
 
 Status: living guidance
-Last reviewed: 2026-08-26
+Last reviewed: 2026-08-27
 
 This roadmap communicates direction, not a delivery promise. It has no fixed
 dates. Candidate releases may be split, merged, reordered, renamed, or skipped
@@ -9,7 +9,7 @@ as technical and customer evidence changes. Milestone outcomes and dependency
 order matter more than version numbers.
 
 Among incomplete releases, only an **Active** release has accepted
-implementation scope. Punctra v0.1 through v0.19 are Complete repository
+implementation scope. Punctra v0.1 through v0.20 are Complete repository
 technical slices. Their recorded external field, adoption, partner, and
 support gates remain historically accurate, but they do not determine the next
 product direction. The project now pivots from a desktop terrain-delivery
@@ -19,8 +19,10 @@ v0.15 is the completed repository-verified browser-foundation release, v0.16
 is the completed repository-verified HTTP Range streaming release, v0.17 is the
 completed repository-verified browser-viewer-API release, v0.18 is the
 completed repository-verified SDK-embedding release, and v0.19 is the completed
-exact local browser/device qualification release. Versions v0.20 through v0.30
-remain uncommitted Candidate themes. v0.15–v0.20 establish
+exact local browser/device qualification release. v0.20 is the completed
+repository-verified packed integration baseline; its independent-adopter gate
+remains outstanding. Versions v0.21 through v0.30 remain uncommitted Candidate
+themes. v0.15–v0.20 establish
 browser execution, streaming, the viewer API, embedding, and platform qualification. v0.21–v0.29
 then improve and qualify visual quality. v0.30 is the earliest planned browser-
 engine release candidate; no earlier future release may be represented as a
@@ -93,9 +95,10 @@ release can be Complete while every product gate remains outstanding.
 
 ## Current pivot checkpoint
 
-Status: **v0.15 through v0.19 complete and repository-verified for their
+Status: **v0.15 through v0.20 complete and repository-verified for their
 bounded local browser-foundation, immutable-LAS streaming, and browser viewer
-API/SDK embedding and exact local qualification slices**
+API/SDK embedding, exact local qualification, and packed-consumer integration
+baseline slices; independent adoption remains outstanding**
 
 The completed v0.1–v0.14 contracts are inputs to the pivot, not permission to
 carry the old product sequence forward. In particular:
@@ -160,6 +163,16 @@ nonclaims are recorded in the [v0.19 browser
 matrix](docs/releases/v0.19-browser-matrix.json), with the complete local
 command, benchmark, GPU, and provenance evidence in the [v0.19 repository
 verification record](docs/releases/v0.19.0.md).
+
+The completed bounded [v0.20 Stable Browser-Engine Integration Baseline
+design](docs/design/browser-integration-baseline-v0.20.md) consolidates the
+supported package entry points, clean packed TypeScript consumer, strict
+quickstart acceptance workflow, exact fixture and generated-scene identities,
+presentation semantics, recovery dispositions, qualification limits, and
+known limitations. The repository trial is not independent-adopter evidence.
+The [machine-readable baseline](docs/releases/v0.20-browser-baseline.json),
+[v0.20 browser matrix](docs/releases/v0.20-browser-matrix.json), and
+[verification record](docs/releases/v0.20.0.md) preserve that distinction.
 
 ## Pre-v0.13 renderer quality corrective checkpoint
 
@@ -1361,17 +1374,20 @@ verification record](docs/releases/v0.19.0.md).
 
 ### v0.20 — Stable browser-engine integration baseline
 
-Status: **Candidate — not a release candidate**
+Status: **Complete and repository-verified for the bounded packed integration
+baseline and one exact local lane; independent adoption remains outstanding —
+not a release candidate**
 
-Candidate outcome: consolidate v0.15–v0.19 into one documented and independently
-embeddable functional baseline before visual-quality work begins.
+Completed repository outcome: consolidate v0.15–v0.19 into one documented,
+independently installable packed functional baseline before visual-quality work
+begins. A maintainer-run repository consumer cannot prove independent adoption.
 
 Activation gate:
 
 - v0.19 is Browser-qualified for its declared matrix and at least one
   independent adopter has completed the v0.18 embedding path.
 
-Likely scope:
+Completed bounded scope:
 
 - close release-blocking correctness, lifecycle, recovery, packaging, and
   documentation gaps in the accepted browser surface;
@@ -1382,15 +1398,20 @@ Likely scope:
 - freeze the input scenes, browser matrix, and existing visual behavior that
   v0.21 will use as its measured starting point.
 
-Candidate exit evidence:
+Repository exit evidence:
 
-- an adopter can install, stream, render, navigate, pick, highlight, query,
-  recover, and dispose without maintainer-only patches;
+- the clean packed consumer installs, streams, renders, navigates, picks,
+  highlights, confirms an exact record, recovers, and disposes without
+  repository-relative imports;
 - the complete functional and resource suite reproduces from packed artifacts;
 - no known release-blocking correctness, security, data-mixing, lifecycle, or
   recovery defect remains in the declared baseline; and
 - v0.20 is described as an integration baseline, not a beta, release candidate,
   v1 promise, or claim of completed visual quality.
+
+The original independent-adopter activation/exit evidence is still absent and
+was not fabricated. It remains an external product gate rather than a reason to
+mislabel the bounded repository implementation as incomplete or supported.
 
 ### v0.21 — Visual-quality baseline and regression corpus
 
@@ -1680,7 +1701,7 @@ nor completion of v0.20 is a reason to publish v1.
 | Spatial contract and production terrain | v0.12–v0.13 | v0.12 bounded repository contract complete; v0.13 bounded persistent-terrain slice complete and repository-verified; external spatial, production-scale, out-of-core, adoption, partner, and support exits outstanding | Make reference semantics explicit, then persist one bounded-AOI Surface without confusing repository durability with field-scale qualification. |
 | Terrain acceptance tooling | v0.14 | Complete and repository-verified for the bounded slice; external historical exits outstanding | Preserve exact Terrain QA and correction as an available module without extending it in the current browser-engine path. |
 | Browser execution and streaming | v0.15–v0.16 | Complete and repository-verified for the bounded private slices; arbitrary delivery and external qualification outstanding | Establish WebAssembly/WebGPU execution, then bounded remote Source delivery, browser caching, and worker decoding. |
-| Browser viewer and embedding | v0.17–v0.20 | v0.17 bounded viewer API, v0.18 packed SDK/embedding, and v0.19 exact local qualification slices complete and repository-verified; v0.20 Candidate | Expose the viewer API, package the SDK, qualify the browser/device envelope, and consolidate a stable integration baseline without release-candidate status. |
+| Browser viewer and embedding | v0.17–v0.20 | Complete and repository-verified for bounded viewer, packed SDK, exact local qualification, and clean packed-consumer baseline; independent adoption outstanding | Expose the viewer API, package the SDK, qualify the browser/device envelope, and consolidate a stable integration baseline without release-candidate status. |
 | Measured visual quality | v0.21–v0.25 | Candidate | Establish visual evidence, then improve point footprints, LOD continuity, depth, and color. |
 | Visual interaction and qualification | v0.26–v0.29 | Candidate | Improve temporal, selection, and composition clarity, then freeze and qualify the visual surface without release-candidate status. |
 | Browser-engine release candidate | v0.30 | Candidate; earliest planned release candidate | Freeze, soak, and explicitly decide whether the supported browser engine should ship or narrow. |

@@ -5,6 +5,6 @@ self.addEventListener("message", (event) => {
   if (typeof manifestUrl !== "string") return;
   if (new URL(manifestUrl).searchParams.get("worker_fault") !== "crash") return;
   queueMicrotask(() => {
-    throw new Error("intentional v0.19 qualification worker crash");
+    throw new Error("intentional v0.20 qualification worker crash");
   });
 });

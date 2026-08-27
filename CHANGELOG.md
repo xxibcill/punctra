@@ -3,6 +3,36 @@
 All notable changes to Punctra are documented here. The project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased - 0.20.0-alpha.1
+
+- Completed and locally repository-verified the bounded v0.20 packed browser
+  integration baseline at implementation commit
+  `0000000000000000000000000000000000000000`; the final verification record
+  pins the exact local commands and observations.
+- Consolidated the supported `@punctra/viewer` surface to four package entry
+  points and removed the LAS header and Point-record decoders from the public
+  exact-query API while retaining them as package-private implementation.
+- Rebuilt `examples/browser-typescript` as a clean packed-consumer quickstart
+  with host-owned navigation, five display modes, both projections,
+  cancellation retention, provisional pick, presentation highlight, exact
+  immutable-record confirmation, pause/resume, and deterministic disposal.
+- Added strict quickstart type/build/runtime verification, including packed-
+  artifact-only installation, deployable Wasm/Worker graph checks, a copied
+  immutable fixture, deterministic controller/navigation tests, and the
+  attended `punctra-browser-quickstart-acceptance-v1` workflow.
+- Added the machine-readable [browser integration
+  baseline](docs/releases/v0.20-browser-baseline.json), exact updated [browser
+  matrix](docs/releases/v0.20-browser-matrix.json), five-minute
+  [quickstart](docs/guides/browser-quickstart.md), and consolidated [known
+  limitations](docs/guides/browser-known-limitations.md).
+- Corrected the qualification evaluator to distinguish the 70,000-Point Source
+  from the 4,096-Point sampled root published in public viewer state, and bound
+  the exact browser-screen facts observed by the v0.20 lane.
+- Preserved all external boundaries: no independent-adopter evidence, registry
+  or CDN publication, other browser/device qualification, stable API, visual-
+  quality completion, support qualification, beta, v1, or release-candidate
+  claim is introduced.
+
 ## Unreleased - 0.19.0-alpha.1
 
 - Completed and locally repository-verified the accepted v0.19 slice at

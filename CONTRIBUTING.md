@@ -124,6 +124,14 @@ playbook. It does not qualify installed Chrome, Safari, another operating
 system, adapter, or device; force physical device loss or memory pressure;
 establish independent adoption or API stability; expand visual policy; or
 claim beta, support-qualified, or release-candidate status.
+The completed bounded [v0.20 Stable Browser-Engine Integration Baseline
+scope](docs/design/browser-integration-baseline-v0.20.md) consolidates the
+supported package exports, clean packed TypeScript quickstart, strict attended
+consumer workflow, exact fixture/scene/presentation freeze, recovery boundary,
+capability matrix, and known limitations. The repository consumer is not an
+independent adopter; registry/CDN publication, other browsers/devices, API
+stability, visual-quality completion, support qualification, beta, v1, and
+release-candidate status remain outside this scope.
 Apart from the explicit v0.8 reader exception, the v0.17 browser-demo
 exact-query bridge is a narrowly scoped exception for the trusted immutable
 LAS fixture described by the accepted design. All other external format
@@ -202,16 +210,20 @@ test -f docs/guides/browser-streaming.md
 test -f docs/guides/browser-viewer.md
 test -f docs/guides/browser-sdk.md
 test -f docs/guides/browser-qualification.md
+test -f docs/guides/browser-quickstart.md
+test -f docs/guides/browser-known-limitations.md
 test -f docs/api/browser-sdk.md
-ruby -rjson -e 'JSON.parse(File.read(ARGV.fetch(0)))' \
-  docs/guides/field-corpus.example.json
+ruby -rjson -e 'ARGV.each { |path| JSON.parse(File.read(path)) }' \
+  docs/guides/field-corpus.example.json \
+  docs/releases/v0.20-browser-baseline.json \
+  docs/releases/v0.20-browser-matrix.json
 git diff --check
 ```
 
 After `scripts/build-browser-sdk.sh`, run
 `scripts/serve-browser-demo.py --port 8000` and open
 `http://127.0.0.1:8000/` in a secure-context WebGPU browser. A generic static
-server is insufficient for the v0.16–v0.19 acceptance fixture because exact Range,
+server is insufficient for the v0.16–v0.20 acceptance fixture because exact Range,
 strong-validator, identity-encoding, exposed CORS-header, and bounded fault
 behavior is part
 of the contract. The document must publish `PASS` after the inherited v0.15
@@ -223,8 +235,8 @@ public viewer only, all five inherited display modes, both projections,
 normalized-input wiring, provisional pick/highlight/clear, exact confirmation
 of the same immutable Source record, cancelled exact confirmation, and stale-
 generation rejection. The v0.18 continuation must import the packaged SDK
-entry, exercise pause/resume/dispose lifecycle spelling, and report package
-version `0.19.0-alpha.1`. The v0.19 continuation must additionally reject an
+entry, exercise pause/resume/dispose lifecycle spelling, and report the current
+package version. The v0.19 continuation must additionally reject an
 over-limit resize without changing the prior viewport, change and restore DPR,
 skip one hidden frame, resume, classify pre-publication Worker and disconnected-
 network failures as recoverable without generation change, sample 30 settled
@@ -234,11 +246,23 @@ delayed Fetch cancellation within 1,000 milliseconds. Record the exact browser,
 operating system, adapter, surface
 format, viewport, and reported transport/cache/worker/main-thread plus
 logical/surface/transient resource facts. The step qualifies only that exact
-local browser environment. See the [browser streaming
+local browser environment. The v0.20 continuation must additionally build the
+clean packed quickstart, import only supported package entries, complete the
+deterministic cancellation/load/display/projection/navigation/pick/highlight/
+exact/pause/resume/dispose workflow, and pass the machine-readable integration
+baseline verifier. Run:
+
+```bash
+node scripts/verify-browser-integration-baseline.mjs
+scripts/serve-browser-demo.py --root target/browser-quickstart --port 8000
+```
+
+See the [browser streaming
 guide](docs/guides/browser-streaming.md) and [browser viewer API
 guide](docs/guides/browser-viewer.md), [browser SDK
-guide](docs/guides/browser-sdk.md), and [browser qualification
-guide](docs/guides/browser-qualification.md).
+guide](docs/guides/browser-sdk.md), [browser quickstart
+guide](docs/guides/browser-quickstart.md), [known limitations](docs/guides/browser-known-limitations.md),
+and [browser qualification guide](docs/guides/browser-qualification.md).
 
 The default `point-index` benchmark generates one million Points. Use only the
 documented scale values when a larger local run is intended, for example:

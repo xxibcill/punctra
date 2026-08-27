@@ -14,8 +14,8 @@ import {
 } from "./verify-browser-qualification.mjs";
 
 const changelogUrl = new URL("../CHANGELOG.md", import.meta.url);
-const matrixUrl = new URL("../docs/releases/v0.19-browser-matrix.json", import.meta.url);
-const releaseRecordUrl = new URL("../docs/releases/v0.19.0.md", import.meta.url);
+const matrixUrl = new URL("../docs/releases/v0.20-browser-matrix.json", import.meta.url);
+const releaseRecordUrl = new URL("../docs/releases/v0.20.0.md", import.meta.url);
 const [changelog, matrixSource, releaseRecord] = await Promise.all([
   readFile(changelogUrl, "utf8"),
   readFile(matrixUrl, "utf8"),

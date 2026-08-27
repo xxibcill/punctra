@@ -14,7 +14,8 @@ Terrain QA and correction-loop slice Complete and repository-verified; v0.15
 bounded local WebAssembly/WebGPU browser-host workflow Complete and repository-
 verified; v0.16 bounded immutable-LAS Range/cache/Worker workflow Complete and
 repository-verified; v0.17 bounded viewer API/exact-Point, v0.18 packed SDK/React
-lifecycle, and v0.19 exact local qualification workflows Complete and repository-verified; arbitrary remote browser
+lifecycle, v0.19 exact local qualification, and v0.20 clean packed-consumer
+integration workflows Complete and repository-verified; arbitrary remote browser
 delivery and broader workflows remain outstanding**
 
 The host composes sibling modules explicitly. Lower crates never call back into
@@ -768,6 +769,37 @@ or any failure after partial Source publication. It retries in place only when
 the structured failure is recoverable and the active generation was never
 changed. The runner uploads nothing and cannot convert a passing unlisted
 browser into a supported matrix entry without a new recorded trial.
+
+## 11g. Complete the packed browser quickstart
+
+The v0.20 clean consumer exercises the supported integration boundary without
+repository-relative imports:
+
+~~~mermaid
+sequenceDiagram
+    participant APP as TypeScript host
+    participant SDK as @punctra/viewer
+    participant INPUT as @punctra/viewer/input
+    participant EXACT as @punctra/viewer/exact-query
+    participant SERVER as strict Range server
+
+    APP->>SDK: create viewer on caller-owned canvas
+    APP->>SDK: cancel delayed load; retain viewer/frame
+    APP->>SDK: load immutable manifest
+    SDK->>SERVER: bounded verified ranges
+    APP->>SDK: five modes, two projections, host camera policy
+    INPUT-->>APP: normalized pointer/wheel/keyboard facts
+    APP->>SDK: provisional pick and presentation highlight
+    APP->>EXACT: confirm immutable Source record
+    EXACT->>SERVER: bounded exact record range
+    EXACT-->>APP: exact_source_record
+    APP->>SDK: clear, pause, resume, dispose
+~~~
+
+The app owns navigation, controls, recovery messaging, and teardown. The SDK
+owns generation-safe state and bounded operations. The bridge's LAS decoders
+remain package-private; no step turns the fixed deployment into general Source
+or Query support.
 
 ## 12. Cancellation and crash matrix
 

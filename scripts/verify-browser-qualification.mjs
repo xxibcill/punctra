@@ -18,8 +18,8 @@ import {
 } from "../apps/browser-demo/web/qualification-lane.js";
 
 const changelogUrl = new URL("../CHANGELOG.md", import.meta.url);
-const matrixUrl = new URL("../docs/releases/v0.19-browser-matrix.json", import.meta.url);
-const releaseRecordUrl = new URL("../docs/releases/v0.19.0.md", import.meta.url);
+const matrixUrl = new URL("../docs/releases/v0.20-browser-matrix.json", import.meta.url);
+const releaseRecordUrl = new URL("../docs/releases/v0.20.0.md", import.meta.url);
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
 const qualificationViewerPackage = path.join(
   repositoryRoot,
@@ -33,14 +33,15 @@ const qualificationFixtureRoot = path.join(
 const qualificationManifestPath = path.join(qualificationFixtureRoot, "deployment.json");
 const qualificationViewerArtifact = path.join(
   repositoryRoot,
-  "target/npm/punctra-viewer-0.19.0-alpha.1.tgz",
+  "target/npm/punctra-viewer-0.20.0-alpha.1.tgz",
 );
 const verifierSource = await readFile(new URL("./verify-browser-qualification.mjs", import.meta.url), "utf8");
 const QUALIFICATION_VERIFIER_SHA256 = createHash("sha256").update(verifierSource).digest("hex");
-const EXPECTED_OBSERVATION_DATE = "2026-08-26";
+const EXPECTED_OBSERVATION_DATE = "2026-08-27";
 const QUALIFIED_IMPLEMENTATION_PATHS = [
   "Cargo.toml",
   "Cargo.lock",
+  "fuzz",
   "crates",
   "examples",
   "apps/browser-demo/web",
@@ -49,6 +50,9 @@ const QUALIFIED_IMPLEMENTATION_PATHS = [
   "scripts/build-browser-sdk.sh",
   "scripts/generate-browser-sdk-reference.mjs",
   "scripts/serve-browser-demo.py",
+  "scripts/verify-browser-integration-baseline.mjs",
+  "scripts/verify-browser-integration-baseline.test.mjs",
+  "scripts/verify-browser-qualification.test.mjs",
   "scripts/verify-browser-sdk.mjs",
 ];
 const JAVASCRIPT_HEAP_PHASE_FIELDS = Object.freeze([
@@ -59,7 +63,7 @@ const JAVASCRIPT_HEAP_PHASE_FIELDS = Object.freeze([
 ]);
 export function verifyBrowserQualificationMatrix(matrix, implementationCommit) {
   assert.equal(matrix.schema, "punctra-browser-qualification-matrix-v1");
-  assert.equal(matrix.release, "0.19.0-alpha.1");
+  assert.equal(matrix.release, "0.20.0-alpha.1");
   assert.match(matrix.verifier_sha256, /^[0-9a-f]{64}$/);
   assert.equal(
     matrix.verifier_sha256,
@@ -146,7 +150,7 @@ export function releaseVerifierSha256(releaseRecord) {
 
 export function changelogImplementationCommit(changelog) {
   const match = changelog.match(/implementation commit `([0-9a-f]{40})`/);
-  assert.ok(match, "changelog must contain one full v0.19 implementation commit SHA");
+  assert.ok(match, "changelog must contain one full v0.20 implementation commit SHA");
   return match[1];
 }
 

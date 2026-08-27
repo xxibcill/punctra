@@ -12,7 +12,8 @@ correction-loop slice Complete and repository-verified; v0.15 bounded local
 WebAssembly/WebGPU browser-foundation slice Complete and repository-verified;
 v0.16 bounded HTTP Range/cache/worker slice Complete and repository-verified;
 v0.17 bounded viewer API/exact-Point, v0.18 packed SDK/React lifecycle, and
-v0.19 exact local browser/device qualification slices Complete and repository-verified;
+v0.19 exact local browser/device qualification and v0.20 clean packed-consumer
+integration-baseline slices Complete and repository-verified;
 all gates run locally**
 
 Verification follows public contracts first. Private tests are used for fault
@@ -41,6 +42,10 @@ safely through the public API. Hosted CI is not configured.
    canvas lifecycle, resize/visibility behavior, provisional pick, resource
    diagnostics, shutdown, and recreation without generalizing to other
    browsers.
+10. **Packed-consumer baseline verification** installs only local tarballs into
+    clean TypeScript and React applications, checks supported exports and
+    deployable assets, builds development/production bundles, freezes fixture
+    and scene identities, and runs the deterministic browser quickstart.
 
 Tests assert semantic results, ordering, exactness, publication certainty, and
 resource failure. They avoid depending on private tree shape, batching,
@@ -657,7 +662,7 @@ command list; this architecture guide does not duplicate it. Required local GPU
 lanes use `PUNCTRA_REQUIRE_GPU=1`, including renderer appearance, corpus,
 offscreen, planner, display-mapping, and public-host acceptance.
 
-The v0.15–v0.19 browser lane is separate from native GPU acceptance. It uses
+The v0.15–v0.20 browser lane is separate from native GPU acceptance. It uses
 the build and strict local-Range-host steps in `CONTRIBUTING.md`, requires the
 document itself to publish `PASS`, and records exact browser/adapter facts in
 the bounded v0.19 matrix rather than inferring support for an unexecuted entry.

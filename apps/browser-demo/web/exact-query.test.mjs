@@ -5,9 +5,8 @@ import test from "node:test";
 import {
   ExactQueryError,
   createLasExactQueryBridge,
-  decodeLasLayout,
-  decodeLasPointRecord,
 } from "./exact-query.js";
+import { decodeLasLayout, decodeLasPointRecord } from "./las-exact-decoder.js";
 import { loadStreamingProtocol } from "./module-loader.js";
 
 const { validateManifest } = await loadStreamingProtocol("exact-query-test");
@@ -70,18 +69,17 @@ test("LAS layout and record decoders reject incompatible widths and preserve exa
   );
 });
 
-test("exact-query public exports are declared and documented", async () => {
+test("exact-query exports only the supported bridge boundary", async () => {
   const declaration = await readFile(new URL("exact-query.d.ts", import.meta.url), "utf8");
   const guide = await readFile(new URL("../../../docs/guides/browser-viewer.md", import.meta.url), "utf8");
 
-  for (const name of [
-    "ExactQueryError",
-    "createLasExactQueryBridge",
-    "decodeLasLayout",
-    "decodeLasPointRecord",
-  ]) {
+  for (const name of ["ExactQueryError", "createLasExactQueryBridge"]) {
     assert.match(declaration, new RegExp(`export (?:class|function) ${name}\\b`));
     assert.ok(guide.includes(`\`${name}\``));
+  }
+  for (const name of ["decodeLasLayout", "decodeLasPointRecord"]) {
+    assert.doesNotMatch(declaration, new RegExp(`export (?:class|function) ${name}\\b`));
+    assert.ok(!guide.includes(`\`${name}\``));
   }
 });
 
@@ -134,6 +132,13 @@ test("exact-query errors do not expose raw external exceptions", async () => {
     (error) => error instanceof ExactQueryError
       && error.code === "exact_query_failed"
       && !("cause" in error),
+  );
+});
+
+test("exact bridge rejects a missing manifest URL before creating a usable bridge", () => {
+  assert.throws(
+    () => createLasExactQueryBridge({}),
+    (error) => error instanceof ExactQueryError && error.code === "exact_query_invalid",
   );
 });
 

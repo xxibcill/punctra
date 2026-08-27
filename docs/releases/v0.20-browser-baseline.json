@@ -1,0 +1,180 @@
+{
+  "schema": "punctra-browser-integration-baseline-v1",
+  "release": "0.20.0-alpha.1",
+  "packages": {
+    "viewer": {
+      "name": "@punctra/viewer",
+      "version": "0.20.0-alpha.1",
+      "supported_entry_points": {
+        ".": [
+          "DISPLAY_MODES",
+          "VIEWER_ERROR_CODES",
+          "ViewerError",
+          "createViewer",
+          "resolveViewerAssets"
+        ],
+        "./input": [
+          "createInputNormalizer"
+        ],
+        "./exact-query": [
+          "ExactQueryError",
+          "createLasExactQueryBridge"
+        ],
+        "./package.json": []
+      },
+      "required_deployable_assets": [
+        "pkg/browser_demo_bg.wasm",
+        "stream-worker.js"
+      ],
+      "package_private_modules": [
+        "camera-policy.js",
+        "exact-query-error.js",
+        "las-exact-decoder.js",
+        "module-loader.js",
+        "pkg/browser_demo.js",
+        "range-response.js",
+        "stream-ordinals.js",
+        "stream-worker.js",
+        "streaming-protocol.js",
+        "viewer-api.js",
+        "wasm-loader.js",
+        "worker-operation.js",
+        "worker-protocol.js"
+      ]
+    },
+    "react": {
+      "name": "@punctra/react",
+      "version": "0.20.0-alpha.1",
+      "viewer_peer": "0.20.0-alpha.1"
+    }
+  },
+  "generated_api_reference": {
+    "path": "docs/api/browser-sdk.md",
+    "byte_length": 13563,
+    "sha256": "0bac8177b32759d04a63f9253616dfd4e29880ad43068794ea28a483fe31cc4b"
+  },
+  "immutable_deployment": {
+    "manifest": {
+      "path": "apps/browser-demo/web/fixtures/v1/deployment.json",
+      "byte_length": 2245,
+      "sha256": "d738c52dd0c01a572bdcef3730e4e2d0c675b73c813905c2b19286ac91eab0c7"
+    },
+    "source": {
+      "path": "apps/browser-demo/web/fixtures/v1/representative.las",
+      "byte_length": 2380227,
+      "sha256": "bc2b1cb9077505425e051e26920edba152a67f83c2b0b00dc26fc08ed8198697",
+      "source_identity": "c459ff39717b7d6994aaebf344641f5a3add7faf65e249b85933ebd066d1c26e",
+      "point_count": 70000
+    },
+    "index": {
+      "path": "apps/browser-demo/web/fixtures/v1/representative.pidx",
+      "byte_length": 172808,
+      "sha256": "2707e8a163ec2855fe7c859beb6259108204b78e111997785a8defc4c560f1ff",
+      "disk_version": 2,
+      "recipe_version": 2,
+      "display_sample_schema": 1
+    },
+    "source_record": {
+      "path": "apps/browser-demo/web/fixtures/v1/source-record.json",
+      "byte_length": 3120,
+      "sha256": "1aa06e038c8cfd42dd94a8aae6a78807ecdc641b696a094710b0d38a1a36c227"
+    },
+    "root": {
+      "coverage": "sampled",
+      "covered_point_count": 70000,
+      "display_point_count": 4096,
+      "displayed_batches": 4,
+      "world_origin": [500000, 4600000, 100]
+    }
+  },
+  "generated_scene": {
+    "source_identity": "1515151515151515151515151515151515151515151515151515151515151515",
+    "point_count": 1089,
+    "estimated_gpu_bytes": 26136,
+    "world_origin": [500000, 4600000, 100],
+    "view_id": 15,
+    "generation": 1,
+    "batch_key": 1,
+    "batch_version": 1,
+    "centre_point_ordinal": 544
+  },
+  "presentation_policy": {
+    "display_modes": [
+      "neutral",
+      "elevation",
+      "rgb",
+      "intensity",
+      "classification"
+    ],
+    "projections": [
+      "orthographic",
+      "perspective"
+    ],
+    "deployment_display_mapping": "rgb16_full_range_rounded_rgba8_v1",
+    "provisional_authority": "provisional_gpu_hint",
+    "exact_authority": "exact_source_record",
+    "highlight_authority": "presentation_only"
+  },
+  "quickstart": {
+    "path": "examples/browser-typescript",
+    "acceptance_schema": "punctra-browser-quickstart-acceptance-v1",
+    "imports": [
+      "@punctra/viewer",
+      "@punctra/viewer/input",
+      "@punctra/viewer/exact-query"
+    ],
+    "required_workflow": [
+      "cancelled_load_retains_viewer",
+      "strict_source_load",
+      "five_display_modes",
+      "two_projections",
+      "host_navigation",
+      "provisional_pick",
+      "presentation_highlight",
+      "exact_confirmation",
+      "highlight_clear",
+      "pause_resume",
+      "dispose"
+    ]
+  },
+  "qualification": {
+    "matrix_path": "docs/releases/v0.20-browser-matrix.json",
+    "matrix_schema": "punctra-browser-qualification-matrix-v1",
+    "qualified_lane": "codex-iab-chromium-151-macos-26-apple-m5-pro",
+    "limits": {
+      "firstCoverageMilliseconds": 10000,
+      "settledViewMilliseconds": 15000,
+      "frameIntervalP95Milliseconds": 50,
+      "frameSubmissionP95Milliseconds": 16.7,
+      "cancellationAcknowledgementMilliseconds": 1000,
+      "physicalDimensionPixels": 4096,
+      "physicalAreaPixels": 8388608,
+      "residentPoints": 8192,
+      "residentBytes": 196608,
+      "canvasBytes": 33554432,
+      "transientTextureBytes": 67108864,
+      "retainedRecordBytes": 262144,
+      "workerStagingBytes": 327680,
+      "concurrentResponseBytes": 262144,
+      "persistentCacheBytes": 4194304
+    }
+  },
+  "recovery": {
+    "prepublication_worker_or_network": "retry_in_place_after_correction",
+    "cancelled_load": "retain_viewer_and_last_frame",
+    "invalid_resize": "retain_prior_viewport",
+    "partial_publication": "dispose_and_recreate_viewer",
+    "device_loss": "dispose_and_recreate_viewer_and_device",
+    "stale_generation": "reject",
+    "unsupported_initialization": "report_structured_failure_without_fallback"
+  },
+  "external_evidence": {
+    "independent_adopter": false,
+    "registry_or_cdn_publication": false,
+    "api_stable": false,
+    "visual_quality_complete": false,
+    "support_qualified": false,
+    "beta": false,
+    "release_candidate": false
+  }
+}

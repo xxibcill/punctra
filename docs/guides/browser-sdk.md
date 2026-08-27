@@ -1,6 +1,6 @@
 # Browser SDK installation and deployment
 
-Punctra `0.19.0-alpha.1` packages the framework-neutral browser viewer as
+Punctra `0.20.0-alpha.1` packages the framework-neutral browser viewer as
 `@punctra/viewer` and the one qualified lifecycle adapter as `@punctra/react`.
 The repository verifies locally packed npm tarballs; it does not claim that
 either package has been published to a registry.
@@ -17,11 +17,13 @@ The artifacts are written under `target/npm/`. A clean application can install
 the exact viewer artifact directly:
 
 ```bash
-npm install /absolute/path/to/target/npm/punctra-viewer-0.19.0-alpha.1.tgz
+npm install /absolute/path/to/target/npm/punctra-viewer-0.20.0-alpha.1.tgz
 ```
 
-The checked-in `examples/browser-typescript` and `examples/browser-react`
-applications intentionally contain no repository-relative Punctra dependency.
+The checked-in `examples/browser-typescript` consumer is the v0.20
+[five-minute quickstart](browser-quickstart.md); `examples/browser-react`
+remains the thin React trial. Both intentionally contain no repository-relative
+Punctra dependency.
 `scripts/verify-browser-sdk.mjs` copies them to fresh temporary directories,
 installs only the packed artifacts, type-checks them, and executes development
 and production builds.
@@ -74,8 +76,8 @@ Install both packed artifacts plus a qualified React version:
 
 ```bash
 npm install \
-  /absolute/path/to/target/npm/punctra-viewer-0.19.0-alpha.1.tgz \
-  /absolute/path/to/target/npm/punctra-react-0.19.0-alpha.1.tgz \
+  /absolute/path/to/target/npm/punctra-viewer-0.20.0-alpha.1.tgz \
+  /absolute/path/to/target/npm/punctra-react-0.20.0-alpha.1.tgz \
   react react-dom
 ```
 
@@ -133,7 +135,7 @@ const viewer = await createViewer({
   assets: {
     wasmUrl: new URL("/assets/punctra/browser_demo_bg.wasm", location.origin),
     workerUrl: new URL("/assets/punctra/stream-worker.js", location.origin),
-    cacheKey: "0.19.0-alpha.1-build-7",
+    cacheKey: "0.20.0-alpha.1-build-7",
   },
 });
 ```
@@ -152,7 +154,7 @@ requires the exact Range and validator behavior in the
 
 ## Content Security Policy and isolation
 
-The v0.19 path uses a module Worker and WebAssembly, but no inline/evaluated
+The v0.20 path uses a module Worker and WebAssembly, but no inline/evaluated
 JavaScript, `blob:` Worker, `SharedArrayBuffer`, or service worker. It does not
 require COOP/COEP cross-origin isolation. A restrictive same-origin starting
 policy is:
@@ -176,14 +178,16 @@ Run:
 ```bash
 scripts/build-browser-sdk.sh
 node scripts/verify-browser-sdk.mjs
+node scripts/verify-browser-integration-baseline.mjs
 node scripts/generate-browser-sdk-reference.mjs --check
 ```
 
 The [generated API reference](../api/browser-sdk.md) is derived from the exact
-packed declarations. The [v0.18 repository verification
-record](../releases/v0.18.0.md) pins the two checked-in Vite trials. The v0.19
-[browser matrix](../releases/v0.19-browser-matrix.json) and [qualification
-guide](browser-qualification.md) pin the only exact browser/device lane that
-has passed the new resource, latency, and recovery gates. Other bundlers,
+packed declarations. The v0.20 [integration baseline](../releases/v0.20-browser-baseline.json),
+[browser matrix](../releases/v0.20-browser-matrix.json), and [qualification
+guide](browser-qualification.md) pin the package boundary and the only exact
+browser/device lane that has passed the resource, latency, and recovery gates.
+The LAS header and Point-record decoders used by `exact-query` are deliberately
+package-private and are not supported exports. Other bundlers,
 frameworks, browsers, devices, hosting stacks, and CSP deployments require
 their own evidence and are not implied by ESM compatibility.

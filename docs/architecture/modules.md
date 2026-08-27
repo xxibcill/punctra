@@ -13,7 +13,8 @@ foundation slice Complete and repository-verified; v0.16 private HTTP Range,
 cache, and worker streaming slice Complete and repository-verified; v0.17
 framework-neutral viewer API and exact-Point bridge plus v0.18 packed SDK and
 thin React lifecycle adapter plus v0.19 exact local browser/device qualification
-Complete and repository-verified
+and v0.20 clean packed-consumer integration baseline Complete and repository-
+verified
 
 This is the ownership map for implemented crates. Each crate has one public
 job. Several private files may cooperate behind one deep interface; private
@@ -53,7 +54,10 @@ composition and fixture-specific exact bridge, and v0.18 packages that
 composition without exporting those internals. The private v0.19 qualification
 runner evaluates one exact local lane without becoming a package export,
 telemetry seam, or automatic recovery controller. Navigation/display policy
-remains private to application hosts, and correction remains existing
+remains private to application hosts. v0.20 narrows the exact-query export to
+the bridge and structured error while keeping LAS decoding private, and freezes
+the supported package/fixture/presentation/recovery facts in a repository
+baseline rather than creating another runtime module. Correction remains existing
 `point-workspace` commit policy.
 
 ## 1. point-contracts
@@ -554,7 +558,9 @@ The implemented reusable seams are:
 The v0.19 timing record is additive data returned by the existing Source-load
 operation. Qualification profiles, environment capture, frame sampling, fault
 workers, matrix evaluation, and issue evidence remain private repository-host
-policy rather than new SDK modules.
+policy rather than new SDK modules. The v0.20 TypeScript quickstart is a caller
+of the supported root, input, and exact-query entries; its navigation and UI are
+application policy, not additions to `@punctra/viewer`.
 
 Index pages, decoder buffers, Point Set frames, overlay tables, Operation
 records, Revision blocks, triangulation arenas, XML encoder state, scheduling

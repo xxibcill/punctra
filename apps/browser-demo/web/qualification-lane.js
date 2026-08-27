@@ -50,6 +50,7 @@ export const QUALIFICATION_LANE = deepFreeze({
     pixel_depth: 30,
     canvas_bytes: 7_646_628,
     display_path: "built-in Retina display",
+    screen_note: "The browser-reported CSS screen size and bit depth are exact session facts; the host independently reported the built-in Retina display path.",
   },
   workload: {
     deployment_id: "repository-las-v1",
@@ -81,7 +82,7 @@ export const QUALIFICATION_RUNTIME_LANE = deepFreeze({
     displayPath: QUALIFICATION_LANE.display.display_path,
     package: {
       name: "@punctra/viewer",
-      version: "0.19.0-alpha.1",
+      version: "0.20.0-alpha.1",
     },
   },
   browser: {

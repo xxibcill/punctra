@@ -147,6 +147,42 @@ export function evaluateQualification(record) {
   return deepFreeze({ passed: failures.length === 0, failures, limits: QUALIFICATION_LIMITS });
 }
 
+export function evaluateStreamingResult(result) {
+  const failures = [];
+  const checks = [
+    [result?.deployment?.deployment_id, QUALIFICATION_WORKLOAD.deploymentId, "deployment identity"],
+    [result?.deployment?.source_identity, QUALIFICATION_WORKLOAD.sourceIdentity, "Source identity"],
+    [result?.deployment?.source_point_count, QUALIFICATION_WORKLOAD.sourcePoints, "Source point count"],
+    [result?.deployment?.root_coverage, QUALIFICATION_WORKLOAD.coverage, "deployment Coverage"],
+    [result?.state?.source?.identity, QUALIFICATION_WORKLOAD.sourceIdentity, "state Source identity"],
+    [result?.state?.source?.expectedPoints, QUALIFICATION_WORKLOAD.sampledPoints, "state sampled Point count"],
+    [result?.state?.source?.coverage, QUALIFICATION_WORKLOAD.coverage, "state Coverage"],
+    [result?.state?.source?.publishedPoints, QUALIFICATION_WORKLOAD.sampledPoints, "published Points"],
+    [result?.state?.source?.publishedBatches, QUALIFICATION_WORKLOAD.publishedBatches, "published batches"],
+    [result?.state?.source?.retainedRecordBytes, QUALIFICATION_WORKLOAD.transferRecordBytes, "retained records"],
+    [result?.state?.render?.drawnPoints, QUALIFICATION_WORKLOAD.sampledPoints, "drawn Points"],
+    [result?.state?.render?.residentBytes, QUALIFICATION_WORKLOAD.rendererResidentBytes, "renderer vertex bytes"],
+    [result?.pointOrdinals?.length, QUALIFICATION_WORKLOAD.sampledPoints, "Point identities"],
+    [result?.metrics?.transferredBytes, QUALIFICATION_WORKLOAD.transferRecordBytes, "transfer-v2 bytes"],
+  ];
+  for (const [actual, expected, label] of checks) checkEqual(failures, actual, expected, label);
+  checkAtMost(
+    failures,
+    result?.metrics?.concurrentResponseBytesHighWater,
+    QUALIFICATION_LIMITS.concurrentResponseBytes,
+    "concurrent response bytes",
+    "bytes",
+  );
+  checkAtMost(
+    failures,
+    result?.metrics?.decodedStagingBytesHighWater,
+    QUALIFICATION_LIMITS.workerStagingBytes,
+    "worker staging bytes",
+    "bytes",
+  );
+  return deepFreeze({ passed: failures.length === 0, failures });
+}
+
 export function recreationRequiredRecoveryEvidence() {
   return deepFreeze({
     partial_publication: {
