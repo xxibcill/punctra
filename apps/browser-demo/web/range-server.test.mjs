@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { once } from "node:events";
 import { cp, mkdtemp, rm } from "node:fs/promises";
+import { createConnection } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -111,17 +112,24 @@ test("real local server exposes bounded protocol fault routes", async () => {
 
 test("expected client cancellation does not emit a server traceback", async () => {
   const { server, port, stderr } = await startServer();
-  const cancellation = new AbortController();
-  const request = fetch(
-    `http://127.0.0.1:${port}/fixtures/v1/representative.las?delay_ms=250`,
-    { signal: cancellation.signal },
-  );
-  cancellation.abort();
+  const requestPath = "/fixtures/v1/representative.las?delay_ms=500";
+  const socket = createConnection({ host: "127.0.0.1", port });
 
   try {
-    await assert.rejects(request, (error) => error.name === "AbortError");
-    await new Promise((resolve) => setTimeout(resolve, 350));
+    await once(socket, "connect");
+    socket.write([
+      `GET ${requestPath} HTTP/1.1`,
+      `Host: 127.0.0.1:${port}`,
+      "Connection: close",
+      "",
+      "",
+    ].join("\r\n"));
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    socket.resetAndDestroy();
+    await waitForStderr(stderr, /delay_ms=500 HTTP\/1\.1" 200/);
+    await new Promise((resolve) => setTimeout(resolve, 50));
   } finally {
+    socket.destroy();
     await stopServer(server);
   }
   assert.doesNotMatch(stderr(), /Traceback|BrokenPipeError|ConnectionResetError/);
@@ -179,4 +187,13 @@ async function listeningPort(server) {
     if (match) return Number(match[1]);
   }
   throw new Error("local Range server exited before reporting its port");
+}
+
+async function waitForStderr(stderr, expected) {
+  const deadline = performance.now() + 2_000;
+  while (performance.now() < deadline) {
+    if (expected.test(stderr())) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.match(stderr(), expected);
 }

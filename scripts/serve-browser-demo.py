@@ -134,6 +134,12 @@ class BrowserDemoHandler(BaseHTTPRequestHandler):
 
     server_version = "PunctraBrowserRange/1"
 
+    def handle_one_request(self) -> None:
+        try:
+            super().handle_one_request()
+        except (BrokenPipeError, ConnectionResetError):
+            self.close_connection = True
+
     def do_OPTIONS(self) -> None:  # noqa: N802
         self.send_response(HTTPStatus.NO_CONTENT)
         self._send_cors_headers()
@@ -230,20 +236,17 @@ class BrowserDemoHandler(BaseHTTPRequestHandler):
     def _write_body(self, path: Path, start: int, length: int, *, corrupt: bool = False) -> None:
         remaining = length
         first_chunk = True
-        try:
-            with path.open("rb") as source:
-                source.seek(start)
-                while remaining:
-                    chunk = bytearray(source.read(min(remaining, FILE_CHUNK_BYTES)))
-                    if not chunk:
-                        return
-                    if corrupt and first_chunk:
-                        chunk[0] ^= 0xFF
-                        first_chunk = False
-                    self.wfile.write(chunk)
-                    remaining -= len(chunk)
-        except (BrokenPipeError, ConnectionResetError):
-            return
+        with path.open("rb") as source:
+            source.seek(start)
+            while remaining:
+                chunk = bytearray(source.read(min(remaining, FILE_CHUNK_BYTES)))
+                if not chunk:
+                    return
+                if corrupt and first_chunk:
+                    chunk[0] ^= 0xFF
+                    first_chunk = False
+                self.wfile.write(chunk)
+                remaining -= len(chunk)
 
     def _resolve_path(self) -> Path:
         raw_path = unquote(urlsplit(self.path).path)
