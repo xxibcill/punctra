@@ -125,6 +125,41 @@ test("qualification evidence preserves environment and heap phase fields", () =>
   );
 });
 
+test("JavaScript heap status and high-water agree with phase observations", () => {
+  const available = structuredClone(matrix);
+  const availableResources = available.qualified_entries[0].observations.resources;
+  availableResources.javascript_heap_status = "non_standard_observation";
+  availableResources.javascript_heap_before_bytes = 100;
+  availableResources.javascript_heap_after_cold_bytes = 120;
+  availableResources.javascript_heap_after_warm_bytes = 110;
+  availableResources.javascript_heap_after_frames_bytes = 130;
+  availableResources.javascript_heap_high_water_bytes = 130;
+  assert.doesNotThrow(() => verifyBrowserQualificationMatrix(available, implementationCommit));
+
+  const missingHighWater = structuredClone(matrix);
+  delete missingHighWater.qualified_entries[0].observations.resources.javascript_heap_high_water_bytes;
+  assert.throws(
+    () => verifyBrowserQualificationMatrix(missingHighWater, implementationCommit),
+    /resources must preserve javascript_heap_high_water_bytes/,
+  );
+
+  const inconsistentStatus = structuredClone(matrix);
+  inconsistentStatus.qualified_entries[0].observations.resources.javascript_heap_status =
+    "non_standard_observation";
+  assert.throws(
+    () => verifyBrowserQualificationMatrix(inconsistentStatus, implementationCommit),
+    /non-standard JavaScript heap observations must include every numeric phase/,
+  );
+
+  const inconsistentHighWater = structuredClone(available);
+  inconsistentHighWater.qualified_entries[0].observations.resources.javascript_heap_high_water_bytes =
+    131;
+  assert.throws(
+    () => verifyBrowserQualificationMatrix(inconsistentHighWater, implementationCommit),
+    /JavaScript heap high-water must match the phase observations/,
+  );
+});
+
 test("the JSON matrix and Markdown record pin the same qualification verifier", () => {
   assert.equal(matrix.verifier_sha256, releaseVerifierSha256(releaseRecord));
   assert.match(matrix.verifier_sha256, /^[0-9a-f]{64}$/);

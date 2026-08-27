@@ -50,6 +50,12 @@ const QUALIFIED_IMPLEMENTATION_PATHS = [
   "scripts/serve-browser-demo.py",
   "scripts/verify-browser-sdk.mjs",
 ];
+const JAVASCRIPT_HEAP_PHASE_FIELDS = Object.freeze([
+  "javascript_heap_before_bytes",
+  "javascript_heap_after_cold_bytes",
+  "javascript_heap_after_warm_bytes",
+  "javascript_heap_after_frames_bytes",
+]);
 export function verifyBrowserQualificationMatrix(matrix, implementationCommit) {
   assert.equal(matrix.schema, "punctra-browser-qualification-matrix-v1");
   assert.equal(matrix.release, "0.19.0-alpha.1");
@@ -544,13 +550,11 @@ function verifyResourceObservations(entry) {
   const [physicalWidth, physicalHeight] = entry.display.physical_viewport;
   assert.equal(entry.display.canvas_bytes, physicalWidth * physicalHeight * 4);
   assert.equal(resources.javascript_heap_api, "performance.memory.usedJSHeapSize");
-  assert.equal(resources.javascript_heap_status, "non_standard_observation");
-  for (const field of [
-    "javascript_heap_before_bytes",
-    "javascript_heap_after_cold_bytes",
-    "javascript_heap_after_warm_bytes",
-    "javascript_heap_after_frames_bytes",
-  ]) {
+  assert.ok(
+    ["unavailable", "non_standard_observation"].includes(resources.javascript_heap_status),
+    "javascript heap status must be unavailable or non_standard_observation",
+  );
+  for (const field of JAVASCRIPT_HEAP_PHASE_FIELDS) {
     assert.equal(
       Object.hasOwn(resources, field),
       true,
@@ -561,6 +565,41 @@ function verifyResourceObservations(entry) {
       value === null || (Number.isSafeInteger(value) && value >= 0),
       true,
       `${field} must be a nullable nonnegative integer`,
+    );
+  }
+  assert.equal(
+    Object.hasOwn(resources, "javascript_heap_high_water_bytes"),
+    true,
+    "resources must preserve javascript_heap_high_water_bytes",
+  );
+  const phaseValues = JAVASCRIPT_HEAP_PHASE_FIELDS.map((field) => resources[field]);
+  const highWater = resources.javascript_heap_high_water_bytes;
+  assert.equal(
+    highWater === null || (Number.isSafeInteger(highWater) && highWater >= 0),
+    true,
+    "javascript_heap_high_water_bytes must be a nullable nonnegative integer",
+  );
+  if (resources.javascript_heap_status === "unavailable") {
+    assert.deepEqual(
+      phaseValues,
+      JAVASCRIPT_HEAP_PHASE_FIELDS.map(() => null),
+      "unavailable JavaScript heap observations must be explicit nulls",
+    );
+    assert.equal(
+      highWater,
+      null,
+      "unavailable JavaScript heap observations must have a null high-water",
+    );
+  } else {
+    assert.equal(
+      phaseValues.every((value) => Number.isSafeInteger(value) && value >= 0),
+      true,
+      "non-standard JavaScript heap observations must include every numeric phase",
+    );
+    assert.equal(
+      highWater,
+      Math.max(...phaseValues),
+      "JavaScript heap high-water must match the phase observations",
     );
   }
   assert.equal(resources.process_resident_bytes, null);
