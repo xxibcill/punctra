@@ -14,7 +14,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { captureChildExit } from "./child-process.mjs";
-import { publicDeclaration } from "./generate-browser-sdk-reference.mjs";
+import {
+  BROWSER_SDK_REFERENCE_SECTIONS,
+  publicDeclaration,
+} from "./generate-browser-sdk-reference.mjs";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const artifactDirectory = path.join(repositoryRoot, "target/npm");
@@ -91,24 +94,43 @@ function verifyGeneratedApiReference(viewer, react) {
   const viewerManifest = packedJson(viewer, "package/package.json");
   const reactManifest = packedJson(react, "package/package.json");
   assert.ok(reference.includes(`packed in Punctra \`${viewerManifest.version}\``));
-  for (const [title, artifact, packageName, declarationPath] of [
-    ["@punctra/viewer", viewer, viewerManifest.name, "sdk.d.ts"],
-    ["Viewer model", viewer, viewerManifest.name, "viewer-api.d.ts"],
-    ["Input normalizer", viewer, viewerManifest.name, "viewer-input.d.ts"],
-    ["Immutable-LAS exact bridge", viewer, viewerManifest.name, "exact-query.d.ts"],
-    ["@punctra/react", react, reactManifest.name, "index.d.ts"],
-  ]) {
-    const declaration = publicDeclaration(
+  const packedPackages = {
+    viewer: { artifact: viewer, packageName: viewerManifest.name },
+    react: { artifact: react, packageName: reactManifest.name },
+  };
+  for (const { title, packageKey, declarationPath } of BROWSER_SDK_REFERENCE_SECTIONS) {
+    const { artifact, packageName } = packedPackages[packageKey];
+    const expectedDeclaration = publicDeclaration(
       declarationPath,
       packedText(artifact, `package/${declarationPath}`),
-    );
-    const section = `## ${title}\n\nPacked declaration: \`${packageName}/${declarationPath}\`\n\n\`\`\`ts\n${declaration.trim()}\n\`\`\``;
+    ).trim();
+    const section = readReferenceSection(reference, title);
     assert.equal(
-      reference.includes(section),
-      true,
-      `generated API reference differs from packed ${packageName}/${declarationPath}`,
+      section.packedDeclaration,
+      `${packageName}/${declarationPath}`,
+      `${title} names the wrong packed declaration`,
+    );
+    assert.equal(
+      section.declaration,
+      expectedDeclaration,
+      `${title} differs from packed ${packageName}/${declarationPath}`,
     );
   }
+}
+
+function readReferenceSection(reference, title) {
+  const heading = `## ${title}\n\n`;
+  const headingStart = reference.indexOf(heading);
+  assert.notEqual(headingStart, -1, `generated API reference omitted ${title}`);
+  const bodyStart = headingStart + heading.length;
+  const nextHeading = reference.indexOf("\n\n## ", bodyStart);
+  const body = reference.slice(
+    bodyStart,
+    nextHeading === -1 ? reference.length : nextHeading,
+  ).trimEnd();
+  const parsed = /^Packed declaration: `([^`]+)`\n\n```ts\n([\s\S]*?)\n```$/.exec(body);
+  assert(parsed, `generated API reference has a malformed ${title} section`);
+  return { packedDeclaration: parsed[1], declaration: parsed[2] };
 }
 
 function packedJson(artifact, entry) {

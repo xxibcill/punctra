@@ -7,6 +7,14 @@ const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url))
 const artifactDirectory = path.join(repositoryRoot, "target/npm");
 const outputPath = path.join(repositoryRoot, "docs/api/browser-sdk.md");
 
+export const BROWSER_SDK_REFERENCE_SECTIONS = Object.freeze([
+  referenceSection("@punctra/viewer", "viewer", "sdk.d.ts"),
+  referenceSection("Viewer model", "viewer", "viewer-api.d.ts"),
+  referenceSection("Input normalizer", "viewer", "viewer-input.d.ts"),
+  referenceSection("Immutable-LAS exact bridge", "viewer", "exact-query.d.ts"),
+  referenceSection("@punctra/react", "react", "index.d.ts"),
+]);
+
 export async function generateBrowserSdkReference() {
   const [viewerArtifact, reactArtifact] = await Promise.all([
     onlyArtifact("punctra-viewer-"),
@@ -20,14 +28,16 @@ export async function generateBrowserSdkReference() {
     throw new Error("Packed viewer and React artifacts must have the same release version.");
   }
 
-  const declarations = [
-    ["@punctra/viewer", viewerArtifact, viewerManifest.name, "sdk.d.ts"],
-    ["Viewer model", viewerArtifact, viewerManifest.name, "viewer-api.d.ts"],
-    ["Input normalizer", viewerArtifact, viewerManifest.name, "viewer-input.d.ts"],
-    ["Immutable-LAS exact bridge", viewerArtifact, viewerManifest.name, "exact-query.d.ts"],
-    ["@punctra/react", reactArtifact, reactManifest.name, "index.d.ts"],
-  ];
-  const sections = declarations.map(([title, artifact, packageName, declarationPath]) => {
+  const packedPackages = {
+    viewer: { artifact: viewerArtifact, packageName: viewerManifest.name },
+    react: { artifact: reactArtifact, packageName: reactManifest.name },
+  };
+  const sections = BROWSER_SDK_REFERENCE_SECTIONS.map(({
+    title,
+    packageKey,
+    declarationPath,
+  }) => {
+    const { artifact, packageName } = packedPackages[packageKey];
     const declaration = publicDeclaration(
       declarationPath,
       packedText(artifact, `package/${declarationPath}`),
@@ -55,6 +65,10 @@ export function publicDeclaration(declarationPath, declaration) {
     /export interface BrowserViewerOptions \{[\s\S]*?\n\}\n\nexport function createBrowserViewer\([\s\S]*?;\n\n/,
     "",
   );
+}
+
+function referenceSection(title, packageKey, declarationPath) {
+  return Object.freeze({ title, packageKey, declarationPath });
 }
 
 async function onlyArtifact(prefix) {

@@ -6,6 +6,7 @@ import {
   verifyBrowserIntegrationBaseline,
   verifyQuickstartEvidence,
 } from "./verify-browser-integration-baseline.mjs";
+import { BROWSER_SDK_REFERENCE_SECTIONS } from "./generate-browser-sdk-reference.mjs";
 
 const baseline = JSON.parse(await readFile(
   new URL("../docs/releases/v0.20-browser-baseline.json", import.meta.url),
@@ -121,5 +122,23 @@ test("operational tooling derives the release from authoritative package manifes
   for (const relativePath of operationalReleaseSources) {
     const source = await readFile(new URL(relativePath, import.meta.url), "utf8");
     assert.doesNotMatch(source, /0\.20\.0-alpha\.1/, relativePath);
+  }
+});
+
+test("the generated browser SDK reference covers the exact supported declarations", () => {
+  assert.deepEqual(BROWSER_SDK_REFERENCE_SECTIONS, [
+    { title: "@punctra/viewer", packageKey: "viewer", declarationPath: "sdk.d.ts" },
+    { title: "Viewer model", packageKey: "viewer", declarationPath: "viewer-api.d.ts" },
+    { title: "Input normalizer", packageKey: "viewer", declarationPath: "viewer-input.d.ts" },
+    {
+      title: "Immutable-LAS exact bridge",
+      packageKey: "viewer",
+      declarationPath: "exact-query.d.ts",
+    },
+    { title: "@punctra/react", packageKey: "react", declarationPath: "index.d.ts" },
+  ]);
+  assert.equal(Object.isFrozen(BROWSER_SDK_REFERENCE_SECTIONS), true);
+  for (const section of BROWSER_SDK_REFERENCE_SECTIONS) {
+    assert.equal(Object.isFrozen(section), true);
   }
 });
