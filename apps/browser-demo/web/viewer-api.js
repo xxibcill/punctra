@@ -374,7 +374,7 @@ class BrowserViewer {
     operationSequence += 1;
     const workerUrl = `${this.#workerUrl}${this.#workerUrl.includes("?") ? "&" : "?"}operation=${encodeURIComponent(operationId)}`;
     let deployment;
-    let begun = false;
+    let sourcePublicationStarted = false;
     let mainThreadMillisecondsHighWater = 0;
     let firstCoverageMilliseconds;
     const pointOrdinals = [];
@@ -416,8 +416,8 @@ class BrowserViewer {
             if (message.phase === "deployment") deployment = message.deployment;
           } else if (message.type === "batch") {
             const started = this.#monotonicNow();
-            this.#publishWorkerBatch(deployment, message, begun);
-            begun = true;
+            this.#publishWorkerBatch(deployment, message, sourcePublicationStarted);
+            sourcePublicationStarted = true;
             appendTransferredOrdinals(pointOrdinals, message.payload);
             this.render();
             const finished = this.#monotonicNow();
@@ -468,8 +468,11 @@ class BrowserViewer {
       if (this.#destroyed) {
         throw new ViewerError("viewer_destroyed", "viewer was destroyed during Source loading");
       }
-      const viewerError = toViewerError(error, begun ? "stream_publication" : "worker_failed");
-      if (!begun) throw viewerError;
+      const viewerError = toViewerError(
+        error,
+        sourcePublicationStarted ? "stream_publication" : "worker_failed",
+      );
+      if (!sourcePublicationStarted) throw viewerError;
       const fusedError = new ViewerError(viewerError.code, viewerError.message, {
         safeAction: RECREATION_REQUIRED_SAFE_ACTIONS.partialPublication,
         recoverable: false,
@@ -639,12 +642,12 @@ class BrowserViewer {
     this.#listeners.clear();
   }
 
-  #publishWorkerBatch(deployment, message, begun) {
+  #publishWorkerBatch(deployment, message, sourcePublicationStarted) {
     if (!deployment?.source_bounds || !(message.payload instanceof ArrayBuffer)) {
       throw new ViewerError("stream_validation", "worker batch preceded a complete deployment binding");
     }
     const payload = new Uint8Array(message.payload);
-    if (!begun) {
+    if (!sourcePublicationStarted) {
       this.#cancelScheduledRender("scheduled render was cancelled by a new Source generation");
       const [x, y, z] = deployment.world_origin;
       this.#callRaw(
