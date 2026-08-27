@@ -261,18 +261,18 @@ async function runSmokePath() {
   const lifecycle = await runLifecycleQualification(initial, runtimeLane);
   const delivery = await runDeliveryQualification(heap);
   const presentation = await runPresentationQualification(delivery.warm);
-  const performance = await runPerformanceQualification({ lifecycle, delivery }, heap);
+  const performanceEvidence = await runPerformanceQualification({ lifecycle, delivery }, heap);
 
   smokeRecord = {
     schema: ACCEPTANCE_SCHEMA,
-    package_version: performance.finalState.packageVersion,
+    package_version: performanceEvidence.finalState.packageVersion,
     environment,
     runtime_lane: runtimeLane,
     heap: completeHeapRecord(heap),
     generated: lifecycle.generated,
     destruction: lifecycle.destruction,
     recovery: {
-      ...performance.recovery,
+      ...performanceEvidence.recovery,
       generation: presentation.generationRecovery,
       recreation_required: recreationRequiredRecoveryEvidence(),
       physical_device_loss: "not forced on the physical adapter",
@@ -281,13 +281,13 @@ async function runSmokePath() {
     cancellation: delivery.cancellation,
     workload: observedWorkload(delivery.warm),
     render: {
-      coverage: performance.finalState.source.coverage,
-      drawn_points: performance.finalState.render.drawnPoints,
+      coverage: performanceEvidence.finalState.source.coverage,
+      drawn_points: performanceEvidence.finalState.render.drawnPoints,
     },
     cold: compactLoad(delivery.cold),
     warm: compactLoad(delivery.warm),
-    foreground_frames: performance.frames,
-    qualification: performance.qualification,
+    foreground_frames: performanceEvidence.frames,
+    qualification: performanceEvidence.qualification,
     display_modes: presentation.displayEvidence,
     projections: presentation.projections,
     input_normalizer: presentation.normalizedInput,
@@ -295,7 +295,7 @@ async function runSmokePath() {
     exact: presentation.exact,
     stale_generation_rejected: true,
     cancelled_query_rejected: true,
-    final_state: performance.finalState,
+    final_state: performanceEvidence.finalState,
     nonclaims: [
       "no arbitrary Source or Query support",
       "no npm registry publication, production hosting, or offline-first support",
