@@ -471,6 +471,8 @@ test("viewer keeps streamed interaction and exact handoff generation-safe", asyn
   assert.equal(exact.authority, "exact_source_record");
   assert.equal(exact.pointOrdinal, "7");
   assert.equal(exactRequests.length, 1);
+  viewer.clearHighlights();
+  assert.equal(viewer.state().highlights.pointCount, 0);
 
   const lateExact = viewer.confirmPoint(pick);
   await Promise.resolve();

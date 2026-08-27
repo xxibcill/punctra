@@ -377,6 +377,8 @@ async function runSmokePath() {
     viewer.confirmPoint(provisional, { signal: cancelledQuery.signal }),
     "exact_query_cancelled",
   );
+  viewer.clearHighlights();
+  assertFact(viewer.state().highlights.pointCount === 0, "complete highlight clear");
 
   const nextGeneration = await viewer.loadSource({
     manifestUrl: STREAM_MANIFEST_URL,
