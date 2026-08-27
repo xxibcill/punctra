@@ -244,6 +244,15 @@ test("a viewport change during asynchronous creation is applied before publicati
   });
 });
 
+test("pointer pan motion is independent of device pixel ratio", async () => {
+  for (const projection of ["perspective", "orthographic"] as const) {
+    const dprOne = await cameraAfterPan(1, projection);
+    const dprTwo = await cameraAfterPan(2, projection);
+    assert.deepEqual(dprTwo.eye, dprOne.eye, `${projection} eye`);
+    assert.deepEqual(dprTwo.target, dprOne.target, `${projection} target`);
+  }
+});
+
 test("a superseded asynchronous mount disposes the late viewer", async () => {
   const first = new FakeViewer();
   const second = new FakeViewer();
@@ -497,6 +506,30 @@ function quickstartController(
     createExactBridge: () => ({ confirm: async () => exactPoint() } as ExactQueryBridge),
     publish: () => {},
   });
+}
+
+async function cameraAfterPan(
+  devicePixelRatio: number,
+  projection: "perspective" | "orthographic",
+): Promise<ViewerState["camera"]> {
+  const viewport = { cssWidth: 960, cssHeight: 600, devicePixelRatio };
+  const viewer = new FakeViewer();
+  viewer.resize(viewport);
+  const controller = quickstartController(
+    async () => viewer as unknown as BrowserViewer,
+    () => viewport,
+  );
+  await controller.mount();
+  if (projection === "orthographic") controller.alternateProjection();
+  const state = controller.navigate({
+    kind: "pan",
+    deltaX: 100,
+    deltaY: -40,
+    source: "pointer",
+  });
+  controller.dispose();
+  assert(state);
+  return state.camera;
 }
 
 function deferredViewer(viewer: FakeViewer) {

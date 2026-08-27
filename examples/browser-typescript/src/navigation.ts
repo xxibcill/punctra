@@ -18,12 +18,12 @@ export function cameraFromState(state: ViewerState): ViewerCamera {
 export function applyNavigation(
   camera: ViewerCamera,
   input: NormalizedViewerInput,
-  viewportHeight: number,
+  viewportCssHeight: number,
 ): ViewerCamera | null {
   if ("deltaX" in input) {
     return input.kind === "orbit"
       ? orbitCamera(camera, input.deltaX, input.deltaY)
-      : panCamera(camera, input.deltaX, input.deltaY, viewportHeight);
+      : panCamera(camera, input.deltaX, input.deltaY, viewportCssHeight);
   }
   if (input.kind === "zoom") return zoomCamera(camera, input.delta);
   return input.code === "KeyP" ? alternateProjection(camera) : null;
@@ -74,13 +74,13 @@ function panCamera(
   camera: ViewerCamera,
   horizontalPixels: number,
   verticalPixels: number,
-  viewportHeight: number,
+  viewportCssHeight: number,
 ): ViewerCamera {
   const forward = normalize(subtract(camera.target, camera.eye));
   const right = normalize(cross(forward, camera.up));
   const up = normalize(cross(right, forward));
   const verticalHeight = visibleHeight(camera);
-  const scale = verticalHeight / Math.max(1, viewportHeight);
+  const scale = verticalHeight / Math.max(1, viewportCssHeight);
   const movement = add(
     scaleVector(right, -horizontalPixels * scale),
     scaleVector(up, verticalPixels * scale),

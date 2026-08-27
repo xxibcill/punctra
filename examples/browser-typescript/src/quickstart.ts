@@ -164,7 +164,7 @@ export class QuickstartController {
     const camera = applyNavigation(
       cameraFromState(viewer.state()),
       input,
-      viewer.state().viewport.physicalHeight,
+      viewer.state().viewport.cssHeight,
     );
     if (!camera) return null;
     const state = viewer.setCamera(camera);
