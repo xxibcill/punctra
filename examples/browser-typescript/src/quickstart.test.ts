@@ -10,6 +10,7 @@ import type {
   SourceLoadResult,
   ViewerCamera,
   ViewerState,
+  ViewportInput,
 } from "@punctra/viewer";
 
 import { runQuickstartAcceptance } from "./acceptance.ts";
@@ -34,7 +35,7 @@ test("packed quickstart exercises the supported workflow and disposes", async ()
   const snapshots: string[] = [];
   const controller = new QuickstartController({
     canvas: {} as HTMLCanvasElement,
-    viewport: { cssWidth: 960, cssHeight: 600, devicePixelRatio: 1 },
+    readViewport: () => ({ cssWidth: 960, cssHeight: 600, devicePixelRatio: 1 }),
     manifestUrl: "https://fixtures.test/fixtures/v1/deployment.json",
     createViewer: async (options) => {
       createOptions.push(options);
@@ -184,6 +185,63 @@ test("loads reject a manifest outside the mounted identity", async () => {
     /bound to the mounted manifest/,
   );
   assert.equal(viewer.loadUrls.length, 0);
+});
+
+test("a remount reads the current viewport after disposal", async () => {
+  let currentViewport: ViewportInput = {
+    cssWidth: 960,
+    cssHeight: 600,
+    devicePixelRatio: 2,
+  };
+  const createdWith: ViewportInput[] = [];
+  const viewers = [new FakeViewer(), new FakeViewer()];
+  const controller = quickstartController(
+    async (options) => {
+      createdWith.push(options.viewport);
+      const viewer = viewers.shift()!;
+      viewer.resize(options.viewport);
+      return viewer as unknown as BrowserViewer;
+    },
+    () => currentViewport,
+  );
+
+  await controller.mount();
+  controller.dispose();
+  currentViewport = { cssWidth: 956, cssHeight: 420, devicePixelRatio: 1 };
+  await controller.mount();
+
+  assert.deepEqual(createdWith, [
+    { cssWidth: 960, cssHeight: 600, devicePixelRatio: 2 },
+    { cssWidth: 956, cssHeight: 420, devicePixelRatio: 1 },
+  ]);
+});
+
+test("a viewport change during asynchronous creation is applied before publication", async () => {
+  let currentViewport: ViewportInput = {
+    cssWidth: 960,
+    cssHeight: 600,
+    devicePixelRatio: 1,
+  };
+  const viewer = new FakeViewer();
+  const creation = deferredViewer(viewer);
+  const controller = quickstartController(
+    async () => creation.promise,
+    () => currentViewport,
+  );
+
+  const mount = controller.mount();
+  currentViewport = { cssWidth: 800, cssHeight: 450, devicePixelRatio: 2 };
+  creation.resolve();
+  const state = await mount;
+
+  assert.deepEqual(state.viewport, {
+    cssWidth: 800,
+    cssHeight: 450,
+    devicePixelRatio: 2,
+    physicalWidth: 1_600,
+    physicalHeight: 900,
+    surfaceBytes: 5_760_000,
+  });
 });
 
 test("a superseded asynchronous mount disposes the late viewer", async () => {
@@ -423,10 +481,17 @@ function viewerFailure(code: "offline" | "cancelled", recoverable: boolean) {
   };
 }
 
-function quickstartController(createViewer: (options: CreateViewerOptions) => Promise<BrowserViewer>) {
+function quickstartController(
+  createViewer: (options: CreateViewerOptions) => Promise<BrowserViewer>,
+  readViewport: () => ViewportInput = () => ({
+    cssWidth: 960,
+    cssHeight: 600,
+    devicePixelRatio: 1,
+  }),
+) {
   return new QuickstartController({
     canvas: {} as HTMLCanvasElement,
-    viewport: { cssWidth: 960, cssHeight: 600, devicePixelRatio: 1 },
+    readViewport,
     manifestUrl: "https://fixtures.test/fixtures/v1/deployment.json",
     createViewer,
     createExactBridge: () => ({ confirm: async () => exactPoint() } as ExactQueryBridge),

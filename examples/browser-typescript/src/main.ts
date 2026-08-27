@@ -13,7 +13,7 @@ const manifestUrl = new URL("/fixtures/v1/deployment.json", location.href).href;
 const canvas = requiredElement<HTMLCanvasElement>("viewer");
 const controller = new QuickstartController({
   canvas,
-  viewport: readViewport(),
+  readViewport,
   manifestUrl,
   createViewer: createPackedViewer,
   createExactBridge: createLasExactQueryBridge,

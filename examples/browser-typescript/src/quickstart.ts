@@ -24,7 +24,7 @@ export interface QuickstartSnapshot {
 
 interface QuickstartOptions {
   readonly canvas: HTMLCanvasElement;
-  readonly viewport: ViewportInput;
+  readonly readViewport: () => ViewportInput;
   readonly manifestUrl: string;
   readonly createViewer: (options: CreateViewerOptions) => Promise<BrowserViewer>;
   readonly createExactBridge: (options: { manifestUrl: string }) => ExactQueryBridge;
@@ -59,11 +59,12 @@ export class QuickstartController {
     const exactQueryBridge = this.#options.createExactBridge({
       manifestUrl: this.#options.manifestUrl,
     });
+    const creationViewport = this.#options.readViewport();
     let viewer: BrowserViewer;
     try {
       viewer = await this.#options.createViewer({
         canvas: this.#options.canvas,
-        viewport: this.#options.viewport,
+        viewport: creationViewport,
         exactQueryBridge,
         assets: { cacheKey: "v0.20-quickstart" },
       });
@@ -81,6 +82,10 @@ export class QuickstartController {
     }
     this.#viewer = viewer;
     try {
+      const publicationViewport = this.#options.readViewport();
+      if (!sameViewport(creationViewport, publicationViewport)) {
+        viewer.resize(publicationViewport);
+      }
       this.#unsubscribe = viewer.subscribe(() => this.#publish());
       const state = viewer.render();
       this.#operation = "Viewer ready; immutable Source not loaded";
@@ -275,6 +280,12 @@ export class QuickstartController {
       operation: this.#operation,
     }));
   }
+}
+
+function sameViewport(left: ViewportInput, right: ViewportInput): boolean {
+  return left.cssWidth === right.cssWidth
+    && left.cssHeight === right.cssHeight
+    && left.devicePixelRatio === right.devicePixelRatio;
 }
 
 function boundManifestUrl(configuredManifestUrl: string, requestedManifestUrl?: string): string {
