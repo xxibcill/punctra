@@ -50,8 +50,8 @@
   },
   "generated_api_reference": {
     "path": "docs/api/browser-sdk.md",
-    "byte_length": 13563,
-    "sha256": "0bac8177b32759d04a63f9253616dfd4e29880ad43068794ea28a483fe31cc4b"
+    "byte_length": 13539,
+    "sha256": "82a4acab1fb7367b445d3cbd4fbcbb06323ef81abbde2893edf5ba45acc95347"
   },
   "immutable_deployment": {
     "manifest": {
@@ -162,7 +162,7 @@
   "qualification": {
     "matrix_path": "docs/releases/v0.20-browser-matrix.json",
     "matrix_schema": "punctra-browser-qualification-matrix-v1",
-    "implementation_commit": "c92a445814e3865fa1820f1e523b37c5e2fa18a8",
+    "implementation_commit": "f7d080c87f4217bcea9164c8d848c87e7bd32afb",
     "qualified_lane": "codex-iab-chromium-151-macos-26-apple-m5-pro",
     "limits": {
       "firstCoverageMilliseconds": 10000,
