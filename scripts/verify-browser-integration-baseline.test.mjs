@@ -38,6 +38,21 @@ test("an accidental exact-decoder export fails the supported surface", async () 
   await assert.rejects(() => verifyBrowserIntegrationBaseline(tampered));
 });
 
+test("declaration drift fails even when required names remain present", async () => {
+  const tampered = structuredClone(baseline);
+  tampered.packages.viewer.declaration_digests["."].sha256 = "00".repeat(32);
+  await assert.rejects(
+    () => verifyBrowserIntegrationBaseline(tampered),
+    /apps\/browser-demo\/web\/sdk\.d\.ts SHA-256 drifted/,
+  );
+});
+
+test("export target drift fails the supported package surface", async () => {
+  const tampered = structuredClone(baseline);
+  tampered.packages.viewer.export_targets["./input"].import = "./sdk.js";
+  await assert.rejects(() => verifyBrowserIntegrationBaseline(tampered));
+});
+
 test("fixture digest drift fails even when semantic facts are unchanged", async () => {
   const tampered = structuredClone(baseline);
   tampered.immutable_deployment.source.sha256 = "00".repeat(32);

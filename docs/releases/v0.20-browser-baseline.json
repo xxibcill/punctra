@@ -22,6 +22,38 @@
         ],
         "./package.json": []
       },
+      "export_targets": {
+        ".": {
+          "types": "./sdk.d.ts",
+          "import": "./sdk.js"
+        },
+        "./input": {
+          "types": "./viewer-input.d.ts",
+          "import": "./viewer-input.js"
+        },
+        "./exact-query": {
+          "types": "./exact-query.d.ts",
+          "import": "./exact-query.js"
+        },
+        "./package.json": "./package.json"
+      },
+      "declaration_digests": {
+        ".": {
+          "path": "apps/browser-demo/web/sdk.d.ts",
+          "byte_length": 1811,
+          "sha256": "4c9094f4f3c971de56f9babab51e30ac1af97ac147180639af59c1acdd8ed1b"
+        },
+        "./input": {
+          "path": "apps/browser-demo/web/viewer-input.d.ts",
+          "byte_length": 792,
+          "sha256": "fffcaf678bfc4f78a8e9c2821c8e31b693cf177efb6e0ad2d8591bb06659c6d2"
+        },
+        "./exact-query": {
+          "path": "apps/browser-demo/web/exact-query.d.ts",
+          "byte_length": 1162,
+          "sha256": "416436c182da7358d3f460661266fab6d56ee2063df76acf2aca10e8ab61c95d"
+        }
+      },
       "required_deployable_assets": [
         "pkg/browser_demo_bg.wasm",
         "stream-worker.js"
@@ -45,7 +77,19 @@
     "react": {
       "name": "@punctra/react",
       "version": "0.20.0-alpha.1",
-      "viewer_peer": "0.20.0-alpha.1"
+      "viewer_peer": "0.20.0-alpha.1",
+      "export_targets": {
+        ".": {
+          "types": "./index.d.ts",
+          "import": "./index.js"
+        },
+        "./package.json": "./package.json"
+      },
+      "declaration_digest": {
+        "path": "packages/react/index.d.ts",
+        "byte_length": 1011,
+        "sha256": "ba45cf4218a58d85ba7446655b86a1767eaf1921bb56da132d9b2ffa32d210c0"
+      }
     }
   },
   "generated_api_reference": {

@@ -64,9 +64,11 @@ async function verifyPackages(packages) {
   const reactManifest = await readJson("packages/react/package.json");
   assert.equal(viewerManifest.name, packages.viewer.name);
   assert.equal(viewerManifest.version, packages.viewer.version);
+  assert.deepEqual(viewerManifest.exports, packages.viewer.export_targets);
   assert.deepEqual(Object.keys(viewerManifest.exports), Object.keys(packages.viewer.supported_entry_points));
   assert.equal(reactManifest.name, packages.react.name);
   assert.equal(reactManifest.version, packages.react.version);
+  assert.deepEqual(reactManifest.exports, packages.react.export_targets);
   assert.equal(reactManifest.peerDependencies["@punctra/viewer"], packages.react.viewer_peer);
 
   const modules = {
@@ -84,11 +86,14 @@ async function verifyPackages(packages) {
     "./exact-query": "apps/browser-demo/web/exact-query.d.ts",
   };
   for (const [entryPoint, declarationPath] of Object.entries(declarations)) {
+    assert.equal(packages.viewer.declaration_digests[entryPoint].path, declarationPath);
+    await verifyDigestRecord(packages.viewer.declaration_digests[entryPoint]);
     const declaration = await readText(declarationPath);
     for (const exportName of packages.viewer.supported_entry_points[entryPoint]) {
       assert.match(declaration, new RegExp(`\\b${escapeRegExp(exportName)}\\b`));
     }
   }
+  await verifyDigestRecord(packages.react.declaration_digest);
   const exactDeclaration = await readText(declarations["./exact-query"]);
   assert.doesNotMatch(exactDeclaration, /decodeLasLayout|decodeLasPointRecord|LasExactQueryLayout/);
   for (const asset of packages.viewer.required_deployable_assets) {
