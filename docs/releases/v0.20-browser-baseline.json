@@ -208,10 +208,10 @@
     "matrix_digest": {
       "path": "docs/releases/v0.20-browser-matrix.json",
       "byte_length": 10061,
-      "sha256": "ec80a99437aeba13cc1f24e75e26b43a17b220f9ec2c2f64c068c5e609e648cb"
+      "sha256": "b33a6e090be82e0352a94291d5978dfe498266f0419b8d36c22149c118ee1e89"
     },
     "matrix_schema": "punctra-browser-qualification-matrix-v1",
-    "implementation_commit": "ff8cc5f42908447f7b787435943a0a3c7201dad6",
+    "implementation_commit": "0e16d924ed9d812dbef3e28726cf33322ffd9ada",
     "qualified_lane": "codex-iab-chromium-151-macos-26-apple-m5-pro",
     "limits": {
       "firstCoverageMilliseconds": 10000,

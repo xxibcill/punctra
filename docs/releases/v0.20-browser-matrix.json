@@ -1,7 +1,7 @@
 {
   "schema": "punctra-browser-qualification-matrix-v1",
   "release": "0.20.0-alpha.1",
-  "implementation_commit": "ff8cc5f42908447f7b787435943a0a3c7201dad6",
+  "implementation_commit": "0e16d924ed9d812dbef3e28726cf33322ffd9ada",
   "verifier_sha256": "f31dcb13dd080ac6b1a7e0ff1ecc69edd0e92f1aa159bab9bf5047b8ac0e8ff1",
   "observed_on": "2026-08-27",
   "qualified_entries": [
