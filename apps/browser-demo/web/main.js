@@ -1,3 +1,5 @@
+import { failureLabel, failureState } from "./failure-policy.js";
+
 const BUILD_CACHE_TOKEN = encodeURIComponent(
   new URL(import.meta.url).searchParams.get("v") ?? "unversioned",
 );
@@ -174,12 +176,11 @@ function failureRecord(error) {
 
 function publishFailure(error, disableControls = false) {
   const failure = failureRecord(error);
+  const state = failureState(failure);
   if (disableControls) setControls(false);
   setHarnessState(
-    failure.code === "webgpu_unavailable" || failure.code === "insecure_context"
-      ? "unsupported"
-      : "failed",
-    `FAIL — ${failure.message}`,
+    state,
+    `${failureLabel(state)} — ${failure.message}`,
     failure.safeAction,
   );
   diagnosticOutput.textContent = JSON.stringify({
