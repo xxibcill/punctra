@@ -6,13 +6,14 @@ import { runQuickstartAcceptance } from "./acceptance.ts";
 import { QUICKSTART_DISPLAY_MODES } from "./display-modes.ts";
 import { parsePackedRuntimeProof, type PackedRuntimeProof } from "./packed-runtime.ts";
 import { QuickstartController, type QuickstartSnapshot } from "./quickstart.ts";
+import { mapClientPointToViewport, viewportFromCanvasBounds } from "./viewport.ts";
 import "./styles.css";
 
 const manifestUrl = new URL("/fixtures/v1/deployment.json", location.href).href;
 const canvas = requiredElement<HTMLCanvasElement>("viewer");
 const controller = new QuickstartController({
   canvas,
-  viewport: viewport(),
+  viewport: readViewport(),
   manifestUrl,
   createViewer: createPackedViewer,
   createExactBridge: createLasExactQueryBridge,
@@ -23,14 +24,17 @@ const inputNormalizer = createInputNormalizer(canvas, (input) => {
   runAction(() => controller.navigate(input));
 }, { preventDefault: true });
 let resizeFrame: number | undefined;
-const resizeObserver = new ResizeObserver(() => {
+const resizeObserver = new ResizeObserver(scheduleResize);
+resizeObserver.observe(canvas);
+window.addEventListener("resize", scheduleResize);
+
+function scheduleResize(): void {
   if (resizeFrame !== undefined) cancelAnimationFrame(resizeFrame);
   resizeFrame = requestAnimationFrame(() => {
     resizeFrame = undefined;
-    if (controller.state()) runAction(() => controller.resize(viewport()));
+    if (controller.state()) runAction(() => controller.resize(readViewport()));
   });
-});
-resizeObserver.observe(canvas);
+}
 
 bindButton("initialize", () => controller.mount());
 bindButton("load-source", () => controller.load({ invalidate: true }));
@@ -49,6 +53,7 @@ canvas.addEventListener("click", (event) => runAction(() => pickCanvasPoint(even
 document.addEventListener("visibilitychange", synchronizeVisibility);
 window.addEventListener("beforeunload", () => {
   document.removeEventListener("visibilitychange", synchronizeVisibility);
+  window.removeEventListener("resize", scheduleResize);
   resizeObserver.disconnect();
   if (resizeFrame !== undefined) cancelAnimationFrame(resizeFrame);
   inputNormalizer.dispose();
@@ -62,8 +67,12 @@ async function pickCanvasPoint(event: MouseEvent): Promise<void> {
   const state = controller.state();
   if (!state) throw new Error("Initialize the viewer before picking.");
   const bounds = canvas.getBoundingClientRect();
-  const x = Math.floor((event.clientX - bounds.left) * state.viewport.devicePixelRatio);
-  const y = Math.floor((event.clientY - bounds.top) * state.viewport.devicePixelRatio);
+  const [x, y] = mapClientPointToViewport(
+    bounds,
+    state.viewport,
+    event.clientX,
+    event.clientY,
+  );
   await controller.pick(x, y);
 }
 
@@ -126,14 +135,8 @@ function resourceLine(state: QuickstartSnapshot["state"]): string {
   ].join(" · ");
 }
 
-function viewport() {
-  const cssWidth = Math.max(320, Math.min(960, canvas.clientWidth || 960));
-  const cssHeight = Math.max(240, Math.min(600, canvas.clientHeight || 600));
-  return {
-    cssWidth,
-    cssHeight,
-    devicePixelRatio: Math.min(4, window.devicePixelRatio || 1),
-  };
+function readViewport() {
+  return viewportFromCanvasBounds(canvas.getBoundingClientRect(), window.devicePixelRatio);
 }
 
 function populateDisplayModes(): void {
