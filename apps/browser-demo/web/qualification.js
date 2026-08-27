@@ -232,6 +232,11 @@ function evaluateRecovery(recovery, failures) {
   );
   checkTrue(
     failures,
+    recovery?.worker?.retry_succeeded,
+    "pre-publication Worker retry",
+  );
+  checkTrue(
+    failures,
     recovery?.network?.recoverable,
     "pre-publication offline recovery",
   );

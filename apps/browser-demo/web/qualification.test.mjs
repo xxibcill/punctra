@@ -193,7 +193,12 @@ function qualificationFixture() {
     },
     recovery: {
       lifecycle: { prior_viewport_preserved: true, resumed: true },
-      worker: { recoverable: true, viewer_retained: true, generation_preserved: true },
+      worker: {
+        recoverable: true,
+        viewer_retained: true,
+        generation_preserved: true,
+        retry_succeeded: true,
+      },
       network: { recoverable: true, viewer_retained: true, generation_preserved: true },
     },
   };

@@ -116,6 +116,7 @@
           "hidden_frame_skipped_and_resumed": true,
           "prepublication_worker_crash_preserved_viewer": true,
           "prepublication_worker_recoverable": true,
+          "prepublication_worker_retry_succeeded": true,
           "prepublication_offline_failure_preserved_viewer": true,
           "prepublication_offline_recoverable": true,
           "cancellation_acknowledgement_milliseconds": 7.599999904632568,

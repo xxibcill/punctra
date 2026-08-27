@@ -117,6 +117,7 @@ export function verifyBrowserQualificationMatrix(matrix, implementationCommit) {
     "hidden_frame_skipped_and_resumed",
     "prepublication_worker_crash_preserved_viewer",
     "prepublication_worker_recoverable",
+    "prepublication_worker_retry_succeeded",
     "prepublication_offline_failure_preserved_viewer",
     "prepublication_offline_recoverable",
     "warm_cache_recreation_zero_binary_requests",
@@ -254,6 +255,7 @@ function evaluationRecord(entry) {
         recoverable: observations.recovery.prepublication_worker_recoverable,
         viewer_retained: observations.recovery.prepublication_worker_crash_preserved_viewer,
         generation_preserved: observations.recovery.prepublication_worker_crash_preserved_viewer,
+        retry_succeeded: observations.recovery.prepublication_worker_retry_succeeded,
       },
       network: {
         recoverable: observations.recovery.prepublication_offline_recoverable,

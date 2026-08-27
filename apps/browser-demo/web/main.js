@@ -304,6 +304,7 @@ async function runSmokePath() {
     manifestUrl: `${STREAM_MANIFEST_URL}?worker_fault=crash`,
     expectedCode: "worker_failed",
     label: "pre-publication worker crash",
+    retryManifestUrl: STREAM_MANIFEST_URL,
   });
   discardViewer();
 
@@ -490,7 +491,7 @@ async function cancellationProbe() {
   return { code: "cancelled", acknowledgement_milliseconds: acknowledgementMilliseconds, limit_milliseconds: 1_000 };
 }
 
-async function exercisePrepublicationRecovery({ manifestUrl, expectedCode, label }) {
+async function exercisePrepublicationRecovery({ manifestUrl, expectedCode, label, retryManifestUrl }) {
   const generationBeforeFailure = viewer.state().generation;
   const failure = await expectCode(viewer.loadSource({
     manifestUrl,
@@ -500,12 +501,22 @@ async function exercisePrepublicationRecovery({ manifestUrl, expectedCode, label
   assertFact(failure.recoverable === true, `${label} is recoverable`);
   assertFact(viewer.state().lifecycle === "ready", `${label} retains viewer`);
   assertFact(viewer.state().generation === generationBeforeFailure, `${label} preserves generation`);
-  return {
+  const evidence = {
     code: failure.code,
     recoverable: failure.recoverable,
     viewer_retained: true,
     generation_preserved: true,
   };
+  if (retryManifestUrl !== undefined) {
+    const retry = await viewer.loadSource({
+      manifestUrl: retryManifestUrl,
+      cacheMode: "none",
+      credentials: "same-origin",
+    });
+    verifyStreamingResult(retry, `${label} retry`);
+    evidence.retry_succeeded = true;
+  }
+  return evidence;
 }
 
 function verifyStreamingResult(result, label) {
