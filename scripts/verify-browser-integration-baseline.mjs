@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
@@ -124,27 +125,18 @@ async function verifyDeployment(deploymentBaseline) {
   assert.equal(deploymentBaseline.root.displayed_batches, QUALIFICATION_WORKLOAD.publishedBatches);
 }
 
+let generatedSceneFacts;
+
 async function verifyGeneratedScene(scene) {
-  const source = await readText("apps/browser-demo/src/scene.rs");
-  for (const fixedDeclaration of [
-    "ViewGenerationKey::new(ViewId::new(15), 1)",
-    "BatchKey::new(1)",
-    "BatchVersion::new(1)",
-    "SCENE_SIDE: u64 = 33",
-    "const SOURCE_ID: SourceId = SourceId::new([0x15; 32])",
-    "const WORLD_ORIGIN: [f64; 3] = [500_000.0, 4_600_000.0, 100.0]",
-  ]) assert.match(source, new RegExp(escapeRegExp(fixedDeclaration)));
-  assert.deepEqual(scene, {
-    source_identity: "15".repeat(32),
-    point_count: 1089,
-    estimated_gpu_bytes: 26136,
-    world_origin: [500000, 4600000, 100],
-    view_id: 15,
-    generation: 1,
-    batch_key: 1,
-    batch_version: 1,
-    centre_point_ordinal: 544,
-  });
+  generatedSceneFacts ??= JSON.parse(commandOutput(
+    "cargo",
+    ["run", "--quiet", "-p", "browser-demo", "--bin", "scene_facts"],
+  ));
+  assert.deepEqual(
+    scene,
+    generatedSceneFacts,
+    "baseline generated-scene facts must match PreparedScene output",
+  );
 }
 
 async function verifyPresentationPolicy(policy) {
@@ -257,6 +249,16 @@ async function readJson(relativePath) {
 
 function sha256(bytes) {
   return createHash("sha256").update(bytes).digest("hex");
+}
+
+function commandOutput(command, arguments_) {
+  const result = spawnSync(command, arguments_, {
+    cwd: repositoryRoot,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  assert.equal(result.status, 0, `${command} ${arguments_.join(" ")} failed: ${result.stderr}`);
+  return result.stdout.trim();
 }
 
 function escapeRegExp(value) {

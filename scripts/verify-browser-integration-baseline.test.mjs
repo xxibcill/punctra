@@ -56,6 +56,15 @@ test("the integration baseline binds the qualification observations", async () =
   );
 });
 
+test("generated-scene facts come from the executable scene preparation", async () => {
+  const tampered = structuredClone(baseline);
+  tampered.generated_scene.point_count = 1;
+  await assert.rejects(
+    () => verifyBrowserIntegrationBaseline(tampered),
+    /baseline generated-scene facts must match PreparedScene output/,
+  );
+});
+
 test("quickstart evidence is byte-bound and semantically verified", async () => {
   const digestTampered = structuredClone(baseline);
   digestTampered.quickstart.evidence.sha256 = "00".repeat(32);

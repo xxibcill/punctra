@@ -53,6 +53,7 @@ impl PreparedScene {
             source_identity: SOURCE_ID,
             point_count: batch.point_count(),
             estimated_gpu_bytes: batch.estimated_gpu_bytes(),
+            world_origin: WORLD_ORIGIN,
             initial_requests: 1,
             retained_nodes: 0,
             view_id: VIEW_GENERATION.view().get(),
@@ -123,12 +124,13 @@ impl PreparedScene {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
 pub(crate) struct SceneFacts {
     #[serde(serialize_with = "serialize_required_source_identity")]
     pub(crate) source_identity: SourceId,
     pub(crate) point_count: u64,
     pub(crate) estimated_gpu_bytes: u64,
+    pub(crate) world_origin: [f64; 3],
     pub(crate) initial_requests: u64,
     pub(crate) retained_nodes: u64,
     pub(crate) view_id: u64,

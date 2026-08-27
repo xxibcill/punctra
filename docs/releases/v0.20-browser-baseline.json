@@ -92,11 +92,15 @@
     "point_count": 1089,
     "estimated_gpu_bytes": 26136,
     "world_origin": [500000, 4600000, 100],
+    "initial_requests": 1,
+    "retained_nodes": 0,
     "view_id": 15,
     "generation": 1,
     "batch_key": 1,
     "batch_version": 1,
-    "centre_point_ordinal": 544
+    "centre_point_ordinal": 544,
+    "progressive_coverage": true,
+    "cpu_authoritative": false
   },
   "presentation_policy": {
     "display_modes": [
