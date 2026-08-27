@@ -400,6 +400,30 @@ test("Source timings wait for an actual frame after resuming from hidden", async
   assert.equal(loaded.state.render.renderedFrames > 0, true);
 });
 
+test("hidden Source completion rejects promptly when its signal is aborted", async () => {
+  const viewer = await createBrowserViewer({
+    bindings: { createViewer: async () => new HiddenRenderRawViewer() },
+    canvas: {},
+    viewport: viewport(),
+    WorkerConstructor: HiddenCompletionWorker,
+    workerUrl: "https://fixtures.test/stream-worker.js",
+  });
+  viewer.pause();
+  const controller = new AbortController();
+  const load = viewer.loadSource({
+    manifestUrl: "https://fixtures.test/deployment.json",
+    signal: controller.signal,
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+  controller.abort();
+  await assert.rejects(
+    load,
+    (error) => error.code === "cancelled" && error.recoverable === false,
+  );
+  assert.equal(viewer.state().lifecycle, "destroyed");
+});
+
 test("every recreation-required renderer failure fuses the viewer", async () => {
   for (const code of [
     "pick_recording",
@@ -1201,6 +1225,24 @@ class HiddenRenderRawViewer extends FakeRawViewer {
       return this.json();
     }
     return super.render();
+  }
+}
+
+class HiddenCompletionWorker extends FixtureWorker {
+  postMessage(message) {
+    if (message.type === "cancel") return;
+    queueMicrotask(() => {
+      publishFixtureBatch(this, message);
+      const deployment = fixtureDeployment();
+      this.emit({
+        schema: WORKER_SCHEMA,
+        type: "complete",
+        operation_id: message.operation_id,
+        deployment,
+        metrics: { requestCount: 3 },
+        decode: { pointCount: 1 },
+      });
+    });
   }
 }
 

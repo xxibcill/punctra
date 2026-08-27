@@ -18,7 +18,7 @@ export function runWorkerOperation({
       ? workerFactory(workerUrl, workerOptions)
       : new WorkerConstructor(workerUrl, workerOptions);
     let settled = false;
-    const timeout = globalThis.setTimeout(
+    let timeout = globalThis.setTimeout(
       () => settle(reject, timeoutFailure),
       timeoutMilliseconds,
     );
@@ -30,7 +30,7 @@ export function runWorkerOperation({
     function settle(callback, value) {
       if (settled) return;
       settled = true;
-      globalThis.clearTimeout(timeout);
+      if (timeout !== undefined) globalThis.clearTimeout(timeout);
       signal?.removeEventListener("abort", onAbort);
       worker.terminate();
       callback(value);
@@ -40,6 +40,11 @@ export function runWorkerOperation({
       resolve: (value) => settle(resolve, value),
       reject: (error) => settle(reject, error),
       postMessage: (message) => worker.postMessage(message),
+      pauseTimeout: () => {
+        if (settled || timeout === undefined) return;
+        globalThis.clearTimeout(timeout);
+        timeout = undefined;
+      },
     });
     worker.addEventListener("error", (event) => controls.reject(errorFailure(event)));
     worker.addEventListener("messageerror", () => controls.reject(messageErrorFailure));

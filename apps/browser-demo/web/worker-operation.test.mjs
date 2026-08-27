@@ -110,6 +110,36 @@ test("worker operation forwards cancellation and still owns terminal settlement"
   assert.equal(worker.terminations, 1);
 });
 
+test("worker operation can pause its timeout while completion waits for a consumer", async () => {
+  const worker = new FakeWorker();
+  let controls;
+  const pending = runWorkerOperation({
+    WorkerConstructor: class { constructor() { return worker; } },
+    workerUrl: "worker.js",
+    workerName: "operation-paused",
+    timeoutMilliseconds: 10,
+    timeoutFailure: { code: "timeout" },
+    errorFailure: (event) => ({ code: "error", message: event.message }),
+    messageErrorFailure: { code: "message_error" },
+    initialMessage: { type: "start" },
+    onMessage(message, operationControls) {
+      if (message.type !== "complete") return;
+      controls = operationControls;
+      controls.pauseTimeout();
+    },
+  });
+
+  worker.emit("message", { data: { type: "complete" } });
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  let settled = false;
+  pending.finally(() => { settled = true; });
+  await Promise.resolve();
+  assert.equal(settled, false);
+
+  controls.resolve("done");
+  assert.equal(await pending, "done");
+});
+
 class FakeWorker {
   constructor() {
     this.listeners = new Map();

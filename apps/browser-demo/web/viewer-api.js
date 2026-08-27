@@ -442,7 +442,9 @@ class BrowserViewer {
               return;
             }
             this.#callRaw("completeStream");
+            controls.pauseTimeout();
             let completion;
+            let onCompletionAbort;
             completion = {
               controller,
               flush: () => {
@@ -460,6 +462,7 @@ class BrowserViewer {
                   settledViewMilliseconds: finished - loadStarted,
                   mainThreadBatchMillisecondsHighWater: mainThreadMillisecondsHighWater,
                 };
+                controller.signal.removeEventListener("abort", onCompletionAbort);
                 controls.resolve({
                   deployment: message.deployment,
                   metrics: message.metrics,
@@ -470,10 +473,17 @@ class BrowserViewer {
                   state,
                 });
               },
-              reject: (error) => controls.reject(error),
+              reject: (error) => {
+                controller.signal.removeEventListener("abort", onCompletionAbort);
+                if (this.#pendingLoadCompletion === completion) this.#pendingLoadCompletion = undefined;
+                controls.reject(error);
+              },
             };
+            onCompletionAbort = () => completion.reject(cancellationFailure(controller.signal, "cancelled"));
+            controller.signal.addEventListener("abort", onCompletionAbort, { once: true });
             this.#pendingLoadCompletion = completion;
-            completion.flush();
+            if (controller.signal.aborted) onCompletionAbort();
+            else completion.flush();
           }
         },
       });
