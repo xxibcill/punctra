@@ -361,6 +361,7 @@ async function runLifecycleQualification(initial, runtimeLane) {
   const generatedPick = await pickCentre();
   assertFact(generatedPick?.pointOrdinal === "544", "generated centre pick identity");
   const generated = { state: viewer.state(), pick: generatedPick };
+  const resumed = viewer.state().lifecycle === "ready";
   const destroyedViewer = viewer;
   const stalePresentation = destroyedViewer.requestRender();
   discardViewer();
@@ -374,7 +375,7 @@ async function runLifecycleQualification(initial, runtimeLane) {
       prior_viewport_preserved: true,
       alternate_device_pixel_ratio: alternateDpr,
       hidden_frame_skips: 1,
-      resumed: viewer.state().lifecycle === "ready",
+      resumed,
     },
     generated,
     destruction: {
