@@ -2,7 +2,7 @@
   "schema": "punctra-browser-qualification-matrix-v1",
   "release": "0.19.0-alpha.1",
   "implementation_commit": "d891dec55b7a7076adcac78e9c40a9c49e476a83",
-  "verifier_sha256": "2d4a34b596af57191a29d496a8bb7fbb7e9e21939f5b118a1de460d938f648f2",
+  "verifier_sha256": "ba596d8b2e9b4d5f7d6fbe6ba96e0db564649e14ac42e63fd095514d3536bf85",
   "observed_on": "2026-08-26",
   "qualified_entries": [
     {
@@ -75,6 +75,10 @@
           "coverage": "sampled",
           "displayed_points": 4096,
           "displayed_batches": 4
+        },
+        "render": {
+          "coverage": "sampled",
+          "drawn_points": 4096
         },
         "cold": {
           "first_coverage_milliseconds": 26.299999952316284,

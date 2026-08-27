@@ -471,6 +471,10 @@ async function runSmokePath() {
     },
     cancellation,
     workload: observedWorkload(warm),
+    render: {
+      coverage: finalState.source.coverage,
+      drawn_points: finalState.render.drawnPoints,
+    },
     cold: compactLoad(cold),
     warm: compactLoad(warm),
     foreground_frames: frames,

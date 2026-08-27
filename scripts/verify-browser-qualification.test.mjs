@@ -83,6 +83,15 @@ test("observed workload identity is bound to the qualified deployment", () => {
   }
 });
 
+test("observed render output is required by the evaluator", () => {
+  const tampered = structuredClone(matrix);
+  tampered.qualified_entries[0].observations.render.drawn_points = 1;
+  assert.throws(
+    () => verifyBrowserQualificationMatrix(tampered, implementationCommit),
+    /observed render output must match the qualified workload/,
+  );
+});
+
 test("the JSON matrix and Markdown record pin the same qualification verifier", () => {
   assert.equal(matrix.verifier_sha256, releaseVerifierSha256(releaseRecord));
   assert.match(matrix.verifier_sha256, /^[0-9a-f]{64}$/);

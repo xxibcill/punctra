@@ -240,8 +240,13 @@ function qualificationFixture() {
     cancellation: { acknowledgementMilliseconds: 10 },
     viewport: { physicalWidth: 1_600, physicalHeight: 1_000, surfaceBytes: 6_400_000 },
     state: {
-      source: { publishedPoints: 4_096, publishedBatches: 4, retainedRecordBytes: 131_072 },
-      render: { residentBytes: 98_304, transientTextureBytes: 12_800_000 },
+      source: {
+        coverage: "sampled",
+        publishedPoints: 4_096,
+        publishedBatches: 4,
+        retainedRecordBytes: 131_072,
+      },
+      render: { drawnPoints: 4_096, residentBytes: 98_304, transientTextureBytes: 12_800_000 },
     },
     recovery: {
       lifecycle: { prior_viewport_preserved: true, resumed: true },

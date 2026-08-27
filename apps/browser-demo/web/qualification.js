@@ -367,6 +367,12 @@ function evaluateViewport(viewport, failures) {
 function evaluateState(state, failures) {
   checkDifferent(
     failures,
+    state.source.coverage,
+    QUALIFICATION_WORKLOAD.coverage,
+    "Source Coverage",
+  );
+  checkDifferent(
+    failures,
     state.source.publishedPoints,
     QUALIFICATION_WORKLOAD.sampledPoints,
     "published Points",
@@ -388,6 +394,12 @@ function evaluateState(state, failures) {
     state.render.residentBytes,
     QUALIFICATION_WORKLOAD.rendererResidentBytes,
     "renderer resident bytes",
+  );
+  checkDifferent(
+    failures,
+    state.render.drawnPoints,
+    QUALIFICATION_WORKLOAD.sampledPoints,
+    "drawn Points",
   );
   checkAbove(failures, state.source.publishedPoints, QUALIFICATION_LIMITS.residentPoints, "resident Points", "Points");
   checkAbove(failures, state.source.retainedRecordBytes, QUALIFICATION_LIMITS.retainedRecordBytes, "retained record bytes", "bytes");

@@ -118,6 +118,7 @@ export function verifyBrowserQualificationMatrix(matrix, implementationCommit) {
   assert.equal(observations.acceptance_schema, "punctra-browser-qualification-v1");
   assert.deepEqual(observations.limits, QUALIFICATION_LIMITS);
   verifyWorkloadObservations(entry);
+  verifyRenderObservations(entry);
   assert.deepEqual(
     observations.recovery.recreation_required,
     recreationRequiredRecoveryEvidence(),
@@ -256,11 +257,13 @@ function evaluationRecord(entry) {
     },
     state: {
       source: {
-        publishedPoints: entry.workload.displayed_points,
-        publishedBatches: entry.workload.displayed_batches,
+        coverage: observations.render.coverage,
+        publishedPoints: observations.workload.displayed_points,
+        publishedBatches: observations.workload.displayed_batches,
         retainedRecordBytes: observations.resources.retained_record_bytes,
       },
       render: {
+        drawnPoints: observations.render.drawn_points,
         residentBytes: observations.resources.renderer_resident_bytes,
         transientTextureBytes: observations.resources.transient_texture_bytes,
       },
@@ -366,6 +369,17 @@ function verifyWorkloadObservations(entry) {
       displayed_batches: workload.displayed_batches,
     },
     "observed workload identity must match the qualified deployment",
+  );
+}
+
+function verifyRenderObservations(entry) {
+  assert.deepEqual(
+    entry.observations.render,
+    {
+      coverage: entry.workload.coverage,
+      drawn_points: entry.workload.displayed_points,
+    },
+    "observed render output must match the qualified workload",
   );
 }
 
