@@ -139,6 +139,18 @@ test("qualification evaluation reports every violated fixed ceiling and exact fa
     "cold first sampled Coverage exceeded 10000 ms",
     "warm binary network request count differed from 0",
   ]);
+
+  const recoveryResult = evaluateQualification({
+    ...passing,
+    recovery: {
+      ...passing.recovery,
+      worker: { ...passing.recovery.worker, recoverable: false },
+    },
+  });
+  assert.equal(recoveryResult.passed, false);
+  assert.deepEqual(recoveryResult.failures, [
+    "pre-publication Worker recovery must be true",
+  ]);
 });
 
 test("recreation-required evidence names the outcome and safe host action", () => {
@@ -178,6 +190,11 @@ function qualificationFixture() {
     state: {
       source: { publishedPoints: 4_096, publishedBatches: 4, retainedRecordBytes: 131_072 },
       render: { residentBytes: 98_304, transientTextureBytes: 12_800_000 },
+    },
+    recovery: {
+      lifecycle: { prior_viewport_preserved: true, resumed: true },
+      worker: { recoverable: true, viewer_retained: true, generation_preserved: true },
+      network: { recoverable: true, viewer_retained: true, generation_preserved: true },
     },
   };
 }

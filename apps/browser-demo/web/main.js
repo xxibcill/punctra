@@ -409,6 +409,11 @@ async function runSmokePath() {
   });
   heap.afterFrames = captureJsHeap(performance);
   const finalState = viewer.state();
+  const recovery = {
+    lifecycle: lifecycleRecovery,
+    worker: workerRecovery,
+    network: networkRecovery,
+  };
   const qualification = evaluateQualification({
     cold,
     warm,
@@ -418,6 +423,7 @@ async function runSmokePath() {
     },
     viewport: finalState.viewport,
     state: finalState,
+    recovery,
   });
   assertFact(
     qualification.passed,
@@ -432,9 +438,7 @@ async function runSmokePath() {
     generated: generatedEvidence,
     destruction: destructionEvidence,
     recovery: {
-      lifecycle: lifecycleRecovery,
-      worker: workerRecovery,
-      network: networkRecovery,
+      ...recovery,
       generation: generationRecovery,
       recreation_required: recreationRequiredRecoveryEvidence(),
       physical_device_loss: "not forced on the physical adapter",
@@ -493,6 +497,7 @@ async function exercisePrepublicationRecovery({ manifestUrl, expectedCode, label
     cacheMode: "none",
     credentials: "same-origin",
   }), expectedCode);
+  assertFact(failure.recoverable === true, `${label} is recoverable`);
   assertFact(viewer.state().lifecycle === "ready", `${label} retains viewer`);
   assertFact(viewer.state().generation === generationBeforeFailure, `${label} preserves generation`);
   return {

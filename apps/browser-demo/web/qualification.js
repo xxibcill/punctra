@@ -104,6 +104,7 @@ export function evaluateQualification(record) {
   evaluateCancellation(record.cancellation, failures);
   evaluateViewport(record.viewport, failures);
   evaluateState(record.state, failures);
+  evaluateRecovery(record.recovery, failures);
   checkDifferent(
     failures,
     record.warm.metrics.requestCount,
@@ -203,6 +204,49 @@ function evaluateCancellation(cancellation, failures) {
   );
 }
 
+function evaluateRecovery(recovery, failures) {
+  checkTrue(
+    failures,
+    recovery?.lifecycle?.prior_viewport_preserved,
+    "invalid resize recovery",
+  );
+  checkTrue(
+    failures,
+    recovery?.lifecycle?.resumed,
+    "hidden resume recovery",
+  );
+  checkTrue(
+    failures,
+    recovery?.worker?.recoverable,
+    "pre-publication Worker recovery",
+  );
+  checkTrue(
+    failures,
+    recovery?.worker?.viewer_retained,
+    "pre-publication Worker viewer retention",
+  );
+  checkTrue(
+    failures,
+    recovery?.worker?.generation_preserved,
+    "pre-publication Worker generation preservation",
+  );
+  checkTrue(
+    failures,
+    recovery?.network?.recoverable,
+    "pre-publication offline recovery",
+  );
+  checkTrue(
+    failures,
+    recovery?.network?.viewer_retained,
+    "pre-publication offline viewer retention",
+  );
+  checkTrue(
+    failures,
+    recovery?.network?.generation_preserved,
+    "pre-publication offline generation preservation",
+  );
+}
+
 function evaluateViewport(viewport, failures) {
   checkAbove(
     failures,
@@ -266,6 +310,11 @@ function checkAbove(failures, actual, limit, label, unit) {
 function checkDifferent(failures, actual, expected, label) {
   if (actual === expected) return;
   failures.push(`${label} differed from ${expected}`);
+}
+
+function checkTrue(failures, actual, label) {
+  if (actual === true) return;
+  failures.push(`${label} must be true`);
 }
 
 function percentile(ordered, percentage) {
