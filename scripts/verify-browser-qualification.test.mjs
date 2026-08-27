@@ -109,6 +109,22 @@ test("observed render output is required by the evaluator", () => {
   );
 });
 
+test("qualification evidence preserves environment and heap phase fields", () => {
+  const missingEnvironment = structuredClone(matrix);
+  delete missingEnvironment.qualified_entries[0].observations.environment.visibility_state;
+  assert.throws(
+    () => verifyBrowserQualificationMatrix(missingEnvironment, implementationCommit),
+    /recorded browser environment must include the declared runtime facts/,
+  );
+
+  const missingHeapPhase = structuredClone(matrix);
+  delete missingHeapPhase.qualified_entries[0].observations.resources.javascript_heap_before_bytes;
+  assert.throws(
+    () => verifyBrowserQualificationMatrix(missingHeapPhase, implementationCommit),
+    /resources must preserve javascript_heap_before_bytes/,
+  );
+});
+
 test("the JSON matrix and Markdown record pin the same qualification verifier", () => {
   assert.equal(matrix.verifier_sha256, releaseVerifierSha256(releaseRecord));
   assert.match(matrix.verifier_sha256, /^[0-9a-f]{64}$/);

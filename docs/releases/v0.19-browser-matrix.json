@@ -2,7 +2,7 @@
   "schema": "punctra-browser-qualification-matrix-v1",
   "release": "0.19.0-alpha.1",
   "implementation_commit": "e840c2210a0ad2f1300f1f0bdc4675bedaf5bb78",
-  "verifier_sha256": "8cbe35082ea181a71f9348f684a3fc88742d8c5d84ab9589cb1b446e1c9caf02",
+  "verifier_sha256": "b9be3ea917e8c6e561d2ceead7bc4bb7001d0228741d6dfd370ca4b105861a72",
   "observed_on": "2026-08-26",
   "qualified_entries": [
     {
@@ -80,6 +80,20 @@
           "coverage": "sampled",
           "drawn_points": 4096
         },
+        "environment": {
+          "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36",
+          "platform": "MacIntel",
+          "language": "en-US",
+          "logical_processors": 15,
+          "screen": {
+            "width": 1512,
+            "height": 982,
+            "color_depth": 30,
+            "pixel_depth": 30
+          },
+          "visibility_state": "visible",
+          "secure_context": true
+        },
         "cold": {
           "first_coverage_milliseconds": 26.299999952316284,
           "settled_view_milliseconds": 28.59999990463257,
@@ -118,6 +132,10 @@
           "transient_texture_bytes": 15293256,
           "javascript_heap_api": "performance.memory.usedJSHeapSize",
           "javascript_heap_status": "non_standard_observation",
+          "javascript_heap_before_bytes": null,
+          "javascript_heap_after_cold_bytes": null,
+          "javascript_heap_after_warm_bytes": null,
+          "javascript_heap_after_frames_bytes": null,
           "javascript_heap_high_water_bytes": 6942736,
           "process_resident_bytes": null,
           "physical_cache_allocation_bytes": null,

@@ -73,6 +73,7 @@ export function verifyBrowserQualificationMatrix(matrix, implementationCommit) {
   assertNonnegativeNumbers(observations, "observations");
   assert.equal(observations.acceptance_schema, "punctra-browser-qualification-v1");
   assert.deepEqual(observations.limits, QUALIFICATION_LIMITS);
+  verifyEnvironmentObservations(entry);
   verifyWorkloadObservations(entry);
   verifyRenderObservations(entry);
   assert.deepEqual(
@@ -468,6 +469,27 @@ function verifyRenderObservations(entry) {
   );
 }
 
+function verifyEnvironmentObservations(entry) {
+  assert.deepEqual(
+    entry.observations.environment,
+    {
+      user_agent: entry.browser.user_agent,
+      platform: entry.operating_system.user_agent_platform,
+      language: entry.browser.language,
+      logical_processors: entry.browser.logical_processors,
+      screen: {
+        width: entry.display.screen_css_pixels[0],
+        height: entry.display.screen_css_pixels[1],
+        color_depth: entry.display.color_depth,
+        pixel_depth: entry.display.pixel_depth,
+      },
+      visibility_state: "visible",
+      secure_context: true,
+    },
+    "recorded browser environment must include the declared runtime facts",
+  );
+}
+
 function loadRecord(load) {
   return {
     timings: {
@@ -523,6 +545,24 @@ function verifyResourceObservations(entry) {
   assert.equal(entry.display.canvas_bytes, physicalWidth * physicalHeight * 4);
   assert.equal(resources.javascript_heap_api, "performance.memory.usedJSHeapSize");
   assert.equal(resources.javascript_heap_status, "non_standard_observation");
+  for (const field of [
+    "javascript_heap_before_bytes",
+    "javascript_heap_after_cold_bytes",
+    "javascript_heap_after_warm_bytes",
+    "javascript_heap_after_frames_bytes",
+  ]) {
+    assert.equal(
+      Object.hasOwn(resources, field),
+      true,
+      `resources must preserve ${field}`,
+    );
+    const value = resources[field];
+    assert.equal(
+      value === null || (Number.isSafeInteger(value) && value >= 0),
+      true,
+      `${field} must be a nullable nonnegative integer`,
+    );
+  }
   assert.equal(resources.process_resident_bytes, null);
   assert.equal(resources.physical_cache_allocation_bytes, null);
   assert.equal(resources.physical_gpu_allocation_bytes, null);
