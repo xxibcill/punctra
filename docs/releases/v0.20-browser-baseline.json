@@ -125,7 +125,7 @@
     "evidence": {
       "path": "docs/releases/v0.20-browser-quickstart.json",
       "byte_length": 1310,
-      "sha256": "897a738de37b76cfd34e9a0cccccedd01ba38b37be8b9cae9af1bd4e57489b4e"
+      "sha256": "e54e40f846987fcac05b6f981daa1d80011c2964ab2c1dfc4ace36b7355ec58d"
     },
     "packed_runtime": {
       "path": "target/browser-quickstart/punctra-packed-runtime.json",
@@ -135,7 +135,7 @@
         "serverContract": "punctra-strict-range-v1",
         "viewerPackage": "@punctra/viewer",
         "viewerVersion": "0.20.0-alpha.1",
-        "viewerArtifactSha256": "b61e59f0f0b34776158494af272dc684156c24806a0abbefa2c0d2b626e7e834"
+        "viewerArtifactSha256": "3282f7192fc60f4e45acfaa79be8b7e542d771582a5095f48ecea404b590703c"
       }
     },
     "imports": [
@@ -162,7 +162,7 @@
   "qualification": {
     "matrix_path": "docs/releases/v0.20-browser-matrix.json",
     "matrix_schema": "punctra-browser-qualification-matrix-v1",
-    "implementation_commit": "a2f7baf112c4fd188e6edda405fa67a6c1637dca",
+    "implementation_commit": "c92a445814e3865fa1820f1e523b37c5e2fa18a8",
     "qualified_lane": "codex-iab-chromium-151-macos-26-apple-m5-pro",
     "limits": {
       "firstCoverageMilliseconds": 10000,

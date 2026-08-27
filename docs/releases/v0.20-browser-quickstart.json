@@ -35,7 +35,7 @@
       "serverContract": "punctra-strict-range-v1",
       "viewerPackage": "@punctra/viewer",
       "viewerVersion": "0.20.0-alpha.1",
-      "viewerArtifactSha256": "b61e59f0f0b34776158494af272dc684156c24806a0abbefa2c0d2b626e7e834"
+      "viewerArtifactSha256": "3282f7192fc60f4e45acfaa79be8b7e542d771582a5095f48ecea404b590703c"
     }
   }
 }
