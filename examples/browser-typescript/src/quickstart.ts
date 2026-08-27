@@ -12,6 +12,9 @@ import type { NormalizedViewerInput } from "@punctra/viewer/input";
 
 import { alternateProjection, applyNavigation, cameraFromState } from "./navigation.ts";
 
+const ACCEPTANCE_QUERY_KEYS = new Set(["acceptance_phase", "delay_ms", "fault"]);
+const MANIFEST_URL_BASE = "http://localhost/";
+
 export interface QuickstartSnapshot {
   readonly state: ViewerState | null;
   readonly selectedPoint: ProvisionalPick | null;
@@ -96,6 +99,7 @@ export class QuickstartController {
     readonly onState?: (state: ViewerState) => void;
   } = {}): Promise<ViewerState> {
     const viewer = this.#requireViewer();
+    const manifestUrl = boundManifestUrl(this.#options.manifestUrl, options.manifestUrl);
     const asyncRevision = ++this.#asyncRevision;
     const unsubscribe = options.onState ? viewer.subscribe(options.onState) : undefined;
     this.#operation = "Streaming verified sampled Coverage";
@@ -103,7 +107,7 @@ export class QuickstartController {
     let result;
     try {
       result = await viewer.loadSource({
-        manifestUrl: options.manifestUrl ?? this.#options.manifestUrl,
+        manifestUrl,
         cacheMode: "persistent",
         credentials: "same-origin",
         invalidate: options.invalidate,
@@ -271,6 +275,27 @@ export class QuickstartController {
       operation: this.#operation,
     }));
   }
+}
+
+function boundManifestUrl(configuredManifestUrl: string, requestedManifestUrl?: string): string {
+  const configured = new URL(configuredManifestUrl, globalThis.location?.href ?? MANIFEST_URL_BASE);
+  const requested = new URL(
+    requestedManifestUrl ?? configured.href,
+    globalThis.location?.href ?? MANIFEST_URL_BASE,
+  );
+  if (
+    requested.origin !== configured.origin
+    || requested.pathname !== configured.pathname
+    || requested.hash !== configured.hash
+  ) {
+    throw new Error("Source manifest URL must remain bound to the mounted manifest.");
+  }
+  for (const key of requested.searchParams.keys()) {
+    if (!ACCEPTANCE_QUERY_KEYS.has(key) || requested.searchParams.getAll(key).length !== 1) {
+      throw new Error("Source manifest URL contains an unsupported identity variation.");
+    }
+  }
+  return requested.href;
 }
 
 function cancelledOperation(message: string): DOMException {

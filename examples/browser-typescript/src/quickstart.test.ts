@@ -73,6 +73,18 @@ test("packed quickstart exercises the supported workflow and disposes", async ()
   assert(snapshots.includes("Viewer disposed"));
 });
 
+test("loads reject a manifest outside the mounted identity", async () => {
+  const viewer = new FakeViewer();
+  const controller = quickstartController(async () => viewer as unknown as BrowserViewer);
+
+  await controller.mount();
+  await assert.rejects(
+    () => controller.load({ manifestUrl: "https://fixtures.test/other/deployment.json" }),
+    /bound to the mounted manifest/,
+  );
+  assert.equal(viewer.loadUrls.length, 0);
+});
+
 test("a superseded asynchronous mount disposes the late viewer", async () => {
   const first = new FakeViewer();
   const second = new FakeViewer();
@@ -145,6 +157,7 @@ class FakeViewer {
   data = viewerState();
   listeners = new Set<(state: ViewerState) => void>();
   disposals = 0;
+  loadUrls: string[] = [];
 
   state(): ViewerState {
     return this.data;
@@ -163,6 +176,7 @@ class FakeViewer {
   }
 
   async loadSource(options: { manifestUrl: string; signal?: AbortSignal }): Promise<SourceLoadResult> {
+    this.loadUrls.push(options.manifestUrl);
     if (options.manifestUrl.includes("delay_ms")) {
       await new Promise<never>((_resolve, reject) => {
         options.signal?.addEventListener("abort", () => reject({ code: "cancelled" }), { once: true });
