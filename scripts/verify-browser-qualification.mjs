@@ -6,10 +6,13 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
   QUALIFICATION_LIMITS,
-  QUALIFICATION_RUNTIME_LANE,
   evaluateQualification,
   recreationRequiredRecoveryEvidence,
 } from "../apps/browser-demo/web/qualification.js";
+import {
+  QUALIFICATION_LANE,
+  QUALIFICATION_RUNTIME_LANE,
+} from "../apps/browser-demo/web/qualification-lane.js";
 
 const changelogUrl = new URL("../CHANGELOG.md", import.meta.url);
 const matrixUrl = new URL("../docs/releases/v0.19-browser-matrix.json", import.meta.url);
@@ -31,69 +34,6 @@ const QUALIFIED_IMPLEMENTATION_PATHS = [
   "scripts/serve-browser-demo.py",
   "scripts/verify-browser-sdk.mjs",
 ];
-const EXPECTED_QUALIFIED_LANE = {
-  id: "codex-iab-chromium-151-macos-26-apple-m5-pro",
-  status: "repository_qualified_exact_lane",
-  browser: {
-    surface: "Codex in-app browser",
-    engine: "Chromium",
-    user_agent_version: "151.0.0.0",
-    user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36",
-    language: "en-US",
-    logical_processors: 15,
-  },
-  operating_system: {
-    name: "macOS",
-    version: "26.5.2",
-    build: "25F84",
-    architecture: "arm64",
-    user_agent_platform: "MacIntel",
-    note: "The browser's reduced user-agent OS token is not the operating-system version authority.",
-  },
-  device: {
-    class: "Apple silicon laptop",
-    gpu: "Apple M5 Pro",
-    gpu_cores: 16,
-    gpu_class: "integrated",
-    metal_support: "Metal 4",
-    mapping_note: "The browser exposed only a generic WebGPU adapter name; the physical GPU mapping is a local-system inference from the sole installed GPU.",
-  },
-  webgpu: {
-    adapter_name: "browser WebGPU adapter",
-    backend: "BrowserWebGpu",
-    device_type: "Other",
-    surface_format: "Bgra8Unorm",
-    composite_alpha_mode: "Opaque",
-    present_mode: "fifo",
-    render_attachment: true,
-    blendable: true,
-    required_feature_count: 0,
-    max_buffer_size: 4_294_967_292,
-    max_texture_dimension_2d: 16_384,
-    max_bind_groups: 4,
-    max_vertex_buffers: 8,
-    max_color_attachments: 8,
-  },
-  display: {
-    physical_viewport: [1_749, 1_093],
-    css_viewport: [874.28125, 546.421875],
-    device_pixel_ratio: 2,
-    screen_css_pixels: [1_512, 982],
-    color_depth: 30,
-    pixel_depth: 30,
-    canvas_bytes: 7_646_628,
-    display_path: "built-in Retina display",
-  },
-  workload: {
-    deployment_id: "repository-las-v1",
-    source_identity: "c459ff39717b7d6994aaebf344641f5a3add7faf65e249b85933ebd066d1c26e",
-    source_points: 70_000,
-    coverage: "sampled",
-    displayed_points: 4_096,
-    displayed_batches: 4,
-  },
-};
-
 export function verifyBrowserQualificationMatrix(matrix, implementationCommit) {
   assert.equal(matrix.schema, "punctra-browser-qualification-matrix-v1");
   assert.equal(matrix.release, "0.19.0-alpha.1");
@@ -289,8 +229,8 @@ function evaluationRecord(entry) {
 }
 
 function verifyQualifiedLane(entry) {
-  assert.equal(entry.id, EXPECTED_QUALIFIED_LANE.id);
-  assert.equal(entry.status, EXPECTED_QUALIFIED_LANE.status);
+  assert.equal(entry.id, QUALIFICATION_LANE.id);
+  assert.equal(entry.status, QUALIFICATION_LANE.status);
   for (const section of [
     "browser",
     "operating_system",
@@ -301,13 +241,31 @@ function verifyQualifiedLane(entry) {
   ]) {
     assert.deepEqual(
       entry[section],
-      EXPECTED_QUALIFIED_LANE[section],
+      QUALIFICATION_LANE[section],
       `qualified ${section} facts must match the exact recorded lane`,
     );
   }
   assert.deepEqual(
     {
       id: entry.id,
+      host: {
+        schema: QUALIFICATION_RUNTIME_LANE.host.schema,
+        operatingSystem: {
+          name: entry.operating_system.name,
+          version: entry.operating_system.version,
+          build: entry.operating_system.build,
+          architecture: entry.operating_system.architecture,
+        },
+        device: {
+          class: entry.device.class,
+          gpu: entry.device.gpu,
+          gpuCores: entry.device.gpu_cores,
+          gpuClass: entry.device.gpu_class,
+          metalSupport: entry.device.metal_support,
+        },
+        displayPath: entry.display.display_path,
+        package: QUALIFICATION_RUNTIME_LANE.host.package,
+      },
       browser: {
         userAgent: entry.browser.user_agent,
         platform: entry.operating_system.user_agent_platform,

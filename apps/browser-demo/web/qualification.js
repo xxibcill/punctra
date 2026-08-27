@@ -1,4 +1,7 @@
 import { RECREATION_REQUIRED_SAFE_ACTIONS } from "./viewer-api.js";
+import { QUALIFICATION_RUNTIME_LANE } from "./qualification-lane.js";
+
+export { QUALIFICATION_RUNTIME_LANE };
 
 export const QUALIFICATION_LIMITS = deepFreeze({
   firstCoverageMilliseconds: 10_000,
@@ -28,70 +31,6 @@ export const QUALIFICATION_WORKLOAD = deepFreeze({
   transferRecordBytes: 131_072,
   rendererResidentBytes: 98_304,
   warmBinaryRequestCount: 0,
-});
-
-export const QUALIFICATION_RUNTIME_LANE = deepFreeze({
-  id: "codex-iab-chromium-151-macos-26-apple-m5-pro",
-  host: {
-    schema: "punctra-qualification-host-v1",
-    operatingSystem: {
-      name: "macOS",
-      version: "26.5.2",
-      build: "25F84",
-      architecture: "arm64",
-    },
-    device: {
-      class: "Apple silicon laptop",
-      gpu: "Apple M5 Pro",
-      gpuCores: 16,
-      gpuClass: "integrated",
-      metalSupport: "Metal 4",
-    },
-    displayPath: "built-in Retina display",
-    package: {
-      name: "@punctra/viewer",
-      version: "0.19.0-alpha.1",
-    },
-  },
-  browser: {
-    userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36",
-    platform: "MacIntel",
-    language: "en-US",
-    logicalProcessors: 15,
-  },
-  screen: {
-    width: 1_512,
-    height: 982,
-    colorDepth: 30,
-    pixelDepth: 30,
-  },
-  display: {
-    physicalWidth: 1_749,
-    physicalHeight: 1_093,
-    cssWidth: 874.28125,
-    cssHeight: 546.421875,
-    devicePixelRatio: 2,
-    surfaceBytes: 7_646_628,
-  },
-  capabilities: {
-    secure_context: true,
-    webgpu: true,
-    browser_user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36",
-    browser_platform: "MacIntel",
-    adapter_name: "browser WebGPU adapter",
-    backend: "BrowserWebGpu",
-    device_type: "Other",
-    surface_format: "Bgra8Unorm",
-    composite_alpha_mode: "Opaque",
-    present_mode: "fifo",
-    surface_format_support: { render_attachment: true, blendable: true },
-    required_feature_count: 0,
-    adapter_max_buffer_size: 4_294_967_292,
-    adapter_max_texture_dimension_2d: 16_384,
-    adapter_max_bind_groups: 4,
-    adapter_max_vertex_buffers: 8,
-    adapter_max_color_attachments: 8,
-  },
 });
 
 export function summarizeSamples(samples) {
