@@ -14,6 +14,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { captureChildExit } from "./child-process.mjs";
+import { publicDeclaration } from "./generate-browser-sdk-reference.mjs";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const artifactDirectory = path.join(repositoryRoot, "target/npm");
@@ -59,6 +60,7 @@ verifyPackedFiles(reactArtifact, [
   "package/lifecycle.js",
   "package/package.json",
 ]);
+verifyGeneratedApiReference(viewerArtifact, reactArtifact);
 
 run("node", ["--test", "packages/react/lifecycle.test.mjs"], repositoryRoot);
 await verifyTrial("browser-typescript", [viewerArtifact], {
@@ -82,6 +84,39 @@ function verifyQualificationConsumer() {
   assert.match(index, /"@punctra\/viewer\/exact-query":\s*"\.\/node_modules\/\@punctra\/viewer\/exact-query\.js"/);
   const worker = readFileSync(path.join(qualificationRoot, "qualification-worker.js"), "utf8");
   assert.match(worker, /node_modules\/\@punctra\/viewer\/stream-worker\.js/);
+}
+
+function verifyGeneratedApiReference(viewer, react) {
+  const reference = readFileSync(path.join(repositoryRoot, "docs/api/browser-sdk.md"), "utf8");
+  const viewerManifest = packedJson(viewer, "package/package.json");
+  const reactManifest = packedJson(react, "package/package.json");
+  assert.ok(reference.includes(`packed in Punctra \`${viewerManifest.version}\``));
+  for (const [title, artifact, packageName, declarationPath] of [
+    ["@punctra/viewer", viewer, viewerManifest.name, "sdk.d.ts"],
+    ["Viewer model", viewer, viewerManifest.name, "viewer-api.d.ts"],
+    ["Input normalizer", viewer, viewerManifest.name, "viewer-input.d.ts"],
+    ["Immutable-LAS exact bridge", viewer, viewerManifest.name, "exact-query.d.ts"],
+    ["@punctra/react", react, reactManifest.name, "index.d.ts"],
+  ]) {
+    const declaration = publicDeclaration(
+      declarationPath,
+      packedText(artifact, `package/${declarationPath}`),
+    );
+    const section = `## ${title}\n\nPacked declaration: \`${packageName}/${declarationPath}\`\n\n\`\`\`ts\n${declaration.trim()}\n\`\`\``;
+    assert.equal(
+      reference.includes(section),
+      true,
+      `generated API reference differs from packed ${packageName}/${declarationPath}`,
+    );
+  }
+}
+
+function packedJson(artifact, entry) {
+  return JSON.parse(packedText(artifact, entry));
+}
+
+function packedText(artifact, entry) {
+  return run("tar", ["-xOzf", artifact, entry], repositoryRoot).stdout;
 }
 
 function onlyArtifact(prefix) {

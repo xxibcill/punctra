@@ -10,7 +10,7 @@ assets even when their files are visible in a packed artifact.
 
 ## @punctra/viewer
 
-Source declaration: `apps/browser-demo/web/sdk.d.ts`
+Packed declaration: `@punctra/viewer/sdk.d.ts`
 
 ```ts
 import type {
@@ -84,7 +84,7 @@ export function createViewer(options: CreateViewerOptions): Promise<BrowserViewe
 
 ## Viewer model
 
-Source declaration: `apps/browser-demo/web/viewer-api.d.ts`
+Packed declaration: `@punctra/viewer/viewer-api.d.ts`
 
 ```ts
 export type DisplayMode =
@@ -361,7 +361,7 @@ export interface BrowserViewer {
 
 ## Input normalizer
 
-Source declaration: `apps/browser-demo/web/viewer-input.d.ts`
+Packed declaration: `@punctra/viewer/viewer-input.d.ts`
 
 ```ts
 export type NormalizedViewerInput =
@@ -405,7 +405,7 @@ export function createInputNormalizer(
 
 ## Immutable-LAS exact bridge
 
-Source declaration: `apps/browser-demo/web/exact-query.d.ts`
+Packed declaration: `@punctra/viewer/exact-query.d.ts`
 
 ```ts
 import type { ExactPoint } from "./viewer-api.js";
@@ -452,7 +452,7 @@ export function createLasExactQueryBridge(
 
 ## @punctra/react
 
-Source declaration: `packages/react/index.d.ts`
+Packed declaration: `@punctra/react/index.d.ts`
 
 ```ts
 import type {
