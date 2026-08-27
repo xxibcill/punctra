@@ -131,6 +131,8 @@ The machine-readable `punctra-browser-integration-baseline-v1` record binds:
   batch identity, and logical resource facts;
 - the five display modes, two projections, sampled-Coverage meaning, and the
   unchanged renderer/display-policy versions;
+- the exact checked-in packed-quickstart browser record, including retry,
+  recreation, authority, and disposal outcomes;
 - the exact inherited v0.19 qualified browser lane and each explicitly
   unqualified platform class;
 - latency and independent logical resource ceilings plus their observed local

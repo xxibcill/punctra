@@ -2,10 +2,17 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-import { verifyBrowserIntegrationBaseline } from "./verify-browser-integration-baseline.mjs";
+import {
+  verifyBrowserIntegrationBaseline,
+  verifyQuickstartEvidence,
+} from "./verify-browser-integration-baseline.mjs";
 
 const baseline = JSON.parse(await readFile(
   new URL("../docs/releases/v0.20-browser-baseline.json", import.meta.url),
+  "utf8",
+));
+const quickstartEvidence = JSON.parse(await readFile(
+  new URL("../docs/releases/v0.20-browser-quickstart.json", import.meta.url),
   "utf8",
 ));
 const operationalReleaseSources = [
@@ -34,6 +41,19 @@ test("fixture digest drift fails even when semantic facts are unchanged", async 
     () => verifyBrowserIntegrationBaseline(tampered),
     /representative\.las SHA-256 drifted/,
   );
+});
+
+test("quickstart evidence is byte-bound and semantically verified", async () => {
+  const digestTampered = structuredClone(baseline);
+  digestTampered.quickstart.evidence.sha256 = "00".repeat(32);
+  await assert.rejects(
+    () => verifyBrowserIntegrationBaseline(digestTampered),
+    /v0\.20-browser-quickstart\.json SHA-256 drifted/,
+  );
+
+  const semanticTampered = structuredClone(quickstartEvidence);
+  semanticTampered.acceptance.recreationSucceeded = false;
+  assert.throws(() => verifyQuickstartEvidence(semanticTampered, baseline));
 });
 
 test("the external-evidence boundary cannot be promoted by editing the record", async () => {

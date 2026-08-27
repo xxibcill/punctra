@@ -118,6 +118,11 @@
   "quickstart": {
     "path": "examples/browser-typescript",
     "acceptance_schema": "punctra-browser-quickstart-acceptance-v1",
+    "evidence": {
+      "path": "docs/releases/v0.20-browser-quickstart.json",
+      "byte_length": 967,
+      "sha256": "b7e79fa266f394cbda8e3a39855dcf9f33ddf2351dff6d4510c27e62a4523585"
+    },
     "imports": [
       "@punctra/viewer",
       "@punctra/viewer/input",

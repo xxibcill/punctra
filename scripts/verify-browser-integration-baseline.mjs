@@ -22,7 +22,7 @@ export async function verifyBrowserIntegrationBaseline(baseline) {
   await verifyDeployment(baseline.immutable_deployment);
   await verifyGeneratedScene(baseline.generated_scene);
   await verifyPresentationPolicy(baseline.presentation_policy);
-  await verifyQuickstart(baseline.quickstart);
+  await verifyQuickstart(baseline.quickstart, baseline);
 
   assert.equal(baseline.qualification.matrix_schema, "punctra-browser-qualification-matrix-v1");
   assert.equal(baseline.qualification.qualified_lane, QUALIFICATION_LANE.id);
@@ -156,12 +156,14 @@ async function verifyPresentationPolicy(policy) {
   assert.equal(policy.highlight_authority, "presentation_only");
 }
 
-async function verifyQuickstart(quickstart) {
-  const [manifest, controllerSource, mainSource] = await Promise.all([
+async function verifyQuickstart(quickstart, baseline) {
+  const [manifest, controllerSource, mainSource, evidence] = await Promise.all([
     readJson(`${quickstart.path}/package.json`),
     readText(`${quickstart.path}/src/quickstart.ts`),
     readText(`${quickstart.path}/src/main.ts`),
+    readJson(quickstart.evidence.path),
   ]);
+  await verifyDigestRecord(quickstart.evidence);
   assert.equal(manifest.name, "punctra-browser-quickstart");
   assert.equal(quickstart.acceptance_schema, "punctra-browser-quickstart-acceptance-v1");
   const consumerSource = `${controllerSource}\n${mainSource}`;
@@ -183,6 +185,32 @@ async function verifyQuickstart(quickstart) {
     "pause_resume",
     "dispose",
   ]);
+  verifyQuickstartEvidence(evidence, baseline);
+}
+
+export function verifyQuickstartEvidence(evidence, baseline) {
+  assert.equal(evidence.schema, "punctra-browser-quickstart-evidence-v1");
+  assert.match(evidence.observed_on, /^\d{4}-\d{2}-\d{2}$/);
+  assert.equal(evidence.lane_id, baseline.qualification.qualified_lane);
+  assert.deepEqual(evidence.acceptance, {
+    schema: baseline.quickstart.acceptance_schema,
+    packageVersion: baseline.release,
+    sourceIdentity: baseline.immutable_deployment.source.source_identity,
+    generation: 1,
+    displayedPoints: baseline.immutable_deployment.root.display_point_count,
+    displayModes: baseline.presentation_policy.display_modes,
+    projections: baseline.presentation_policy.projections,
+    cancellationRetainedViewer: true,
+    recoverableFailureCode: "offline",
+    retryRetainedViewer: true,
+    retrySucceeded: true,
+    recreationFailureCode: "cancelled",
+    recreationRequired: true,
+    recreationSucceeded: true,
+    provisionalAuthority: baseline.presentation_policy.provisional_authority,
+    exactAuthority: baseline.presentation_policy.exact_authority,
+    disposed: true,
+  });
 }
 
 async function verifyDigestRecord(record) {
