@@ -466,6 +466,7 @@ async function runSmokePath() {
       memory_pressure: "no portable signal; independent fixed ceilings enforced",
     },
     cancellation,
+    workload: observedWorkload(warm),
     cold: compactLoad(cold),
     warm: compactLoad(warm),
     foreground_frames: frames,
@@ -541,6 +542,30 @@ async function exercisePrepublicationRecovery({ manifestUrl, expectedCode, label
 
 function verifyStreamingResult(result, label) {
   assertFact(
+    result.deployment.deployment_id === QUALIFICATION_WORKLOAD.deploymentId,
+    `${label} deployment identity`,
+  );
+  assertFact(
+    result.deployment.source_identity === QUALIFICATION_WORKLOAD.sourceIdentity,
+    `${label} Source identity`,
+  );
+  assertFact(
+    result.deployment.source_point_count === QUALIFICATION_WORKLOAD.sourcePoints,
+    `${label} Source point count`,
+  );
+  assertFact(
+    result.deployment.root_coverage === QUALIFICATION_WORKLOAD.coverage,
+    `${label} deployment Coverage`,
+  );
+  assertFact(
+    result.state.source.identity === QUALIFICATION_WORKLOAD.sourceIdentity,
+    `${label} state Source identity`,
+  );
+  assertFact(
+    result.state.source.expectedPoints === QUALIFICATION_WORKLOAD.sourcePoints,
+    `${label} state Source point count`,
+  );
+  assertFact(
     result.state.source.coverage === QUALIFICATION_WORKLOAD.coverage,
     `${label} Sampled Coverage`,
   );
@@ -580,6 +605,17 @@ function verifyStreamingResult(result, label) {
     result.metrics.transferredBytes === QUALIFICATION_WORKLOAD.transferRecordBytes,
     `${label} transfer-v2 bytes`,
   );
+}
+
+function observedWorkload(result) {
+  return {
+    deployment_id: result.deployment.deployment_id,
+    source_identity: result.deployment.source_identity,
+    source_points: result.deployment.source_point_count,
+    coverage: result.state.source.coverage,
+    displayed_points: result.state.source.publishedPoints,
+    displayed_batches: result.state.source.publishedBatches,
+  };
 }
 
 function compactLoad(result) {

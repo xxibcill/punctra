@@ -19,6 +19,9 @@ export const QUALIFICATION_LIMITS = deepFreeze({
 });
 
 export const QUALIFICATION_WORKLOAD = deepFreeze({
+  deploymentId: "repository-las-v1",
+  sourceIdentity: "c459ff39717b7d6994aaebf344641f5a3add7faf65e249b85933ebd066d1c26e",
+  sourcePoints: 70_000,
   coverage: "sampled",
   sampledPoints: 4_096,
   publishedBatches: 4,

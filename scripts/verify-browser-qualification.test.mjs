@@ -70,6 +70,19 @@ test("generation preservation is independently required for pre-publication reco
   }
 });
 
+test("observed workload identity is bound to the qualified deployment", () => {
+  for (const field of ["deployment_id", "source_identity", "source_points"]) {
+    const tampered = structuredClone(matrix);
+    tampered.qualified_entries[0].observations.workload[field] = field === "source_points"
+      ? 1
+      : "other";
+    assert.throws(
+      () => verifyBrowserQualificationMatrix(tampered, implementationCommit),
+      /observed workload identity must match the qualified deployment/,
+    );
+  }
+});
+
 test("the JSON matrix and Markdown record pin the same qualification verifier", () => {
   assert.equal(matrix.verifier_sha256, releaseVerifierSha256(releaseRecord));
   assert.match(matrix.verifier_sha256, /^[0-9a-f]{64}$/);

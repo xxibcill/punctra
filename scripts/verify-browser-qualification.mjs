@@ -117,6 +117,7 @@ export function verifyBrowserQualificationMatrix(matrix, implementationCommit) {
   assertNonnegativeNumbers(observations, "observations");
   assert.equal(observations.acceptance_schema, "punctra-browser-qualification-v1");
   assert.deepEqual(observations.limits, QUALIFICATION_LIMITS);
+  verifyWorkloadObservations(entry);
   assert.deepEqual(
     observations.recovery.recreation_required,
     recreationRequiredRecoveryEvidence(),
@@ -349,6 +350,22 @@ function verifyQualifiedLane(entry) {
     },
     QUALIFICATION_RUNTIME_LANE,
     "checked-in exact lane must match the runtime qualification gate",
+  );
+}
+
+function verifyWorkloadObservations(entry) {
+  const { workload } = entry;
+  assert.deepEqual(
+    entry.observations.workload,
+    {
+      deployment_id: workload.deployment_id,
+      source_identity: workload.source_identity,
+      source_points: workload.source_points,
+      coverage: workload.coverage,
+      displayed_points: workload.displayed_points,
+      displayed_batches: workload.displayed_batches,
+    },
+    "observed workload identity must match the qualified deployment",
   );
 }
 
