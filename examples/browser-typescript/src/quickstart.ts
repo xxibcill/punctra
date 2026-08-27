@@ -93,9 +93,11 @@ export class QuickstartController {
     readonly manifestUrl?: string;
     readonly invalidate?: boolean;
     readonly signal?: AbortSignal;
+    readonly onState?: (state: ViewerState) => void;
   } = {}): Promise<ViewerState> {
     const viewer = this.#requireViewer();
     const asyncRevision = ++this.#asyncRevision;
+    const unsubscribe = options.onState ? viewer.subscribe(options.onState) : undefined;
     this.#operation = "Streaming verified sampled Coverage";
     this.#publish();
     let result;
@@ -110,6 +112,8 @@ export class QuickstartController {
     } catch (error) {
       this.#assertAsyncCurrent(viewer, asyncRevision);
       throw error;
+    } finally {
+      unsubscribe?.();
     }
     this.#assertAsyncCurrent(viewer, asyncRevision);
     this.#selectedPoint = null;

@@ -16,16 +16,18 @@ import { runQuickstartAcceptance } from "./acceptance.ts";
 import { QuickstartController } from "./quickstart.ts";
 
 test("packed quickstart exercises the supported workflow and disposes", async () => {
-  const viewer = new FakeViewer();
-  let createOptions: CreateViewerOptions | undefined;
+  const firstViewer = new FakeViewer();
+  const recreatedViewer = new FakeViewer();
+  const viewers = [firstViewer, recreatedViewer];
+  const createOptions: CreateViewerOptions[] = [];
   const snapshots: string[] = [];
   const controller = new QuickstartController({
     canvas: {} as HTMLCanvasElement,
     viewport: { cssWidth: 960, cssHeight: 600, devicePixelRatio: 1 },
     manifestUrl: "https://fixtures.test/fixtures/v1/deployment.json",
     createViewer: async (options) => {
-      createOptions = options;
-      return viewer as unknown as BrowserViewer;
+      createOptions.push(options);
+      return viewers.shift() as unknown as BrowserViewer;
     },
     createExactBridge: () => ({ confirm: async () => exactPoint() } as ExactQueryBridge),
     publish: (snapshot) => snapshots.push(snapshot.operation),
@@ -36,16 +38,24 @@ test("packed quickstart exercises the supported workflow and disposes", async ()
     "https://fixtures.test/fixtures/v1/deployment.json",
   );
 
-  assert.equal(createOptions?.canvas !== undefined, true);
-  assert.equal(createOptions?.assets?.cacheKey, "v0.20-quickstart");
+  assert.equal(createOptions.length, 2);
+  assert.equal(createOptions[0]?.canvas !== undefined, true);
+  assert.equal(createOptions[0]?.assets?.cacheKey, "v0.20-quickstart");
   assert.equal(record.schema, "punctra-browser-quickstart-acceptance-v1");
   assert.equal(record.packageVersion, "0.20.0-alpha.1");
   assert.equal(record.displayedPoints, 4_096);
   assert.deepEqual(record.projections, ["orthographic", "perspective"]);
   assert.equal(record.provisionalAuthority, "provisional_gpu_hint");
   assert.equal(record.exactAuthority, "exact_source_record");
+  assert.equal(record.recoverableFailureCode, "offline");
+  assert.equal(record.retryRetainedViewer, true);
+  assert.equal(record.retrySucceeded, true);
+  assert.equal(record.recreationFailureCode, "cancelled");
+  assert.equal(record.recreationRequired, true);
+  assert.equal(record.recreationSucceeded, true);
   assert.equal(record.disposed, true);
-  assert.equal(viewer.disposals, 1);
+  assert.equal(firstViewer.disposals, 1);
+  assert.equal(recreatedViewer.disposals, 1);
   assert.equal(controller.state(), null);
   assert(snapshots.includes("Exact Source record confirmed"));
   assert(snapshots.includes("Viewer disposed"));
@@ -146,6 +156,26 @@ class FakeViewer {
         options.signal?.addEventListener("abort", () => reject({ code: "cancelled" }), { once: true });
       });
     }
+    if (options.manifestUrl.includes("fault=disconnect")) {
+      throw viewerFailure("offline", true);
+    }
+    if (options.manifestUrl.includes("acceptance_phase=partial-publication")) {
+      this.publish({
+        generation: this.data.generation + 1,
+        source: {
+          ...this.data.source,
+          identity: SOURCE_IDENTITY,
+          coverage: "sampled",
+          expectedPoints: 4_096,
+          publishedPoints: 1_024,
+          publishedBatches: 1,
+          retainedRecordBytes: 32_768,
+        },
+      });
+      assert.equal(options.signal?.aborted, true);
+      this.publish({ lifecycle: "destroyed" });
+      throw viewerFailure("cancelled", false);
+    }
     const state = this.publish({
       generation: this.data.generation + 1,
       source: {
@@ -239,6 +269,17 @@ class FakeViewer {
     for (const listener of this.listeners) listener(this.data);
     return this.data;
   }
+}
+
+function viewerFailure(code: "offline" | "cancelled", recoverable: boolean) {
+  return {
+    schema: "punctra-viewer-error-v1",
+    code,
+    recoverable,
+    safeAction: recoverable
+      ? "Correct the reported condition and retry."
+      : "Dispose the fused viewer and create a new one before any Source load.",
+  };
 }
 
 function quickstartController(createViewer: (options: CreateViewerOptions) => Promise<BrowserViewer>) {

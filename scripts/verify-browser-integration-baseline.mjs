@@ -170,6 +170,8 @@ async function verifyQuickstart(quickstart) {
   }
   assert.deepEqual(quickstart.required_workflow, [
     "cancelled_load_retains_viewer",
+    "recoverable_failure_retries_in_place",
+    "postpublication_failure_recreates_viewer",
     "strict_source_load",
     "five_display_modes",
     "two_projections",

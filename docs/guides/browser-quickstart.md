@@ -30,24 +30,27 @@ Source contract.
 The page initializes one viewer and exposes the host-owned operations in their
 safe order:
 
-1. Load the immutable Source and confirm that the visible Coverage is
+1. Cancel a delayed load, retry a disconnected-manifest failure in the retained
+   viewer, and recreate after a deterministic post-publication cancellation.
+2. Load the immutable Source and confirm that the visible Coverage is
    `sampled`, not complete.
-2. Switch among neutral, elevation, RGB, intensity, and classification display
+3. Switch among neutral, elevation, RGB, intensity, and classification display
    mappings.
-3. Switch between perspective and orthographic projection, then orbit, pan, or
+4. Switch between perspective and orthographic projection, then orbit, pan, or
    zoom with normalized input.
-4. Pick a resident display Point. The result is a
+5. Pick a resident display Point. The result is a
    `provisional_gpu_hint`, not an exact Source record.
-5. Highlight the provisional Point for presentation, then confirm it through
+6. Highlight the provisional Point for presentation, then confirm it through
    the immutable-LAS bridge. Only the result labeled `exact_source_record` is
    exact authority.
-6. Clear the highlight, pause and resume presentation, and dispose the viewer.
+7. Clear the highlight, pause and resume presentation, and dispose the viewer.
 
 Select **Run baseline check** to execute the same deterministic path used by
 the attended v0.20 browser check. A pass publishes a
 `punctra-browser-quickstart-acceptance-v1` record containing the package
 version, Source identity, display/projection coverage, cancellation retention,
-provisional and exact authority labels, and disposal result.
+retry/recreation outcomes, provisional and exact authority labels, and disposal
+result.
 
 ## What the application owns
 

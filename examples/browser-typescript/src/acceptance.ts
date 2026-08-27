@@ -11,6 +11,12 @@ export interface QuickstartAcceptanceRecord {
   readonly displayModes: readonly string[];
   readonly projections: readonly string[];
   readonly cancellationRetainedViewer: true;
+  readonly recoverableFailureCode: "offline";
+  readonly retryRetainedViewer: true;
+  readonly retrySucceeded: true;
+  readonly recreationFailureCode: "cancelled";
+  readonly recreationRequired: true;
+  readonly recreationSucceeded: true;
   readonly provisionalAuthority: "provisional_gpu_hint";
   readonly exactAuthority: "exact_source_record";
   readonly disposed: true;
@@ -35,7 +41,8 @@ export async function runQuickstartAcceptance(
     throw new Error("Cancelled load changed the active generation.");
   }
 
-  await controller.load({ invalidate: true });
+  const retry = await exerciseRecoverableRetry(controller, manifestUrl);
+  const recreation = await exerciseRecreationRequiredRecovery(controller, manifestUrl);
   for (const mode of ACCEPTED_DISPLAY_MODES) controller.setDisplayMode(mode);
   const projections = exerciseProjections(controller);
   exerciseNavigation(controller);
@@ -60,12 +67,81 @@ export async function runQuickstartAcceptance(
     displayModes: Object.freeze([...ACCEPTED_DISPLAY_MODES]),
     projections: Object.freeze(projections),
     cancellationRetainedViewer: true as const,
+    ...retry,
+    ...recreation,
     provisionalAuthority: provisional.authority,
     exactAuthority: exact.authority,
     disposed: true as const,
   });
   controller.dispose();
   return record;
+}
+
+async function exerciseRecoverableRetry(
+  controller: QuickstartController,
+  manifestUrl: string,
+): Promise<Pick<
+  QuickstartAcceptanceRecord,
+  "recoverableFailureCode" | "retryRetainedViewer" | "retrySucceeded"
+>> {
+  const before = requiredState(controller);
+  const disconnectedManifest = acceptanceUrl(manifestUrl, "fault", "disconnect");
+  const failure = await expectViewerFailure(controller.load({
+    manifestUrl: disconnectedManifest,
+    invalidate: true,
+  }));
+  if (failure.code !== "offline" || failure.recoverable !== true) {
+    throw new Error("The disconnected manifest was not a recoverable offline failure.");
+  }
+  const retained = requiredState(controller);
+  if (retained.lifecycle !== "ready" || retained.generation !== before.generation) {
+    throw new Error("The recoverable failure did not retain the active viewer generation.");
+  }
+  await controller.load({ invalidate: true });
+  return Object.freeze({
+    recoverableFailureCode: "offline" as const,
+    retryRetainedViewer: true as const,
+    retrySucceeded: true as const,
+  });
+}
+
+async function exerciseRecreationRequiredRecovery(
+  controller: QuickstartController,
+  manifestUrl: string,
+): Promise<Pick<
+  QuickstartAcceptanceRecord,
+  "recreationFailureCode" | "recreationRequired" | "recreationSucceeded"
+>> {
+  const before = requiredState(controller);
+  const cancellation = new AbortController();
+  const partialPublicationManifest = acceptanceUrl(
+    manifestUrl,
+    "acceptance_phase",
+    "partial-publication",
+  );
+  const failure = await expectViewerFailure(controller.load({
+    manifestUrl: partialPublicationManifest,
+    invalidate: true,
+    signal: cancellation.signal,
+    onState: (state) => {
+      if (state.generation !== before.generation && state.source.publishedPoints > 0) {
+        cancellation.abort();
+      }
+    },
+  }));
+  if (failure.code !== "cancelled" || failure.recoverable !== false) {
+    throw new Error("The post-publication cancellation did not require viewer recreation.");
+  }
+  if (requiredState(controller).lifecycle !== "destroyed") {
+    throw new Error("The post-publication failure did not fuse the viewer.");
+  }
+  await controller.mount();
+  await controller.load({ invalidate: true });
+  return Object.freeze({
+    recreationFailureCode: "cancelled" as const,
+    recreationRequired: true as const,
+    recreationSucceeded: true as const,
+  });
 }
 
 async function pickResidentPoint(controller: QuickstartController, state: ViewerState) {
@@ -97,6 +173,34 @@ async function cancelDelayedLoad(controller: QuickstartController, manifestUrl: 
     }
     if ((error as { code?: string }).code !== "cancelled") throw error;
   }
+}
+
+function acceptanceUrl(manifestUrl: string, name: string, value: string): string {
+  const url = new URL(manifestUrl, globalThis.location?.href ?? "http://localhost/");
+  url.searchParams.set(name, value);
+  return url.href;
+}
+
+interface StructuredViewerFailure {
+  readonly code: string;
+  readonly recoverable: boolean;
+}
+
+async function expectViewerFailure(operation: Promise<unknown>): Promise<StructuredViewerFailure> {
+  try {
+    await operation;
+  } catch (error) {
+    if (
+      typeof error === "object"
+      && error !== null
+      && typeof (error as { code?: unknown }).code === "string"
+      && typeof (error as { recoverable?: unknown }).recoverable === "boolean"
+    ) {
+      return error as StructuredViewerFailure;
+    }
+    throw error;
+  }
+  throw new Error("The deterministic quickstart fault completed successfully.");
 }
 
 function exerciseProjections(controller: QuickstartController): string[] {
