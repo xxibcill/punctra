@@ -9,6 +9,7 @@ import {
   releaseVerifierSha256,
   verifyBrowserQualificationMatrix,
   verifyImplementationCommit,
+  verifyQualificationRuntimeTree,
 } from "./verify-browser-qualification.mjs";
 
 const changelogUrl = new URL("../CHANGELOG.md", import.meta.url);
@@ -24,6 +25,10 @@ const implementationCommit = releaseImplementationCommit(releaseRecord);
 
 test("the checked-in browser qualification matrix derives a passing result", () => {
   assert.equal(verifyBrowserQualificationMatrix(matrix, implementationCommit), true);
+});
+
+test("the qualification runtime package matches its packed and source files", () => {
+  assert.doesNotThrow(verifyQualificationRuntimeTree);
 });
 
 test("an over-limit observation fails even when the recorded pass flag is true", () => {

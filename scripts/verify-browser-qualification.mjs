@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
+import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
@@ -18,6 +20,15 @@ const changelogUrl = new URL("../CHANGELOG.md", import.meta.url);
 const matrixUrl = new URL("../docs/releases/v0.19-browser-matrix.json", import.meta.url);
 const releaseRecordUrl = new URL("../docs/releases/v0.19.0.md", import.meta.url);
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
+const qualificationViewerPackage = path.join(
+  repositoryRoot,
+  "apps/browser-demo/web/node_modules/@punctra/viewer",
+);
+const qualificationViewerSource = path.join(repositoryRoot, "apps/browser-demo/web");
+const qualificationViewerArtifact = path.join(
+  repositoryRoot,
+  "target/npm/punctra-viewer-0.19.0-alpha.1.tgz",
+);
 const verifierSource = await readFile(new URL("./verify-browser-qualification.mjs", import.meta.url), "utf8");
 const QUALIFICATION_VERIFIER_SHA256 = createHash("sha256").update(verifierSource).digest("hex");
 const EXPECTED_OBSERVATION_DATE = "2026-08-26";
@@ -170,6 +181,73 @@ export function verifyImplementationCommit(commit) {
     "",
     `qualified implementation files have uncommitted changes:\n${workingChanges.stdout.trim()}`,
   );
+  verifyQualificationRuntimeTree();
+}
+
+export function verifyQualificationRuntimeTree() {
+  assert.equal(
+    existsSync(qualificationViewerArtifact),
+    true,
+    `packed viewer artifact is missing: ${qualificationViewerArtifact}`,
+  );
+  assert.equal(
+    existsSync(qualificationViewerPackage),
+    true,
+    `qualification runtime package is missing: ${qualificationViewerPackage}`,
+  );
+
+  const archiveFiles = commandOutput("tar", ["-tzf", qualificationViewerArtifact])
+    .split(/\r?\n/)
+    .filter((entry) => entry.startsWith("package/") && entry !== "package/")
+    .map((entry) => entry.slice("package/".length))
+    .sort();
+  const runtimeFiles = recursiveFiles(qualificationViewerPackage)
+    .map((file) => path.relative(qualificationViewerPackage, file).split(path.sep).join("/"))
+    .sort();
+  assert.deepEqual(
+    runtimeFiles,
+    archiveFiles,
+    "qualification runtime package files must match the packed viewer artifact",
+  );
+
+  for (const file of archiveFiles) {
+    const packed = commandBinaryOutput("tar", [
+      "-xOzf",
+      qualificationViewerArtifact,
+      `package/${file}`,
+    ]);
+    const runtime = readFileSync(path.join(qualificationViewerPackage, file));
+    assert.deepEqual(runtime, packed, `qualification runtime package differs for ${file}`);
+    const source = readFileSync(path.join(qualificationViewerSource, file));
+    assert.deepEqual(source, packed, `packed viewer artifact differs from source for ${file}`);
+  }
+}
+
+function recursiveFiles(directory) {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const file = path.join(directory, entry.name);
+    return entry.isDirectory() ? recursiveFiles(file) : [file];
+  });
+}
+
+function commandOutput(command, arguments_) {
+  const result = spawnSync(command, arguments_, {
+    cwd: repositoryRoot,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  assert.equal(result.status, 0, `${command} ${arguments_.join(" ")} failed: ${result.stderr}`);
+  return result.stdout;
+}
+
+function commandBinaryOutput(command, arguments_) {
+  const result = spawnSync(command, arguments_, {
+    cwd: repositoryRoot,
+    encoding: null,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  assert.equal(result.status, 0, `${command} ${arguments_.join(" ")} failed`);
+  return result.stdout;
 }
 
 function evaluationRecord(entry) {
