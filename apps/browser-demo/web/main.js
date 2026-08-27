@@ -258,14 +258,75 @@ async function runSmokePath() {
     runtimeLane.passed,
     `exact qualification lane: ${runtimeLane.failures.join("; ")}`,
   );
-  let state = viewer.render();
+  const lifecycle = await runLifecycleQualification(initial, runtimeLane);
+  const delivery = await runDeliveryQualification(heap);
+  const presentation = await runPresentationQualification(delivery.warm);
+  const performance = await runPerformanceQualification({ lifecycle, delivery }, heap);
+
+  smokeRecord = {
+    schema: ACCEPTANCE_SCHEMA,
+    package_version: performance.finalState.packageVersion,
+    environment,
+    runtime_lane: runtimeLane,
+    heap: completeHeapRecord(heap),
+    generated: lifecycle.generated,
+    destruction: lifecycle.destruction,
+    recovery: {
+      ...performance.recovery,
+      generation: presentation.generationRecovery,
+      recreation_required: recreationRequiredRecoveryEvidence(),
+      physical_device_loss: "not forced on the physical adapter",
+      memory_pressure: "no portable signal; independent fixed ceilings enforced",
+    },
+    cancellation: delivery.cancellation,
+    workload: observedWorkload(delivery.warm),
+    render: {
+      coverage: performance.finalState.source.coverage,
+      drawn_points: performance.finalState.render.drawnPoints,
+    },
+    cold: compactLoad(delivery.cold),
+    warm: compactLoad(delivery.warm),
+    foreground_frames: performance.frames,
+    qualification: performance.qualification,
+    display_modes: presentation.displayEvidence,
+    projections: presentation.projections,
+    input_normalizer: presentation.normalizedInput,
+    provisional: presentation.provisional,
+    exact: presentation.exact,
+    stale_generation_rejected: true,
+    cancelled_query_rejected: true,
+    final_state: performance.finalState,
+    nonclaims: [
+      "no arbitrary Source or Query support",
+      "no npm registry publication, production hosting, or offline-first support",
+      "no browser or device support beyond the exact recorded qualification lane",
+      "no physical cache, process RSS, driver, or GPU allocation claim",
+      "no independent adoption, stable API, visual-quality, support, or release-candidate claim",
+    ],
+  };
+  smokePassed = true;
+  smokeRunning = false;
+  publishState(viewer.state());
+  setHarnessState(
+    "passed",
+    "PASS — the declared browser/device lane satisfied functional, latency, resource, and recovery qualification locally.",
+  );
+}
+
+function assertInitialQualification(initial, runtimeLane) {
+  assertFact(runtimeLane.passed, `exact qualification lane: ${runtimeLane.failures.join("; ")}`);
+  const state = viewer.render();
   assertFact(state.packageVersion === "0.19.0-alpha.1", "v0.19 package version");
   assertFact(state.capabilities.secure_context === true, "secure context");
   assertFact(state.capabilities.webgpu === true, "WebGPU capability");
   assertFact(state.source.publishedPoints === 1_089, "generated fixture Points");
   assertFact(state.resources.pointLimit === 8_192, "Point ceiling");
   assertFact(state.resources.highlightPointLimit === 32, "highlight ceiling");
+  assertFact(initial.lifecycle === "ready", "initial viewer lifecycle");
+}
 
+async function runLifecycleQualification(initial, runtimeLane) {
+  assertInitialQualification(initial, runtimeLane);
   const resized = {
     cssWidth: Math.max(1, initial.viewport.cssWidth * 0.75),
     cssHeight: Math.max(1, initial.viewport.cssHeight * 0.75),
@@ -281,7 +342,7 @@ async function runSmokePath() {
     sameViewport(viewer.state().viewport, resizeBeforeFailure),
     "over-limit resize preserves the prior viewport",
   );
-  state = viewer.resize(resized);
+  let state = viewer.resize(resized);
   assertFact(state.viewport.physicalWidth === Math.round(resized.cssWidth * resized.devicePixelRatio), "bounded resize");
   const alternateDpr = resized.devicePixelRatio === 1 ? 1.25 : 1;
   state = viewer.resize({ ...resized, devicePixelRatio: alternateDpr });
@@ -295,31 +356,37 @@ async function runSmokePath() {
   assertFact(state.render.hiddenFrameSkips === hiddenSkipsBefore + 1, "hidden frame skip");
   viewer.resume();
   viewer.render();
-  const lifecycleRecovery = {
-    invalid_resize_code: resizeFailure.code,
-    invalid_resize_safe_action: resizeFailure.safeAction,
-    prior_viewport_preserved: true,
-    alternate_device_pixel_ratio: alternateDpr,
-    hidden_frame_skips: 1,
-    resumed: viewer.state().lifecycle === "ready",
-  };
+  assertFact(viewer.state().lifecycle === "ready", "resumed lifecycle");
 
   const generatedPick = await pickCentre();
   assertFact(generatedPick?.pointOrdinal === "544", "generated centre pick identity");
-  const generatedEvidence = { state: viewer.state(), pick: generatedPick };
+  const generated = { state: viewer.state(), pick: generatedPick };
   const destroyedViewer = viewer;
   const stalePresentation = destroyedViewer.requestRender();
   discardViewer();
   await expectCode(stalePresentation, "render_cancelled");
   expectSynchronousCode(() => destroyedViewer.render(), "viewer_destroyed");
   assertFact(viewer === undefined, "explicit viewer disposal");
-  const destructionEvidence = {
-    stale_presentation_cancelled: true,
-    work_after_destruction_rejected: true,
+  return {
+    lifecycle: {
+      invalid_resize_code: resizeFailure.code,
+      invalid_resize_safe_action: resizeFailure.safeAction,
+      prior_viewport_preserved: true,
+      alternate_device_pixel_ratio: alternateDpr,
+      hidden_frame_skips: 1,
+      resumed: viewer.state().lifecycle === "ready",
+    },
+    generated,
+    destruction: {
+      stale_presentation_cancelled: true,
+      work_after_destruction_rejected: true,
+    },
   };
+}
 
+async function runDeliveryQualification(heap) {
   await initializeViewer({ workerUrl: QUALIFICATION_WORKER_URL });
-  const workerRecovery = await exercisePrepublicationRecovery({
+  const worker = await exercisePrepublicationRecovery({
     manifestUrl: `${STREAM_MANIFEST_URL}?worker_fault=crash`,
     expectedCode: "worker_failed",
     label: "pre-publication worker crash",
@@ -329,7 +396,7 @@ async function runSmokePath() {
 
   await initializeViewer();
   const cancellation = await cancellationProbe();
-  const networkRecovery = await exercisePrepublicationRecovery({
+  const network = await exercisePrepublicationRecovery({
     manifestUrl: `${STREAM_MANIFEST_URL}?fault=disconnect`,
     expectedCode: "offline",
     label: "pre-publication offline failure",
@@ -357,11 +424,14 @@ async function runSmokePath() {
   assertFact(sameOrdinals(cold.pointOrdinals, warm.pointOrdinals), "cold/warm Point identities");
   latestLoad = warm;
   heap.afterWarm = captureJsHeap(performance);
+  return { worker, network, cancellation, cold, warm };
+}
 
+async function runPresentationQualification(warm) {
   const displayEvidence = [];
   for (const mode of DISPLAY_MODES) {
     viewer.setDisplayMode(mode);
-    state = viewer.render();
+    const state = viewer.render();
     assertFact(state.displayMode === mode, `${mode} display mode`);
     displayEvidence.push({ mode, generation: state.generation, drawnPoints: state.render.drawnPoints });
   }
@@ -404,14 +474,8 @@ async function runSmokePath() {
     credentials: "same-origin",
   });
   verifyStreamingResult(nextGeneration, "generation retry");
-  assertFact(
-    nextGeneration.state.pick.status === "not_requested",
-    "generation replacement clears provisional pick state",
-  );
-  assertFact(
-    nextGeneration.state.highlights.pointCount === 0,
-    "generation replacement clears presentation highlights",
-  );
+  assertFact(nextGeneration.state.pick.status === "not_requested", "generation replacement clears provisional pick state");
+  assertFact(nextGeneration.state.highlights.pointCount === 0, "generation replacement clears presentation highlights");
   const replacementPick = await pickResidentPoint();
   assertFact(replacementPick !== undefined, "replacement-generation provisional pick");
   viewer.setHighlights([replacementPick], replacementPick.generation);
@@ -419,12 +483,21 @@ async function runSmokePath() {
   viewer.clearHighlights();
   assertFact(viewer.state().highlights.pointCount === 0, "explicit highlight clear");
   await expectCode(viewer.confirmPoint(provisional), "stale_generation");
-  const generationRecovery = {
-    provisional_pick_cleared: true,
-    presentation_highlights_cleared: true,
-    stale_exact_request_rejected: true,
+  return {
+    displayEvidence,
+    projections: ["orthographic", "perspective"],
+    normalizedInput,
+    provisional,
+    exact: exactPoint,
+    generationRecovery: {
+      provisional_pick_cleared: true,
+      presentation_highlights_cleared: true,
+      stale_exact_request_rejected: true,
+    },
   };
+}
 
+async function runPerformanceQualification({ lifecycle, delivery }, heap) {
   const frames = await measureForegroundFrames({
     frameCount: 30,
     render: () => viewer.render(),
@@ -434,74 +507,23 @@ async function runSmokePath() {
   heap.afterFrames = captureJsHeap(performance);
   const finalState = viewer.state();
   const recovery = {
-    lifecycle: lifecycleRecovery,
-    worker: workerRecovery,
-    network: networkRecovery,
+    lifecycle: lifecycle.lifecycle,
+    worker: delivery.worker,
+    network: delivery.network,
   };
   const qualification = evaluateQualification({
-    cold,
-    warm,
+    cold: delivery.cold,
+    warm: delivery.warm,
     frames,
     cancellation: {
-      acknowledgementMilliseconds: cancellation.acknowledgement_milliseconds,
+      acknowledgementMilliseconds: delivery.cancellation.acknowledgement_milliseconds,
     },
     viewport: finalState.viewport,
     state: finalState,
     recovery,
   });
-  assertFact(
-    qualification.passed,
-    `qualification ceilings: ${qualification.failures.join("; ")}`,
-  );
-
-  smokeRecord = {
-    schema: ACCEPTANCE_SCHEMA,
-    package_version: finalState.packageVersion,
-    environment,
-    runtime_lane: runtimeLane,
-    heap: completeHeapRecord(heap),
-    generated: generatedEvidence,
-    destruction: destructionEvidence,
-    recovery: {
-      ...recovery,
-      generation: generationRecovery,
-      recreation_required: recreationRequiredRecoveryEvidence(),
-      physical_device_loss: "not forced on the physical adapter",
-      memory_pressure: "no portable signal; independent fixed ceilings enforced",
-    },
-    cancellation,
-    workload: observedWorkload(warm),
-    render: {
-      coverage: finalState.source.coverage,
-      drawn_points: finalState.render.drawnPoints,
-    },
-    cold: compactLoad(cold),
-    warm: compactLoad(warm),
-    foreground_frames: frames,
-    qualification,
-    display_modes: displayEvidence,
-    projections: ["orthographic", "perspective"],
-    input_normalizer: normalizedInput,
-    provisional,
-    exact: exactPoint,
-    stale_generation_rejected: true,
-    cancelled_query_rejected: true,
-    final_state: finalState,
-    nonclaims: [
-      "no arbitrary Source or Query support",
-      "no npm registry publication, production hosting, or offline-first support",
-      "no browser or device support beyond the exact recorded qualification lane",
-      "no physical cache, process RSS, driver, or GPU allocation claim",
-      "no independent adoption, stable API, visual-quality, support, or release-candidate claim",
-    ],
-  };
-  smokePassed = true;
-  smokeRunning = false;
-  publishState(viewer.state());
-  setHarnessState(
-    "passed",
-    "PASS — the declared browser/device lane satisfied functional, latency, resource, and recovery qualification locally.",
-  );
+  assertFact(qualification.passed, `qualification ceilings: ${qualification.failures.join("; ")}`);
+  return { frames, finalState, recovery, qualification };
 }
 
 async function cancellationProbe() {
