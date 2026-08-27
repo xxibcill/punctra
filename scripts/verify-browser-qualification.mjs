@@ -44,7 +44,7 @@ const QUALIFIED_IMPLEMENTATION_PATHS = [
   "fuzz",
   "crates",
   "examples",
-  "apps/browser-demo/web",
+  "apps",
   "packages",
   "scripts/build-browser-demo.sh",
   "scripts/build-browser-sdk.sh",

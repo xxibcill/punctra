@@ -16,10 +16,12 @@ import {
 const changelogUrl = new URL("../CHANGELOG.md", import.meta.url);
 const matrixUrl = new URL("../docs/releases/v0.20-browser-matrix.json", import.meta.url);
 const releaseRecordUrl = new URL("../docs/releases/v0.20.0.md", import.meta.url);
-const [changelog, matrixSource, releaseRecord] = await Promise.all([
+const verifierUrl = new URL("./verify-browser-qualification.mjs", import.meta.url);
+const [changelog, matrixSource, releaseRecord, verifierSource] = await Promise.all([
   readFile(changelogUrl, "utf8"),
   readFile(matrixUrl, "utf8"),
   readFile(releaseRecordUrl, "utf8"),
+  readFile(verifierUrl, "utf8"),
 ]);
 const matrix = JSON.parse(matrixSource);
 const implementationCommit = releaseImplementationCommit(releaseRecord);
@@ -235,6 +237,11 @@ test("the implementation pin rejects later changes to qualified browser files", 
     () => verifyImplementationCommit("7c3ceec11fc2cc4d3eae5db9ebd2399271c0cb18"),
     /qualified implementation files changed after/,
   );
+});
+
+test("the implementation pin covers every executable application tree", () => {
+  assert.match(verifierSource, /^\s*"apps",$/m);
+  assert.doesNotMatch(verifierSource, /^\s*"apps\/browser-demo\/web",$/m);
 });
 
 test("the qualified entry rejects exact lane and workload drift", () => {
