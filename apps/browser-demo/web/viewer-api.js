@@ -231,6 +231,7 @@ class BrowserViewer {
   #monotonicNow;
   #renderRequest;
   #loadController;
+  #pendingLoadCompletion;
   #exactController;
   #pickController;
   #loadFacts;
@@ -285,6 +286,7 @@ class BrowserViewer {
       if (typeof visible !== "boolean") throw invalidArgument("visible must be boolean");
       this.#callRaw("setVisible", visible);
       if (!visible) this.#cancelScheduledRender("scheduled render was cancelled because the viewer was hidden");
+      if (visible) this.#flushPendingLoadCompletion();
       return this.#state;
     });
   }
@@ -375,6 +377,7 @@ class BrowserViewer {
     const workerUrl = `${this.#workerUrl}${this.#workerUrl.includes("?") ? "&" : "?"}operation=${encodeURIComponent(operationId)}`;
     let deployment;
     let sourcePublicationStarted = false;
+    let sourceBatchReceived = false;
     let mainThreadMillisecondsHighWater = 0;
     let firstCoverageMilliseconds;
     const pointOrdinals = [];
@@ -418,16 +421,20 @@ class BrowserViewer {
             const started = this.#monotonicNow();
             this.#publishWorkerBatch(deployment, message, sourcePublicationStarted);
             sourcePublicationStarted = true;
+            sourceBatchReceived = true;
             appendTransferredOrdinals(pointOrdinals, message.payload);
+            const renderedFramesBefore = this.#state.render.renderedFrames;
             this.render();
             const finished = this.#monotonicNow();
             mainThreadMillisecondsHighWater = Math.max(
               mainThreadMillisecondsHighWater,
               finished - started,
             );
-            firstCoverageMilliseconds ??= finished - loadStarted;
+            if (this.#state.render.renderedFrames > renderedFramesBefore) {
+              firstCoverageMilliseconds ??= finished - loadStarted;
+            }
           } else if (message.type === "complete") {
-            if (firstCoverageMilliseconds === undefined) {
+            if (!sourceBatchReceived) {
               controls.reject(new ViewerError(
                 "stream_validation",
                 "worker completed before publishing first sampled Coverage",
@@ -435,21 +442,38 @@ class BrowserViewer {
               return;
             }
             this.#callRaw("completeStream");
-            const state = this.render();
-            const timings = {
-              firstCoverageMilliseconds,
-              settledViewMilliseconds: this.#monotonicNow() - loadStarted,
-              mainThreadBatchMillisecondsHighWater: mainThreadMillisecondsHighWater,
+            let completion;
+            completion = {
+              controller,
+              flush: () => {
+                const renderedFramesBefore = this.#state.render.renderedFrames;
+                const state = this.render();
+                const finished = this.#monotonicNow();
+                if (state.render.renderedFrames === renderedFramesBefore) {
+                  this.#pendingLoadCompletion = completion;
+                  return;
+                }
+                firstCoverageMilliseconds ??= finished - loadStarted;
+                this.#pendingLoadCompletion = undefined;
+                const timings = {
+                  firstCoverageMilliseconds,
+                  settledViewMilliseconds: finished - loadStarted,
+                  mainThreadBatchMillisecondsHighWater: mainThreadMillisecondsHighWater,
+                };
+                controls.resolve({
+                  deployment: message.deployment,
+                  metrics: message.metrics,
+                  decode: message.decode,
+                  pointOrdinals,
+                  timings,
+                  mainThreadMillisecondsHighWater,
+                  state,
+                });
+              },
+              reject: (error) => controls.reject(error),
             };
-            controls.resolve({
-              deployment: message.deployment,
-              metrics: message.metrics,
-              decode: message.decode,
-              pointOrdinals,
-              timings,
-              mainThreadMillisecondsHighWater,
-              state,
-            });
+            this.#pendingLoadCompletion = completion;
+            completion.flush();
           }
         },
       });
@@ -480,6 +504,9 @@ class BrowserViewer {
       this.#fuseViewer(fusedError);
       throw fusedError;
     } finally {
+      if (this.#pendingLoadCompletion?.controller === controller) {
+        this.#pendingLoadCompletion = undefined;
+      }
       if (this.#loadController === controller) {
         this.#loadController = undefined;
         controller.dispose();
@@ -625,6 +652,12 @@ class BrowserViewer {
   #destroyViewer(failure) {
     if (this.#destroyed) return;
     this.#destroyed = true;
+    const pendingLoadCompletion = this.#pendingLoadCompletion;
+    this.#pendingLoadCompletion = undefined;
+    pendingLoadCompletion?.reject(new ViewerError(
+      "viewer_destroyed",
+      "viewer was destroyed during Source loading",
+    ));
     const controllers = [this.#loadController, this.#exactController, this.#pickController];
     this.#loadController = undefined;
     this.#exactController = undefined;
@@ -762,6 +795,10 @@ class BrowserViewer {
     request.reject(failure);
     if (publishFailure) this.#refreshState(failure);
     return failure;
+  }
+
+  #flushPendingLoadCompletion() {
+    this.#pendingLoadCompletion?.flush();
   }
 
   #requireCurrentPoint(identity, generation) {

@@ -374,6 +374,32 @@ test("worker completion without first Coverage fails before changing the viewer"
   assert.equal(viewer.state().source.identity, GENERATED_SOURCE);
 });
 
+test("Source timings wait for an actual frame after resuming from hidden", async () => {
+  const viewer = await createBrowserViewer({
+    bindings: { createViewer: async () => new HiddenRenderRawViewer() },
+    canvas: {},
+    viewport: viewport(),
+    WorkerConstructor: FixtureWorker,
+    workerUrl: "https://fixtures.test/stream-worker.js",
+  });
+  viewer.pause();
+  let settled = false;
+  const load = viewer.loadSource({ manifestUrl: "https://fixtures.test/deployment.json" }).then((result) => {
+    settled = true;
+    return result;
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(settled, false);
+  assert.equal(viewer.state().lifecycle, "hidden");
+
+  viewer.resume();
+  const loaded = await load;
+  assert.ok(loaded.timings.firstCoverageMilliseconds >= 0);
+  assert.ok(loaded.timings.settledViewMilliseconds >= loaded.timings.firstCoverageMilliseconds);
+  assert.equal(loaded.state.render.renderedFrames > 0, true);
+});
+
 test("every recreation-required renderer failure fuses the viewer", async () => {
   for (const code of [
     "pick_recording",
@@ -1165,6 +1191,16 @@ class BoundedResizeRawViewer extends FakeRawViewer {
       }));
     }
     return super.resize(cssWidth, cssHeight, dpr);
+  }
+}
+
+class HiddenRenderRawViewer extends FakeRawViewer {
+  render() {
+    if (this.data.phase === "hidden") {
+      this.data.hidden_frame_skips += 1;
+      return this.json();
+    }
+    return super.render();
   }
 }
 
