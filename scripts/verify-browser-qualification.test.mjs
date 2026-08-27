@@ -52,6 +52,10 @@ test("the qualification runtime package matches its packed and source files", ()
   assert.doesNotThrow(verifyQualificationRuntimeTree);
 });
 
+test("the implementation pin includes the qualification verifier", () => {
+  assert.match(verifierSource, /^\s+"scripts\/verify-browser-qualification\.mjs",$/m);
+});
+
 test("an over-limit observation fails even when the recorded pass flag is true", () => {
   const tampered = structuredClone(matrix);
   tampered.qualified_entries[0].observations.cold.first_coverage_milliseconds =

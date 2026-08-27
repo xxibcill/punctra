@@ -68,6 +68,7 @@ const QUALIFIED_IMPLEMENTATION_PATHS = [
   "scripts/build-browser-sdk.sh",
   "scripts/generate-browser-sdk-reference.mjs",
   "scripts/serve-browser-demo.py",
+  "scripts/verify-browser-qualification.mjs",
   "scripts/verify-browser-integration-baseline.mjs",
   "scripts/verify-browser-integration-baseline.test.mjs",
   "scripts/verify-browser-qualification.test.mjs",
