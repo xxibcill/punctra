@@ -2,16 +2,14 @@ import type { ViewerCamera, ViewerState } from "@punctra/viewer";
 import type { NormalizedViewerInput } from "@punctra/viewer/input";
 
 type Vector3 = readonly [number, number, number];
+type SharedCameraFields = Pick<
+  ViewerCamera,
+  "eye" | "target" | "up" | "nearDistance" | "farDistance"
+>;
 
 export function cameraFromState(state: ViewerState): ViewerCamera {
   const camera = state.camera;
-  const shared = {
-    eye: vector3(camera.eye),
-    target: vector3(camera.target),
-    up: vector3(camera.up),
-    nearDistance: camera.nearDistance,
-    farDistance: camera.farDistance,
-  };
+  const shared = copySharedCameraFields(camera);
   return camera.projection === "perspective"
     ? { ...shared, projection: "perspective", verticalFieldOfViewRadians: camera.verticalFieldOfViewRadians }
     : { ...shared, projection: "orthographic", verticalWorldHeight: camera.verticalWorldHeight };
@@ -32,13 +30,7 @@ export function applyNavigation(
 }
 
 export function alternateProjection(camera: ViewerCamera): ViewerCamera {
-  const shared = {
-    eye: vector3(camera.eye),
-    target: vector3(camera.target),
-    up: vector3(camera.up),
-    nearDistance: camera.nearDistance,
-    farDistance: camera.farDistance,
-  };
+  const shared = copySharedCameraFields(camera);
   if (camera.projection === "perspective") {
     const radius = length(subtract(camera.eye, camera.target));
     return {
@@ -51,6 +43,16 @@ export function alternateProjection(camera: ViewerCamera): ViewerCamera {
     ...shared,
     projection: "perspective",
     verticalFieldOfViewRadians: Math.PI / 3,
+  };
+}
+
+function copySharedCameraFields(camera: SharedCameraFields) {
+  return {
+    eye: vector3(camera.eye),
+    target: vector3(camera.target),
+    up: vector3(camera.up),
+    nearDistance: camera.nearDistance,
+    farDistance: camera.farDistance,
   };
 }
 
