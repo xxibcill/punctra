@@ -6,7 +6,7 @@ All notable changes to Punctra are documented here. The project follows
 ## Unreleased - 0.20.0-alpha.1
 
 - Completed and locally repository-verified the bounded v0.20 packed browser
-  integration baseline at implementation commit `f7d080c87f4217bcea9164c8d848c87e7bd32afb`;
+  integration baseline at implementation commit `ff8cc5f42908447f7b787435943a0a3c7201dad6`;
   the final verification record
   pins the exact local commands and observations.
 - Consolidated the supported `@punctra/viewer` surface to four package entry
