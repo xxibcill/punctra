@@ -13,6 +13,7 @@ export interface QuickstartAcceptanceRecord {
   readonly displayModes: readonly string[];
   readonly projections: readonly string[];
   readonly cancellationRetainedViewer: true;
+  readonly cancellationRetainedFrame: true;
   readonly recoverableFailureCode: "offline";
   readonly retryRetainedViewer: true;
   readonly retrySucceeded: true;
@@ -31,10 +32,11 @@ export async function runQuickstartAcceptance(
   packedRuntime: PackedRuntimeProof,
 ): Promise<QuickstartAcceptanceRecord> {
   await controller.mount();
-  const generationBeforeCancellation = requiredState(controller).generation;
+  const stateBeforeCancellation = requiredState(controller);
   await cancelDelayedLoad(controller, manifestUrl);
-  if (requiredState(controller).generation !== generationBeforeCancellation) {
-    throw new Error("Cancelled load changed the active generation.");
+  const stateAfterCancellation = requiredState(controller);
+  if (!cancelledLoadRetainedFrame(stateBeforeCancellation, stateAfterCancellation)) {
+    throw new Error("Cancelled load did not retain the last safe viewer frame.");
   }
 
   const retry = await exerciseRecoverableRetry(controller, manifestUrl);
@@ -76,6 +78,7 @@ export async function runQuickstartAcceptance(
     displayModes: Object.freeze(displayModes),
     projections: Object.freeze(projections),
     cancellationRetainedViewer: true as const,
+    cancellationRetainedFrame: true as const,
     ...retry,
     ...recreation,
     provisionalAuthority: provisional.authority,
@@ -185,6 +188,29 @@ async function cancelDelayedLoad(controller: QuickstartController, manifestUrl: 
     }
     if ((error as { code?: string }).code !== "cancelled") throw error;
   }
+}
+
+function cancelledLoadRetainedFrame(before: ViewerState, after: ViewerState): boolean {
+  return after.lifecycle === "ready"
+    && JSON.stringify(retainedFrame(after)) === JSON.stringify(retainedFrame(before));
+}
+
+function retainedFrame(state: ViewerState) {
+  return {
+    generation: state.generation,
+    source: state.source,
+    viewport: state.viewport,
+    camera: state.camera,
+    displayMode: state.displayMode,
+    render: {
+      renderedFrames: state.render.renderedFrames,
+      drawnPoints: state.render.drawnPoints,
+      drawCalls: state.render.drawCalls,
+      residentBytes: state.render.residentBytes,
+      transientTextureBytes: state.render.transientTextureBytes,
+      surfaceSuboptimal: state.render.surfaceSuboptimal,
+    },
+  };
 }
 
 function acceptanceUrl(manifestUrl: string, name: string, value: string): string {

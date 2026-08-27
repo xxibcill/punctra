@@ -124,8 +124,8 @@
     "acceptance_schema": "punctra-browser-quickstart-acceptance-v1",
     "evidence": {
       "path": "docs/releases/v0.20-browser-quickstart.json",
-      "byte_length": 1310,
-      "sha256": "e54e40f846987fcac05b6f981daa1d80011c2964ab2c1dfc4ace36b7355ec58d"
+      "byte_length": 1349,
+      "sha256": "5fcc735846fdc31334bbdbb075e6f979df33174f9f675d8900fe10ede4053afb"
     },
     "packed_runtime": {
       "path": "target/browser-quickstart/punctra-packed-runtime.json",

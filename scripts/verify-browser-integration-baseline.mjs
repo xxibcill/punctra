@@ -218,6 +218,7 @@ export function verifyQuickstartEvidence(evidence, baseline) {
     displayModes: baseline.presentation_policy.display_modes,
     projections: baseline.presentation_policy.projections,
     cancellationRetainedViewer: true,
+    cancellationRetainedFrame: true,
     recoverableFailureCode: "offline",
     retryRetainedViewer: true,
     retrySucceeded: true,

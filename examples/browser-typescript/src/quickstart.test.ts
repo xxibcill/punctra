@@ -58,6 +58,8 @@ test("packed quickstart exercises the supported workflow and disposes", async ()
   assert.equal(record.displayedPoints, 4_096);
   assert.deepEqual(record.displayModes, QUICKSTART_DISPLAY_MODES);
   assert.deepEqual(record.projections, ["orthographic", "perspective"]);
+  assert.equal(record.cancellationRetainedViewer, true);
+  assert.equal(record.cancellationRetainedFrame, true);
   assert.equal(record.provisionalAuthority, "provisional_gpu_hint");
   assert.equal(record.exactAuthority, "exact_source_record");
   assert.equal(record.recoverableFailureCode, "offline");
@@ -73,6 +75,34 @@ test("packed quickstart exercises the supported workflow and disposes", async ()
   assert.equal(controller.state(), null);
   assert(snapshots.includes("Exact Source record confirmed"));
   assert(snapshots.includes("Viewer disposed"));
+});
+
+test("packed acceptance rejects cancellation that clears the last frame", async () => {
+  const firstViewer = new FakeViewer();
+  firstViewer.clearFrameOnCancellation = true;
+  firstViewer.publish({
+    render: {
+      ...firstViewer.state().render,
+      drawnPoints: 1,
+      drawCalls: 1,
+    },
+  });
+  const controller = quickstartController(
+    async () => firstViewer as unknown as BrowserViewer,
+  );
+
+  try {
+    await assert.rejects(
+      runQuickstartAcceptance(
+        controller,
+        "https://fixtures.test/fixtures/v1/deployment.json",
+        packedRuntime,
+      ),
+      /last safe viewer frame/,
+    );
+  } finally {
+    QuickstartController.prototype.dispose.call(controller);
+  }
 });
 
 test("packed acceptance rejects workflow operations that do not change viewer state", async (context) => {
@@ -229,6 +259,7 @@ class FakeViewer {
   listeners = new Set<(state: ViewerState) => void>();
   disposals = 0;
   loadUrls: string[] = [];
+  clearFrameOnCancellation = false;
 
   state(): ViewerState {
     return this.data;
@@ -250,7 +281,20 @@ class FakeViewer {
     this.loadUrls.push(options.manifestUrl);
     if (options.manifestUrl.includes("delay_ms")) {
       await new Promise<never>((_resolve, reject) => {
-        options.signal?.addEventListener("abort", () => reject({ code: "cancelled" }), { once: true });
+        options.signal?.addEventListener("abort", () => {
+          if (this.clearFrameOnCancellation) {
+            this.publish({
+              render: {
+                ...this.data.render,
+                drawnPoints: 0,
+                drawCalls: 0,
+                residentBytes: 0,
+                transientTextureBytes: 0,
+              },
+            });
+          }
+          reject({ code: "cancelled" });
+        }, { once: true });
       });
     }
     if (options.manifestUrl.includes("fault=disconnect")) {
