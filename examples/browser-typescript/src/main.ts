@@ -20,14 +20,14 @@ const controller = new QuickstartController({
 });
 
 const inputNormalizer = createInputNormalizer(canvas, (input) => {
-  runSync(() => controller.navigate(input));
+  runAction(() => controller.navigate(input));
 }, { preventDefault: true });
 let resizeFrame: number | undefined;
 const resizeObserver = new ResizeObserver(() => {
   if (resizeFrame !== undefined) cancelAnimationFrame(resizeFrame);
   resizeFrame = requestAnimationFrame(() => {
     resizeFrame = undefined;
-    if (controller.state()) runSync(() => controller.resize(viewport()));
+    if (controller.state()) runAction(() => controller.resize(viewport()));
   });
 });
 resizeObserver.observe(canvas);
@@ -43,9 +43,9 @@ bindButton("resume", () => controller.resume());
 bindButton("dispose", () => controller.dispose());
 bindButton("run-acceptance", runAcceptance);
 requiredElement<HTMLSelectElement>("display-mode").addEventListener("change", (event) => {
-  runSync(() => controller.setDisplayMode((event.currentTarget as HTMLSelectElement).value as DisplayMode));
+  runAction(() => controller.setDisplayMode((event.currentTarget as HTMLSelectElement).value as DisplayMode));
 });
-canvas.addEventListener("click", (event) => runAsync(() => pickCanvasPoint(event)));
+canvas.addEventListener("click", (event) => runAction(() => pickCanvasPoint(event)));
 document.addEventListener("visibilitychange", synchronizeVisibility);
 window.addEventListener("beforeunload", () => {
   document.removeEventListener("visibilitychange", synchronizeVisibility);
@@ -56,7 +56,7 @@ window.addEventListener("beforeunload", () => {
 }, { once: true });
 
 populateDisplayModes();
-void runAsync(() => controller.mount());
+runAction(() => controller.mount());
 
 async function pickCanvasPoint(event: MouseEvent): Promise<void> {
   const state = controller.state();
@@ -69,7 +69,7 @@ async function pickCanvasPoint(event: MouseEvent): Promise<void> {
 
 function synchronizeVisibility(): void {
   if (!controller.state()) return;
-  runSync(() => document.visibilityState === "hidden" ? controller.pause() : controller.resume());
+  runAction(() => document.visibilityState === "hidden" ? controller.pause() : controller.resume());
 }
 
 async function runAcceptance(): Promise<void> {
@@ -143,20 +143,12 @@ function populateDisplayModes(): void {
 }
 
 function bindButton(id: string, action: () => unknown | Promise<unknown>): void {
-  requiredElement<HTMLButtonElement>(id).addEventListener("click", () => runAsync(action));
+  requiredElement<HTMLButtonElement>(id).addEventListener("click", () => runAction(action));
 }
 
-function runSync(action: () => unknown): void {
+function runAction(action: () => unknown | Promise<unknown>): void {
   try {
-    action();
-  } catch (error) {
-    publishError(error);
-  }
-}
-
-async function runAsync(action: () => unknown | Promise<unknown>): Promise<void> {
-  try {
-    await action();
+    void Promise.resolve(action()).catch(publishError);
   } catch (error) {
     publishError(error);
   }
