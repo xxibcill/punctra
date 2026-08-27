@@ -75,6 +75,75 @@ test("packed quickstart exercises the supported workflow and disposes", async ()
   assert(snapshots.includes("Viewer disposed"));
 });
 
+test("packed acceptance rejects workflow operations that do not change viewer state", async (context) => {
+  const cases: readonly [
+    string,
+    (controller: QuickstartController, viewer: FakeViewer) => void,
+    RegExp,
+  ][] = [
+    [
+      "display mapping",
+      (_controller, viewer) => { viewer.setDisplayMode = () => viewer.state(); },
+      /did not apply the neutral display mapping/,
+    ],
+    [
+      "navigation",
+      (controller) => { controller.navigate = () => controller.state(); },
+      /orbit navigation did not change the camera/,
+    ],
+    [
+      "highlight",
+      (_controller, viewer) => { viewer.setHighlights = () => viewer.state(); },
+      /did not publish the accepted presentation highlight/,
+    ],
+    [
+      "highlight clear",
+      (_controller, viewer) => { viewer.clearHighlights = () => viewer.state(); },
+      /did not clear its presentation highlight/,
+    ],
+    [
+      "pause",
+      (_controller, viewer) => { viewer.pause = () => viewer.state(); },
+      /did not pause presentation/,
+    ],
+    [
+      "resume",
+      (_controller, viewer) => { viewer.resume = () => viewer.state(); },
+      /did not resume presentation/,
+    ],
+    [
+      "disposal",
+      (controller) => { controller.dispose = () => {}; },
+      /retained its viewer after disposal/,
+    ],
+  ];
+
+  for (const [label, configure, expected] of cases) {
+    await context.test(label, async () => {
+      const firstViewer = new FakeViewer();
+      const recreatedViewer = new FakeViewer();
+      const viewers = [firstViewer, recreatedViewer];
+      const controller = quickstartController(
+        async () => viewers.shift() as unknown as BrowserViewer,
+      );
+      configure(controller, recreatedViewer);
+
+      try {
+        await assert.rejects(
+          runQuickstartAcceptance(
+            controller,
+            "https://fixtures.test/fixtures/v1/deployment.json",
+            packedRuntime,
+          ),
+          expected,
+        );
+      } finally {
+        QuickstartController.prototype.dispose.call(controller);
+      }
+    });
+  }
+});
+
 test("loads reject a manifest outside the mounted identity", async () => {
   const viewer = new FakeViewer();
   const controller = quickstartController(async () => viewer as unknown as BrowserViewer);

@@ -39,7 +39,7 @@ export async function runQuickstartAcceptance(
 
   const retry = await exerciseRecoverableRetry(controller, manifestUrl);
   const recreation = await exerciseRecreationRequiredRecovery(controller, manifestUrl);
-  for (const mode of QUICKSTART_DISPLAY_MODES) controller.setDisplayMode(mode);
+  const displayModes = exerciseDisplayModes(controller);
   const projections = exerciseProjections(controller);
   exerciseNavigation(controller);
   await controller.settlePresentation();
@@ -47,34 +47,46 @@ export async function runQuickstartAcceptance(
   const state = requiredState(controller);
   const provisional = await pickResidentPoint(controller, state);
   if (!provisional) throw new Error("The fixed quickstart pick grid missed the accepted fixture.");
-  controller.highlightSelected();
+  const highlighted = controller.highlightSelected();
+  if (highlighted.highlights.pointCount !== 1) {
+    throw new Error("The quickstart did not publish the accepted presentation highlight.");
+  }
   const exact = await controller.confirmSelected();
-  controller.clearHighlights();
-  controller.pause();
-  controller.resume();
+  const cleared = controller.clearHighlights();
+  if (cleared.highlights.pointCount !== 0) {
+    throw new Error("The quickstart did not clear its presentation highlight.");
+  }
+  if (controller.pause().lifecycle !== "hidden") {
+    throw new Error("The quickstart did not pause presentation.");
+  }
+  if (controller.resume().lifecycle !== "ready") {
+    throw new Error("The quickstart did not resume presentation.");
+  }
 
   const settled = requiredState(controller);
   if (settled.packageVersion !== packedRuntime.viewerVersion) {
     throw new Error("The running viewer does not match the packed runtime proof.");
   }
-  const record = Object.freeze({
+  const completed = {
     schema: "punctra-browser-quickstart-acceptance-v1" as const,
     packageVersion: settled.packageVersion,
     sourceIdentity: requiredSourceIdentity(settled),
     generation: settled.generation,
     displayedPoints: settled.source.publishedPoints,
-    displayModes: Object.freeze([...QUICKSTART_DISPLAY_MODES]),
+    displayModes: Object.freeze(displayModes),
     projections: Object.freeze(projections),
     cancellationRetainedViewer: true as const,
     ...retry,
     ...recreation,
     provisionalAuthority: provisional.authority,
     exactAuthority: exact.authority,
-    disposed: true as const,
     packedRuntime: Object.freeze({ ...packedRuntime }),
-  });
+  };
   controller.dispose();
-  return record;
+  if (controller.state() !== null) {
+    throw new Error("The quickstart retained its viewer after disposal.");
+  }
+  return Object.freeze({ ...completed, disposed: true as const });
 }
 
 async function exerciseRecoverableRetry(
@@ -213,18 +225,59 @@ function exerciseProjections(controller: QuickstartController): string[] {
   return [...projections].sort();
 }
 
+function exerciseDisplayModes(controller: QuickstartController): string[] {
+  return QUICKSTART_DISPLAY_MODES.map((mode) => {
+    const state = controller.setDisplayMode(mode);
+    if (state.displayMode !== mode || requiredState(controller).displayMode !== mode) {
+      throw new Error(`The quickstart did not apply the ${mode} display mapping.`);
+    }
+    return state.displayMode;
+  });
+}
+
 function exerciseNavigation(controller: QuickstartController): void {
-  controller.navigate({ kind: "orbit", deltaX: 4, deltaY: 2, source: "pointer" });
-  controller.navigate({ kind: "pan", deltaX: 2, deltaY: -1, source: "pointer" });
-  controller.navigate({ kind: "zoom", delta: 0.2, source: "wheel" });
+  requireNavigationChange(
+    controller,
+    { kind: "orbit", deltaX: 4, deltaY: 2, source: "pointer" },
+    "orbit",
+  );
+  requireNavigationChange(
+    controller,
+    { kind: "pan", deltaX: 2, deltaY: -1, source: "pointer" },
+    "pan",
+  );
+  requireNavigationChange(
+    controller,
+    { kind: "zoom", delta: 0.2, source: "wheel" },
+    "zoom",
+  );
   const keyboardInput = {
     kind: "keyboard" as const,
     code: "KeyP",
     repeat: false,
     modifiers: { alt: false, control: false, meta: false, shift: false },
   };
-  controller.navigate(keyboardInput);
-  controller.navigate(keyboardInput);
+  requireNavigationChange(controller, keyboardInput, "keyboard projection change");
+  requireNavigationChange(controller, keyboardInput, "keyboard projection restore");
+}
+
+function requireNavigationChange(
+  controller: QuickstartController,
+  input: Parameters<QuickstartController["navigate"]>[0],
+  label: string,
+): void {
+  const before = requiredState(controller).camera;
+  const after = controller.navigate(input);
+  if (!after || sameCamera(before, after.camera)) {
+    throw new Error(`The quickstart ${label} navigation did not change the camera.`);
+  }
+  if (!sameCamera(after.camera, requiredState(controller).camera)) {
+    throw new Error(`The quickstart ${label} navigation did not publish its camera.`);
+  }
+}
+
+function sameCamera(left: ViewerState["camera"], right: ViewerState["camera"]): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
 }
 
 function requiredState(controller: QuickstartController): ViewerState {
