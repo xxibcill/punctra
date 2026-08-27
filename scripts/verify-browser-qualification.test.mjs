@@ -76,6 +76,17 @@ test("generation preservation is independently required for pre-publication reco
   }
 });
 
+test("cancellation evidence requires viewer and frame retention", () => {
+  for (const field of ["cancellation_viewer_retained", "cancellation_frame_retained"]) {
+    const tampered = structuredClone(matrix);
+    tampered.qualified_entries[0].observations.recovery[field] = false;
+    assert.throws(
+      () => verifyBrowserQualificationMatrix(tampered, implementationCommit),
+      new RegExp(`${field} must pass`),
+    );
+  }
+});
+
 test("observed workload identity is bound to the qualified deployment", () => {
   for (const field of ["deployment_id", "source_identity", "source_points"]) {
     const tampered = structuredClone(matrix);

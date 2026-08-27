@@ -99,6 +99,8 @@ export function verifyBrowserQualificationMatrix(matrix, implementationCommit) {
     "prepublication_offline_failure_preserved_viewer",
     "prepublication_offline_recoverable",
     "prepublication_offline_generation_preserved",
+    "cancellation_viewer_retained",
+    "cancellation_frame_retained",
     "warm_cache_recreation_zero_binary_requests",
     "stale_generation_rejected",
     "generation_replacement_cleared_provisional_pick",

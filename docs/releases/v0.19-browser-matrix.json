@@ -2,7 +2,7 @@
   "schema": "punctra-browser-qualification-matrix-v1",
   "release": "0.19.0-alpha.1",
   "implementation_commit": "e840c2210a0ad2f1300f1f0bdc4675bedaf5bb78",
-  "verifier_sha256": "1e042979dfd77575f343aac2ac56c991c1927b5cfa63bf7f3b13b023f4d33345",
+  "verifier_sha256": "02bfbc2aca43034ce241cf652a327e289b79086e7d31631c4bc01c3c5407e046",
   "observed_on": "2026-08-26",
   "qualified_entries": [
     {
@@ -173,6 +173,8 @@
           "prepublication_offline_recoverable": true,
           "prepublication_offline_generation_preserved": true,
           "cancellation_acknowledgement_milliseconds": 7.599999904632568,
+          "cancellation_viewer_retained": true,
+          "cancellation_frame_retained": true,
           "warm_cache_recreation_zero_binary_requests": true,
           "stale_generation_rejected": true,
           "generation_replacement_cleared_provisional_pick": true,

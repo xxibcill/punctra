@@ -273,6 +273,8 @@ async function runSmokePath() {
     destruction: lifecycle.destruction,
     recovery: {
       ...performanceEvidence.recovery,
+      cancellation_viewer_retained: delivery.cancellation.viewer_retained,
+      cancellation_frame_retained: delivery.cancellation.frame_retained,
       generation: presentation.generationRecovery,
       recreation_required: recreationRequiredRecoveryEvidence(),
       physical_device_loss: "not forced on the physical adapter",
@@ -528,6 +530,7 @@ async function runPerformanceQualification({ lifecycle, delivery }, heap) {
 }
 
 async function cancellationProbe() {
+  const stateBefore = viewer.render();
   const controller = new AbortController();
   const started = performance.now();
   const operation = viewer.loadSource({
@@ -540,7 +543,22 @@ async function cancellationProbe() {
   await expectCode(operation, "cancelled");
   const acknowledgementMilliseconds = performance.now() - started;
   assertFact(acknowledgementMilliseconds <= 1_000, "load cancellation deadline");
-  return { code: "cancelled", acknowledgement_milliseconds: acknowledgementMilliseconds, limit_milliseconds: 1_000 };
+  const stateAfter = viewer.state();
+  const viewerRetained = stateAfter.lifecycle === "ready"
+    && stateAfter.generation === stateBefore.generation;
+  const frameRetained = stateAfter.render.renderedFrames === stateBefore.render.renderedFrames
+    && stateAfter.render.drawnPoints === stateBefore.render.drawnPoints
+    && stateAfter.render.residentBytes === stateBefore.render.residentBytes
+    && stateAfter.render.transientTextureBytes === stateBefore.render.transientTextureBytes;
+  assertFact(viewerRetained, "load cancellation retains the current viewer and generation");
+  assertFact(frameRetained, "load cancellation retains the current frame");
+  return {
+    code: "cancelled",
+    acknowledgement_milliseconds: acknowledgementMilliseconds,
+    limit_milliseconds: 1_000,
+    viewer_retained: viewerRetained,
+    frame_retained: frameRetained,
+  };
 }
 
 async function exercisePrepublicationRecovery({ manifestUrl, expectedCode, label, retryManifestUrl }) {
