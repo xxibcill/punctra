@@ -6,7 +6,7 @@ All notable changes to Punctra are documented here. The project follows
 ## Unreleased - 0.19.0-alpha.1
 
 - Completed and locally repository-verified the accepted v0.19 slice at
-  implementation commit `43d1194d684d789567ef36a7263fceacb656cf8e`. The
+  implementation commit `e3119429aef998eab27ce4760025942a02bd3cd1`. The
   [v0.19 verification record](docs/releases/v0.19.0.md) pins the exact local
   browser/device lane, native and GPU command matrix, benchmarks, and remaining
   external exits.

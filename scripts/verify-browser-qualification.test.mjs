@@ -6,6 +6,7 @@ import { QUALIFICATION_LIMITS } from "../apps/browser-demo/web/qualification.js"
 import {
   changelogImplementationCommit,
   releaseImplementationCommit,
+  releaseVerifierSha256,
   verifyBrowserQualificationMatrix,
   verifyImplementationCommit,
 } from "./verify-browser-qualification.mjs";
@@ -53,6 +54,11 @@ test("the JSON matrix and Markdown record pin the same implementation", () => {
   assert.throws(
     () => verifyBrowserQualificationMatrix(matrix, "0000000000000000000000000000000000000000"),
   );
+});
+
+test("the JSON matrix and Markdown record pin the same qualification verifier", () => {
+  assert.equal(matrix.verifier_sha256, releaseVerifierSha256(releaseRecord));
+  assert.match(matrix.verifier_sha256, /^[0-9a-f]{64}$/);
 });
 
 test("the changelog pins the same implementation as the evidence records", () => {

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -14,6 +15,8 @@ const changelogUrl = new URL("../CHANGELOG.md", import.meta.url);
 const matrixUrl = new URL("../docs/releases/v0.19-browser-matrix.json", import.meta.url);
 const releaseRecordUrl = new URL("../docs/releases/v0.19.0.md", import.meta.url);
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
+const verifierSource = await readFile(new URL("./verify-browser-qualification.mjs", import.meta.url), "utf8");
+const QUALIFICATION_VERIFIER_SHA256 = createHash("sha256").update(verifierSource).digest("hex");
 const EXPECTED_OBSERVATION_DATE = "2026-08-26";
 const QUALIFIED_IMPLEMENTATION_PATHS = [
   "Cargo.toml",
@@ -94,6 +97,12 @@ const EXPECTED_QUALIFIED_LANE = {
 export function verifyBrowserQualificationMatrix(matrix, implementationCommit) {
   assert.equal(matrix.schema, "punctra-browser-qualification-matrix-v1");
   assert.equal(matrix.release, "0.19.0-alpha.1");
+  assert.match(matrix.verifier_sha256, /^[0-9a-f]{64}$/);
+  assert.equal(
+    matrix.verifier_sha256,
+    QUALIFICATION_VERIFIER_SHA256,
+    "qualification verifier source must match the recorded SHA-256",
+  );
   assert.match(matrix.implementation_commit, /^[0-9a-f]{40}$/);
   assert.equal(matrix.implementation_commit, implementationCommit);
   verifyImplementationCommit(matrix.implementation_commit);
@@ -155,6 +164,12 @@ export function verifyBrowserQualificationMatrix(matrix, implementationCommit) {
 export function releaseImplementationCommit(releaseRecord) {
   const match = releaseRecord.match(/^- Implementation commit: `([0-9a-f]{40})`$/m);
   assert.ok(match, "release record must contain one full implementation commit SHA");
+  return match[1];
+}
+
+export function releaseVerifierSha256(releaseRecord) {
+  const match = releaseRecord.match(/^- Qualification verifier SHA-256: `([0-9a-f]{64})`$/m);
+  assert.ok(match, "release record must contain one qualification verifier SHA-256");
   return match[1];
 }
 
@@ -422,6 +437,11 @@ if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) 
   ]);
   const matrix = JSON.parse(matrixSource);
   const implementationCommit = releaseImplementationCommit(releaseRecord);
+  assert.equal(
+    matrix.verifier_sha256,
+    releaseVerifierSha256(releaseRecord),
+    "matrix and release records must pin the same qualification verifier hash",
+  );
   assert.equal(
     changelogImplementationCommit(changelog),
     implementationCommit,
