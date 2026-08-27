@@ -194,8 +194,8 @@ test("JavaScript heap status and high-water agree with phase observations", () =
   const inconsistentStatus = structuredClone(matrix);
   inconsistentStatus.qualified_entries[0].observations.resources.javascript_heap_status =
     "non_standard_observation";
-  delete inconsistentStatus
-    .qualified_entries[0].observations.resources.javascript_heap_before_bytes;
+  inconsistentStatus
+    .qualified_entries[0].observations.resources.javascript_heap_before_bytes = null;
   assert.throws(
     () => verifyBrowserQualificationMatrix(inconsistentStatus, implementationCommit),
     /non-standard JavaScript heap observations must include every numeric phase/,
