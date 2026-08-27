@@ -69,6 +69,15 @@ test("quickstart evidence is byte-bound and semantically verified", async () => 
   assert.throws(() => verifyQuickstartEvidence(semanticTampered, baseline));
 });
 
+test("quickstart evidence requires packed runtime provenance", () => {
+  const tampered = structuredClone(quickstartEvidence);
+  delete tampered.acceptance.packedRuntime;
+  assert.throws(
+    () => verifyQuickstartEvidence(tampered, baseline),
+    /packedRuntime/,
+  );
+});
+
 test("the external-evidence boundary cannot be promoted by editing the record", async () => {
   const tampered = structuredClone(baseline);
   tampered.external_evidence.independent_adopter = true;

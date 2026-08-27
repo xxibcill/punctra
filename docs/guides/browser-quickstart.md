@@ -50,7 +50,10 @@ the attended v0.20 browser check. A pass publishes a
 `punctra-browser-quickstart-acceptance-v1` record containing the package
 version, Source identity, display/projection coverage, cancellation retention,
 retry/recreation outcomes, provisional and exact authority labels, and disposal
-result.
+result. The packed verifier also publishes a production runtime proof with the
+viewer tarball digest. The acceptance flow requires that proof from the strict
+Range server, so a development build or generic static host cannot create the
+checked-in packed-consumer evidence.
 
 ## What the application owns
 

@@ -28,6 +28,14 @@
     "recreationSucceeded": true,
     "provisionalAuthority": "provisional_gpu_hint",
     "exactAuthority": "exact_source_record",
-    "disposed": true
+    "disposed": true,
+    "packedRuntime": {
+      "schema": "punctra-browser-packed-runtime-v1",
+      "build": "production",
+      "serverContract": "punctra-strict-range-v1",
+      "viewerPackage": "@punctra/viewer",
+      "viewerVersion": "0.20.0-alpha.1",
+      "viewerArtifactSha256": "b61e59f0f0b34776158494af272dc684156c24806a0abbefa2c0d2b626e7e834"
+    }
   }
 }

@@ -3,6 +3,7 @@ import { createLasExactQueryBridge } from "@punctra/viewer/exact-query";
 import { createInputNormalizer } from "@punctra/viewer/input";
 
 import { runQuickstartAcceptance } from "./acceptance.ts";
+import { parsePackedRuntimeProof, type PackedRuntimeProof } from "./packed-runtime.ts";
 import { QuickstartController, type QuickstartSnapshot } from "./quickstart.ts";
 import "./styles.css";
 
@@ -79,9 +80,27 @@ function synchronizeVisibility(): void {
 
 async function runAcceptance(): Promise<void> {
   setAcceptance("running", "RUNNING");
-  const record = await runQuickstartAcceptance(controller, manifestUrl);
+  const packedRuntime = await loadPackedRuntimeProof();
+  const record = await runQuickstartAcceptance(controller, manifestUrl, packedRuntime);
   requiredElement<HTMLOutputElement>("acceptance-record").textContent = JSON.stringify(record, null, 2);
   setAcceptance("passed", "PASS");
+}
+
+async function loadPackedRuntimeProof(): Promise<PackedRuntimeProof> {
+  const response = await fetch("/punctra-packed-runtime.json", { cache: "no-store" });
+  if (!response.ok) throw new Error(`Packed runtime proof returned HTTP ${response.status}.`);
+  for (const [header, expected] of [
+    ["accept-ranges", "bytes"],
+    ["content-encoding", "identity"],
+  ]) {
+    if (response.headers.get(header) !== expected) {
+      throw new Error(`Packed runtime proof is missing the strict ${header} response.`);
+    }
+  }
+  if (!response.headers.get("etag")) {
+    throw new Error("Packed runtime proof is missing its validator response.");
+  }
+  return parsePackedRuntimeProof(await response.json());
 }
 
 function renderSnapshot(snapshot: QuickstartSnapshot): void {

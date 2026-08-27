@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   cpSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
   rmSync,
+  writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -119,7 +121,11 @@ async function verifyTrial(
     verifyProductionAssets(path.join(trial, "dist"), requireCodeSplit);
     run("npm", ["run", "build"], trial);
     verifyProductionAssets(path.join(trial, "dist"), requireCodeSplit);
-    if (publishDistribution) publishQuickstart(path.join(trial, "dist"));
+    if (publishDistribution) {
+      const packedViewerArtifact = artifacts.find((artifact) => path.basename(artifact).startsWith("punctra-viewer-"));
+      assert(packedViewerArtifact, "packed quickstart is missing its viewer artifact");
+      publishQuickstart(path.join(trial, "dist"), packedViewerArtifact);
+    }
     await verifyDevelopmentServer(trial);
   } finally {
     rmSync(temporaryRoot, { recursive: true, force: true });
@@ -132,10 +138,22 @@ function prepareQuickstartFixture(trial) {
   cpSync(fixtureSource, fixtureTarget, { recursive: true });
 }
 
-function publishQuickstart(distribution) {
+function publishQuickstart(distribution, viewerArtifact) {
   const target = path.join(repositoryRoot, "target/browser-quickstart");
   rmSync(target, { recursive: true, force: true });
   cpSync(distribution, target, { recursive: true });
+  writeFileSync(
+    path.join(target, "punctra-packed-runtime.json"),
+    `${JSON.stringify({
+      schema: "punctra-browser-packed-runtime-v1",
+      build: "production",
+      serverContract: "punctra-strict-range-v1",
+      viewerPackage: sourceViewerManifest.name,
+      viewerVersion: sourceViewerManifest.version,
+      viewerArtifactSha256: createHash("sha256").update(readFileSync(viewerArtifact)).digest("hex"),
+    }, null, 2)}\n`,
+    "utf8",
+  );
 }
 
 function verifyProductionAssets(distribution, requireCodeSplit) {

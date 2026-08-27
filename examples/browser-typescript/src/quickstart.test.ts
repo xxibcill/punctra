@@ -13,7 +13,17 @@ import type {
 } from "@punctra/viewer";
 
 import { runQuickstartAcceptance } from "./acceptance.ts";
+import type { PackedRuntimeProof } from "./packed-runtime.ts";
 import { QuickstartController } from "./quickstart.ts";
+
+const packedRuntime: PackedRuntimeProof = {
+  schema: "punctra-browser-packed-runtime-v1",
+  build: "production",
+  serverContract: "punctra-strict-range-v1",
+  viewerPackage: "@punctra/viewer",
+  viewerVersion: "0.20.0-alpha.1",
+  viewerArtifactSha256: "b61e59f0f0b34776158494af272dc684156c24806a0abbefa2c0d2b626e7e834",
+};
 
 test("packed quickstart exercises the supported workflow and disposes", async () => {
   const firstViewer = new FakeViewer();
@@ -36,6 +46,7 @@ test("packed quickstart exercises the supported workflow and disposes", async ()
   const record = await runQuickstartAcceptance(
     controller,
     "https://fixtures.test/fixtures/v1/deployment.json",
+    packedRuntime,
   );
 
   assert.equal(createOptions.length, 2);
@@ -54,6 +65,7 @@ test("packed quickstart exercises the supported workflow and disposes", async ()
   assert.equal(record.recreationRequired, true);
   assert.equal(record.recreationSucceeded, true);
   assert.equal(record.disposed, true);
+  assert.deepEqual(record.packedRuntime, packedRuntime);
   assert.equal(firstViewer.disposals, 1);
   assert.equal(recreatedViewer.disposals, 1);
   assert.equal(controller.state(), null);

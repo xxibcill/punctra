@@ -120,8 +120,19 @@
     "acceptance_schema": "punctra-browser-quickstart-acceptance-v1",
     "evidence": {
       "path": "docs/releases/v0.20-browser-quickstart.json",
-      "byte_length": 967,
-      "sha256": "b7e79fa266f394cbda8e3a39855dcf9f33ddf2351dff6d4510c27e62a4523585"
+      "byte_length": 1310,
+      "sha256": "897a738de37b76cfd34e9a0cccccedd01ba38b37be8b9cae9af1bd4e57489b4e"
+    },
+    "packed_runtime": {
+      "path": "target/browser-quickstart/punctra-packed-runtime.json",
+      "record": {
+        "schema": "punctra-browser-packed-runtime-v1",
+        "build": "production",
+        "serverContract": "punctra-strict-range-v1",
+        "viewerPackage": "@punctra/viewer",
+        "viewerVersion": "0.20.0-alpha.1",
+        "viewerArtifactSha256": "b61e59f0f0b34776158494af272dc684156c24806a0abbefa2c0d2b626e7e834"
+      }
     },
     "imports": [
       "@punctra/viewer",

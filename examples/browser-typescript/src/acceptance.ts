@@ -1,5 +1,6 @@
 import type { DisplayMode, ViewerState } from "@punctra/viewer";
 
+import type { PackedRuntimeProof } from "./packed-runtime.ts";
 import { QuickstartController } from "./quickstart.ts";
 
 export interface QuickstartAcceptanceRecord {
@@ -20,6 +21,7 @@ export interface QuickstartAcceptanceRecord {
   readonly provisionalAuthority: "provisional_gpu_hint";
   readonly exactAuthority: "exact_source_record";
   readonly disposed: true;
+  readonly packedRuntime: PackedRuntimeProof;
 }
 
 const ACCEPTED_DISPLAY_MODES: readonly DisplayMode[] = Object.freeze([
@@ -33,6 +35,7 @@ const ACCEPTED_DISPLAY_MODES: readonly DisplayMode[] = Object.freeze([
 export async function runQuickstartAcceptance(
   controller: QuickstartController,
   manifestUrl: string,
+  packedRuntime: PackedRuntimeProof,
 ): Promise<QuickstartAcceptanceRecord> {
   await controller.mount();
   const generationBeforeCancellation = requiredState(controller).generation;
@@ -58,6 +61,9 @@ export async function runQuickstartAcceptance(
   controller.resume();
 
   const settled = requiredState(controller);
+  if (settled.packageVersion !== packedRuntime.viewerVersion) {
+    throw new Error("The running viewer does not match the packed runtime proof.");
+  }
   const record = Object.freeze({
     schema: "punctra-browser-quickstart-acceptance-v1" as const,
     packageVersion: settled.packageVersion,
@@ -72,6 +78,7 @@ export async function runQuickstartAcceptance(
     provisionalAuthority: provisional.authority,
     exactAuthority: exact.authority,
     disposed: true as const,
+    packedRuntime: Object.freeze({ ...packedRuntime }),
   });
   controller.dispose();
   return record;

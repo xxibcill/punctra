@@ -159,15 +159,18 @@ async function verifyPresentationPolicy(policy) {
 }
 
 async function verifyQuickstart(quickstart, baseline) {
-  const [manifest, controllerSource, mainSource, evidence] = await Promise.all([
+  const [manifest, controllerSource, mainSource, evidence, packedRuntime] = await Promise.all([
     readJson(`${quickstart.path}/package.json`),
     readText(`${quickstart.path}/src/quickstart.ts`),
     readText(`${quickstart.path}/src/main.ts`),
     readJson(quickstart.evidence.path),
+    readJson(quickstart.packed_runtime.path),
   ]);
   await verifyDigestRecord(quickstart.evidence);
+  await verifyPackedRuntime(packedRuntime, quickstart.packed_runtime.record, baseline.release);
   assert.equal(manifest.name, "punctra-browser-quickstart");
   assert.equal(quickstart.acceptance_schema, "punctra-browser-quickstart-acceptance-v1");
+  assert.match(mainSource, /punctra-packed-runtime\.json/);
   const consumerSource = `${controllerSource}\n${mainSource}`;
   for (const packageName of quickstart.imports) {
     assert.match(consumerSource, new RegExp(escapeRegExp(packageName)));
@@ -188,6 +191,24 @@ async function verifyQuickstart(quickstart, baseline) {
     "dispose",
   ]);
   verifyQuickstartEvidence(evidence, baseline);
+}
+
+async function verifyPackedRuntime(packedRuntime, expected, release) {
+  assert.deepEqual(packedRuntime, expected);
+  assert.deepEqual(packedRuntime, {
+    schema: "punctra-browser-packed-runtime-v1",
+    build: "production",
+    serverContract: "punctra-strict-range-v1",
+    viewerPackage: "@punctra/viewer",
+    viewerVersion: release,
+    viewerArtifactSha256: packedRuntime.viewerArtifactSha256,
+  });
+  const artifact = await readFile(resolvePath(`target/npm/punctra-viewer-${release}.tgz`));
+  assert.equal(
+    packedRuntime.viewerArtifactSha256,
+    sha256(artifact),
+    "packed runtime proof must name the exact viewer artifact",
+  );
 }
 
 export function verifyQuickstartEvidence(evidence, baseline) {
@@ -212,6 +233,7 @@ export function verifyQuickstartEvidence(evidence, baseline) {
     provisionalAuthority: baseline.presentation_policy.provisional_authority,
     exactAuthority: baseline.presentation_policy.exact_authority,
     disposed: true,
+    packedRuntime: baseline.quickstart.packed_runtime.record,
   });
 }
 
