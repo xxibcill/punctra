@@ -9,6 +9,7 @@ import {
   releaseVerifierSha256,
   verifyBrowserQualificationMatrix,
   verifyImplementationCommit,
+  verifyWorkloadObservations,
   verifyQualificationRuntimeTree,
 } from "./verify-browser-qualification.mjs";
 
@@ -86,6 +87,17 @@ test("observed workload identity is bound to the qualified deployment", () => {
       /observed workload identity must match the qualified deployment/,
     );
   }
+});
+
+test("workload evidence is bound to the checked-in deployment bytes", () => {
+  const tampered = structuredClone(matrix.qualified_entries[0]);
+  tampered.workload.source_points = 1;
+  tampered.observations.workload.source_points = 1;
+
+  assert.throws(
+    () => verifyWorkloadObservations(tampered),
+    /recorded Source point count must match the checked-in deployment/,
+  );
 });
 
 test("observed render output is required by the evaluator", () => {

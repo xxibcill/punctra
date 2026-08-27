@@ -25,6 +25,11 @@ const qualificationViewerPackage = path.join(
   "apps/browser-demo/web/node_modules/@punctra/viewer",
 );
 const qualificationViewerSource = path.join(repositoryRoot, "apps/browser-demo/web");
+const qualificationFixtureRoot = path.join(
+  repositoryRoot,
+  "apps/browser-demo/web/fixtures/v1",
+);
+const qualificationManifestPath = path.join(qualificationFixtureRoot, "deployment.json");
 const qualificationViewerArtifact = path.join(
   repositoryRoot,
   "target/npm/punctra-viewer-0.19.0-alpha.1.tgz",
@@ -392,7 +397,7 @@ function verifyQualifiedLane(entry) {
   );
 }
 
-function verifyWorkloadObservations(entry) {
+export function verifyWorkloadObservations(entry) {
   const { workload } = entry;
   assert.deepEqual(
     entry.observations.workload,
@@ -405,6 +410,50 @@ function verifyWorkloadObservations(entry) {
       displayed_batches: workload.displayed_batches,
     },
     "observed workload identity must match the qualified deployment",
+  );
+  const deployment = JSON.parse(readFileSync(qualificationManifestPath, "utf8"));
+  assert.equal(
+    deployment.deployment_id,
+    workload.deployment_id,
+    "recorded workload deployment must match the checked-in deployment",
+  );
+  assert.equal(
+    deployment.source.source_identity,
+    workload.source_identity,
+    "recorded Source identity must match the checked-in deployment",
+  );
+  assert.equal(
+    deployment.source.point_count,
+    workload.source_points,
+    "recorded Source point count must match the checked-in deployment",
+  );
+  assert.equal(
+    deployment.index.root.coverage,
+    workload.coverage,
+    "recorded Coverage must match the checked-in deployment",
+  );
+  assert.equal(
+    deployment.index.root.display_point_count,
+    workload.displayed_points,
+    "recorded displayed Point count must match the checked-in deployment",
+  );
+  assert.equal(deployment.source.url, "./representative.las");
+  assert.equal(deployment.index.url, "./representative.pidx");
+  const sourcePath = path.join(qualificationFixtureRoot, "representative.las");
+  const indexPath = path.join(qualificationFixtureRoot, "representative.pidx");
+  const sourceBytes = readFileSync(sourcePath);
+  const indexBytes = readFileSync(indexPath);
+  assert.equal(sourceBytes.byteLength, deployment.source.byte_length);
+  assert.equal(indexBytes.byteLength, deployment.index.byte_length);
+  assert.equal(
+    createHash("sha256").update(sourceBytes).digest("hex"),
+    deployment.source.sha256,
+    "checked-in LAS bytes must match the deployment digest",
+  );
+  assert.equal(
+    createHash("sha256").update(indexBytes).digest("hex"),
+    deployment.index.sha256,
+    "checked-in index bytes must match the deployment digest",
   );
 }
 
