@@ -216,6 +216,7 @@ test -f docs/api/browser-sdk.md
 ruby -rjson -e 'ARGV.each { |path| JSON.parse(File.read(path)) }' \
   docs/guides/field-corpus.example.json \
   docs/releases/v0.20-browser-baseline.json \
+  docs/releases/v0.20-browser-quickstart.json \
   docs/releases/v0.20-browser-matrix.json
 git diff --check
 ```
