@@ -15,6 +15,10 @@ const quickstartEvidence = JSON.parse(await readFile(
   new URL("../docs/releases/v0.20-browser-quickstart.json", import.meta.url),
   "utf8",
 ));
+const qualificationMatrix = JSON.parse(await readFile(
+  new URL("../docs/releases/v0.20-browser-matrix.json", import.meta.url),
+  "utf8",
+));
 const operationalReleaseSources = [
   "build-browser-sdk.sh",
   "generate-browser-sdk-reference.mjs",
@@ -40,6 +44,15 @@ test("fixture digest drift fails even when semantic facts are unchanged", async 
   await assert.rejects(
     () => verifyBrowserIntegrationBaseline(tampered),
     /representative\.las SHA-256 drifted/,
+  );
+});
+
+test("the integration baseline binds the qualification observations", async () => {
+  const tampered = structuredClone(qualificationMatrix);
+  tampered.qualified_entries[0].observations.render.drawn_points = 1;
+  await assert.rejects(
+    () => verifyBrowserIntegrationBaseline(baseline, tampered),
+    /observed render output must match the qualified workload/,
   );
 });
 

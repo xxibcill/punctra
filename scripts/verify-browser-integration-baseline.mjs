@@ -9,11 +9,12 @@ import {
   QUALIFICATION_WORKLOAD,
 } from "../apps/browser-demo/web/qualification.js";
 import { QUALIFICATION_LANE } from "../apps/browser-demo/web/qualification-lane.js";
+import { verifyBrowserQualificationMatrix } from "./verify-browser-qualification.mjs";
 
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
 const baselineUrl = new URL("../docs/releases/v0.20-browser-baseline.json", import.meta.url);
 
-export async function verifyBrowserIntegrationBaseline(baseline) {
+export async function verifyBrowserIntegrationBaseline(baseline, qualificationMatrix) {
   assert.equal(baseline.schema, "punctra-browser-integration-baseline-v1");
 
   const packageVersion = await verifyPackages(baseline.packages);
@@ -27,11 +28,12 @@ export async function verifyBrowserIntegrationBaseline(baseline) {
   assert.equal(baseline.qualification.matrix_schema, "punctra-browser-qualification-matrix-v1");
   assert.equal(baseline.qualification.qualified_lane, QUALIFICATION_LANE.id);
   assert.deepEqual(baseline.qualification.limits, QUALIFICATION_LIMITS);
-  const matrix = await readJson(baseline.qualification.matrix_path);
+  const matrix = qualificationMatrix ?? await readJson(baseline.qualification.matrix_path);
   assert.equal(matrix.schema, baseline.qualification.matrix_schema);
   assert.equal(matrix.release, baseline.release);
-  assert.equal(matrix.qualified_entries.length, 1);
+  assert.equal(matrix.implementation_commit, baseline.qualification.implementation_commit);
   assert.equal(matrix.qualified_entries[0].id, baseline.qualification.qualified_lane);
+  verifyBrowserQualificationMatrix(matrix, matrix.implementation_commit);
 
   assert.deepEqual(baseline.recovery, {
     prepublication_worker_or_network: "retry_in_place_after_correction",

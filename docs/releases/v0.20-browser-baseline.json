@@ -147,6 +147,7 @@
   "qualification": {
     "matrix_path": "docs/releases/v0.20-browser-matrix.json",
     "matrix_schema": "punctra-browser-qualification-matrix-v1",
+    "implementation_commit": "a2f7baf112c4fd188e6edda405fa67a6c1637dca",
     "qualified_lane": "codex-iab-chromium-151-macos-26-apple-m5-pro",
     "limits": {
       "firstCoverageMilliseconds": 10000,
