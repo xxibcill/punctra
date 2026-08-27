@@ -41,6 +41,7 @@ apps/
       scene.rs
       streaming.rs
       bin/generate_stream_fixture.rs
+      bin/scene_facts.rs
     web/
       package.json
       sdk.js
