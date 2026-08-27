@@ -521,8 +521,6 @@ test("viewer keeps streamed interaction and exact handoff generation-safe", asyn
   assert.equal(exact.authority, "exact_source_record");
   assert.equal(exact.pointOrdinal, "7");
   assert.equal(exactRequests.length, 1);
-  viewer.clearHighlights();
-  assert.equal(viewer.state().highlights.pointCount, 0);
 
   const lateExact = viewer.confirmPoint(pick);
   await Promise.resolve();
@@ -533,6 +531,12 @@ test("viewer keeps streamed interaction and exact handoff generation-safe", asyn
   assert.equal(replaced.state.generation, pick.generation + 1);
   assert.equal(replaced.state.pick.status, "not_requested");
   assert.equal(replaced.state.highlights.pointCount, 0);
+
+  const replacementPick = await viewer.pick({ x: 10, y: 20 });
+  viewer.setHighlights([replacementPick], replacementPick.generation);
+  assert.equal(viewer.state().highlights.pointCount, 1);
+  viewer.clearHighlights();
+  assert.equal(viewer.state().highlights.pointCount, 0);
 
   resolveLateExact(exactResult(pick));
   await assert.rejects(

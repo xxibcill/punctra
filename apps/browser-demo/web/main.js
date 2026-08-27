@@ -397,8 +397,6 @@ async function runSmokePath() {
     viewer.confirmPoint(provisional, { signal: cancelledQuery.signal }),
     "exact_query_cancelled",
   );
-  viewer.clearHighlights();
-  assertFact(viewer.state().highlights.pointCount === 0, "complete highlight clear");
 
   const nextGeneration = await viewer.loadSource({
     manifestUrl: STREAM_MANIFEST_URL,
@@ -414,6 +412,12 @@ async function runSmokePath() {
     nextGeneration.state.highlights.pointCount === 0,
     "generation replacement clears presentation highlights",
   );
+  const replacementPick = await pickResidentPoint();
+  assertFact(replacementPick !== undefined, "replacement-generation provisional pick");
+  viewer.setHighlights([replacementPick], replacementPick.generation);
+  assertFact(viewer.state().highlights.pointCount === 1, "replacement-generation presentation highlight");
+  viewer.clearHighlights();
+  assertFact(viewer.state().highlights.pointCount === 0, "explicit highlight clear");
   await expectCode(viewer.confirmPoint(provisional), "stale_generation");
   const generationRecovery = {
     provisional_pick_cleared: true,
