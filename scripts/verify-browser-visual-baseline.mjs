@@ -1490,6 +1490,15 @@ async function verifyTrialEvidence(
   const source = corpus.sources.find(({ id }) => id === trial.source_id);
   assert(source, `trial ${trial.id} source is absent`);
   const runtimeSource = expectedRuntimeSourceFacts(source, autzenManifest);
+  const trialContext = createTrialVerificationContext({
+    trial,
+    source,
+    runtimeSource,
+    expectedCamera,
+    corpus,
+    registry,
+    repository: context,
+  });
   assert.equal(result.source_id, trial.source_id);
   assert.equal(result.display_mode, trial.display_mode);
   assert.equal(result.projection, expectedCamera.projection);
@@ -1537,7 +1546,7 @@ async function verifyTrialEvidence(
     requireRecord(recreation, `trial ${trial.id} recreation ${index}`);
     assert.equal(recreation.index, index);
     assert.equal(recreation.environment_match, true);
-    verifySettlement(recreation.settlement, trial, source, runtimeSource, expectedCamera, corpus, {
+    verifySettlement(recreation.settlement, trialContext, {
       expectedCaptureCount: 0,
       representative: true,
       observedBatches: recreation.capture?.facts?.batches,
@@ -1550,17 +1559,12 @@ async function verifyTrialEvidence(
       source,
       runtimeSource,
     );
-    verifyCoreDiagnostics(recreation.diagnostics, trial, source, runtimeSource, expectedCamera, corpus);
+    verifyCoreDiagnostics(recreation.diagnostics, trialContext);
 
     const candidate = await verifyCaptureArtifact(
       recreation.capture,
-      trial,
-      source,
-      runtimeSource,
+      trialContext,
       index,
-      corpus,
-      registry,
-      context,
     );
     const derived = deriveEvidenceComparison(baselineImage, candidate, comparisonOptions(
       corpus,
@@ -1576,14 +1580,8 @@ async function verifyTrialEvidence(
     const temporal = await verifyTemporalEvidence(
       recreation.temporal,
       recreation.capture,
-      trial,
-      source,
-      runtimeSource,
-      expectedCamera,
+      trialContext,
       index,
-      corpus,
-      registry,
-      context,
     );
     verifyResourceEvidence(
       recreation.resources,
@@ -1591,11 +1589,8 @@ async function verifyTrialEvidence(
       temporal.timing,
       temporal.artifactPrefix,
       recreation.settlement,
-      trial,
-      source,
-      runtimeSource,
+      trialContext,
       recreation.diagnostics,
-      corpus,
     );
     verifyCleanup(recreation.cleanup, recreation.resources);
 
@@ -1622,6 +1617,26 @@ async function verifyTrialEvidence(
   assert.equal(result.passed, passed, `trial ${trial.id} recorded pass differs from derived recreations`);
   assert.deepEqual(result.failures, []);
   return { trial_id: trial.id, passed, comparisons };
+}
+
+function createTrialVerificationContext({
+  trial,
+  source,
+  runtimeSource,
+  expectedCamera,
+  corpus,
+  registry,
+  repository,
+}) {
+  return Object.freeze({
+    trial,
+    source,
+    runtimeSource,
+    expectedCamera,
+    corpus,
+    registry,
+    repository,
+  });
 }
 
 function verifyNominalPickEvidence(evidence, trial, source, runtimeSource) {
@@ -1844,7 +1859,8 @@ function verifyBatchFacts(batchFacts, trial, expectedView) {
   });
 }
 
-function verifySettlement(settlement, trial, source, runtimeSource, expectedCamera, corpus, options) {
+function verifySettlement(settlement, trialContext, options) {
+  const { trial, source, runtimeSource, expectedCamera, corpus } = trialContext;
   requireRecord(settlement, `trial ${trial.id} settlement`);
   assert.equal(settlement.schema, "punctra-browser-quiet-window-v1");
   assert.equal(settlement.complete, true);
@@ -1898,11 +1914,7 @@ function verifySettlement(settlement, trial, source, runtimeSource, expectedCame
   ], `trial ${trial.id} quiet-window stable-facts projection differs`);
   verifyCoreDiagnostics(
     settlement.stable_facts,
-    trial,
-    source,
-    runtimeSource,
-    expectedCamera,
-    corpus,
+    trialContext,
     { requirePickFacts: false },
   );
   verifyPendingWork(settlement.pending_work, settlement, trial, source, runtimeSource, options.observedBatches);
@@ -1996,13 +2008,10 @@ function verifyPendingWork(pending, settlement, trial, source, runtimeSource, ob
 
 function verifyCoreDiagnostics(
   diagnostics,
-  trial,
-  source,
-  runtimeSource,
-  expectedCamera,
-  corpus,
+  trialContext,
   options = { requirePickFacts: true },
 ) {
+  const { trial, source, runtimeSource, expectedCamera, corpus } = trialContext;
   requireRecord(diagnostics, `trial ${trial.id} diagnostics`);
   assert.equal(diagnostics.phase, "ready");
   assert.deepEqual(diagnostics.capabilities, QUALIFICATION_RUNTIME_LANE.capabilities);
@@ -2095,18 +2104,20 @@ function assertObservedF32(observed, expected, label) {
   assert.equal(Math.fround(observed), Math.fround(expected), `${label} differs`);
 }
 
-async function verifyCaptureArtifact(capture, trial, source, runtimeSource, recreationIndex, corpus, registry, context) {
-  verifyCaptureRecord(capture, trial, source, runtimeSource, corpus);
+async function verifyCaptureArtifact(capture, trialContext, recreationIndex) {
+  const { trial, corpus, registry, repository } = trialContext;
+  verifyCaptureRecord(capture, trialContext);
   verifyArtifactDescriptor(capture.artifact, {
     kind: "recreation_png",
     trialId: trial.id,
     recreationIndex,
     frameIndex: 29,
   });
-  return readBoundArtifact(capture.artifact, registry, corpus.viewport, context);
+  return readBoundArtifact(capture.artifact, registry, corpus.viewport, repository);
 }
 
-function verifyCaptureRecord(capture, trial, source, runtimeSource, corpus, expectedBatches) {
+function verifyCaptureRecord(capture, trialContext, expectedBatches) {
+  const { trial, source, runtimeSource, corpus } = trialContext;
   requireRecord(capture, `trial ${trial.id} frame capture`);
   assert.equal(capture.schema, "punctra-browser-canonical-capture-v1");
   const facts = capture.facts;
@@ -2210,15 +2221,10 @@ function verifyCaptureRecord(capture, trial, source, runtimeSource, corpus, expe
 async function verifyTemporalEvidence(
   temporal,
   finalCapture,
-  trial,
-  source,
-  runtimeSource,
-  expectedCamera,
+  trialContext,
   recreationIndex,
-  corpus,
-  registry,
-  context,
 ) {
+  const { trial, source, corpus, registry, repository } = trialContext;
   requireRecord(temporal, `trial ${trial.id} temporal evidence`);
   assert.equal(temporal.kind, trial.temporal_trace.kind);
   assert.deepEqual(temporal.trace, trial.temporal_trace);
@@ -2229,7 +2235,7 @@ async function verifyTemporalEvidence(
   assert.equal(settled.gating, true);
   assert.equal(settled.frame_count, 30);
   assert.equal(settled.pair_count, 29);
-  verifySettlement(settled.capture_window, trial, source, runtimeSource, expectedCamera, corpus, {
+  verifySettlement(settled.capture_window, trialContext, {
     expectedCaptureCount: 30,
     representative: false,
     observedBatches: finalCapture.facts.batches,
@@ -2247,7 +2253,7 @@ async function verifyTemporalEvidence(
     const frame = settled.frames[index];
     requireRecord(frame, `trial ${trial.id} settled frame ${index}`);
     assert.equal(frame.index, index);
-    verifyCaptureRecord(frame.capture, trial, source, runtimeSource, corpus);
+    verifyCaptureRecord(frame.capture, trialContext);
     settledCaptureMilliseconds += frame.capture.timing.total_milliseconds;
     verifyArtifactDescriptor(frame.artifact, {
       kind: index === 29 ? "recreation_png" : "settled_quiet_frame_png",
@@ -2255,13 +2261,13 @@ async function verifyTemporalEvidence(
       recreationIndex,
       frameIndex: index,
     });
-    const image = await readBoundArtifact(frame.artifact, registry, corpus.viewport, context);
+    const image = await readBoundArtifact(frame.artifact, registry, corpus.viewport, repository);
     if (index > 0) {
       const comparison = deriveEvidenceComparison(previousImage, image, comparisonOptions(
         corpus,
         trial,
         trial.temporal_tolerance_profile,
-      ), context);
+      ), repository);
       const pair = {
         from_index: index - 1,
         to_index: index,
@@ -2303,9 +2309,9 @@ async function verifyTemporalEvidence(
     frameIndex: summary.worst_pair_index,
   });
   const [worstFrom, worstTo, differenceImage] = await Promise.all([
-    readBoundArtifact(summary.worst_pair.from_path, registry, corpus.viewport, context),
-    readBoundArtifact(summary.worst_pair.to_path, registry, corpus.viewport, context),
-    readBoundArtifact(differenceArtifact, registry, corpus.viewport, context),
+    readBoundArtifact(summary.worst_pair.from_path, registry, corpus.viewport, repository),
+    readBoundArtifact(summary.worst_pair.to_path, registry, corpus.viewport, repository),
+    readBoundArtifact(differenceArtifact, registry, corpus.viewport, repository),
   ]);
   assertBytesEqual(
     differenceImage.data,
@@ -2318,13 +2324,8 @@ async function verifyTemporalEvidence(
   assert.equal(summary.passed, true, `trial ${trial.id} settled temporal window failed`);
   const transitionFacts = await verifyTransitionEvidence(
     temporal.transition,
-    trial,
-    source,
-    runtimeSource,
+    trialContext,
     recreationIndex,
-    corpus,
-    registry,
-    context,
   );
   return {
     passed: summary.passed,
@@ -2345,14 +2346,10 @@ async function verifyTemporalEvidence(
 
 async function verifyTransitionEvidence(
   transition,
-  trial,
-  source,
-  runtimeSource,
+  trialContext,
   recreationIndex,
-  corpus,
-  registry,
-  context,
 ) {
+  const { trial, source, runtimeSource, corpus, registry, repository } = trialContext;
   if (trial.temporal_trace.kind === "static") {
     assert.equal(transition, null);
     return {
@@ -2404,7 +2401,7 @@ async function verifyTransitionEvidence(
       state: "resident",
       presentation_weight_u8: weights[batchIndex],
     }));
-    verifyCaptureRecord(frame.capture, trial, source, runtimeSource, corpus, transitionBatches);
+    verifyCaptureRecord(frame.capture, trialContext, transitionBatches);
     captureSamples.push(frame.capture.timing);
     verifyArtifactDescriptor(frame.artifact, {
       kind: "mixed_lod_transition_png",
@@ -2412,7 +2409,7 @@ async function verifyTransitionEvidence(
       recreationIndex,
       frameIndex: index,
     });
-    const image = await readBoundArtifact(frame.artifact, registry, corpus.viewport, context);
+    const image = await readBoundArtifact(frame.artifact, registry, corpus.viewport, repository);
     if (index > 0) {
       const comparisonMilliseconds = transition.comparisons.pairs[index - 1].comparison_milliseconds;
       verifyComparisonMilliseconds(comparisonMilliseconds, corpus.timing_limits, `trial ${trial.id} transition pair ${index - 1}`);
@@ -2425,7 +2422,7 @@ async function verifyTransitionEvidence(
           corpus,
           trial,
           trial.tolerance_profile,
-        ), context),
+        ), repository),
         comparison_milliseconds: comparisonMilliseconds,
       });
     }
@@ -2490,12 +2487,10 @@ function verifyResourceEvidence(
   temporalTiming,
   artifactPrefix,
   representativeSettlement,
-  trial,
-  source,
-  runtimeSource,
+  trialContext,
   diagnostics,
-  corpus,
 ) {
+  const { trial, source, runtimeSource, corpus } = trialContext;
   const limits = corpus.resource_limits;
   requireRecord(resources, `trial ${trial.id} resource evidence`);
   assert.equal(resources.schema, "punctra-browser-visual-resource-evidence-v1");
