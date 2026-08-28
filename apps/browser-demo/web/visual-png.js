@@ -9,6 +9,11 @@ const BYTES_PER_PIXEL = 4;
 const MAX_DIMENSION = 4_096;
 const MAX_PIXELS = 8_388_608;
 const DEFLATE_OVERHEAD_LIMIT = 65_536;
+const ARTIFACT_TIMING_FIELDS = Object.freeze([
+  "encode_milliseconds",
+  "png_encode_milliseconds",
+  "artifact_encoding_milliseconds",
+]);
 const CRC_TABLE = createCrcTable();
 
 export async function encodeRgba8Png(image) {
@@ -40,6 +45,57 @@ export async function sha256Hex(bytes) {
   if (subtle === undefined) throw new Error("Web Crypto SHA-256 is unavailable");
   const digest = new Uint8Array(await subtle.digest("SHA-256", bytes));
   return Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+export async function createPngArtifactMetadata({
+  descriptor,
+  encodedBytes,
+  image,
+  identities = {},
+  timing = {},
+}) {
+  const validatedDescriptor = validateArtifactDescriptor(descriptor);
+  requireUint8Array(encodedBytes, "encoded PNG");
+  const validatedImage = validateImage(image);
+  const timingMetadata = {};
+  for (const field of ARTIFACT_TIMING_FIELDS) {
+    if (timing[field] === undefined) continue;
+    if (!Number.isFinite(timing[field]) || timing[field] < 0) {
+      throw new TypeError(`${field} must be finite and nonnegative`);
+    }
+    timingMetadata[field] = timing[field];
+  }
+  return {
+    kind: validatedDescriptor.kind,
+    trial_id: validatedDescriptor.trial_id ?? null,
+    recreation_index: validatedDescriptor.recreation_index ?? null,
+    frame_index: validatedDescriptor.frame_index ?? null,
+    path: validatedDescriptor.path,
+    filename: validatedDescriptor.path.split("/").at(-1),
+    mime_type: "image/png",
+    encoding: "png-rgba8-filter-0",
+    width: validatedImage.width,
+    height: validatedImage.height,
+    encoded_byte_length: encodedBytes.byteLength,
+    encoded_sha256: identities.encoded_sha256 ?? await sha256Hex(encodedBytes),
+    decoded_byte_length: validatedImage.data.byteLength,
+    decoded_sha256: identities.decoded_sha256 ?? await sha256Hex(validatedImage.data),
+    ...timingMetadata,
+    authority: "presentation_only",
+  };
+}
+
+function validateArtifactDescriptor(descriptor) {
+  if (descriptor === null || typeof descriptor !== "object" || Array.isArray(descriptor)) {
+    throw new TypeError("PNG artifact descriptor must be an object");
+  }
+  if (typeof descriptor.kind !== "string" || descriptor.kind.length === 0) {
+    throw new TypeError("PNG artifact kind must be nonempty");
+  }
+  if (typeof descriptor.path !== "string" || descriptor.path.length === 0) {
+    throw new TypeError("PNG artifact path must be nonempty");
+  }
+  return descriptor;
 }
 
 function validateImage(image) {

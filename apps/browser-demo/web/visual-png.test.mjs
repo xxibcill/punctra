@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { decodeRgba8Png, encodeRgba8Png, sha256Hex } from "./visual-png.js";
+import {
+  createPngArtifactMetadata,
+  decodeRgba8Png,
+  encodeRgba8Png,
+  sha256Hex,
+} from "./visual-png.js";
 
 const PNG_SIGNATURE = Uint8Array.of(137, 80, 78, 71, 13, 10, 26, 10);
 
@@ -60,6 +65,48 @@ test("SHA-256 identities use lowercase Web Crypto hexadecimal", async () => {
     "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
   );
   await assert.rejects(() => sha256Hex("abc"), /byte source/);
+});
+
+test("PNG artifact metadata has one shared identity and timing schema", async () => {
+  const image = fixtureImage();
+  const encodedBytes = await encodeRgba8Png(image);
+  const metadata = await createPngArtifactMetadata({
+    descriptor: {
+      kind: "recreation_png",
+      trial_id: "trial-a",
+      recreation_index: 1,
+      frame_index: 29,
+      path: "docs/releases/trial-a-recreation-1.png",
+    },
+    encodedBytes,
+    image,
+    timing: {
+      encode_milliseconds: 1.25,
+      png_encode_milliseconds: 1,
+      artifact_encoding_milliseconds: 1.5,
+    },
+  });
+
+  assert.deepEqual(metadata, {
+    kind: "recreation_png",
+    trial_id: "trial-a",
+    recreation_index: 1,
+    frame_index: 29,
+    path: "docs/releases/trial-a-recreation-1.png",
+    filename: "trial-a-recreation-1.png",
+    mime_type: "image/png",
+    encoding: "png-rgba8-filter-0",
+    width: image.width,
+    height: image.height,
+    encoded_byte_length: encodedBytes.byteLength,
+    encoded_sha256: await sha256Hex(encodedBytes),
+    decoded_byte_length: image.data.byteLength,
+    decoded_sha256: await sha256Hex(image.data),
+    encode_milliseconds: 1.25,
+    png_encode_milliseconds: 1,
+    artifact_encoding_milliseconds: 1.5,
+    authority: "presentation_only",
+  });
 });
 
 test("the decoder rejects malformed signatures, truncation, and trailing bytes", async () => {

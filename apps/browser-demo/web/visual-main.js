@@ -31,6 +31,7 @@ import {
   writeDifferenceImage,
 } from "./visual-comparison.js";
 import {
+  createPngArtifactMetadata,
   decodeRgba8Png,
   encodeRgba8Png,
   sha256Hex,
@@ -1228,23 +1229,11 @@ async function loadExistingBaseline(trial, corpusUrl, repositoryPath) {
 async function inspectPngArtifact(bytes, descriptor) {
   let decoded = await decodeRgba8Png(bytes);
   requireCondition(decoded.width === VISUAL_VIEWPORT.physical_width && decoded.height === VISUAL_VIEWPORT.physical_height, `PNG ${descriptor.path} dimensions differ`);
-  const metadata = {
-    kind: descriptor.kind,
-    trial_id: descriptor.trial_id ?? null,
-    recreation_index: descriptor.recreation_index ?? null,
-    frame_index: descriptor.frame_index ?? null,
-    path: descriptor.path,
-    filename: descriptor.path.split("/").at(-1),
-    mime_type: "image/png",
-    encoding: "png-rgba8-filter-0",
-    width: decoded.width,
-    height: decoded.height,
-    encoded_byte_length: bytes.byteLength,
-    encoded_sha256: await sha256Hex(bytes),
-    decoded_byte_length: decoded.data.byteLength,
-    decoded_sha256: await sha256Hex(decoded.data),
-    authority: "presentation_only",
-  };
+  const metadata = await createPngArtifactMetadata({
+    descriptor,
+    encodedBytes: bytes,
+    image: decoded,
+  });
   decoded = undefined;
   return metadata;
 }
@@ -2014,26 +2003,20 @@ class ArtifactRegistry {
     const encodedSha256 = await sha256Hex(bytes);
     const decodedSha256 = await sha256Hex(image.data);
     const artifactEncodingMilliseconds = performance.now() - artifactStarted;
-    const metadata = {
-      kind: descriptor.kind,
-      trial_id: descriptor.trial_id ?? null,
-      recreation_index: descriptor.recreation_index ?? null,
-      frame_index: descriptor.frame_index ?? null,
-      path: descriptor.path,
-      filename: descriptor.path.split("/").at(-1),
-      mime_type: "image/png",
-      encoding: "png-rgba8-filter-0",
-      width: image.width,
-      height: image.height,
-      encoded_byte_length: bytes.byteLength,
-      encoded_sha256: encodedSha256,
-      decoded_byte_length: image.data.byteLength,
-      decoded_sha256: decodedSha256,
-      encode_milliseconds: pngEncodeMilliseconds,
-      png_encode_milliseconds: pngEncodeMilliseconds,
-      artifact_encoding_milliseconds: artifactEncodingMilliseconds,
-      authority: "presentation_only",
-    };
+    const metadata = await createPngArtifactMetadata({
+      descriptor,
+      encodedBytes: bytes,
+      image,
+      identities: {
+        encoded_sha256: encodedSha256,
+        decoded_sha256: decodedSha256,
+      },
+      timing: {
+        encode_milliseconds: pngEncodeMilliseconds,
+        png_encode_milliseconds: pngEncodeMilliseconds,
+        artifact_encoding_milliseconds: artifactEncodingMilliseconds,
+      },
+    });
     this.#register(metadata, bytes);
     return { metadata, bytes };
   }
