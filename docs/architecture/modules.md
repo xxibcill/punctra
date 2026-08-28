@@ -542,7 +542,7 @@ The allowlist is stricter than what Cargo can compile:
 | `render-protocol` | `point-contracts` |
 | `point-view` | `render-protocol` and narrow math/value dependencies |
 | `render-wgpu` | `render-protocol`, `point-contracts` |
-| `browser-demo` | runtime: `point-view`, `render-protocol`, `render-wgpu`, and narrow private serialization/browser/WebGPU dependencies; native fixture generator: `source-las`, `point-index`, `point-contracts` |
+| `browser-demo` | runtime: `point-view`, `render-protocol`, `render-wgpu`, and narrow private serialization/browser/WebGPU dependencies; native fixture generator: `source-las`, `point-source`, `point-index`, `point-contracts` |
 | `@punctra/react` | `@punctra/viewer` and React peer APIs only |
 | `renderer-demo` | only the Source/index/Workspace/review/View/render crates it composes |
 | `terrain-demo` | `source-las`, `point-source`, `point-index`, `point-workspace`, `point-terrain`, `point-contracts`, `foundation-runtime`, and narrow checksum, identity-generation, and error dependencies |

@@ -429,7 +429,7 @@ render-protocol -> point-contracts
 point-view -> render-protocol
 render-wgpu -> render-protocol + point-contracts
 browser-demo runtime -> point-view + render-protocol + render-wgpu
-browser-demo native fixture generator -> source-las + point-index + point-contracts
+browser-demo native fixture generator -> source-las + point-source + point-index + point-contracts
 renderer-demo -> source-las + point-source + point-index + point-workspace + point-review + point-view + render-protocol + render-wgpu + point-contracts + foundation-runtime
 terrain-demo -> source-las + point-source + point-index + point-workspace + point-terrain + point-contracts + foundation-runtime
 ~~~
