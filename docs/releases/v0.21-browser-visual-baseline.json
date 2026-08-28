@@ -4,12 +4,12 @@
   "baseline_inputs": {
     "artifact": {
       "path": "apps/browser-demo/web/fixtures/visual-v1/baseline-inputs.json",
-      "byte_length": 0,
-      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      "byte_length": 5100,
+      "sha256": "ec45107078bb90c58964f85e13316953bdaf3db1576b7fdfb6f9e38304c3c49a"
     }
   },
   "pins": {
-    "implementation_commit": "0000000000000000000000000000000000000000",
+    "implementation_commit": "5c283d42cb874000f4e749b84a0a67cb72a45ae4",
     "qualified_paths": [
       "Cargo.lock",
       "Cargo.toml",
@@ -128,13 +128,13 @@
       },
       {
         "path": "apps/browser-demo/web/pkg/browser_demo.js",
-        "byte_length": 81397,
-        "sha256": "dc651c449bde872e96b4170c169cdafc8b798154ee17389876f2f7e64a95bafa"
+        "byte_length": 85045,
+        "sha256": "2bc87f1d3df50cdcfb56e7dba6fadf0d64133b841b556315bde016b98b0f7d33"
       },
       {
         "path": "apps/browser-demo/web/pkg/browser_demo_bg.wasm",
-        "byte_length": 737400,
-        "sha256": "7c7d322b85b32bb92c331d0256d614a2374a62d618107dc580e6b01a1ecd756f"
+        "byte_length": 792815,
+        "sha256": "ddf0e0d62926260e8ef28866dab6d9f032da4d267eb6d4998a7cbcebee5a2cb1"
       }
     ],
     "capture_interface": "private_browser_demo_only",
@@ -201,8 +201,8 @@
   "corpus": {
     "artifact": {
       "path": "apps/browser-demo/web/fixtures/visual-v1/corpus.json",
-      "byte_length": 17713,
-      "sha256": "df2a0ac5402eb24a68e340687e446978a10cea5c8b3ac811afb6e1a1e16725b0"
+      "byte_length": 28119,
+      "sha256": "0b720e96b6a283238894f3704f9549f848af49ad4243f768985c684ba4178e64"
     },
     "generated": {
       "id": "generated-visual-composite-v1",
@@ -286,8 +286,8 @@
       },
       "generator": {
         "path": "apps/browser-demo/src/bin/generate_visual_source_fixture.rs",
-        "byte_length": 30207,
-        "sha256": "0f55648afbb56fa4ea93ef4406cc40696ee10ee68003e8449d954ce380b14d2b"
+        "byte_length": 32163,
+        "sha256": "ed069079d8638018847a21124f006a7f937faa247ebdde7bb5d49407f7a5415c"
       },
       "verification_command": "cargo run --quiet -p browser-demo --bin generate_visual_source_fixture -- --output-dir <isolated-directory>"
     }

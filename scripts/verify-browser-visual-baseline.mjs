@@ -36,9 +36,11 @@ export const VISUAL_BASELINE_SCHEMA = "punctra-browser-visual-baseline-v1";
 export const VISUAL_EVIDENCE_SCHEMA = "punctra-browser-visual-evidence-v1";
 export const VISUAL_RELEASE = "0.21.0-alpha.1";
 export const VISUAL_VERIFIER_PATH = "scripts/verify-browser-visual-baseline.mjs";
+export const MAX_PINNED_FILE_BYTES = 80 * 1024 * 1024;
 
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
 const defaultBaselinePath = "docs/releases/v0.21-browser-visual-baseline.json";
+const MAX_PINNED_SIZE_OUTPUT_BYTES = 32;
 const canonicalViewport = Object.freeze({
   css_width: 320,
   css_height: 240,
@@ -2780,14 +2782,53 @@ async function readRepositoryFile(relativePath, encoding) {
   return encoding === "utf8" ? bytes.toString("utf8") : bytes;
 }
 
-function readPinnedFile(commit, relativePath) {
-  const result = spawnSync("git", ["show", `${commit}:${relativePath}`], {
-    cwd: repositoryRoot,
-    encoding: null,
+export function readPinnedFile(commit, relativePath, options = {}) {
+  verifyFullCommit(commit, "pinned file commit");
+  validateRepositoryPath(relativePath);
+  const spawn = options.spawnSync ?? spawnSync;
+  const workingDirectory = options.repositoryRoot ?? repositoryRoot;
+  const objectName = `${commit}:${relativePath}`;
+  const sizeResult = spawn("git", ["cat-file", "-s", objectName], {
+    cwd: workingDirectory,
+    encoding: "utf8",
+    maxBuffer: MAX_PINNED_SIZE_OUTPUT_BYTES,
     stdio: ["ignore", "pipe", "pipe"],
   });
-  assert.equal(result.status, 0, `cannot read ${relativePath} at ${commit}: ${result.stderr.toString("utf8")}`);
-  return result.stdout;
+  assertPinnedGitSucceeded(sizeResult, `cannot size ${relativePath} at ${commit}`);
+  assert.equal(typeof sizeResult.stdout, "string", `pinned size output for ${relativePath} is not text`);
+  assert.match(sizeResult.stdout, /^[1-9][0-9]*\n$/, `pinned size output for ${relativePath} is not a canonical positive decimal`);
+  const expectedBytes = Number(sizeResult.stdout.slice(0, -1));
+  assert(Number.isSafeInteger(expectedBytes), `pinned size for ${relativePath} exceeds the safe integer range`);
+  assert(
+    expectedBytes <= MAX_PINNED_FILE_BYTES,
+    `pinned file ${relativePath} exceeds the ${MAX_PINNED_FILE_BYTES}-byte verification ceiling`,
+  );
+
+  const readResult = spawn("git", ["show", objectName], {
+    cwd: workingDirectory,
+    encoding: null,
+    maxBuffer: MAX_PINNED_FILE_BYTES,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  assertPinnedGitSucceeded(readResult, `cannot read ${relativePath} at ${commit}`);
+  assert(readResult.stdout instanceof Uint8Array, `pinned file ${relativePath} did not return bytes`);
+  assert.equal(readResult.stdout.byteLength, expectedBytes, `pinned file ${relativePath} length differs from its preflight size`);
+  return readResult.stdout;
+}
+
+function assertPinnedGitSucceeded(result, label) {
+  requireRecord(result, `${label} result`);
+  if (result.error !== undefined) {
+    const code = typeof result.error?.code === "string" ? ` (${result.error.code})` : "";
+    assert.fail(`${label}: git could not complete${code}: ${result.error?.message ?? String(result.error)}`);
+  }
+  if (result.status !== 0) {
+    const signal = typeof result.signal === "string" ? `; signal ${result.signal}` : "";
+    const stderr = result.stderr === undefined || result.stderr === null
+      ? ""
+      : String(result.stderr).trim();
+    assert.fail(`${label}: git exited with status ${String(result.status)}${signal}${stderr.length === 0 ? "" : `: ${stderr}`}`);
+  }
 }
 
 function requireCommit(commit) {

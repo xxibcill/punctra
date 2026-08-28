@@ -4,9 +4,11 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
+  MAX_PINNED_FILE_BYTES,
   VISUAL_EVIDENCE_SCHEMA,
   VISUAL_RELEASE,
   compareCanonicalImages,
+  readPinnedFile,
   verifyBrowserVisualBaseline,
   verifyBrowserVisualEvidence,
   verifyCanonicalImageRecord,
@@ -145,6 +147,52 @@ test("the implementation and verifier pins reject abbreviated or stale identitie
   const staleVerifier = await pinnedBaselineFixture();
   staleVerifier.pins.verifier.sha256 = "00".repeat(32);
   await assert.rejects(() => verifyFixture(staleVerifier), /verify-browser-visual-baseline\.mjs SHA-256 drifted/);
+
+  const commit = "1".repeat(40);
+  const calls = [];
+  const bytes = readPinnedFile(commit, "fixtures/bounded.bin", {
+    spawnSync(command, arguments_, options) {
+      calls.push({ command, arguments_, options });
+      return arguments_[0] === "cat-file"
+        ? { status: 0, signal: null, stdout: "3\n", stderr: "" }
+        : { status: 0, signal: null, stdout: Buffer.from("abc"), stderr: Buffer.alloc(0) };
+    },
+  });
+  assert.deepEqual(bytes, Buffer.from("abc"));
+  assert.deepEqual(calls.map(({ arguments_ }) => arguments_), [
+    ["cat-file", "-s", `${commit}:fixtures/bounded.bin`],
+    ["show", `${commit}:fixtures/bounded.bin`],
+  ]);
+  assert.equal(calls[0].options.maxBuffer, 32);
+  assert.equal(calls[1].options.maxBuffer, MAX_PINNED_FILE_BYTES);
+
+  for (const invalidSize of ["0\n", "01\n", "3 \n", "3"]) {
+    assert.throws(
+      () => readPinnedFile(commit, "fixtures/bounded.bin", {
+        spawnSync: () => ({ status: 0, signal: null, stdout: invalidSize, stderr: "" }),
+      }),
+      /canonical positive decimal/,
+    );
+  }
+  assert.throws(
+    () => readPinnedFile(commit, "fixtures/oversized.bin", {
+      spawnSync: () => ({
+        status: 0,
+        signal: null,
+        stdout: `${MAX_PINNED_FILE_BYTES + 1}\n`,
+        stderr: "",
+      }),
+    }),
+    /exceeds the 83886080-byte verification ceiling/,
+  );
+  assert.throws(
+    () => readPinnedFile(commit, "fixtures/truncated.bin", {
+      spawnSync: (_command, arguments_) => arguments_[0] === "cat-file"
+        ? { status: 0, signal: null, stdout: "3\n", stderr: "" }
+        : { status: 0, signal: null, stdout: Buffer.from("ab"), stderr: Buffer.alloc(0) },
+    }),
+    /length differs from its preflight size/,
+  );
 });
 
 test("canonical PNG evidence is decoded before its pixel identity is accepted", async () => {
