@@ -1599,7 +1599,7 @@ function verifyNominalPickEvidence(evidence, trial, source, runtimeSource) {
   assert.equal(evidence.highlight_authority, trial.selection.highlight_authority);
   assert.equal(evidence.highlight_point_count_during_checks, 0);
   assert.equal(evidence.poll_frame_ceiling, 180);
-  assert.equal(evidence.attempt_ceiling_per_region, 1_024);
+  assert.equal(evidence.attempt_ceiling_per_region, 9);
   requireArray(evidence.checks, `trial ${trial.id} nominal-pick checks`);
   assert.equal(evidence.checks.length, trial.selection.nominal_pick_regions.length);
   assert.equal(source.kind, "generated", `trial ${trial.id} nominal picks require authored generated Points`);
@@ -1622,6 +1622,7 @@ function verifyNominalPickEvidence(evidence, trial, source, runtimeSource) {
       ordinal: region.ordinal,
       feature_id: region.feature_id,
       expected_pixel: feature.binding.expected_pixels[ordinalIndex],
+      tolerance_pixels: feature.binding.tolerance_pixels,
       nominal_region: feature.rectangle,
       expected: expectedIdentity,
       matched_pixel: check.matched_pixel,
@@ -1630,7 +1631,11 @@ function verifyNominalPickEvidence(evidence, trial, source, runtimeSource) {
       attempts: check.attempts,
       passed: true,
     });
-    const candidatePixels = verifierNominalPickPixels(check.expected_pixel, check.nominal_region);
+    const candidatePixels = verifierNominalPickPixels(
+      check.expected_pixel,
+      check.nominal_region,
+      check.tolerance_pixels,
+    );
     assertPositiveInteger(check.attempt_count, `trial ${trial.id} nominal-pick attempt count`);
     assert(check.attempt_count <= evidence.attempt_ceiling_per_region, `trial ${trial.id} nominal pick exceeded its attempt ceiling`);
     assert.equal(check.attempts.length, check.attempt_count);
@@ -1667,12 +1672,18 @@ function verifyNominalPickEvidence(evidence, trial, source, runtimeSource) {
   return true;
 }
 
-function verifierNominalPickPixels(expectedPixel, region) {
-  const pixels = [];
-  for (let y = region.y; y < region.y + region.height; y += 1) {
-    for (let x = region.x; x < region.x + region.width; x += 1) pixels.push([x, y]);
+function verifierNominalPickPixels(expectedPixel, region, tolerancePixels) {
+  const candidates = [];
+  for (let y = expectedPixel[1] - tolerancePixels; y <= expectedPixel[1] + tolerancePixels; y += 1) {
+    for (let x = expectedPixel[0] - tolerancePixels; x <= expectedPixel[0] + tolerancePixels; x += 1) {
+      const insideRegion = x >= region.x
+        && y >= region.y
+        && x < region.x + region.width
+        && y < region.y + region.height;
+      if (insideRegion) candidates.push([x, y]);
+    }
   }
-  return pixels.sort((left, right) => {
+  return candidates.sort((left, right) => {
     const leftDistance = (left[0] - expectedPixel[0]) ** 2 + (left[1] - expectedPixel[1]) ** 2;
     const rightDistance = (right[0] - expectedPixel[0]) ** 2 + (right[1] - expectedPixel[1]) ** 2;
     return leftDistance - rightDistance || left[1] - right[1] || left[0] - right[0];

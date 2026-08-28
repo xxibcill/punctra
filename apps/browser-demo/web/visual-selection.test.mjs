@@ -7,7 +7,7 @@ const sourceIdentity = "21".repeat(32);
 const trial = {
   id: "selected-trial",
   selection: {
-    ordinals: [1866, 1913],
+    ordinals: [1866, 2005],
     point_identity_authority: "authored_source_fact",
     nominal_pick_coverage_authority: "projected_authored_point_fact",
     highlight_authority: "presentation_only",
@@ -15,7 +15,7 @@ const trial = {
 };
 const expectations = [
   expectation(1866, "selected-1866", [178, 158], 4),
-  expectation(1913, "selected-1913", [318, 154], 4),
+  expectation(2005, "selected-2005", [320, 157], 4),
 ];
 
 test("nominal picks bind authored pixels to returned Point identities before highlights", async () => {
@@ -25,29 +25,47 @@ test("nominal picks bind authored pixels to returned Point identities before hig
   });
   assert.equal(evidence.execution_order, "before_presentation_only_highlights");
   assert.equal(evidence.highlight_point_count_during_checks, 0);
-  assert.deepEqual(evidence.checks.map(({ ordinal }) => ordinal), [1866, 1913]);
+  assert.deepEqual(evidence.checks.map(({ ordinal }) => ordinal), [1866, 2005]);
   assert(evidence.checks.every(({ passed, attempts }) => passed && attempts.at(-1).matched));
-  assert.deepEqual(viewer.requestedPixels, [[178, 158], [178, 157], [318, 154]]);
-  assert.deepEqual(evidence.checks[0].matched_pixel, [178, 157]);
-  assert.equal(viewer.cancelCount, 3);
+  assert.deepEqual(viewer.requestedPixels, [
+    [178, 158],
+    [178, 157],
+    [177, 158],
+    [179, 158],
+    [178, 159],
+    [177, 157],
+    [179, 157],
+    [177, 159],
+    [320, 157],
+  ]);
+  assert.deepEqual(evidence.checks[0].matched_pixel, [177, 159]);
+  assert.equal(evidence.attempt_ceiling_per_region, 9);
+  assert.equal(viewer.cancelCount, 9);
 });
 
-test("nominal picks reject a different provisional Point identity", async () => {
-  const onePixelExpectation = {
-    ...expectations[0],
-    nominal_region: { x: 178, y: 158, width: 1, height: 1 },
-  };
-  const viewer = new FakePickViewer([onePixelExpectation]);
+test("nominal picks reject a different Point throughout the one-pixel authored tolerance", async () => {
+  const viewer = new FakePickViewer([expectations[0]]);
   viewer.pointOrdinalOverride = "999";
   await assert.rejects(
     verifyNominalPickCoverage(viewer, {
       ...trial,
       selection: { ...trial.selection, ordinals: [1866] },
-    }, [onePixelExpectation], {
+    }, [expectations[0]], {
       requestFrame: () => Promise.resolve(),
     }),
-    /was not pickable in its authored region/,
+    /was not pickable within its authored projection tolerance/,
   );
+  assert.deepEqual(viewer.requestedPixels, [
+    [178, 158],
+    [178, 157],
+    [177, 158],
+    [179, 158],
+    [178, 159],
+    [177, 157],
+    [179, 157],
+    [177, 159],
+    [179, 159],
+  ]);
 });
 
 test("unselected trials do not issue a pick", async () => {
@@ -65,6 +83,7 @@ function expectation(ordinal, featureId, expectedPixel, batchKey) {
     ordinal,
     feature_id: featureId,
     expected_pixel: expectedPixel,
+    tolerance_pixels: 1,
     nominal_region: {
       x: expectedPixel[0] - 12,
       y: expectedPixel[1] - 12,
@@ -107,10 +126,10 @@ class FakePickViewer {
 
   pollPick() {
     const expected = this.activePixel[0] > 250 ? this.expected.at(-1) : this.expected[0];
-    const pointOrdinal = this.pointOrdinalOverride
-      ?? (this.activePixel[0] === expected.expected_pixel[0]
-        && this.activePixel[1] === expected.expected_pixel[1]
-        && expected.ordinal === 1866 ? "999" : String(expected.ordinal));
+    const matchesTargetPixel = expected.ordinal !== 1866
+      || (this.activePixel[0] === expected.expected_pixel[0] - 1
+        && this.activePixel[1] === expected.expected_pixel[1] + 1);
+    const pointOrdinal = this.pointOrdinalOverride ?? (matchesTargetPixel ? String(expected.ordinal) : "999");
     this.pick = {
       status: "hit",
       authority: "provisional_gpu_hint",

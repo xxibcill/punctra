@@ -373,6 +373,12 @@ test("coverage authority, capture-bound batches, callback facts, cleanup, and pe
   }, /Expected values to be strictly equal/);
   await rejectEvidenceMutation(fixture, (evidence) => {
     const selected = evidence.trials.find(({ selection }) => selection.ordinals.length > 0);
+    const check = selected.recreations[0].nominal_pick.checks[0];
+    check.matched_pixel[0] += 2;
+    check.attempts[0].pixel[0] += 2;
+  }, /authored pixel|deep-equal/);
+  await rejectEvidenceMutation(fixture, (evidence) => {
+    const selected = evidence.trials.find(({ selection }) => selection.ordinals.length > 0);
     selected.recreations[0].nominal_pick.highlight_point_count_during_checks = 2;
   }, /Expected values to be strictly equal/);
   await rejectEvidenceMutation(fixture, (evidence) => {
@@ -1018,7 +1024,7 @@ function evidenceNominalPick(trial, source, runtime) {
     highlight_authority: trial.selection.highlight_authority,
     highlight_point_count_during_checks: 0,
     poll_frame_ceiling: 180,
-    attempt_ceiling_per_region: 1_024,
+    attempt_ceiling_per_region: 9,
     checks: trial.selection.nominal_pick_regions.map((region) => {
       const feature = trial.features.find(({ id }) => id === region.feature_id);
       const ordinalIndex = feature.binding.authored_point_ordinals.indexOf(region.ordinal);
@@ -1034,6 +1040,7 @@ function evidenceNominalPick(trial, source, runtime) {
         ordinal: region.ordinal,
         feature_id: region.feature_id,
         expected_pixel: structuredClone(feature.binding.expected_pixels[ordinalIndex]),
+        tolerance_pixels: feature.binding.tolerance_pixels,
         nominal_region: structuredClone(feature.rectangle),
         expected: identity,
         matched_pixel: structuredClone(feature.binding.expected_pixels[ordinalIndex]),

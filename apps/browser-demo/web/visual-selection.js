@@ -3,7 +3,7 @@ import { createVisualValidator } from "./visual-validation.js";
 
 export const NOMINAL_PICK_EVIDENCE_SCHEMA = "punctra-browser-nominal-pick-evidence-v1";
 export const NOMINAL_PICK_POLL_FRAME_CEILING = 180;
-export const NOMINAL_PICK_ATTEMPT_CEILING = 1_024;
+export const NOMINAL_PICK_ATTEMPT_CEILING = 9;
 
 const { requireCondition, requireRecord } = createVisualValidator("Visual selection invalid");
 
@@ -23,8 +23,12 @@ export async function verifyNominalPickCoverage(rawViewer, trial, expectations, 
   const checks = [];
   for (const expectation of expectations) {
     validateExpectation(expectation, trial);
-    const candidatePixels = nominalPickPixels(expectation.expected_pixel, expectation.nominal_region);
-    requireCondition(candidatePixels.length <= NOMINAL_PICK_ATTEMPT_CEILING, `trial ${trial.id} nominal-pick region exceeds its attempt ceiling`);
+    const candidatePixels = nominalPickPixels(
+      expectation.expected_pixel,
+      expectation.nominal_region,
+      expectation.tolerance_pixels,
+    );
+    requireCondition(candidatePixels.length <= NOMINAL_PICK_ATTEMPT_CEILING, `trial ${trial.id} nominal-pick tolerance exceeds its attempt ceiling`);
     const attempts = [];
     for (const pixel of candidatePixels) {
       const attempt = await performPick(rawViewer, trial, expectation, pixel, {
@@ -35,11 +39,12 @@ export async function verifyNominalPickCoverage(rawViewer, trial, expectations, 
       if (attempt.matched) break;
     }
     const matched = attempts.at(-1);
-    requireCondition(matched?.matched === true, `trial ${trial.id} Point ${expectation.ordinal} was not pickable in its authored region`);
+    requireCondition(matched?.matched === true, `trial ${trial.id} Point ${expectation.ordinal} was not pickable within its authored projection tolerance`);
     checks.push({
       ordinal: expectation.ordinal,
       feature_id: expectation.feature_id,
       expected_pixel: [...expectation.expected_pixel],
+      tolerance_pixels: expectation.tolerance_pixels,
       nominal_region: { ...expectation.nominal_region },
       expected: {
         generation: expectation.generation,
@@ -77,6 +82,7 @@ function validateExpectation(expectation, trial) {
   requireCondition(trial.selection.ordinals.includes(expectation.ordinal), `trial ${trial.id} nominal-pick ordinal differs`);
   requireCondition(Array.isArray(expectation.expected_pixel) && expectation.expected_pixel.length === 2, `trial ${trial.id} nominal-pick pixel differs`);
   requireCondition(expectation.expected_pixel.every((value) => Number.isInteger(value) && value >= 0), `trial ${trial.id} nominal-pick pixel is invalid`);
+  requireCondition(Number.isInteger(expectation.tolerance_pixels) && expectation.tolerance_pixels === 1, `trial ${trial.id} nominal-pick tolerance differs`);
   requireRecord(expectation.nominal_region, `trial ${trial.id} nominal-pick region`);
   const [x, y] = expectation.expected_pixel;
   requireCondition(
@@ -134,20 +140,29 @@ function observedPickMatches(observed, expectation) {
     && observed.point_ordinal === String(expectation.ordinal);
 }
 
-export function nominalPickPixels(expectedPixel, region) {
-  const pixels = [];
-  for (let y = region.y; y < region.y + region.height; y += 1) {
-    for (let x = region.x; x < region.x + region.width; x += 1) pixels.push([x, y]);
+export function nominalPickPixels(expectedPixel, region, tolerancePixels) {
+  requireCondition(
+    expectedPixel[0] >= region.x
+      && expectedPixel[1] >= region.y
+      && expectedPixel[0] < region.x + region.width
+      && expectedPixel[1] < region.y + region.height,
+    "authored projected pixel lies outside its nominal region",
+  );
+  const candidates = [];
+  for (let y = expectedPixel[1] - tolerancePixels; y <= expectedPixel[1] + tolerancePixels; y += 1) {
+    for (let x = expectedPixel[0] - tolerancePixels; x <= expectedPixel[0] + tolerancePixels; x += 1) {
+      const insideRegion = x >= region.x
+        && y >= region.y
+        && x < region.x + region.width
+        && y < region.y + region.height;
+      if (insideRegion) candidates.push([x, y]);
+    }
   }
-  return pixels.sort((left, right) => {
-    const leftDistance = squaredDistance(left, expectedPixel);
-    const rightDistance = squaredDistance(right, expectedPixel);
+  return candidates.sort((left, right) => {
+    const leftDistance = (left[0] - expectedPixel[0]) ** 2 + (left[1] - expectedPixel[1]) ** 2;
+    const rightDistance = (right[0] - expectedPixel[0]) ** 2 + (right[1] - expectedPixel[1]) ** 2;
     return leftDistance - rightDistance || left[1] - right[1] || left[0] - right[0];
   });
-}
-
-function squaredDistance(left, right) {
-  return (left[0] - right[0]) ** 2 + (left[1] - right[1]) ** 2;
 }
 
 function browserAnimationFrame() {

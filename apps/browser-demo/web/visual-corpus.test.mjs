@@ -194,7 +194,7 @@ test("selected ordinals use independent bounded nominal-pick regions", async () 
   const trial = corpus.trials.find((entry) => entry.id === "generated-classification-selection-perspective");
   assert.deepEqual(trial.selection.nominal_pick_regions, [
     { ordinal: 1866, feature_id: "selected-point-1866-nominal-pick" },
-    { ordinal: 1913, feature_id: "selected-point-1913-nominal-pick" },
+    { ordinal: 2005, feature_id: "selected-point-2005-nominal-pick" },
   ]);
   assert.equal(trial.selection.point_identity_authority, "authored_source_fact");
   assert.equal(trial.selection.highlight_authority, "presentation_only");

@@ -582,13 +582,13 @@
         "far_distance": 200
       },
       "selection": {
-        "ordinals": [1866, 1913],
+        "ordinals": [1866, 2005],
         "point_identity_authority": "authored_source_fact",
         "highlight_authority": "presentation_only",
         "nominal_pick_coverage_authority": "projected_authored_point_fact",
         "nominal_pick_regions": [
           { "ordinal": 1866, "feature_id": "selected-point-1866-nominal-pick" },
-          { "ordinal": 1913, "feature_id": "selected-point-1913-nominal-pick" }
+          { "ordinal": 2005, "feature_id": "selected-point-2005-nominal-pick" }
         ]
       },
       "features": [
@@ -606,15 +606,15 @@
           }
         },
         {
-          "id": "selected-point-1913-nominal-pick",
+          "id": "selected-point-2005-nominal-pick",
           "rectangle": { "x": 306, "y": 142, "width": 24, "height": 24 },
           "minimum_foreground_pixels": 1,
           "binding": {
             "kind": "authored_point_projection",
             "source_identity": "2121212121212121212121212121212121212121212121212121212121212121",
             "projection_rule": "punctra-authored-camera-projection-v1",
-            "authored_point_ordinals": [1913],
-            "expected_pixels": [[318, 154]],
+            "authored_point_ordinals": [2005],
+            "expected_pixels": [[320, 157]],
             "tolerance_pixels": 1
           }
         }

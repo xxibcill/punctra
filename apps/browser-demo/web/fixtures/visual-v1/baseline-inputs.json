@@ -68,10 +68,10 @@
       "path": "apps/browser-demo/web/fixtures/visual-v1/baselines/generated-classification-selection-perspective.png",
       "width": 640,
       "height": 480,
-      "encoded_byte_length": 16987,
-      "encoded_sha256": "83c52edffa04d52d4f86a129b60566a81662763ab9b27f726b296f86d3ddd3c6",
+      "encoded_byte_length": 16982,
+      "encoded_sha256": "ff2d787546a3f568123152ac2da58b48dae59245f7eaadf0d30ee5a30dc0e335",
       "decoded_byte_length": 1228800,
-      "decoded_sha256": "297c8eaaa0424ef0d1c08c4b615ccf5a101610bfec98ec9f7bd3488a16c59b12"
+      "decoded_sha256": "85563540fc63eb89de08ed63e376e6ed3ca4f0e62dec95aec86f490d91673c69"
     },
     {
       "trial_id": "autzen-rgb-perspective",

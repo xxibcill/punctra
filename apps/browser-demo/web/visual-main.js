@@ -883,6 +883,7 @@ function nominalPickExpectations(trial, materialized) {
       ordinal: region.ordinal,
       feature_id: region.feature_id,
       expected_pixel: [...feature.binding.expected_pixels[ordinalIndex]],
+      tolerance_pixels: feature.binding.tolerance_pixels,
       nominal_region: { ...feature.rectangle },
       generation: materialized.source.expected_view.generation,
       batch_key: materialized.source.expected_view.batch_keys[batchIndex],
