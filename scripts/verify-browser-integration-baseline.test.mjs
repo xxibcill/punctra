@@ -9,15 +9,15 @@ import {
 import { BROWSER_SDK_REFERENCE_SECTIONS } from "./generate-browser-sdk-reference.mjs";
 
 const baseline = JSON.parse(await readFile(
-  new URL("../docs/releases/v0.20-browser-baseline.json", import.meta.url),
+  new URL("../docs/releases/v0.21-browser-baseline.json", import.meta.url),
   "utf8",
 ));
 const quickstartEvidence = JSON.parse(await readFile(
-  new URL("../docs/releases/v0.20-browser-quickstart.json", import.meta.url),
+  new URL("../docs/releases/v0.21-browser-quickstart.json", import.meta.url),
   "utf8",
 ));
 const qualificationMatrix = JSON.parse(await readFile(
-  new URL("../docs/releases/v0.20-browser-matrix.json", import.meta.url),
+  new URL("../docs/releases/v0.21-browser-matrix.json", import.meta.url),
   "utf8",
 ));
 const operationalReleaseSources = [
@@ -68,7 +68,7 @@ test("qualification observations are byte-bound even when values remain in limit
   tampered.qualification.matrix_digest.sha256 = "00".repeat(32);
   await assert.rejects(
     () => verifyBrowserIntegrationBaseline(tampered),
-    /v0\.20-browser-matrix\.json SHA-256 drifted/,
+    /v0\.21-browser-matrix\.json SHA-256 drifted/,
   );
 });
 
@@ -95,7 +95,7 @@ test("quickstart evidence is byte-bound and semantically verified", async () => 
   digestTampered.quickstart.evidence.sha256 = "00".repeat(32);
   await assert.rejects(
     () => verifyBrowserIntegrationBaseline(digestTampered),
-    /v0\.20-browser-quickstart\.json SHA-256 drifted/,
+    /v0\.21-browser-quickstart\.json SHA-256 drifted/,
   );
 
   const semanticTampered = structuredClone(quickstartEvidence);
@@ -121,7 +121,7 @@ test("the external-evidence boundary cannot be promoted by editing the record", 
 test("operational tooling derives the release from authoritative package manifests", async () => {
   for (const relativePath of operationalReleaseSources) {
     const source = await readFile(new URL(relativePath, import.meta.url), "utf8");
-    assert.doesNotMatch(source, /0\.20\.0-alpha\.1/, relativePath);
+    assert.doesNotMatch(source, /0\.21\.0-alpha\.1/, relativePath);
   }
 });
 

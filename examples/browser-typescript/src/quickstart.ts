@@ -66,7 +66,7 @@ export class QuickstartController {
         canvas: this.#options.canvas,
         viewport: creationViewport,
         exactQueryBridge,
-        assets: { cacheKey: "v0.20-quickstart" },
+        assets: { cacheKey: "v0.21-quickstart" },
       });
     } catch (error) {
       if (mountRevision === this.#mountRevision) throw error;

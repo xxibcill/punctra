@@ -1,0 +1,251 @@
+{
+  "schema": "punctra-browser-qualification-matrix-v1",
+  "release": "0.21.0-alpha.1",
+  "implementation_commit": "0c04f1dfda11d268227408224965dc0daf679ac1",
+  "verifier_sha256": "3bc9ef7ad67c54903c16090ddd0ae032228ba02ba9a9f888228e65ebab32b336",
+  "observed_on": "2026-08-28",
+  "qualified_entries": [
+    {
+      "id": "codex-iab-chromium-151-macos-26-apple-m5-pro",
+      "status": "repository_qualified_exact_lane",
+      "browser": {
+        "surface": "Codex in-app browser",
+        "engine": "Chromium",
+        "user_agent_version": "151.0.0.0",
+        "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36",
+        "language": "en-US",
+        "logical_processors": 15
+      },
+      "operating_system": {
+        "name": "macOS",
+        "version": "26.6.2",
+        "build": "25G83",
+        "architecture": "arm64",
+        "user_agent_platform": "MacIntel",
+        "note": "The browser's reduced user-agent OS token is not the operating-system version authority."
+      },
+      "device": {
+        "class": "Apple silicon laptop",
+        "gpu": "Apple M5 Pro",
+        "gpu_cores": 16,
+        "gpu_class": "integrated",
+        "metal_support": "Metal 4",
+        "mapping_note": "The browser exposed only a generic WebGPU adapter name; the physical GPU mapping is a local-system inference from the sole installed GPU."
+      },
+      "webgpu": {
+        "adapter_name": "browser WebGPU adapter",
+        "backend": "BrowserWebGpu",
+        "device_type": "Other",
+        "surface_format": "Bgra8Unorm",
+        "composite_alpha_mode": "Opaque",
+        "present_mode": "fifo",
+        "render_attachment": true,
+        "blendable": true,
+        "required_feature_count": 0,
+        "max_buffer_size": 4294967292,
+        "max_texture_dimension_2d": 16384,
+        "max_bind_groups": 4,
+        "max_vertex_buffers": 8,
+        "max_color_attachments": 8
+      },
+      "display": {
+        "physical_viewport": [
+          1896,
+          1185
+        ],
+        "css_viewport": [
+          948,
+          592.5
+        ],
+        "device_pixel_ratio": 2,
+        "screen_css_pixels": [
+          1920,
+          1080
+        ],
+        "color_depth": 24,
+        "pixel_depth": 24,
+        "canvas_bytes": 8987040,
+        "display_path": "built-in Retina display",
+        "screen_note": "The browser-reported CSS screen size and bit depth are exact session facts; the host independently reported the built-in Retina display path."
+      },
+      "workload": {
+        "deployment_id": "repository-las-v1",
+        "source_identity": "c459ff39717b7d6994aaebf344641f5a3add7faf65e249b85933ebd066d1c26e",
+        "source_points": 70000,
+        "coverage": "sampled",
+        "displayed_points": 4096,
+        "displayed_batches": 4
+      },
+      "observations": {
+        "acceptance_schema": "punctra-browser-qualification-v1",
+        "workload": {
+          "deployment_id": "repository-las-v1",
+          "source_identity": "c459ff39717b7d6994aaebf344641f5a3add7faf65e249b85933ebd066d1c26e",
+          "source_points": 70000,
+          "coverage": "sampled",
+          "displayed_points": 4096,
+          "displayed_batches": 4
+        },
+        "render": {
+          "coverage": "sampled",
+          "drawn_points": 4096
+        },
+        "environment": {
+          "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36",
+          "platform": "MacIntel",
+          "language": "en-US",
+          "logical_processors": 15,
+          "screen": {
+            "width": 1920,
+            "height": 1080,
+            "color_depth": 24,
+            "pixel_depth": 24
+          },
+          "visibility_state": "visible",
+          "secure_context": true
+        },
+        "cold": {
+          "workload": {
+            "deployment_id": "repository-las-v1",
+            "source_identity": "c459ff39717b7d6994aaebf344641f5a3add7faf65e249b85933ebd066d1c26e",
+            "source_points": 70000,
+            "coverage": "sampled",
+            "displayed_points": 4096,
+            "displayed_batches": 4,
+            "ordinal_count": 4096,
+            "transferred_bytes": 131072
+          },
+          "first_coverage_milliseconds": 23.5,
+          "settled_view_milliseconds": 25.19999999552965,
+          "main_thread_batch_milliseconds_high_water": 0.5,
+          "binary_requests": 3,
+          "requested_bytes": 172696,
+          "received_bytes": 172696,
+          "concurrent_response_bytes_high_water": 172032,
+          "worker_staging_bytes_high_water": 204800,
+          "verified_cache_bytes": 0
+        },
+        "warm": {
+          "workload": {
+            "deployment_id": "repository-las-v1",
+            "source_identity": "c459ff39717b7d6994aaebf344641f5a3add7faf65e249b85933ebd066d1c26e",
+            "source_points": 70000,
+            "coverage": "sampled",
+            "displayed_points": 4096,
+            "displayed_batches": 4,
+            "ordinal_count": 4096,
+            "transferred_bytes": 131072
+          },
+          "first_coverage_milliseconds": 11,
+          "settled_view_milliseconds": 13.099999994039536,
+          "main_thread_batch_milliseconds_high_water": 0.4000000059604645,
+          "binary_requests": 0,
+          "requested_bytes": 0,
+          "received_bytes": 0,
+          "concurrent_response_bytes_high_water": 0,
+          "worker_staging_bytes_high_water": 204800,
+          "verified_cache_hits": 3,
+          "verified_cache_bytes": 172696
+        },
+        "foreground_frames": {
+          "sample_count": 30,
+          "callback_interval_p50_milliseconds": 33.30000000000018,
+          "callback_interval_p95_milliseconds": 33.40000000000009,
+          "callback_interval_max_milliseconds": 33.40000000000009,
+          "submission_p50_milliseconds": 0.29999999701976776,
+          "submission_p95_milliseconds": 0.3999999985098839,
+          "submission_max_milliseconds": 0.3999999985098839
+        },
+        "resources": {
+          "retained_record_bytes": 131072,
+          "renderer_resident_bytes": 98304,
+          "transient_texture_bytes": 17974080,
+          "javascript_heap_api": "performance.memory.usedJSHeapSize",
+          "javascript_heap_status": "non_standard_observation",
+          "javascript_heap_before_bytes": 11371721,
+          "javascript_heap_after_cold_bytes": 11930746,
+          "javascript_heap_after_warm_bytes": 11930746,
+          "javascript_heap_after_frames_bytes": 8682777,
+          "javascript_heap_high_water_bytes": 11930746,
+          "process_resident_bytes": null,
+          "physical_cache_allocation_bytes": null,
+          "physical_gpu_allocation_bytes": null
+        },
+        "recovery": {
+          "invalid_resize_preserved_viewport": true,
+          "dpr_change_and_restore": true,
+          "hidden_frame_skipped_and_resumed": true,
+          "prepublication_worker_crash_preserved_viewer": true,
+          "prepublication_worker_recoverable": true,
+          "prepublication_worker_generation_preserved": true,
+          "prepublication_worker_retry_succeeded": true,
+          "prepublication_offline_failure_preserved_viewer": true,
+          "prepublication_offline_recoverable": true,
+          "prepublication_offline_generation_preserved": true,
+          "cancellation_acknowledgement_milliseconds": 7.600000001490116,
+          "cancellation_viewer_retained": true,
+          "cancellation_frame_retained": true,
+          "warm_cache_recreation_zero_binary_requests": true,
+          "stale_generation_rejected": true,
+          "generation_replacement_cleared_provisional_pick": true,
+          "generation_replacement_cleared_presentation_highlights": true,
+          "stale_exact_request_rejected": true,
+          "partial_publication_failure_fuses_in_deterministic_tests": true,
+          "device_loss_fuses_in_deterministic_tests": true,
+          "recreation_required": {
+            "partial_publication": {
+              "outcome": "viewer_destroyed",
+              "safe_action": "Dispose the fused viewer and create a new one before any Source load.",
+              "test_scope": "deterministic post-publication Worker failure"
+            },
+            "device_loss": {
+              "outcome": "viewer_destroyed",
+              "safe_action": "Dispose the fused viewer and explicitly recreate the viewer and device.",
+              "test_scope": "deterministic facade and raw-viewer failure"
+            }
+          },
+          "physical_device_loss_forced": false,
+          "memory_pressure_forced": false
+        },
+        "limits": {
+          "firstCoverageMilliseconds": 10000,
+          "settledViewMilliseconds": 15000,
+          "frameIntervalP95Milliseconds": 50,
+          "frameSubmissionP95Milliseconds": 16.7,
+          "cancellationAcknowledgementMilliseconds": 1000,
+          "physicalDimensionPixels": 4096,
+          "physicalAreaPixels": 8388608,
+          "residentPoints": 8192,
+          "residentBytes": 196608,
+          "canvasBytes": 33554432,
+          "transientTextureBytes": 67108864,
+          "retainedRecordBytes": 262144,
+          "workerStagingBytes": 327680,
+          "concurrentResponseBytes": 262144,
+          "persistentCacheBytes": 4194304
+        },
+        "passed": true
+      }
+    }
+  ],
+  "unqualified_entries": [
+    {
+      "browser": "Google Chrome 150.0.7871.115",
+      "reason": "Installed locally but no connected browser-control surface was available for an attended packed-consumer WebGPU run."
+    },
+    {
+      "browser": "Safari 26.5.2",
+      "reason": "Installed locally but no supported browser-control surface was available for an attended packed-consumer WebGPU run."
+    },
+    {
+      "browser": "All other browser, OS, adapter, display, and mobile combinations",
+      "reason": "Not executed in the v0.21 repository qualification lane."
+    }
+  ],
+  "external_evidence": {
+    "independent_adopter": false,
+    "registry_install": false,
+    "support_qualified": false,
+    "release_candidate": false
+  }
+}

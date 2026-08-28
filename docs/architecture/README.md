@@ -18,9 +18,14 @@ and repository-verified; v0.16 bounded immutable-LAS HTTP Range, browser-cache,
 and worker-decoding slice Complete and repository-verified; v0.17 bounded
 framework-neutral browser viewer API and immutable-LAS exact-Point bridge plus
 v0.18 packed viewer SDK and thin React lifecycle adapter Complete and
-repository-verified; arbitrary Source delivery, broad bundler/framework/browser
-qualification, independent adoption, API stability,
-and support qualification outstanding; broader terrain, export, external
+repository-verified; v0.19 exact local browser/device qualification and v0.20
+clean packed-consumer integration baseline Complete and repository-verified;
+v0.21 private visual-corpus, capture, comparison, rubric, and evidence workflow
+Complete and repository-verified for the bounded exact local attended lane;
+arbitrary Source delivery, broad bundler/framework/browser qualification,
+physical-display presentation, independent human interpretation and adoption,
+improved or final visual quality, API stability, support qualification, beta,
+v1, and release-candidate status outstanding; broader terrain, export, external
 interoperability evidence, and product layers remain deferred
 
 The accepted versioned designs are authoritative:
@@ -43,6 +48,9 @@ The accepted versioned designs are authoritative:
 - [v0.16 HTTP Range Streaming, Browser Caching, and Worker Decoding](../design/http-range-streaming-v0.16.md)
 - [v0.17 Browser Viewer API](../design/browser-viewer-api-v0.17.md)
 - [v0.18 Embeddable SDK and Framework Integration](../design/embeddable-sdk-v0.18.md)
+- [v0.19 Browser and Device Qualification](../design/browser-device-qualification-v0.19.md)
+- [v0.20 Stable Browser-Engine Integration Baseline](../design/browser-integration-baseline-v0.20.md)
+- [v0.21 Visual-Quality Baseline and Regression Corpus](../design/visual-quality-baseline-v0.21.md)
 
 The current foundation is headless and embeddable. It reads immutable Sources,
 prepares a complete rebuildable Spatial Index, resolves progressive display,
@@ -95,6 +103,25 @@ and React; its hook translates asynchronous mount, resize, active state,
 unmount, and replay cleanup without adding UI or another viewer model. The two
 checked-in applications under `examples/` are clean packed-artifact trials,
 not application modules or broad compatibility claims.
+
+The v0.19 private qualifier records one exact local browser/device lane without
+adding a package export or broad support promise. The v0.20 baseline freezes the
+packed package, quickstart, fixture, generated-scene, presentation, recovery,
+and matrix facts as repository evidence rather than another runtime module.
+
+The completed v0.21 implementation adds one closed private Visual Trial seam.
+Its nine-trial corpus, Autzen derivative, offscreen readback, PNG/USTAR codecs,
+comparison, post-capture rubric, baseline-input manifest, and verifier remain
+inside `browser-demo` and repository scripts. Record mode created the baseline
+inputs before the implementation pin; the attended verify-mode run of that
+exact pinned build published the final repository evidence summarized in the
+[v0.21 release record](../releases/v0.21.0.md). None of these parts is a public
+viewer, React, or Rust screenshot/testing interface. Standard Blob download is
+the primary TAR transport; an explicitly enabled same-origin local-server
+export is only a no-overwrite fallback when an attended in-app browser does not
+materialize that download. Final verify provenance comes from the exact pinned
+page URL; the runner fixes the accepted attended lane and disables its visible
+Run control until the complete pin tuple is valid.
 
 The frozen [v0.9 public interface review](v0.9-interface-review.md) classifies
 reusable, adapter-author, test-support, and private application surfaces. The
@@ -366,3 +393,8 @@ external product-readiness claim.
 - [First LAS/LAZ guide](../guides/first-las-laz.md)
 - [Library packaging and compatibility](../guides/library-packaging.md)
 - [Persistent bounded-AOI terrain guide](../guides/persistent-terrain.md)
+- [Browser SDK and deployment guide](../guides/browser-sdk.md)
+- [Browser qualification and recovery guide](../guides/browser-qualification.md)
+- [Packed browser quickstart](../guides/browser-quickstart.md)
+- [Browser integration known limitations](../guides/browser-known-limitations.md)
+- [Browser visual-quality baseline guide](../guides/browser-visual-quality.md)

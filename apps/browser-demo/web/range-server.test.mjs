@@ -1,8 +1,15 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { once } from "node:events";
-import { cp, mkdtemp, rm } from "node:fs/promises";
+import {
+  cp,
+  mkdtemp,
+  readFile,
+  readdir,
+  realpath,
+  rm,
+} from "node:fs/promises";
 import { createConnection } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -17,6 +24,223 @@ const serverPath = fileURLToPath(
   new URL("../../../scripts/serve-browser-demo.py", import.meta.url),
 );
 const webRoot = fileURLToPath(new URL("./", import.meta.url));
+const visualExportFilename = "v0.21-browser-visual-evidence.tar";
+const maxVisualExportBytes = 1_243_611_136;
+
+test("qualification pin endpoint binds the running checkout and verifier bytes", async () => {
+  const { server, port } = await startServer();
+  try {
+    const response = await fetch(
+      `http://127.0.0.1:${port}/qualification-visual-pins.json`,
+    );
+    const verifierPath = fileURLToPath(
+      new URL("../../../scripts/verify-browser-visual-baseline.mjs", import.meta.url),
+    );
+    const verifierBytes = await readFile(verifierPath);
+    const baseline = JSON.parse(await readFile(
+      fileURLToPath(
+        new URL("../../../docs/releases/v0.21-browser-visual-baseline.json", import.meta.url),
+      ),
+      "utf8",
+    ));
+    const runningPins = {
+      implementation_commit: execFileSync(
+        "git",
+        ["rev-parse", "HEAD"],
+        { cwd: fileURLToPath(new URL("../../../", import.meta.url)), encoding: "utf8" },
+      ).trim(),
+      verifier: {
+        path: "scripts/verify-browser-visual-baseline.mjs",
+        byte_length: verifierBytes.byteLength,
+        sha256: createHash("sha256").update(verifierBytes).digest("hex"),
+      },
+    };
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("cache-control"), "no-store");
+    assert.deepEqual(await response.json(), {
+      schema: "punctra-browser-visual-verify-pins-v1",
+      accepted: {
+        implementation_commit: baseline.pins.implementation_commit,
+        verifier: baseline.pins.verifier,
+      },
+      running: runningPins,
+    });
+  } finally {
+    await stopServer(server);
+  }
+});
+
+test("opt-in local server persists a bounded visual evidence TAR", async () => {
+  const exportDirectory = await mkdtemp(
+    path.join(tmpdir(), "punctra-visual-export-"),
+  );
+  const { server, port } = await startServer([
+    "--visual-export-dir",
+    exportDirectory,
+  ]);
+  const origin = `http://127.0.0.1:${port}`;
+  const bytes = Uint8Array.from(
+    { length: 64 * 1024 + 37 },
+    (_, index) => (index * 31 + 7) & 0xff,
+  );
+  const sha256 = createHash("sha256").update(bytes).digest("hex");
+  const resolvedExportDirectory = await realpath(exportDirectory);
+
+  try {
+    const response = await fetch(`${origin}/qualification-visual-export`, {
+      method: "POST",
+      headers: {
+        "Content-Length": String(bytes.byteLength),
+        "Content-Type": "application/x-tar",
+        Origin: origin,
+      },
+      body: bytes,
+    });
+    assert.equal(response.status, 201);
+    assert.equal(response.headers.get("access-control-allow-origin"), null);
+    assert.deepEqual(await response.json(), {
+      schema: "punctra-browser-visual-export-receipt-v1",
+      filename: visualExportFilename,
+      path: path.join(resolvedExportDirectory, visualExportFilename),
+      byte_length: bytes.byteLength,
+      sha256,
+    });
+
+    const persisted = await readFile(
+      path.join(exportDirectory, visualExportFilename),
+    );
+    assert.deepEqual(persisted, Buffer.from(bytes));
+    assert.equal(createHash("sha256").update(persisted).digest("hex"), sha256);
+
+    const conflict = await fetch(`${origin}/qualification-visual-export`, {
+      method: "POST",
+      headers: {
+        "Content-Length": String(bytes.byteLength),
+        "Content-Type": "application/x-tar",
+        Origin: origin,
+      },
+      body: bytes,
+    });
+    assert.equal(conflict.status, 409);
+    assert.equal(conflict.headers.get("access-control-allow-origin"), null);
+    assert.deepEqual(
+      await readFile(path.join(exportDirectory, visualExportFilename)),
+      persisted,
+    );
+    assert.deepEqual(await readdir(exportDirectory), [visualExportFilename]);
+  } finally {
+    await stopServer(server);
+    await rm(exportDirectory, { recursive: true });
+  }
+});
+
+test("visual evidence export is absent unless explicitly enabled", async () => {
+  const { server, port } = await startServer();
+  const origin = `http://127.0.0.1:${port}`;
+  const bytes = new Uint8Array([0x75, 0x73, 0x74, 0x61, 0x72]);
+
+  try {
+    const response = await fetch(`${origin}/qualification-visual-export`, {
+      method: "POST",
+      headers: {
+        "Content-Length": String(bytes.byteLength),
+        "Content-Type": "application/x-tar",
+        Origin: origin,
+      },
+      body: bytes,
+    });
+    assert.equal(response.status, 404);
+    assert.equal(response.headers.get("access-control-allow-origin"), null);
+  } finally {
+    await stopServer(server);
+  }
+});
+
+test("visual evidence export rejects missing or mismatched origins", async () => {
+  const exportDirectory = await mkdtemp(
+    path.join(tmpdir(), "punctra-visual-export-"),
+  );
+  const { server, port } = await startServer([
+    "--visual-export-dir",
+    exportDirectory,
+  ]);
+  const origin = `http://127.0.0.1:${port}`;
+  const exportUrl = `${origin}/qualification-visual-export`;
+  const bytes = new Uint8Array([0x75, 0x73, 0x74, 0x61, 0x72]);
+
+  try {
+    for (const requestOrigin of [undefined, "http://localhost:65535"]) {
+      const headers = {
+        "Content-Length": String(bytes.byteLength),
+        "Content-Type": "application/x-tar",
+      };
+      if (requestOrigin !== undefined) headers.Origin = requestOrigin;
+      const response = await fetch(exportUrl, {
+        method: "POST",
+        headers,
+        body: bytes,
+      });
+      assert.equal(response.status, 403);
+      assert.equal(response.headers.get("access-control-allow-origin"), null);
+    }
+
+    const wrongType = await fetch(exportUrl, {
+      method: "POST",
+      headers: {
+        "Content-Length": String(bytes.byteLength),
+        "Content-Type": "application/x-tar; charset=binary",
+        Origin: origin,
+      },
+      body: bytes,
+    });
+    assert.equal(wrongType.status, 415);
+    assert.equal(wrongType.headers.get("access-control-allow-origin"), null);
+
+    assert.equal(
+      await rawVisualExportStatus(port, {
+        host: `rebound.invalid:${port}`,
+        origin: `http://rebound.invalid:${port}`,
+        contentLength: bytes.byteLength,
+        body: bytes,
+      }),
+      403,
+    );
+    assert.equal(
+      await rawVisualExportStatus(port, { origin, contentLength: 0 }),
+      400,
+    );
+    assert.equal(
+      await rawVisualExportStatus(port, {
+        origin,
+        contentLength: maxVisualExportBytes + 1,
+      }),
+      413,
+    );
+    assert.equal(
+      await rawVisualExportStatus(port, {
+        origin,
+        contentLength: maxVisualExportBytes,
+      }),
+      400,
+      "the inclusive upper bound must reach exact-length validation",
+    );
+    assert.equal(
+      await rawVisualExportStatus(port, { origin }),
+      411,
+    );
+
+    const options = await fetch(exportUrl, { method: "OPTIONS" });
+    assert.equal(options.status, 204);
+    assert.equal(
+      options.headers.get("access-control-allow-methods"),
+      "GET, HEAD, OPTIONS",
+    );
+    assert.deepEqual(await readdir(exportDirectory), []);
+  } finally {
+    await stopServer(server);
+    await rm(exportDirectory, { recursive: true });
+  }
+});
 
 test("strict local server enforces the v0.16 Range and CORS contract", async () => {
   const { server, port } = await startServer();
@@ -171,6 +395,38 @@ async function startServer(additionalArguments = []) {
   server.stderr.setEncoding("utf8");
   server.stderr.on("data", (chunk) => { stderr += chunk; });
   return { server, port: await listeningPort(server), stderr: () => stderr };
+}
+
+async function rawVisualExportStatus(port, {
+  host = `127.0.0.1:${port}`,
+  origin,
+  contentLength,
+  body = new Uint8Array(),
+}) {
+  const socket = createConnection({ host: "127.0.0.1", port });
+  await once(socket, "connect");
+  const headers = [
+    "POST /qualification-visual-export HTTP/1.1",
+    `Host: ${host}`,
+    "Content-Type: application/x-tar",
+    "Connection: close",
+  ];
+  if (origin !== undefined) headers.push(`Origin: ${origin}`);
+  if (contentLength !== undefined) {
+    headers.push(`Content-Length: ${contentLength}`);
+  }
+  socket.end(
+    Buffer.concat([
+      Buffer.from(`${headers.join("\r\n")}\r\n\r\n`),
+      Buffer.from(body),
+    ]),
+  );
+
+  let response = "";
+  for await (const chunk of socket) response += chunk.toString("latin1");
+  const match = /^HTTP\/1\.[01] (\d{3})/.exec(response);
+  assert.ok(match, `server must return one HTTP status, received ${response}`);
+  return Number(match[1]);
 }
 
 async function stopServer(server) {

@@ -28,11 +28,13 @@ js-sys.workspace = true
 wasm-bindgen.workspace = true
 wasm-bindgen-futures.workspace = true
 web-sys = { workspace = true, features = ["HtmlCanvasElement", "Navigator", "Window"] }
+web-time.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 las.workspace = true
 point-contracts.workspace = true
 point-index.workspace = true
+point-source.workspace = true
 sha2.workspace = true
 source-las.workspace = true
 

@@ -14,9 +14,12 @@ cache, and worker streaming slice Complete and repository-verified; v0.17
 framework-neutral viewer API and exact-Point bridge plus v0.18 packed SDK and
 thin React adapter plus v0.19 exact local browser/device qualification plus
 v0.20 clean packed-consumer integration baseline Complete and repository-
-verified; later
-crates are created only with accepted behavior
-and a caller
+verified; v0.21 private visual-corpus/capture/comparison/evidence implementation
+Complete and repository-verified for the bounded exact local attended lane;
+broader browser/device support, physical-display presentation, independent-
+human/adopter evidence, improved or final visual quality, API stability,
+support qualification, beta, v1, and release-candidate status remain
+outstanding; later crates are created only with accepted behavior and a caller
 
 The repository is one Cargo workspace. Each current crate is independently
 buildable and exposes a smaller public interface than its private
@@ -35,12 +38,14 @@ apps/
     src/
       lib.rs
       browser.rs
+      capture.rs
       display.rs
       diagnostics.rs
       host.rs
       scene.rs
       streaming.rs
       bin/generate_stream_fixture.rs
+      bin/generate_visual_source_fixture.rs
       bin/scene_facts.rs
     web/
       package.json
@@ -49,6 +54,33 @@ apps/
       sdk.test.mjs
       index.html
       main.js
+      visual.html
+      visual.css
+      visual-main.js
+      visual-archive.js
+      visual-archive.test.mjs
+      visual-baseline-inputs.js
+      visual-baseline-inputs.test.mjs
+      visual-capture.js
+      visual-capture.test.mjs
+      visual-comparison.js
+      visual-comparison.test.mjs
+      visual-corpus.js
+      visual-corpus.test.mjs
+      visual-export.js
+      visual-export.test.mjs
+      visual-png.js
+      visual-png.test.mjs
+      visual-provenance.js
+      visual-provenance.test.mjs
+      visual-rubric.js
+      visual-rubric.test.mjs
+      visual-run-session.js
+      visual-run-session.test.mjs
+      visual-selection.js
+      visual-selection.test.mjs
+      visual-validation.js
+      visual-validation.test.mjs
       qualification.js
       qualification.test.mjs
       qualification-worker.js
@@ -88,6 +120,21 @@ apps/
         representative.las
         representative.pidx
         source-record.json
+      fixtures/visual-v1/
+        corpus.json
+        autzen-classified-sample.json
+        autzen-classified-sample.pvis
+        baseline-inputs.json
+        baselines/
+          generated-neutral-mixed-lod-perspective.png
+          generated-elevation-layered-orthographic.png
+          generated-rgb-hdr-perspective.png
+          generated-intensity-sparse-orthographic.png
+          generated-classification-selection-perspective.png
+          autzen-rgb-perspective.png
+          autzen-classification-perspective.png
+          autzen-intensity-perspective.png
+          autzen-elevation-perspective.png
 
 examples/
   browser-typescript/
@@ -315,14 +362,26 @@ crates/
 docs/
   architecture/
   design/
+  guides/browser-visual-quality.md
   releases/
+    v0.21-browser-baseline.json
+    v0.21-browser-matrix.json
+    v0.21-browser-quickstart.json
+    v0.21-browser-visual-baseline.json
+    v0.21-browser-visual-evidence.json
+    v0.21-browser-visual-rubric-template.json
+    v0.21-browser-visual-artifacts/  # 864 bound PNGs
+    v0.21.0.md
   adr/
   research/
 
 scripts/
   build-browser-demo.sh
   serve-browser-demo.py
+  verify-browser-integration-baseline.mjs
   verify-browser-qualification.mjs
+  verify-browser-visual-baseline.mjs
+  verify-browser-visual-baseline.test.mjs
 ~~~
 
 Files inside a crate are private locality, not additional public modules. In
@@ -333,6 +392,29 @@ one public terrain seam. `terrain-demo` likewise keeps journal, publication,
 comparison, streaming, qualification, evidence, report, and recovery policy
 behind one private application surface. These files are not separate public
 crate seams.
+
+The v0.21 `browser-demo` capture implementation, visual corpus/PNG files,
+licensed derivative generator, same-origin export helper, strict local-server
+endpoint, and visual verifier form one private evidence/transport module. Their
+file boundaries are implementation locality. Only the closed trial identifier
+crosses the internal seam; none is an `@punctra/viewer`, `@punctra/react`, or
+public Rust interface. `visual-provenance.test.mjs` pins the URL-derived final
+verify tuple and fixed attended lane. `visual-export.test.mjs` pins the Blob-
+default client selection and exact receipt validation; `range-server.test.mjs`
+exercises the opt-in endpoint implemented by `scripts/serve-browser-demo.py`.
+
+The completed record stage added `fixtures/visual-v1/baseline-inputs.json` and
+exactly nine canonical PNGs under `fixtures/visual-v1/baselines/`. The completed
+verify stage added the visual-evidence record and 864 bound recreation,
+transition, and difference PNGs under
+`docs/releases/v0.21-browser-visual-artifacts/`. Together the repository
+contains 873 v0.21 PNGs. The visual policy, rubric template, evidence, and
+human-readable release record are checked in under `docs/releases/`. The
+browser moved the repository-relative files in one private uncompressed USTAR
+bundle; that bundle is transport only and is not checked in. `visual-export.js`
+may send the same bundle to the strict server only when `transport=server` and
+the server was started with `--visual-export-dir`; its fixed no-overwrite local
+target and receipt are not evidence.
 
 ## Cargo dependency direction
 
@@ -353,7 +435,7 @@ render-protocol -> point-contracts
 point-view -> render-protocol
 render-wgpu -> render-protocol + point-contracts
 browser-demo runtime -> point-view + render-protocol + render-wgpu
-browser-demo native fixture generator -> source-las + point-index + point-contracts
+browser-demo native fixture generator -> source-las + point-source + point-index + point-contracts
 renderer-demo -> source-las + point-source + point-index + point-workspace + point-review + point-view + render-protocol + render-wgpu + point-contracts + foundation-runtime
 terrain-demo -> source-las + point-source + point-index + point-workspace + point-terrain + point-contracts + foundation-runtime
 ~~~
@@ -407,9 +489,12 @@ cargo bench -p renderer-demo --bench viewing
 cargo bench -p point-view --bench planner
 cargo check -p browser-demo --target wasm32-unknown-unknown
 cargo run -p browser-demo --bin generate_stream_fixture
+cargo run -p browser-demo --bin generate_visual_source_fixture
 node --test apps/browser-demo/web/*.test.mjs
 scripts/build-browser-demo.sh
 node scripts/verify-browser-qualification.mjs
+node scripts/verify-browser-integration-baseline.mjs
+node scripts/verify-browser-visual-baseline.mjs
 cargo test -p renderer-demo --test headless_smoke
 PUNCTRA_REQUIRE_GPU=1 cargo test -p renderer-demo --test headless_smoke \
   corpus_success_binds_trace_inputs_and_separate_resource_measurements -- --exact
@@ -562,13 +647,13 @@ versions, and LandXML/journal/report format versions are separate axes. A Cargo
 `0.9` version does not imply Workspace disk schema or terrain algorithm version
 9.
 
-The v0.20 work advances all public Rust libraries as one `0.20.0-alpha.1` package
+The v0.21 work advances all public Rust libraries as one `0.21.0-alpha.1` package
 set with exact inter-Punctra registry requirements and
 local development paths. Their empty default features, dependency roles,
 MSRV, publication order, and pre-v1 policy are documented in the [library
 packaging guide](../guides/library-packaging.md). The separately versioned
 `@punctra/viewer` and `@punctra/react` npm tarballs use the same
-`0.20.0-alpha.1` release identity but remain local packed artifacts governed by
+`0.21.0-alpha.1` release identity but remain local packed artifacts governed by
 the [browser SDK guide](../guides/browser-sdk.md); Cargo and npm publication
 remain separate decisions.
 

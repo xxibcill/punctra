@@ -1,0 +1,459 @@
+{
+  "camera": {
+    "eye": [
+      638920.1885,
+      847019.946,
+      3071.230500000005
+    ],
+    "far_distance": 18831.160000000036,
+    "near_distance": 1.0,
+    "projection": "perspective",
+    "target": [
+      637290.76,
+      851209.905,
+      510.7
+    ],
+    "up": [
+      0.0,
+      0.0,
+      1.0
+    ],
+    "vertical_field_of_view_radians": 1.0471975803375244
+  },
+  "condition_facts": {
+    "classifications": [
+      {
+        "count": 192,
+        "value": 0
+      },
+      {
+        "count": 2624,
+        "value": 2
+      },
+      {
+        "count": 960,
+        "value": 5
+      },
+      {
+        "count": 128,
+        "value": 6
+      },
+      {
+        "count": 128,
+        "value": 9
+      },
+      {
+        "count": 40,
+        "value": 76
+      },
+      {
+        "count": 24,
+        "value": 77
+      }
+    ],
+    "depth_bins": {
+      "count": 32,
+      "occupied_bins": 29
+    },
+    "derived_conditions": [
+      "sparse",
+      "dense",
+      "layered",
+      "high_dynamic_range",
+      "classification",
+      "large_world"
+    ],
+    "intensity": {
+      "maximum": 65024,
+      "minimum": 0
+    },
+    "maximum_absolute_world_origin": 851209.905,
+    "minimum_positive_axis_spacing": 0.0198974609375,
+    "overlapping_depth": {
+      "cells_with_at_least_10_unit_z_span": 29,
+      "maximum_cell_z_span": 108.16999816894531,
+      "xy_grid_columns": 32,
+      "xy_grid_rows": 32
+    },
+    "relative_bounds": {
+      "max": [
+        1653.9300537109375,
+        2326.10498046875,
+        36.18000030517578
+      ],
+      "min": [
+        -1604.6800537109375,
+        -2237.235107421875,
+        -103.19000244140625
+      ]
+    },
+    "rgb_channel": {
+      "maximum": 61184,
+      "minimum": 7424
+    },
+    "schema": "punctra-browser-visual-sample-conditions-v1",
+    "thresholds": {
+      "dense_cell_minimum_points": 8,
+      "high_dynamic_range_minimum_span": 32768,
+      "large_world_maximum_spacing_exclusive": 1.0,
+      "large_world_minimum_absolute_origin": 500000.0,
+      "layered_cell_minimum_z_span": 10.0
+    },
+    "xy_grid": {
+      "cells_with_at_least_8_points": 112,
+      "columns": 32,
+      "empty_cells": 874,
+      "maximum_points_per_cell": 126,
+      "occupied_cells": 150,
+      "rows": 32,
+      "singleton_cells": 6
+    }
+  },
+  "conditions": [
+    "permitted_real_source",
+    "sparse",
+    "dense",
+    "layered",
+    "high_dynamic_range",
+    "classification",
+    "large_world"
+  ],
+  "derivation": {
+    "attribute_mapping": "copy raw intensity/red/green/blue u16 and classification u8 without rescaling",
+    "attributes": [
+      "intensity",
+      "classification",
+      "red",
+      "green",
+      "blue"
+    ],
+    "block_count": 64,
+    "discarded_fields": [
+      "return_number",
+      "number_of_returns",
+      "synthetic",
+      "key_point",
+      "withheld",
+      "overlap",
+      "scanner_channel",
+      "scan_direction_flag",
+      "edge_of_flight_line",
+      "user_data",
+      "scan_angle",
+      "point_source_id",
+      "gps_time"
+    ],
+    "formula": "floor((source_point_count - points_per_block) * block / (block_count - 1))",
+    "output_order": "ascending canonical Source ordinal",
+    "output_source_identity": "4461a593f1be469e8171aa1eff3aed4615c7f80a02f12b2c608941ae2ae10c24",
+    "points_per_block": 64,
+    "position_mapping": "decode LAS integer ticks through the Source scale/offset transform, subtract world_origin in f64, then round once to IEEE-754 f32",
+    "record_schema": "punctra-browser-transfer-v2",
+    "schema": "punctra-visual-ordinal-block-sample-v1",
+    "selected_spans": [
+      {
+        "first_ordinal": 0,
+        "point_count": 64
+      },
+      {
+        "first_ordinal": 169099,
+        "point_count": 64
+      },
+      {
+        "first_ordinal": 338199,
+        "point_count": 64
+      },
+      {
+        "first_ordinal": 507298,
+        "point_count": 64
+      },
+      {
+        "first_ordinal": 676398,
+        "point_count": 64
+      },
+      {
+        "first_ordinal": 845497,
+        "point_count": 64
+      },
+      {
+        "first_ordinal": 1014597,
+        "point_count": 64
+      },
+      {
+        "first_ordinal": 1183696,
+        "point_count": 64
+      },
+      {
+        "first_ordinal": 1352796,
+        "point_count": 64
+      },
+      {
+        "first_ordinal": 1521896,
+        "point_count": 64
+      },
+      {
+        "first_ordinal": 1690995,
+        "point_count": 64
+      },
+      {
+        "first_ordinal": 1860095,
+        "point_count": 64
+      },
+      {
+        "first_ordinal": 2029194,
+        "point_count": 64
+      },
+      {
+        "first_ordinal": 2198294,
+        "point_count": 64
+      },
+      {
+        "first_ordinal": 2367393,
+        "point_count": 64
+      },
+      {
+        "first_ordinal": 2536493,
+        "point_count": 64
+      },
+      {
+        "first_ordinal": 2705592,
+        "point_count": 64
+      },
+      {
+        "first_ordinal": 2874692,
+        "point_count": 64
+      },
+      {
+        "first_ordinal": 3043792,
+        "point_count": 64
+      },
+      {
+        "first_ordinal": 3212891,
+        "point_count": 64
+      },
+      {
+        "first_ordinal": 3381991,
+        "point_count": 64
+      },
+      {
+        "first_ordinal": 3551090,
+        "point_count": 64
+      },
+      {
+        "first_ordinal": 3720190,
+        "point_count": 64
+      },
+      {
+        "first_ordinal": 3889289,
+        "point_count": 64
+      },
+      {
+        "first_ordinal": 4058389,
+        "point_count": 64
+      },
+      {
+        "first_ordinal": 4227488,
+        "point_count": 64
+      },
+      {
+        "first_ordinal": 4396588,
+        "point_count": 64
+      },
+      {
+        "first_ordinal": 4565688,
+        "point_count": 64
+      },
+      {
+        "first_ordinal": 4734787,
+        "point_count": 64
+      },
+      {
+        "first_ordinal": 4903887,
+        "point_count": 64
+      },
+      {
+        "first_ordinal": 5072986,
+        "point_count": 64
+      },
+      {
+        "first_ordinal": 5242086,
+        "point_count": 64
+      },
+      {
+        "first_ordinal": 5411185,
+        "point_count": 64
+      },
+      {
+        "first_ordinal": 5580285,
+        "point_count": 64
+      },
+      {
+        "first_ordinal": 5749384,
+        "point_count": 64
+      },
+      {
+        "first_ordinal": 5918484,
+        "point_count": 64
+      },
+      {
+        "first_ordinal": 6087584,
+        "point_count": 64
+      },
+      {
+        "first_ordinal": 6256683,
+        "point_count": 64
+      },
+      {
+        "first_ordinal": 6425783,
+        "point_count": 64
+      },
+      {
+        "first_ordinal": 6594882,
+        "point_count": 64
+      },
+      {
+        "first_ordinal": 6763982,
+        "point_count": 64
+      },
+      {
+        "first_ordinal": 6933081,
+        "point_count": 64
+      },
+      {
+        "first_ordinal": 7102181,
+        "point_count": 64
+      },
+      {
+        "first_ordinal": 7271280,
+        "point_count": 64
+      },
+      {
+        "first_ordinal": 7440380,
+        "point_count": 64
+      },
+      {
+        "first_ordinal": 7609480,
+        "point_count": 64
+      },
+      {
+        "first_ordinal": 7778579,
+        "point_count": 64
+      },
+      {
+        "first_ordinal": 7947679,
+        "point_count": 64
+      },
+      {
+        "first_ordinal": 8116778,
+        "point_count": 64
+      },
+      {
+        "first_ordinal": 8285878,
+        "point_count": 64
+      },
+      {
+        "first_ordinal": 8454977,
+        "point_count": 64
+      },
+      {
+        "first_ordinal": 8624077,
+        "point_count": 64
+      },
+      {
+        "first_ordinal": 8793176,
+        "point_count": 64
+      },
+      {
+        "first_ordinal": 8962276,
+        "point_count": 64
+      },
+      {
+        "first_ordinal": 9131376,
+        "point_count": 64
+      },
+      {
+        "first_ordinal": 9300475,
+        "point_count": 64
+      },
+      {
+        "first_ordinal": 9469575,
+        "point_count": 64
+      },
+      {
+        "first_ordinal": 9638674,
+        "point_count": 64
+      },
+      {
+        "first_ordinal": 9807774,
+        "point_count": 64
+      },
+      {
+        "first_ordinal": 9976873,
+        "point_count": 64
+      },
+      {
+        "first_ordinal": 10145973,
+        "point_count": 64
+      },
+      {
+        "first_ordinal": 10315072,
+        "point_count": 64
+      },
+      {
+        "first_ordinal": 10484172,
+        "point_count": 64
+      },
+      {
+        "first_ordinal": 10653272,
+        "point_count": 64
+      }
+    ]
+  },
+  "fixture_id": "autzen-classified-derived-sample-v1",
+  "permission": {
+    "attribution": "Autzen Stadium point cloud, PDAL/data contributors",
+    "creator": "PDAL/data contributors",
+    "derivative_redistribution": true,
+    "derived_sample_and_image_publication": true,
+    "license": "CC BY 4.0",
+    "license_url": "https://creativecommons.org/licenses/by/4.0/",
+    "modification_notice": "Punctra v0.21 selected 64 fixed Source-ordinal blocks, converted decoded world positions to origin-relative IEEE-754 f32, retained intensity, classification, and RGB, and discarded every other upstream field.",
+    "redistribution": "The CC BY 4.0 license permits redistribution of this attributed derivative and its rendered evidence.",
+    "upstream_revision": "360327d2ae791b9d52c57b610a5a6b5c1b08c878",
+    "upstream_url": "https://github.com/PDAL/data/blob/360327d2ae791b9d52c57b610a5a6b5c1b08c878/autzen/autzen-classified.laz"
+  },
+  "sample": {
+    "byte_length": 131072,
+    "path": "./autzen-classified-sample.pvis",
+    "point_count": 4096,
+    "record_bytes": 32,
+    "sha256": "149718ce9ac5b3cfea39ac40fdd3c3148dfec1fa6ff56eb2571e4f0b762d686c"
+  },
+  "schema": "punctra-browser-visual-source-v1",
+  "source": {
+    "bounds": {
+      "max": [
+        639003.73,
+        853537.66,
+        615.26
+      ],
+      "min": [
+        635577.79,
+        848882.15,
+        406.14
+      ]
+    },
+    "byte_length": 74416814,
+    "coordinate_units": "US survey feet",
+    "format": "LAZ 1.4 point format 7",
+    "point_count": 10653336,
+    "repository_path": "examples/data/autzen-classified.laz",
+    "sha256": "c8828215facfb4c9465c9a7db9d45cf2c0e9175a6eb5b21e89417978cc85cd51",
+    "source_identity": "4461a593f1be469e8171aa1eff3aed4615c7f80a02f12b2c608941ae2ae10c24",
+    "world_origin": [
+      637290.76,
+      851209.905,
+      510.7
+    ]
+  }
+}

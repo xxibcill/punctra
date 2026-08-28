@@ -18,8 +18,8 @@ import {
 } from "../apps/browser-demo/web/qualification-lane.js";
 
 const changelogUrl = new URL("../CHANGELOG.md", import.meta.url);
-const matrixUrl = new URL("../docs/releases/v0.20-browser-matrix.json", import.meta.url);
-const releaseRecordUrl = new URL("../docs/releases/v0.20.0.md", import.meta.url);
+const matrixUrl = new URL("../docs/releases/v0.21-browser-matrix.json", import.meta.url);
+const releaseRecordUrl = new URL("../docs/releases/v0.21.0.md", import.meta.url);
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
 const qualificationViewerPackage = path.join(
   repositoryRoot,
@@ -41,7 +41,7 @@ const qualificationViewerArtifact = path.join(
 );
 const verifierSource = await readFile(new URL("./verify-browser-qualification.mjs", import.meta.url), "utf8");
 const QUALIFICATION_VERIFIER_SHA256 = createHash("sha256").update(verifierSource).digest("hex");
-const EXPECTED_OBSERVATION_DATE = "2026-08-27";
+const EXPECTED_OBSERVATION_DATE = "2026-08-28";
 const EXPECTED_UNQUALIFIED_ENTRIES = Object.freeze([
   Object.freeze({
     browser: "Google Chrome 150.0.7871.115",
@@ -53,7 +53,7 @@ const EXPECTED_UNQUALIFIED_ENTRIES = Object.freeze([
   }),
   Object.freeze({
     browser: "All other browser, OS, adapter, display, and mobile combinations",
-    reason: "Not executed in the v0.20 repository qualification lane.",
+    reason: "Not executed in the v0.21 repository qualification lane.",
   }),
 ]);
 const QUALIFIED_IMPLEMENTATION_PATHS = [
@@ -73,6 +73,8 @@ const QUALIFIED_IMPLEMENTATION_PATHS = [
   "scripts/verify-browser-integration-baseline.test.mjs",
   "scripts/verify-browser-qualification.test.mjs",
   "scripts/verify-browser-sdk.mjs",
+  "scripts/verify-browser-visual-baseline.mjs",
+  "scripts/verify-browser-visual-baseline.test.mjs",
 ];
 const JAVASCRIPT_HEAP_PHASE_FIELDS = Object.freeze([
   "javascript_heap_before_bytes",
@@ -159,7 +161,7 @@ export function verifyUnqualifiedEntries(entries) {
   assert.deepEqual(
     entries,
     EXPECTED_UNQUALIFIED_ENTRIES,
-    "unqualified platform classes must match the frozen v0.20 matrix",
+    "unqualified platform classes must match the frozen v0.21 matrix",
   );
 }
 
@@ -177,7 +179,7 @@ export function releaseVerifierSha256(releaseRecord) {
 
 export function changelogImplementationCommit(changelog) {
   const match = changelog.match(/implementation commit `([0-9a-f]{40})`/);
-  assert.ok(match, "changelog must contain one full v0.20 implementation commit SHA");
+  assert.ok(match, "changelog must contain one full v0.21 implementation commit SHA");
   return match[1];
 }
 

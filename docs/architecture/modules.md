@@ -14,7 +14,12 @@ cache, and worker streaming slice Complete and repository-verified; v0.17
 framework-neutral viewer API and exact-Point bridge plus v0.18 packed SDK and
 thin React lifecycle adapter plus v0.19 exact local browser/device qualification
 and v0.20 clean packed-consumer integration baseline Complete and repository-
-verified
+verified; v0.21 bounded visual-corpus, capture, comparison, and evidence
+implementation Complete and repository-verified for the bounded exact local
+attended lane, while broader browser/device support, physical-display
+presentation, independent-human/adopter evidence, improved or final visual
+quality, API stability, support qualification, beta, v1, and release-candidate
+status remain outstanding
 
 This is the ownership map for implemented crates. Each crate has one public
 job. Several private files may cooperate behind one deep interface; private
@@ -40,7 +45,7 @@ limits, and recovery modes are frozen in the
 | `render-protocol` | Define generation-safe renderer-neutral point display state. | Camera and display values | Validated updates and frame values |
 | `point-view` | Plan one frozen View over a host-owned hierarchy without I/O. | Camera, viewport, hierarchy/residency, budget | Demand, requests, retention, retirements |
 | `render-wgpu` | Maintain and draw one wgpu representation of render-protocol state. | Render updates, frame, host target | Recorded commands, report, provisional picks |
-| `browser-demo` / `@punctra/viewer` | Package and qualify one bounded framework-neutral browser viewer composition without owning application policy. | Caller-owned canvas/lifecycle/navigation/cache/recovery policy, generated scene, or trusted immutable-LAS deployment | Disposable viewer handle, WebGPU frame, bounded state, Source-load timings, provisional pick/highlight, exact fixture record, sampled remote Coverage, structured errors, private qualification evidence |
+| `browser-demo` / `@punctra/viewer` | Package and qualify one bounded framework-neutral browser viewer composition without owning application policy. | Caller-owned canvas/lifecycle/navigation/cache/recovery policy, generated scene, trusted immutable-LAS deployment, or one closed private Visual Trial identifier | Disposable viewer handle, WebGPU frame, bounded state, Source-load timings, provisional pick/highlight, exact fixture record, sampled remote Coverage, structured errors, private qualification or visual-baseline evidence |
 | `@punctra/react` | Translate React mount, resize, active, unmount, and replay lifecycle into the framework-neutral viewer. | Caller-owned canvas, viewport, active flag, viewer creation options | React binding state over the same disposable viewer handle |
 | `renderer-demo` | Exercise indexed LAS/LAZ View-to-render composition, exact review/correction, and local viewing measurement. | CLI, permitted corpus manifest, generated inputs, or an existing Workspace | Interactive demo, exact review outcome, GPU-free process smoke, or canonical Viewing Report |
 | `terrain-demo` | Own one recoverable headless LAS/LAZ-to-terrain Workflow Run and its private post-Run qualification. | Caller-owned paths, identities, baseline, correction/QA intent, limits, and returned LandXML declaration | Eight-frame journal, Revision, Terrain/QA evidence, LandXML/report, and separate Round-Trip Evidence |
@@ -59,6 +64,23 @@ the bridge and structured error while keeping LAS decoding private, and freezes
 the supported package/fixture/presentation/recovery facts in a repository
 baseline rather than creating another runtime module. Correction remains existing
 `point-workspace` commit policy.
+
+The completed v0.21 implementation adds one private visual-trial module behind a
+closed trial-identifier interface. That module owns deterministic generated
+scene construction, the permission-bound Autzen derivative, settlement,
+offscreen target capture and readback, channel normalization, lossless image
+encoding, comparison, commit-free baseline-input construction, post-capture
+rubric binding, URL-derived final-pin provenance, deterministic USTAR
+transport, evidence facts, and cleanup. It
+also owns the private client half of the opt-in same-origin local-server export
+fallback; that fallback transports the identical bounded archive and exposes no
+general upload or file-writing seam. The module composes the existing renderer
+implementation and presentation rules; it does
+not become an export of `@punctra/viewer`, `@punctra/react`, or a Rust library.
+The canonical images remain presentation-only and cannot cross the Source/Query
+authority seam. Record mode creates the inputs that cross the implementation
+pin; only a later verify-mode run of that pinned build can publish final visual
+evidence.
 
 ## 1. point-contracts
 
@@ -520,7 +542,7 @@ The allowlist is stricter than what Cargo can compile:
 | `render-protocol` | `point-contracts` |
 | `point-view` | `render-protocol` and narrow math/value dependencies |
 | `render-wgpu` | `render-protocol`, `point-contracts` |
-| `browser-demo` | runtime: `point-view`, `render-protocol`, `render-wgpu`, and narrow private serialization/browser/WebGPU dependencies; native fixture generator: `source-las`, `point-index`, `point-contracts` |
+| `browser-demo` | runtime: `point-view`, `render-protocol`, `render-wgpu`, and narrow private serialization/browser/WebGPU dependencies; native fixture generator: `source-las`, `point-source`, `point-index`, `point-contracts` |
 | `@punctra/react` | `@punctra/viewer` and React peer APIs only |
 | `renderer-demo` | only the Source/index/Workspace/review/View/render crates it composes |
 | `terrain-demo` | `source-las`, `point-source`, `point-index`, `point-workspace`, `point-terrain`, `point-contracts`, `foundation-runtime`, and narrow checksum, identity-generation, and error dependencies |
@@ -561,6 +583,14 @@ workers, matrix evaluation, and issue evidence remain private repository-host
 policy rather than new SDK modules. The v0.20 TypeScript quickstart is a caller
 of the supported root, input, and exact-query entries; its navigation and UI are
 application policy, not additions to `@punctra/viewer`.
+
+The v0.21 Visual Corpus likewise adds no reusable public seam. Its one private
+trial interface hides generated/derived input preparation, raw Wasm capture,
+row-aligned GPU readback, PNG handling, tolerant/temporal comparison, feature
+checks, baseline-input construction, post-capture interpretation binding,
+USTAR transport, and evidence publication. The seam is closed over checked-in
+identifiers so a caller cannot assemble a configurable screenshot or comparison
+interface from shallow implementation files.
 
 Index pages, decoder buffers, Point Set frames, overlay tables, Operation
 records, Revision blocks, triangulation arenas, XML encoder state, scheduling

@@ -321,7 +321,7 @@ async function runSmokePath() {
 function assertInitialQualification(initial, runtimeLane) {
   assertFact(runtimeLane.passed, `exact qualification lane: ${runtimeLane.failures.join("; ")}`);
   const state = viewer.render();
-  assertFact(state.packageVersion === "0.20.0-alpha.1", "v0.20 package version");
+  assertFact(state.packageVersion === "0.21.0-alpha.1", "v0.21 package version");
   assertFact(state.capabilities.secure_context === true, "secure context");
   assertFact(state.capabilities.webgpu === true, "WebGPU capability");
   assertFact(state.source.publishedPoints === 1_089, "generated fixture Points");

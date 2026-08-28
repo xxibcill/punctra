@@ -1,7 +1,17 @@
-use std::sync::{Arc, Mutex};
+use std::{
+    sync::{Arc, Mutex, mpsc},
+    time::Duration,
+};
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::time::Instant;
+#[cfg(target_arch = "wasm32")]
+use web_time::Instant;
 
 use js_sys::Reflect;
-use render_protocol::{Camera, PointId, RenderUpdate, ViewGenerationKey, Viewport};
+use render_protocol::{
+    Camera, PointId, PresentationWeight, RenderUpdate, ViewGenerationKey, Viewport,
+};
 use render_wgpu::{
     Frame, FrameReport, PickHit, PickPoll, PickRequest, PickTicket, RecordedFrame, RendererConfig,
     WgpuRenderer,
@@ -9,9 +19,10 @@ use render_wgpu::{
 use wasm_bindgen::prelude::*;
 use web_sys::HtmlCanvasElement;
 
+use crate::capture::{CaptureCompletionFacts, CaptureFrameFacts, CaptureLayout, CaptureSlot};
 use crate::diagnostics::{
-    CameraFacts, CapabilityFacts, Diagnostics, Failure, FailureCode, FrameFacts, HighlightFacts,
-    LimitFacts, PickFacts,
+    CameraFacts, CapabilityFacts, CaptureResourceFacts, Diagnostics, Failure, FailureCode,
+    FrameFacts, HighlightFacts, LimitFacts, PickFacts,
 };
 use crate::display::DisplayMode;
 use crate::host::{
@@ -29,6 +40,8 @@ const INITIAL_VIEWPORT_ACTION: &str = "Keep the canvas unavailable, choose finit
 const RECREATE_ACTION: &str =
     "Destroy this viewer and explicitly create a new viewer before rendering again.";
 const RETRY_FRAME_ACTION: &str = "Keep the last presented frame and request another frame after the browser reports the canvas visible.";
+const RETRY_CAPTURE_ACTION: &str =
+    "Keep the last presented frame, discard this capture, and begin a new bounded frame capture.";
 
 /// Creates the private browser acceptance viewer after complete capability and
 /// deterministic scene validation.
@@ -120,7 +133,7 @@ impl BrowserViewer {
         self.ensure_active()?;
         self.lifecycle.set_visible(visible).map_err(model_failure)?;
         if !visible {
-            self.resources_mut()?.discard_interaction_state();
+            self.resources_mut()?.discard_frame_dependent_state();
             self.pick = PickFacts::not_requested();
         }
         self.diagnostics()
@@ -195,6 +208,38 @@ impl BrowserViewer {
         self.diagnostics()
     }
 
+    /// Begins one bounded offscreen frame capture without presenting a frame.
+    #[wasm_bindgen(js_name = beginFrameCapture)]
+    pub fn begin_frame_capture(&mut self) -> Result<String, JsValue> {
+        self.ensure_ready()?;
+        let frame = self.scene_frame()?;
+        let batches = self
+            .stream
+            .capture_batch_facts()
+            .map_err(stream_validation_failure)?;
+        self.resources_mut()?.begin_frame_capture(&frame, batches)
+    }
+
+    /// Polls the current capture without blocking the browser event loop.
+    ///
+    /// JavaScript receives `undefined` while mapping is pending and one tight
+    /// top-left-origin RGBA8 `Uint8Array` after completion.
+    #[wasm_bindgen(js_name = pollFrameCapture)]
+    pub fn poll_frame_capture(&mut self) -> Result<Option<Vec<u8>>, JsValue> {
+        self.ensure_ready()?;
+        self.resources_mut()?.poll_frame_capture()
+    }
+
+    /// Returns callback timing for the most recently completed frame capture.
+    #[wasm_bindgen(js_name = frameCaptureCompletionFacts)]
+    pub fn frame_capture_completion_facts(&self) -> Result<String, JsValue> {
+        self.ensure_ready()?;
+        self.resources
+            .as_ref()
+            .ok_or_else(|| model_failure(HostModelError::ViewerShutdown))?
+            .frame_capture_completion_facts()
+    }
+
     /// Returns the complete bounded host diagnostics as JSON.
     #[wasm_bindgen]
     pub fn diagnostics(&self) -> Result<String, JsValue> {
@@ -206,6 +251,9 @@ impl BrowserViewer {
     #[wasm_bindgen]
     pub fn shutdown(&mut self) -> Result<String, JsValue> {
         self.lifecycle.shutdown().map_err(model_failure)?;
+        if let Some(resources) = self.resources.as_mut() {
+            resources.cancel_frame_capture();
+        }
         self.resources.take();
         self.last_frame = None;
         self.pick = PickFacts::not_requested();
@@ -403,6 +451,43 @@ impl BrowserViewer {
     pub fn complete_stream(&mut self) -> Result<String, JsValue> {
         self.ensure_source_publication()?;
         self.stream.complete().map_err(stream_validation_failure)?;
+        self.resources_mut()?.cancel_frame_capture();
+        self.diagnostics()
+    }
+
+    /// Applies one color-only batch weight for the private visual fixture harness.
+    #[wasm_bindgen(js_name = setVisualBatchPresentation)]
+    pub fn set_visual_batch_presentation(
+        &mut self,
+        batch_index: u32,
+        weight_u8: u8,
+    ) -> Result<String, JsValue> {
+        self.ensure_ready()?;
+        let update = self
+            .stream
+            .visual_batch_presentation(batch_index, PresentationWeight::new(weight_u8))
+            .map_err(stream_validation_failure)?;
+        self.resources_mut()?.apply_update(&update)?;
+        self.stream
+            .commit_visual_batch_presentation(batch_index, PresentationWeight::new(weight_u8))
+            .map_err(stream_validation_failure)?;
+        self.reset_interaction_facts();
+        self.diagnostics()
+    }
+
+    /// Conditionally removes one batch for the private visual fixture harness.
+    #[wasm_bindgen(js_name = removeVisualBatch)]
+    pub fn remove_visual_batch(&mut self, batch_index: u32) -> Result<String, JsValue> {
+        self.ensure_ready()?;
+        let update = self
+            .stream
+            .visual_batch_removal(batch_index)
+            .map_err(stream_validation_failure)?;
+        self.resources_mut()?.apply_update(&update)?;
+        self.stream
+            .commit_visual_batch_removal(batch_index)
+            .map_err(stream_validation_failure)?;
+        self.reset_interaction_facts();
         self.diagnostics()
     }
 }
@@ -425,6 +510,10 @@ impl BrowserViewer {
             scene: self.scene.facts(),
             streaming: self.stream.facts(),
             streaming_limits: StreamingLimitFacts::fixed(),
+            capture_resources: self.resources.as_ref().map_or_else(
+                CaptureResourceFacts::released,
+                BrowserResources::capture_resource_facts,
+            ),
             frame: self.last_frame,
             pick: &self.pick,
             camera: CameraFacts::from_camera(self.camera),
@@ -510,7 +599,7 @@ impl BrowserViewer {
             .map_err(camera_failure)?;
         self.camera = camera;
         self.reset_interaction_facts();
-        self.resources_mut()?.discard_interaction_state();
+        self.resources_mut()?.discard_frame_dependent_state();
         self.diagnostics()
     }
 
@@ -558,12 +647,103 @@ struct BrowserResources {
     renderer: WgpuRenderer,
     recorded_frame: Option<RecordedFrame>,
     pick_ticket: Option<PickTicket>,
+    frame_capture: CaptureSlot<FrameCaptureTicket>,
     device_loss: DeviceLossState,
 }
 
 type DeviceLossState = Arc<Mutex<Option<String>>>;
 
+struct FrameCaptureTicket {
+    _target: wgpu::Texture,
+    readback: wgpu::Buffer,
+    submitted_work_done_receiver: mpsc::Receiver<Duration>,
+    readback_mapping_receiver: mpsc::Receiver<(Duration, Result<(), wgpu::BufferAsyncError>)>,
+    submitted_work_done: Option<Duration>,
+    readback_mapping: Option<(Duration, Result<(), wgpu::BufferAsyncError>)>,
+    layout: CaptureLayout,
+}
+
+impl FrameCaptureTicket {
+    fn poll(&mut self) -> Result<FrameCapturePoll, JsValue> {
+        self.poll_submitted_work_done()?;
+        self.poll_readback_mapping()?;
+        let Some(submitted_work_done) = self.submitted_work_done else {
+            return Ok(FrameCapturePoll::Pending);
+        };
+        let Some((readback_mapping, result)) = self.readback_mapping.take() else {
+            return Ok(FrameCapturePoll::Pending);
+        };
+        match result {
+            Ok(()) => self
+                .read_mapped_bytes()
+                .map(|bytes| FrameCapturePoll::Ready {
+                    bytes,
+                    completion: CaptureCompletionFacts::new(submitted_work_done, readback_mapping),
+                }),
+            Err(error) => Err(frame_capture_readback_failure(error)),
+        }
+    }
+
+    fn poll_submitted_work_done(&mut self) -> Result<(), JsValue> {
+        if self.submitted_work_done.is_some() {
+            return Ok(());
+        }
+        match self.submitted_work_done_receiver.try_recv() {
+            Ok(completed) => self.submitted_work_done = Some(completed),
+            Err(mpsc::TryRecvError::Empty) => {}
+            Err(mpsc::TryRecvError::Disconnected) => {
+                return Err(frame_capture_readback_failure(
+                    "the submitted-work completion callback ended without a result",
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn poll_readback_mapping(&mut self) -> Result<(), JsValue> {
+        if self.readback_mapping.is_some() {
+            return Ok(());
+        }
+        match self.readback_mapping_receiver.try_recv() {
+            Ok(completed) => self.readback_mapping = Some(completed),
+            Err(mpsc::TryRecvError::Empty) => {}
+            Err(mpsc::TryRecvError::Disconnected) => {
+                return Err(frame_capture_readback_failure(
+                    "the frame-capture mapping callback ended without a result",
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn read_mapped_bytes(&self) -> Result<Vec<u8>, JsValue> {
+        let mapped = match self.readback.get_mapped_range(..) {
+            Ok(mapped) => mapped,
+            Err(error) => {
+                self.readback.unmap();
+                return Err(frame_capture_readback_failure(error));
+            }
+        };
+        let rgba = self.layout.canonical_rgba(&mapped);
+        drop(mapped);
+        self.readback.unmap();
+        rgba.map_err(frame_capture_readback_failure)
+    }
+}
+
+enum FrameCapturePoll {
+    Pending,
+    Ready {
+        bytes: Vec<u8>,
+        completion: CaptureCompletionFacts,
+    },
+}
+
 impl BrowserResources {
+    fn capture_resource_facts(&self) -> CaptureResourceFacts {
+        CaptureResourceFacts::from_pending(self.frame_capture.is_pending())
+    }
+
     async fn initialize(
         canvas: &HtmlCanvasElement,
         viewport: PhysicalViewport,
@@ -612,6 +792,7 @@ impl BrowserResources {
                 renderer,
                 recorded_frame: None,
                 pick_ticket: None,
+                frame_capture: CaptureSlot::idle(),
                 device_loss,
             },
             facts,
@@ -624,7 +805,7 @@ impl BrowserResources {
         self.surface_configuration.width = dimensions[0];
         self.surface_configuration.height = dimensions[1];
         set_canvas_size(&self.canvas, viewport);
-        self.discard_interaction_state();
+        self.discard_frame_dependent_state();
         configure_surface(
             &self.surface,
             &self.device,
@@ -637,7 +818,10 @@ impl BrowserResources {
 
     fn render(&mut self, frame: &Frame) -> Result<(FrameReport, bool), JsValue> {
         self.ensure_device_available()?;
-        self.discard_interaction_state();
+        // Capture commands own a separate color target and were submitted
+        // before this presentation. Preserve that ticket across same-state
+        // rerenders; queue ordering completes its copy before later work.
+        self.discard_presented_frame_state();
         let (surface_texture, suboptimal) = self.acquire_surface_texture()?;
         let target = surface_texture
             .texture
@@ -656,7 +840,7 @@ impl BrowserResources {
 
     fn apply_update(&mut self, update: &render_protocol::RenderUpdate) -> Result<(), JsValue> {
         self.ensure_device_available()?;
-        self.discard_interaction_state();
+        self.discard_frame_dependent_state();
         self.renderer
             .apply(update)
             .map(|_| ())
@@ -711,9 +895,207 @@ impl BrowserResources {
         self.pick_ticket = None;
     }
 
-    fn discard_interaction_state(&mut self) {
+    fn begin_frame_capture(
+        &mut self,
+        frame: &Frame,
+        batches: Vec<crate::streaming::VisualBatchFacts>,
+    ) -> Result<String, JsValue> {
+        self.ensure_device_available()?;
+        if self.frame_capture.is_pending() {
+            return Err(failure(
+                FailureCode::FrameCapturePending,
+                "a frame capture is already pending",
+                "Poll the current frame capture to completion before beginning another one.",
+            ));
+        }
+        let started_at = Instant::now();
+
+        let dimensions = frame.viewport().dimensions();
+        let layout = CaptureLayout::new(dimensions, self.surface_configuration.format)
+            .map_err(frame_capture_validation_failure)?;
+        self.validate_frame_capture_resources(layout)?;
+        let target = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Punctra browser frame capture target"),
+            size: capture_extent(dimensions),
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: layout.texture_format(),
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let target_view = target.create_view(&wgpu::TextureViewDescriptor::default());
+        let readback = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Punctra browser frame capture readback"),
+            size: layout.staging_bytes(),
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut encoder = self.encoder("Punctra browser frame capture");
+        let recorded = self
+            .renderer
+            .render(&mut encoder, &target_view, frame)
+            .map_err(|error| {
+                failure(
+                    FailureCode::FrameCaptureRecording,
+                    error,
+                    RETRY_CAPTURE_ACTION,
+                )
+            })?;
+        let report = recorded.report();
+        validate_transient_bytes(report.transient_texture_bytes())?;
+        let facts = layout
+            .pending_facts_json(CaptureFrameFacts::new(
+                report.view_generation().generation(),
+                report.drawn_points(),
+                report.draw_calls(),
+                report.resident_bytes(),
+                report.transient_texture_bytes(),
+                batches,
+            ))
+            .map_err(|error| {
+                failure(FailureCode::FrameCaptureFacts, error, RETRY_CAPTURE_ACTION)
+            })?;
+        encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture: &target,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &readback,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(layout.padded_bytes_per_row()),
+                    rows_per_image: Some(dimensions[1]),
+                },
+            },
+            capture_extent(dimensions),
+        );
+        let (mapping_sender, readback_mapping_receiver) = mpsc::channel();
+        let mapping_started_at = started_at;
+        encoder.map_buffer_on_submit(&readback, wgpu::MapMode::Read, .., move |result| {
+            let _ = mapping_sender.send((mapping_started_at.elapsed(), result));
+        });
+        let (submitted_sender, submitted_work_done_receiver) = mpsc::channel();
+        encoder.on_submitted_work_done(move || {
+            let _ = submitted_sender.send(started_at.elapsed());
+        });
+        self.queue.submit([encoder.finish()]);
+        let ticket = FrameCaptureTicket {
+            _target: target,
+            readback,
+            submitted_work_done_receiver,
+            readback_mapping_receiver,
+            submitted_work_done: None,
+            readback_mapping: None,
+            layout,
+        };
+        if self.frame_capture.begin(ticket).is_err() {
+            return Err(failure(
+                FailureCode::FrameCapturePending,
+                "a frame capture became pending before ownership could be recorded",
+                "Poll the current frame capture to completion before beginning another one.",
+            ));
+        }
+        Ok(facts)
+    }
+
+    fn poll_frame_capture(&mut self) -> Result<Option<Vec<u8>>, JsValue> {
+        if let Err(error) = self.ensure_device_available() {
+            self.cancel_frame_capture();
+            return Err(error);
+        }
+        if !self.frame_capture.is_pending() {
+            return Err(failure(
+                FailureCode::FrameCaptureNotRequested,
+                "no frame capture is pending",
+                "Begin a bounded frame capture before polling it.",
+            ));
+        }
+        if let Err(error) = self.device.poll(wgpu::PollType::Poll) {
+            self.cancel_frame_capture();
+            return Err(failure(FailureCode::DevicePoll, error, RECREATE_ACTION));
+        }
+        let outcome = self
+            .frame_capture
+            .pending_mut()
+            .expect("the capture ticket was checked above")
+            .poll();
+        match outcome {
+            Ok(FrameCapturePoll::Pending) => Ok(None),
+            Ok(FrameCapturePoll::Ready { bytes, completion }) => {
+                if !self.frame_capture.complete(completion) {
+                    return Err(frame_capture_readback_failure(
+                        "the completed frame capture lost ownership before release",
+                    ));
+                }
+                Ok(Some(bytes))
+            }
+            Err(error) => {
+                self.frame_capture.cancel();
+                Err(error)
+            }
+        }
+    }
+
+    fn cancel_frame_capture(&mut self) {
+        self.frame_capture.cancel();
+    }
+
+    fn frame_capture_completion_facts(&self) -> Result<String, JsValue> {
+        self.frame_capture
+            .completion()
+            .ok_or_else(|| {
+                failure(
+                    FailureCode::FrameCaptureFacts,
+                    "no completed frame-capture callback timing is available",
+                    "Complete one bounded frame capture before reading its callback timing.",
+                )
+            })?
+            .to_json()
+            .map_err(|error| failure(FailureCode::FrameCaptureFacts, error, RETRY_CAPTURE_ACTION))
+    }
+
+    fn validate_frame_capture_resources(&self, layout: CaptureLayout) -> Result<(), JsValue> {
+        let dimensions = layout.dimensions();
+        let limits = self.device.limits();
+        if dimensions[0] > limits.max_texture_dimension_2d
+            || dimensions[1] > limits.max_texture_dimension_2d
+            || layout.staging_bytes() > limits.max_buffer_size
+        {
+            return Err(frame_capture_validation_failure(format!(
+                "capture {:?} with a {}-byte staging buffer exceeds device limits of {} pixels and {} buffer bytes",
+                dimensions,
+                layout.staging_bytes(),
+                limits.max_texture_dimension_2d,
+                limits.max_buffer_size,
+            )));
+        }
+        let required_usages =
+            wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC;
+        let allowed_usages = layout
+            .texture_format()
+            .guaranteed_format_features(self.device.features())
+            .allowed_usages;
+        if !allowed_usages.contains(required_usages) {
+            return Err(frame_capture_validation_failure(format!(
+                "capture format {:?} does not guarantee RENDER_ATTACHMENT and COPY_SRC usage",
+                layout.texture_format(),
+            )));
+        }
+        Ok(())
+    }
+
+    fn discard_presented_frame_state(&mut self) {
         self.cancel_pick();
         self.recorded_frame = None;
+    }
+
+    fn discard_frame_dependent_state(&mut self) {
+        self.discard_presented_frame_state();
+        self.cancel_frame_capture();
     }
 
     fn acquire_surface_texture(&self) -> Result<(wgpu::SurfaceTexture, bool), JsValue> {
@@ -932,6 +1314,14 @@ fn set_canvas_size(canvas: &HtmlCanvasElement, viewport: PhysicalViewport) {
     canvas.set_height(dimensions[1]);
 }
 
+const fn capture_extent(dimensions: [u32; 2]) -> wgpu::Extent3d {
+    wgpu::Extent3d {
+        width: dimensions[0],
+        height: dimensions[1],
+        depth_or_array_layers: 1,
+    }
+}
+
 fn configure_surface(
     surface: &wgpu::Surface<'_>,
     device: &wgpu::Device,
@@ -986,6 +1376,22 @@ fn missing_recorded_frame_failure() -> JsValue {
         FailureCode::MissingRecordedFrame,
         "no recorded frame is available for provisional picking",
         "Render a visible frame before beginning a provisional pick.",
+    )
+}
+
+fn frame_capture_validation_failure(error: impl std::fmt::Display) -> JsValue {
+    failure(
+        FailureCode::FrameCaptureValidation,
+        error,
+        "Keep the last presented frame and retry with the current bounded four-byte canvas format and dimensions.",
+    )
+}
+
+fn frame_capture_readback_failure(error: impl std::fmt::Display) -> JsValue {
+    failure(
+        FailureCode::FrameCaptureReadback,
+        error,
+        RETRY_CAPTURE_ACTION,
     )
 }
 

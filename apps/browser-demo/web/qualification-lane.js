@@ -11,8 +11,8 @@ export const QUALIFICATION_LANE = deepFreeze({
   },
   operating_system: {
     name: "macOS",
-    version: "26.5.2",
-    build: "25F84",
+    version: "26.6.2",
+    build: "25G83",
     architecture: "arm64",
     user_agent_platform: "MacIntel",
     note: "The browser's reduced user-agent OS token is not the operating-system version authority.",
@@ -42,13 +42,13 @@ export const QUALIFICATION_LANE = deepFreeze({
     max_color_attachments: 8,
   },
   display: {
-    physical_viewport: [1_749, 1_093],
-    css_viewport: [874.28125, 546.421875],
+    physical_viewport: [1_896, 1_185],
+    css_viewport: [948, 592.5],
     device_pixel_ratio: 2,
     screen_css_pixels: [1_920, 1_080],
     color_depth: 24,
     pixel_depth: 24,
-    canvas_bytes: 7_646_628,
+    canvas_bytes: 8_987_040,
     display_path: "built-in Retina display",
     screen_note: "The browser-reported CSS screen size and bit depth are exact session facts; the host independently reported the built-in Retina display path.",
   },
@@ -82,7 +82,7 @@ export const QUALIFICATION_RUNTIME_LANE = deepFreeze({
     displayPath: QUALIFICATION_LANE.display.display_path,
     package: {
       name: "@punctra/viewer",
-      version: "0.20.0-alpha.1",
+      version: "0.21.0-alpha.1",
     },
   },
   browser: {

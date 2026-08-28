@@ -1,0 +1,1010 @@
+{
+  "schema": "punctra-browser-visual-baseline-v1",
+  "release": "0.21.0-alpha.1",
+  "baseline_inputs": {
+    "artifact": {
+      "path": "apps/browser-demo/web/fixtures/visual-v1/baseline-inputs.json",
+      "byte_length": 5100,
+      "sha256": "f4f2a5714f17dbb1d285308d74886ea7aee63e0aa52df4dca9b01d7cb7d0993b"
+    }
+  },
+  "pins": {
+    "implementation_commit": "0c04f1dfda11d268227408224965dc0daf679ac1",
+    "qualified_paths": [
+      "Cargo.lock",
+      "Cargo.toml",
+      "apps/browser-demo/Cargo.toml",
+      "apps/browser-demo/src/bin/generate_stream_fixture.rs",
+      "apps/browser-demo/src/bin/generate_visual_source_fixture.rs",
+      "apps/browser-demo/src/bin/scene_facts.rs",
+      "apps/browser-demo/src/browser.rs",
+      "apps/browser-demo/src/capture.rs",
+      "apps/browser-demo/src/diagnostics.rs",
+      "apps/browser-demo/src/display.rs",
+      "apps/browser-demo/src/host.rs",
+      "apps/browser-demo/src/lib.rs",
+      "apps/browser-demo/src/scene.rs",
+      "apps/browser-demo/src/streaming.rs",
+      "apps/browser-demo/web/camera-policy.js",
+      "apps/browser-demo/web/exact-query-error.js",
+      "apps/browser-demo/web/exact-query.d.ts",
+      "apps/browser-demo/web/exact-query.js",
+      "apps/browser-demo/web/exact-query.test.mjs",
+      "apps/browser-demo/web/las-exact-decoder.js",
+      "apps/browser-demo/web/module-loader.js",
+      "apps/browser-demo/web/module-loader.test.mjs",
+      "apps/browser-demo/web/package.json",
+      "apps/browser-demo/web/range-response.js",
+      "apps/browser-demo/web/range-response.test.mjs",
+      "apps/browser-demo/web/range-server.test.mjs",
+      "apps/browser-demo/web/sdk.d.ts",
+      "apps/browser-demo/web/sdk.js",
+      "apps/browser-demo/web/sdk.test.mjs",
+      "apps/browser-demo/web/stream-ordinals.js",
+      "apps/browser-demo/web/stream-ordinals.test.mjs",
+      "apps/browser-demo/web/stream-worker.js",
+      "apps/browser-demo/web/streaming-protocol.js",
+      "apps/browser-demo/web/streaming-protocol.test.mjs",
+      "apps/browser-demo/web/viewer-api.d.ts",
+      "apps/browser-demo/web/viewer-api.js",
+      "apps/browser-demo/web/viewer-api.test.mjs",
+      "apps/browser-demo/web/viewer-input.d.ts",
+      "apps/browser-demo/web/viewer-input.js",
+      "apps/browser-demo/web/viewer-input.test.mjs",
+      "apps/browser-demo/web/wasm-loader.js",
+      "apps/browser-demo/web/wasm-loader.test.mjs",
+      "apps/browser-demo/web/worker-operation.js",
+      "apps/browser-demo/web/worker-operation.test.mjs",
+      "apps/browser-demo/web/worker-protocol.js",
+      "apps/browser-demo/web/worker-protocol.test.mjs",
+      "apps/browser-demo/web/fixtures/visual-v1/autzen-classified-sample.json",
+      "apps/browser-demo/web/fixtures/visual-v1/autzen-classified-sample.pvis",
+      "apps/browser-demo/web/fixtures/visual-v1/baseline-inputs.json",
+      "apps/browser-demo/web/fixtures/visual-v1/baselines/generated-neutral-mixed-lod-perspective.png",
+      "apps/browser-demo/web/fixtures/visual-v1/baselines/generated-elevation-layered-orthographic.png",
+      "apps/browser-demo/web/fixtures/visual-v1/baselines/generated-rgb-hdr-perspective.png",
+      "apps/browser-demo/web/fixtures/visual-v1/baselines/generated-intensity-sparse-orthographic.png",
+      "apps/browser-demo/web/fixtures/visual-v1/baselines/generated-classification-selection-perspective.png",
+      "apps/browser-demo/web/fixtures/visual-v1/baselines/autzen-rgb-perspective.png",
+      "apps/browser-demo/web/fixtures/visual-v1/baselines/autzen-classification-perspective.png",
+      "apps/browser-demo/web/fixtures/visual-v1/baselines/autzen-intensity-perspective.png",
+      "apps/browser-demo/web/fixtures/visual-v1/baselines/autzen-elevation-perspective.png",
+      "apps/browser-demo/web/fixtures/visual-v1/corpus.json",
+      "apps/browser-demo/web/qualification-lane.js",
+      "apps/browser-demo/web/visual-capture.js",
+      "apps/browser-demo/web/visual-capture.test.mjs",
+      "apps/browser-demo/web/visual-comparison.js",
+      "apps/browser-demo/web/visual-comparison.test.mjs",
+      "apps/browser-demo/web/visual-corpus.js",
+      "apps/browser-demo/web/visual-corpus.test.mjs",
+      "apps/browser-demo/web/visual-export.js",
+      "apps/browser-demo/web/visual-export.test.mjs",
+      "apps/browser-demo/web/visual-archive.js",
+      "apps/browser-demo/web/visual-archive.test.mjs",
+      "apps/browser-demo/web/visual-baseline-inputs.js",
+      "apps/browser-demo/web/visual-baseline-inputs.test.mjs",
+      "apps/browser-demo/web/visual.css",
+      "apps/browser-demo/web/visual-main.js",
+      "apps/browser-demo/web/visual-png.js",
+      "apps/browser-demo/web/visual-png.test.mjs",
+      "apps/browser-demo/web/visual-provenance.js",
+      "apps/browser-demo/web/visual-provenance.test.mjs",
+      "apps/browser-demo/web/visual-rubric.js",
+      "apps/browser-demo/web/visual-rubric.test.mjs",
+      "apps/browser-demo/web/visual-run-session.js",
+      "apps/browser-demo/web/visual-run-session.test.mjs",
+      "apps/browser-demo/web/visual-selection.js",
+      "apps/browser-demo/web/visual-selection.test.mjs",
+      "apps/browser-demo/web/visual-validation.js",
+      "apps/browser-demo/web/visual-validation.test.mjs",
+      "apps/browser-demo/web/visual.html",
+      "crates/foundation-runtime/Cargo.toml",
+      "crates/foundation-runtime/src/lib.rs",
+      "crates/point-contracts/Cargo.toml",
+      "crates/point-contracts/src/lib.rs",
+      "crates/point-index/Cargo.toml",
+      "crates/point-index/src/error.rs",
+      "crates/point-index/src/lib.rs",
+      "crates/point-index/src/limits.rs",
+      "crates/point-index/src/model.rs",
+      "crates/point-index/src/persistence.rs",
+      "crates/point-index/src/prepare.rs",
+      "crates/point-index/src/read.rs",
+      "crates/point-index/src/tree.rs",
+      "crates/point-source/Cargo.toml",
+      "crates/point-source/src/adapter.rs",
+      "crates/point-source/src/error.rs",
+      "crates/point-source/src/lib.rs",
+      "crates/point-source/src/stream.rs",
+      "crates/point-view/Cargo.toml",
+      "crates/point-view/src/lib.rs",
+      "crates/point-view/src/planning.rs",
+      "crates/render-protocol/Cargo.toml",
+      "crates/render-protocol/src/camera.rs",
+      "crates/render-protocol/src/lib.rs",
+      "crates/render-protocol/src/viewport.rs",
+      "crates/render-wgpu/Cargo.toml",
+      "crates/render-wgpu/src/eye_dome.wgsl",
+      "crates/render-wgpu/src/frame.rs",
+      "crates/render-wgpu/src/gpu.rs",
+      "crates/render-wgpu/src/lib.rs",
+      "crates/render-wgpu/src/pick.rs",
+      "crates/render-wgpu/src/pipeline.rs",
+      "crates/render-wgpu/src/point.wgsl",
+      "crates/render-wgpu/src/renderer.rs",
+      "crates/render-wgpu/src/targets.rs",
+      "crates/source-las/Cargo.toml",
+      "crates/source-las/src/decode.rs",
+      "crates/source-las/src/format.rs",
+      "crates/source-las/src/lib.rs",
+      "docs/releases/v0.21-browser-visual-rubric-template.json",
+      "examples/data/autzen-classified.laz",
+      "packages/react/hook.js",
+      "packages/react/index.d.ts",
+      "packages/react/index.js",
+      "packages/react/lifecycle.js",
+      "packages/react/lifecycle.test.mjs",
+      "packages/react/package.json",
+      "rust-toolchain.toml",
+      "scripts/build-browser-demo.sh",
+      "scripts/build-browser-sdk.sh",
+      "scripts/generate-browser-sdk-reference.mjs",
+      "scripts/serve-browser-demo.py",
+      "scripts/verify-browser-visual-baseline.mjs"
+    ],
+    "verifier": {
+      "path": "scripts/verify-browser-visual-baseline.mjs",
+      "byte_length": 158501,
+      "sha256": "3e07cb5109a08cdd171b401b5f1924c1bbf0874ff06c71a97c11362da367cbbf"
+    }
+  },
+  "predecessor": {
+    "path": "docs/releases/v0.20-browser-baseline.json",
+    "byte_length": 8144,
+    "sha256": "83c20884ec4dea109ea91a0577beb67d9be6723200f00f115c0d8d996fcf1417"
+  },
+  "package_runtime": {
+    "viewer_manifest": {
+      "path": "apps/browser-demo/web/package.json",
+      "byte_length": 1371,
+      "sha256": "fa33501eebbd1b0dd7dddc610e8632c8bb84a82edaf6774750538d73a5ff03c3"
+    },
+    "react_manifest": {
+      "path": "packages/react/package.json",
+      "byte_length": 755,
+      "sha256": "b30e093b46d672d56d8430626c3015d5da6c105c70f9566f88f9aae62b5cd171"
+    },
+    "built_runtime_artifacts": [
+      {
+        "path": "apps/browser-demo/web/package.json",
+        "byte_length": 1371,
+        "sha256": "fa33501eebbd1b0dd7dddc610e8632c8bb84a82edaf6774750538d73a5ff03c3"
+      },
+      {
+        "path": "apps/browser-demo/web/pkg/browser_demo.js",
+        "byte_length": 85045,
+        "sha256": "2bc87f1d3df50cdcfb56e7dba6fadf0d64133b841b556315bde016b98b0f7d33"
+      },
+      {
+        "path": "apps/browser-demo/web/pkg/browser_demo_bg.wasm",
+        "byte_length": 792815,
+        "sha256": "ddf0e0d62926260e8ef28866dab6d9f032da4d267eb6d4998a7cbcebee5a2cb1"
+      }
+    ],
+    "capture_interface": "private_browser_demo_only",
+    "public_capture_export": false
+  },
+  "point_appearance": {
+    "change": "unchanged_from_v0.20",
+    "predecessor_implementation_commit": "0e16d924ed9d812dbef3e28726cf33322ffd9ada",
+    "presentation_policy": {
+      "display_modes": [
+        "neutral",
+        "elevation",
+        "rgb",
+        "intensity",
+        "classification"
+      ],
+      "projections": [
+        "orthographic",
+        "perspective"
+      ],
+      "deployment_display_mapping": "rgb16_full_range_rounded_rgba8_v1",
+      "provisional_authority": "provisional_gpu_hint",
+      "exact_authority": "exact_source_record",
+      "highlight_authority": "presentation_only"
+    },
+    "protected_files": [
+      {
+        "path": "apps/browser-demo/src/display.rs",
+        "byte_length": 6057,
+        "sha256": "0b7c3beba99de6cb312520ca1f55b0c29b480b070f0245c28a658c8f7f651868"
+      },
+      {
+        "path": "apps/browser-demo/src/scene.rs",
+        "byte_length": 11548,
+        "sha256": "da02c3db0b73e2d00939a22abad997fae14f860b22e7a5225cabb227b26030c5"
+      },
+      {
+        "path": "crates/render-wgpu/src/eye_dome.wgsl",
+        "byte_length": 1613,
+        "sha256": "14c0006312e0df8b7cc7aa47058c0b5cd81c08e9f2ea72cb7768f190ad414ad9"
+      },
+      {
+        "path": "crates/render-wgpu/src/frame.rs",
+        "byte_length": 8388,
+        "sha256": "a7e8f3fa59c2fef27c8063f1f16a28b680fa85ee312c9e46a35b1ddc899df345"
+      },
+      {
+        "path": "crates/render-wgpu/src/pipeline.rs",
+        "byte_length": 10002,
+        "sha256": "a6c42d09f39807f670e2f5a7e423b1cb0edb049cd2300f5c713ea467cad489a6"
+      },
+      {
+        "path": "crates/render-wgpu/src/point.wgsl",
+        "byte_length": 3155,
+        "sha256": "7591505dabf612e679405e18658923a8a663fe50e27fe2f6bb724c7b998b22e7"
+      },
+      {
+        "path": "crates/render-wgpu/src/renderer.rs",
+        "byte_length": 45986,
+        "sha256": "ab2dcf90a5d7a9787342fe954d416c8d5b6a21d76a2344f643ab9c44c252c9f0"
+      }
+    ]
+  },
+  "corpus": {
+    "artifact": {
+      "path": "apps/browser-demo/web/fixtures/visual-v1/corpus.json",
+      "byte_length": 28119,
+      "sha256": "f8d78105861a6822523be62c914469c98072201f2f343f290b288e607061e580"
+    },
+    "generated": {
+      "id": "generated-visual-composite-v1",
+      "source_identity": "2121212121212121212121212121212121212121212121212121212121212121",
+      "point_count": 2103,
+      "batch_roles": [
+        {
+          "index": 0,
+          "role": "lod_parent",
+          "point_count": 225
+        },
+        {
+          "index": 1,
+          "role": "lod_child",
+          "point_count": 841
+        },
+        {
+          "index": 2,
+          "role": "depth_layers",
+          "point_count": 800
+        },
+        {
+          "index": 3,
+          "role": "sparse_features",
+          "point_count": 192
+        },
+        {
+          "index": 4,
+          "role": "lod_adjacent_coarse",
+          "point_count": 45
+        }
+      ],
+      "lod_relations": [
+        {
+          "parent_batch_index": 0,
+          "child_batch_index": 1
+        }
+      ],
+      "stable_lod_relations": [
+        {
+          "dense_batch_index": 1,
+          "coarse_batch_index": 4
+        }
+      ],
+      "world_origin": [
+        6378137.25,
+        4782951.5,
+        1234.75
+      ],
+      "source_z_range": [
+        1230.75,
+        1242.75
+      ],
+      "conditions": [
+        "sparse",
+        "dense",
+        "layered",
+        "high_dynamic_range",
+        "classification",
+        "large_world",
+        "mixed_lod"
+      ],
+      "transfer_byte_length": 67296,
+      "payload_sha256": "dec11f50be83a59f8567440207d17eaea5650063ce88b73d56721f5614f3fd99"
+    },
+    "autzen": {
+      "manifest": {
+        "path": "apps/browser-demo/web/fixtures/visual-v1/autzen-classified-sample.json",
+        "byte_length": 10384,
+        "sha256": "8fe91b4cfc3153b993c5d9872ffd26345abc877bc718ca01110921433ba4805e"
+      },
+      "payload": {
+        "path": "apps/browser-demo/web/fixtures/visual-v1/autzen-classified-sample.pvis",
+        "byte_length": 131072,
+        "sha256": "149718ce9ac5b3cfea39ac40fdd3c3148dfec1fa6ff56eb2571e4f0b762d686c"
+      },
+      "upstream_source": {
+        "path": "examples/data/autzen-classified.laz",
+        "byte_length": 74416814,
+        "sha256": "c8828215facfb4c9465c9a7db9d45cf2c0e9175a6eb5b21e89417978cc85cd51"
+      },
+      "generator": {
+        "path": "apps/browser-demo/src/bin/generate_visual_source_fixture.rs",
+        "byte_length": 32163,
+        "sha256": "ed069079d8638018847a21124f006a7f937faa247ebdde7bb5d49407f7a5415c"
+      },
+      "verification_command": "cargo run --quiet -p browser-demo --bin generate_visual_source_fixture -- --output-dir <isolated-directory>"
+    }
+  },
+  "trial_contract": {
+    "trial_count": 9,
+    "generated_trial_count": 5,
+    "autzen_trial_count": 4,
+    "required_generated_conditions": [
+      "sparse",
+      "dense",
+      "layered",
+      "high_dynamic_range",
+      "classification",
+      "large_world",
+      "mixed_lod"
+    ],
+    "display_modes": [
+      "neutral",
+      "elevation",
+      "rgb",
+      "intensity",
+      "classification"
+    ],
+    "projections": [
+      "orthographic",
+      "perspective"
+    ],
+    "coverage_labels": [
+      "authored",
+      "complete",
+      "sampled"
+    ],
+    "selection_states": "selected_and_unselected_required",
+    "mixed_lod_trace": "parent_replacement_to_settled_cut_required",
+    "condition_fact_snapshot": {
+      "schema": "punctra-browser-visual-condition-coverage-v1",
+      "generated": {
+        "sparse": {
+          "trial_ids": [
+            "generated-neutral-mixed-lod-perspective",
+            "generated-intensity-sparse-orthographic",
+            "generated-classification-selection-perspective"
+          ],
+          "fact": {
+            "sparse_batch": {
+              "batch_index": 3,
+              "point_count": 192,
+              "maximum_points": 256
+            }
+          }
+        },
+        "dense": {
+          "trial_ids": [
+            "generated-neutral-mixed-lod-perspective",
+            "generated-rgb-hdr-perspective",
+            "generated-classification-selection-perspective"
+          ],
+          "fact": {
+            "dense_batches": [
+              {
+                "batch_index": 1,
+                "point_count": 841
+              },
+              {
+                "batch_index": 2,
+                "point_count": 800
+              }
+            ]
+          }
+        },
+        "layered": {
+          "trial_ids": [
+            "generated-elevation-layered-orthographic"
+          ],
+          "fact": {
+            "layer_pairs": {
+              "batch_index": 2,
+              "paired_xy_count": 400,
+              "minimum_z_separation": 5.5
+            }
+          }
+        },
+        "high_dynamic_range": {
+          "trial_ids": [
+            "generated-rgb-hdr-perspective",
+            "generated-intensity-sparse-orthographic"
+          ],
+          "fact": {
+            "attribute_extrema": {
+              "intensity": [
+                0,
+                65535
+              ],
+              "rgb_channel": [
+                0,
+                65535
+              ],
+              "classifications": [
+                1,
+                2,
+                5,
+                6,
+                9,
+                17,
+                31
+              ]
+            }
+          }
+        },
+        "classification": {
+          "trial_ids": [
+            "generated-classification-selection-perspective"
+          ],
+          "fact": {
+            "classifications": [
+              1,
+              2,
+              5,
+              6,
+              9,
+              17,
+              31
+            ]
+          }
+        },
+        "large_world": {
+          "trial_ids": [
+            "generated-neutral-mixed-lod-perspective",
+            "generated-elevation-layered-orthographic",
+            "generated-rgb-hdr-perspective",
+            "generated-intensity-sparse-orthographic",
+            "generated-classification-selection-perspective"
+          ],
+          "fact": {
+            "world_origin": [
+              6378137.25,
+              4782951.5,
+              1234.75
+            ],
+            "minimum_dense_axis_spacing": 0.5714282989501953
+          }
+        },
+        "mixed_lod": {
+          "trial_ids": [
+            "generated-neutral-mixed-lod-perspective"
+          ],
+          "fact": {
+            "replacement": {
+              "parent_batch_index": 0,
+              "parent_points": 225,
+              "child_batch_index": 1,
+              "child_points": 841
+            },
+            "stable_lod_cut": {
+              "dense_batch_index": 1,
+              "dense_points": 841,
+              "dense_xy_bounds": {
+                "min": [
+                  -18,
+                  -12
+                ],
+                "max": [
+                  -2,
+                  12
+                ]
+              },
+              "dense_points_per_xy_area": 2.1901041666666665,
+              "coarse_batch_index": 4,
+              "coarse_points": 45,
+              "coarse_xy_bounds": {
+                "min": [
+                  -1.5,
+                  -12
+                ],
+                "max": [
+                  1.5,
+                  12
+                ]
+              },
+              "coarse_points_per_xy_area": 0.625,
+              "adjacent_x_gap": 0.5,
+              "density_ratio": 3.5041666666666664,
+              "settled_dense_weight_u8": 255,
+              "settled_coarse_weight_u8": 255,
+              "distinct_from_parent_child_replacement": true
+            }
+          }
+        }
+      },
+      "autzen": {
+        "dense_real_world_structure": {
+          "trial_ids": [
+            "autzen-rgb-perspective",
+            "autzen-classification-perspective",
+            "autzen-intensity-perspective",
+            "autzen-elevation-perspective"
+          ],
+          "fact": {
+            "xy_grid": {
+              "cells_with_at_least_8_points": 112,
+              "columns": 32,
+              "empty_cells": 874,
+              "maximum_points_per_cell": 126,
+              "occupied_cells": 150,
+              "rows": 32,
+              "singleton_cells": 6
+            }
+          }
+        },
+        "classification": {
+          "trial_ids": [
+            "autzen-classification-perspective"
+          ],
+          "fact": {
+            "classifications": [
+              {
+                "count": 192,
+                "value": 0
+              },
+              {
+                "count": 2624,
+                "value": 2
+              },
+              {
+                "count": 960,
+                "value": 5
+              },
+              {
+                "count": 128,
+                "value": 6
+              },
+              {
+                "count": 128,
+                "value": 9
+              },
+              {
+                "count": 40,
+                "value": 76
+              },
+              {
+                "count": 24,
+                "value": 77
+              }
+            ]
+          }
+        },
+        "intensity": {
+          "trial_ids": [
+            "autzen-intensity-perspective"
+          ],
+          "fact": {
+            "intensity": {
+              "maximum": 65024,
+              "minimum": 0
+            }
+          }
+        },
+        "rgb": {
+          "trial_ids": [
+            "autzen-rgb-perspective"
+          ],
+          "fact": {
+            "rgb_channel": {
+              "maximum": 61184,
+              "minimum": 7424
+            }
+          }
+        },
+        "elevation": {
+          "trial_ids": [
+            "autzen-elevation-perspective"
+          ],
+          "fact": {
+            "relative_z_bounds": [
+              -103.19000244140625,
+              36.18000030517578
+            ],
+            "overlapping_depth": {
+              "cells_with_at_least_10_unit_z_span": 29,
+              "maximum_cell_z_span": 108.16999816894531,
+              "xy_grid_columns": 32,
+              "xy_grid_rows": 32
+            }
+          }
+        },
+        "large_world_coordinates": {
+          "trial_ids": [
+            "autzen-rgb-perspective",
+            "autzen-classification-perspective",
+            "autzen-intensity-perspective",
+            "autzen-elevation-perspective"
+          ],
+          "fact": {
+            "maximum_absolute_world_origin": 851209.905,
+            "minimum_positive_axis_spacing": 0.0198974609375
+          }
+        }
+      }
+    },
+    "condition_coverage": {
+      "schema": "punctra-browser-visual-condition-coverage-v1",
+      "generated": [
+        {
+          "condition": "sparse",
+          "source_id": "generated-visual-composite-v1",
+          "trial_ids": [
+            "generated-neutral-mixed-lod-perspective",
+            "generated-intensity-sparse-orthographic",
+            "generated-classification-selection-perspective"
+          ],
+          "fact_paths": [
+            "condition_facts.sparse_batch"
+          ]
+        },
+        {
+          "condition": "dense",
+          "source_id": "generated-visual-composite-v1",
+          "trial_ids": [
+            "generated-neutral-mixed-lod-perspective",
+            "generated-rgb-hdr-perspective",
+            "generated-classification-selection-perspective"
+          ],
+          "fact_paths": [
+            "condition_facts.dense_batches"
+          ]
+        },
+        {
+          "condition": "layered",
+          "source_id": "generated-visual-composite-v1",
+          "trial_ids": [
+            "generated-elevation-layered-orthographic"
+          ],
+          "fact_paths": [
+            "condition_facts.layer_pairs"
+          ]
+        },
+        {
+          "condition": "high_dynamic_range",
+          "source_id": "generated-visual-composite-v1",
+          "trial_ids": [
+            "generated-rgb-hdr-perspective",
+            "generated-intensity-sparse-orthographic"
+          ],
+          "fact_paths": [
+            "condition_facts.attribute_extrema.intensity",
+            "condition_facts.attribute_extrema.rgb_channel"
+          ]
+        },
+        {
+          "condition": "classification",
+          "source_id": "generated-visual-composite-v1",
+          "trial_ids": [
+            "generated-classification-selection-perspective"
+          ],
+          "fact_paths": [
+            "condition_facts.attribute_extrema.classifications"
+          ]
+        },
+        {
+          "condition": "large_world",
+          "source_id": "generated-visual-composite-v1",
+          "trial_ids": [
+            "generated-neutral-mixed-lod-perspective",
+            "generated-elevation-layered-orthographic",
+            "generated-rgb-hdr-perspective",
+            "generated-intensity-sparse-orthographic",
+            "generated-classification-selection-perspective"
+          ],
+          "fact_paths": [
+            "condition_facts.large_world_origin",
+            "condition_facts.minimum_dense_axis_spacing"
+          ]
+        },
+        {
+          "condition": "mixed_lod",
+          "source_id": "generated-visual-composite-v1",
+          "trial_ids": [
+            "generated-neutral-mixed-lod-perspective"
+          ],
+          "fact_paths": [
+            "condition_facts.lod_relation",
+            "condition_facts.stable_lod_cut"
+          ],
+          "required_temporal_trace": "mixed_lod_parent_child"
+        }
+      ],
+      "derived_modes": [
+        {
+          "source_id": "autzen-classified-derived-sample-v1",
+          "trial_id": "autzen-classification-perspective",
+          "display_mode": "classification",
+          "fact_paths": [
+            "condition_facts.classifications",
+            "condition_facts.xy_grid",
+            "condition_facts.maximum_absolute_world_origin"
+          ]
+        },
+        {
+          "source_id": "autzen-classified-derived-sample-v1",
+          "trial_id": "autzen-elevation-perspective",
+          "display_mode": "elevation",
+          "fact_paths": [
+            "condition_facts.relative_bounds",
+            "condition_facts.overlapping_depth",
+            "condition_facts.xy_grid",
+            "condition_facts.maximum_absolute_world_origin"
+          ]
+        },
+        {
+          "source_id": "autzen-classified-derived-sample-v1",
+          "trial_id": "autzen-intensity-perspective",
+          "display_mode": "intensity",
+          "fact_paths": [
+            "condition_facts.intensity",
+            "condition_facts.xy_grid",
+            "condition_facts.maximum_absolute_world_origin"
+          ]
+        },
+        {
+          "source_id": "autzen-classified-derived-sample-v1",
+          "trial_id": "autzen-rgb-perspective",
+          "display_mode": "rgb",
+          "fact_paths": [
+            "condition_facts.rgb_channel",
+            "condition_facts.overlapping_depth",
+            "condition_facts.xy_grid",
+            "condition_facts.maximum_absolute_world_origin"
+          ]
+        }
+      ]
+    }
+  },
+  "canonical_lane": {
+    "id": "codex-iab-chromium-151-macos-26-apple-m5-pro",
+    "qualification_status": "repository_qualified_exact_lane",
+    "qualification_lane_record": {
+      "path": "apps/browser-demo/web/qualification-lane.js",
+      "byte_length": 5329,
+      "sha256": "ed5cf9e3c5cb1d864e8d63b82ad6720df035be74383466a26712e97f00408d55"
+    },
+    "viewport": {
+      "css_width": 320,
+      "css_height": 240,
+      "requested_device_pixel_ratio": 2,
+      "physical_width": 640,
+      "physical_height": 480
+    },
+    "physical_limits": {
+      "maximum_axis_pixels": 4096,
+      "maximum_area_pixels": 8388608
+    },
+    "settling": {
+      "quiet_frames": 30,
+      "capture_poll_frame_ceiling": 240,
+      "transition_frame_count": 9
+    },
+    "calibration_repetitions": 3,
+    "fallback": "none",
+    "capture": {
+      "schema": "punctra-browser-frame-capture-v1",
+      "kind": "private_offscreen_gpu_readback",
+      "canonical_format": "rgba8",
+      "canonical_channel_order": "rgba",
+      "canonical_encoding": "linear",
+      "origin": "top_left",
+      "lossless_artifact": "png-rgba8-filter-0",
+      "presentation_claim": "offscreen_not_presented"
+    }
+  },
+  "tolerance_policy": {
+    "caps": {
+      "channel_threshold": 2,
+      "maximum_channel_delta": 4,
+      "unstable_pixel_fraction": 0.001,
+      "feature_centroid_distance_pixels": 1
+    },
+    "calibration_repetitions": 3,
+    "generated_settled_temporal_unstable_pixels": 0,
+    "aggregate_override": false,
+    "profiles": {
+      "canonical-lane-v1": {
+        "channel_threshold": 2,
+        "maximum_channel_delta": 4,
+        "mean_channel_delta": 0.25,
+        "rms_channel_delta": 0.75,
+        "p95_channel_delta": 2,
+        "unstable_pixel_fraction": 0.001,
+        "coverage_fraction_delta": 0.001,
+        "feature_occupancy_fraction_delta": 0.005,
+        "feature_centroid_distance_pixels": 1
+      },
+      "settled-generated-exact-v1": {
+        "channel_threshold": 0,
+        "maximum_channel_delta": 0,
+        "mean_channel_delta": 0,
+        "rms_channel_delta": 0,
+        "p95_channel_delta": 0,
+        "unstable_pixel_fraction": 0,
+        "coverage_fraction_delta": 0,
+        "feature_occupancy_fraction_delta": 0,
+        "feature_centroid_distance_pixels": 0
+      }
+    }
+  },
+  "resources": {
+    "inherited_viewer_limits": {
+      "firstCoverageMilliseconds": 10000,
+      "settledViewMilliseconds": 15000,
+      "frameIntervalP95Milliseconds": 50,
+      "frameSubmissionP95Milliseconds": 16.7,
+      "cancellationAcknowledgementMilliseconds": 1000,
+      "physicalDimensionPixels": 4096,
+      "physicalAreaPixels": 8388608,
+      "residentPoints": 8192,
+      "residentBytes": 196608,
+      "canvasBytes": 33554432,
+      "transientTextureBytes": 67108864,
+      "retainedRecordBytes": 262144,
+      "workerStagingBytes": 327680,
+      "concurrentResponseBytes": 262144,
+      "persistentCacheBytes": 4194304
+    },
+    "capture_limits": {
+      "renderer_resident_points": 8192,
+      "renderer_resident_bytes": 196608,
+      "renderer_batches": 8,
+      "highlight_points": 32,
+      "canvas_surface_bytes": 33554432,
+      "renderer_transient_texture_bytes": 67108864,
+      "retained_record_bytes": 262144,
+      "worker_staging_bytes": 327680,
+      "queued_range_bytes": 524288,
+      "concurrent_response_bytes": 262144,
+      "memory_cache_bytes": 524288,
+      "persistent_cache_bytes": 4194304,
+      "canonical_pixel_bytes": 1228800,
+      "capture_texture_bytes": 1228800,
+      "staging_buffer_bytes": 1228800,
+      "row_aligned_readback_bytes": 1228800,
+      "png_scanline_bytes": 1229280,
+      "encoder_working_bytes": 2524096,
+      "encoded_png_bytes": 1310720,
+      "total_encoded_artifact_bytes": 1207959552,
+      "evidence_json_bytes": 33554432,
+      "baseline_inputs_json_bytes": 1048576,
+      "comparison_workspace_bytes": 65536,
+      "peak_live_canonical_images": 2
+    },
+    "timing_limits": {
+      "schema": "punctra-browser-visual-timing-limits-v1",
+      "first_coverage_milliseconds": 10000,
+      "settled_view_milliseconds": 15000,
+      "representative_frame_interval_p95_milliseconds": 50,
+      "representative_frame_submission_p95_milliseconds": 16.7,
+      "capture_begin_submission_milliseconds_per_frame": 100,
+      "capture_poll_wait_milliseconds_per_frame": 5000,
+      "capture_poll_call_milliseconds_per_frame": 100,
+      "capture_canonical_copy_milliseconds_per_frame": 100,
+      "capture_submitted_work_done_callback_milliseconds_per_frame": 5000,
+      "capture_readback_mapping_callback_milliseconds_per_frame": 5000,
+      "png_encode_milliseconds_per_artifact": 5000,
+      "artifact_encoding_milliseconds_per_artifact": 7500,
+      "comparison_milliseconds_per_pair": 5000,
+      "settled_capture_total_milliseconds_per_recreation": 150000,
+      "transition_capture_total_milliseconds_per_recreation": 45000,
+      "settled_comparison_total_milliseconds_per_recreation": 150000,
+      "transition_comparison_total_milliseconds_per_recreation": 45000,
+      "artifact_encoding_total_milliseconds_per_recreation": 300000
+    },
+    "maximum_retained_canonical_images": 2,
+    "representative_frame_cost_excludes_capture": true,
+    "capture_overhead_separately_bounded": true
+  },
+  "authority": {
+    "canonical_image": "presentation_only",
+    "feature_report": "presentation_only",
+    "provisional_pick": "provisional_gpu_hint",
+    "exact_confirmation": "exact_source_record",
+    "source_coverage": "source_or_authored_facts_only",
+    "query_completion": "not_inferred_from_visual_evidence"
+  },
+  "rubric": {
+    "template": {
+      "path": "docs/releases/v0.21-browser-visual-rubric-template.json",
+      "byte_length": 1855,
+      "sha256": "6aacfc949ec80d16238ddc43c1fd5b4b43ecf5cc90f681d29fb7a0fbf0d747ec"
+    },
+    "prompts": [
+      "depth",
+      "shape",
+      "density_transition",
+      "color_meaning",
+      "selection",
+      "false_feature"
+    ],
+    "outcomes": [
+      "clear",
+      "ambiguous",
+      "false_feature",
+      "not_visible",
+      "not_observed"
+    ],
+    "trial_bindings": {
+      "depth": [
+        "generated-elevation-layered-orthographic"
+      ],
+      "shape": [
+        "generated-intensity-sparse-orthographic"
+      ],
+      "density_transition": [
+        "generated-neutral-mixed-lod-perspective"
+      ],
+      "color_meaning": [
+        "generated-rgb-hdr-perspective",
+        "generated-intensity-sparse-orthographic",
+        "generated-classification-selection-perspective",
+        "autzen-rgb-perspective"
+      ],
+      "selection": [
+        "generated-classification-selection-perspective"
+      ],
+      "false_feature": [
+        "generated-neutral-mixed-lod-perspective",
+        "generated-elevation-layered-orthographic",
+        "autzen-rgb-perspective"
+      ]
+    },
+    "note_character_limit": 280,
+    "gating": false,
+    "independent_human_evidence": false
+  },
+  "evidence": {
+    "schema": "punctra-browser-visual-evidence-v1",
+    "path": "docs/releases/v0.21-browser-visual-evidence.json",
+    "required_recreations_per_trial": 3,
+    "derive_pass_from_observations": true,
+    "recorded_pass_flag_authoritative": false
+  },
+  "external_evidence": {
+    "cross_browser": false,
+    "cross_operating_system": false,
+    "cross_adapter": false,
+    "cross_device": false,
+    "physical_display_presentation": false,
+    "independent_human": false,
+    "independent_adopter": false,
+    "professional_usability": false,
+    "registry_or_cdn_publication": false,
+    "final_visual_quality": false,
+    "support_qualified": false,
+    "api_stable": false,
+    "beta": false,
+    "release_candidate": false,
+    "v1": false
+  },
+  "unavailable_measurements": [
+    "driver_gpu_memory_bytes",
+    "energy",
+    "gpu_completion_time",
+    "physical_cache_allocation_bytes",
+    "physical_display_panel_presentation",
+    "process_resident_memory_bytes",
+    "thermal_state"
+  ]
+}

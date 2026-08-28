@@ -132,6 +132,20 @@ capability matrix, and known limitations. The repository consumer is not an
 independent adopter; registry/CDN publication, other browsers/devices, API
 stability, visual-quality completion, support qualification, beta, v1, and
 release-candidate status remain outside this scope.
+The completed bounded [v0.21 Visual-Quality Baseline and Regression Corpus
+scope](docs/design/visual-quality-baseline-v0.21.md) permits a closed private
+browser corpus, deterministic generated inputs, one CC BY 4.0 Autzen
+derivative, private offscreen GPU capture/readback, lossless canonical-image
+encoding, tolerant and temporal comparison, Coverage/feature/authority/resource
+reporting, a non-gating interpretation rubric, and machine-readable baseline
+and evidence verification. The 2026-08-28 repository activation supplies the
+representative corpus that v0.20 did not; it does not pretend the original gate
+was already satisfied. It changes no public viewer seam or point-appearance
+policy and does not authorize cross-browser/display claims, arbitrary Sources,
+independent-human or adopter evidence, improved/final visual quality, support
+qualification, API stability, beta, v1, or release-candidate status.
+Its exact completed repository observations and pins are recorded in the
+[v0.21 verification record](docs/releases/v0.21.0.md).
 Apart from the explicit v0.8 reader exception, the v0.17 browser-demo
 exact-query bridge is a narrowly scoped exception for the trusted immutable
 LAS fixture described by the accepted design. All other external format
@@ -161,10 +175,13 @@ cargo clippy -p browser-demo --all-targets --all-features -- -D warnings
 cargo clippy -p browser-demo --target wasm32-unknown-unknown --all-targets \
   --all-features -- -D warnings
 cargo run -p browser-demo --bin generate_stream_fixture
+cargo run -p browser-demo --bin generate_visual_source_fixture
 node --test apps/browser-demo/web/*.test.mjs packages/react/*.test.mjs scripts/*.test.mjs
 scripts/build-browser-sdk.sh
 node scripts/verify-browser-sdk.mjs
 node scripts/verify-browser-qualification.mjs
+node scripts/verify-browser-integration-baseline.mjs
+node scripts/verify-browser-visual-baseline.mjs
 node scripts/generate-browser-sdk-reference.mjs --check
 cargo bench -p point-view --bench planner
 cargo bench -p source-memory --bench read
@@ -212,12 +229,20 @@ test -f docs/guides/browser-sdk.md
 test -f docs/guides/browser-qualification.md
 test -f docs/guides/browser-quickstart.md
 test -f docs/guides/browser-known-limitations.md
+test -f docs/guides/browser-visual-quality.md
 test -f docs/api/browser-sdk.md
 ruby -rjson -e 'ARGV.each { |path| JSON.parse(File.read(path)) }' \
   docs/guides/field-corpus.example.json \
   docs/releases/v0.20-browser-baseline.json \
   docs/releases/v0.20-browser-quickstart.json \
-  docs/releases/v0.20-browser-matrix.json
+  docs/releases/v0.20-browser-matrix.json \
+  docs/releases/v0.21-browser-baseline.json \
+  docs/releases/v0.21-browser-quickstart.json \
+  docs/releases/v0.21-browser-matrix.json \
+  docs/releases/v0.21-browser-visual-baseline.json \
+  docs/releases/v0.21-browser-visual-rubric-template.json \
+  apps/browser-demo/web/fixtures/visual-v1/corpus.json \
+  apps/browser-demo/web/fixtures/visual-v1/autzen-classified-sample.json
 git diff --check
 ```
 
@@ -258,12 +283,143 @@ node scripts/verify-browser-integration-baseline.mjs
 scripts/serve-browser-demo.py --root target/browser-quickstart --port 8000
 ```
 
+The v0.21 continuation first regenerates the generated and licensed-derived
+visual inputs and verifies the static visual policy:
+
+```bash
+cargo run -p browser-demo --bin generate_visual_source_fixture
+node --test apps/browser-demo/web/visual-*.test.mjs \
+  apps/browser-demo/web/range-server.test.mjs \
+  scripts/verify-browser-visual-baseline.test.mjs
+node scripts/verify-browser-visual-baseline.mjs
+```
+
+The attended visual lane is a mandatory sequential record-then-verify workflow,
+not a choice between two equivalent modes. Both stages use the private runner
+through the strict local server, keep the canvas at exactly 320 by 240 CSS
+pixels and requested DPR 2, reach 640 by 480 physical pixels, and complete 30
+unchanged foreground frames before capture. Every one of the nine fixed trials
+runs through three complete viewer/harness recreations. Build and serve the
+working implementation for the record stage with:
+
+```bash
+scripts/build-browser-sdk.sh
+python3 scripts/serve-browser-demo.py --port 8000
+```
+
+Keep the page visible at browser DPR 2 and 100% zoom. First open
+`http://127.0.0.1:8000/visual.html?mode=record` and click **Run
+three-recreation corpus**. Captures must finish before the rubric is available.
+Wait for the post-capture exact images to load in the visible document, confirm
+the bounded session label, record all six non-gating rubric outcomes, and click
+**Submit post-capture review**. `not_observed` is valid when the maintainer did
+not evaluate a prompt; do not invent a favorable observation. Only after
+`document.body.dataset.visualBaseline === "passed"` may the record-stage
+repository bundle be downloaded.
+
+The standard transport is one browser Blob download. If the in-app browser
+reports success but no TAR materializes, do not fall back to per-artifact
+downloads or console reconstruction. Create a fresh empty export directory,
+restart the strict local server with its explicit visual-export opt-in, and
+repeat only the attended stage whose archive was not transported. For example,
+the record fallback is:
+
+```bash
+mkdir -p target/v0.21-visual-record-export
+python3 scripts/serve-browser-demo.py --port 8000 \
+  --visual-export-dir target/v0.21-visual-record-export
+```
+
+Open
+`http://127.0.0.1:8000/visual.html?mode=record&transport=server`. For the later
+verify stage, use a different fresh empty export directory and append
+`transport=server` to the fully pinned verify URL documented below. The page
+POSTs the same bounded `application/x-tar` body to the same-origin
+`/qualification-visual-export` endpoint. It publishes only
+`v0.21-browser-visual-evidence.tar` and rejects cross-origin requests or an
+existing target rather than overwriting it. The exported TAR and the
+`punctra-browser-visual-export-receipt-v1` response remain private transport,
+not release evidence.
+
+The record-stage `v0.21-browser-visual-evidence.tar` is private transport, not
+release evidence. Inspect and extract it into a fresh directory rather than
+overwriting repository files directly:
+
+```bash
+tar -tf /path/to/v0.21-browser-visual-evidence.tar
+mkdir -p target/v0.21-visual-record
+tar -xf /path/to/v0.21-browser-visual-evidence.tar \
+  -C target/v0.21-visual-record
+```
+
+Retain from that bundle only the nine canonical baseline PNGs and the
+commit-free `apps/browser-demo/web/fixtures/visual-v1/baseline-inputs.json`.
+The record-mode evidence, rubric, recreation images, transition images, and
+difference images are calibration output and must not be published as final
+evidence. Check in the retained baseline inputs, freeze every qualified
+implementation path, create the implementation pin, and refresh the static
+baseline digests.
+
+Rebuild that exact pinned implementation, then repeat the inherited packed
+quickstart and browser qualification before final visual evidence is accepted.
+Record the pinned facts before opening verify mode:
+
+```bash
+git rev-parse HEAD
+wc -c < scripts/verify-browser-visual-baseline.mjs
+shasum -a 256 scripts/verify-browser-visual-baseline.mjs
+```
+
+Substitute those exact values into this single-line URL:
+
+```text
+http://127.0.0.1:8000/visual.html?mode=verify&implementation_commit=<40hex>&verifier_byte_length=<decimal>&verifier_sha256=<64hex>
+```
+
+The runner fixes the attended lane to
+`codex-iab-chromium-151-macos-26-apple-m5-pro`, `browser_trusted_activation`, and
+`exact_observed_lane_only`; the URL cannot substitute a different lane. The
+visible **Run three-recreation corpus** button remains disabled until all three
+pin values match both the checked-in visual baseline and the commit plus
+verifier bytes reported by the strict local server. Click it to run the same
+nine-trial, three-recreation
+corpus against the checked-in baselines, wait for the exact post-capture images,
+record and submit the final maintainer-labelled rubric, and wait for
+`document.body.dataset.visualBaseline === "passed"`.
+The Run click, every rubric selection, and rubric submission each require active
+browser transient user activation; `event.isTrusted` alone is not sufficient.
+Download the single
+repository TAR bundle; separate evidence-JSON and per-artifact links are
+diagnostic conveniences, not the documented transport workflow. For the
+server fallback, append `&transport=server` to that same pinned URL. Inspect
+and extract the verify bundle into a fresh directory, then place its evidence
+JSON and PNG artifacts at their recorded repository-relative paths. Do not
+substitute screenshots or a development-console reconstruction.
+
+Only verify-mode evidence is eligible. The extracted evidence is accepted only
+after this command passes:
+
+```bash
+node scripts/verify-browser-visual-baseline.mjs \
+  --evidence docs/releases/v0.21-browser-visual-evidence.json
+```
+
+The completed v0.21 repository run followed that sequence: all nine trials
+passed through three complete recreations, 873 PNG artifacts were retained,
+and all six rubric outcomes were explicitly `not_observed` under
+`codex-local-maintainer-not-human`. The [v0.21 verification
+record](docs/releases/v0.21.0.md) pins the exact implementation, verifier,
+environment, evidence, and remaining nonclaims. Future reproductions must not
+replace those observations with placeholders. See the [browser visual-quality
+guide](docs/guides/browser-visual-quality.md).
+
 See the [browser streaming
 guide](docs/guides/browser-streaming.md) and [browser viewer API
 guide](docs/guides/browser-viewer.md), [browser SDK
 guide](docs/guides/browser-sdk.md), [browser quickstart
 guide](docs/guides/browser-quickstart.md), [known limitations](docs/guides/browser-known-limitations.md),
-and [browser qualification guide](docs/guides/browser-qualification.md).
+[browser qualification guide](docs/guides/browser-qualification.md), and
+[browser visual-quality guide](docs/guides/browser-visual-quality.md).
 
 The default `point-index` benchmark generates one million Points. Use only the
 documented scale values when a larger local run is intended, for example:

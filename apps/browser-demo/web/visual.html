@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <title>Punctra v0.21 visual baseline</title>
+    <link rel="stylesheet" href="./visual.css?v=21-visual-baseline" />
+  </head>
+  <body data-visual-baseline="idle">
+    <a class="skip-link" href="#visual-runner">Skip to visual runner</a>
+    <header class="masthead">
+      <div>
+        <p class="eyebrow">Private attended qualification</p>
+        <h1>Visual baseline / v0.21</h1>
+      </div>
+      <p class="release-stamp">640 × 480 RGBA8 · CSS 320 × 240 · DPR 2</p>
+    </header>
+
+    <main id="visual-runner" class="runner-grid">
+      <section aria-labelledby="viewport-heading">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Canonical renderer evidence</p>
+            <h2 id="viewport-heading">Private GPU readback</h2>
+          </div>
+          <p class="authority-note">Presentation-only evidence; never authoritative geometry.</p>
+        </div>
+        <div class="canonical-canvas-shell">
+          <canvas id="visual-canvas" width="640" height="480" aria-label="Punctra visual corpus renderer"></canvas>
+          <span>CSS 320 × 240</span>
+          <span>physical 640 × 480</span>
+        </div>
+
+        <section class="run-status" aria-live="polite" aria-atomic="true">
+          <span class="status-marker" aria-hidden="true"></span>
+          <div>
+            <p class="eyebrow">Runner state</p>
+            <p id="visual-status">Idle. Final acceptance records baseline inputs first, pins and rebuilds them, then verifies. The attended image review opens only after capture.</p>
+          </div>
+        </section>
+
+        <section class="progress-panel" aria-labelledby="progress-heading">
+          <div class="section-heading compact">
+            <h2 id="progress-heading">Trial progress</h2>
+            <span id="progress-count">0 / 9</span>
+          </div>
+          <ol id="trial-progress" class="trial-progress"></ol>
+        </section>
+
+        <section class="artifact-panel" aria-labelledby="artifacts-heading">
+          <div class="section-heading compact">
+            <h2 id="artifacts-heading">Attended downloads</h2>
+            <button id="download-evidence" type="button" disabled>Download evidence JSON</button>
+            <button id="download-bundle" type="button" disabled>Download repository bundle</button>
+          </div>
+          <p>Use the repository TAR as the standard transport and extract it into a fresh directory. Standalone JSON and per-artifact Blob links are diagnostic conveniences.</p>
+          <p id="transport-status">Standard browser TAR download is active.</p>
+          <ul id="artifact-links" class="artifact-links"></ul>
+        </section>
+      </section>
+
+      <aside class="control-panel" aria-labelledby="controls-heading">
+        <div class="panel-heading">
+          <p class="eyebrow">Closed trial interface</p>
+          <h2 id="controls-heading">Run controls</h2>
+        </div>
+
+        <div class="control-body">
+          <label>
+            Evidence mode
+            <select id="run-mode">
+              <option value="verify">Verify checked-in baselines</option>
+              <option value="record">Record new baseline downloads</option>
+            </select>
+          </label>
+          <label>
+            Anonymous session label
+            <input id="session-label" value="maintainer-attended-1" maxlength="64" autocomplete="off" />
+          </label>
+          <button id="run-corpus" class="primary-button" type="button" disabled>Run three-recreation corpus</button>
+          <p id="provenance-status" class="control-note">Final verify provenance has not been loaded.</p>
+          <p class="control-note">Keep this page visible. The runner rejects a noncanonical viewport, unavailable WebGPU, fallback state, moving resources, or missing baseline.</p>
+        </div>
+
+        <fieldset id="rubric-fields" class="rubric-fields">
+          <legend>Post-capture interpretation review</legend>
+          <p id="rubric-status">Run the corpus first. Exact captured images will be bound and presented here afterward.</p>
+          <p>Select every outcome explicitly after reviewing the bound captures. Unfavorable and not-observed answers are preserved and do not fail the machine baseline.</p>
+          <div data-rubric-prompt="depth"></div>
+          <div data-rubric-prompt="shape"></div>
+          <div data-rubric-prompt="density_transition"></div>
+          <div data-rubric-prompt="color_meaning"></div>
+          <div data-rubric-prompt="selection"></div>
+          <div data-rubric-prompt="false_feature"></div>
+          <button id="submit-rubric" class="primary-button" type="button" disabled>Submit post-capture review</button>
+        </fieldset>
+
+        <details class="evidence-details">
+          <summary>Live evidence record</summary>
+          <pre id="evidence-output">No visual evidence has been produced.</pre>
+        </details>
+      </aside>
+    </main>
+
+    <footer>
+      <p>Canonical images are offscreen renderer readbacks before operating-system composition and display color management.</p>
+      <p><a href="./index.html">Return to browser integration demo</a></p>
+    </footer>
+
+    <script type="module" src="./visual-main.js?v=21-visual-baseline"></script>
+  </body>
+</html>

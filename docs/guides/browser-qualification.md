@@ -1,13 +1,21 @@
 # Browser qualification and recovery
 
-Punctra `0.20.0-alpha.1` qualifies one exact local browser/device lane for the
-fixed repository workload and packed quickstart. The machine-readable [browser matrix](../releases/v0.20-browser-matrix.json)
-is the support authority: a platform absent from its `qualified_entries` is
+Punctra `0.21.0-alpha.1` carries forward the contract for one exact local
+browser/device lane over the fixed repository workload and packed quickstart.
+The current machine-readable [browser
+matrix](../releases/v0.21-browser-matrix.json) is the completed bounded v0.21
+repository record: a platform absent from its `qualified_entries` is
 unqualified even when the SDK initializes successfully.
 
-This is deliberately narrower than a browser-support promise. The v0.20 lane is
-the Codex in-app browser reporting Chromium 151 on macOS 26.5.2/arm64 and the
-local Apple M5 Pro machine. The browser exposed a generic WebGPU adapter name,
+The immutable [v0.20 browser
+matrix](../releases/v0.20-browser-matrix.json) remains the immutable historical
+authority for the predecessor package. v0.21 repeated that bounded functional
+qualification without converting the earlier evidence to a moving target.
+
+This is deliberately narrower than a browser-support promise. The v0.21 lane is
+the Codex in-app browser reporting Chromium 151 on macOS 26.6.2 build 25G83,
+arm64, and the local Apple M5 Pro machine. The browser exposed a generic WebGPU
+adapter name,
 so the physical-GPU mapping is recorded as a local-system inference rather than
 a browser-reported fact. Installed Google Chrome and Safari were not controlled
 by the available browser surface and remain unqualified.
@@ -50,7 +58,8 @@ The page passes only after it exercises:
 - 30 settled foreground frames plus first-Coverage, settled-View, main-thread,
   network, worker, cache, logical renderer, canvas, and optional heap evidence;
   and
-- every fixed ceiling in the accepted v0.20 design.
+- every fixed ceiling inherited from the accepted v0.20 design and current
+  v0.21 functional baseline.
 
 Record the raw `punctra-browser-qualification-v1` artifact before changing the
 browser, viewport, display, adapter, operating system, package, fixture, server,
@@ -128,14 +137,34 @@ precise customer locations, proprietary filenames, and unrelated browser or
 system logs. The harness itself uploads nothing and reads no browser profile,
 cookies, credentials, or unrelated storage.
 
+## Visual evidence is a separate lane
+
+The accepted v0.21 visual baseline adds nine fixed private trials, exact 640 by
+480 physical capture at requested DPR 2, 30 quiet frames, three complete
+viewer/harness recreations per trial, tolerant/temporal image
+comparison, and separate Coverage, feature, authority, resource, and rubric
+facts. Passing the functional matrix does not manufacture those observations.
+Final visual acceptance first records and checks in canonical baseline inputs,
+then pins and rebuilds the implementation, repeats this functional lane, and
+only afterward runs the attended verify stage. Rubric review follows capture;
+one private TAR transports repository-relative artifacts. Standard Blob
+download is primary; the explicitly enabled same-origin local-server export is
+only a no-overwrite fallback for a download that does not materialize. Follow
+the [visual-quality guide](browser-visual-quality.md). Its attended verify-mode
+evidence and release pins are complete for this exact lane; they do not qualify
+another lane or establish a physical-display claim.
+
 ## Remaining evidence
 
-v0.20 does not qualify installed Chrome, Safari, another operating system/GPU,
+v0.21 does not qualify installed Chrome, Safari, another operating system/GPU,
 mobile, registry/CDN deployment, authentication, offline-first behavior,
-independent adoption, API stability, visual quality, or support operations.
-Those remain external evidence or later accepted work; this release is not a
-beta or release candidate.
+independent adoption, API stability, compositor/display presentation,
+cross-browser visual equivalence, independent human interpretation, improved
+or final visual quality, or support operations. Those remain external evidence
+or later accepted work; this release is not a beta, v1, or release candidate.
 
 The [v0.20 repository verification record](../releases/v0.20.0.md) pins the
-exact implementation commit, environment, attended observations, full local
-command matrix, and outstanding exits.
+exact predecessor implementation commit and historical observations. The
+[v0.21 repository verification record](../releases/v0.21.0.md) pins the current
+implementation, environment, functional and visual observations, verifier
+identities, artifacts, and outstanding exits.
