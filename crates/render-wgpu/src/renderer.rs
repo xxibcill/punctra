@@ -362,9 +362,9 @@ impl WgpuRenderer {
     /// using its explicit capability fallback.
     ///
     /// This is renderer-wide capability status. A frame whose Point footprint
-    /// reports [`PointFootprintStatus::ResourceFallback`] suppresses eye-dome
-    /// staging for that frame so the fallback stays within its exact transient
-    /// target bound; this method continues to report [`DepthCueStatus::Active`].
+    /// cannot retain its complete eye-dome and pick target set within the exact
+    /// transient ceiling suppresses eye-dome staging for that frame; this method
+    /// continues to report [`DepthCueStatus::Active`].
     #[must_use]
     pub const fn depth_cue_status(&self) -> DepthCueStatus {
         self.eye_dome.status()
@@ -498,8 +498,8 @@ impl WgpuRenderer {
 
         let viewport = frame.viewport();
         let point_footprint_status = self.point_footprint_status(viewport);
-        let eye_dome_lighting_applied = self.eye_dome.is_active()
-            && point_footprint_status != PointFootprintStatus::ResourceFallback;
+        let eye_dome_lighting_applied =
+            self.eye_dome.is_active() && self.point_footprint.allows_eye_dome(viewport);
         self.record_frame_uniforms(
             encoder,
             frame,
@@ -571,6 +571,7 @@ impl WgpuRenderer {
             &self.eye_dome,
             self.pipelines.eye_dome_depth.as_ref(),
             multisample,
+            nominal_camera_upload,
         ) {
             (
                 EyeDomeState::Active {
@@ -579,6 +580,7 @@ impl WgpuRenderer {
                 },
                 Some(depth_pipeline),
                 Some(point_pipelines),
+                Some(nominal_camera_upload),
             ) => {
                 let (color, depth, visibility_depth, resolved_color, bind_group) = self
                     .targets
@@ -589,9 +591,7 @@ impl WgpuRenderer {
                     depth,
                     point_pipelines,
                 );
-                pass.stage_camera_uniform(
-                    nominal_camera_upload.expect("active eye-dome frames stage nominal size"),
-                );
+                pass.stage_camera_uniform(nominal_camera_upload);
                 pass.record_eye_dome_depth(visibility_depth, depth_pipeline);
                 pass.record_eye_dome(pipeline, bind_group);
             }
@@ -602,22 +602,21 @@ impl WgpuRenderer {
                 },
                 Some(depth_pipeline),
                 None,
+                Some(nominal_camera_upload),
             ) => {
                 let (depth, color, bind_group) =
                     self.targets
                         .eye_dome(&self.device, viewport, &pipeline.layout, uniform_buffer);
                 pass.record_points(color.view(), None, depth, &self.pipelines.single_sample);
-                pass.stage_camera_uniform(
-                    nominal_camera_upload.expect("active eye-dome frames stage nominal size"),
-                );
+                pass.stage_camera_uniform(nominal_camera_upload);
                 pass.record_eye_dome_depth(depth, depth_pipeline);
                 pass.record_eye_dome(pipeline, bind_group);
             }
-            (_, _, Some(point_pipelines)) => {
+            (_, _, Some(point_pipelines), _) => {
                 let (color, depth) = self.targets.multisample(&self.device, viewport);
                 pass.record_points(color.view(), Some(target), depth, point_pipelines);
             }
-            (_, _, None) => {
+            (_, _, None, _) => {
                 let depth = self.targets.single_sample_depth(&self.device, viewport);
                 pass.record_points(target, None, depth, &self.pipelines.single_sample);
             }
@@ -1443,6 +1442,7 @@ pub(crate) mod point_footprint_test_support {
     use super::*;
     use crate::{
         PickHit, PickPoll, PointStyle,
+        footprint::MAX_TRANSIENT_TEXTURE_BYTES,
         gpu_support::{GpuContext, Rgba8Image, Rgba8Target, with_gpu},
     };
 
@@ -1470,6 +1470,38 @@ pub(crate) mod point_footprint_test_support {
         let mut proof = None;
         with_gpu(|gpu| proof = Some(measure_with_gpu(gpu, path)));
         proof.expect("private Point-footprint evidence requires a GPU adapter")
+    }
+
+    pub(crate) fn assert_resource_bounded_single_sample_eye_dome() {
+        with_gpu(|gpu| {
+            let limits = RenderLimits::new(1_024 * 1_024, 1_024, 16);
+            let eye_dome = EyeDomeLighting::new(1.0, 1).unwrap();
+            let config = RendererConfig::new(FORMAT, limits).with_eye_dome_lighting(eye_dome);
+            let mut renderer = configured_fixture_renderer(gpu, config);
+            renderer.point_footprint = PointFootprintPlan::forced_for_test(
+                PointFootprint::SingleSample,
+                true,
+                48,
+                MAX_TRANSIENT_TEXTURE_BYTES,
+            );
+            let viewport = SINGLE_SAMPLE_VIEWPORT;
+            let pixels = u64::from(viewport[0]) * u64::from(viewport[1]);
+            let frame = fixture_frame(viewport);
+
+            let (recorded, _) = render(gpu, &mut renderer, &frame, viewport);
+            assert_eq!(
+                renderer.point_footprint_status(frame.viewport()),
+                PointFootprintStatus::SingleSample
+            );
+            assert!(!recorded.report().eye_dome_lighting_applied());
+            assert_eq!(recorded.report().transient_texture_bytes(), pixels * 4);
+
+            let center = [viewport[0] / 2, viewport[1] / 2];
+            let hit = pick(gpu, &mut renderer, &recorded, center)
+                .expect("the resource-bounded SingleSample path should remain pickable");
+            assert_eq!(identity_json(hit), fixture_identity());
+            assert_eq!(renderer.transient_texture_bytes(), pixels * 8);
+        });
     }
 
     fn measure_with_gpu(gpu: &GpuContext, path: TestFootprintPath) -> TestFootprintMeasurement {
@@ -1543,12 +1575,18 @@ pub(crate) mod point_footprint_test_support {
 
     fn fixture_renderer(gpu: &GpuContext, path: TestFootprintPath) -> WgpuRenderer {
         let limits = RenderLimits::new(1_024 * 1_024, 1_024, 16);
-        let mut renderer = WgpuRenderer::new(&gpu.device, RendererConfig::new(FORMAT, limits))
-            .expect("the private fallback fixture renderer should attach");
+        let config = RendererConfig::new(FORMAT, limits);
+        let mut renderer = configured_fixture_renderer(gpu, config);
         if matches!(path, TestFootprintPath::UnsupportedFallback) {
             renderer.point_footprint =
-                PointFootprintPlan::forced_for_test(PointFootprint::Antialiased, false, 40);
+                PointFootprintPlan::forced_for_test(PointFootprint::Antialiased, false, 40, 12);
         }
+        renderer
+    }
+
+    fn configured_fixture_renderer(gpu: &GpuContext, config: RendererConfig) -> WgpuRenderer {
+        let mut renderer = WgpuRenderer::new(&gpu.device, config)
+            .expect("the private fallback fixture renderer should attach");
         let view_generation = fixture_view_generation();
         renderer
             .apply(&RenderUpdate::Reset { view_generation })
@@ -1707,6 +1745,11 @@ mod tests {
     #[test]
     fn renderer_config_preserves_exact_equality() {
         assert_eq_implementation::<RendererConfig>();
+    }
+
+    #[test]
+    fn resource_bounded_single_sample_suppresses_eye_dome_targets() {
+        point_footprint_test_support::assert_resource_bounded_single_sample_eye_dome();
     }
 
     #[test]

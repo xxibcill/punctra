@@ -445,8 +445,9 @@ hosts. An anti-aliased request may select `Multisample4x`,
 that choice and all associated targets. Point size and nominal pick policy
 remain caller inputs rather than renderer inference. `depth_cue_status()` is
 the renderer-wide capability disposition, while the frame report says whether
-eye-dome lighting was actually applied; bounded `ResourceFallback` frames use
-the unenhanced hard-circle path.
+eye-dome lighting was actually applied; any frame whose complete eye-dome and
+pick target set would exceed the renderer ceiling uses the unenhanced hard-
+circle path without changing its footprint status.
 
 Point positions use a finite 64-bit world origin plus finite 32-bit relative
 coordinates. Upserts replace complete batches atomically. Stale View

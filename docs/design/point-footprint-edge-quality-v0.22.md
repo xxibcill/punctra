@@ -120,7 +120,10 @@ area the resource fallback uses the unenhanced inherited hard-circle path,
 even when eye-dome lighting was enabled at construction, and owns only the
 inherited single-sample depth and pick
 targets, at most 8 bytes per pixel and 67,108,864 bytes at the inherited maximum
-canvas. Fixed pipeline,
+canvas. Requested single-sample and capability-fallback frames likewise suppress
+eye-dome lighting whenever their complete 12-byte-per-pixel EDL-plus-pick set
+would exceed the same ceiling; their footprint status remains unchanged and the
+frame report exposes the suppression. Fixed pipeline,
 binding, and texture objects remain separately described but are not presented
 as observed driver allocation bytes.
 

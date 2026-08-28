@@ -71,7 +71,9 @@ plus pick set is therefore at most 14,745,600 bytes. The resource fallback uses
 the unenhanced inherited hard-circle path even when EDL was enabled at renderer
 construction, and uses only the single-sample depth and pick targets, at most 8
 bytes per pixel. `FrameReport::eye_dome_lighting_applied()` reports that
-per-frame suppression explicitly;
+per-frame suppression explicitly. Requested single-sample and capability-
+fallback frames also suppress EDL when their 12-byte-per-pixel EDL-plus-pick set
+would cross the same ceiling, without changing their footprint status;
 the renderer-wide transient ceiling remains 67,108,864 bytes.
 
 These are exact texture-accounting facts. Canvas bytes, resident Point buffers,

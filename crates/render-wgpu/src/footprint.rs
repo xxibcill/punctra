@@ -4,7 +4,7 @@ use crate::pipeline::{DEPTH_FORMAT, PICK_FORMAT};
 
 pub(crate) const MULTISAMPLE_COUNT: u32 = 4;
 pub(crate) const MAX_ANTIALIASED_PIXELS: u64 = 1_310_720;
-const MAX_TRANSIENT_TEXTURE_BYTES: u64 = 67_108_864;
+pub(crate) const MAX_TRANSIENT_TEXTURE_BYTES: u64 = 67_108_864;
 
 /// Requested color-edge treatment for rendered Points.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -35,6 +35,7 @@ pub(crate) struct PointFootprintPlan {
     request: PointFootprint,
     multisample_supported: bool,
     antialiased_bytes_per_pixel: u64,
+    single_sample_edl_and_pick_bytes_per_pixel: u64,
 }
 
 impl PointFootprintPlan {
@@ -50,6 +51,9 @@ impl PointFootprintPlan {
             request,
             multisample_supported: supports_multisampling(color_features, depth_features),
             antialiased_bytes_per_pixel: antialiased_bytes_per_pixel(color_format, eye_dome_active),
+            single_sample_edl_and_pick_bytes_per_pixel: single_sample_edl_and_pick_bytes_per_pixel(
+                color_format,
+            ),
         }
     }
 
@@ -61,11 +65,10 @@ impl PointFootprintPlan {
             return PointFootprintStatus::UnsupportedFallback;
         }
 
-        let pixels = u64::from(viewport.width()) * u64::from(viewport.height());
+        let pixels = viewport_pixels(viewport);
         let exceeds_pixel_limit = pixels > MAX_ANTIALIASED_PIXELS;
-        let exceeds_byte_limit = pixels
-            .checked_mul(self.antialiased_bytes_per_pixel)
-            .is_none_or(|bytes| bytes > MAX_TRANSIENT_TEXTURE_BYTES);
+        let exceeds_byte_limit =
+            !fits_transient_ceiling(viewport, self.antialiased_bytes_per_pixel);
         if exceeds_pixel_limit || exceeds_byte_limit {
             PointFootprintStatus::ResourceFallback
         } else {
@@ -77,18 +80,40 @@ impl PointFootprintPlan {
         matches!(self.request, PointFootprint::Antialiased) && self.multisample_supported
     }
 
+    pub(crate) fn allows_eye_dome(self, viewport: Viewport) -> bool {
+        match self.status(viewport) {
+            PointFootprintStatus::ResourceFallback => false,
+            PointFootprintStatus::Multisample4x => true,
+            PointFootprintStatus::SingleSample | PointFootprintStatus::UnsupportedFallback => {
+                fits_transient_ceiling(viewport, self.single_sample_edl_and_pick_bytes_per_pixel)
+            }
+        }
+    }
+
     #[cfg(test)]
     pub(crate) const fn forced_for_test(
         request: PointFootprint,
         multisample_supported: bool,
         antialiased_bytes_per_pixel: u64,
+        single_sample_edl_and_pick_bytes_per_pixel: u64,
     ) -> Self {
         Self {
             request,
             multisample_supported,
             antialiased_bytes_per_pixel,
+            single_sample_edl_and_pick_bytes_per_pixel,
         }
     }
+}
+
+fn viewport_pixels(viewport: Viewport) -> u64 {
+    u64::from(viewport.width()) * u64::from(viewport.height())
+}
+
+fn fits_transient_ceiling(viewport: Viewport, bytes_per_pixel: u64) -> bool {
+    viewport_pixels(viewport)
+        .checked_mul(bytes_per_pixel)
+        .is_some_and(|bytes| bytes <= MAX_TRANSIENT_TEXTURE_BYTES)
 }
 
 fn supports_multisampling(
@@ -125,6 +150,12 @@ fn antialiased_bytes_per_pixel(color_format: wgpu::TextureFormat, eye_dome_activ
     multisample_bytes + pick_pair_bytes + eye_dome_bytes
 }
 
+fn single_sample_edl_and_pick_bytes_per_pixel(color_format: wgpu::TextureFormat) -> u64 {
+    format_bytes_per_pixel(color_format)
+        + format_bytes_per_pixel(DEPTH_FORMAT)
+        + format_bytes_per_pixel(PICK_FORMAT)
+}
+
 fn format_bytes_per_pixel(format: wgpu::TextureFormat) -> u64 {
     let (block_width, block_height) = format.block_dimensions();
     assert_eq!(block_width, 1, "render target formats are uncompressed");
@@ -154,6 +185,7 @@ mod tests {
             request: PointFootprint::SingleSample,
             multisample_supported: false,
             antialiased_bytes_per_pixel: 48,
+            single_sample_edl_and_pick_bytes_per_pixel: 12,
         };
 
         let status = plan.status(SMALL_VIEWPORT);
@@ -177,6 +209,7 @@ mod tests {
             request: PointFootprint::Antialiased,
             multisample_supported: false,
             antialiased_bytes_per_pixel: 48,
+            single_sample_edl_and_pick_bytes_per_pixel: 12,
         };
         let oversized = Viewport::new(4_096, 2_048).unwrap();
 
@@ -201,6 +234,7 @@ mod tests {
             request: PointFootprint::Antialiased,
             multisample_supported: true,
             antialiased_bytes_per_pixel: 48,
+            single_sample_edl_and_pick_bytes_per_pixel: 12,
         };
 
         assert_eq!(
@@ -212,6 +246,34 @@ mod tests {
             PointFootprintStatus::ResourceFallback
         );
         assert!(plan.creates_multisample_pipelines());
+    }
+
+    #[test]
+    fn single_sample_eye_dome_stays_within_renderer_ceiling() {
+        let plan = PointFootprintPlan {
+            request: PointFootprint::SingleSample,
+            multisample_supported: true,
+            antialiased_bytes_per_pixel: 48,
+            single_sample_edl_and_pick_bytes_per_pixel: 12,
+        };
+        let largest_bounded_viewport = Viewport::new(4_096, 1_365).unwrap();
+        let first_unbounded_viewport = Viewport::new(4_096, 1_366).unwrap();
+        let maximum_viewport = Viewport::new(4_096, 2_048).unwrap();
+
+        for viewport in [
+            largest_bounded_viewport,
+            first_unbounded_viewport,
+            maximum_viewport,
+        ] {
+            assert_eq!(plan.status(viewport), PointFootprintStatus::SingleSample);
+        }
+        assert!(plan.allows_eye_dome(largest_bounded_viewport));
+        assert!(!plan.allows_eye_dome(first_unbounded_viewport));
+        assert!(!plan.allows_eye_dome(maximum_viewport));
+        assert_eq!(
+            u64::from(maximum_viewport.width()) * u64::from(maximum_viewport.height()) * 8,
+            MAX_TRANSIENT_TEXTURE_BYTES
+        );
     }
 
     #[test]
