@@ -48,6 +48,7 @@ import {
 } from "./visual-rubric.js";
 import { visualVerifyProvenanceFromUrl } from "./visual-provenance.js";
 import { VisualRunSession } from "./visual-run-session.js";
+import { verifyNominalPickCoverage } from "./visual-selection.js";
 import { createVisualValidator } from "./visual-validation.js";
 
 const EVIDENCE_SCHEMA = "punctra-browser-visual-evidence-v1";
@@ -408,6 +409,11 @@ async function runRecreation(options) {
         parseRawJson(rawViewer.removeVisualBatch(batchIndex), "settled batch-removal diagnostics");
       }
     }
+    const nominalPick = await verifyNominalPickCoverage(
+      rawViewer,
+      trial,
+      nominalPickExpectations(trial, materialized),
+    );
     applySelection(rawViewer, trial, materialized.source_identity);
 
     const expected = expectedSettledFacts(trial, materialized);
@@ -623,6 +629,7 @@ async function runRecreation(options) {
         transition,
       },
       batch_facts: expectedBatchFacts(trial, materialized.source.expected_view),
+      nominal_pick: nominalPick,
       coverage: {
         declared: trial.coverage,
         expected_points: materialized.point_count,
@@ -856,6 +863,46 @@ function applySelection(rawViewer, trial, sourceIdentity) {
   ), "selection diagnostics");
   requireCondition(selected.highlights.point_count === ordinals.length, "selection highlight count differs");
   requireCondition(selected.highlights.authority === "presentation_only", "selection authority differs");
+}
+
+function nominalPickExpectations(trial, materialized) {
+  if (trial.selection.ordinals.length === 0) return [];
+  requireCondition(materialized.input_facts.kind === "generated", `trial ${trial.id} selected a Source without authored Point batches`);
+  const featureById = new Map(trial.features.map((feature) => [feature.id, feature]));
+  return trial.selection.nominal_pick_regions.map((region) => {
+    const feature = featureById.get(region.feature_id);
+    requireCondition(feature !== undefined, `trial ${trial.id} nominal-pick feature is absent`);
+    const ordinalIndex = feature.binding.authored_point_ordinals.indexOf(region.ordinal);
+    requireCondition(ordinalIndex >= 0, `trial ${trial.id} nominal-pick Point binding is absent`);
+    const batchIndex = generatedBatchIndexForOrdinal(materialized.input_facts.batch_roles, region.ordinal);
+    requireCondition(
+      !materialized.source.expected_view.settled_removed_batch_indices.includes(batchIndex),
+      `trial ${trial.id} nominal-pick Point batch was removed before settlement`,
+    );
+    return {
+      ordinal: region.ordinal,
+      feature_id: region.feature_id,
+      expected_pixel: [...feature.binding.expected_pixels[ordinalIndex]],
+      nominal_region: { ...feature.rectangle },
+      generation: materialized.source.expected_view.generation,
+      batch_key: materialized.source.expected_view.batch_keys[batchIndex],
+      batch_version: trial.expected_settled_batch_versions[batchIndex],
+      source_identity: materialized.source_identity,
+    };
+  });
+}
+
+function generatedBatchIndexForOrdinal(batchRoles, ordinal) {
+  let firstOrdinal = 0;
+  for (let index = 0; index < batchRoles.length; index += 1) {
+    const batch = batchRoles[index];
+    requireCondition(batch.batch_index === index, "generated batch roles are not in Source order");
+    const afterLastOrdinal = firstOrdinal + batch.point_count;
+    if (ordinal >= firstOrdinal && ordinal < afterLastOrdinal) return batch.batch_index;
+    firstOrdinal = afterLastOrdinal;
+  }
+  requireCondition(false, `selected Point ${ordinal} is absent from generated batches`);
+  return -1;
 }
 
 function expectedSettledFacts(trial, materialized) {

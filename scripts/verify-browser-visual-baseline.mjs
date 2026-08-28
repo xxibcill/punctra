@@ -1491,6 +1491,12 @@ async function verifyTrialEvidence(
     });
     verifyBatchFacts(recreation.batch_facts, trial, source.expected_view);
     verifyCoverage(recreation.coverage, trial, source, true);
+    const nominalPickPassed = verifyNominalPickEvidence(
+      recreation.nominal_pick,
+      trial,
+      source,
+      runtimeSource,
+    );
     verifyCoreDiagnostics(recreation.diagnostics, trial, source, runtimeSource, expectedCamera, corpus);
 
     const candidate = await verifyCaptureArtifact(
@@ -1541,6 +1547,7 @@ async function verifyTrialEvidence(
     verifyCleanup(recreation.cleanup, recreation.resources);
 
     const derivedPass = recreation.environment_match
+      && nominalPickPassed
       && derived.passed
       && temporal.passed
       && temporal.transitionComplete
@@ -1562,6 +1569,111 @@ async function verifyTrialEvidence(
   assert.equal(result.passed, passed, `trial ${trial.id} recorded pass differs from derived recreations`);
   assert.deepEqual(result.failures, []);
   return { trial_id: trial.id, passed, comparisons };
+}
+
+function verifyNominalPickEvidence(evidence, trial, source, runtimeSource) {
+  if (trial.selection.ordinals.length === 0) {
+    assert.equal(evidence, null, `trial ${trial.id} issued an undeclared nominal pick`);
+    return true;
+  }
+  requireRecord(evidence, `trial ${trial.id} nominal-pick evidence`);
+  assert.equal(evidence.schema, "punctra-browser-nominal-pick-evidence-v1");
+  assert.equal(evidence.gating, true);
+  assert.equal(evidence.execution_order, "before_presentation_only_highlights");
+  assert.equal(evidence.point_identity_authority, trial.selection.point_identity_authority);
+  assert.equal(evidence.nominal_pick_coverage_authority, trial.selection.nominal_pick_coverage_authority);
+  assert.equal(evidence.pick_authority, "provisional_gpu_hint");
+  assert.equal(evidence.highlight_authority, trial.selection.highlight_authority);
+  assert.equal(evidence.highlight_point_count_during_checks, 0);
+  assert.equal(evidence.poll_frame_ceiling, 180);
+  assert.equal(evidence.attempt_ceiling_per_region, 1_024);
+  requireArray(evidence.checks, `trial ${trial.id} nominal-pick checks`);
+  assert.equal(evidence.checks.length, trial.selection.nominal_pick_regions.length);
+  assert.equal(source.kind, "generated", `trial ${trial.id} nominal picks require authored generated Points`);
+  for (let index = 0; index < evidence.checks.length; index += 1) {
+    const check = evidence.checks[index];
+    const region = trial.selection.nominal_pick_regions[index];
+    const feature = trial.features.find(({ id }) => id === region.feature_id);
+    assert(feature, `trial ${trial.id} nominal-pick feature is absent`);
+    const ordinalIndex = feature.binding.authored_point_ordinals.indexOf(region.ordinal);
+    assert(ordinalIndex >= 0, `trial ${trial.id} nominal-pick Point binding is absent`);
+    const batchIndex = batchIndexForOrdinal(runtimeSource.batchPointCounts, region.ordinal);
+    const expectedIdentity = {
+      generation: source.expected_view.generation,
+      batch_key: source.expected_view.batch_keys[batchIndex],
+      batch_version: trial.expected_settled_batch_versions[batchIndex],
+      source_identity: runtimeSource.sourceIdentity,
+      point_ordinal: String(region.ordinal),
+    };
+    assert.deepEqual(check, {
+      ordinal: region.ordinal,
+      feature_id: region.feature_id,
+      expected_pixel: feature.binding.expected_pixels[ordinalIndex],
+      nominal_region: feature.rectangle,
+      expected: expectedIdentity,
+      matched_pixel: check.matched_pixel,
+      attempt_count: check.attempt_count,
+      poll_frames_total: check.poll_frames_total,
+      attempts: check.attempts,
+      passed: true,
+    });
+    const candidatePixels = verifierNominalPickPixels(check.expected_pixel, check.nominal_region);
+    assertPositiveInteger(check.attempt_count, `trial ${trial.id} nominal-pick attempt count`);
+    assert(check.attempt_count <= evidence.attempt_ceiling_per_region, `trial ${trial.id} nominal pick exceeded its attempt ceiling`);
+    assert.equal(check.attempts.length, check.attempt_count);
+    assert.deepEqual(check.attempts.map(({ pixel }) => pixel), candidatePixels.slice(0, check.attempt_count));
+    let pollFramesTotal = 0;
+    for (let attemptIndex = 0; attemptIndex < check.attempts.length; attemptIndex += 1) {
+      const attempt = check.attempts[attemptIndex];
+      requireRecord(attempt.observed, `trial ${trial.id} nominal-pick observation`);
+      assert(attempt.observed.status === "hit" || attempt.observed.status === "miss");
+      assert.equal(attempt.observed.authority, "provisional_gpu_hint");
+      if (attempt.observed.status === "hit") {
+        assert.equal(attempt.observed.generation, expectedIdentity.generation);
+        assert.equal(attempt.observed.source_identity, expectedIdentity.source_identity);
+        assertPositiveInteger(attempt.observed.batch_key, `trial ${trial.id} nominal-pick batch key`);
+        assertPositiveInteger(attempt.observed.batch_version, `trial ${trial.id} nominal-pick batch version`);
+        assert.match(attempt.observed.point_ordinal, /^(?:0|[1-9][0-9]*)$/);
+      } else {
+        for (const field of ["generation", "batch_key", "batch_version", "source_identity", "point_ordinal"]) {
+          assert.equal(attempt.observed[field], null);
+        }
+      }
+      const matched = attempt.observed.status === "hit"
+        && Object.entries(expectedIdentity).every(([field, value]) => attempt.observed[field] === value);
+      assert.equal(attempt.matched, matched);
+      assert.equal(matched, attemptIndex === check.attempts.length - 1);
+      assertPositiveInteger(attempt.poll_frames, `trial ${trial.id} nominal-pick poll frames`);
+      assert(attempt.poll_frames <= evidence.poll_frame_ceiling, `trial ${trial.id} nominal pick exceeded its poll ceiling`);
+      pollFramesTotal += attempt.poll_frames;
+    }
+    assert.equal(check.poll_frames_total, pollFramesTotal);
+    assert.deepEqual(check.matched_pixel, check.attempts.at(-1).pixel);
+  }
+  assert.equal(evidence.passed, true);
+  return true;
+}
+
+function verifierNominalPickPixels(expectedPixel, region) {
+  const pixels = [];
+  for (let y = region.y; y < region.y + region.height; y += 1) {
+    for (let x = region.x; x < region.x + region.width; x += 1) pixels.push([x, y]);
+  }
+  return pixels.sort((left, right) => {
+    const leftDistance = (left[0] - expectedPixel[0]) ** 2 + (left[1] - expectedPixel[1]) ** 2;
+    const rightDistance = (right[0] - expectedPixel[0]) ** 2 + (right[1] - expectedPixel[1]) ** 2;
+    return leftDistance - rightDistance || left[1] - right[1] || left[0] - right[0];
+  });
+}
+
+function batchIndexForOrdinal(batchPointCounts, ordinal) {
+  let firstOrdinal = 0;
+  for (let batchIndex = 0; batchIndex < batchPointCounts.length; batchIndex += 1) {
+    const afterLastOrdinal = firstOrdinal + batchPointCounts[batchIndex];
+    if (ordinal >= firstOrdinal && ordinal < afterLastOrdinal) return batchIndex;
+    firstOrdinal = afterLastOrdinal;
+  }
+  assert.fail(`selected Point ${ordinal} is absent from generated batches`);
 }
 
 function expectedRuntimeSourceFacts(source, autzenManifest) {

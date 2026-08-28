@@ -334,6 +334,14 @@ test("coverage authority, capture-bound batches, callback facts, cleanup, and pe
     evidence.trials[0].recreations[0].diagnostics.pick.status = "ready";
   }, /Expected values to be strictly equal/);
   await rejectEvidenceMutation(fixture, (evidence) => {
+    const selected = evidence.trials.find(({ selection }) => selection.ordinals.length > 0);
+    selected.recreations[0].nominal_pick.checks[0].attempts[0].observed.point_ordinal = "999";
+  }, /Expected values to be strictly equal/);
+  await rejectEvidenceMutation(fixture, (evidence) => {
+    const selected = evidence.trials.find(({ selection }) => selection.ordinals.length > 0);
+    selected.recreations[0].nominal_pick.highlight_point_count_during_checks = 2;
+  }, /Expected values to be strictly equal/);
+  await rejectEvidenceMutation(fixture, (evidence) => {
     evidence.trials[0].recreations[0].temporal.settled_window.frames[0]
       .capture.facts.batches[0].version += 1;
   }, /capture-bound renderer batches differ/);
@@ -787,6 +795,7 @@ async function buildPositiveEvidenceFixture() {
         comparison,
         temporal,
         batch_facts: evidenceBatchFacts(trial, source.expected_view),
+        nominal_pick: evidenceNominalPick(trial, source, runtime),
         coverage: evidenceCoverage(trial, source, true),
         resources,
         diagnostics,
@@ -961,6 +970,66 @@ function evidenceBatchFacts(trial, expectedView) {
       state: expectedView.settled_removed_batch_indices.includes(batchIndex) ? "removed" : "resident",
     })),
   };
+}
+
+function evidenceNominalPick(trial, source, runtime) {
+  if (trial.selection.ordinals.length === 0) return null;
+  return {
+    schema: "punctra-browser-nominal-pick-evidence-v1",
+    gating: true,
+    execution_order: "before_presentation_only_highlights",
+    point_identity_authority: trial.selection.point_identity_authority,
+    nominal_pick_coverage_authority: trial.selection.nominal_pick_coverage_authority,
+    pick_authority: "provisional_gpu_hint",
+    highlight_authority: trial.selection.highlight_authority,
+    highlight_point_count_during_checks: 0,
+    poll_frame_ceiling: 180,
+    attempt_ceiling_per_region: 1_024,
+    checks: trial.selection.nominal_pick_regions.map((region) => {
+      const feature = trial.features.find(({ id }) => id === region.feature_id);
+      const ordinalIndex = feature.binding.authored_point_ordinals.indexOf(region.ordinal);
+      const batchIndex = evidenceBatchIndexForOrdinal(runtime.batchPointCounts, region.ordinal);
+      const identity = {
+        generation: source.expected_view.generation,
+        batch_key: source.expected_view.batch_keys[batchIndex],
+        batch_version: trial.expected_settled_batch_versions[batchIndex],
+        source_identity: runtime.sourceIdentity,
+        point_ordinal: String(region.ordinal),
+      };
+      return {
+        ordinal: region.ordinal,
+        feature_id: region.feature_id,
+        expected_pixel: structuredClone(feature.binding.expected_pixels[ordinalIndex]),
+        nominal_region: structuredClone(feature.rectangle),
+        expected: identity,
+        matched_pixel: structuredClone(feature.binding.expected_pixels[ordinalIndex]),
+        attempt_count: 1,
+        poll_frames_total: 1,
+        attempts: [{
+          pixel: structuredClone(feature.binding.expected_pixels[ordinalIndex]),
+          observed: {
+            status: "hit",
+            authority: "provisional_gpu_hint",
+            ...identity,
+          },
+          poll_frames: 1,
+          matched: true,
+        }],
+        passed: true,
+      };
+    }),
+    passed: true,
+  };
+}
+
+function evidenceBatchIndexForOrdinal(batchPointCounts, ordinal) {
+  let firstOrdinal = 0;
+  for (let batchIndex = 0; batchIndex < batchPointCounts.length; batchIndex += 1) {
+    const afterLastOrdinal = firstOrdinal + batchPointCounts[batchIndex];
+    if (ordinal >= firstOrdinal && ordinal < afterLastOrdinal) return batchIndex;
+    firstOrdinal = afterLastOrdinal;
+  }
+  throw new Error(`selected Point ${ordinal} is absent from generated batches`);
 }
 
 function evidenceCoverage(trial, source, recreation) {

@@ -358,6 +358,12 @@ confirmation remains `exact_source_record`. A visual comparison cannot change
 Point Identity, exact position, raw classification, selection membership,
 Coverage truth, or Query completion.
 
+Every recreation of the selected trial performs its bounded nominal picks at
+the authored projected pixels before any presentation-only highlights are
+installed. The gating pick record binds the expected Source, generation, batch,
+version, and Point ordinal to the observed provisional GPU hint, while retaining
+the authored Point and projected-region authorities separately.
+
 ## Independent resource and frame reporting
 
 Each trial preserves the inherited independent v0.20 resource facts and adds
