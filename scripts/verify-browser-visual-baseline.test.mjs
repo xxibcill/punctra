@@ -7,6 +7,7 @@ import {
   MAX_PINNED_FILE_BYTES,
   VISUAL_EVIDENCE_SCHEMA,
   VISUAL_RELEASE,
+  canonicalQualificationHost,
   compareCanonicalImages,
   readPinnedFile,
   verifyBrowserVisualBaseline,
@@ -36,6 +37,30 @@ const verificationCaches = {
   imageDigestByObject: new WeakMap(),
   comparisonCache: new Map(),
 };
+
+test("qualification host facts normalize to the canonical evidence schema", () => {
+  assert.deepEqual(canonicalQualificationHost(QUALIFICATION_RUNTIME_LANE.host), {
+    schema: "punctra-qualification-host-v1",
+    operating_system: {
+      name: "macOS",
+      version: "26.6.2",
+      build: "25G83",
+      architecture: "arm64",
+    },
+    device: {
+      class: "Apple silicon laptop",
+      gpu: "Apple M5 Pro",
+      gpu_cores: 16,
+      gpu_class: "integrated",
+      metal_support: "Metal 4",
+    },
+    display_path: "built-in Retina display",
+    package: {
+      name: "@punctra/viewer",
+      version: VISUAL_RELEASE,
+    },
+  });
+});
 
 test("the checked-in visual policy derives from its fixed corpus and repository inputs", async () => {
   const baseline = await pinnedBaselineFixture();
@@ -303,6 +328,12 @@ test("coverage authority, capture-bound batches, callback facts, cleanup, and pe
     evidence.trials[0].coverage.declared_authority = "presentation_only";
   }, /Coverage|deep-equal/);
   await rejectEvidenceMutation(fixture, (evidence) => {
+    evidence.trials[0].recreations[0].diagnostics.display_authority = "presentation_only";
+  }, /Expected values to be strictly equal/);
+  await rejectEvidenceMutation(fixture, (evidence) => {
+    evidence.trials[0].recreations[0].diagnostics.pick.status = "ready";
+  }, /Expected values to be strictly equal/);
+  await rejectEvidenceMutation(fixture, (evidence) => {
     evidence.trials[0].recreations[0].temporal.settled_window.frames[0]
       .capture.facts.batches[0].version += 1;
   }, /capture-bound renderer batches differ/);
@@ -316,6 +347,11 @@ test("coverage authority, capture-bound batches, callback facts, cleanup, and pe
   await rejectEvidenceMutation(fixture, (evidence) => {
     evidence.trials[0].recreations[0].settlement.pending_work.total = 1;
   }, /pending-work|pending work|deep-equal/);
+  await rejectEvidenceMutation(fixture, (evidence) => {
+    evidence.trials[0].recreations[0].settlement.stable_facts.pick = {
+      status: "not_requested",
+    };
+  }, /quiet-window stable-facts projection differs/);
 });
 
 test("resource and timing totals are recomputed from every accepted raw sample", async () => {
@@ -347,6 +383,9 @@ test("resource and timing totals are recomputed from every accepted raw sample",
     evidence.trials[0].recreations[0].diagnostics.frame.surface_suboptimal = true;
   }, /surface_suboptimal|Expected values/);
   await rejectEvidenceMutation(fixture, (evidence) => {
+    evidence.trials[0].recreations[0].diagnostics.camera.near_distance += 0.01;
+  }, /observed camera near distance differs/);
+  await rejectEvidenceMutation(fixture, (evidence) => {
     evidence.trials[0].recreations[0].resources.transfer.main_thread_batch_bytes_high_water += 32;
   }, /main_thread_batch_bytes_high_water|Expected values/);
 });
@@ -377,6 +416,18 @@ test("environment, nonclaims, runtime pins, baseline inputs, and recorded pass f
 
   await rejectEvidenceMutation(fixture, (evidence) => {
     evidence.environment.screen.width_css_pixels += 1;
+  }, /Expected values to be strictly deep-equal/);
+  await rejectEvidenceMutation(fixture, (evidence) => {
+    evidence.environment.viewport.visual_viewport_width = 0;
+  }, /visual viewport width must be finite and positive/);
+  await rejectEvidenceMutation(fixture, (evidence) => {
+    evidence.environment.viewport.visual_viewport_height = evidence.environment.screen.height_css_pixels + 1;
+  }, /visual viewport height exceeded the observed screen/);
+  await rejectEvidenceMutation(fixture, (evidence) => {
+    evidence.environment.host.device.gpu_cores -= 1;
+  }, /Expected values to be strictly deep-equal/);
+  await rejectEvidenceMutation(fixture, (evidence) => {
+    evidence.environment.color_capabilities.dynamic_range_high = false;
   }, /Expected values to be strictly deep-equal/);
   await rejectEvidenceMutation(fixture, (evidence) => {
     evidence.provenance.attended_lane.execution = "programmatic";
@@ -624,7 +675,7 @@ async function buildPositiveEvidenceFixture() {
         });
       }
       const settledBatches = evidenceSettledBatches(trial, source, runtime);
-      const diagnostics = evidenceDiagnostics(trial, source, runtime, camera);
+      const diagnostics = evidenceDiagnostics(trial, source, runtime, camera, verified.corpus);
       const quietFrames = [];
       const quietPairs = [];
       let previousArtifact;
@@ -939,16 +990,25 @@ function evidenceObservedCamera(camera) {
     target: structuredClone(camera.target),
     up: structuredClone(camera.up),
     projection: camera.projection,
-    near_distance: Math.fround(camera.near_distance),
-    far_distance: Math.fround(camera.far_distance),
+    near_distance: shortestF32JsonNumber(camera.near_distance),
+    far_distance: shortestF32JsonNumber(camera.far_distance),
     vertical_field_of_view_radians: camera.projection === "perspective"
-      ? Math.fround(camera.vertical_field_of_view_radians)
+      ? shortestF32JsonNumber(camera.vertical_field_of_view_radians)
       : null,
     vertical_world_height: camera.projection === "orthographic" ? camera.vertical_world_height : null,
   };
 }
 
-function evidenceDiagnostics(trial, source, runtime, camera) {
+function shortestF32JsonNumber(value) {
+  const rounded = Math.fround(value);
+  for (let precision = 1; precision <= 9; precision += 1) {
+    const candidate = Number(rounded.toPrecision(precision));
+    if (Object.is(Math.fround(candidate), rounded)) return candidate;
+  }
+  throw new Error(`cannot encode ${String(value)} as a finite f32 JSON number`);
+}
+
+function evidenceDiagnostics(trial, source, runtime, camera, corpus) {
   return {
     phase: "ready",
     capabilities: structuredClone(QUALIFICATION_RUNTIME_LANE.capabilities),
@@ -1004,7 +1064,7 @@ function evidenceDiagnostics(trial, source, runtime, camera) {
     },
     camera: evidenceObservedCamera(camera),
     display_mode: trial.display_mode,
-    display_authority: "presentation_only",
+    display_authority: corpus.presentation_policy.display_authority,
   };
 }
 
@@ -1127,6 +1187,18 @@ function evidenceQuietWindow(diagnostics, trial, source, batches, captureCount, 
       scheduled_render: animationScheduler,
     },
   };
+  const stableFacts = Object.fromEntries([
+    "phase",
+    "capabilities",
+    "viewport",
+    "streaming",
+    "capture_resources",
+    "camera",
+    "display_mode",
+    "highlights",
+    "frame",
+    "display_authority",
+  ].map((name) => [name, structuredClone(diagnostics[name])]));
   return {
     schema: "punctra-browser-quiet-window-v1",
     complete: true,
@@ -1140,7 +1212,7 @@ function evidenceQuietWindow(diagnostics, trial, source, batches, captureCount, 
     observed_frames: 30,
     first_rendered_frame: firstFrame,
     last_rendered_frame: firstFrame + 29,
-    stable_facts: structuredClone(diagnostics),
+    stable_facts: stableFacts,
     observed_frame_captures: captureCount,
     frame_interval_milliseconds: summary,
     frame_submission_milliseconds: summary,
@@ -1613,14 +1685,14 @@ function attendedEnvironment(verified) {
       canvas_bitmap_width: 640,
       canvas_bitmap_height: 480,
       visual_viewport_scale: 1,
-      visual_viewport_width: QUALIFICATION_RUNTIME_LANE.display.cssWidth,
-      visual_viewport_height: QUALIFICATION_RUNTIME_LANE.display.cssHeight,
+      visual_viewport_width: 730,
+      visual_viewport_height: 863,
     },
     color_capabilities: {
       gamut_srgb: true,
       gamut_p3: true,
       gamut_rec2020: false,
-      dynamic_range_high: false,
+      dynamic_range_high: true,
       video_dynamic_range_high: false,
       configured_surface_color_space: "srgb",
       display_icc_profile: null,
@@ -1628,7 +1700,7 @@ function attendedEnvironment(verified) {
     },
     webgpu: structuredClone(QUALIFICATION_RUNTIME_LANE.capabilities),
     fallback: { allowed: false, requested: false, used: false },
-    host: structuredClone(QUALIFICATION_RUNTIME_LANE.host),
+    host: canonicalQualificationHost(QUALIFICATION_RUNTIME_LANE.host),
     unavailable_measurements: {
       driver_gpu_memory_bytes: null,
       energy: null,

@@ -95,7 +95,7 @@ const expectedColorCapabilities = Object.freeze({
   gamut_srgb: true,
   gamut_p3: true,
   gamut_rec2020: false,
-  dynamic_range_high: false,
+  dynamic_range_high: true,
   video_dynamic_range_high: false,
   configured_surface_color_space: "srgb",
   display_icc_profile: null,
@@ -1284,7 +1284,7 @@ function verifyEvidenceEnvironment(environment, lane, corpus) {
   assert.equal(environment.schema, "punctra-browser-visual-environment-v1");
   assert.deepEqual(environment.attended_lane, VISUAL_ATTENDED_LANE);
   assert.equal(environment.attended_lane.id, lane.id);
-  assert.deepEqual(environment.host, QUALIFICATION_RUNTIME_LANE.host);
+  assert.deepEqual(environment.host, canonicalQualificationHost(QUALIFICATION_RUNTIME_LANE.host));
   assert.equal(environment.browser.user_agent, QUALIFICATION_RUNTIME_LANE.browser.userAgent);
   assert.equal(environment.browser.platform, QUALIFICATION_RUNTIME_LANE.browser.platform);
   assert.equal(environment.browser.language, QUALIFICATION_RUNTIME_LANE.browser.language);
@@ -1307,8 +1307,16 @@ function verifyEvidenceEnvironment(environment, lane, corpus) {
   assert.equal(environment.viewport.canvas_bitmap_width, 640);
   assert.equal(environment.viewport.canvas_bitmap_height, 480);
   assert.equal(environment.viewport.visual_viewport_scale, 1);
-  assert.equal(environment.viewport.visual_viewport_width, QUALIFICATION_RUNTIME_LANE.display.cssWidth);
-  assert.equal(environment.viewport.visual_viewport_height, QUALIFICATION_RUNTIME_LANE.display.cssHeight);
+  assertFinitePositive(environment.viewport.visual_viewport_width, "visual viewport width");
+  assertFinitePositive(environment.viewport.visual_viewport_height, "visual viewport height");
+  assert(
+    environment.viewport.visual_viewport_width <= environment.screen.width_css_pixels,
+    "visual viewport width exceeded the observed screen",
+  );
+  assert(
+    environment.viewport.visual_viewport_height <= environment.screen.height_css_pixels,
+    "visual viewport height exceeded the observed screen",
+  );
   assert.equal(environment.fallback.allowed, false);
   assert.equal(environment.fallback.requested, false);
   assert.equal(environment.fallback.used, false);
@@ -1327,6 +1335,39 @@ function verifyEvidenceEnvironment(environment, lane, corpus) {
   });
   assert.deepEqual(environment.color_capabilities, expectedColorCapabilities);
   assert.deepEqual(environment.unavailable_measurements, expectedUnavailableEvidence);
+}
+
+export function canonicalQualificationHost(host) {
+  requireRecord(host, "qualification runtime host");
+  requireRecord(host.operatingSystem, "qualification runtime operating system");
+  requireRecord(host.device, "qualification runtime device");
+  requireRecord(host.package, "qualification runtime package");
+  assert.deepEqual(Object.keys(host).sort(), ["device", "displayPath", "operatingSystem", "package", "schema"]);
+  assert.deepEqual(Object.keys(host.operatingSystem).sort(), ["architecture", "build", "name", "version"]);
+  assert.deepEqual(Object.keys(host.device).sort(), ["class", "gpu", "gpuClass", "gpuCores", "metalSupport"]);
+  assert.deepEqual(Object.keys(host.package).sort(), ["name", "version"]);
+  assert.equal(host.schema, "punctra-qualification-host-v1");
+  return {
+    schema: host.schema,
+    operating_system: {
+      name: host.operatingSystem.name,
+      version: host.operatingSystem.version,
+      build: host.operatingSystem.build,
+      architecture: host.operatingSystem.architecture,
+    },
+    device: {
+      class: host.device.class,
+      gpu: host.device.gpu,
+      gpu_cores: host.device.gpuCores,
+      gpu_class: host.device.gpuClass,
+      metal_support: host.device.metalSupport,
+    },
+    display_path: host.displayPath,
+    package: {
+      name: host.package.name,
+      version: host.package.version,
+    },
+  };
 }
 
 function verifyEvidenceExternalBoundary(externalEvidence) {
@@ -1667,7 +1708,27 @@ function verifySettlement(settlement, trial, source, runtimeSource, expectedCame
       <= corpus.timing_limits.representative_frame_submission_p95_milliseconds,
     "representative frame submission p95 exceeded its independent ceiling");
   }
-  verifyCoreDiagnostics(settlement.stable_facts, trial, source, runtimeSource, expectedCamera, corpus);
+  assert.deepEqual(Object.keys(settlement.stable_facts).sort(), [
+    "camera",
+    "capabilities",
+    "capture_resources",
+    "display_authority",
+    "display_mode",
+    "frame",
+    "highlights",
+    "phase",
+    "streaming",
+    "viewport",
+  ], `trial ${trial.id} quiet-window stable-facts projection differs`);
+  verifyCoreDiagnostics(
+    settlement.stable_facts,
+    trial,
+    source,
+    runtimeSource,
+    expectedCamera,
+    corpus,
+    { requirePickFacts: false },
+  );
   verifyPendingWork(settlement.pending_work, settlement, trial, source, runtimeSource, options.observedBatches);
 }
 
@@ -1757,7 +1818,15 @@ function verifyPendingWork(pending, settlement, trial, source, runtimeSource, ob
   assert.equal(pending.total, 0, `trial ${trial.id} retained pending work`);
 }
 
-function verifyCoreDiagnostics(diagnostics, trial, source, runtimeSource, expectedCamera, corpus) {
+function verifyCoreDiagnostics(
+  diagnostics,
+  trial,
+  source,
+  runtimeSource,
+  expectedCamera,
+  corpus,
+  options = { requirePickFacts: true },
+) {
   requireRecord(diagnostics, `trial ${trial.id} diagnostics`);
   assert.equal(diagnostics.phase, "ready");
   assert.deepEqual(diagnostics.capabilities, QUALIFICATION_RUNTIME_LANE.capabilities);
@@ -1768,7 +1837,7 @@ function verifyCoreDiagnostics(diagnostics, trial, source, runtimeSource, expect
   assert.equal(diagnostics.viewport.physical_height, corpus.viewport.physical_height);
   assert.equal(diagnostics.viewport.surface_bytes, corpus.viewport.physical_width * corpus.viewport.physical_height * 4);
   assert.equal(diagnostics.display_mode, trial.display_mode);
-  assert.equal(diagnostics.display_authority, "presentation_only");
+  assert.equal(diagnostics.display_authority, corpus.presentation_policy.display_authority);
   verifyObservedCamera(diagnostics.camera, expectedCamera);
 
   const streaming = diagnostics.streaming;
@@ -1802,10 +1871,15 @@ function verifyCoreDiagnostics(diagnostics, trial, source, runtimeSource, expect
   assert(frame.transient_texture_bytes <= corpus.resource_limits.renderer_transient_texture_bytes);
   assert.equal(frame.surface_suboptimal, false);
   verifyCaptureCleanupFacts(diagnostics.capture_resources, `trial ${trial.id} diagnostics capture resources`);
-  assert.equal(diagnostics.pick.status, "not_requested");
-  assert.equal(diagnostics.pick.authority, "provisional_gpu_hint");
-  for (const name of ["generation", "batch_key", "batch_version", "source_identity", "point_ordinal"]) {
-    assert.equal(diagnostics.pick[name], null);
+  if (options.requirePickFacts) {
+    requireRecord(diagnostics.pick, `trial ${trial.id} pick diagnostics`);
+    assert.equal(diagnostics.pick.status, "not_requested");
+    assert.equal(diagnostics.pick.authority, "provisional_gpu_hint");
+    for (const name of ["generation", "batch_key", "batch_version", "source_identity", "point_ordinal"]) {
+      assert.equal(diagnostics.pick[name], null);
+    }
+  } else {
+    assert.equal("pick" in diagnostics, false, `trial ${trial.id} quiet-window facts retained pick state`);
   }
 
   assert.equal(diagnostics.highlights.point_count, trial.selection.ordinals.length);
@@ -1825,15 +1899,24 @@ function verifyObservedCamera(observed, expected) {
   assert.deepEqual(observed.target, expected.target);
   assert.deepEqual(observed.up, expected.up);
   assert.equal(observed.projection, expected.projection);
-  assert.equal(observed.near_distance, Math.fround(expected.near_distance));
-  assert.equal(observed.far_distance, Math.fround(expected.far_distance));
+  assertObservedF32(observed.near_distance, expected.near_distance, "observed camera near distance");
+  assertObservedF32(observed.far_distance, expected.far_distance, "observed camera far distance");
   if (expected.projection === "perspective") {
-    assert.equal(observed.vertical_field_of_view_radians, Math.fround(expected.vertical_field_of_view_radians));
+    assertObservedF32(
+      observed.vertical_field_of_view_radians,
+      expected.vertical_field_of_view_radians,
+      "observed camera field of view",
+    );
     assert.equal(observed.vertical_world_height, null);
   } else {
     assert.equal(observed.vertical_field_of_view_radians, null);
     assert.equal(observed.vertical_world_height, expected.vertical_world_height);
   }
+}
+
+function assertObservedF32(observed, expected, label) {
+  assert(Number.isFinite(observed), `${label} must be finite`);
+  assert.equal(Math.fround(observed), Math.fround(expected), `${label} differs`);
 }
 
 async function verifyCaptureArtifact(capture, trial, source, runtimeSource, recreationIndex, corpus, registry, context) {
@@ -2468,6 +2551,10 @@ function assertAtMost(value, maximum, label) {
 
 function assertFiniteNonnegative(value, label) {
   assert(Number.isFinite(value) && value >= 0, `${label} must be finite and nonnegative`);
+}
+
+function assertFinitePositive(value, label) {
+  assert(Number.isFinite(value) && value > 0, `${label} must be finite and positive`);
 }
 
 function verifyArtifactDescriptor(record, expected) {
