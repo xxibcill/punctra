@@ -1031,8 +1031,8 @@ function validateFallbackTrials(reference, trials, corpus, artifacts, failures, 
     if (source === "local_renderer_test") {
       validateLocalRendererSelection(trial.selection, requested, selected, label);
       requireCondition(trial.browser_observation === null, `${label} must not fabricate a browser observation`);
-      requireCondition(trial.pick_probes === null,
-        `${label} must not fabricate browser pick probes`);
+      validatePickProbes(trial.pick_probes, label);
+      requireJsonEqual(trial.pick_probes, reference.pick_probes, `${label} pick identities`);
       requireCondition(trial.resources === null,
         `${label} must not fabricate browser resource diagnostics`);
       validateHardCircleMask(trial.hard_circle_mask, label);

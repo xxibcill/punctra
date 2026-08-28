@@ -350,6 +350,8 @@ test("pass flags, samples, metrics, resources, status, identities, and browser p
     (value) => { value.canonical_trials[0].recreations[0].point_footprint.selected = "multisample_4x"; },
     (value) => { value.canonical_trials[0].recreations[0].point_footprint.display_size_physical_pixels += 0.01; },
     (value) => { value.fallback_trials[2].pick_probes[0].point_ordinal = "1867"; },
+    (value) => { value.fallback_trials[0].pick_probes[1].batch_version += 1; },
+    (value) => { value.fallback_trials[1].pick_probes[1].batch_version += 1; },
     (value) => { value.fallback_trials[2].selection.multisample_target_allocated = true; },
     (value) => { value.fallback_trials[0].selection.multisample_pipeline_created = true; },
     (value) => { value.fallback_trials[0].hard_circle_mask.observed_sha256 = "5".repeat(64); },
@@ -565,14 +567,14 @@ function validEvidence(baseline) {
   const probes = [{
     ordinal: 1866,
     generation: 1,
-    source_identity: "2".repeat(64),
+    source_identity: "21".repeat(32),
     batch_key: 4,
     batch_version: 2,
     point_ordinal: "1866",
   }, {
     ordinal: 2005,
     generation: 1,
-    source_identity: "2".repeat(64),
+    source_identity: "21".repeat(32),
     batch_key: 4,
     batch_version: 2,
     point_ordinal: "2005",
@@ -583,11 +585,11 @@ function validEvidence(baseline) {
   const fallbackTrials = [
     localFallback(
       "single_sample", "single_sample", "single_sample",
-      "single_sample_request_never_becomes_a_fallback", localTestResults[0].path,
+      "single_sample_request_never_becomes_a_fallback", localTestResults[0].path, probes,
     ),
     localFallback(
       "unsupported_fallback", "antialiased", "unsupported_fallback",
-      "capability_fallback_precedes_the_viewport_resource_check", localTestResults[0].path,
+      "capability_fallback_precedes_the_viewport_resource_check", localTestResults[0].path, probes,
     ),
     browserFallback(probes),
   ];
@@ -679,7 +681,7 @@ function validEvidence(baseline) {
   };
 }
 
-function localFallback(id, requested, selected, testCase, artifactPath) {
+function localFallback(id, requested, selected, testCase, artifactPath, probes) {
   return {
     id,
     evidence_source: "local_renderer_test",
@@ -689,7 +691,7 @@ function localFallback(id, requested, selected, testCase, artifactPath) {
       requested, selected, sample_count: 1, multisample_pipeline_created: false,
     },
     resources: null,
-    pick_probes: null,
+    pick_probes: structuredClone(probes),
     ...localFallbackProof(id === "single_sample" ? 2201 : 2301),
     browser_observation: null,
     local_test_evidence: {

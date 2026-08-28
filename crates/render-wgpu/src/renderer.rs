@@ -1449,10 +1449,10 @@ pub(crate) mod point_footprint_test_support {
     const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
     const SINGLE_SAMPLE_VIEWPORT: [u32; 2] = [64, 64];
     const CLEAR: [u8; 4] = [0, 0, 0, 255];
-    const SOURCE: SourceId = SourceId::new([0xa5; 32]);
-    const POINT_ORDINAL: u64 = 2_201;
-    const BATCH_KEY: u64 = 7;
-    const BATCH_VERSION: u64 = 3;
+    const SOURCE: SourceId = SourceId::new([0x21; 32]);
+    const POINT_ORDINALS: [u64; 2] = [1_866, 2_005];
+    const BATCH_KEY: u64 = 4;
+    const BATCH_VERSION: u64 = 2;
     const VIEW_GENERATION: u64 = 1;
 
     #[derive(Clone, Copy)]
@@ -1488,7 +1488,7 @@ pub(crate) mod point_footprint_test_support {
             let pixels = u64::from(viewport[0]) * u64::from(viewport[1]);
             let frame = fixture_frame(viewport);
 
-            let (recorded, _) = render(gpu, &mut renderer, &frame, viewport);
+            let (recorded, image) = render(gpu, &mut renderer, &frame, viewport);
             assert_eq!(
                 renderer.point_footprint_status(frame.viewport()),
                 PointFootprintStatus::SingleSample
@@ -1496,10 +1496,12 @@ pub(crate) mod point_footprint_test_support {
             assert!(!recorded.report().eye_dome_lighting_applied());
             assert_eq!(recorded.report().transient_texture_bytes(), pixels * 4);
 
-            let center = [viewport[0] / 2, viewport[1] / 2];
-            let hit = pick(gpu, &mut renderer, &recorded, center)
-                .expect("the resource-bounded SingleSample path should remain pickable");
-            assert_eq!(identity_json(hit), fixture_identity());
+            let probe_pixels = fixture_probe_pixels(&image);
+            for (&point_ordinal, &pixel) in POINT_ORDINALS.iter().zip(&probe_pixels) {
+                let hit = pick(gpu, &mut renderer, &recorded, pixel)
+                    .expect("the resource-bounded SingleSample path should remain pickable");
+                assert_eq!(identity_json(&hit), fixture_identity(point_ordinal));
+            }
             assert_eq!(renderer.transient_texture_bytes(), pixels * 8);
         });
     }
@@ -1508,7 +1510,6 @@ pub(crate) mod point_footprint_test_support {
         let mut reference = fixture_renderer(gpu, TestFootprintPath::SingleSample);
         let mut observed = fixture_renderer(gpu, path);
         let viewport = SINGLE_SAMPLE_VIEWPORT;
-        let center = [viewport[0] / 2, viewport[1] / 2];
         let frame = fixture_frame(viewport);
         let expected_status = match path {
             TestFootprintPath::SingleSample => PointFootprintStatus::SingleSample,
@@ -1533,15 +1534,24 @@ pub(crate) mod point_footprint_test_support {
         let observed_sha256 = sha256_hex(&observed_mask);
         assert_eq!(reference_mask, observed_mask);
 
-        let expected_hit = fixture_identity();
-        let reference_hit = pick(gpu, &mut reference, &reference_frame, center)
-            .expect("the SingleSample reference must preserve nominal pick identity");
-        assert_eq!(identity_json(reference_hit), expected_hit);
-        let observed_hit = pick(gpu, &mut observed, &observed_frame, center)
-            .expect("the selected fallback path must preserve nominal pick identity");
+        let probe_pixels = fixture_probe_pixels(&reference_image);
+        let mut observed_identities = Vec::with_capacity(POINT_ORDINALS.len());
+        let mut observed_pick_probes = Vec::with_capacity(POINT_ORDINALS.len());
+        for (&point_ordinal, &pixel) in POINT_ORDINALS.iter().zip(&probe_pixels) {
+            let expected_hit = fixture_identity(point_ordinal);
+            let reference_hit = pick(gpu, &mut reference, &reference_frame, pixel)
+                .expect("the SingleSample reference must preserve every preferred pick identity");
+            assert_eq!(identity_json(&reference_hit), expected_hit);
+            let observed_hit = pick(gpu, &mut observed, &observed_frame, pixel)
+                .expect("the selected fallback path must preserve every preferred pick identity");
+            let observed_identity = identity_json(&observed_hit);
+            let observed_pick_probe = pick_probe_json(&observed_hit);
+            assert_eq!(observed_identity, expected_hit);
+            assert_eq!(observed_pick_probe, fixture_pick_probe(point_ordinal));
+            observed_identities.push(observed_identity);
+            observed_pick_probes.push(observed_pick_probe);
+        }
         assert_eq!(observed.transient_texture_bytes(), pixels * 8);
-        let observed_identity = identity_json(observed_hit);
-        assert_eq!(observed_identity, expected_hit);
 
         let adapter_info = gpu.device.adapter_info();
         let adapter_name = if adapter_info.name.trim().is_empty() {
@@ -1564,9 +1574,10 @@ pub(crate) mod point_footprint_test_support {
                     "observed_sha256": observed_sha256,
                     "equivalent": true,
                 },
+                "pick_probes": observed_pick_probes,
                 "nominal_pick_identity": {
-                    "expected": expected_hit,
-                    "observed": observed_identity,
+                    "expected": fixture_identity(POINT_ORDINALS[0]),
+                    "observed": observed_identities[0],
                     "matched": true,
                 },
             }),
@@ -1591,18 +1602,26 @@ pub(crate) mod point_footprint_test_support {
         renderer
             .apply(&RenderUpdate::Reset { view_generation })
             .expect("the private fallback fixture reset should apply");
-        let point = RenderPoint::new(
-            [0.0; 3],
-            [255, 0, 0, 255],
-            PointId::new(SOURCE, POINT_ORDINAL),
-        )
-        .expect("the private fallback fixture point should be valid");
+        let points = vec![
+            RenderPoint::new(
+                [-1.0, 0.0, 0.0],
+                [255, 0, 0, 255],
+                PointId::new(SOURCE, POINT_ORDINALS[0]),
+            )
+            .expect("the first private fallback fixture point should be valid"),
+            RenderPoint::new(
+                [1.0, 0.0, 0.0],
+                [0, 255, 255, 255],
+                PointId::new(SOURCE, POINT_ORDINALS[1]),
+            )
+            .expect("the second private fallback fixture point should be valid"),
+        ];
         let batch = PointBatch::new(
             view_generation,
             BatchKey::new(BATCH_KEY),
             BatchVersion::new(BATCH_VERSION),
             [0.0; 3],
-            vec![point],
+            points,
         )
         .expect("the private fallback fixture batch should be valid");
         renderer
@@ -1715,23 +1734,83 @@ pub(crate) mod point_footprint_test_support {
         ViewGenerationKey::new(ViewId::new(22), VIEW_GENERATION)
     }
 
-    fn fixture_identity() -> Value {
+    fn fixture_probe_pixels(image: &Rgba8Image) -> [[u32; 2]; 2] {
+        [
+            color_centroid_pixel(
+                image,
+                |pixel| pixel[0] > 200 && pixel[1] < 40 && pixel[2] < 40,
+                "the preferred ordinal 1866 should render red",
+            ),
+            color_centroid_pixel(
+                image,
+                |pixel| pixel[0] < 40 && pixel[1] > 200 && pixel[2] > 200,
+                "the preferred ordinal 2005 should render cyan",
+            ),
+        ]
+    }
+
+    fn color_centroid_pixel(
+        image: &Rgba8Image,
+        predicate: impl Fn([u8; 4]) -> bool,
+        missing_message: &str,
+    ) -> [u32; 2] {
+        let mut sum = [0_u64; 2];
+        let mut count = 0_u64;
+        for y in 0..SINGLE_SAMPLE_VIEWPORT[1] {
+            for x in 0..SINGLE_SAMPLE_VIEWPORT[0] {
+                if predicate(image.pixel([x, y])) {
+                    sum[0] += u64::from(x);
+                    sum[1] += u64::from(y);
+                    count += 1;
+                }
+            }
+        }
+        assert!(count > 0, "{missing_message}");
+        [
+            u32::try_from((sum[0] + count / 2) / count).unwrap(),
+            u32::try_from((sum[1] + count / 2) / count).unwrap(),
+        ]
+    }
+
+    fn fixture_identity(point_ordinal: u64) -> Value {
         serde_json::json!({
             "generation": VIEW_GENERATION,
             "source_identity": SOURCE.to_string(),
             "batch_key": BATCH_KEY,
             "batch_version": BATCH_VERSION,
-            "point_ordinal": POINT_ORDINAL,
+            "point_ordinal": point_ordinal,
         })
     }
 
-    fn identity_json(hit: PickHit) -> Value {
+    fn fixture_pick_probe(point_ordinal: u64) -> Value {
+        serde_json::json!({
+            "ordinal": point_ordinal,
+            "generation": VIEW_GENERATION,
+            "source_identity": SOURCE.to_string(),
+            "batch_key": BATCH_KEY,
+            "batch_version": BATCH_VERSION,
+            "point_ordinal": point_ordinal.to_string(),
+        })
+    }
+
+    fn identity_json(hit: &PickHit) -> Value {
         serde_json::json!({
             "generation": hit.view_generation().generation(),
             "source_identity": hit.point().source().to_string(),
             "batch_key": hit.batch().get(),
             "batch_version": hit.version().get(),
             "point_ordinal": hit.point().ordinal(),
+        })
+    }
+
+    fn pick_probe_json(hit: &PickHit) -> Value {
+        serde_json::json!({
+            "ordinal": hit.point().ordinal(),
+            "generation": hit.view_generation().generation(),
+            "source_identity": hit.point().source().to_string(),
+            "batch_key": hit.batch().get(),
+            "batch_version": hit.version().get(),
+            "point_ordinal": hit.point().ordinal().to_string(),
         })
     }
 }
