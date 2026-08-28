@@ -455,7 +455,14 @@ test("post-capture rubric presentation, paths, ordering, and shown state are imm
   }, /artifact_paths|deep-equal/);
   await rejectEvidenceMutation(fixture, (evidence) => {
     evidence.rubric.observation.answers.depth.selected_at = "2026-08-28T08:30:00.000Z";
-  }, /selection predates presentation/);
+  }, /selection predates presentation|Expected values to be strictly equal/);
+  await rejectEvidenceMutation(fixture, (evidence) => {
+    evidence.rubric.observation.answers.depth.selection_activation.event_is_trusted = false;
+    evidence.rubric.observation.answers.depth.selection_activation.transient_user_activation = false;
+  }, /browser activation proof/);
+  await rejectEvidenceMutation(fixture, (evidence) => {
+    evidence.rubric.observation.submission.event_type = "programmatic";
+  }, /Expected values to be strictly equal/);
   await rejectEvidenceMutation(fixture, (evidence) => {
     evidence.rubric.observation.answers.depth.shown = false;
   }, /was not shown post-capture/);
@@ -1629,6 +1636,7 @@ function evidenceRubric(policy, trials, captureCompletedAt, completedAt) {
       },
       selected_at: selectedAt,
       selection_order: promptIndex + 1,
+      selection_activation: trustedControlActivation(`rubric-${prompt}`, "change", selectedAt),
     };
   }
   return {
@@ -1639,8 +1647,22 @@ function evidenceRubric(policy, trials, captureCompletedAt, completedAt) {
       session_label: "synthetic-verifier-fixture",
       capture_completed_at: captureCompletedAt,
       submitted_at: completedAt,
+      submission: trustedControlActivation("submit-rubric", "click", "2026-08-28T09:59:59.000Z"),
       answers,
     },
+  };
+}
+
+function trustedControlActivation(controlId, eventType, recordedAt) {
+  return {
+    schema: VISUAL_TRUSTED_CONTROL_SCHEMA,
+    control_id: controlId,
+    event_type: eventType,
+    trust_source: "event_is_trusted",
+    event_is_trusted: true,
+    transient_user_activation: false,
+    document_visibility_state: "visible",
+    recorded_at: recordedAt,
   };
 }
 

@@ -86,6 +86,8 @@ const transportStatus = document.querySelector("#transport-status");
 const provenanceStatus = document.querySelector("#provenance-status");
 
 const runControlGate = new VisualTrustedControlGate();
+const rubricSelectionGate = new VisualTrustedControlGate();
+const rubricSubmitGate = new VisualTrustedControlGate();
 
 async function startRun(options, activation) {
   const mode = validateMode(options?.mode ?? modeSelect.value);
@@ -1610,29 +1612,38 @@ async function prepareRubricReview(policy, record) {
     row.querySelector("select").disabled = false;
     row.querySelector("input").disabled = false;
   }
-  submitRubricButton.disabled = false;
+  updateRubricSubmitState();
 }
 
-async function submitRubricReview(programmaticAnswers) {
+async function submitRubricReview(programmaticAnswers, activation) {
   requireCondition(session.rubricReview?.ready === true, "post-capture rubric review is not ready");
   requireCondition(session.draft !== undefined && session.corpus !== undefined, "post-capture evidence draft is unavailable");
-  if (programmaticAnswers !== undefined) applyProgrammaticRubricAnswers(programmaticAnswers);
   const review = session.rubricReview;
   const draft = session.draft;
   const corpus = session.corpus;
+  if (programmaticAnswers !== undefined) {
+    requireCondition(draft.mode !== "verify", "verify rubric answers must be selected in the attended controls");
+    applyProgrammaticRubricAnswers(programmaticAnswers);
+  }
+  requireCondition(
+    RUBRIC_PROMPTS.every((prompt) => review.selections[prompt] !== undefined),
+    "every rubric outcome must be explicitly selected before submission",
+  );
+  const submission = draft.mode === "verify"
+    ? rubricSubmitGate.consume(activation, submitRubricButton.id)
+    : null;
   const submittedAnswers = {};
-  review.selectionSequence = 0;
   for (const prompt of RUBRIC_PROMPTS) {
     const row = rubricRow(prompt);
-    review.selections[prompt] = {
-      selected_at: new Date().toISOString(),
-      selection_order: ++review.selectionSequence,
-    };
+    const selection = review.selections[prompt];
+    requireCondition(selection.outcome === row.querySelector("select").value, `rubric ${prompt} selection changed without an attended event`);
     submittedAnswers[prompt] = {
-      outcome: row.querySelector("select").value,
+      outcome: selection.outcome,
       note: row.querySelector("input").value,
       presentation: review.presentations[prompt],
-      ...review.selections[prompt],
+      selected_at: selection.selected_at,
+      selection_order: selection.selection_order,
+      selection_activation: selection.selection_activation,
     };
   }
   const submittedAt = new Date().toISOString();
@@ -1641,8 +1652,10 @@ async function submitRubricReview(programmaticAnswers) {
     plan: review.plan,
     captureCompletedAt: review.captureCompletedAt,
     submittedAt,
+    submission,
     sessionLabel: sessionLabel.value,
     answers: submittedAnswers,
+    requireTrustedControls: draft.mode === "verify",
   });
   draft.rubric = {
     schema: corpus.rubric.schema,
@@ -1691,13 +1704,36 @@ function applyProgrammaticRubricAnswers(value) {
   }
 }
 
-function recordRubricSelection(prompt) {
+function recordRubricSelection(prompt, event) {
   const review = session.rubricReview;
   if (review?.ready !== true) return;
+  const select = rubricRow(prompt).querySelector("select");
+  requireCondition(RUBRIC_OUTCOMES.includes(select.value), `rubric ${prompt} requires an explicit outcome`);
+  let selectionActivation = null;
+  if (session.draft?.mode === "verify") {
+    const issued = rubricSelectionGate.issue(event, {
+      control: select,
+      controlId: select.name,
+      eventType: "change",
+      visibilityState: document.visibilityState,
+      userActivationIsActive: navigator.userActivation?.isActive === true,
+    });
+    selectionActivation = rubricSelectionGate.consume(issued, select.name);
+  }
+  const selectedAt = selectionActivation?.recorded_at ?? new Date().toISOString();
   review.selections[prompt] = {
-    selected_at: new Date().toISOString(),
+    outcome: select.value,
+    selected_at: selectedAt,
     selection_order: ++review.selectionSequence,
+    selection_activation: selectionActivation,
   };
+  updateRubricSubmitState();
+}
+
+function updateRubricSubmitState() {
+  const review = session.rubricReview;
+  submitRubricButton.disabled = review?.ready !== true
+    || !RUBRIC_PROMPTS.every((prompt) => review.selections[prompt] !== undefined);
 }
 
 function loadRubricPresentationImage({ gallery, artifact, trialId, review }) {
@@ -1756,14 +1792,19 @@ function configureRubricFields() {
     const select = document.createElement("select");
     select.name = `rubric-${prompt}`;
     select.disabled = true;
+    const placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = "Select an outcome";
+    placeholder.disabled = true;
+    placeholder.selected = true;
+    select.append(placeholder);
     for (const outcome of RUBRIC_OUTCOMES) {
       const option = document.createElement("option");
       option.value = outcome;
       option.textContent = outcome.replaceAll("_", " ");
-      option.selected = outcome === "not_observed";
       select.append(option);
     }
-    select.addEventListener("change", () => recordRubricSelection(prompt));
+    select.addEventListener("change", (event) => recordRubricSelection(prompt, event));
     outcomeLabel.append(select);
     const noteLabel = document.createElement("label");
     noteLabel.textContent = `${labels[prompt]} note`;
@@ -1867,7 +1908,7 @@ function resetRubricReview() {
   for (const prompt of RUBRIC_PROMPTS) {
     const row = rubricRow(prompt);
     row.dataset.reviewState = "waiting";
-    row.querySelector("select").value = "not_observed";
+    row.querySelector("select").value = "";
     row.querySelector("input").value = "";
     row.querySelector("[data-rubric-gallery]").replaceChildren();
     row.querySelector("[data-rubric-presentation-status]").textContent = "Waiting for post-capture images.";
@@ -2182,8 +2223,22 @@ downloadBundleButton.addEventListener("click", () => {
     transportStatus.textContent = `Bundle export failed: ${errorMessage(error)}`;
   });
 });
-submitRubricButton.addEventListener("click", () => {
-  void submitRubricReview();
+submitRubricButton.addEventListener("click", (event) => {
+  try {
+    const activation = session.draft?.mode === "verify"
+      ? rubricSubmitGate.issue(event, {
+        control: submitRubricButton,
+        controlId: submitRubricButton.id,
+        visibilityState: document.visibilityState,
+        userActivationIsActive: navigator.userActivation?.isActive === true,
+      })
+      : undefined;
+    void submitRubricReview(undefined, activation).catch((error) => {
+      rubricStatus.textContent = `Post-capture review failed: ${errorMessage(error)}`;
+    });
+  } catch (error) {
+    rubricStatus.textContent = `Post-capture review failed: ${errorMessage(error)}`;
+  }
 });
 
 requireCondition(DISPLAY_MODES.length === 5, "display-mode contract differs");

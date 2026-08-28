@@ -1278,7 +1278,14 @@ async function verifyEvidenceProvenance(provenance, baseline, context, startedAt
   assert.match(provenance.observation_date, /^\d{4}-\d{2}-\d{2}$/);
   assert.deepEqual(provenance.attended_lane, VISUAL_ATTENDED_LANE);
   assert.equal(provenance.attended_lane.id, baseline.canonical_lane.id);
-  verifyTrustedControlActivation(provenance.run_initiation, "run-corpus", startedAt);
+  const activationMilliseconds = verifyTrustedControlActivation(
+    provenance.run_initiation,
+    "run-corpus",
+    "click",
+  );
+  const startMilliseconds = Date.parse(startedAt);
+  assert(activationMilliseconds <= startMilliseconds, "run-corpus activation follows the run start");
+  assert(startMilliseconds - activationMilliseconds <= 5_000, "run-corpus activation is stale");
   assert.equal(provenance.final_pin_required, false);
   requireRecord(provenance.package_artifact, "visual evidence package artifact");
   assert.equal(provenance.package_artifact.package_version, VISUAL_RELEASE);
@@ -1294,7 +1301,7 @@ async function verifyEvidenceProvenance(provenance, baseline, context, startedAt
   }
 }
 
-function verifyTrustedControlActivation(activation, controlId, startedAt) {
+function verifyTrustedControlActivation(activation, controlId, eventType) {
   requireRecord(activation, `${controlId} trusted control activation`);
   assert.deepEqual(Object.keys(activation).sort(), [
     "control_id",
@@ -1308,7 +1315,7 @@ function verifyTrustedControlActivation(activation, controlId, startedAt) {
   ]);
   assert.equal(activation.schema, VISUAL_TRUSTED_CONTROL_SCHEMA);
   assert.equal(activation.control_id, controlId);
-  assert.equal(activation.event_type, "click");
+  assert.equal(activation.event_type, eventType);
   assert.equal(typeof activation.event_is_trusted, "boolean");
   assert.equal(typeof activation.transient_user_activation, "boolean");
   assert(activation.event_is_trusted || activation.transient_user_activation, `${controlId} lacks browser activation proof`);
@@ -1319,10 +1326,8 @@ function verifyTrustedControlActivation(activation, controlId, startedAt) {
   assert.equal(activation.document_visibility_state, "visible");
   assert.match(activation.recorded_at, /^\d{4}-\d{2}-\d{2}T/);
   const activationMilliseconds = Date.parse(activation.recorded_at);
-  const startMilliseconds = Date.parse(startedAt);
   assert(Number.isFinite(activationMilliseconds), `${controlId} activation timestamp is invalid`);
-  assert(activationMilliseconds <= startMilliseconds, `${controlId} activation follows the run start`);
-  assert(startMilliseconds - activationMilliseconds <= 5_000, `${controlId} activation is stale`);
+  return activationMilliseconds;
 }
 
 function verifyEvidenceEnvironment(environment, lane, corpus) {
@@ -2751,13 +2756,21 @@ function verifyRubricEvidence(rubric, policy, evidence, registry) {
   const observation = rubric.observation;
   requireRecord(observation, "attended rubric observation");
   assert.deepEqual(Object.keys(observation).sort(), [
-    "answers", "capture_completed_at", "session_label", "submitted_at",
+    "answers", "capture_completed_at", "session_label", "submission", "submitted_at",
   ]);
   assertNonemptyString(observation.session_label, "attended rubric session label");
   assert.notEqual(observation.session_label, "not_observed");
   assert.notEqual(observation.session_label, "unavailable");
   assert.equal(observation.capture_completed_at, evidence.capture_completed_at);
   assert.equal(observation.submitted_at, evidence.completed_at);
+  const submissionMilliseconds = verifyTrustedControlActivation(
+    observation.submission,
+    "submit-rubric",
+    "click",
+  );
+  const submittedMilliseconds = Date.parse(observation.submitted_at);
+  assert(submissionMilliseconds <= submittedMilliseconds, "rubric trusted submit event follows submission");
+  assert(submittedMilliseconds - submissionMilliseconds <= 5_000, "rubric trusted submit event is stale");
   assert.deepEqual(Object.keys(observation.answers).sort(), [...RUBRIC_PROMPTS].sort());
 
   const results = new Map(evidence.trials.map((trial) => [trial.trial_id, trial]));
@@ -2774,6 +2787,7 @@ function verifyRubricEvidence(rubric, policy, evidence, registry) {
       "outcome",
       "presentation",
       "selected_at",
+      "selection_activation",
       "selection_order",
       "shown",
       "trial_ids",
@@ -2833,6 +2847,13 @@ function verifyRubricEvidence(rubric, policy, evidence, registry) {
     assertIsoTimestamp(answer.selected_at, `rubric ${prompt} selection`);
     assertPositiveInteger(answer.selection_order, `rubric ${prompt} selection order`);
     selectionOrders.push(answer.selection_order);
+    const selectionMilliseconds = verifyTrustedControlActivation(
+      answer.selection_activation,
+      `rubric-${prompt}`,
+      "change",
+    );
+    assert.equal(answer.selection_activation.recorded_at, answer.selected_at);
+    assert(selectionMilliseconds <= submissionMilliseconds, `rubric ${prompt} selection follows the trusted submit event`);
     assertTimestampNotBefore(answer.selected_at, presentation.presented_at, `rubric ${prompt} selection predates presentation`);
     assertTimestampNotBefore(observation.submitted_at, answer.selected_at, `rubric ${prompt} selection follows submission`);
   }

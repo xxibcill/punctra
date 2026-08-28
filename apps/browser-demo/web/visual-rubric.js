@@ -1,4 +1,5 @@
 import { cloneJson, createVisualValidator, jsonEqual } from "./visual-validation.js";
+import { validateTrustedControlActivationEvidence } from "./visual-provenance.js";
 
 export const RUBRIC_REVIEW_PLAN_SCHEMA = "punctra-browser-visual-rubric-review-plan-v1";
 export const RUBRIC_PRESENTATION_SCHEMA = "punctra-browser-visual-rubric-presentation-v1";
@@ -68,8 +69,10 @@ export function buildRubricObservation(options) {
     plan,
     captureCompletedAt,
     submittedAt,
+    submission,
     sessionLabel,
     answers,
+    requireTrustedControls = false,
   } = options;
   validatePolicy(policy);
   validateReviewPlan(plan, policy);
@@ -79,11 +82,18 @@ export function buildRubricObservation(options) {
   requireCondition(typeof sessionLabel === "string" && sessionLabel.length >= 1 && sessionLabel.length <= 64, "rubric session label is invalid");
   requireRecord(answers, "rubric attended answers");
   requireCondition(sameMembers(Object.keys(answers), policy.prompts), "rubric attended answers are incomplete");
+  if (requireTrustedControls) {
+    validateTrustedControlActivationEvidence(submission, {
+      controlId: "submit-rubric",
+      eventType: "click",
+    });
+  }
 
   const observation = {
     session_label: sessionLabel,
     capture_completed_at: captureCompletedAt,
     submitted_at: submittedAt,
+    submission: submission === null ? null : cloneJson(submission),
     answers: {},
   };
   const presentationOrders = new Set();
@@ -98,6 +108,16 @@ export function buildRubricObservation(options) {
     requireIsoTimestamp(input.selected_at, `rubric ${prompt} selected timestamp`);
     requirePositiveInteger(input.selection_order, `rubric ${prompt} selection order`);
     requireUnique(selectionOrders, input.selection_order, `rubric ${prompt} selection order`);
+    if (requireTrustedControls) {
+      requireCondition(input.selection_activation !== null, `rubric ${prompt} requires a trusted selection event`);
+    }
+    if (input.selection_activation !== null) {
+      validateTrustedControlActivationEvidence(input.selection_activation, {
+        controlId: `rubric-${prompt}`,
+        eventType: "change",
+      });
+      requireCondition(input.selection_activation.recorded_at === input.selected_at, `rubric ${prompt} selection timestamp differs from its trusted event`);
+    }
     validatePresentation(input.presentation, planned, {
       captureCompletedAt,
       submittedAt,
@@ -116,6 +136,7 @@ export function buildRubricObservation(options) {
       presentation: cloneJson(input.presentation),
       selected_at: input.selected_at,
       selection_order: input.selection_order,
+      selection_activation: input.selection_activation === null ? null : cloneJson(input.selection_activation),
     };
   }
   return validateRubricEvidenceShape(observation, policy);
@@ -153,6 +174,13 @@ export function validateRubricEvidenceShape(value, policy) {
     requireIsoTimestamp(value.capture_completed_at, "rubric capture-completed timestamp");
     requireIsoTimestamp(value.submitted_at, "rubric submitted timestamp");
     requireCondition(compareTimestamps(value.capture_completed_at, value.submitted_at) <= 0, "rubric submission predates capture completion");
+    if (value.submission !== null) {
+      validateTrustedControlActivationEvidence(value.submission, {
+        controlId: "submit-rubric",
+        eventType: "click",
+      });
+      requireCondition(compareTimestamps(value.submission.recorded_at, value.submitted_at) <= 0, "rubric trusted submission follows submission");
+    }
   }
   const presentationOrders = new Set();
   const loadOrders = new Set();
@@ -183,8 +211,18 @@ export function validateRubricEvidenceShape(value, policy) {
     requireIsoTimestamp(answer.selected_at, `rubric ${prompt} selected timestamp`);
     requirePositiveInteger(answer.selection_order, `rubric ${prompt} selection order`);
     requireUnique(selectionOrders, answer.selection_order, `rubric ${prompt} selection order`);
+    if (answer.selection_activation !== null) {
+      validateTrustedControlActivationEvidence(answer.selection_activation, {
+        controlId: `rubric-${prompt}`,
+        eventType: "change",
+      });
+      requireCondition(answer.selection_activation.recorded_at === answer.selected_at, `rubric ${prompt} selection timestamp differs from its trusted event`);
+    }
     requireCondition(compareTimestamps(answer.presentation.presented_at, answer.selected_at) <= 0, `rubric ${prompt} selection predates presentation`);
     requireCondition(compareTimestamps(answer.selected_at, value.submitted_at) <= 0, `rubric ${prompt} selection follows submission`);
+    if (value.submission !== null) {
+      requireCondition(compareTimestamps(answer.selected_at, value.submission.recorded_at) <= 0, `rubric ${prompt} selection follows the trusted submit event`);
+    }
   }
   return value;
 }

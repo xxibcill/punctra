@@ -49,8 +49,10 @@ test("attended observation binds loaded images and selections after capture", ()
     plan,
     captureCompletedAt: "2026-08-28T01:00:00.000Z",
     submittedAt: "2026-08-28T01:00:04.000Z",
+    submission: trustedActivation("submit-rubric", "click", "2026-08-28T01:00:03.750Z"),
     sessionLabel: "maintainer-attended-1",
     answers: attendedAnswers(plan),
+    requireTrustedControls: true,
   });
   assert.equal(observation.answers.depth.shown, true);
   assert.equal(observation.answers.depth.outcome, "not_observed");
@@ -68,10 +70,34 @@ test("attended observation binds loaded images and selections after capture", ()
       plan,
       captureCompletedAt: "2026-08-28T01:00:00.000Z",
       submittedAt: "2026-08-28T01:00:04.000Z",
+      submission: trustedActivation("submit-rubric", "click", "2026-08-28T01:00:03.750Z"),
       sessionLabel: "attended",
       answers: preCapture,
+      requireTrustedControls: true,
     }),
     /loaded before capture completion/,
+  );
+});
+
+test("final attended observations reject missing trusted selection and submit events", () => {
+  const { trials, artifacts } = evidenceInputs();
+  const plan = createRubricReviewPlan(policy, trials, artifacts);
+  const options = {
+    policy,
+    plan,
+    captureCompletedAt: "2026-08-28T01:00:00.000Z",
+    submittedAt: "2026-08-28T01:00:04.000Z",
+    submission: trustedActivation("submit-rubric", "click", "2026-08-28T01:00:03.750Z"),
+    sessionLabel: "attended",
+    answers: attendedAnswers(plan),
+    requireTrustedControls: true,
+  };
+  const missingSelection = structuredClone(options);
+  missingSelection.answers.depth.selection_activation = null;
+  assert.throws(() => buildRubricObservation(missingSelection), /trusted selection event/);
+  assert.throws(
+    () => buildRubricObservation({ ...options, submission: null }),
+    /trusted control activation evidence must be an object/,
   );
 });
 
@@ -112,8 +138,26 @@ function attendedAnswers(plan) {
       presentation,
       selected_at: `2026-08-28T01:00:0${promptIndex + 2}.500Z`,
       selection_order: promptIndex + 1,
+      selection_activation: trustedActivation(
+        `rubric-${prompt}`,
+        "change",
+        `2026-08-28T01:00:0${promptIndex + 2}.500Z`,
+      ),
     }];
   }));
+}
+
+function trustedActivation(controlId, eventType, recordedAt) {
+  return {
+    schema: "punctra-browser-trusted-control-activation-v1",
+    control_id: controlId,
+    event_type: eventType,
+    trust_source: "event_is_trusted",
+    event_is_trusted: true,
+    transient_user_activation: false,
+    document_visibility_state: "visible",
+    recorded_at: recordedAt,
+  };
 }
 
 function evidenceInputs() {

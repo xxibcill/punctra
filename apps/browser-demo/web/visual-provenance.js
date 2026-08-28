@@ -59,7 +59,7 @@ export class VisualTrustedControlGate {
 
   consume(activation, controlId) {
     requireRecord(activation, "trusted control activation");
-    requireCondition(this.#issued.delete(activation), "verify run requires a fresh trusted control activation");
+    requireCondition(this.#issued.delete(activation), "attended action requires a fresh trusted control activation");
     requireCondition(activation.evidence.control_id === controlId, "trusted control activation belongs to a different control");
     return { ...activation.evidence };
   }
