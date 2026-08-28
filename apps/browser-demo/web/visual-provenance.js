@@ -1,4 +1,4 @@
-import { createVisualValidator } from "./visual-validation.js";
+import { createVisualValidator, parsePageUrl } from "./visual-validation.js";
 
 export const VISUAL_VERIFIER_PATH = "scripts/verify-browser-visual-baseline.mjs";
 export const VISUAL_ATTENDED_LANE = Object.freeze({
@@ -19,7 +19,7 @@ const { requireCondition } = createVisualValidator("Visual provenance invalid");
 
 /** Reads the final implementation and verifier pins used by the visible verify button. */
 export function visualVerifyProvenanceFromUrl(pageUrl) {
-  const url = parsePageUrl(pageUrl);
+  const url = parsePageUrl(pageUrl, "Visual provenance invalid");
   const values = Object.fromEntries(QUERY_FIELDS.map((field) => [field, exactQueryValue(url, field)]));
   const presentCount = Object.values(values).filter((value) => value !== null).length;
   if (presentCount === 0) return null;
@@ -44,17 +44,4 @@ function exactQueryValue(url, field) {
   const values = url.searchParams.getAll(field);
   requireCondition(values.length <= 1, `${field} query must not be repeated`);
   return values[0] ?? null;
-}
-
-function parsePageUrl(value) {
-  requireCondition(typeof value === "string" && value.length > 0, "page URL is unavailable");
-  try {
-    return new URL(value);
-  } catch (error) {
-    throw new Error(`Visual provenance invalid: page URL is invalid: ${errorMessage(error)}`);
-  }
-}
-
-function errorMessage(error) {
-  return error instanceof Error ? error.message : String(error);
 }

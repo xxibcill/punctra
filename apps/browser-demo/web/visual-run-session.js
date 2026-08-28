@@ -1,4 +1,4 @@
-import { createVisualValidator } from "./visual-validation.js";
+import { cloneJson, createVisualValidator } from "./visual-validation.js";
 
 const { requireCondition } = createVisualValidator("Visual runner failed");
 
@@ -149,8 +149,4 @@ export class VisualRunSession {
     this.#wasmInitialization ??= initialize(this.#wasmRuntimeBytes);
     return this.#wasmInitialization;
   }
-}
-
-function cloneJson(value) {
-  return JSON.parse(JSON.stringify(value));
 }

@@ -1,4 +1,4 @@
-import { createVisualValidator } from "./visual-validation.js";
+import { cloneJson, createVisualValidator, jsonEqual } from "./visual-validation.js";
 
 export const QUIET_WINDOW_SCHEMA = "punctra-browser-quiet-window-v1";
 export const CAPTURE_RESULT_SCHEMA = "punctra-browser-canonical-capture-v1";
@@ -131,7 +131,7 @@ export async function renderQuietFrames(rawViewer, options = {}) {
       stableFacts = currentStableFacts;
       firstRenderedFrame = diagnostics.rendered_frames;
     } else {
-      requireCondition(deepEqual(stableFacts, currentStableFacts), `quiet frame ${frameIndex + 1} changed stable renderer facts`);
+      requireCondition(jsonEqual(stableFacts, currentStableFacts), `quiet frame ${frameIndex + 1} changed stable renderer facts`);
     }
     lastRenderedFrame = diagnostics.rendered_frames;
     if (observeFrame !== undefined) {
@@ -140,7 +140,7 @@ export async function renderQuietFrames(rawViewer, options = {}) {
   }
   const after = parseRawJson(rawViewer.diagnostics(), "post-quiet diagnostics");
   validateSettledDiagnostics(after, expected, true);
-  requireCondition(deepEqual(stableFacts, quietStableFacts(after)), "renderer facts changed after the quiet window");
+  requireCondition(jsonEqual(stableFacts, quietStableFacts(after)), "renderer facts changed after the quiet window");
   return {
     schema: QUIET_WINDOW_SCHEMA,
     complete: true,
@@ -524,12 +524,4 @@ function boundedInteger(value, label, minimum, maximum) {
 
 function requireRawMethod(rawViewer, method) {
   requireCondition(typeof rawViewer?.[method] === "function", `raw viewer ${method} is unavailable`);
-}
-
-function deepEqual(left, right) {
-  return JSON.stringify(left) === JSON.stringify(right);
-}
-
-function cloneJson(value) {
-  return JSON.parse(JSON.stringify(value));
 }

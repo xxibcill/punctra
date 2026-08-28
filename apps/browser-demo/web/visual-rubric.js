@@ -1,4 +1,4 @@
-import { createVisualValidator } from "./visual-validation.js";
+import { cloneJson, createVisualValidator, jsonEqual } from "./visual-validation.js";
 
 export const RUBRIC_REVIEW_PLAN_SCHEMA = "punctra-browser-visual-rubric-review-plan-v1";
 export const RUBRIC_PRESENTATION_SCHEMA = "punctra-browser-visual-rubric-presentation-v1";
@@ -46,7 +46,7 @@ export function createRubricReviewPlan(policy, trialResults, registryArtifacts) 
       const registered = registry.get(artifact.path);
       requireRecord(registered, `rubric ${prompt} registry artifact ${artifact.path}`);
       const identity = artifactIdentity(artifact);
-      requireCondition(deepEqual(identity, artifactIdentity(registered)), `rubric ${prompt} artifact identity differs from the registry`);
+      requireCondition(jsonEqual(identity, artifactIdentity(registered)), `rubric ${prompt} artifact identity differs from the registry`);
       return identity;
     });
     prompts[prompt] = {
@@ -162,7 +162,7 @@ export function validateRubricEvidenceShape(value, policy) {
     requireRecord(answer, `rubric answer ${prompt}`);
     requireCondition(policy.outcomes.includes(answer.outcome), `rubric outcome ${prompt} is invalid`);
     requireCondition(typeof answer.note === "string" && answer.note.length <= policy.note_character_limit, `rubric note ${prompt} is too long`);
-    requireCondition(deepEqual(answer.trial_ids, policy.trial_bindings[prompt]), `rubric trial binding ${prompt} differs`);
+    requireCondition(jsonEqual(answer.trial_ids, policy.trial_bindings[prompt]), `rubric trial binding ${prompt} differs`);
     if (!answer.shown) {
       requireCondition(answer.outcome === "not_observed", `rubric hidden outcome ${prompt} must be not observed`);
       continue;
@@ -213,7 +213,7 @@ function validateReviewPlan(plan, policy) {
   for (const prompt of policy.prompts) {
     const planned = plan.prompts[prompt];
     validatePlannedPrompt(planned, prompt);
-    requireCondition(deepEqual(planned.trial_ids, policy.trial_bindings[prompt]), `rubric review-plan ${prompt} trial bindings differ`);
+    requireCondition(jsonEqual(planned.trial_ids, policy.trial_bindings[prompt]), `rubric review-plan ${prompt} trial bindings differ`);
   }
 }
 
@@ -223,7 +223,7 @@ function validatePlannedPrompt(planned, prompt) {
   requireCondition(Array.isArray(planned.artifact_paths) && planned.artifact_paths.length === planned.trial_ids.length, `rubric review-plan ${prompt} paths differ`);
   requireCondition(Array.isArray(planned.artifact_identities) && planned.artifact_identities.length === planned.trial_ids.length, `rubric review-plan ${prompt} identities differ`);
   const identities = planned.artifact_identities.map(artifactIdentity);
-  requireCondition(deepEqual(planned.artifact_paths, identities.map(({ path }) => path)), `rubric review-plan ${prompt} path identities differ`);
+  requireCondition(jsonEqual(planned.artifact_paths, identities.map(({ path }) => path)), `rubric review-plan ${prompt} path identities differ`);
 }
 
 function validatePresentation(presentation, planned, options) {
@@ -281,12 +281,4 @@ function sameMembers(left, right) {
   return Array.isArray(left) && Array.isArray(right)
     && left.length === right.length
     && [...left].sort().every((value, index) => value === [...right].sort()[index]);
-}
-
-function cloneJson(value) {
-  return JSON.parse(JSON.stringify(value));
-}
-
-function deepEqual(left, right) {
-  return JSON.stringify(left) === JSON.stringify(right);
 }

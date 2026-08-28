@@ -1,4 +1,4 @@
-import { createVisualValidator } from "./visual-validation.js";
+import { createVisualValidator, errorMessage, parsePageUrl } from "./visual-validation.js";
 
 export const VISUAL_EXPORT_RECEIPT_SCHEMA = "punctra-browser-visual-export-receipt-v1";
 export const VISUAL_EXPORT_ENDPOINT = "/qualification-visual-export";
@@ -10,7 +10,7 @@ const { requireCondition } = createVisualValidator("Visual export invalid");
 
 /** Selects the private archive transport explicitly requested by the page URL. */
 export function visualArchiveTransportFromUrl(pageUrl) {
-  const url = parsePageUrl(pageUrl);
+  const url = parsePageUrl(pageUrl, "Visual export invalid");
   const requested = url.searchParams.get("transport");
   if (requested === null) return "browser-download";
   requireCondition(requested === "server", `unsupported archive transport ${JSON.stringify(requested)}`);
@@ -31,7 +31,7 @@ export async function exportVisualArchiveToLocalServer({
   requireCondition(typeof sha256 === "string" && SHA256_HEX.test(sha256), "archive SHA-256 is invalid");
   requireCondition(typeof fetchImpl === "function", "fetch implementation is unavailable");
 
-  const url = parsePageUrl(pageUrl);
+  const url = parsePageUrl(pageUrl, "Visual export invalid");
   requireLocalHttpPage(url);
   const endpoint = new URL(VISUAL_EXPORT_ENDPOINT, url.origin);
   const response = await fetchImpl(endpoint.href, {
@@ -75,23 +75,10 @@ export function validateVisualExportReceipt(receipt, expected) {
   };
 }
 
-function parsePageUrl(value) {
-  requireCondition(typeof value === "string" && value.length > 0, "page URL is unavailable");
-  try {
-    return new URL(value);
-  } catch (error) {
-    throw new Error(`Visual export invalid: page URL is invalid: ${errorMessage(error)}`);
-  }
-}
-
 function requireLocalHttpPage(url) {
   requireCondition(url.protocol === "http:" && LOCAL_HOSTNAMES.has(url.hostname), "local server export requires a loopback HTTP page");
 }
 
 function isPlainObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-function errorMessage(error) {
-  return error instanceof Error ? error.message : String(error);
 }

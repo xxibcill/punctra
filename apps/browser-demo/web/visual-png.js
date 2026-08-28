@@ -1,3 +1,5 @@
+import { errorMessage } from "./visual-validation.js";
+
 const PNG_SIGNATURE = Uint8Array.of(137, 80, 78, 71, 13, 10, 26, 10);
 const IHDR = Uint8Array.of(73, 72, 68, 82);
 const IDAT = Uint8Array.of(73, 68, 65, 84);
@@ -332,9 +334,6 @@ async function cancelQuietly(reader) {
   }
 }
 
-function errorMessage(error) {
-  return error instanceof Error ? error.message : String(error);
-}
 
 function concatenateBytes(...parts) {
   const length = parts.reduce((total, part) => total + part.length, 0);

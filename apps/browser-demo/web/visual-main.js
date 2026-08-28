@@ -49,7 +49,7 @@ import {
 import { visualVerifyProvenanceFromUrl } from "./visual-provenance.js";
 import { VisualRunSession } from "./visual-run-session.js";
 import { verifyNominalPickCoverage } from "./visual-selection.js";
-import { createVisualValidator } from "./visual-validation.js";
+import { cloneJson, createVisualValidator, errorMessage } from "./visual-validation.js";
 
 const EVIDENCE_SCHEMA = "punctra-browser-visual-evidence-v1";
 const RUNNER_STATE_SCHEMA = "punctra-browser-visual-runner-state-v1";
@@ -2002,13 +2002,6 @@ function errorRecord(error) {
   };
 }
 
-function errorMessage(error) {
-  return error instanceof Error ? error.message : String(error);
-}
-
-function cloneJson(value) {
-  return JSON.parse(JSON.stringify(value));
-}
 
 function nextAnimationFrame() {
   return new Promise((resolve) => requestAnimationFrame(resolve));

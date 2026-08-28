@@ -1,4 +1,4 @@
-import { createVisualValidator } from "./visual-validation.js";
+import { cloneJson, createVisualValidator, jsonEqual } from "./visual-validation.js";
 
 export const BASELINE_INPUTS_SCHEMA = "punctra-browser-visual-baseline-inputs-v1";
 export const BASELINE_INPUTS_PATH = "apps/browser-demo/web/fixtures/visual-v1/baseline-inputs.json";
@@ -54,7 +54,7 @@ export function validateBaselineInputsManifest(value, options) {
   requireCondition(value.package_artifact.package_version === value.release, "baseline-input package version differs");
   validateDigestRecords(value.package_artifact.runtime_artifacts, "baseline-input runtime artifacts");
   if (options?.runtimeArtifacts !== undefined) {
-    requireCondition(deepEqual(value.package_artifact.runtime_artifacts, options.runtimeArtifacts), "baseline-input runtime artifacts differ from fetched bytes");
+      requireCondition(jsonEqual(value.package_artifact.runtime_artifacts, options.runtimeArtifacts), "baseline-input runtime artifacts differ from fetched bytes");
   }
   requireCondition(Array.isArray(value.canonical_baselines) && value.canonical_baselines.length > 0, "baseline-input canonical baselines are absent");
   for (const baseline of value.canonical_baselines) validateBaselineIdentity(baseline);
@@ -72,7 +72,7 @@ export function validateBaselineInputsManifest(value, options) {
     for (const baseline of value.canonical_baselines) {
       const artifact = registry.get(baseline.path);
       requireRecord(artifact, `baseline-input registry artifact ${baseline.path}`);
-      requireCondition(deepEqual(baseline, selectFields(artifact, BASELINE_IDENTITY_FIELDS)), `baseline-input artifact ${baseline.path} identity differs`);
+      requireCondition(jsonEqual(baseline, selectFields(artifact, BASELINE_IDENTITY_FIELDS)), `baseline-input artifact ${baseline.path} identity differs`);
     }
   }
   return value;
@@ -110,12 +110,4 @@ function validateDigestRecords(values, label) {
 
 function selectFields(value, fields) {
   return Object.fromEntries(fields.map((field) => [field, value[field]]));
-}
-
-function cloneJson(value) {
-  return JSON.parse(JSON.stringify(value));
-}
-
-function deepEqual(left, right) {
-  return JSON.stringify(left) === JSON.stringify(right);
 }
