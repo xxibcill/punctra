@@ -210,6 +210,14 @@ test("the implementation and verifier pins reject abbreviated or stale identitie
     .filter((qualifiedPath) => qualifiedPath !== "apps/browser-demo/web/visual-selection.js");
   await assert.rejects(() => verifyFixture(omittedVisualModule), /qualified paths omit apps\/browser-demo\/web\/visual-selection\.js/);
 
+  const omittedRendererSource = await pinnedBaselineFixture();
+  omittedRendererSource.pins.qualified_paths = omittedRendererSource.pins.qualified_paths
+    .filter((qualifiedPath) => qualifiedPath !== "crates/render-wgpu/src/gpu.rs");
+  await assert.rejects(
+    () => verifyFixture(omittedRendererSource),
+    /qualified paths omit crates\/render-wgpu\/src\/gpu\.rs/,
+  );
+
   const commit = "1".repeat(40);
   const calls = [];
   const bytes = readPinnedFile(commit, "fixtures/bounded.bin", {
