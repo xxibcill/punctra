@@ -75,6 +75,12 @@ apps/
       visual-provenance.test.mjs
       visual-rubric.js
       visual-rubric.test.mjs
+      visual-run-session.js
+      visual-run-session.test.mjs
+      visual-selection.js
+      visual-selection.test.mjs
+      visual-validation.js
+      visual-validation.test.mjs
       qualification.js
       qualification.test.mjs
       qualification-worker.js
