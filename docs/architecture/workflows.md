@@ -17,7 +17,8 @@ repository-verified; v0.17 bounded viewer API/exact-Point, v0.18 packed SDK/Reac
 lifecycle, v0.19 exact local qualification, and v0.20 clean packed-consumer
 integration workflows Complete and repository-verified; v0.21 private visual-
 trial/capture/evidence workflow Complete and repository-verified for the exact
-local attended lane, while broader browser/device support, physical-display
+local attended lane; v0.22 Point-footprint record/pin/rebuild/verify workflow
+Active with final attended evidence pending, while broader browser/device support, physical-display
 presentation, independent-human/adopter evidence, improved or final visual
 quality, API stability, support qualification, beta, v1, and release-candidate
 status remain outstanding; arbitrary remote browser delivery and broader
@@ -912,6 +913,39 @@ every fixed trial, recreation, accepted artifact, interpretation binding,
 implementation pin, and verifier pin exists and passes; any reproduction
 missing one remains incomplete. See the [v0.21 release
 record](../releases/v0.21.0.md).
+
+## 11i. Qualify Point footprint and edge quality
+
+The v0.22 workflow keeps the immutable v0.21 corpus and canonical PNGs on the
+predecessor side of a new private evidence seam:
+
+~~~mermaid
+flowchart LR
+    PRE["immutable v0.21 corpus + PNGs"] --> REC["attended record"]
+    REC --> BASE["v0.22 baseline + candidate PNGs"]
+    BASE --> PIN["freeze implementation + verifier pins"]
+    PIN --> BUILD["rebuild exact pin"]
+    BUILD --> FUNC["fresh packed quickstart + browser matrix"]
+    FUNC --> VER["attended verify"]
+    VER --> STATIC["static footprint verifier"]
+    STATIC --> RELEASE["v0.22 release record"]
+~~~
+
+Each candidate frame requests anti-aliasing, reports the actual selected
+status, computes display diameter from complete non-retired resident density,
+and reports the independent 7.0-physical-pixel pick diameter. Record output
+crossing the pin is limited to the Point-footprint baseline manifest and
+canonical/focused baseline PNGs. Only later verify-mode evidence from the
+pinned rebuild is final-eligible. The functional quickstart, matrix, and
+integration baseline must be freshly observed for v0.22 between those stages;
+v0.21 values cannot be copied forward.
+
+Run initiation requires trusted active browser activation. The repository TAR
+is transport rather than evidence, and OS composition, physical-display
+presentation, physical GPU-completion, independent interpretation/adoption,
+and broader support remain unobserved. The exact local commands and retained
+paths are in the [Point-footprint qualification
+guide](../guides/browser-point-footprint.md).
 
 ## 12. Cancellation and crash matrix
 

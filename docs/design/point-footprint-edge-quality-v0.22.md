@@ -96,7 +96,9 @@ The count includes resident replacement Points regardless of presentation
 weight so a color cross-fade cannot pulse Point size. A retirement, publication,
 resize, or new generation may change the next frame's size. Color mode,
 classification, highlight state, and source alpha cannot. Zero resident Points
-uses the 6.0-pixel upper bound without creating a draw.
+is treated as one Point before the formula is clamped; it does not create a
+draw and reaches the 6.0-pixel upper bound only when the viewport area makes
+the computed diameter at least that large.
 
 The inherited browser nominal pick diameter remains exactly 7.0 physical
 pixels. Decorative display sizing therefore cannot enlarge or shrink the
@@ -114,11 +116,18 @@ The EDL path may additionally retain one four-byte resolved color texel and one
 four-byte single-sample visibility-depth texel per pixel. With a pick target its
 high-water mark is therefore 48 bytes per physical pixel. The 1,310,720-pixel
 preferred-path ceiling caps that complete set at 62,914,560 bytes. Above that
-area the resource fallback owns the inherited single-sample depth and pick
+area the resource fallback uses the unenhanced inherited hard-circle path,
+even when eye-dome lighting was enabled at construction, and owns only the
+inherited single-sample depth and pick
 targets, at most 8 bytes per pixel and 67,108,864 bytes at the inherited maximum
 canvas. Fixed pipeline,
 binding, and texture objects remain separately described but are not presented
 as observed driver allocation bytes.
+
+`WgpuRenderer::depth_cue_status` remains the construction-time capability
+disposition. `FrameReport::eye_dome_lighting_applied` is the per-frame truth and
+is false for `ResourceFallback` frames so the bounded resource disposition is
+observable rather than silent.
 
 The exact renderer transient ceiling therefore remains 67,108,864 bytes. The
 v0.22 canonical 640 by 480 capture may retain at most 14,745,600 renderer

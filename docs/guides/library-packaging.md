@@ -1,6 +1,6 @@
 # Library Packaging and Compatibility
 
-Punctra v0.21.0-alpha.1 carries forward the local crates.io/docs.rs packaging
+Punctra v0.22.0-alpha.1 carries forward the local crates.io/docs.rs packaging
 path for the twelve public library crates. It does not publish them. The three
 demo applications remain private workspace packages.
 
@@ -28,7 +28,7 @@ exists for conformance and fault tests, not production behavior.
 
 ## Version and compatibility policy
 
-All libraries in the bounded v0.21 slice use `0.21.0-alpha.1`, require
+All libraries in the bounded v0.22 slice use `0.22.0-alpha.1`, require
 Rust 1.90, and pin inter-Punctra registry dependencies
 to exactly that version while retaining local workspace paths. This local
 qualification is not publication. If a later explicit decision publishes the
@@ -40,7 +40,7 @@ Persisted formats do not inherit that freedom from the Cargo version. A frozen
 persisted version continues to reproduce its documented bytes and semantics or
 fails closed; migration and rebuild rules belong to the format owner. Source
 Record v1, Workspace v1, and the other frozen v1 fixtures therefore remain
-compatibility evidence after the Cargo version moves to v0.21. Surface
+compatibility evidence after the Cargo version moves to v0.22. Surface
 disk/work-v1 is a separate rebuildable format: its frozen fixtures govern its
 reader/rebuild behavior without changing Terrain algorithm or Workflow Run-v1.
 
@@ -72,8 +72,8 @@ used by the script's package list, wait for each registry package to become
 available to dependency resolution, and stop on the first failure. Publication
 requires a fresh explicit decision and is outside the v0.14 repository exit.
 
-The v0.20 package identity and its checked-in browser records remain historical
-evidence; advancing local package metadata does not rewrite them. The private
-v0.21 Visual Corpus, capture/readback, image codec, comparison, and evidence
-verifier are not new public crates or npm exports and do not change the
-publication order or compatibility promise.
+The v0.20 and v0.21 package identities and checked-in browser records remain
+historical evidence; advancing local package metadata does not rewrite them.
+The private v0.21 Visual Corpus and v0.22 Point-footprint renderer/capture,
+image-metric, and evidence machinery are not new public crates or npm exports
+and do not change the publication order or compatibility promise.

@@ -1,3 +1,4 @@
+use crate::footprint::MULTISAMPLE_COUNT;
 use crate::gpu::{BatchUniform, CameraUniform, EdlUniform, GpuPoint};
 
 pub(crate) const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
@@ -6,10 +7,15 @@ pub(crate) const PICK_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::R32Uint
 pub(crate) struct PointPipelines {
     pub(crate) camera_layout: wgpu::BindGroupLayout,
     pub(crate) batch_layout: wgpu::BindGroupLayout,
-    pub(crate) draw: wgpu::RenderPipeline,
-    pub(crate) draw_translucent: wgpu::RenderPipeline,
+    pub(crate) single_sample: PointPipelinePair,
+    pub(crate) multisample: Option<PointPipelinePair>,
     pub(crate) eye_dome_depth: Option<wgpu::RenderPipeline>,
     pub(crate) pick: wgpu::RenderPipeline,
+}
+
+pub(crate) struct PointPipelinePair {
+    pub(crate) opaque: wgpu::RenderPipeline,
+    pub(crate) translucent: wgpu::RenderPipeline,
 }
 
 pub(crate) struct EdlPipeline {
@@ -22,19 +28,9 @@ impl PointPipelines {
         device: &wgpu::Device,
         color_format: wgpu::TextureFormat,
         enable_edl: bool,
+        enable_multisample: bool,
     ) -> Self {
-        let camera_layout = uniform_layout::<CameraUniform>(
-            device,
-            "punctra camera layout",
-            wgpu::ShaderStages::VERTEX,
-        );
-        let batch_visibility = if enable_edl {
-            wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT
-        } else {
-            wgpu::ShaderStages::VERTEX
-        };
-        let batch_layout =
-            uniform_layout::<BatchUniform>(device, "punctra batch layout", batch_visibility);
+        let (camera_layout, batch_layout) = point_bind_group_layouts(device, enable_edl);
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("punctra point pipeline layout"),
             bind_group_layouts: &[Some(&camera_layout), Some(&batch_layout)],
@@ -61,30 +57,41 @@ impl PointPipelines {
         } else {
             "point_fragment"
         };
-        let draw = create_pipeline(
+        let single_sample = create_point_pipeline_pair(
             device,
             &pipeline_layout,
             &shader,
             &vertex_buffers,
-            PointPipelineDescriptor {
+            PointPipelinePairDescriptor {
                 targets: &color_targets,
+                vertex_entry_point: "point_vertex",
                 fragment_entry_point: draw_fragment,
-                depth_write_enabled: true,
-                label: "punctra point pipeline",
+                sample_count: 1,
+                opaque_label: "punctra point pipeline",
+                translucent_label: "punctra translucent point pipeline",
             },
         );
-        let draw_translucent = create_pipeline(
-            device,
-            &pipeline_layout,
-            &shader,
-            &vertex_buffers,
-            PointPipelineDescriptor {
-                targets: &color_targets,
-                fragment_entry_point: draw_fragment,
-                depth_write_enabled: false,
-                label: "punctra translucent point pipeline",
-            },
-        );
+        let multisample_fragment = if enable_edl {
+            "multisample_eye_dome_point_fragment"
+        } else {
+            "multisample_point_fragment"
+        };
+        let multisample = enable_multisample.then(|| {
+            create_point_pipeline_pair(
+                device,
+                &pipeline_layout,
+                &shader,
+                &vertex_buffers,
+                PointPipelinePairDescriptor {
+                    targets: &color_targets,
+                    vertex_entry_point: "multisample_point_vertex",
+                    fragment_entry_point: multisample_fragment,
+                    sample_count: MULTISAMPLE_COUNT,
+                    opaque_label: "punctra four-sample point pipeline",
+                    translucent_label: "punctra four-sample translucent point pipeline",
+                },
+            )
+        });
         let eye_dome_depth = enable_edl.then(|| {
             create_pipeline(
                 device,
@@ -93,8 +100,10 @@ impl PointPipelines {
                 &vertex_buffers,
                 PointPipelineDescriptor {
                     targets: &[],
+                    vertex_entry_point: "point_vertex",
                     fragment_entry_point: "eye_dome_depth_fragment",
                     depth_write_enabled: true,
+                    sample_count: 1,
                     label: "punctra eye-dome visibility depth pipeline",
                 },
             )
@@ -106,16 +115,18 @@ impl PointPipelines {
             &vertex_buffers,
             PointPipelineDescriptor {
                 targets: &pick_targets,
+                vertex_entry_point: "point_vertex",
                 fragment_entry_point: "pick_fragment",
                 depth_write_enabled: true,
+                sample_count: 1,
                 label: "punctra pick pipeline",
             },
         );
         Self {
             camera_layout,
             batch_layout,
-            draw,
-            draw_translucent,
+            single_sample,
+            multisample,
             eye_dome_depth,
             pick,
         }
@@ -218,12 +229,71 @@ fn uniform_layout<T>(
     })
 }
 
+fn point_bind_group_layouts(
+    device: &wgpu::Device,
+    enable_edl: bool,
+) -> (wgpu::BindGroupLayout, wgpu::BindGroupLayout) {
+    let camera = uniform_layout::<CameraUniform>(
+        device,
+        "punctra camera layout",
+        wgpu::ShaderStages::VERTEX,
+    );
+    let batch_visibility = if enable_edl {
+        wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT
+    } else {
+        wgpu::ShaderStages::VERTEX
+    };
+    let batch = uniform_layout::<BatchUniform>(device, "punctra batch layout", batch_visibility);
+    (camera, batch)
+}
+
 #[derive(Clone, Copy)]
 struct PointPipelineDescriptor<'targets> {
     targets: &'targets [Option<wgpu::ColorTargetState>],
+    vertex_entry_point: &'static str,
     fragment_entry_point: &'static str,
     depth_write_enabled: bool,
+    sample_count: u32,
     label: &'static str,
+}
+
+#[derive(Clone, Copy)]
+struct PointPipelinePairDescriptor<'targets> {
+    targets: &'targets [Option<wgpu::ColorTargetState>],
+    vertex_entry_point: &'static str,
+    fragment_entry_point: &'static str,
+    sample_count: u32,
+    opaque_label: &'static str,
+    translucent_label: &'static str,
+}
+
+fn create_point_pipeline_pair(
+    device: &wgpu::Device,
+    layout: &wgpu::PipelineLayout,
+    shader: &wgpu::ShaderModule,
+    vertex_buffers: &[Option<wgpu::VertexBufferLayout<'_>>],
+    descriptor: PointPipelinePairDescriptor<'_>,
+) -> PointPipelinePair {
+    let create = |depth_write_enabled, label| {
+        create_pipeline(
+            device,
+            layout,
+            shader,
+            vertex_buffers,
+            PointPipelineDescriptor {
+                targets: descriptor.targets,
+                vertex_entry_point: descriptor.vertex_entry_point,
+                fragment_entry_point: descriptor.fragment_entry_point,
+                depth_write_enabled,
+                sample_count: descriptor.sample_count,
+                label,
+            },
+        )
+    };
+    PointPipelinePair {
+        opaque: create(true, descriptor.opaque_label),
+        translucent: create(false, descriptor.translucent_label),
+    }
 }
 
 fn create_pipeline(
@@ -238,7 +308,7 @@ fn create_pipeline(
         layout: Some(layout),
         vertex: wgpu::VertexState {
             module: shader,
-            entry_point: Some("point_vertex"),
+            entry_point: Some(descriptor.vertex_entry_point),
             compilation_options: wgpu::PipelineCompilationOptions::default(),
             buffers: vertex_buffers,
         },
@@ -254,7 +324,10 @@ fn create_pipeline(
             stencil: wgpu::StencilState::default(),
             bias: wgpu::DepthBiasState::default(),
         }),
-        multisample: wgpu::MultisampleState::default(),
+        multisample: wgpu::MultisampleState {
+            count: descriptor.sample_count,
+            ..Default::default()
+        },
         fragment: Some(wgpu::FragmentState {
             module: shader,
             entry_point: Some(descriptor.fragment_entry_point),

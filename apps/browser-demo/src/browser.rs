@@ -13,8 +13,8 @@ use render_protocol::{
     Camera, PointId, PresentationWeight, RenderUpdate, ViewGenerationKey, Viewport,
 };
 use render_wgpu::{
-    Frame, FrameReport, PickHit, PickPoll, PickRequest, PickTicket, RecordedFrame, RendererConfig,
-    WgpuRenderer,
+    Frame, FrameReport, PickHit, PickPoll, PickRequest, PickTicket, PointFootprintStatus,
+    RecordedFrame, RendererConfig, WgpuRenderer,
 };
 use wasm_bindgen::prelude::*;
 use web_sys::HtmlCanvasElement;
@@ -22,7 +22,7 @@ use web_sys::HtmlCanvasElement;
 use crate::capture::{CaptureCompletionFacts, CaptureFrameFacts, CaptureLayout, CaptureSlot};
 use crate::diagnostics::{
     CameraFacts, CapabilityFacts, CaptureResourceFacts, Diagnostics, Failure, FailureCode,
-    FrameFacts, HighlightFacts, LimitFacts, PickFacts,
+    FrameFacts, HighlightFacts, LimitFacts, PickFacts, PointFootprintFacts,
 };
 use crate::display::DisplayMode;
 use crate::host::{
@@ -30,8 +30,9 @@ use crate::host::{
     PRESENTATION_LATENCY_FRAMES, PhysicalViewport, RESIZE_VIEWPORT_ACTION, RenderDisposition,
 };
 use crate::scene::{
-    BATCH_KEY, BATCH_VERSION, MAX_HIGHLIGHT_POINTS, PreparedScene, VIEW_GENERATION,
-    centre_point_id, render_limits,
+    BATCH_KEY, BATCH_VERSION, MAX_HIGHLIGHT_POINTS, NOMINAL_PICK_SIZE_PHYSICAL_PIXELS,
+    PreparedScene, REQUESTED_POINT_FOOTPRINT, VIEW_GENERATION, centre_point_id,
+    projected_density_display_size, render_limits,
 };
 use crate::streaming::{StreamingLimitFacts, StreamingScene, parse_source_identity};
 
@@ -70,6 +71,7 @@ pub async fn create_viewer(
         .map_err(|error| failure(FailureCode::SceneValidation, error, INITIALIZATION_ACTION))?;
     let (resources, capabilities) =
         BrowserResources::initialize(&canvas, viewport, &mut scene).await?;
+    let point_footprint_status = resources.point_footprint_status(renderer_viewport(viewport)?);
     let camera = scene.camera();
     Ok(BrowserViewer {
         resources: Some(resources),
@@ -82,6 +84,7 @@ pub async fn create_viewer(
         camera,
         highlights: HighlightFacts::empty(),
         stream: StreamingScene::idle(),
+        point_footprint_status,
     })
 }
 
@@ -101,6 +104,7 @@ pub struct BrowserViewer {
     camera: Camera,
     highlights: HighlightFacts,
     stream: StreamingScene,
+    point_footprint_status: PointFootprintStatus,
 }
 
 #[wasm_bindgen]
@@ -120,8 +124,12 @@ impl BrowserViewer {
             device_pixel_ratio,
         ))
         .map_err(resize_viewport_failure)?;
+        let renderer_viewport = renderer_viewport(viewport)?;
         self.resources_mut()?.reconfigure(viewport)?;
         self.viewport = viewport;
+        self.point_footprint_status = self
+            .resources_mut()?
+            .point_footprint_status(renderer_viewport);
         self.last_frame = None;
         self.pick = PickFacts::not_requested();
         self.diagnostics()
@@ -172,12 +180,13 @@ impl BrowserViewer {
         self.last_frame
             .as_ref()
             .ok_or_else(missing_recorded_frame_failure)?;
-        let transient_texture_bytes = self
+        let minimum_transient_texture_bytes = self
             .viewport
             .renderer_transient_bytes_with_pick()
             .map_err(model_failure)?;
+        validate_transient_bytes(minimum_transient_texture_bytes)?;
+        let transient_texture_bytes = self.resources_mut()?.begin_pick([x, y])?;
         validate_transient_bytes(transient_texture_bytes)?;
-        self.resources_mut()?.begin_pick([x, y])?;
         self.last_frame
             .as_mut()
             .ok_or_else(missing_recorded_frame_failure)?
@@ -514,6 +523,7 @@ impl BrowserViewer {
                 CaptureResourceFacts::released,
                 BrowserResources::capture_resource_facts,
             ),
+            point_footprint: self.point_footprint_facts()?,
             frame: self.last_frame,
             pick: &self.pick,
             camera: CameraFacts::from_camera(self.camera),
@@ -552,17 +562,37 @@ impl BrowserViewer {
     }
 
     fn scene_frame(&self) -> Result<Frame, JsValue> {
-        let dimensions = self.viewport.dimensions();
-        let viewport = Viewport::new(dimensions[0], dimensions[1]).map_err(|error| {
-            failure(
-                FailureCode::ViewportValidation,
-                error,
-                "Choose a nonzero bounded canvas size.",
-            )
-        })?;
+        let viewport = renderer_viewport(self.viewport)?;
         let view_generation = self.stream.view_generation().unwrap_or(VIEW_GENERATION);
-        PreparedScene::frame(viewport, view_generation, self.camera)
-            .map_err(|error| failure(FailureCode::FrameValidation, error, RECREATE_ACTION))
+        PreparedScene::frame(
+            viewport,
+            view_generation,
+            self.camera,
+            self.display_size_physical_pixels(viewport),
+        )
+        .map_err(|error| failure(FailureCode::FrameValidation, error, RECREATE_ACTION))
+    }
+
+    fn display_size_physical_pixels(&self, viewport: Viewport) -> f32 {
+        projected_density_display_size(viewport, self.non_retired_resident_point_count())
+    }
+
+    fn non_retired_resident_point_count(&self) -> u64 {
+        if self.stream.view_generation().is_some() {
+            self.stream.non_retired_resident_point_count()
+        } else {
+            self.scene.facts().point_count
+        }
+    }
+
+    fn point_footprint_facts(&self) -> Result<PointFootprintFacts, JsValue> {
+        let viewport = renderer_viewport(self.viewport)?;
+        Ok(PointFootprintFacts::new(
+            REQUESTED_POINT_FOOTPRINT,
+            self.point_footprint_status,
+            NOMINAL_PICK_SIZE_PHYSICAL_PIXELS,
+            self.display_size_physical_pixels(viewport),
+        ))
     }
 
     fn reset_interaction_facts(&mut self) {
@@ -592,11 +622,14 @@ impl BrowserViewer {
 
     fn set_camera(&mut self, camera: Camera) -> Result<String, JsValue> {
         self.ensure_ready()?;
-        let dimensions = self.viewport.dimensions();
-        let viewport = Viewport::new(dimensions[0], dimensions[1])
-            .map_err(|error| failure(FailureCode::ViewportValidation, error, RECREATE_ACTION))?;
-        PreparedScene::frame(viewport, self.active_view_generation(), camera)
-            .map_err(camera_failure)?;
+        let viewport = renderer_viewport(self.viewport)?;
+        PreparedScene::frame(
+            viewport,
+            self.active_view_generation(),
+            camera,
+            self.display_size_physical_pixels(viewport),
+        )
+        .map_err(camera_failure)?;
         self.camera = camera;
         self.reset_interaction_facts();
         self.resources_mut()?.discard_frame_dependent_state();
@@ -744,6 +777,33 @@ impl BrowserResources {
         CaptureResourceFacts::from_pending(self.frame_capture.is_pending())
     }
 
+    fn point_footprint_status(&self, viewport: Viewport) -> PointFootprintStatus {
+        self.renderer.point_footprint_status(viewport)
+    }
+
+    fn capture_frame_facts(
+        &self,
+        frame: &Frame,
+        report: FrameReport,
+        batches: Vec<crate::streaming::VisualBatchFacts>,
+    ) -> CaptureFrameFacts {
+        let point_footprint = PointFootprintFacts::new(
+            REQUESTED_POINT_FOOTPRINT,
+            self.renderer.point_footprint_status(frame.viewport()),
+            frame.style().default_size_pixels(),
+            frame.style().display_size_pixels(),
+        );
+        CaptureFrameFacts::new(
+            report.view_generation().generation(),
+            report.drawn_points(),
+            report.draw_calls(),
+            report.resident_bytes(),
+            report.transient_texture_bytes(),
+            point_footprint,
+            batches,
+        )
+    }
+
     async fn initialize(
         canvas: &HtmlCanvasElement,
         viewport: PhysicalViewport,
@@ -847,7 +907,7 @@ impl BrowserResources {
             .map_err(|error| failure(FailureCode::StreamPublication, error, RECREATE_ACTION))
     }
 
-    fn begin_pick(&mut self, pixel: [u32; 2]) -> Result<(), JsValue> {
+    fn begin_pick(&mut self, pixel: [u32; 2]) -> Result<u64, JsValue> {
         self.ensure_device_available()?;
         if self.pick_ticket.is_some() {
             return Err(failure(
@@ -867,7 +927,7 @@ impl BrowserResources {
             .map_err(|error| failure(FailureCode::PickRecording, error, RECREATE_ACTION))?;
         self.queue.submit([encoder.finish()]);
         self.pick_ticket = Some(ticket);
-        Ok(())
+        Ok(self.renderer.transient_texture_bytes())
     }
 
     fn poll_pick(&mut self) -> Result<PickPoll, JsValue> {
@@ -945,14 +1005,7 @@ impl BrowserResources {
         let report = recorded.report();
         validate_transient_bytes(report.transient_texture_bytes())?;
         let facts = layout
-            .pending_facts_json(CaptureFrameFacts::new(
-                report.view_generation().generation(),
-                report.drawn_points(),
-                report.draw_calls(),
-                report.resident_bytes(),
-                report.transient_texture_bytes(),
-                batches,
-            ))
+            .pending_facts_json(self.capture_frame_facts(frame, report, batches))
             .map_err(|error| {
                 failure(FailureCode::FrameCaptureFacts, error, RETRY_CAPTURE_ACTION)
             })?;
@@ -1291,11 +1344,24 @@ fn create_renderer(
     device: &wgpu::Device,
     format: wgpu::TextureFormat,
 ) -> Result<WgpuRenderer, JsValue> {
-    WgpuRenderer::new(device, RendererConfig::new(format, render_limits())).map_err(|error| {
+    let config = RendererConfig::new(format, render_limits())
+        .with_point_footprint(REQUESTED_POINT_FOOTPRINT);
+    WgpuRenderer::new(device, config).map_err(|error| {
         failure(
             FailureCode::RendererCapability,
             error,
             INITIALIZATION_ACTION,
+        )
+    })
+}
+
+fn renderer_viewport(viewport: PhysicalViewport) -> Result<Viewport, JsValue> {
+    let dimensions = viewport.dimensions();
+    Viewport::new(dimensions[0], dimensions[1]).map_err(|error| {
+        failure(
+            FailureCode::ViewportValidation,
+            error,
+            "Choose a nonzero bounded canvas size.",
         )
     })
 }

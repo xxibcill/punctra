@@ -3,7 +3,37 @@
 All notable changes to Punctra are documented here. The project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased - 0.21.0-alpha.1
+## Unreleased - 0.22.0-alpha.1
+
+- Activated the bounded [v0.22 Point Footprint and Edge Quality
+  design](docs/design/point-footprint-edge-quality-v0.22.md). The renderer now
+  accepts an explicit single-sample or anti-aliased Point-footprint request and
+  reports the selected four-sample, unsupported-capability fallback, or
+  resource fallback path without changing Point geometry or identity.
+- Added deterministic four-sample circular color coverage while keeping the EDL
+  visibility-depth pass and nominal 7.0-physical-pixel pick mask single-sample.
+  Preferred-path color/depth targets resolve into the caller's single-sample
+  target; bounded resource fallback preserves the unenhanced inherited
+  hard-circle presentation and reports that EDL was not applied to the frame.
+- Added the browser host's projected-density display diameter:
+  `clamp(sqrt(physical_pixels / max(non_retired_resident_points, 1)) * 0.55,
+  2.0, 6.0)` physical pixels. Display diameter is reported independently from
+  the unchanged nominal pick diameter.
+- Added exact footprint status, display/pick size, and transient-target facts to
+  private browser diagnostics and capture evidence, plus focused quality, DPR,
+  fallback, resource, pick, and frame-cost checks against immutable v0.21
+  predecessor images.
+- Advanced the Rust and JavaScript package-facing release identity to
+  `0.22.0-alpha.1`. The public browser SDK declaration surface is unchanged;
+  the Point-footprint runner and evidence machinery remain repository-private.
+- The final v0.22 implementation commit is **PENDING** until the two-pass
+  baseline-image pin is created.
+- Final attended record, implementation pin, rebuilt functional qualification,
+  verify evidence, and release observations are pending. No v0.22 completion,
+  physical-display, cross-browser/device, independent-human/adopter, support,
+  beta, release-candidate, or v1 claim is made yet.
+
+## 0.21.0-alpha.1
 
 - Completed and repository-verified the bounded [v0.21 Visual-Quality Baseline
   and Regression Corpus design](docs/design/visual-quality-baseline-v0.21.md)

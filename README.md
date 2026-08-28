@@ -376,6 +376,34 @@ gate or claim another browser, physical display presentation, independent
 human interpretation, independent adoption, improved/final visual quality,
 API stability, support qualification, beta, v1, or release-candidate status.
 
+Version 0.22.0-alpha.1 implements the bounded repository slice in the accepted
+[Point Footprint and Edge Quality
+design](docs/design/point-footprint-edge-quality-v0.22.md). `render-wgpu`
+accepts an explicit single-sample or anti-aliased Point-footprint request. The
+preferred path resolves deterministic four-sample circular color coverage;
+unsupported capabilities and oversized viewports select explicit fallbacks
+that preserve the inherited Point centers, colors, depth ordering, and
+identities.
+
+The private browser host requests anti-aliasing and chooses one display
+diameter per frame from projected resident density, clamped to 2.0 through 6.0
+physical pixels. The complete non-retired resident Point count controls that
+choice. Nominal pick coverage remains exactly 7.0 physical pixels and is
+reported separately, so decorative edge treatment cannot change provisional
+pick authority.
+
+The v0.22 repository lane reuses the immutable v0.21 corpus and predecessor
+images, then produces separate point-footprint baselines, focused DPR and
+fallback evidence, and exact resource/cost facts. The implementation is active,
+but its attended record, implementation pin, rebuilt functional qualification,
+final verify evidence, and [release record](docs/releases/v0.22.0.md) remain
+pending. See the [point-footprint qualification
+guide](docs/guides/browser-point-footprint.md) for the local sequence and
+evidence boundary. This status does not establish final visual quality,
+physical-display or cross-browser/device equivalence, independent human or
+adopter evidence, API stability, support qualification, beta, v1, or
+release-candidate status.
+
 To try the implemented View safely, follow the five-minute [first LAS/LAZ
 guide](docs/guides/first-las-laz.md). It separates position-only disk-v1 and
 attributed disk-v2 caches and explains what progressive Coverage does and does
@@ -383,7 +411,8 @@ not mean.
 
 Later direction and the exact external product gates are described in the
 [living roadmap](ROADMAP.md). The linked v0.15 through v0.21 designs define the
-completed bounded browser scopes. Later Candidate themes do not
+completed bounded browser scopes; the accepted v0.22 design defines the active
+bounded continuation. Later Candidate themes do not
 expand accepted scope by themselves.
 
 ## Embedding model
@@ -394,18 +423,30 @@ loading, and View policy. Punctra owns validated resident state and rendering:
 ```rust,ignore
 let limits = RenderLimits::new(512 * 1024 * 1024, 20_000_000, 4096)
     .with_max_highlight_points(1_000_000);
-let config = RendererConfig::new(surface_format, limits);
+let config = RendererConfig::new(surface_format, limits)
+    .with_point_footprint(PointFootprint::Antialiased);
 let mut renderer = WgpuRenderer::new(&device, config)?;
 
 renderer.apply(&RenderUpdate::Reset { view_generation })?;
 renderer.apply(&RenderUpdate::Upsert { batch })?;
 
 let viewport = Viewport::new(width, height)?;
+let footprint_status = renderer.point_footprint_status(viewport);
 let frame = Frame::new(view_generation, camera, viewport)?;
 let recorded_frame = renderer.render(&mut encoder, &target, &frame)?;
 let report = recorded_frame.report();
+let _eye_dome_applied = report.eye_dome_lighting_applied();
 queue.submit([encoder.finish()]);
 ```
+
+`PointFootprint::SingleSample` remains the explicit default for third-party
+hosts. An anti-aliased request may select `Multisample4x`,
+`UnsupportedFallback`, or `ResourceFallback` for a viewport; the renderer owns
+that choice and all associated targets. Point size and nominal pick policy
+remain caller inputs rather than renderer inference. `depth_cue_status()` is
+the renderer-wide capability disposition, while the frame report says whether
+eye-dome lighting was actually applied; bounded `ResourceFallback` frames use
+the unenhanced hard-circle path.
 
 Point positions use a finite 64-bit world origin plus finite 32-bit relative
 coordinates. Upserts replace complete batches atomically. Stale View
@@ -988,6 +1029,8 @@ cargo run -p point-terrain --example derive
 cargo run -p browser-demo --bin generate_visual_source_fixture
 node --test apps/browser-demo/web/*.test.mjs scripts/*.test.mjs
 node scripts/verify-browser-visual-baseline.mjs
+PUNCTRA_REQUIRE_GPU=1 cargo test -p renderer-demo --bin renderer-demo \
+  appearance::gpu_tests
 PUNCTRA_REQUIRE_GPU=1 cargo run -p render-wgpu --example third_party_host
 cargo test -p terrain-demo --lib --all-features
 cargo test -p terrain-demo --test workflow
@@ -1000,6 +1043,7 @@ PUNCTRA_REQUIRE_GPU=1 cargo test -p renderer-demo --test planner
 PUNCTRA_REQUIRE_GPU=1 cargo test -p renderer-demo --test display_gpu
 test -f docs/guides/first-las-laz.md
 test -f docs/guides/browser-visual-quality.md
+test -f docs/guides/browser-point-footprint.md
 ruby -rjson -e 'JSON.parse(File.read(ARGV.fetch(0)))' \
   docs/guides/field-corpus.example.json
 git diff --check
