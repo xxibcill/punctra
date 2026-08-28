@@ -9,7 +9,7 @@
     }
   },
   "pins": {
-    "implementation_commit": "5c1546f170eaa4365d7b357039c6fe8852677a99",
+    "implementation_commit": "124fab07ab993059ef5df179cb227f7b0ba9b19e",
     "qualified_paths": [
       "Cargo.lock",
       "Cargo.toml",
@@ -106,8 +106,8 @@
     ],
     "verifier": {
       "path": "scripts/verify-browser-visual-baseline.mjs",
-      "byte_length": 146479,
-      "sha256": "e15c42359f8390e6bbdcc0dac3a2b4dd18c39d3e1825205f8a0dd931d6368b22"
+      "byte_length": 153403,
+      "sha256": "5c0fdbe41917cc40adf9d22f0af4d76a220a23c1b1e7875c53efb300bd33c837"
     }
   },
   "predecessor": {
@@ -732,8 +732,8 @@
     "qualification_status": "repository_qualified_exact_lane",
     "qualification_lane_record": {
       "path": "apps/browser-demo/web/qualification-lane.js",
-      "byte_length": 5326,
-      "sha256": "23cb1d16c1f3972c3ac71f1d787018e32bb53c0e373e1d6a12ccfb12d340acff"
+      "byte_length": 5338,
+      "sha256": "c64d215d5a3591ee0655d64db3858725a045727941815f3ff986fd143ff90e07"
     },
     "viewport": {
       "css_width": 320,

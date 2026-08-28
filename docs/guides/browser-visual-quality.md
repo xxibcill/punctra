@@ -341,7 +341,7 @@ node scripts/verify-browser-visual-baseline.mjs \
 
 The completed record stage produced the checked-in baseline inputs. The later
 verify stage at implementation commit
-`5c1546f170eaa4365d7b357039c6fe8852677a99` passed all nine trials through
+`124fab07ab993059ef5df179cb227f7b0ba9b19e` passed all nine trials through
 three complete recreations and retained 873 PNG artifacts. All six rubric
 outcomes are explicitly `not_observed` under
 `codex-local-maintainer-not-human`; they are not favorable or independent-human
