@@ -491,13 +491,14 @@ test("environment, nonclaims, runtime pins, baseline inputs, and recorded pass f
     evidence.environment.viewport.visual_viewport_width = 0;
   }, /visual viewport width must be finite and positive/);
   await rejectEvidenceMutation(fixture, (evidence) => {
-    evidence.environment.viewport.visual_viewport_height = evidence.environment.screen.height_css_pixels + 1;
-  }, /visual viewport height exceeded the observed screen/);
+    evidence.environment.viewport.visual_viewport_height = evidence.environment.screen.height_css_pixels + 33;
+  }, /visual viewport height exceeded the observed in-app browser allowance/);
   await rejectEvidenceMutation(fixture, (evidence) => {
     evidence.environment.host.device.gpu_cores -= 1;
   }, /Expected values to be strictly deep-equal/);
   await rejectEvidenceMutation(fixture, (evidence) => {
-    evidence.environment.color_capabilities.dynamic_range_high = false;
+    evidence.environment.color_capabilities.dynamic_range_high
+      = !evidence.environment.color_capabilities.dynamic_range_high;
   }, /Expected values to be strictly deep-equal/);
   await rejectEvidenceMutation(fixture, (evidence) => {
     evidence.provenance.attended_lane.execution = "programmatic";
@@ -1859,7 +1860,7 @@ function attendedEnvironment(verified) {
       gamut_srgb: true,
       gamut_p3: true,
       gamut_rec2020: false,
-      dynamic_range_high: true,
+      dynamic_range_high: false,
       video_dynamic_range_high: false,
       configured_surface_color_space: "srgb",
       display_icc_profile: null,

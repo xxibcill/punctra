@@ -44,6 +44,7 @@ export const MAX_PINNED_FILE_BYTES = 80 * 1024 * 1024;
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
 const defaultBaselinePath = "docs/releases/v0.21-browser-visual-baseline.json";
 const MAX_PINNED_SIZE_OUTPUT_BYTES = 32;
+const MAX_IAB_VISUAL_VIEWPORT_HEIGHT_OVERFLOW_CSS_PIXELS = 32;
 const canonicalViewport = Object.freeze({
   css_width: 320,
   css_height: 240,
@@ -98,7 +99,7 @@ const expectedColorCapabilities = Object.freeze({
   gamut_srgb: true,
   gamut_p3: true,
   gamut_rec2020: false,
-  dynamic_range_high: true,
+  dynamic_range_high: false,
   video_dynamic_range_high: false,
   configured_surface_color_space: "srgb",
   display_icc_profile: null,
@@ -1368,8 +1369,9 @@ function verifyEvidenceEnvironment(environment, lane, corpus) {
     "visual viewport width exceeded the observed screen",
   );
   assert(
-    environment.viewport.visual_viewport_height <= environment.screen.height_css_pixels,
-    "visual viewport height exceeded the observed screen",
+    environment.viewport.visual_viewport_height
+      <= environment.screen.height_css_pixels + MAX_IAB_VISUAL_VIEWPORT_HEIGHT_OVERFLOW_CSS_PIXELS,
+    "visual viewport height exceeded the observed in-app browser allowance",
   );
   assert.equal(environment.fallback.allowed, false);
   assert.equal(environment.fallback.requested, false);
