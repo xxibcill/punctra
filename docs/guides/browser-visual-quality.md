@@ -312,7 +312,9 @@ http://127.0.0.1:8000/visual.html?mode=verify&implementation_commit=<40hex>&veri
 The page fixes the attended lane to
 `codex-iab-chromium-151-macos-26-apple-m5-pro`, `browser_trusted_activation`, and
 `exact_observed_lane_only`. It disables the visible Run button until every pin
-is present and valid. Click that button, run the same corpus against the
+is present and matches both the checked-in visual baseline and the running
+checkout/verifier identity exposed by the strict local server. Click that
+button, run the same corpus against the
 checked-in baselines, wait for the post-capture images, record and submit the
 final maintainer-labelled rubric, and wait for the page to report `passed`.
 Download the one repository TAR bundle, inspect and extract it into a fresh

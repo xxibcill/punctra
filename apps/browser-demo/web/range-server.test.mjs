@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { once } from "node:events";
 import {
@@ -26,6 +26,49 @@ const serverPath = fileURLToPath(
 const webRoot = fileURLToPath(new URL("./", import.meta.url));
 const visualExportFilename = "v0.21-browser-visual-evidence.tar";
 const maxVisualExportBytes = 1_243_611_136;
+
+test("qualification pin endpoint binds the running checkout and verifier bytes", async () => {
+  const { server, port } = await startServer();
+  try {
+    const response = await fetch(
+      `http://127.0.0.1:${port}/qualification-visual-pins.json`,
+    );
+    const verifierPath = fileURLToPath(
+      new URL("../../../scripts/verify-browser-visual-baseline.mjs", import.meta.url),
+    );
+    const verifierBytes = await readFile(verifierPath);
+    const baseline = JSON.parse(await readFile(
+      fileURLToPath(
+        new URL("../../../docs/releases/v0.21-browser-visual-baseline.json", import.meta.url),
+      ),
+      "utf8",
+    ));
+    const runningPins = {
+      implementation_commit: execFileSync(
+        "git",
+        ["rev-parse", "HEAD"],
+        { cwd: fileURLToPath(new URL("../../../", import.meta.url)), encoding: "utf8" },
+      ).trim(),
+      verifier: {
+        path: "scripts/verify-browser-visual-baseline.mjs",
+        byte_length: verifierBytes.byteLength,
+        sha256: createHash("sha256").update(verifierBytes).digest("hex"),
+      },
+    };
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("cache-control"), "no-store");
+    assert.deepEqual(await response.json(), {
+      schema: "punctra-browser-visual-verify-pins-v1",
+      accepted: {
+        implementation_commit: baseline.pins.implementation_commit,
+        verifier: baseline.pins.verifier,
+      },
+      running: runningPins,
+    });
+  } finally {
+    await stopServer(server);
+  }
+});
 
 test("opt-in local server persists a bounded visual evidence TAR", async () => {
   const exportDirectory = await mkdtemp(

@@ -2,6 +2,7 @@ import { createVisualValidator, parsePageUrl } from "./visual-validation.js";
 
 export const VISUAL_VERIFIER_PATH = "scripts/verify-browser-visual-baseline.mjs";
 export const VISUAL_TRUSTED_CONTROL_SCHEMA = "punctra-browser-trusted-control-activation-v1";
+export const VISUAL_VERIFY_PINS_SCHEMA = "punctra-browser-visual-verify-pins-v1";
 export const VISUAL_ATTENDED_LANE = Object.freeze({
   id: "codex-iab-chromium-151-macos-26-apple-m5-pro",
   execution: "browser_trusted_activation",
@@ -109,6 +110,52 @@ export function visualVerifyProvenanceFromUrl(pageUrl) {
       sha256: values.verifier_sha256,
     },
   };
+}
+
+export async function loadVisualVerifyProvenance(pageUrl, fetchImplementation = fetch) {
+  const requested = visualVerifyProvenanceFromUrl(pageUrl);
+  if (requested === null) return null;
+  const response = await fetchImplementation(
+    new URL("/qualification-visual-pins.json", pageUrl),
+    { cache: "no-store", credentials: "same-origin" },
+  );
+  requireCondition(response?.ok === true, "running checkout pin endpoint is unavailable");
+  const pins = await response.json();
+  validateVerifyPins(pins);
+  requireMatchingPins(requested, pins.running, "running checkout");
+  requireMatchingPins(requested, pins.accepted, "checked-in baseline");
+  return requested;
+}
+
+function validateVerifyPins(value) {
+  requireRecord(value, "visual verify pins");
+  requireCondition(value.schema === VISUAL_VERIFY_PINS_SCHEMA, "running checkout pin schema differs");
+  validatePinSet(value.running, "running checkout");
+  validatePinSet(value.accepted, "checked-in baseline");
+}
+
+function validatePinSet(value, label) {
+  requireRecord(value, `${label} pins`);
+  requireCondition(IMPLEMENTATION_COMMIT.test(value.implementation_commit), `${label} implementation commit is invalid`);
+  requireRecord(value.verifier, `${label} verifier pins`);
+  requireCondition(value.verifier.path === VISUAL_VERIFIER_PATH, `${label} verifier path differs`);
+  requireCondition(Number.isSafeInteger(value.verifier.byte_length) && value.verifier.byte_length > 0, `${label} verifier byte length is invalid`);
+  requireCondition(SHA256_HEX.test(value.verifier.sha256), `${label} verifier SHA-256 is invalid`);
+}
+
+function requireMatchingPins(requested, expected, label) {
+  requireCondition(
+    requested.implementation_commit === expected.implementation_commit,
+    `implementation commit differs from the ${label}`,
+  );
+  requireCondition(
+    requested.verifier.byte_length === expected.verifier.byte_length,
+    `verifier byte length differs from the ${label}`,
+  );
+  requireCondition(
+    requested.verifier.sha256 === expected.verifier.sha256,
+    `verifier SHA-256 differs from the ${label}`,
+  );
 }
 
 function exactQueryValue(url, field) {

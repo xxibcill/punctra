@@ -49,7 +49,7 @@ import {
 import {
   VISUAL_ATTENDED_LANE,
   VisualTrustedControlGate,
-  visualVerifyProvenanceFromUrl,
+  loadVisualVerifyProvenance,
 } from "./visual-provenance.js";
 import { VisualRunSession, VisualTrialRunner } from "./visual-run-session.js";
 import { verifyNominalPickCoverage } from "./visual-selection.js";
@@ -88,6 +88,7 @@ const provenanceStatus = document.querySelector("#provenance-status");
 const runControlGate = new VisualTrustedControlGate();
 const rubricSelectionGate = new VisualTrustedControlGate();
 const rubricSubmitGate = new VisualTrustedControlGate();
+let provenanceConfigurationSequence = 0;
 
 async function startRun(options, activation) {
   const mode = validateMode(options?.mode ?? modeSelect.value);
@@ -1761,19 +1762,25 @@ function configureModeFromUrl() {
   if (requested === "record" || requested === "verify") modeSelect.value = requested;
 }
 
-function configureVerifyProvenance() {
+async function configureVerifyProvenance() {
+  const sequence = ++provenanceConfigurationSequence;
   session.verifyProvenance = null;
+  runButton.disabled = true;
   if (modeSelect.value !== "verify") {
     provenanceStatus.textContent = "Record mode creates commit-free baseline inputs; final pin provenance is intentionally absent.";
     if (!modeSelect.disabled) runButton.disabled = false;
     return;
   }
+  provenanceStatus.textContent = "Validating final verify pins against the running checkout…";
   try {
-    session.verifyProvenance = visualVerifyProvenanceFromUrl(window.location.href);
+    const provenance = await loadVisualVerifyProvenance(window.location.href);
+    if (sequence !== provenanceConfigurationSequence || modeSelect.value !== "verify") return;
+    session.verifyProvenance = provenance;
     provenanceStatus.textContent = session.verifyProvenance === null
       ? "Final verify requires the documented implementation commit and verifier identity in this page URL."
-      : `Final verify pin loaded for implementation ${session.verifyProvenance.implementation_commit}.`;
+      : `Final verify pins match running implementation ${session.verifyProvenance.implementation_commit}.`;
   } catch (error) {
+    if (sequence !== provenanceConfigurationSequence || modeSelect.value !== "verify") return;
     provenanceStatus.textContent = `Final verify provenance rejected: ${errorMessage(error)}`;
   }
   if (!modeSelect.disabled) runButton.disabled = verifyProvenanceMissing();
@@ -2108,7 +2115,7 @@ const session = new VisualRunSession({
 });
 
 configureModeFromUrl();
-configureVerifyProvenance();
+void configureVerifyProvenance();
 configureArchiveTransport();
 configureRubricFields();
 publishRunnerState(session.runnerState());
@@ -2148,7 +2155,9 @@ runButton.addEventListener("click", (event) => {
     statusOutput.textContent = `Visual run failed: ${errorMessage(error)}`;
   }
 });
-modeSelect.addEventListener("change", () => configureVerifyProvenance());
+modeSelect.addEventListener("change", () => {
+  void configureVerifyProvenance();
+});
 downloadEvidenceButton.addEventListener("click", () => downloadEvidence());
 downloadBundleButton.addEventListener("click", () => {
   void downloadBundle().catch((error) => {

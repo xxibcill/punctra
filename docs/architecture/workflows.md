@@ -887,7 +887,8 @@ repeat inherited quickstart and browser qualification before verify mode.
 Only the later verify-mode evidence is eligible for final acceptance. Its URL
 supplies the exact implementation commit, verifier byte length, and verifier
 SHA-256; the runner fixes the attended-lane identity and disables the visible
-Run control until those pins are valid.
+Run control until those pins match both the checked-in visual baseline and the
+running checkout/verifier facts from the strict local server.
 
 In both stages the rubric begins only after capture and exact bound images have
 loaded in the visible document. The uncompressed TAR preserves repository paths

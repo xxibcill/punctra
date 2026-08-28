@@ -20,6 +20,10 @@ from urllib.parse import parse_qs, unquote, urlsplit
 
 
 WEB_ROOT = (Path(__file__).resolve().parent.parent / "apps/browser-demo/web").resolve()
+REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
+VISUAL_VERIFIER_REPOSITORY_PATH = "scripts/verify-browser-visual-baseline.mjs"
+VISUAL_VERIFIER_PATH = REPOSITORY_ROOT / VISUAL_VERIFIER_REPOSITORY_PATH
+VISUAL_BASELINE_PATH = REPOSITORY_ROOT / "docs/releases/v0.21-browser-visual-baseline.json"
 VIEWER_PACKAGE = json.loads((WEB_ROOT / "package.json").read_text(encoding="utf-8"))
 EXPOSED_HEADERS = "Accept-Ranges, Content-Encoding, Content-Length, Content-Range, ETag"
 FILE_CHUNK_BYTES = 64 * 1024
@@ -28,6 +32,7 @@ QUALIFICATION_HOST_SCHEMA = "punctra-qualification-host-v1"
 VISUAL_EXPORT_PATH = "/qualification-visual-export"
 VISUAL_EXPORT_FILENAME = "v0.21-browser-visual-evidence.tar"
 VISUAL_EXPORT_RECEIPT_SCHEMA = "punctra-browser-visual-export-receipt-v1"
+VISUAL_VERIFY_PINS_SCHEMA = "punctra-browser-visual-verify-pins-v1"
 MAX_VISUAL_EXPORT_BYTES = 1_243_611_136
 
 
@@ -78,6 +83,37 @@ def qualification_host_facts() -> dict[str, object]:
         "package": {
             "name": VIEWER_PACKAGE["name"],
             "version": VIEWER_PACKAGE["version"],
+        },
+    }
+
+
+@lru_cache(maxsize=1)
+def visual_verify_pins() -> dict[str, object]:
+    implementation_commit = command_text(
+        "git",
+        "-C",
+        str(REPOSITORY_ROOT),
+        "rev-parse",
+        "HEAD",
+    )
+    if implementation_commit is None or len(implementation_commit) != 40:
+        raise RuntimeError("visual implementation commit is unavailable")
+    verifier_bytes = VISUAL_VERIFIER_PATH.read_bytes()
+    baseline = json.loads(VISUAL_BASELINE_PATH.read_text(encoding="utf-8"))
+    accepted = baseline["pins"]
+    return {
+        "schema": VISUAL_VERIFY_PINS_SCHEMA,
+        "accepted": {
+            "implementation_commit": accepted["implementation_commit"],
+            "verifier": accepted["verifier"],
+        },
+        "running": {
+            "implementation_commit": implementation_commit,
+            "verifier": {
+                "path": VISUAL_VERIFIER_REPOSITORY_PATH,
+                "byte_length": len(verifier_bytes),
+                "sha256": hashlib.sha256(verifier_bytes).hexdigest(),
+            },
         },
     }
 
@@ -292,6 +328,9 @@ class BrowserDemoHandler(BaseHTTPRequestHandler):
         if urlsplit(self.path).path == "/qualification-host.json":
             self._serve_qualification_host(send_body=send_body)
             return
+        if urlsplit(self.path).path == "/qualification-visual-pins.json":
+            self._serve_json(visual_verify_pins(), send_body=send_body)
+            return
         try:
             delay_milliseconds = self._delay_milliseconds()
             fault = self._fault()
@@ -353,13 +392,27 @@ class BrowserDemoHandler(BaseHTTPRequestHandler):
             self._write_body(path, start, body_length, corrupt=fault == "corrupt")
 
     def _serve_qualification_host(self, *, send_body: bool) -> None:
-        body = json.dumps(
+        self._serve_json(
             qualification_host_facts(),
+            send_body=send_body,
+            allow_cross_origin=True,
+        )
+
+    def _serve_json(
+        self,
+        payload: dict[str, object],
+        *,
+        send_body: bool,
+        allow_cross_origin: bool = False,
+    ) -> None:
+        body = json.dumps(
+            payload,
             separators=(",", ":"),
             sort_keys=True,
         ).encode("utf-8")
         self.send_response(HTTPStatus.OK)
-        self._send_cors_headers()
+        if allow_cross_origin:
+            self._send_cors_headers()
         self.send_header("Cache-Control", "no-store")
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))

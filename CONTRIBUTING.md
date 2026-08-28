@@ -380,7 +380,9 @@ The runner fixes the attended lane to
 `codex-iab-chromium-151-macos-26-apple-m5-pro`, `browser_trusted_activation`, and
 `exact_observed_lane_only`; the URL cannot substitute a different lane. The
 visible **Run three-recreation corpus** button remains disabled until all three
-pin values are valid. Click it to run the same nine-trial, three-recreation
+pin values match both the checked-in visual baseline and the commit plus
+verifier bytes reported by the strict local server. Click it to run the same
+nine-trial, three-recreation
 corpus against the checked-in baselines, wait for the exact post-capture images,
 record and submit the final maintainer-labelled rubric, and wait for
 `document.body.dataset.visualBaseline === "passed"`. Download the single

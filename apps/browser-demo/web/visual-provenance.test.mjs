@@ -5,6 +5,7 @@ import {
   VISUAL_TRUSTED_CONTROL_SCHEMA,
   VISUAL_VERIFIER_PATH,
   VisualTrustedControlGate,
+  loadVisualVerifyProvenance,
   visualVerifyProvenanceFromUrl,
 } from "./visual-provenance.js";
 
@@ -37,6 +38,68 @@ test("final verify provenance binds only the qualified implementation and verifi
       sha256: SHA256,
     },
   });
+});
+
+test("final verify provenance must match the running checkout and verifier bytes", async () => {
+  const pageUrl = new URL("http://127.0.0.1:8000/visual.html?mode=verify");
+  pageUrl.searchParams.set("implementation_commit", COMMIT);
+  pageUrl.searchParams.set("verifier_byte_length", "140956");
+  pageUrl.searchParams.set("verifier_sha256", SHA256);
+  const expected = {
+    schema: "punctra-browser-visual-verify-pins-v1",
+    accepted: {
+      implementation_commit: COMMIT,
+      verifier: {
+        path: VISUAL_VERIFIER_PATH,
+        byte_length: 140956,
+        sha256: SHA256,
+      },
+    },
+    running: {
+      implementation_commit: COMMIT,
+      verifier: {
+        path: VISUAL_VERIFIER_PATH,
+        byte_length: 140956,
+        sha256: SHA256,
+      },
+    },
+  };
+  const requestedVerifier = {
+      path: VISUAL_VERIFIER_PATH,
+      byte_length: 140956,
+      sha256: SHA256,
+  };
+  const requests = [];
+  const fetchPins = async (url, init) => {
+    requests.push({ url: String(url), init });
+    return new Response(JSON.stringify(expected), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  };
+
+  assert.deepEqual(await loadVisualVerifyProvenance(pageUrl.href, fetchPins), {
+    implementation_commit: COMMIT,
+    verifier: requestedVerifier,
+  });
+  assert.deepEqual(requests, [{
+    url: "http://127.0.0.1:8000/qualification-visual-pins.json",
+    init: { cache: "no-store", credentials: "same-origin" },
+  }]);
+
+  const wrongCommit = structuredClone(expected);
+  wrongCommit.running.implementation_commit = "2".repeat(40);
+  await assert.rejects(
+    () => loadVisualVerifyProvenance(pageUrl.href, async () => new Response(JSON.stringify(wrongCommit))),
+    /implementation commit differs from the running checkout/,
+  );
+
+  const staleBaseline = structuredClone(expected);
+  staleBaseline.accepted.verifier.sha256 = "b".repeat(64);
+  await assert.rejects(
+    () => loadVisualVerifyProvenance(pageUrl.href, async () => new Response(JSON.stringify(staleBaseline))),
+    /verifier SHA-256 differs from the checked-in baseline/,
+  );
 });
 
 test("trusted control activations are visible, browser-issued, and single use", () => {
