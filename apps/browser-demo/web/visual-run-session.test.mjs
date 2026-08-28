@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { VisualRunSession } from "./visual-run-session.js";
+import { VisualRunSession, VisualTrialRunner } from "./visual-run-session.js";
 
 function createSession() {
   const artifacts = {
@@ -96,4 +96,104 @@ test("VisualRunSession pins one Wasm runtime and initializes it once", async () 
     () => session.bindWasmRuntime("3:def", new Uint8Array([1, 2, 3])),
     /Wasm runtime bytes changed/,
   );
+});
+
+test("VisualTrialRunner accepts one checked-in trial id and owns its complete recreation lifecycle", async () => {
+  const trial = {
+    id: "generated-neutral",
+    source_id: "generated-source",
+    display_mode: "neutral",
+    conditions: ["dense"],
+    coverage: "authored",
+    selection: { ordinals: [] },
+    features: [{ id: "centre" }],
+    tolerance_profile: "canonical",
+    temporal_tolerance_profile: "stable",
+  };
+  const materialized = {
+    camera: { projection: "perspective", eye: [1, 2, 3] },
+    input_facts: { source: "generated" },
+    source: {
+      expected_view: {
+        stream_coverage: "authored",
+        published_points: 4,
+        settled_drawn_points: 4,
+      },
+    },
+  };
+  const baselinePng = new Uint8Array([1, 2, 3]);
+  const baselineArtifact = { path: "baseline.png" };
+  const recreationCalls = [];
+  const runner = new VisualTrialRunner({
+    corpus: { trials: [trial] },
+    corpusUrl: new URL("http://127.0.0.1:8000/corpus.json"),
+    mode: "record",
+    environmentTracker: { id: "environment" },
+    artifacts: { recordMetadata: () => assert.fail("record mode must not load a baseline") },
+    materializeTrial: async (corpus, trialId, options) => {
+      assert.equal(corpus.trials[0], trial);
+      assert.equal(trialId, trial.id);
+      assert.equal(options.corpusUrl.href, "http://127.0.0.1:8000/corpus.json");
+      return materialized;
+    },
+    loadBaseline: async () => assert.fail("record mode must not load a baseline"),
+    runRecreation: async (options) => {
+      recreationCalls.push(options);
+      return {
+        internal_final_png: options.recreationIndex === 0 ? baselinePng : undefined,
+        record: {
+          index: options.recreationIndex,
+          capture: { artifact: options.recreationIndex === 0 ? baselineArtifact : { path: `recreation-${options.recreationIndex}.png` } },
+          failures: [],
+        },
+      };
+    },
+    updateRunnerState: () => {},
+    repositoryBaselinePath: () => "fixtures/baseline.png",
+    observationArtifactPath: (_trialId, recreationIndex) => `evidence/recreation-${recreationIndex}.png`,
+    buildBatchFacts: () => ({ schema: "batch-facts-v1" }),
+    recreationCount: 3,
+  });
+
+  const result = await runner.run(trial.id);
+
+  assert.equal(recreationCalls.length, 3);
+  assert.equal(recreationCalls[0].baselinePng, undefined);
+  assert.equal(recreationCalls[0].finalArtifact.kind, "baseline_png");
+  assert.equal(recreationCalls[1].baselinePng, baselinePng);
+  assert.equal(recreationCalls[1].finalArtifact.kind, "recreation_png");
+  assert.equal(recreationCalls[2].environmentTracker.id, "environment");
+  assert.deepEqual(result, {
+    trial_id: trial.id,
+    source_id: trial.source_id,
+    display_mode: trial.display_mode,
+    projection: materialized.camera.projection,
+    conditions: trial.conditions,
+    coverage: {
+      declared: trial.coverage,
+      raw_stream: materialized.source.expected_view.stream_coverage,
+      expected_points: materialized.source.expected_view.published_points,
+      settled_drawn_points: materialized.source.expected_view.settled_drawn_points,
+      declared_authority: "source_or_authored_facts_only",
+      settled_draw_authority: "presentation_only",
+      query_completion: "not_inferred_from_visual_evidence",
+    },
+    input_facts: materialized.input_facts,
+    camera: materialized.camera,
+    selection: trial.selection,
+    features: trial.features,
+    expected_view: materialized.source.expected_view,
+    batch_facts: { schema: "batch-facts-v1" },
+    tolerance_profile: trial.tolerance_profile,
+    temporal_tolerance_profile: trial.temporal_tolerance_profile,
+    baseline: baselineArtifact,
+    recreations: recreationCalls.map((_call, index) => ({
+      index,
+      capture: { artifact: index === 0 ? baselineArtifact : { path: `recreation-${index}.png` } },
+      failures: [],
+    })),
+    passed: true,
+    failures: [],
+  });
+  await assert.rejects(() => runner.run("missing-trial"), /checked-in trial missing-trial is unavailable/);
 });

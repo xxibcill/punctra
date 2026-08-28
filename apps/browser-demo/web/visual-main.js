@@ -51,7 +51,7 @@ import {
   VisualTrustedControlGate,
   visualVerifyProvenanceFromUrl,
 } from "./visual-provenance.js";
-import { VisualRunSession } from "./visual-run-session.js";
+import { VisualRunSession, VisualTrialRunner } from "./visual-run-session.js";
 import { verifyNominalPickCoverage } from "./visual-selection.js";
 import { cloneJson, createVisualValidator, errorMessage } from "./visual-validation.js";
 
@@ -166,6 +166,21 @@ async function runVisualCorpus(options, runInitiation) {
     updateRunnerState({ total_trials: corpus.trials.length });
 
     const environmentTracker = createEnvironmentTracker(record, corpus, host);
+    const trialRunner = new VisualTrialRunner({
+      corpus,
+      corpusUrl,
+      mode,
+      environmentTracker,
+      artifacts: session.artifacts,
+      materializeTrial: materializeVisualTrial,
+      loadBaseline: loadExistingBaseline,
+      runRecreation,
+      updateRunnerState,
+      repositoryBaselinePath,
+      observationArtifactPath,
+      buildBatchFacts: expectedBatchFacts,
+      recreationCount: RECREATION_COUNT,
+    });
     for (const trial of corpus.trials) {
       markTrialProgress(trial.id, "running", "running three fresh viewers");
       updateRunnerState({
@@ -175,13 +190,7 @@ async function runVisualCorpus(options, runInitiation) {
       });
       let result;
       try {
-        result = await runTrial({
-          corpus,
-          corpusUrl,
-          trial,
-          mode,
-          environmentTracker,
-        });
+        result = await trialRunner.run(trial.id);
       } catch (error) {
         result = failedTrial(trial, error);
       }
@@ -282,83 +291,6 @@ async function runVisualCorpus(options, runInitiation) {
   downloadBundleButton.disabled = !transportAvailable;
   setRunControlsEnabled(true);
   return cloneJson(record);
-}
-
-async function runTrial(context) {
-  const { corpus, corpusUrl, trial, mode, environmentTracker } = context;
-  const materialized = await materializeVisualTrial(corpus, trial.id, {
-    corpusUrl,
-  });
-  const baselinePath = repositoryBaselinePath(trial);
-  let baselinePng;
-  let baselineMetadata;
-  if (mode === "verify") {
-    const loadedBaseline = await loadExistingBaseline(trial, corpusUrl, baselinePath);
-    baselinePng = loadedBaseline.bytes;
-    baselineMetadata = loadedBaseline.metadata;
-    session.artifacts.recordMetadata(baselineMetadata, baselinePng);
-  }
-
-  const recreations = [];
-  for (let recreationIndex = 0; recreationIndex < RECREATION_COUNT; recreationIndex += 1) {
-    updateRunnerState({
-      trial_id: trial.id,
-      recreation_index: recreationIndex,
-      message: `${trial.id}: recreation ${recreationIndex + 1}/${RECREATION_COUNT}`,
-    });
-    const adoptAsBaseline = mode === "record" && recreationIndex === 0;
-    const recreation = await runRecreation({
-      corpus,
-      trial,
-      materialized,
-      recreationIndex,
-      baselinePng,
-      finalArtifact: adoptAsBaseline
-        ? { kind: "baseline_png", path: baselinePath }
-        : {
-            kind: "recreation_png",
-            path: observationArtifactPath(trial.id, recreationIndex, "settled"),
-          },
-      environmentTracker,
-    });
-    if (adoptAsBaseline) {
-      baselinePng = recreation.internal_final_png;
-      baselineMetadata = recreation.record.capture.artifact;
-    }
-    recreations.push(recreation.record);
-  }
-
-  const failures = recreations.flatMap((recreation) => recreation.failures.map(
-    (failure) => `recreation:${recreation.index}:${failure}`,
-  ));
-  return {
-    trial_id: trial.id,
-    source_id: trial.source_id,
-    display_mode: trial.display_mode,
-    projection: materialized.camera.projection,
-    conditions: [...trial.conditions],
-    coverage: {
-      declared: trial.coverage,
-      raw_stream: materialized.source.expected_view.stream_coverage,
-      expected_points: materialized.source.expected_view.published_points,
-      settled_drawn_points: materialized.source.expected_view.settled_drawn_points,
-      declared_authority: "source_or_authored_facts_only",
-      settled_draw_authority: "presentation_only",
-      query_completion: "not_inferred_from_visual_evidence",
-    },
-    input_facts: materialized.input_facts,
-    camera: cloneJson(materialized.camera),
-    selection: cloneJson(trial.selection),
-    features: cloneJson(trial.features),
-    expected_view: cloneJson(materialized.source.expected_view),
-    batch_facts: expectedBatchFacts(trial, materialized.source.expected_view),
-    tolerance_profile: trial.tolerance_profile,
-    temporal_tolerance_profile: trial.temporal_tolerance_profile,
-    baseline: baselineMetadata,
-    recreations,
-    passed: failures.length === 0 && recreations.length === RECREATION_COUNT,
-    failures,
-  };
 }
 
 async function runRecreation(options) {
