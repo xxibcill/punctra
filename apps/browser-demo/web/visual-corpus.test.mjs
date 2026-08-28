@@ -3,9 +3,12 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
+  AUTZEN_VISUAL_TRIAL_COUNT,
   DISPLAY_MODES,
+  GENERATED_VISUAL_TRIAL_COUNT,
   RAW_VIEWER_INITIAL_DISPLAY_MODE,
   REQUIRED_GENERATED_CONDITIONS,
+  VISUAL_TRIAL_COUNT,
   VISUAL_VIEWPORT,
   decodeTransferV2,
   encodeTransferV2,
@@ -23,6 +26,9 @@ const CORPUS_URL = new URL("corpus.json", FIXTURE_DIRECTORY);
 
 test("checked-in corpus is closed, representative, and binds all modes and projections", async () => {
   const corpus = validateVisualCorpus(await readJson(CORPUS_URL));
+  assert.equal(corpus.trials.length, VISUAL_TRIAL_COUNT);
+  assert.equal(corpus.trials.filter((trial) => trial.source_id.startsWith("generated")).length, GENERATED_VISUAL_TRIAL_COUNT);
+  assert.equal(corpus.trials.filter((trial) => trial.source_id.startsWith("autzen")).length, AUTZEN_VISUAL_TRIAL_COUNT);
   assert.deepEqual(corpus.viewport, VISUAL_VIEWPORT);
   assert.deepEqual(
     [...new Set(corpus.trials.map((trial) => trial.display_mode))].sort(),
@@ -63,6 +69,27 @@ test("checked-in corpus is closed, representative, and binds all modes and proje
       .sort(),
     ["classification", "elevation", "intensity", "rgb"],
   );
+});
+
+test("corpus validation rejects missing, extra, or rebalanced trials", async () => {
+  const corpus = validateVisualCorpus(await readJson(CORPUS_URL));
+
+  const missing = structuredClone(corpus);
+  missing.trials.pop();
+  assert.throws(() => validateVisualCorpus(missing), /requires exactly 9 trials/);
+
+  const extra = structuredClone(corpus);
+  const extraTrial = structuredClone(extra.trials.find(({ source_id: sourceId }) => sourceId.startsWith("generated")));
+  extraTrial.id = "generated-extra-trial";
+  extra.trials.push(extraTrial);
+  assert.throws(() => validateVisualCorpus(extra), /requires exactly 9 trials/);
+
+  const rebalanced = structuredClone(corpus);
+  const generated = structuredClone(rebalanced.trials.find(({ source_id: sourceId }) => sourceId.startsWith("generated")));
+  generated.id = "generated-rebalanced-trial";
+  const autzenIndex = rebalanced.trials.findIndex(({ source_id: sourceId }) => sourceId.startsWith("autzen"));
+  rebalanced.trials[autzenIndex] = generated;
+  assert.throws(() => validateVisualCorpus(rebalanced), /requires exactly 5 generated trials/);
 });
 
 test("generated scene, batch roles, transfer bytes, and digest are deterministic", async () => {

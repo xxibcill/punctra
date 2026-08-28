@@ -65,7 +65,36 @@ test("qualification host facts normalize to the canonical evidence schema", () =
 test("the checked-in visual policy derives from its fixed corpus and repository inputs", async () => {
   const baseline = await pinnedBaselineFixture();
   const verified = await verifyFixture(baseline);
-  assert.equal(verified.corpus.trials.length >= 6, true);
+  assert.equal(verified.corpus.trials.length, 9);
+  assert.equal(verified.corpus.trials.filter(({ source_id: sourceId }) => sourceId.startsWith("generated")).length, 5);
+  assert.equal(verified.corpus.trials.filter(({ source_id: sourceId }) => sourceId.startsWith("autzen")).length, 4);
+});
+
+test("the exact trial matrix rejects missing, extra, and rebalanced trials", async () => {
+  const baseline = await pinnedBaselineFixture();
+  await assert.rejects(
+    () => verifyWithCorpusTamper(baseline, (corpus) => {
+      corpus.trials.pop();
+    }),
+    /requires exactly 9 trials/,
+  );
+  await assert.rejects(
+    () => verifyWithCorpusTamper(baseline, (corpus) => {
+      const extra = structuredClone(corpus.trials.find(({ source_id: sourceId }) => sourceId.startsWith("generated")));
+      extra.id = "generated-extra-trial";
+      corpus.trials.push(extra);
+    }),
+    /requires exactly 9 trials/,
+  );
+  await assert.rejects(
+    () => verifyWithCorpusTamper(baseline, (corpus) => {
+      const generated = structuredClone(corpus.trials.find(({ source_id: sourceId }) => sourceId.startsWith("generated")));
+      generated.id = "generated-rebalanced-trial";
+      const autzenIndex = corpus.trials.findIndex(({ source_id: sourceId }) => sourceId.startsWith("autzen"));
+      corpus.trials[autzenIndex] = generated;
+    }),
+    /requires exactly 5 generated trials/,
+  );
 });
 
 test("input bytes and executable generated facts cannot be replaced by matching labels", async () => {

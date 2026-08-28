@@ -870,6 +870,9 @@ function verifyAutzenPermission(permission) {
 
 function verifyTrialContract(contract, corpus, autzenManifest) {
   requireRecord(contract, "trial contract");
+  assert.equal(contract.trial_count, 9);
+  assert.equal(contract.generated_trial_count, 5);
+  assert.equal(contract.autzen_trial_count, 4);
   assert.deepEqual(contract.required_generated_conditions, REQUIRED_GENERATED_CONDITIONS);
   assert.deepEqual(contract.display_modes, DISPLAY_MODES);
   assert.deepEqual(contract.projections, ["orthographic", "perspective"]);
@@ -885,6 +888,8 @@ function verifyTrialContract(contract, corpus, autzenManifest) {
   let unselected = false;
   let mixedLod = false;
   const autzenModes = new Set();
+  let generatedTrialCount = 0;
+  let autzenTrialCount = 0;
   for (const trial of corpus.trials) {
     const source = sourceById.get(trial.source_id);
     modes.add(trial.display_mode);
@@ -893,7 +898,12 @@ function verifyTrialContract(contract, corpus, autzenManifest) {
     unselected ||= trial.selection.ordinals.length === 0;
     mixedLod ||= trial.temporal_trace.kind === "mixed_lod_parent_child";
     assert.equal(trial.coverage, source.kind === "generated" ? "authored" : "sampled");
-    if (source.kind === "derived_pvis") autzenModes.add(trial.display_mode);
+    if (source.kind === "derived_pvis") {
+      autzenTrialCount += 1;
+      autzenModes.add(trial.display_mode);
+    } else {
+      generatedTrialCount += 1;
+    }
     if (source.kind === "derived_pvis") verifyAutzenTrialFeatureBindings(trial, source, autzenManifest);
     if (trial.conditions.includes("mixed_lod")) {
       assert.equal(trial.temporal_trace.kind, "mixed_lod_parent_child");
@@ -904,6 +914,9 @@ function verifyTrialContract(contract, corpus, autzenManifest) {
     if (source.kind === "generated") trial.conditions.forEach((condition) => generatedConditions.add(condition));
     verifyTrialEvidenceFacts(trial, source, corpus);
   }
+  assert.equal(corpus.trials.length, 9);
+  assert.equal(generatedTrialCount, 5);
+  assert.equal(autzenTrialCount, 4);
   assert.deepEqual([...modes].sort(), [...DISPLAY_MODES].sort());
   assert.deepEqual([...projections].sort(), ["orthographic", "perspective"]);
   assert.equal(selected && unselected, true);

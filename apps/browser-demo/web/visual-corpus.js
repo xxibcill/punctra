@@ -7,6 +7,9 @@ export const TRANSFER_SCHEMA = "punctra-browser-transfer-v2";
 export const TRANSFER_RECORD_BYTES = 32;
 export const MAX_TRANSFER_BATCH_POINTS = 1_024;
 export const MAX_TRANSFER_BATCHES = 8;
+export const VISUAL_TRIAL_COUNT = 9;
+export const GENERATED_VISUAL_TRIAL_COUNT = 5;
+export const AUTZEN_VISUAL_TRIAL_COUNT = 4;
 export const VISUAL_VIEWPORT = Object.freeze({
   css_width: 320,
   css_height: 240,
@@ -187,7 +190,10 @@ export function validateVisualCorpus(value) {
     "the licensed derived Source is missing",
   );
 
-  requireCondition(Array.isArray(value.trials) && value.trials.length >= 6, "visual trials are incomplete");
+  requireCondition(
+    Array.isArray(value.trials) && value.trials.length === VISUAL_TRIAL_COUNT,
+    `visual corpus requires exactly ${VISUAL_TRIAL_COUNT} trials`,
+  );
   const trialIds = new Set();
   const modes = new Set();
   const projections = new Set();
@@ -195,7 +201,8 @@ export function validateVisualCorpus(value) {
   let hasSelection = false;
   let hasEmptySelection = false;
   let hasMixedLod = false;
-  let hasDerivedTrial = false;
+  let generatedTrialCount = 0;
+  let autzenTrialCount = 0;
   for (const trial of value.trials) {
     validateTrial(trial, sources, value.tolerance_profiles);
     requireCondition(!trialIds.has(trial.id), `duplicate visual trial ${trial.id}`);
@@ -204,9 +211,10 @@ export function validateVisualCorpus(value) {
     projections.add(trial.camera === "source" ? "perspective" : trial.camera.projection);
     const source = sources.get(trial.source_id);
     if (source.kind === "generated") {
+      generatedTrialCount += 1;
       for (const condition of trial.conditions) generatedConditions.add(condition);
     } else {
-      hasDerivedTrial = true;
+      autzenTrialCount += 1;
     }
     hasSelection ||= trial.selection.ordinals.length > 0;
     hasEmptySelection ||= trial.selection.ordinals.length === 0;
@@ -216,7 +224,8 @@ export function validateVisualCorpus(value) {
   requireCondition(projections.has("perspective") && projections.has("orthographic"), "both camera projections are required");
   requireCondition(hasSelection && hasEmptySelection, "selected and unselected trials are required");
   requireCondition(hasMixedLod, "a parent/child mixed-LOD trace is required");
-  requireCondition(hasDerivedTrial, "an Autzen-derived trial is required");
+  requireCondition(generatedTrialCount === GENERATED_VISUAL_TRIAL_COUNT, `visual corpus requires exactly ${GENERATED_VISUAL_TRIAL_COUNT} generated trials`);
+  requireCondition(autzenTrialCount === AUTZEN_VISUAL_TRIAL_COUNT, `visual corpus requires exactly ${AUTZEN_VISUAL_TRIAL_COUNT} Autzen-derived trials`);
   for (const [prompt, binding] of Object.entries(value.rubric.trial_bindings)) {
     requireCondition(binding.every((trialId) => trialIds.has(trialId)), `rubric ${prompt} binds an unknown trial`);
   }

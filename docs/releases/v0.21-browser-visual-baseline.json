@@ -293,6 +293,9 @@
     }
   },
   "trial_contract": {
+    "trial_count": 9,
+    "generated_trial_count": 5,
+    "autzen_trial_count": 4,
     "required_generated_conditions": [
       "sparse",
       "dense",
