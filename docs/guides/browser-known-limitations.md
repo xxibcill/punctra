@@ -1,12 +1,13 @@
 # Browser integration known limitations
 
-Punctra `0.21.0-alpha.1` carries forward the bounded packed integration
-baseline and one exact local Chromium/macOS/Apple-GPU functional lane while its
-accepted visual-baseline evidence remains in progress. The current
+Punctra `0.21.0-alpha.1` completes and repository-verifies the bounded packed
+integration baseline, visual regression corpus, and one exact local
+Chromium/macOS/Apple-GPU lane. The
 [machine-readable baseline](../releases/v0.21-browser-baseline.json) and
-[browser matrix](../releases/v0.21-browser-matrix.json) describe that current
-functional target but are not final release authority until locally rerun and
-pinned. The v0.20 [baseline](../releases/v0.20-browser-baseline.json) and
+[browser matrix](../releases/v0.21-browser-matrix.json), together with the
+[v0.21 verification record](../releases/v0.21.0.md), are the bounded v0.21
+repository authority. The v0.20
+[baseline](../releases/v0.20-browser-baseline.json) and
 [matrix](../releases/v0.20-browser-matrix.json) remain the immutable completed
 historical evidence.
 
@@ -30,9 +31,8 @@ they must not silently substitute a different renderer, Source, or cache mode.
 
 ## Unqualified
 
-Only the exact entry in `v0.21-browser-matrix.json` is eligible for the current
-repository functional lane, and it is not final v0.21 evidence until the rerun
-and pins are complete.
+Only the exact entry in `v0.21-browser-matrix.json` is repository-qualified for
+v0.21. Its completed observation does not qualify a different environment.
 Installed Chrome, Safari, other Chromium builds, other screens, operating
 systems, GPUs, adapters, mobile devices, bundlers, framework versions, CDNs,
 authentication stacks, CSP variants, and production networks remain
@@ -83,11 +83,12 @@ fraction 0.001, maximum channel delta 4, and one physical pixel of feature
 displacement. These are regression bounds, not perceptual-quality scores.
 
 The rubric records depth, shape, density-transition, color-meaning, selection,
-and false-feature observations but is deliberately non-gating. The static
-corpus/policy implementation does not become completed visual evidence until
-the accepted images, three complete recreations, maintainer observation, machine-
-readable evidence, implementation/verifier pins, and release record exist and
-pass. See the [visual-quality guide](browser-visual-quality.md).
+and false-feature observations but is deliberately non-gating. The completed
+repository evidence contains the accepted images, three complete recreations
+per trial, machine-readable evidence, implementation/verifier pins, and release
+record. All six rubric outcomes are explicitly `not_observed` under a non-human
+maintainer label; no favorable or independent-human interpretation is inferred.
+See the [visual-quality guide](browser-visual-quality.md).
 
 Record and verify are sequential. The attended record stage supplies only the
 baseline PNGs and commit-free baseline-input manifest that cross the

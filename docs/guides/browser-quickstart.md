@@ -79,8 +79,10 @@ before describing a browser/device as qualified. Review the consolidated
 The v0.21 [visual-quality workflow](browser-visual-quality.md) is a separate
 private repository lane: it fixes a 320 by 240 CSS-pixel canvas at requested
 DPR 2, waits 30 quiet frames, captures 640 by 480 renderer evidence, and runs
-three complete viewer/harness recreations per trial. It adds no screenshot or visual-
-testing export to this quickstart or the supported package surface. Its
+three complete viewer/harness recreations per trial. It adds no screenshot or
+visual-testing export to this quickstart or the supported package surface. Its
 attended record stage creates baseline inputs before the implementation pin;
-the pinned build must repeat this quickstart and qualification before a separate
-attended verify stage can publish final evidence.
+the pinned v0.21 build repeated this quickstart and qualification before its
+separate attended verify stage published the bounded final evidence. See the
+[v0.21 verification record](../releases/v0.21.0.md) for the exact observations
+and remaining nonclaims.

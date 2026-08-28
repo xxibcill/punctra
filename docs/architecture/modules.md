@@ -14,9 +14,12 @@ cache, and worker streaming slice Complete and repository-verified; v0.17
 framework-neutral viewer API and exact-Point bridge plus v0.18 packed SDK and
 thin React lifecycle adapter plus v0.19 exact local browser/device qualification
 and v0.20 clean packed-consumer integration baseline Complete and repository-
-verified; v0.21 bounded visual-corpus, capture, and comparison implementation
-Accepted and in progress, with attended evidence and release verification
-outstanding
+verified; v0.21 bounded visual-corpus, capture, comparison, and evidence
+implementation Complete and repository-verified for the bounded exact local
+attended lane, while broader browser/device support, physical-display
+presentation, independent-human/adopter evidence, improved or final visual
+quality, API stability, support qualification, beta, v1, and release-candidate
+status remain outstanding
 
 This is the ownership map for implemented crates. Each crate has one public
 job. Several private files may cooperate behind one deep interface; private
@@ -62,7 +65,7 @@ the supported package/fixture/presentation/recovery facts in a repository
 baseline rather than creating another runtime module. Correction remains existing
 `point-workspace` commit policy.
 
-The accepted v0.21 implementation adds one private visual-trial module behind a
+The completed v0.21 implementation adds one private visual-trial module behind a
 closed trial-identifier interface. That module owns deterministic generated
 scene construction, the permission-bound Autzen derivative, settlement,
 offscreen target capture and readback, channel normalization, lossless image

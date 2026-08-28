@@ -1,12 +1,15 @@
 # Visual-Quality Baseline and Regression Corpus Design (v0.21)
 
-Status: **Accepted for bounded repository implementation; cross-browser,
-independent-human, independent-adopter, and final visual-quality evidence
-remain outstanding**
+Status: **Complete and repository-verified for the bounded v0.21 visual-quality
+baseline and regression corpus on one exact attended local Chromium/macOS/
+Apple-GPU lane; broader browser/device support, physical-display presentation,
+independent-human/adopter evidence, improved or final visual quality, API
+stability, support qualification, beta, v1, and release-candidate status remain
+outstanding**
 
 This design is authoritative for the bounded Punctra v0.21 repository slice.
 The maintainer's 2026-08-28 request to continue through v0.21 after v0.20 was
-merged activates the repository implementation below.
+merged activated the repository implementation below.
 
 The roadmap's original activation gate also expected v0.20's fixed scenes to
 expose representative sparse, dense, layered, high-dynamic-range,
@@ -607,13 +610,14 @@ Repository completion requires:
   observation, independent-adopter gap, independent-human gap, and later visual
   nonclaim.
 
-No hosted CI is added. Completion wording will be: **Complete and repository-
-verified for the bounded v0.21 visual-quality baseline and regression corpus,
-including deterministic generated scenes, one derived licensed Autzen sample,
-and one exact local Chromium/macOS/Apple-GPU attended lane; other browsers,
-operating systems, adapters, devices, independent human interpretation,
-independent adoption, final visual-quality completion, support qualification,
-beta, v1, and release-candidate status remain outstanding.**
+No hosted CI is added. Completion status is: **Complete and repository-verified
+for the bounded v0.21 visual-quality baseline and regression corpus, including
+deterministic generated scenes, one derived licensed Autzen sample, and one
+exact local Chromium/macOS/Apple-GPU attended lane; other browsers, operating
+systems, adapters, devices, physical-display presentation, independent human
+interpretation, independent adoption, improved or final visual quality, API
+stability, support qualification, beta, v1, and release-candidate status remain
+outstanding.**
 
 ## Explicit non-goals
 

@@ -3,20 +3,19 @@
 Punctra `0.21.0-alpha.1` carries forward the contract for one exact local
 browser/device lane over the fixed repository workload and packed quickstart.
 The current machine-readable [browser
-matrix](../releases/v0.21-browser-matrix.json) is the candidate v0.21 record: a
-platform absent from its `qualified_entries` is unqualified even when the SDK
-initializes successfully, but the record is not final release authority until
-the v0.21 implementation and verifier are locally rerun and pinned.
+matrix](../releases/v0.21-browser-matrix.json) is the completed bounded v0.21
+repository record: a platform absent from its `qualified_entries` is
+unqualified even when the SDK initializes successfully.
 
 The immutable [v0.20 browser
-matrix](../releases/v0.20-browser-matrix.json) remains the last completed
-authority for the predecessor package. The current lane must repeat that same
-bounded functional qualification for v0.21; it cannot convert the earlier
-evidence to a moving target.
+matrix](../releases/v0.20-browser-matrix.json) remains the immutable historical
+authority for the predecessor package. v0.21 repeated that bounded functional
+qualification without converting the earlier evidence to a moving target.
 
 This is deliberately narrower than a browser-support promise. The v0.21 lane is
-the Codex in-app browser reporting Chromium 151 on macOS 26.5.2/arm64 and the
-local Apple M5 Pro machine. The browser exposed a generic WebGPU adapter name,
+the Codex in-app browser reporting Chromium 151 on macOS 26.6.2 build 25G83,
+arm64, and the local Apple M5 Pro machine. The browser exposed a generic WebGPU
+adapter name,
 so the physical-GPU mapping is recorded as a local-system inference rather than
 a browser-reported fact. Installed Google Chrome and Safari were not controlled
 by the available browser surface and remain unqualified.
@@ -151,9 +150,9 @@ only afterward runs the attended verify stage. Rubric review follows capture;
 one private TAR transports repository-relative artifacts. Standard Blob
 download is primary; the explicitly enabled same-origin local-server export is
 only a no-overwrite fallback for a download that does not materialize. Follow
-the [visual-quality guide](browser-visual-quality.md); until its attended
-evidence and release pins exist, visual-baseline verification remains
-incomplete.
+the [visual-quality guide](browser-visual-quality.md). Its attended verify-mode
+evidence and release pins are complete for this exact lane; they do not qualify
+another lane or establish a physical-display claim.
 
 ## Remaining evidence
 
@@ -162,10 +161,10 @@ mobile, registry/CDN deployment, authentication, offline-first behavior,
 independent adoption, API stability, compositor/display presentation,
 cross-browser visual equivalence, independent human interpretation, improved
 or final visual quality, or support operations. Those remain external evidence
-or later accepted work; this release is not a beta or release candidate.
+or later accepted work; this release is not a beta, v1, or release candidate.
 
 The [v0.20 repository verification record](../releases/v0.20.0.md) pins the
-exact predecessor implementation commit, environment, attended observations,
-full local command matrix, and outstanding exits. A v0.21 release record must
-not be created until the current functional and visual evidence is actually
-verified and pinned.
+exact predecessor implementation commit and historical observations. The
+[v0.21 repository verification record](../releases/v0.21.0.md) pins the current
+implementation, environment, functional and visual observations, verifier
+identities, artifacts, and outstanding exits.

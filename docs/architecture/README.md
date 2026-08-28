@@ -21,10 +21,11 @@ v0.18 packed viewer SDK and thin React lifecycle adapter Complete and
 repository-verified; v0.19 exact local browser/device qualification and v0.20
 clean packed-consumer integration baseline Complete and repository-verified;
 v0.21 private visual-corpus, capture, comparison, rubric, and evidence workflow
-Accepted and in progress while attended record/verify evidence and release
-verification remain outstanding; arbitrary Source delivery, broad bundler/
-framework/browser qualification, independent adoption, API stability, and
-support qualification outstanding; broader terrain, export, external
+Complete and repository-verified for the bounded exact local attended lane;
+arbitrary Source delivery, broad bundler/framework/browser qualification,
+physical-display presentation, independent human interpretation and adoption,
+improved or final visual quality, API stability, support qualification, beta,
+v1, and release-candidate status outstanding; broader terrain, export, external
 interoperability evidence, and product layers remain deferred
 
 The accepted versioned designs are authoritative:
@@ -108,12 +109,13 @@ adding a package export or broad support promise. The v0.20 baseline freezes the
 packed package, quickstart, fixture, generated-scene, presentation, recovery,
 and matrix facts as repository evidence rather than another runtime module.
 
-The accepted v0.21 implementation adds one closed private Visual Trial seam.
+The completed v0.21 implementation adds one closed private Visual Trial seam.
 Its nine-trial corpus, Autzen derivative, offscreen readback, PNG/USTAR codecs,
 comparison, post-capture rubric, baseline-input manifest, and verifier remain
-inside `browser-demo` and repository scripts. Record mode creates the baseline
-inputs before the implementation pin; only a later attended verify-mode run of
-that pinned build can become final evidence. None of these parts is a public
+inside `browser-demo` and repository scripts. Record mode created the baseline
+inputs before the implementation pin; the attended verify-mode run of that
+exact pinned build published the final repository evidence summarized in the
+[v0.21 release record](../releases/v0.21.0.md). None of these parts is a public
 viewer, React, or Rust screenshot/testing interface. Standard Blob download is
 the primary TAR transport; an explicitly enabled same-origin local-server
 export is only a no-overwrite fallback when an attended in-app browser does not

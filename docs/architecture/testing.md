@@ -13,9 +13,12 @@ WebAssembly/WebGPU browser-foundation slice Complete and repository-verified;
 v0.16 bounded HTTP Range/cache/worker slice Complete and repository-verified;
 v0.17 bounded viewer API/exact-Point, v0.18 packed SDK/React lifecycle, and
 v0.19 exact local browser/device qualification and v0.20 clean packed-consumer
-integration-baseline slices Complete and repository-verified;
-v0.21 bounded visual-baseline implementation Accepted and in progress, with
-attended evidence and release verification outstanding; all gates run locally**
+integration-baseline slices Complete and repository-verified; v0.21 bounded
+visual-baseline implementation Complete and repository-verified for the exact
+local attended lane, while broader browser/device support, physical-display
+presentation, independent-human/adopter evidence, improved or final visual
+quality, API stability, support qualification, beta, v1, and release-candidate
+status remain outstanding; all gates run locally**
 
 Verification follows public contracts first. Private tests are used for fault
 injection and measured implementation boundaries that cannot be triggered
@@ -672,7 +675,7 @@ generated-scene, presentation, recovery, quickstart, and exact matrix facts.
 Those v0.20 records remain immutable historical evidence after package-facing
 documents move to v0.21.
 
-## v0.21 visual-quality baseline verification target
+## v0.21 visual-quality baseline verification
 
 The static lane verifies the closed corpus manifest, deterministic generated
 scene and Autzen derivative, CC BY 4.0 permission/attribution, trial cameras and
@@ -742,10 +745,13 @@ start at the begin-capture monotonic origin. They include callback/scheduling
 delay, do not establish callback ordering, and are not physical GPU-completion
 time. The verifier independently bounds them and preserves that nonclaim.
 
-Until that evidence file, accepted images, maintainer-labelled rubric result,
-implementation/verifier pins, and release record exist and pass, the target is
-implemented work rather than repository-verified v0.21 completion. Offscreen
-readback is renderer evidence; it does not observe the OS compositor or panel.
+The checked-in evidence, nine baselines, bound evidence artifacts, maintainer-
+labelled rubric, implementation/verifier pins, and release record all pass. The
+exact observed lane completed 9/9 trials with three recreations each and 873
+PNGs; all six rubric outcomes are `not_observed` under
+`codex-local-maintainer-not-human`. See the [v0.21 release
+record](../releases/v0.21.0.md). Offscreen readback remains renderer evidence
+and does not observe the OS compositor or physical panel.
 
 ## Local verification lanes
 

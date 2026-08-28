@@ -9,7 +9,7 @@ as technical and customer evidence changes. Milestone outcomes and dependency
 order matter more than version numbers.
 
 Among incomplete releases, only an **Active** release has accepted
-implementation scope. Punctra v0.1 through v0.20 are Complete repository
+implementation scope. Punctra v0.1 through v0.21 are Complete repository
 technical slices. Their recorded external field, adoption, partner, and
 support gates remain historically accurate, but they do not determine the next
 product direction. The project now pivots from a desktop terrain-delivery
@@ -21,10 +21,10 @@ completed repository-verified browser-viewer-API release, v0.18 is the
 completed repository-verified SDK-embedding release, and v0.19 is the completed
 exact local browser/device qualification release. v0.20 is the completed
 repository-verified packed integration baseline; its independent-adopter gate
-remains outstanding. v0.21 is Active with an accepted bounded visual-baseline
-design and repository implementation in progress; its attended evidence and
-release pins are not yet complete. Versions v0.22 through v0.30 remain
-uncommitted Candidate themes. v0.15–v0.20 establish browser execution,
+remains outstanding. v0.21 is the completed repository-verified bounded visual-
+baseline and regression-corpus release; its exact attended evidence and pins
+are recorded without satisfying its external evidence gates. Versions v0.22
+through v0.30 remain uncommitted Candidate themes. v0.15–v0.20 establish browser execution,
 streaming, the viewer API, embedding, and platform qualification. v0.21–v0.29
 then establish, improve, and qualify visual quality. v0.30 is the earliest
 planned browser-engine release candidate; no earlier future release may be
@@ -176,16 +176,19 @@ The [machine-readable baseline](docs/releases/v0.20-browser-baseline.json),
 [v0.20 browser matrix](docs/releases/v0.20-browser-matrix.json), and
 [verification record](docs/releases/v0.20.0.md) preserve that distinction.
 
-The accepted [v0.21 Visual-Quality Baseline and Regression Corpus
+The completed [v0.21 Visual-Quality Baseline and Regression Corpus
 design](docs/design/visual-quality-baseline-v0.21.md) records the maintainer's
 2026-08-28 repository-activation decision. v0.20's fixed functional scenes did
 not satisfy the original representative-corpus gate; v0.21 therefore creates
 and freezes the missing deterministic generated inputs plus one permission-
 bound CC BY 4.0 Autzen derivative. The private capture/comparison and evidence
-implementation is in progress. Until the exact attended lane, three complete
-recreations, baseline images, interpretation record, machine-readable
-evidence, verifier pin, and release record exist and pass, v0.21 is not
-Complete or repository-verified.
+workflow is Complete and repository-verified for one exact attended local lane:
+the checked-in baselines, three complete recreations per trial, interpretation
+record, machine-readable evidence, implementation/verifier pins, and release
+record all exist and pass. Broader browser/device and physical-display evidence,
+independent-human/adopter evidence, improved or final visual quality, API
+stability, support qualification, beta, v1, and release-candidate status remain
+outstanding.
 
 ## Pre-v0.13 renderer quality corrective checkpoint
 
@@ -462,12 +465,12 @@ CRS guessing, or a general desktop product UI.
 ## Release sequence
 
 The completed v0.1–v0.14 sequence remains the historical repository baseline.
-The browser-engine pivot begins at v0.15. Six completed platform themes,
-v0.15–v0.20, establish a browser execution and embedding baseline. The Active
-v0.21 release establishes the visual evidence baseline; eight later visual-
-quality Candidate themes, v0.22–v0.29, improve and qualify it under measured
-image, motion, resource, and interpretation gates. v0.30 is the first planned
-browser-engine release candidate.
+The browser-engine pivot begins at v0.15. Seven completed platform and visual-
+baseline themes, v0.15–v0.21, establish browser execution, embedding, and the
+visual evidence baseline. Eight later visual-quality Candidate themes,
+v0.22–v0.29, improve and qualify it under measured image, motion, resource, and
+interpretation gates. v0.30 is the first planned browser-engine release
+candidate.
 
 This is a planning sequence, not a requirement to publish every number.
 Candidates may be narrowed, split, merged, reordered, or stopped before
@@ -1429,10 +1432,13 @@ mislabel the bounded repository implementation as incomplete or supported.
 
 ### v0.21 — Visual-quality baseline and regression corpus
 
-Status: **Active — accepted for bounded repository implementation; attended
-evidence, exact pins, and repository verification are in progress**
+Status: **Complete and repository-verified for the bounded visual baseline and
+regression corpus; broader browser/device and physical-display evidence,
+independent human/adopter evidence, improved or final visual quality, API
+stability, support qualification, beta, v1, and release-candidate status remain
+outstanding**
 
-Accepted outcome: establish reproducible evidence for visual changes before
+Completed outcome: establish reproducible evidence for visual changes before
 changing point appearance, without approving or intentionally changing the
 inherited v0.20 appearance policy.
 
@@ -1441,12 +1447,12 @@ Activation decision:
 - v0.20 is complete, but its fixed functional scenes do **not** expose the
   representative sparse, dense, layered, high-dynamic-range, classification,
   large-world, and mixed-LOD conditions expected by the original gate; and
-- the maintainer's 2026-08-28 request activates bounded repository
+- the maintainer's 2026-08-28 request activated bounded repository
   implementation by authorizing v0.21 to create, accept, measure, and freeze
   that missing corpus. It does not rewrite v0.20 history or fabricate the
   unsatisfied representative-scene evidence.
 
-Accepted bounded scope:
+Completed bounded scope:
 
 - nine fixed trials--five deterministic generated trials and four Autzen-
   derived display-mode trials over one 4,096-Point sample--whose upstream
@@ -1472,7 +1478,7 @@ Accepted bounded scope:
 - a non-gating interpretation rubric for depth, shape, density transitions,
   color meaning, selection, and false-feature observations.
 
-Repository exit evidence, not yet complete:
+Repository exit evidence:
 
 - every fixture regenerates exactly and the unchanged v0.20 appearance policy
   is audited;
@@ -1487,10 +1493,15 @@ Repository exit evidence, not yet complete:
 - every later visual-quality claim can cite a v0.21 baseline; and
 - screenshots remain presentation evidence, never authoritative geometry.
 
+The [v0.21 repository verification record](docs/releases/v0.21.0.md) pins the
+implementation and verifier identities, the exact local lane, all nine passing
+trials across three complete recreations, 873 PNG artifacts, and the six
+explicit `not_observed` rubric outcomes under the non-human maintainer label.
+
 Cross-browser or physical-display equivalence, independent-human or
 independent-adopter evidence, favorable interpretation, improved/final visual
-quality, support qualification, beta, v1, and release-candidate status remain
-outside this exit.
+quality, API stability, support qualification, beta, v1, and release-candidate
+status remain outside this exit.
 
 ### v0.22 — Point footprint and edge quality
 
@@ -1749,7 +1760,7 @@ nor completion of v0.20 is a reason to publish v1.
 | Terrain acceptance tooling | v0.14 | Complete and repository-verified for the bounded slice; external historical exits outstanding | Preserve exact Terrain QA and correction as an available module without extending it in the current browser-engine path. |
 | Browser execution and streaming | v0.15–v0.16 | Complete and repository-verified for the bounded private slices; arbitrary delivery and external qualification outstanding | Establish WebAssembly/WebGPU execution, then bounded remote Source delivery, browser caching, and worker decoding. |
 | Browser viewer and embedding | v0.17–v0.20 | Complete and repository-verified for bounded viewer, packed SDK, exact local qualification, and clean packed-consumer baseline; independent adoption outstanding | Expose the viewer API, package the SDK, qualify the browser/device envelope, and consolidate a stable integration baseline without release-candidate status. |
-| Measured visual quality | v0.21–v0.25 | v0.21 Active with accepted implementation in progress; v0.22–v0.25 Candidate | Establish visual evidence, then improve point footprints, LOD continuity, depth, and color. |
+| Measured visual quality | v0.21–v0.25 | v0.21 Complete and repository-verified for the bounded baseline; v0.22–v0.25 Candidate | Establish visual evidence, then improve point footprints, LOD continuity, depth, and color. |
 | Visual interaction and qualification | v0.26–v0.29 | Candidate | Improve temporal, selection, and composition clarity, then freeze and qualify the visual surface without release-candidate status. |
 | Browser-engine release candidate | v0.30 | Candidate; earliest planned release candidate | Freeze, soak, and explicitly decide whether the supported browser engine should ship or narrow. |
 | Trustworthy supported browser engine | v1.0 | Candidate after v0.30 soak | Publish v1 only when independent use and maintainable functional, visual, compatibility, resource, and support evidence justify the promise. |

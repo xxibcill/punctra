@@ -5,10 +5,13 @@ All notable changes to Punctra are documented here. The project follows
 
 ## Unreleased - 0.21.0-alpha.1
 
-- Accepted and implemented the bounded [v0.21 Visual-Quality Baseline and
-  Regression Corpus design](docs/design/visual-quality-baseline-v0.21.md),
-  while leaving final attended evidence, implementation/verifier pins, and the
-  human-readable release record outstanding.
+- Completed and repository-verified the bounded [v0.21 Visual-Quality Baseline
+  and Regression Corpus design](docs/design/visual-quality-baseline-v0.21.md)
+  at implementation commit `5c1546f170eaa4365d7b357039c6fe8852677a99`;
+  the [final verification record](docs/releases/v0.21.0.md) pins the exact
+  functional and visual observations, verifier identities, and artifacts.
+- Implementation commit: `5c1546f170eaa4365d7b357039c6fe8852677a99`
+- Qualification verifier SHA-256: `3bc9ef7ad67c54903c16090ddd0ae032228ba02ba9a9f888228e65ebab32b336`
 - Added a closed private browser corpus with nine fixed trials: five
   deterministic generated trials and four display-mode trials over one
   4,096-Point derivative of the CC BY 4.0 Autzen fixture. The derivation binds
@@ -52,11 +55,13 @@ All notable changes to Punctra are documented here. The project follows
   `0.21.0-alpha.1` without changing the public viewer seams or the inherited
   v0.20 point-appearance policy. The v0.20 records remain immutable historical
   evidence.
-- Preserved the evidence boundary: v0.21 is not yet locally verified or pinned
-  and does not claim cross-browser equivalence, compositor/display evidence,
-  independent human interpretation, independent adoption, improved or final
-  visual quality, support qualification, beta, v1, or release-candidate
-  status.
+- Verified all nine visual trials through three complete recreations, retained
+  873 PNG artifacts, and recorded all six non-gating rubric outcomes explicitly
+  as `not_observed` under `codex-local-maintainer-not-human`.
+- Preserved the evidence boundary: v0.21 does not claim cross-browser
+  equivalence, compositor or physical-display evidence, independent human
+  interpretation, independent adoption, improved or final visual quality, API
+  stability, support qualification, beta, v1, or release-candidate status.
 
 ## Unreleased - 0.20.0-alpha.1
 

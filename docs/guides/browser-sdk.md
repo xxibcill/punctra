@@ -191,20 +191,22 @@ matrix](../releases/v0.20-browser-matrix.json) remain immutable historical
 evidence. The current v0.21 [integration
 baseline](../releases/v0.21-browser-baseline.json), [browser
 matrix](../releases/v0.21-browser-matrix.json), and [qualification
-guide](browser-qualification.md) describe the package-facing continuation and
-the one exact lane that must repeat the inherited resource, latency, and
-recovery gates. They become v0.21 release evidence only after the current
-implementation and verifier are locally rerun and pinned.
+guide](browser-qualification.md) record the package-facing continuation and
+the one exact lane that repeated and passed the inherited resource, latency,
+and recovery gates. The [v0.21 verification
+record](../releases/v0.21.0.md) pins that completed bounded evidence.
 
 The v0.21 visual corpus, raw Wasm capture/readback, PNG codec, comparison, and
 evidence runner remain repository-private and add no package export. See the
 [browser visual-quality guide](browser-visual-quality.md) for the bounded local
-baseline workflow. Its attended record stage creates baseline inputs before the
-implementation pin; a later verify stage of the rebuilt pin supplies final
-evidence only after the inherited packed quickstart and qualification pass.
-Static policy implementation is not final attended visual evidence,
-cross-browser equivalence, or a physical-display claim.
+baseline workflow. Its attended record stage created baseline inputs before the
+implementation pin; the later verify stage of the rebuilt pin supplied final
+evidence after the inherited packed quickstart and qualification passed. That
+completed repository evidence is not cross-browser equivalence,
+independent-human interpretation, or a physical-display claim.
 The LAS header and Point-record decoders used by `exact-query` are deliberately
 package-private and are not supported exports. Other bundlers,
 frameworks, browsers, devices, hosting stacks, and CSP deployments require
-their own evidence and are not implied by ESM compatibility.
+their own evidence and are not implied by ESM compatibility. The completed
+repository lane does not establish API stability, support qualification, beta,
+v1, or release-candidate status.

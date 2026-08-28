@@ -17,11 +17,10 @@ outstanding; v0.14 exact Terrain QA/correction, v0.15 local browser-foundation,
 v0.16 bounded HTTP Range streaming, v0.17 bounded framework-neutral browser
 viewer API, and v0.18 packed SDK/React lifecycle slices are Complete and
 repository-verified while their declared external exits remain outstanding;
-v0.19 exact local browser/device qualification and v0.20 packed integration
-baseline are Complete and repository-verified; the accepted bounded v0.21
-visual-quality baseline implementation is in progress while attended evidence,
-independent interpretation/adoption, broader platform/support qualification,
-and final visual-quality claims remain outstanding
+v0.19 exact local browser/device qualification, v0.20 packed integration
+baseline, and v0.21 bounded visual-quality baseline are Complete and repository-
+verified while independent interpretation/adoption, broader platform/support
+qualification, and improved or final visual-quality claims remain outstanding
 
 Punctra v0.11 builds on the reusable render engine, renderer-neutral View
 planner, and verified Source path described in the accepted [v0.1 renderer
@@ -183,18 +182,21 @@ delivery, other browser/device evidence, API stability, visual-quality
 completion, support qualification, beta, v1, and release-candidate status are
 not implied by repository completion.
 
-The accepted [v0.21 Visual-Quality Baseline and Regression Corpus
+The completed [v0.21 Visual-Quality Baseline and Regression Corpus
 design](docs/design/visual-quality-baseline-v0.21.md) fixes the meanings of
 Visual Corpus, Visual Trial, Settled Cut, Canonical Image, Unstable Pixel,
 Feature Region, and Interpretation Rubric. It accepts deterministic generated
 inputs and one permission-bound derived Autzen sample as a bounded repository
 corpus because v0.20's functional scenes were not representative. Visual
 evidence remains presentation-only; it cannot change Point authority, Coverage
-truth, selection membership, or exact Query meaning. Repository implementation
-is active, but final attended evidence and release verification are not yet
-recorded. Acceptance first records the canonical baseline inputs, freezes them
-in the implementation pin, and then verifies a rebuilt pinned implementation;
-record-mode evidence cannot substitute for the later verify-mode record.
+truth, selection membership, or exact Query meaning. Its sequential attended
+record, implementation pin, rebuilt functional qualification, and verify stages
+are Complete and repository-verified on one exact local lane. The
+[v0.21 repository verification record](docs/releases/v0.21.0.md) owns the pins,
+measurements, non-gating all-`not_observed` rubric, and nonclaims. That result is
+not independent-human/adopter evidence, broader browser/device support, a
+physical-display observation, improved/final visual quality, API stability,
+support qualification, beta, v1, or release-candidate status.
 
 ## Artifact
 

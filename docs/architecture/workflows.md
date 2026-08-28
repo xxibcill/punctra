@@ -16,9 +16,12 @@ verified; v0.16 bounded immutable-LAS Range/cache/Worker workflow Complete and
 repository-verified; v0.17 bounded viewer API/exact-Point, v0.18 packed SDK/React
 lifecycle, v0.19 exact local qualification, and v0.20 clean packed-consumer
 integration workflows Complete and repository-verified; v0.21 private visual-
-trial/capture/evidence workflow Accepted and in progress, with attended
-evidence and release verification outstanding; arbitrary remote browser
-delivery and broader workflows remain outstanding**
+trial/capture/evidence workflow Complete and repository-verified for the exact
+local attended lane, while broader browser/device support, physical-display
+presentation, independent-human/adopter evidence, improved or final visual
+quality, API stability, support qualification, beta, v1, and release-candidate
+status remain outstanding; arbitrary remote browser delivery and broader
+workflows remain outstanding**
 
 The host composes sibling modules explicitly. Lower crates never call back into
 an application, discover a Source for a Workspace, submit a GPU queue, or infer
@@ -805,7 +808,7 @@ or Query support.
 
 ## 11h. Reproduce one private visual baseline
 
-The accepted v0.21 workflow crosses one closed private Visual Trial seam. A
+The completed v0.21 workflow crosses one closed private Visual Trial seam. A
 trial identifier fixes its generated or permission-bound derived input,
 camera, mode, projection, highlight, viewport, settling, feature, tolerance,
 and resource facts; the runner exposes none of those as a configurable public
@@ -900,9 +903,11 @@ target observes renderer output before OS composition and display color
 management. Its callback intervals include scheduling delay and do not measure
 physical GPU-completion time. It is presentation-only evidence and cannot
 publish Source geometry, exact Query truth, or a browser/display support claim.
-The evidence workflow remains incomplete until every fixed trial, recreation,
-accepted artifact, interpretation binding, implementation pin, and verifier pin
-exists and passes.
+The checked-in evidence workflow is Complete and repository-verified because
+every fixed trial, recreation, accepted artifact, interpretation binding,
+implementation pin, and verifier pin exists and passes; any reproduction
+missing one remains incomplete. See the [v0.21 release
+record](../releases/v0.21.0.md).
 
 ## 12. Cancellation and crash matrix
 

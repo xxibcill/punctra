@@ -14,8 +14,11 @@ cache, and worker streaming slice Complete and repository-verified; v0.17
 framework-neutral viewer API and exact-Point bridge plus v0.18 packed SDK and
 thin React adapter plus v0.19 exact local browser/device qualification plus
 v0.20 clean packed-consumer integration baseline Complete and repository-
-verified; v0.21 private visual-corpus/capture/comparison implementation Accepted
-and in progress while attended evidence and release verification remain
+verified; v0.21 private visual-corpus/capture/comparison/evidence implementation
+Complete and repository-verified for the bounded exact local attended lane;
+broader browser/device support, physical-display presentation, independent-
+human/adopter evidence, improved or final visual quality, API stability,
+support qualification, beta, v1, and release-candidate status remain
 outstanding; later crates are created only with accepted behavior and a caller
 
 The repository is one Cargo workspace. Each current crate is independently
@@ -115,6 +118,17 @@ apps/
         corpus.json
         autzen-classified-sample.json
         autzen-classified-sample.pvis
+        baseline-inputs.json
+        baselines/
+          generated-neutral-mixed-lod-perspective.png
+          generated-elevation-layered-orthographic.png
+          generated-rgb-hdr-perspective.png
+          generated-intensity-sparse-orthographic.png
+          generated-classification-selection-perspective.png
+          autzen-rgb-perspective.png
+          autzen-classification-perspective.png
+          autzen-intensity-perspective.png
+          autzen-elevation-perspective.png
 
 examples/
   browser-typescript/
@@ -344,6 +358,14 @@ docs/
   design/
   guides/browser-visual-quality.md
   releases/
+    v0.21-browser-baseline.json
+    v0.21-browser-matrix.json
+    v0.21-browser-quickstart.json
+    v0.21-browser-visual-baseline.json
+    v0.21-browser-visual-evidence.json
+    v0.21-browser-visual-rubric-template.json
+    v0.21-browser-visual-artifacts/  # 864 bound PNGs
+    v0.21.0.md
   adr/
   research/
 
@@ -375,17 +397,18 @@ verify tuple and fixed attended lane. `visual-export.test.mjs` pins the Blob-
 default client selection and exact receipt validation; `range-server.test.mjs`
 exercises the opt-in endpoint implemented by `scripts/serve-browser-demo.py`.
 
-The attended record stage adds
-`fixtures/visual-v1/baseline-inputs.json` and exactly nine PNGs under
-`fixtures/visual-v1/baselines/` before the implementation pin. They are absent
-until that real record run occurs; no placeholder is valid. The later attended
-verify stage produces `docs/releases/v0.21-browser-visual-evidence.json` and its
-bound recreation, transition, and difference PNGs. The browser moves these
-repository-relative files in one private uncompressed USTAR bundle. The bundle
-is transport only and is not checked in. `visual-export.js` may send the same
-bundle to the strict server only when `transport=server` and the server was
-started with `--visual-export-dir`; its fixed no-overwrite local target and
-receipt are not evidence.
+The completed record stage added `fixtures/visual-v1/baseline-inputs.json` and
+exactly nine canonical PNGs under `fixtures/visual-v1/baselines/`. The completed
+verify stage added the visual-evidence record and 864 bound recreation,
+transition, and difference PNGs under
+`docs/releases/v0.21-browser-visual-artifacts/`. Together the repository
+contains 873 v0.21 PNGs. The visual policy, rubric template, evidence, and
+human-readable release record are checked in under `docs/releases/`. The
+browser moved the repository-relative files in one private uncompressed USTAR
+bundle; that bundle is transport only and is not checked in. `visual-export.js`
+may send the same bundle to the strict server only when `transport=server` and
+the server was started with `--visual-export-dir`; its fixed no-overwrite local
+target and receipt are not evidence.
 
 ## Cargo dependency direction
 

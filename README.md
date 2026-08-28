@@ -324,7 +324,7 @@ Independent adoption, registry/CDN publication, other browsers and devices,
 API stability, visual-quality completion, support qualification, beta, v1, and
 release-candidate status remain outstanding.
 
-Version 0.21.0-alpha.1 is implementing the accepted bounded
+Version 0.21.0-alpha.1 completes the accepted bounded
 [Visual-Quality Baseline and Regression Corpus
 design](docs/design/visual-quality-baseline-v0.21.md). The private repository
 lane freezes nine trials--five deterministic generated trials and four
@@ -336,10 +336,10 @@ canonical canvas is 320 by 240 CSS pixels at requested DPR 2; every trial must
 settle for 30 quiet foreground frames and be repeated across three complete
 viewer/harness recreations.
 
-Acceptance is sequential: an attended record stage creates the canonical PNGs
+Acceptance was sequential: an attended record stage created the canonical PNGs
 and commit-free baseline-input manifest before the implementation pin; after
-that exact pin is rebuilt and the inherited browser lanes pass, a separate
-attended verify stage creates the only evidence eligible for final acceptance.
+that exact pin was rebuilt and the inherited browser lanes passed, a separate
+attended verify stage created the only evidence eligible for final acceptance.
 Each stage presents its exact rubric images after capture and moves repository-
 relative artifacts in one private uncompressed TAR bundle. The default is one
 standard browser Blob download. If the in-app browser does not materialize
@@ -352,21 +352,29 @@ attended-lane identity, and disables the visible Run control until that tuple
 is valid.
 
 The checked-in corpus, derivative, private capture path, comparison policy,
-and verifier are implementation work, not yet a completed or pinned v0.21
-release. Accepted tolerances cannot exceed a channel threshold of 2, an
-unstable-pixel fraction of 0.001, a maximum channel delta of 4, or one physical
-pixel of feature displacement; settled generated temporal comparisons remain
-exact. A non-gating interpretation rubric records depth, shape, density-
-transition, color-meaning, selection, and false-feature observations without
+baseline inputs, verifier, and verify-mode evidence are Complete and repository-
+verified at implementation commit
+`5c1546f170eaa4365d7b357039c6fe8852677a99`. All nine trials passed through
+three complete recreations, producing 873 checked-in PNG artifacts. All six
+post-capture non-gating rubric outcomes are explicitly `not_observed` under the
+session label `codex-local-maintainer-not-human`; no favorable or independent-
+human interpretation is inferred. Accepted tolerances cannot exceed a channel
+threshold of 2, an unstable-pixel fraction of 0.001, a maximum channel delta of
+4, or one physical pixel of feature displacement; settled generated temporal
+comparisons remain exact. A non-gating interpretation rubric records depth,
+shape, density-transition, color-meaning, selection, and false-feature
+observations without
 turning screenshots into geometry or favorable opinion into a pass condition.
 See the [visual-quality guide](docs/guides/browser-visual-quality.md) for the
-current local workflow and evidence boundary.
+local workflow and evidence boundary, and the [v0.21 repository verification
+record](docs/releases/v0.21.0.md) for the exact pins, measurements, artifacts,
+rubric outcome, and remaining external exits.
 
 This repository activation explicitly supplies the representative corpus that
 v0.20 did not. It does not retroactively satisfy v0.20's representative-scene
 gate or claim another browser, physical display presentation, independent
 human interpretation, independent adoption, improved/final visual quality,
-support qualification, beta, v1, or release-candidate status.
+API stability, support qualification, beta, v1, or release-candidate status.
 
 To try the implemented View safely, follow the five-minute [first LAS/LAZ
 guide](docs/guides/first-las-laz.md). It separates position-only disk-v1 and
@@ -374,9 +382,8 @@ attributed disk-v2 caches and explains what progressive Coverage does and does
 not mean.
 
 Later direction and the exact external product gates are described in the
-[living roadmap](ROADMAP.md). The linked v0.15 through v0.20 designs define the
-completed functional browser scopes; the accepted v0.21 design defines the
-active bounded visual-baseline implementation. Later Candidate themes do not
+[living roadmap](ROADMAP.md). The linked v0.15 through v0.21 designs define the
+completed bounded browser scopes. Later Candidate themes do not
 expand accepted scope by themselves.
 
 ## Embedding model

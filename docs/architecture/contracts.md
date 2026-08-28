@@ -12,8 +12,11 @@ QA and correction-loop slice Complete and repository-verified; v0.15 browser
 foundation, v0.16 Range/cache/Worker streaming, v0.17 viewer/exact-Point,
 v0.18 packed SDK/React lifecycle, v0.19 exact local qualification, and v0.20
 packed-consumer integration contracts Complete and repository-verified; v0.21
-private visual-baseline contracts Accepted and in progress while attended
-record/verify evidence and release verification remain outstanding
+private visual-baseline contracts Complete and repository-verified for the
+bounded exact local attended lane, while broader browser/device support,
+physical-display presentation, independent-human/adopter evidence, improved or
+final visual quality, API stability, support qualification, beta, v1, and
+release-candidate status remain outstanding
 
 The versioned designs in [`docs/design`](../design) control exact release
 scope. This document summarizes the invariants that cross current crate seams.

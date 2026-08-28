@@ -1,8 +1,9 @@
 # Browser visual-quality baseline
 
-Status: **v0.21 bounded repository implementation is accepted and in progress;
-final attended evidence, accepted images, exact pins, and the release record do
-not yet exist**
+Status: **v0.21 is Complete and repository-verified for the bounded corpus and
+one exact attended Chromium/macOS/Apple-GPU lane; broader browser/device,
+physical-display, independent-human/adopter, and improved/final-quality claims
+remain outstanding**
 
 Punctra `0.21.0-alpha.1` establishes a reproducible visual-regression baseline
 before any intentional point-appearance change. The accepted
@@ -338,16 +339,15 @@ node scripts/verify-browser-visual-baseline.mjs \
   --evidence docs/releases/v0.21-browser-visual-evidence.json
 ```
 
-The baseline-input files are intentionally absent until the real record stage;
-the final evidence path remains absent until the later verify stage. At this
-implementation-in-progress stage, the static policy's
-`pins.implementation_commit` is the explicit forty-zero non-pin and its verifier
-digest is provisional. The accepted baseline PNGs, final maintainer rubric
-result, verify-mode evidence, and `docs/releases/v0.21.0.md` release record are
-absent. Do not create observation placeholders or infer them from the rubric
-template. The static verifier must reject the non-pin and cannot become release
-evidence until the workflow freezes the exact implementation commit and
-refreshes every dependent digest.
+The completed record stage produced the checked-in baseline inputs. The later
+verify stage at implementation commit
+`5c1546f170eaa4365d7b357039c6fe8852677a99` passed all nine trials through
+three complete recreations and retained 873 PNG artifacts. All six rubric
+outcomes are explicitly `not_observed` under
+`codex-local-maintainer-not-human`; they are not favorable or independent-human
+observations. The [v0.21 repository verification
+record](../releases/v0.21.0.md) pins the exact lane, verifier identities,
+evidence record, functional measurements, artifacts, and remaining nonclaims.
 
 Follow [CONTRIBUTING.md](../../CONTRIBUTING.md) for the complete local Rust,
 Wasm, JavaScript, package, GPU, browser, benchmark, documentation, and JSON

@@ -1,8 +1,8 @@
 {
   "schema": "punctra-browser-qualification-matrix-v1",
   "release": "0.21.0-alpha.1",
-  "implementation_commit": "0e16d924ed9d812dbef3e28726cf33322ffd9ada",
-  "verifier_sha256": "f31dcb13dd080ac6b1a7e0ff1ecc69edd0e92f1aa159bab9bf5047b8ac0e8ff1",
+  "implementation_commit": "5c1546f170eaa4365d7b357039c6fe8852677a99",
+  "verifier_sha256": "3bc9ef7ad67c54903c16090ddd0ae032228ba02ba9a9f888228e65ebab32b336",
   "observed_on": "2026-08-28",
   "qualified_entries": [
     {
@@ -18,8 +18,8 @@
       },
       "operating_system": {
         "name": "macOS",
-        "version": "26.5.2",
-        "build": "25F84",
+        "version": "26.6.2",
+        "build": "25G83",
         "architecture": "arm64",
         "user_agent_platform": "MacIntel",
         "note": "The browser's reduced user-agent OS token is not the operating-system version authority."
@@ -49,13 +49,13 @@
         "max_color_attachments": 8
       },
       "display": {
-        "physical_viewport": [1749, 1093],
-        "css_viewport": [874.28125, 546.421875],
+        "physical_viewport": [1396, 873],
+        "css_viewport": [698, 436.25],
         "device_pixel_ratio": 2,
-        "screen_css_pixels": [1920, 1080],
-        "color_depth": 24,
-        "pixel_depth": 24,
-        "canvas_bytes": 7646628,
+        "screen_css_pixels": [1512, 982],
+        "color_depth": 30,
+        "pixel_depth": 30,
+        "canvas_bytes": 4874832,
         "display_path": "built-in Retina display",
         "screen_note": "The browser-reported CSS screen size and bit depth are exact session facts; the host independently reported the built-in Retina display path."
       },
@@ -87,10 +87,10 @@
           "language": "en-US",
           "logical_processors": 15,
           "screen": {
-            "width": 1920,
-            "height": 1080,
-            "color_depth": 24,
-            "pixel_depth": 24
+            "width": 1512,
+            "height": 982,
+            "color_depth": 30,
+            "pixel_depth": 30
           },
           "visibility_state": "visible",
           "secure_context": true
@@ -106,9 +106,9 @@
             "ordinal_count": 4096,
             "transferred_bytes": 131072
           },
-          "first_coverage_milliseconds": 15.899999856948853,
-          "settled_view_milliseconds": 17.799999952316284,
-          "main_thread_batch_milliseconds_high_water": 0.39999985694885254,
+          "first_coverage_milliseconds": 16.300000000745058,
+          "settled_view_milliseconds": 18.100000001490116,
+          "main_thread_batch_milliseconds_high_water": 0.30000000074505806,
           "binary_requests": 3,
           "requested_bytes": 172696,
           "received_bytes": 172696,
@@ -127,9 +127,9 @@
             "ordinal_count": 4096,
             "transferred_bytes": 131072
           },
-          "first_coverage_milliseconds": 12.799999952316284,
-          "settled_view_milliseconds": 14.700000047683716,
-          "main_thread_batch_milliseconds_high_water": 0.40000009536743164,
+          "first_coverage_milliseconds": 12.599999997764826,
+          "settled_view_milliseconds": 14.800000000745058,
+          "main_thread_batch_milliseconds_high_water": 0.5,
           "binary_requests": 0,
           "requested_bytes": 0,
           "received_bytes": 0,
@@ -140,24 +140,24 @@
         },
         "foreground_frames": {
           "sample_count": 30,
-          "callback_interval_p50_milliseconds": 33.299999999999955,
-          "callback_interval_p95_milliseconds": 34.30000000000018,
-          "callback_interval_max_milliseconds": 34.399999999999864,
-          "submission_p50_milliseconds": 1,
-          "submission_p95_milliseconds": 1.2000000476837158,
-          "submission_max_milliseconds": 1.2000000476837158
+          "callback_interval_p50_milliseconds": 8.399999999999977,
+          "callback_interval_p95_milliseconds": 17.19999999999999,
+          "callback_interval_max_milliseconds": 18.199999999999932,
+          "submission_p50_milliseconds": 0.3999999985098839,
+          "submission_p95_milliseconds": 0.6000000014901161,
+          "submission_max_milliseconds": 0.6999999992549419
         },
         "resources": {
           "retained_record_bytes": 131072,
           "renderer_resident_bytes": 98304,
-          "transient_texture_bytes": 15293256,
+          "transient_texture_bytes": 9749664,
           "javascript_heap_api": "performance.memory.usedJSHeapSize",
           "javascript_heap_status": "non_standard_observation",
-          "javascript_heap_before_bytes": 7958380,
-          "javascript_heap_after_cold_bytes": 8350236,
-          "javascript_heap_after_warm_bytes": 8350236,
-          "javascript_heap_after_frames_bytes": 5964356,
-          "javascript_heap_high_water_bytes": 8350236,
+          "javascript_heap_before_bytes": 30471302,
+          "javascript_heap_after_cold_bytes": 30456028,
+          "javascript_heap_after_warm_bytes": 30456028,
+          "javascript_heap_after_frames_bytes": 7024004,
+          "javascript_heap_high_water_bytes": 30471302,
           "process_resident_bytes": null,
           "physical_cache_allocation_bytes": null,
           "physical_gpu_allocation_bytes": null
@@ -173,7 +173,7 @@
           "prepublication_offline_failure_preserved_viewer": true,
           "prepublication_offline_recoverable": true,
           "prepublication_offline_generation_preserved": true,
-          "cancellation_acknowledgement_milliseconds": 7.3999998569488525,
+          "cancellation_acknowledgement_milliseconds": 7.600000001490116,
           "cancellation_viewer_retained": true,
           "cancellation_frame_retained": true,
           "warm_cache_recreation_zero_binary_requests": true,

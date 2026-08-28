@@ -132,7 +132,7 @@ capability matrix, and known limitations. The repository consumer is not an
 independent adopter; registry/CDN publication, other browsers/devices, API
 stability, visual-quality completion, support qualification, beta, v1, and
 release-candidate status remain outside this scope.
-The accepted bounded [v0.21 Visual-Quality Baseline and Regression Corpus
+The completed bounded [v0.21 Visual-Quality Baseline and Regression Corpus
 scope](docs/design/visual-quality-baseline-v0.21.md) permits a closed private
 browser corpus, deterministic generated inputs, one CC BY 4.0 Autzen
 derivative, private offscreen GPU capture/readback, lossless canonical-image
@@ -143,7 +143,9 @@ representative corpus that v0.20 did not; it does not pretend the original gate
 was already satisfied. It changes no public viewer seam or point-appearance
 policy and does not authorize cross-browser/display claims, arbitrary Sources,
 independent-human or adopter evidence, improved/final visual quality, support
-qualification, beta, v1, or release-candidate status.
+qualification, API stability, beta, v1, or release-candidate status.
+Its exact completed repository observations and pins are recorded in the
+[v0.21 verification record](docs/releases/v0.21.0.md).
 Apart from the explicit v0.8 reader exception, the v0.17 browser-demo
 exact-query bridge is a narrowly scoped exception for the trusted immutable
 LAS fixture described by the accepted design. All other external format
@@ -397,10 +399,14 @@ node scripts/verify-browser-visual-baseline.mjs \
   --evidence docs/releases/v0.21-browser-visual-evidence.json
 ```
 
-That evidence file, the accepted PNGs, the maintainer-labelled rubric result,
-and the v0.21 release record are intentionally absent until both attended
-stages have actually completed. Do not create placeholders that look observed.
-See the [browser visual-quality guide](docs/guides/browser-visual-quality.md).
+The completed v0.21 repository run followed that sequence: all nine trials
+passed through three complete recreations, 873 PNG artifacts were retained,
+and all six rubric outcomes were explicitly `not_observed` under
+`codex-local-maintainer-not-human`. The [v0.21 verification
+record](docs/releases/v0.21.0.md) pins the exact implementation, verifier,
+environment, evidence, and remaining nonclaims. Future reproductions must not
+replace those observations with placeholders. See the [browser visual-quality
+guide](docs/guides/browser-visual-quality.md).
 
 See the [browser streaming
 guide](docs/guides/browser-streaming.md) and [browser viewer API
