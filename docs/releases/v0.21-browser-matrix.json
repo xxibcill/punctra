@@ -1,7 +1,7 @@
 {
   "schema": "punctra-browser-qualification-matrix-v1",
   "release": "0.21.0-alpha.1",
-  "implementation_commit": "f5d04d2c6091deda1136c2304cf8f97b9b40a755",
+  "implementation_commit": "0c04f1dfda11d268227408224965dc0daf679ac1",
   "verifier_sha256": "3bc9ef7ad67c54903c16090ddd0ae032228ba02ba9a9f888228e65ebab32b336",
   "observed_on": "2026-08-28",
   "qualified_entries": [
@@ -49,13 +49,22 @@
         "max_color_attachments": 8
       },
       "display": {
-        "physical_viewport": [1749, 1093],
-        "css_viewport": [874.28125, 546.421875],
+        "physical_viewport": [
+          1896,
+          1185
+        ],
+        "css_viewport": [
+          948,
+          592.5
+        ],
         "device_pixel_ratio": 2,
-        "screen_css_pixels": [1920, 1080],
+        "screen_css_pixels": [
+          1920,
+          1080
+        ],
         "color_depth": 24,
         "pixel_depth": 24,
-        "canvas_bytes": 7646628,
+        "canvas_bytes": 8987040,
         "display_path": "built-in Retina display",
         "screen_note": "The browser-reported CSS screen size and bit depth are exact session facts; the host independently reported the built-in Retina display path."
       },
@@ -106,15 +115,15 @@
             "ordinal_count": 4096,
             "transferred_bytes": 131072
           },
-          "first_coverage_milliseconds": 16.100000001490116,
-          "settled_view_milliseconds": 17.899999998509884,
-          "main_thread_batch_milliseconds_high_water": 0.30000000447034836,
+          "first_coverage_milliseconds": 23.5,
+          "settled_view_milliseconds": 25.19999999552965,
+          "main_thread_batch_milliseconds_high_water": 0.5,
           "binary_requests": 3,
           "requested_bytes": 172696,
           "received_bytes": 172696,
-          "verified_cache_bytes": 0,
           "concurrent_response_bytes_high_water": 172032,
-          "worker_staging_bytes_high_water": 204800
+          "worker_staging_bytes_high_water": 204800,
+          "verified_cache_bytes": 0
         },
         "warm": {
           "workload": {
@@ -127,9 +136,9 @@
             "ordinal_count": 4096,
             "transferred_bytes": 131072
           },
-          "first_coverage_milliseconds": 10.800000004470348,
-          "settled_view_milliseconds": 12.600000001490116,
-          "main_thread_batch_milliseconds_high_water": 0.5,
+          "first_coverage_milliseconds": 11,
+          "settled_view_milliseconds": 13.099999994039536,
+          "main_thread_batch_milliseconds_high_water": 0.4000000059604645,
           "binary_requests": 0,
           "requested_bytes": 0,
           "received_bytes": 0,
@@ -140,24 +149,24 @@
         },
         "foreground_frames": {
           "sample_count": 30,
-          "callback_interval_p50_milliseconds": 33.299999999999955,
-          "callback_interval_p95_milliseconds": 33.899999999999864,
-          "callback_interval_max_milliseconds": 33.90000000000009,
-          "submission_p50_milliseconds": 0.8999999985098839,
-          "submission_p95_milliseconds": 1.1000000014901161,
-          "submission_max_milliseconds": 1.2000000029802322
+          "callback_interval_p50_milliseconds": 33.30000000000018,
+          "callback_interval_p95_milliseconds": 33.40000000000009,
+          "callback_interval_max_milliseconds": 33.40000000000009,
+          "submission_p50_milliseconds": 0.29999999701976776,
+          "submission_p95_milliseconds": 0.3999999985098839,
+          "submission_max_milliseconds": 0.3999999985098839
         },
         "resources": {
           "retained_record_bytes": 131072,
           "renderer_resident_bytes": 98304,
-          "transient_texture_bytes": 15293256,
+          "transient_texture_bytes": 17974080,
           "javascript_heap_api": "performance.memory.usedJSHeapSize",
           "javascript_heap_status": "non_standard_observation",
-          "javascript_heap_before_bytes": 8889425,
-          "javascript_heap_after_cold_bytes": 9606987,
-          "javascript_heap_after_warm_bytes": 9606987,
-          "javascript_heap_after_frames_bytes": 6857045,
-          "javascript_heap_high_water_bytes": 9606987,
+          "javascript_heap_before_bytes": 11371721,
+          "javascript_heap_after_cold_bytes": 11930746,
+          "javascript_heap_after_warm_bytes": 11930746,
+          "javascript_heap_after_frames_bytes": 8682777,
+          "javascript_heap_high_water_bytes": 11930746,
           "process_resident_bytes": null,
           "physical_cache_allocation_bytes": null,
           "physical_gpu_allocation_bytes": null
@@ -173,7 +182,7 @@
           "prepublication_offline_failure_preserved_viewer": true,
           "prepublication_offline_recoverable": true,
           "prepublication_offline_generation_preserved": true,
-          "cancellation_acknowledgement_milliseconds": 7.100000001490116,
+          "cancellation_acknowledgement_milliseconds": 7.600000001490116,
           "cancellation_viewer_retained": true,
           "cancellation_frame_retained": true,
           "warm_cache_recreation_zero_binary_requests": true,

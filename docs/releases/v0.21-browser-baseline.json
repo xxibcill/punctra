@@ -207,11 +207,11 @@
     "matrix_path": "docs/releases/v0.21-browser-matrix.json",
     "matrix_digest": {
       "path": "docs/releases/v0.21-browser-matrix.json",
-      "byte_length": 10061,
-      "sha256": "c01b4571d3b87efcabeb6f44fc719c25a69b43363a1a34aad041a0a470da4d42"
+      "byte_length": 10111,
+      "sha256": "7f0ae96aa7c179d48585ed9ffc4f3c8e6e012efa81b016e86bded34ca40e3b02"
     },
     "matrix_schema": "punctra-browser-qualification-matrix-v1",
-    "implementation_commit": "f5d04d2c6091deda1136c2304cf8f97b9b40a755",
+    "implementation_commit": "0c04f1dfda11d268227408224965dc0daf679ac1",
     "qualified_lane": "codex-iab-chromium-151-macos-26-apple-m5-pro",
     "limits": {
       "firstCoverageMilliseconds": 10000,
