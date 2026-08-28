@@ -3,7 +3,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-#[path = "../../../../tests/support/gpu.rs"]
+#[path = "../../../../crates/render-wgpu/test-support/gpu.rs"]
 mod gpu_support;
 
 use render_protocol::{

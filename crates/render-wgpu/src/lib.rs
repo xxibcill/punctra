@@ -139,7 +139,7 @@ mod footprint;
 mod frame;
 mod gpu;
 #[cfg(test)]
-#[path = "../../../tests/support/gpu.rs"]
+#[path = "../test-support/gpu.rs"]
 mod gpu_support;
 mod pick;
 mod pipeline;

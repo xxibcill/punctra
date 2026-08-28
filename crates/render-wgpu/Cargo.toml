@@ -17,6 +17,9 @@ publish = true
 all-features = true
 rustdoc-args = ["-D", "warnings"]
 
+[features]
+default = []
+
 [dependencies]
 bytemuck.workspace = true
 glam.workspace = true

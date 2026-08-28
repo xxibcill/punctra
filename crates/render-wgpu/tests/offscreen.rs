@@ -9,7 +9,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-#[path = "../../../tests/support/gpu.rs"]
+#[path = "../test-support/gpu.rs"]
 mod gpu_support;
 
 use render_protocol::{
