@@ -33,6 +33,7 @@ import {
   createPointFootprintResourceEvidence,
   createTopologyMetricBinding,
   derivePointFootprintEvidenceSummary,
+  evaluateDenseSolidBlockBudget,
   projectedDensityDisplayDiameter,
   summarizeFootprintTiming,
   validatePointFootprintBaseline,
@@ -368,6 +369,7 @@ async function runCanonicalTrial(options) {
       predecessor.image,
       recreation.image,
       footprint.focused_trials.find(({ id }) => id === trial.id)?.dense_regions ?? [],
+      footprint.metric_limits,
     );
     const quality = evaluateCanonicalQuality({
       topology: topology.metrics,
@@ -949,7 +951,7 @@ function compareFeatureFacts(predecessor, candidate, features) {
   });
 }
 
-function compareDenseRegions(predecessor, candidate, regions) {
+function compareDenseRegions(predecessor, candidate, regions, limits) {
   return regions.map((rectangle) => {
     const before = measureOccupancyTopology(predecessor, { rectangle, backgroundRgba: BACKGROUND_RGBA });
     const after = measureOccupancyTopology(candidate, { rectangle, backgroundRgba: BACKGROUND_RGBA });
@@ -957,9 +959,7 @@ function compareDenseRegions(predecessor, candidate, regions) {
       rectangle: structuredClone(rectangle),
       predecessor: before,
       candidate: after,
-      solid_2x2_ratio: before.metrics.solid_2x2_blocks === 0
-        ? (after.metrics.solid_2x2_blocks === 0 ? 1 : null)
-        : after.metrics.solid_2x2_blocks / before.metrics.solid_2x2_blocks,
+      solid_2x2_budget: evaluateDenseSolidBlockBudget(before.metrics, after.metrics, limits),
     };
   });
 }
@@ -993,10 +993,7 @@ function evaluateCanonicalQuality(options) {
     }
   }
   for (const region of densityComparisons) {
-    if (region.solid_2x2_ratio === null
-      || region.solid_2x2_ratio > limits.dense_solid_block_predecessor_ratio) {
-      failures.push("dense_solid_2x2_ratio");
-    }
+    if (!region.solid_2x2_budget.passed) failures.push("dense_solid_2x2_budget");
   }
   if (topology.foreground.left_right_bridge_components > predecessorTopology.foreground.left_right_bridge_components
     || topology.foreground.top_bottom_bridge_components > predecessorTopology.foreground.top_bottom_bridge_components) {

@@ -20,6 +20,7 @@ import {
   createPointFootprintResourceEvidence,
   createTopologyMetricBinding,
   derivePointFootprintEvidenceSummary,
+  evaluateDenseSolidBlockBudget,
   expectedPointFootprintResources,
   projectedDensityDisplayDiameter,
   summarizeFootprintTiming,
@@ -222,6 +223,17 @@ test("density diameter treats an empty resident set as one point like the host",
   );
 });
 
+test("dense solid-block budget requires reduction only above the accepted bound", () => {
+  const rectangle = { x: 0, y: 0, width: 10, height: 10 };
+  const limits = corpus.metric_limits;
+  const report = (solidBlocks) => ({ rectangle, solid_2x2_blocks: solidBlocks });
+
+  assert.equal(evaluateDenseSolidBlockBudget(report(64), report(65), limits).passed, true);
+  assert.equal(evaluateDenseSolidBlockBudget(report(64), report(66), limits).passed, false);
+  assert.equal(evaluateDenseSolidBlockBudget(report(66), report(65), limits).passed, true);
+  assert.equal(evaluateDenseSolidBlockBudget(report(66), report(66), limits).passed, false);
+});
+
 test("runner adapters project PNG, metric, and resource facts without carrying its larger record shape", () => {
   const image = imageArtifact({
     kind: "focused_candidate_png",
@@ -324,6 +336,15 @@ test("pass flags, samples, metrics, resources, status, identities, and browser p
         candidate_component: 0,
         predecessor_components: [0, 1],
       };
+    },
+    (value) => {
+      const recreation = value.canonical_trials
+        .flatMap(({ recreations }) => recreations)
+        .find(({ dense_region_checks: regions }) => regions.length > 0);
+      const region = recreation.dense_region_checks[0];
+      const possibleBlocks = (region.rectangle.width - 1) * (region.rectangle.height - 1);
+      region.predecessor.report.solid_2x2_blocks = possibleBlocks;
+      region.candidate.report.solid_2x2_blocks = possibleBlocks;
     },
     (value) => { value.canonical_trials[0].recreations[0].resources.multisample_color_bytes -= 4; },
     (value) => { value.canonical_trials[0].recreations[0].point_footprint.selected = "multisample_4x"; },

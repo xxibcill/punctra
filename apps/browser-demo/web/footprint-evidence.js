@@ -304,6 +304,44 @@ export function projectedDensityDisplayDiameter(profile, residentPoints, policy)
   ));
 }
 
+/** Applies the accepted dense-region bound and its conditional predecessor budget. */
+export function evaluateDenseSolidBlockBudget(predecessor, candidate, limits) {
+  requireRecord(predecessor, "predecessor dense-region report");
+  requireRecord(candidate, "candidate dense-region report");
+  requireRecord(limits, "dense-region limits");
+  requireJsonEqual(candidate.rectangle, predecessor.rectangle, "dense-region rectangles");
+  const rectangle = predecessor.rectangle;
+  validateRectangle(rectangle, "dense-region budget");
+  const possibleBlocks = Math.max(0, rectangle.width - 1) * Math.max(0, rectangle.height - 1);
+  requireCondition(possibleBlocks > 0, "dense-region budget has no two-by-two cells");
+  for (const [label, value] of [
+    ["predecessor", predecessor.solid_2x2_blocks],
+    ["candidate", candidate.solid_2x2_blocks],
+  ]) {
+    requireCondition(Number.isSafeInteger(value) && value >= 0 && value <= possibleBlocks,
+      `${label} dense-region solid blocks are invalid`);
+  }
+  const acceptedFraction = limits.maximum_dense_solid_2x2_fraction;
+  const predecessorRatio = limits.dense_solid_block_predecessor_ratio;
+  requireCondition(Number.isFinite(acceptedFraction)
+    && acceptedFraction >= 0 && acceptedFraction <= 1,
+  "dense-region accepted fraction is invalid");
+  requireCondition(Number.isFinite(predecessorRatio) && predecessorRatio >= 1,
+    "dense-region predecessor ratio is invalid");
+
+  const predecessorFraction = predecessor.solid_2x2_blocks / possibleBlocks;
+  const alreadyWithinAcceptedBound = predecessorFraction <= acceptedFraction;
+  const maximumCandidateBlocks = alreadyWithinAcceptedBound
+    ? predecessor.solid_2x2_blocks * predecessorRatio
+    : predecessor.solid_2x2_blocks - 1;
+  return Object.freeze({
+    passed: candidate.solid_2x2_blocks <= maximumCandidateBlocks,
+    rule: alreadyWithinAcceptedBound ? "retain_within_predecessor_ratio" : "strict_reduction",
+    predecessor_solid_2x2_fraction: predecessorFraction,
+    maximum_candidate_solid_2x2_blocks: maximumCandidateBlocks,
+  });
+}
+
 /** Projects browser PNG metadata onto the closed evidence artifact shape. */
 export function createPointFootprintImageArtifact(metadata, profileId) {
   requireRecord(metadata, "browser PNG metadata");
@@ -1379,10 +1417,13 @@ function validateDenseRegionChecks(
       metricBindings,
       `${label} dense region ${index} candidate`,
     );
-    gate(region.candidate.report.solid_2x2_blocks
-      <= region.predecessor.report.solid_2x2_blocks
-        * limits.dense_solid_block_predecessor_ratio,
-    failures, `${label} dense region ${index} solid-block excess grew`);
+    const budget = evaluateDenseSolidBlockBudget(
+      region.predecessor.report,
+      region.candidate.report,
+      limits,
+    );
+    gate(budget.passed, failures,
+      `${label} dense region ${index} violates its ${budget.rule} solid-block budget`);
   }
 }
 

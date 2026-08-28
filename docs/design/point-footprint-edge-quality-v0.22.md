@@ -168,8 +168,9 @@ centroid facts. Acceptance requires:
   one physical pixel of its v0.21 position;
 - foreground fraction remains between 50% and 105% of the predecessor value,
   preventing both hidden sparse structure and new blob coverage;
-- the generated dense regions reduce two-by-two solid-block excess or retain it
-  within 2% when already below the accepted bound;
+- the generated dense regions reduce two-by-two solid-block excess when the
+  predecessor exceeds 0.80 of possible two-by-two cells, or retain it within 2%
+  when the predecessor is already at or below that accepted bound;
 - no new foreground connected component bridges two predecessor components
   separated by at least two clear physical pixels; and
 - the focused sparse trial retains every bound thin-feature center.
