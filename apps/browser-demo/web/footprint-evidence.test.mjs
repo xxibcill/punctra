@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import path from "node:path";
 import test from "node:test";
 
 import {
   FOOTPRINT_BASELINE_SCHEMA,
   FOOTPRINT_EVIDENCE_SCHEMA,
   FOOTPRINT_EXTERNAL_NONCLAIMS,
+  FOOTPRINT_IMPLEMENTATION_PATHS,
   FOOTPRINT_LOCAL_TEST_CASE_IDS,
   FOOTPRINT_LOCAL_TEST_PRODUCER_COMMAND,
   FOOTPRINT_LOCAL_TEST_SCHEMA,
@@ -23,6 +25,7 @@ import {
   summarizeFootprintTiming,
   validatePointFootprintBaseline,
   validatePointFootprintLocalTestArtifact,
+  validatePointFootprintRunInputs,
   verifyPointFootprintEvidence,
 } from "./footprint-evidence.js";
 
@@ -31,6 +34,7 @@ const corpus = JSON.parse(await readFile(
   "utf8",
 ));
 const SHA = "a".repeat(64);
+const REPOSITORY_ROOT_URL = new URL("../../../", import.meta.url);
 const IMPLEMENTATION_PATHS = [
   "Cargo.lock",
   "Cargo.toml",
@@ -62,6 +66,7 @@ const IMPLEMENTATION_PATHS = [
   "apps/browser-demo/web/visual-footprint-metrics.js",
   "apps/browser-demo/web/visual-footprint-metrics.test.mjs",
   "apps/browser-demo/web/visual-png.js",
+  "apps/browser-demo/web/visual-provenance.js",
   "apps/browser-demo/web/visual-rubric.js",
   "apps/browser-demo/web/visual-validation.js",
   "apps/browser-demo/web/fixtures/footprint-v1/corpus.json",
@@ -79,11 +84,53 @@ const IMPLEMENTATION_PATHS = [
   "crates/render-wgpu/src/targets.rs",
   "crates/render-wgpu/tests/contracts.rs",
   "crates/render-wgpu/tests/offscreen.rs",
-  "tests/support/gpu.rs",
+  "crates/render-wgpu/test-support/gpu.rs",
   "scripts/build-browser-demo.sh",
   "scripts/serve-browser-demo.py",
   FOOTPRINT_VERIFIER_PATH,
 ];
+
+test("qualification binds the exact loaded corpora before running", () => {
+  const inputs = validRunInputs();
+  const runningPins = validBaseline().pins;
+  runningPins.corpus = {
+    ...runningPins.corpus,
+    byte_length: inputs.footprint.byte_length,
+    sha256: inputs.footprint.sha256,
+  };
+  assert.equal(validatePointFootprintRunInputs(inputs, runningPins), inputs);
+
+  for (const [label, mutate] of [
+    ["footprint digest", (candidate) => { candidate.footprint.sha256 = "0".repeat(64); }],
+    ["predecessor pins", (candidate, pins) => { pins.predecessor.release = "tampered"; }],
+    ["visual URL", (candidate) => { candidate.visual.corpus_url += "?tampered=1"; }],
+    ["visual length", (candidate) => { candidate.visual.corpus_byte_length += 1; }],
+    ["visual digest", (candidate) => { candidate.visual.corpus_sha256 = "0".repeat(64); }],
+  ]) {
+    const candidate = structuredClone(inputs);
+    const pins = structuredClone(runningPins);
+    mutate(candidate, pins);
+    assert.throws(
+      () => validatePointFootprintRunInputs(candidate, pins),
+      new RegExp(label),
+    );
+  }
+});
+
+test("implementation pins close every relative JavaScript import", async () => {
+  const importedModules = await relativeJavaScriptImportClosure(
+    "apps/browser-demo/web/footprint-main.js",
+  );
+  const pinnedPaths = new Set([
+    ...FOOTPRINT_IMPLEMENTATION_PATHS,
+    ...FOOTPRINT_RUNTIME_PATHS,
+  ]);
+  assert.equal(importedModules.has("apps/browser-demo/web/pkg/browser_demo.js"), true,
+    "generated runtime entrypoint is absent from the import closure");
+  for (const modulePath of importedModules) {
+    assert.equal(pinnedPaths.has(modulePath), true, `${modulePath} is not pinned`);
+  }
+});
 
 test("baseline closes implementation, verifier, runtime, corpus, predecessor, and nine images", () => {
   const baseline = validBaseline();
@@ -794,6 +841,59 @@ function topologyReport(rectangle) {
       top_bottom_bridge_components: 0,
     },
   };
+}
+
+function validRunInputs() {
+  const footprintUrl = new URL("./fixtures/footprint-v1/corpus.json", import.meta.url);
+  const predecessorCorpus = corpus.predecessor.corpus;
+  return {
+    footprint: {
+      corpus: structuredClone(corpus),
+      url: footprintUrl.href,
+      byte_length: 12_345,
+      sha256: SHA,
+    },
+    visual: {
+      corpus: {},
+      corpus_url: new URL(predecessorCorpus.path, footprintUrl).href,
+      corpus_byte_length: predecessorCorpus.byte_length,
+      corpus_sha256: predecessorCorpus.sha256,
+    },
+  };
+}
+
+async function relativeJavaScriptImportClosure(entryPath) {
+  const visited = new Set();
+  const pending = [entryPath];
+  while (pending.length > 0) {
+    const modulePath = pending.pop();
+    if (visited.has(modulePath)) continue;
+    visited.add(modulePath);
+    let source;
+    try {
+      source = await readFile(new URL(modulePath, REPOSITORY_ROOT_URL), "utf8");
+    } catch (error) {
+      if (error?.code === "ENOENT" && FOOTPRINT_RUNTIME_PATHS.includes(modulePath)) continue;
+      throw error;
+    }
+    for (const specifier of relativeJavaScriptImports(source)) {
+      const dependency = path.posix.normalize(path.posix.join(
+        path.posix.dirname(modulePath),
+        specifier,
+      ));
+      if (!visited.has(dependency)) pending.push(dependency);
+    }
+  }
+  return visited;
+}
+
+function relativeJavaScriptImports(source) {
+  const imports = [];
+  const staticImport = /(?:^|\n)\s*(?:import|export)\s+(?:[^;]*?\s+from\s+)?["'](\.[^"']+\.js)["']\s*;/g;
+  for (const match of source.matchAll(staticImport)) imports.push(match[1]);
+  const dynamicImport = /\bimport\(\s*["'](\.[^"']+\.js)["']\s*\)/g;
+  for (const match of source.matchAll(dynamicImport)) imports.push(match[1]);
+  return imports;
 }
 
 function imageArtifact({

@@ -86,6 +86,7 @@ export const FOOTPRINT_IMPLEMENTATION_PATHS = Object.freeze([
   "apps/browser-demo/web/visual-footprint-metrics.js",
   "apps/browser-demo/web/visual-footprint-metrics.test.mjs",
   "apps/browser-demo/web/visual-png.js",
+  "apps/browser-demo/web/visual-provenance.js",
   "apps/browser-demo/web/visual-rubric.js",
   "apps/browser-demo/web/visual-validation.js",
   "apps/browser-demo/web/fixtures/footprint-v1/corpus.json",
@@ -103,7 +104,7 @@ export const FOOTPRINT_IMPLEMENTATION_PATHS = Object.freeze([
   "crates/render-wgpu/src/targets.rs",
   "crates/render-wgpu/tests/contracts.rs",
   "crates/render-wgpu/tests/offscreen.rs",
-  "tests/support/gpu.rs",
+  "crates/render-wgpu/test-support/gpu.rs",
   "scripts/build-browser-demo.sh",
   "scripts/serve-browser-demo.py",
   FOOTPRINT_VERIFIER_PATH,
@@ -127,6 +128,43 @@ export function validatePointFootprintBaseline(baseline, corpus) {
   validateFocusedImages(baseline.focused_images, baseline.candidate_images, corpus);
   requireJsonEqual(baseline.external_evidence, FOOTPRINT_EXTERNAL_NONCLAIMS, "baseline external nonclaims");
   return baseline;
+}
+
+/** Binds the corpus bytes loaded by the browser to the running qualification pins. */
+export function validatePointFootprintRunInputs(inputs, runningPins) {
+  requireRecord(inputs, "run inputs");
+  requireExactKeys(inputs, ["footprint", "visual"], "run inputs");
+  const { footprint, visual } = inputs;
+  requireRecord(footprint, "loaded footprint corpus");
+  requireRecord(visual, "loaded predecessor visual corpus");
+  requireRecord(runningPins, "running pins");
+  validateFootprintCorpus(footprint.corpus);
+  validateDigestRecord(runningPins.corpus, "running corpus pin");
+  requireRecord(runningPins.predecessor, "running predecessor pins");
+
+  requireJsonEqual({
+    path: CORPUS_PATH,
+    byte_length: footprint.byte_length,
+    sha256: footprint.sha256,
+  }, runningPins.corpus, "footprint digest");
+  requireJsonEqual(
+    runningPins.predecessor,
+    footprint.corpus.predecessor,
+    "predecessor pins",
+  );
+
+  const predecessorCorpus = footprint.corpus.predecessor.corpus;
+  const expectedVisualUrl = new URL(predecessorCorpus.path, footprint.url).href;
+  requireCondition(visual.corpus_url === expectedVisualUrl, "visual URL differs");
+  requireCondition(
+    visual.corpus_byte_length === predecessorCorpus.byte_length,
+    "visual length differs",
+  );
+  requireCondition(
+    visual.corpus_sha256 === predecessorCorpus.sha256,
+    "visual digest differs",
+  );
+  return inputs;
 }
 
 /**

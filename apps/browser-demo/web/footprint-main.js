@@ -36,6 +36,7 @@ import {
   summarizeFootprintTiming,
   validatePointFootprintBaseline,
   validatePointFootprintLocalTestArtifact,
+  validatePointFootprintRunInputs,
 } from "./footprint-evidence.js";
 import {
   FOOTPRINT_EXPORT_ARCHIVE_FILENAME,
@@ -52,7 +53,6 @@ import { createVisualValidator, errorMessage } from "./visual-validation.js";
 const EVIDENCE_SCHEMA = FOOTPRINT_EVIDENCE_SCHEMA;
 const BASELINE_SCHEMA = FOOTPRINT_BASELINE_SCHEMA;
 const FOOTPRINT_CORPUS_URL = new URL("./fixtures/footprint-v1/corpus.json", import.meta.url);
-const VISUAL_CORPUS_URL = new URL("./fixtures/visual-v1/corpus.json", import.meta.url);
 const BASELINE_URL = new URL("./qualification-footprint-baseline.json", globalThis.location.href);
 const LOCAL_TEST_EVIDENCE_URL = new URL(
   "./fixtures/footprint-v1/local-test-evidence.json",
@@ -96,10 +96,9 @@ let latestEvidence;
 
 async function initializePage() {
   try {
-    const [footprint, visual] = await Promise.all([
-      loadFootprintCorpus(FOOTPRINT_CORPUS_URL),
-      loadVisualCorpus(VISUAL_CORPUS_URL),
-    ]);
+    const footprint = await loadFootprintCorpus(FOOTPRINT_CORPUS_URL);
+    const visualUrl = new URL(footprint.corpus.predecessor.corpus.path, footprint.url);
+    const visual = await loadVisualCorpus(visualUrl);
     loadedContext = { footprint, visual };
     buildProgress(footprint.corpus.canonical_trials);
     updateState("ready", "Ready. Choose record or verify, then start the bounded attended run.");
@@ -170,6 +169,7 @@ async function runQualification({ mode, sessionLabel, activationFacts }) {
     loadRuntimeArtifacts(),
   ]);
   validateRunPins(mode, pins);
+  validatePointFootprintRunInputs({ footprint, visual }, pins.running);
   validatePointFootprintLocalTestArtifact(
     localTestBundle.json,
     pins.running.implementation.commit,

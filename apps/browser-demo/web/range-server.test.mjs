@@ -131,6 +131,7 @@ test("point-footprint pin endpoint binds the running checkout and verifier", asy
       "apps/browser-demo/web/visual-capture.js",
       "apps/browser-demo/web/visual-corpus.test.mjs",
       "apps/browser-demo/web/visual-footprint-metrics.test.mjs",
+      "apps/browser-demo/web/visual-provenance.js",
       "apps/browser-demo/web/visual-rubric.js",
       "apps/browser-demo/src/streaming.rs",
       "apps/renderer-demo/src/appearance.rs",
@@ -142,7 +143,7 @@ test("point-footprint pin endpoint binds the running checkout and verifier", asy
       "scripts/build-browser-demo.sh",
       "scripts/serve-browser-demo.py",
       "scripts/verify-browser-point-footprint.mjs",
-      "tests/support/gpu.rs",
+      "crates/render-wgpu/test-support/gpu.rs",
     ]) {
       assert.equal(implementationPaths.includes(requiredPath), true, requiredPath);
     }
