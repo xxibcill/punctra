@@ -86,6 +86,25 @@ test("a square footprint exposes coverage outside the ideal disk corners", () =>
   assert(report.coverage.mean_absolute_error > 0.04);
 });
 
+test("a compact square that passes aggregate gates still fills a quad corner", () => {
+  const image = solidImage(8, 8, BLACK);
+  for (const [x, y] of [[3, 3], [4, 3], [3, 4], [4, 4]]) {
+    setPixel(image, x, y, WHITE);
+  }
+  const report = measurePointFootprint(image, {
+    rectangle: { x: 0, y: 0, width: 8, height: 8 },
+    center: [4, 4],
+    radiusPixels: 1,
+    foregroundRgba: WHITE,
+    backgroundRgba: BLACK,
+  });
+
+  assert(report.coverage.root_mean_square_error <= 0.18);
+  assert.equal(report.corner_leakage.exact_distance_outer.pixel_count, 0);
+  assert.equal(report.centroid.error_pixels, 0);
+  assert.equal(report.corner_leakage.all_quad_corners_clear, false);
+});
+
 test("a translated disk reports centroid and radial drift from the declared center", () => {
   const shifted = createIdealDiskCoverage({
     rectangle: RECTANGLE,

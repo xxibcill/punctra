@@ -256,6 +256,9 @@ function measureCornerLeakage(
   center,
   radiusPixels,
 ) {
+  const allQuadCornersClear = quadCornerPixels(center, radiusPixels).every(([x, y]) => (
+    observedCoverageAtPixel(observed, rectangle, x, y) < 1 - quantizationTolerance
+  ));
   let pixelCount = 0;
   let coverage = 0;
   let outerPixelCount = 0;
@@ -284,6 +287,7 @@ function measureCornerLeakage(
   return {
     definition: "observed_coverage_above_ideal_disk_after_endpoint_rgba8_quantization_tolerance",
     normalized_rgba8_quantization_tolerance: quantizationTolerance,
+    all_quad_corners_clear: allQuadCornersClear,
     pixel_count: pixelCount,
     coverage,
     outer_pixel_count: outerPixelCount,
@@ -297,6 +301,27 @@ function measureCornerLeakage(
     },
     fraction_of_observed_coverage: observedTotal === 0 ? 0 : coverage / observedTotal,
   };
+}
+
+function quadCornerPixels(center, radiusPixels) {
+  return [
+    [-1, -1],
+    [1, -1],
+    [-1, 1],
+    [1, 1],
+  ].map(([signX, signY]) => [
+    Math.floor(center[0] + signX * radiusPixels),
+    Math.floor(center[1] + signY * radiusPixels),
+  ]);
+}
+
+function observedCoverageAtPixel(observed, rectangle, x, y) {
+  const localX = x - rectangle.x;
+  const localY = y - rectangle.y;
+  if (localX < 0 || localX >= rectangle.width || localY < 0 || localY >= rectangle.height) {
+    return 0;
+  }
+  return observed[localY * rectangle.width + localX];
 }
 
 function decodedPixelCenterDistance(index, rectangle, center) {

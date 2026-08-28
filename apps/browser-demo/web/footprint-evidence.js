@@ -807,6 +807,8 @@ function validateIsolatedFootprints(samples, expectedTrial, trial, corpus, metri
     gate(candidate.corner_leakage.exact_distance_outer.pixel_count
       <= corpus.metric_limits.maximum_outer_leakage_pixels, failures,
     `${label} footprint ${ordinal} leaks beyond radius margin`);
+    gate(candidate.corner_leakage.all_quad_corners_clear === true, failures,
+      `${label} footprint ${ordinal} fills a quad corner`);
     gate(candidate.centroid.error_pixels !== null
       && candidate.centroid.error_pixels <= corpus.metric_limits.maximum_centroid_distance_pixels,
     failures, `${label} footprint ${ordinal} centroid exceeds ceiling`);
@@ -1172,6 +1174,9 @@ function validateFootprintReport(report, binding, label) {
     || Number.isFinite(report.centroid.error_pixels) && report.centroid.error_pixels >= 0,
   `${label} centroid error is invalid`);
   requireRecord(report.corner_leakage?.exact_distance_outer, `${label} exact-distance leakage`);
+  requireCondition(report.corner_leakage.all_quad_corners_clear === true
+    || report.corner_leakage.all_quad_corners_clear === false,
+  `${label} quad-corner disposition is invalid`);
   requireCondition(report.corner_leakage.exact_distance_outer.margin_physical_pixels === 0.75,
     `${label} exact-distance margin differs`);
   requireCondition(Number.isSafeInteger(report.corner_leakage.exact_distance_outer.pixel_count)

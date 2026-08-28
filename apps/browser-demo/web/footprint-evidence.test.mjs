@@ -316,6 +316,7 @@ test("pass flags, samples, metrics, resources, status, identities, and browser p
     (value) => { value.summary.passed = false; },
     (value) => { value.canonical_trials[0].recreations[0].timing.frame_interval.p95 = 2; },
     (value) => { value.focused_trials[0].isolated_footprints[0].candidate.report.coverage.root_mean_square_error = 0.19; },
+    (value) => { value.focused_trials[0].isolated_footprints[0].candidate.report.corner_leakage.all_quad_corners_clear = false; },
     (value) => { value.canonical_trials[0].recreations[0].resources.multisample_color_bytes -= 4; },
     (value) => { value.canonical_trials[0].recreations[0].point_footprint.selected = "multisample_4x"; },
     (value) => { value.canonical_trials[0].recreations[0].point_footprint.display_size_physical_pixels += 0.01; },
@@ -802,6 +803,7 @@ function footprintBinding(metricId, artifactPath, rmse) {
       coverage: { root_mean_square_error: rmse, partial_edge_pixels: rmse === 0.1 ? 8 : 0 },
       centroid: { error_pixels: 0 },
       corner_leakage: {
+        all_quad_corners_clear: true,
         exact_distance_outer: { margin_physical_pixels: 0.75, pixel_count: 0, coverage: 0 },
       },
     },

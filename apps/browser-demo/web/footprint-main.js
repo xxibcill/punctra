@@ -627,6 +627,7 @@ async function runFocusedScaleTrials(options) {
         const metrics = measurement.metrics;
         if (metrics.coverage.root_mean_square_error > footprint.metric_limits.coverage_rmse) failures.push(`ordinal-${measurement.ordinal}:coverage_rmse`);
         if (metrics.corner_leakage.exact_distance_outer.pixel_count > footprint.metric_limits.maximum_outer_leakage_pixels) failures.push(`ordinal-${measurement.ordinal}:outer_leakage`);
+        if (!metrics.corner_leakage.all_quad_corners_clear) failures.push(`ordinal-${measurement.ordinal}:quad_corner_leakage`);
         if (metrics.centroid.error_pixels === null || metrics.centroid.error_pixels > footprint.metric_limits.maximum_centroid_distance_pixels) failures.push(`ordinal-${measurement.ordinal}:centroid`);
       }
       if (baselineComparison !== null && !baselineComparison.passed) failures.push(...baselineComparison.failures.map((failure) => `baseline:${failure}`));
