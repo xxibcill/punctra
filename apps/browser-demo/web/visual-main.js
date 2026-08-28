@@ -46,7 +46,11 @@ import {
   createRubricReviewPlan,
   createUnobservedRubricObservation,
 } from "./visual-rubric.js";
-import { visualVerifyProvenanceFromUrl } from "./visual-provenance.js";
+import {
+  VISUAL_ATTENDED_LANE,
+  VisualTrustedControlGate,
+  visualVerifyProvenanceFromUrl,
+} from "./visual-provenance.js";
 import { VisualRunSession } from "./visual-run-session.js";
 import { verifyNominalPickCoverage } from "./visual-selection.js";
 import { cloneJson, createVisualValidator, errorMessage } from "./visual-validation.js";
@@ -81,11 +85,15 @@ const rubricStatus = document.querySelector("#rubric-status");
 const transportStatus = document.querySelector("#transport-status");
 const provenanceStatus = document.querySelector("#provenance-status");
 
-async function startRun(options) {
-  return session.start(() => runVisualCorpus(options));
+const runControlGate = new VisualTrustedControlGate();
+
+async function startRun(options, activation) {
+  const mode = validateMode(options?.mode ?? modeSelect.value);
+  const runInitiation = mode === "verify" ? runControlGate.consume(activation, runButton.id) : null;
+  return session.start(() => runVisualCorpus({ ...options, mode }, runInitiation));
 }
 
-async function runVisualCorpus(options) {
+async function runVisualCorpus(options, runInitiation) {
   const mode = validateMode(options?.mode ?? modeSelect.value);
   modeSelect.value = mode;
   setRunControlsEnabled(false);
@@ -101,7 +109,7 @@ async function runVisualCorpus(options) {
     capture_completed_at: null,
     completed_at: null,
     corpus: null,
-    provenance: normalizeProvenance(options?.provenance, startedAt),
+    provenance: normalizeProvenance(options?.provenance, startedAt, mode, runInitiation),
     environment: null,
     capture_policy: null,
     presentation_policy: null,
@@ -1436,7 +1444,7 @@ function createEnvironmentTracker(record, corpus, host) {
   };
 }
 
-function normalizeProvenance(input, startedAt) {
+function normalizeProvenance(input, startedAt, mode, runInitiation) {
   const value = input ?? {};
   requireCondition(value !== null && typeof value === "object" && !Array.isArray(value), "provenance must be an object");
   const implementationCommit = value.implementation_commit ?? null;
@@ -1448,7 +1456,7 @@ function normalizeProvenance(input, startedAt) {
     requireCondition(/^[0-9a-f]{64}$/.test(verifier.sha256), "verifier SHA-256 is invalid");
     verifier = cloneJson(verifier);
   }
-  const attendedLane = value.attended_lane ?? {
+  const attendedLane = mode === "verify" ? VISUAL_ATTENDED_LANE : {
     id: "local-attended-private-webgpu-v1",
     execution: "visible_user_gesture",
     qualification: "exact_observed_lane_only",
@@ -1460,6 +1468,7 @@ function normalizeProvenance(input, startedAt) {
     observation_date: startedAt.slice(0, 10),
     package_artifact: null,
     attended_lane: cloneJson(attendedLane),
+    run_initiation: runInitiation === null ? null : cloneJson(runInitiation),
     final_pin_required: implementationCommit === null || verifier === null,
   };
 }
@@ -2146,13 +2155,25 @@ window.__PUNCTRA_BROWSER_VISUAL__ = Object.freeze({
   downloadBundle: () => downloadBundle(),
 });
 
-runButton.addEventListener("click", () => {
-  void startRun({
-    mode: modeSelect.value,
-    provenance: modeSelect.value === "verify" ? session.verifyProvenance : undefined,
-  }).catch((error) => {
+runButton.addEventListener("click", (event) => {
+  try {
+    const activation = modeSelect.value === "verify"
+      ? runControlGate.issue(event, {
+        control: runButton,
+        controlId: runButton.id,
+        visibilityState: document.visibilityState,
+        userActivationIsActive: navigator.userActivation?.isActive === true,
+      })
+      : undefined;
+    void startRun({
+      mode: modeSelect.value,
+      provenance: modeSelect.value === "verify" ? session.verifyProvenance : undefined,
+    }, activation).catch((error) => {
+      statusOutput.textContent = `Visual run failed: ${errorMessage(error)}`;
+    });
+  } catch (error) {
     statusOutput.textContent = `Visual run failed: ${errorMessage(error)}`;
-  });
+  }
 });
 modeSelect.addEventListener("change", () => configureVerifyProvenance());
 downloadEvidenceButton.addEventListener("click", () => downloadEvidence());

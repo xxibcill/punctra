@@ -24,7 +24,10 @@ import {
   validateToleranceProfile as validateSharedToleranceProfile,
 } from "../apps/browser-demo/web/visual-comparison.js";
 import { decodeRgba8Png } from "../apps/browser-demo/web/visual-png.js";
-import { VISUAL_ATTENDED_LANE } from "../apps/browser-demo/web/visual-provenance.js";
+import {
+  VISUAL_ATTENDED_LANE,
+  VISUAL_TRUSTED_CONTROL_SCHEMA,
+} from "../apps/browser-demo/web/visual-provenance.js";
 import {
   QUALIFICATION_LANE,
   QUALIFICATION_RUNTIME_LANE,
@@ -195,7 +198,7 @@ export async function verifyBrowserVisualEvidence(evidence, verifiedBaseline, op
     byte_length: baseline.baseline_inputs.artifact.byte_length,
     sha256: baseline.baseline_inputs.artifact.sha256,
   });
-  await verifyEvidenceProvenance(evidence.provenance, baseline, context);
+  await verifyEvidenceProvenance(evidence.provenance, baseline, context, evidence.started_at);
   assert.equal(evidence.provenance.observation_date, evidence.started_at.slice(0, 10));
   verifyEvidenceEnvironment(evidence.environment, baseline.canonical_lane, corpus);
   assert.deepEqual(evidence.capture_policy, corpus.capture);
@@ -1259,7 +1262,7 @@ function verifyEvidencePolicy(policy) {
   assert.equal(policy.recorded_pass_flag_authoritative, false);
 }
 
-async function verifyEvidenceProvenance(provenance, baseline, context) {
+async function verifyEvidenceProvenance(provenance, baseline, context, startedAt) {
   requireRecord(provenance, "visual evidence provenance");
   assert.deepEqual(Object.keys(provenance).sort(), [
     "attended_lane",
@@ -1267,6 +1270,7 @@ async function verifyEvidenceProvenance(provenance, baseline, context) {
     "implementation_commit",
     "observation_date",
     "package_artifact",
+    "run_initiation",
     "verifier",
   ]);
   assert.equal(provenance.implementation_commit, baseline.pins.implementation_commit);
@@ -1274,6 +1278,7 @@ async function verifyEvidenceProvenance(provenance, baseline, context) {
   assert.match(provenance.observation_date, /^\d{4}-\d{2}-\d{2}$/);
   assert.deepEqual(provenance.attended_lane, VISUAL_ATTENDED_LANE);
   assert.equal(provenance.attended_lane.id, baseline.canonical_lane.id);
+  verifyTrustedControlActivation(provenance.run_initiation, "run-corpus", startedAt);
   assert.equal(provenance.final_pin_required, false);
   requireRecord(provenance.package_artifact, "visual evidence package artifact");
   assert.equal(provenance.package_artifact.package_version, VISUAL_RELEASE);
@@ -1287,6 +1292,37 @@ async function verifyEvidenceProvenance(provenance, baseline, context) {
     assert.deepEqual(artifact, expected);
     await verifyDigestRecord(expected, context);
   }
+}
+
+function verifyTrustedControlActivation(activation, controlId, startedAt) {
+  requireRecord(activation, `${controlId} trusted control activation`);
+  assert.deepEqual(Object.keys(activation).sort(), [
+    "control_id",
+    "document_visibility_state",
+    "event_is_trusted",
+    "event_type",
+    "recorded_at",
+    "schema",
+    "transient_user_activation",
+    "trust_source",
+  ]);
+  assert.equal(activation.schema, VISUAL_TRUSTED_CONTROL_SCHEMA);
+  assert.equal(activation.control_id, controlId);
+  assert.equal(activation.event_type, "click");
+  assert.equal(typeof activation.event_is_trusted, "boolean");
+  assert.equal(typeof activation.transient_user_activation, "boolean");
+  assert(activation.event_is_trusted || activation.transient_user_activation, `${controlId} lacks browser activation proof`);
+  assert.equal(
+    activation.trust_source,
+    activation.event_is_trusted ? "event_is_trusted" : "transient_user_activation",
+  );
+  assert.equal(activation.document_visibility_state, "visible");
+  assert.match(activation.recorded_at, /^\d{4}-\d{2}-\d{2}T/);
+  const activationMilliseconds = Date.parse(activation.recorded_at);
+  const startMilliseconds = Date.parse(startedAt);
+  assert(Number.isFinite(activationMilliseconds), `${controlId} activation timestamp is invalid`);
+  assert(activationMilliseconds <= startMilliseconds, `${controlId} activation follows the run start`);
+  assert(startMilliseconds - activationMilliseconds <= 5_000, `${controlId} activation is stale`);
 }
 
 function verifyEvidenceEnvironment(environment, lane, corpus) {

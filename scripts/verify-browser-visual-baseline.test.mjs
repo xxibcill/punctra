@@ -24,7 +24,10 @@ import {
 } from "../apps/browser-demo/web/visual-comparison.js";
 import { encodeRgba8Png } from "../apps/browser-demo/web/visual-png.js";
 import { QUALIFICATION_RUNTIME_LANE } from "../apps/browser-demo/web/qualification-lane.js";
-import { VISUAL_ATTENDED_LANE } from "../apps/browser-demo/web/visual-provenance.js";
+import {
+  VISUAL_ATTENDED_LANE,
+  VISUAL_TRUSTED_CONTROL_SCHEMA,
+} from "../apps/browser-demo/web/visual-provenance.js";
 
 const implementationCommit = "a".repeat(40);
 const baselinePath = new URL("../docs/releases/v0.21-browser-visual-baseline.json", import.meta.url);
@@ -361,6 +364,10 @@ test("coverage authority, capture-bound batches, callback facts, cleanup, and pe
   await rejectEvidenceMutation(fixture, (evidence) => {
     evidence.trials[0].coverage.declared_authority = "presentation_only";
   }, /Coverage|deep-equal/);
+  await rejectEvidenceMutation(fixture, (evidence) => {
+    evidence.provenance.run_initiation.event_is_trusted = false;
+    evidence.provenance.run_initiation.transient_user_activation = false;
+  }, /browser activation proof/);
   await rejectEvidenceMutation(fixture, (evidence) => {
     evidence.trials[0].recreations[0].diagnostics.display_authority = "presentation_only";
   }, /Expected values to be strictly equal/);
@@ -1664,6 +1671,16 @@ function evidenceProvenance(verified) {
       runtime_artifacts: structuredClone(verified.baseline.package_runtime.built_runtime_artifacts),
     },
     attended_lane: structuredClone(VISUAL_ATTENDED_LANE),
+    run_initiation: {
+      schema: VISUAL_TRUSTED_CONTROL_SCHEMA,
+      control_id: "run-corpus",
+      event_type: "click",
+      trust_source: "event_is_trusted",
+      event_is_trusted: true,
+      transient_user_activation: false,
+      document_visibility_state: "visible",
+      recorded_at: "2026-08-28T08:00:00.000Z",
+    },
     final_pin_required: false,
   };
 }
@@ -1751,6 +1768,16 @@ async function emptyEvidenceFixture(verified) {
       verifier: verified.baseline.pins.verifier,
       observation_date: "2026-08-28",
       attended_lane: structuredClone(VISUAL_ATTENDED_LANE),
+      run_initiation: {
+        schema: VISUAL_TRUSTED_CONTROL_SCHEMA,
+        control_id: "run-corpus",
+        event_type: "click",
+        trust_source: "event_is_trusted",
+        event_is_trusted: true,
+        transient_user_activation: false,
+        document_visibility_state: "visible",
+        recorded_at: "2026-08-28T08:00:00.000Z",
+      },
       final_pin_required: false,
       package_artifact: {
         package_name: "@punctra/viewer",
