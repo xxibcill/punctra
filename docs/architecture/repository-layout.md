@@ -86,12 +86,17 @@ apps/
       footprint.html
       footprint.css
       footprint-main.js
+      footprint-artifacts.js
+      footprint-artifacts.test.mjs
       footprint-corpus.js
       footprint-corpus.test.mjs
       footprint-evidence.js
       footprint-evidence.test.mjs
       footprint-export.js
       footprint-export.test.mjs
+      footprint-qualification.js
+      footprint-records.js
+      footprint-records.test.mjs
       footprint-runner-core.js
       footprint-runner-core.test.mjs
       visual-footprint-metrics.js

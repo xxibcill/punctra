@@ -435,9 +435,11 @@ cargo test -p render-wgpu --test contracts
 cargo test -p browser-demo
 cargo test -p renderer-demo --bin renderer-demo appearance::tests
 node --test \
+  apps/browser-demo/web/footprint-artifacts.test.mjs \
   apps/browser-demo/web/footprint-corpus.test.mjs \
   apps/browser-demo/web/footprint-evidence.test.mjs \
   apps/browser-demo/web/footprint-export.test.mjs \
+  apps/browser-demo/web/footprint-records.test.mjs \
   apps/browser-demo/web/footprint-runner-core.test.mjs \
   apps/browser-demo/web/visual-footprint-metrics.test.mjs \
   apps/browser-demo/web/range-server.test.mjs
