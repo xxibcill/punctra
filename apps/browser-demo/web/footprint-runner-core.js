@@ -1,4 +1,8 @@
-import { measurePointFootprint, measureRegionTopology } from "./visual-footprint-metrics.js";
+import {
+  measureForegroundComponentBridges,
+  measurePointFootprint,
+  measureRegionTopology,
+} from "./visual-footprint-metrics.js";
 import { createVisualValidator } from "./visual-validation.js";
 
 export const OCCUPANCY_NORMALIZATION = "maximum_absolute_rgba8_channel_delta_from_clear_color_v1";
@@ -41,6 +45,32 @@ export function measureOccupancyTopology(image, options) {
       foregroundRgba: [255, 255, 255, 255],
       backgroundRgba: [0, 0, 0, 255],
       foregroundThreshold: 0.5,
+    }),
+  };
+}
+
+export function measureOccupancyComponentBridges(predecessor, candidate, options) {
+  requireRecord(options, "occupancy component-bridge options");
+  const channelThreshold = options.channelThreshold ?? 2;
+  const predecessorOccupancy = createOccupancyImage(
+    predecessor,
+    options.backgroundRgba,
+    channelThreshold,
+  );
+  const candidateOccupancy = createOccupancyImage(
+    candidate,
+    options.backgroundRgba,
+    channelThreshold,
+  );
+  return {
+    occupancy_normalization: OCCUPANCY_NORMALIZATION,
+    channel_threshold: channelThreshold,
+    metrics: measureForegroundComponentBridges(predecessorOccupancy, candidateOccupancy, {
+      rectangle: options.rectangle,
+      foregroundRgba: [255, 255, 255, 255],
+      backgroundRgba: [0, 0, 0, 255],
+      foregroundThreshold: 0.5,
+      minimumClearSeparationPixels: options.minimumClearSeparationPixels,
     }),
   };
 }

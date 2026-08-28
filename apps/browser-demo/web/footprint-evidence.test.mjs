@@ -288,7 +288,7 @@ test("complete evidence derives 27 canonical recreations, nine DPR trials, and t
     focused_scale_trials: 9,
     fallback_trials: 3,
     artifacts: evidence.artifacts.png.length + 1,
-    metric_reports: 81,
+    metric_reports: 108,
     failures: [],
   });
 });
@@ -317,6 +317,14 @@ test("pass flags, samples, metrics, resources, status, identities, and browser p
     (value) => { value.canonical_trials[0].recreations[0].timing.frame_interval.p95 = 2; },
     (value) => { value.focused_trials[0].isolated_footprints[0].candidate.report.coverage.root_mean_square_error = 0.19; },
     (value) => { value.focused_trials[0].isolated_footprints[0].candidate.report.corner_leakage.all_quad_corners_clear = false; },
+    (value) => {
+      const binding = value.canonical_trials[0].recreations[0].component_bridge_check;
+      binding.report.bridging_candidate_component_count = 1;
+      binding.report.first_bridge = {
+        candidate_component: 0,
+        predecessor_components: [0, 1],
+      };
+    },
     (value) => { value.canonical_trials[0].recreations[0].resources.multisample_color_bytes -= 4; },
     (value) => { value.canonical_trials[0].recreations[0].point_footprint.selected = "multisample_4x"; },
     (value) => { value.canonical_trials[0].recreations[0].point_footprint.display_size_physical_pixels += 0.01; },
@@ -448,6 +456,12 @@ function validEvidence(baseline) {
           capture_artifact_path: artifact.path,
           candidate_topology: topologyBinding(
             `canonical/${trial.id}/r${recreationIndex}`,
+            artifact.path,
+            { x: 0, y: 0, width: 640, height: 480 },
+          ),
+          component_bridge_check: componentBridgeBinding(
+            `canonical/${trial.id}/r${recreationIndex}/component-bridges`,
+            trial.predecessor_baseline.path,
             artifact.path,
             { x: 0, y: 0, width: 640, height: 480 },
           ),
@@ -823,6 +837,37 @@ function topologyBinding(metricId, artifactPath, rectangle) {
   };
 }
 
+function componentBridgeBinding(
+  metricId,
+  predecessorArtifactPath,
+  candidateArtifactPath,
+  rectangle,
+) {
+  return {
+    kind: "background_difference_component_bridges_v1",
+    metric_id: metricId,
+    predecessor_artifact_path: predecessorArtifactPath,
+    candidate_artifact_path: candidateArtifactPath,
+    rectangle,
+    background_rgba: [19, 20, 19, 255],
+    maximum_background_channel_delta: 2,
+    foreground_threshold: 0.5,
+    minimum_clear_separation_pixels:
+      corpus.metric_limits.minimum_component_clear_separation_pixels,
+    report: {
+      schema: "punctra-browser-component-bridge-metrics-v1",
+      rectangle,
+      connectivity: 4,
+      minimum_clear_separation_pixels:
+        corpus.metric_limits.minimum_component_clear_separation_pixels,
+      predecessor_component_count: 1,
+      candidate_component_count: 1,
+      bridging_candidate_component_count: 0,
+      first_bridge: null,
+    },
+  };
+}
+
 function topologyReport(rectangle) {
   return {
     schema: "punctra-browser-region-topology-metrics-v1",
@@ -943,7 +988,10 @@ function collectMetricReports(evidence) {
   const add = (binding) => reports.set(binding.metric_id, structuredClone(binding.report));
   for (const trial of evidence.canonical_trials) {
     add(trial.predecessor_topology);
-    for (const recreation of trial.recreations) add(recreation.candidate_topology);
+    for (const recreation of trial.recreations) {
+      add(recreation.candidate_topology);
+      add(recreation.component_bridge_check);
+    }
     for (const recreation of trial.recreations) {
       for (const region of recreation.dense_region_checks) {
         add(region.predecessor);

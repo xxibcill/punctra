@@ -175,6 +175,8 @@ function validateLimits(metric, timing) {
   requireCondition(metric.ideal_supersample_axis === 16, "ideal supersample axis differs");
   requireCondition(metric.coverage_rmse === 0.18, "coverage RMSE differs");
   requireCondition(metric.minimum_predecessor_rmse_improvement_fraction === 0.2, "RMSE improvement differs");
+  requireCondition(metric.minimum_component_clear_separation_pixels === 2,
+    "component clear separation differs");
   requireRecord(metric.foreground_fraction_predecessor_ratio, "foreground ratio");
   requireCondition(metric.foreground_fraction_predecessor_ratio.minimum === 0.5 && metric.foreground_fraction_predecessor_ratio.maximum === 1.05, "foreground ratio differs");
   requireRecord(timing, "timing limits");

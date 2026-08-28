@@ -17,6 +17,7 @@ import {
 } from "../apps/browser-demo/web/footprint-evidence.js";
 import { validateFootprintCorpus } from "../apps/browser-demo/web/footprint-corpus.js";
 import {
+  measureForegroundComponentBridges,
   measurePointFootprint,
   measureRegionTopology,
 } from "../apps/browser-demo/web/visual-footprint-metrics.js";
@@ -293,9 +294,33 @@ async function recomputeMetricBindings(evidence, loadImage) {
   const results = new Map();
   const binaryImageCache = new Map();
   for (const binding of bindings) {
-    const image = await loadImage(binding.artifact_path);
     let report;
-    if (binding.kind === "known_endpoint_disk_v1") {
+    if (binding.kind === "background_difference_component_bridges_v1") {
+      const [predecessorMask, candidateMask] = await Promise.all([
+        loadBackgroundDifferenceImage(
+          loadImage,
+          binaryImageCache,
+          binding.predecessor_artifact_path,
+          binding.background_rgba,
+          binding.maximum_background_channel_delta,
+        ),
+        loadBackgroundDifferenceImage(
+          loadImage,
+          binaryImageCache,
+          binding.candidate_artifact_path,
+          binding.background_rgba,
+          binding.maximum_background_channel_delta,
+        ),
+      ]);
+      report = measureForegroundComponentBridges(predecessorMask, candidateMask, {
+        rectangle: binding.rectangle,
+        foregroundRgba: WHITE,
+        backgroundRgba: BLACK,
+        foregroundThreshold: binding.foreground_threshold,
+        minimumClearSeparationPixels: binding.minimum_clear_separation_pixels,
+      });
+    } else if (binding.kind === "known_endpoint_disk_v1") {
+      const image = await loadImage(binding.artifact_path);
       report = measurePointFootprint(image, {
         rectangle: binding.rectangle,
         center: binding.center,
@@ -304,16 +329,13 @@ async function recomputeMetricBindings(evidence, loadImage) {
         backgroundRgba: binding.background_rgba,
       });
     } else {
-      const maskKey = `${binding.artifact_path}:${binding.background_rgba.join(",")}:${binding.maximum_background_channel_delta}`;
-      let mask = binaryImageCache.get(maskKey);
-      if (mask === undefined) {
-        mask = backgroundDifferenceImage(
-          image,
-          binding.background_rgba,
-          binding.maximum_background_channel_delta,
-        );
-        binaryImageCache.set(maskKey, mask);
-      }
+      const mask = await loadBackgroundDifferenceImage(
+        loadImage,
+        binaryImageCache,
+        binding.artifact_path,
+        binding.background_rgba,
+        binding.maximum_background_channel_delta,
+      );
       report = measureRegionTopology(mask, {
         rectangle: binding.rectangle,
         foregroundRgba: WHITE,
@@ -324,6 +346,23 @@ async function recomputeMetricBindings(evidence, loadImage) {
     results.set(binding.metric_id, report);
   }
   return results;
+}
+
+async function loadBackgroundDifferenceImage(
+  loadImage,
+  cache,
+  artifactPath,
+  backgroundRgba,
+  maximumDelta,
+) {
+  const key = `${artifactPath}:${backgroundRgba.join(",")}:${maximumDelta}`;
+  let mask = cache.get(key);
+  if (mask === undefined) {
+    const image = await loadImage(artifactPath);
+    mask = backgroundDifferenceImage(image, backgroundRgba, maximumDelta);
+    cache.set(key, mask);
+  }
+  return mask;
 }
 
 async function verifyDerivedFeatureFacts(evidence, predecessorEvidence, loadImage) {
@@ -406,7 +445,7 @@ function collectMetricBindings(evidence) {
   for (const trial of evidence.canonical_trials) {
     bindings.push(trial.predecessor_topology);
     for (const recreation of trial.recreations) {
-      bindings.push(recreation.candidate_topology);
+      bindings.push(recreation.candidate_topology, recreation.component_bridge_check);
       for (const region of recreation.dense_region_checks) {
         bindings.push(region.predecessor, region.candidate);
       }

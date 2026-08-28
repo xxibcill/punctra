@@ -1,5 +1,6 @@
 import { validateFootprintCorpus } from "./footprint-corpus.js";
 import {
+  COMPONENT_BRIDGE_METRICS_SCHEMA,
   POINT_FOOTPRINT_METRICS_SCHEMA,
   REGION_TOPOLOGY_METRICS_SCHEMA,
 } from "./visual-footprint-metrics.js";
@@ -353,6 +354,44 @@ export function createTopologyMetricBinding({
   return binding;
 }
 
+/** Binds a paired predecessor/candidate component-bridge measurement. */
+export function createComponentBridgeMetricBinding({
+  metricId,
+  predecessorArtifactPath,
+  candidateArtifactPath,
+  backgroundRgba,
+  measurement,
+}) {
+  requireRecord(measurement, "runner component-bridge measurement");
+  requireCondition(
+    measurement.occupancy_normalization
+      === "maximum_absolute_rgba8_channel_delta_from_clear_color_v1",
+    "runner component-bridge normalization differs",
+  );
+  const binding = {
+    kind: "background_difference_component_bridges_v1",
+    metric_id: metricId,
+    predecessor_artifact_path: predecessorArtifactPath,
+    candidate_artifact_path: candidateArtifactPath,
+    rectangle: measurement.metrics?.rectangle,
+    background_rgba: backgroundRgba,
+    maximum_background_channel_delta: measurement.channel_threshold,
+    foreground_threshold: 0.5,
+    minimum_clear_separation_pixels:
+      measurement.metrics?.minimum_clear_separation_pixels,
+    report: measurement.metrics,
+  };
+  validateComponentBridgeBinding(
+    binding,
+    predecessorArtifactPath,
+    candidateArtifactPath,
+    binding.minimum_clear_separation_pixels,
+    new Map(),
+    "runner component-bridge binding",
+  );
+  return binding;
+}
+
 /** Binds one runner isolated-footprint measurement to its captured PNG. */
 export function createFootprintMetricBinding({ metricId, artifactPath, measurement }) {
   requireRecord(measurement, "runner footprint measurement");
@@ -616,7 +655,7 @@ function validateCanonicalTrials(
       requireRecord(recreation, label);
       requireExactKeys(recreation, [
         "index", "adapter", "resident_points", "point_footprint", "timing", "resources", "capture_artifact_path",
-        "candidate_topology", "feature_checks", "dense_region_checks",
+        "candidate_topology", "component_bridge_check", "feature_checks", "dense_region_checks",
       ], label);
       requireCondition(recreation.index === index, `${label} index differs`);
       validateAdapter(recreation.adapter, label);
@@ -665,6 +704,19 @@ function validateCanonicalTrials(
         corpus.metric_limits,
         failures,
         label,
+      );
+      validateComponentBridgeBinding(
+        recreation.component_bridge_check,
+        expected.predecessor_baseline.path,
+        capture.path,
+        corpus.metric_limits.minimum_component_clear_separation_pixels,
+        metricBindings,
+        `${label} component bridges`,
+      );
+      gate(
+        recreation.component_bridge_check.report.bridging_candidate_component_count === 0,
+        failures,
+        `${label} bridges separated predecessor components`,
       );
       validateFeatureChecks(recreation.feature_checks, corpus.metric_limits, failures, label);
       const focusedContract = corpus.focused_trials.find(({ id }) => id === expected.id);
@@ -1120,6 +1172,85 @@ function validateTopologyBinding(binding, artifactPath, metricBindings, label) {
   requireCondition(binding.foreground_threshold === 0.5, `${label} foreground threshold differs`);
   validateTopologyReport(binding.report, binding.rectangle, label);
   metricBindings.set(binding.metric_id, binding);
+}
+
+function validateComponentBridgeBinding(
+  binding,
+  predecessorArtifactPath,
+  candidateArtifactPath,
+  minimumClearSeparationPixels,
+  metricBindings,
+  label,
+) {
+  requireRecord(binding, label);
+  requireExactKeys(binding, [
+    "kind", "metric_id", "predecessor_artifact_path", "candidate_artifact_path",
+    "rectangle", "background_rgba", "maximum_background_channel_delta",
+    "foreground_threshold", "minimum_clear_separation_pixels", "report",
+  ], label);
+  requireCondition(binding.kind === "background_difference_component_bridges_v1",
+    `${label} kind differs`);
+  requireCondition(binding.predecessor_artifact_path === predecessorArtifactPath,
+    `${label} predecessor artifact path differs`);
+  requireCondition(binding.candidate_artifact_path === candidateArtifactPath,
+    `${label} candidate artifact path differs`);
+  validateMetricId(binding.metric_id, metricBindings, label);
+  validateRectangle(binding.rectangle, label);
+  validateRgba(binding.background_rgba, `${label} background`);
+  requireCondition(Number.isInteger(binding.maximum_background_channel_delta)
+    && binding.maximum_background_channel_delta >= 0
+    && binding.maximum_background_channel_delta <= 8,
+  `${label} background delta is invalid`);
+  requireCondition(binding.foreground_threshold === 0.5,
+    `${label} foreground threshold differs`);
+  requireCondition(binding.minimum_clear_separation_pixels === minimumClearSeparationPixels,
+    `${label} clear separation differs`);
+  validateComponentBridgeReport(
+    binding.report,
+    binding.rectangle,
+    minimumClearSeparationPixels,
+    label,
+  );
+  metricBindings.set(binding.metric_id, binding);
+}
+
+function validateComponentBridgeReport(report, rectangle, minimumClearSeparationPixels, label) {
+  requireRecord(report, `${label} report`);
+  requireExactKeys(report, [
+    "schema", "rectangle", "connectivity", "minimum_clear_separation_pixels",
+    "predecessor_component_count", "candidate_component_count",
+    "bridging_candidate_component_count", "first_bridge",
+  ], `${label} report`);
+  requireCondition(report.schema === COMPONENT_BRIDGE_METRICS_SCHEMA,
+    `${label} report schema differs`);
+  requireJsonEqual(report.rectangle, rectangle, `${label} report rectangle`);
+  requireCondition(report.connectivity === 4, `${label} report connectivity differs`);
+  requireCondition(report.minimum_clear_separation_pixels === minimumClearSeparationPixels,
+    `${label} report clear separation differs`);
+  for (const field of [
+    "predecessor_component_count",
+    "candidate_component_count",
+    "bridging_candidate_component_count",
+  ]) {
+    nonnegativeSafeInteger(report[field], `${label} report ${field}`);
+  }
+  if (report.bridging_candidate_component_count === 0) {
+    requireCondition(report.first_bridge === null, `${label} report fabricates a bridge witness`);
+    return;
+  }
+  requireRecord(report.first_bridge, `${label} report first bridge`);
+  requireExactKeys(report.first_bridge, [
+    "candidate_component", "predecessor_components",
+  ], `${label} report first bridge`);
+  nonnegativeSafeInteger(
+    report.first_bridge.candidate_component,
+    `${label} report bridge candidate component`,
+  );
+  requireCondition(Array.isArray(report.first_bridge.predecessor_components)
+    && report.first_bridge.predecessor_components.length === 2
+    && report.first_bridge.predecessor_components.every(
+      (value) => Number.isSafeInteger(value) && value >= 0,
+    ), `${label} report predecessor bridge pair is invalid`);
 }
 
 function validateFootprintBinding(binding, artifactPath, metricBindings, label) {

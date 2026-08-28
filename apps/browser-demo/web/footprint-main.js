@@ -27,6 +27,7 @@ import {
   FOOTPRINT_LOCAL_TEST_CASE_IDS,
   FOOTPRINT_LOCAL_TEST_PRODUCER_COMMAND,
   FOOTPRINT_UNAVAILABLE_MEASUREMENTS,
+  createComponentBridgeMetricBinding,
   createFootprintMetricBinding,
   createPointFootprintImageArtifact,
   createPointFootprintResourceEvidence,
@@ -46,6 +47,7 @@ import {
 import {
   evaluateRepresentativeTiming,
   measureIsolatedFootprint,
+  measureOccupancyComponentBridges,
   measureOccupancyTopology,
 } from "./footprint-runner-core.js";
 import { createVisualValidator, errorMessage } from "./visual-validation.js";
@@ -351,6 +353,16 @@ async function runCanonicalTrial(options) {
       rectangle: fullRectangle(predecessor.image),
       backgroundRgba: BACKGROUND_RGBA,
     });
+    const componentBridges = measureOccupancyComponentBridges(
+      predecessor.image,
+      recreation.image,
+      {
+        rectangle: fullRectangle(recreation.image),
+        backgroundRgba: BACKGROUND_RGBA,
+        minimumClearSeparationPixels:
+          footprint.metric_limits.minimum_component_clear_separation_pixels,
+      },
+    );
     const featureComparisons = compareFeatureFacts(predecessor.image, recreation.image, trial.features);
     const densityComparisons = compareDenseRegions(
       predecessor.image,
@@ -362,6 +374,7 @@ async function runCanonicalTrial(options) {
       predecessorTopology: predecessorTopology.metrics,
       featureComparisons,
       densityComparisons,
+      componentBridges: componentBridges.metrics,
       limits: footprint.metric_limits,
     });
     const failures = [];
@@ -382,6 +395,7 @@ async function runCanonicalTrial(options) {
       repeatability,
       predecessor_topology: predecessorTopology,
       candidate_topology: topology,
+      component_bridges: componentBridges,
       feature_comparisons: featureComparisons,
       dense_region_comparisons: densityComparisons,
       quality,
@@ -951,7 +965,14 @@ function compareDenseRegions(predecessor, candidate, regions) {
 }
 
 function evaluateCanonicalQuality(options) {
-  const { topology, predecessorTopology, featureComparisons, densityComparisons, limits } = options;
+  const {
+    topology,
+    predecessorTopology,
+    featureComparisons,
+    densityComparisons,
+    componentBridges,
+    limits,
+  } = options;
   const failures = [];
   const foregroundRatio = predecessorTopology.foreground_fraction === 0
     ? null
@@ -980,6 +1001,9 @@ function evaluateCanonicalQuality(options) {
   if (topology.foreground.left_right_bridge_components > predecessorTopology.foreground.left_right_bridge_components
     || topology.foreground.top_bottom_bridge_components > predecessorTopology.foreground.top_bottom_bridge_components) {
     failures.push("new_foreground_bridge");
+  }
+  if (componentBridges.bridging_candidate_component_count > 0) {
+    failures.push("separated_predecessor_component_bridge");
   }
   return { passed: failures.length === 0, failures, foreground_fraction_predecessor_ratio: foregroundRatio };
 }
@@ -1138,6 +1162,13 @@ function canonicalTrialEvidence(trial, footprint) {
         artifactPath: recreation.capture.artifact.path,
         backgroundRgba: BACKGROUND_RGBA,
         measurement: recreation.candidate_topology,
+      }),
+      component_bridge_check: createComponentBridgeMetricBinding({
+        metricId: `canonical/${trial.trial_id}/r${recreation.index}/component-bridges`,
+        predecessorArtifactPath: contract.predecessor_baseline.path,
+        candidateArtifactPath: recreation.capture.artifact.path,
+        backgroundRgba: BACKGROUND_RGBA,
+        measurement: recreation.component_bridges,
       }),
       feature_checks: recreation.feature_comparisons.map((feature) => ({
         id: feature.feature_id,

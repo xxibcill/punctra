@@ -6,6 +6,7 @@ import {
   POINT_FOOTPRINT_METRICS_SCHEMA,
   REGION_TOPOLOGY_METRICS_SCHEMA,
   createIdealDiskCoverage,
+  measureForegroundComponentBridges,
   measurePointFootprint,
   measureRegionTopology,
 } from "./visual-footprint-metrics.js";
@@ -163,6 +164,40 @@ test("a one-pixel thin bridge is distinguished from the same feature with a brea
   assert.equal(brokenReport.foreground.left_right_bridge_components, 0);
   assert.equal(brokenReport.background.component_count, 1);
   assert.equal(brokenReport.background.top_bottom_bridge_components, 1);
+});
+
+test("component correspondence detects a merge hidden by an offsetting split", () => {
+  const predecessor = binaryImage(10, 8, (x, y) => (
+    x === 1 && (y === 1 || y === 2)
+      || x === 4 && (y === 1 || y === 2)
+      || (x === 7 || x === 8) && (y === 5 || y === 6)
+  ));
+  const candidate = binaryImage(10, 8, (x, y) => (
+    y === 1 && x >= 1 && x <= 4
+      || x === 1 && y === 2
+      || x === 4 && y === 2
+      || x === 7 && y === 5
+      || x === 8 && y === 6
+  ));
+  const predecessorTopology = topologyReport(predecessor);
+  const candidateTopology = topologyReport(candidate);
+  assert.equal(predecessorTopology.foreground.component_count, 3);
+  assert.equal(candidateTopology.foreground.component_count, 3);
+  assert.equal(candidateTopology.foreground.left_right_bridge_components, 0);
+  assert.equal(candidateTopology.foreground.top_bottom_bridge_components, 0);
+
+  const report = measureForegroundComponentBridges(predecessor, candidate, {
+    rectangle: { x: 0, y: 0, width: 10, height: 8 },
+    foregroundRgba: WHITE,
+    backgroundRgba: BLACK,
+    foregroundThreshold: 0.5,
+    minimumClearSeparationPixels: 2,
+  });
+  assert.equal(report.bridging_candidate_component_count, 1);
+  assert.deepEqual(report.first_bridge, {
+    candidate_component: 0,
+    predecessor_components: [0, 1],
+  });
 });
 
 test("bounded image, region, color, disk, and threshold validation rejects tampering", () => {

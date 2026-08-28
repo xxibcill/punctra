@@ -2,6 +2,7 @@ import { createVisualValidator } from "./visual-validation.js";
 
 export const POINT_FOOTPRINT_METRICS_SCHEMA = "punctra-browser-point-footprint-metrics-v1";
 export const REGION_TOPOLOGY_METRICS_SCHEMA = "punctra-browser-region-topology-metrics-v1";
+export const COMPONENT_BRIDGE_METRICS_SCHEMA = "punctra-browser-component-bridge-metrics-v1";
 export const IDEAL_DISK_SAMPLES_PER_AXIS = 16;
 
 const MAX_IMAGE_AXIS_PIXELS = 4_096;
@@ -105,6 +106,69 @@ export function measureRegionTopology(image, options) {
     solid_2x2_blocks: countSolidBlocks(mask, config.rectangle.width, config.rectangle.height),
     foreground: components.foreground,
     background: components.background,
+  };
+}
+
+/** Detects candidate components that coalesce separated predecessor components. */
+export function measureForegroundComponentBridges(predecessorImage, candidateImage, options) {
+  const predecessor = validateImage(predecessorImage);
+  const candidate = validateImage(candidateImage);
+  requireCondition(
+    candidate.width === predecessor.width && candidate.height === predecessor.height,
+    "component-bridge image dimensions differ",
+  );
+  const config = validateTopologyOptions(predecessor, options);
+  validateImageRectangle(config.rectangle, candidate, MAX_IMAGE_PIXELS);
+  const minimumClearSeparationPixels = boundedInteger(
+    options.minimumClearSeparationPixels,
+    "minimum clear component separation",
+    1,
+    MAX_IMAGE_AXIS_PIXELS,
+  );
+  const predecessorMask = thresholdCoverage(
+    deriveCoverage(predecessor, config),
+    config.foregroundThreshold,
+  );
+  const candidateMask = thresholdCoverage(
+    deriveCoverage(candidate, config),
+    config.foregroundThreshold,
+  );
+  const width = config.rectangle.width;
+  const height = config.rectangle.height;
+  const predecessorComponents = labelForegroundComponents(predecessorMask, width, height);
+  const candidateComponents = labelForegroundComponents(candidateMask, width, height);
+  let bridgingCandidateComponentCount = 0;
+  let firstBridge = null;
+
+  for (let candidateId = 0; candidateId < candidateComponents.components.length; candidateId += 1) {
+    const predecessorIds = overlappingComponentIds(
+      candidateComponents.components[candidateId],
+      predecessorComponents.labels,
+    );
+    const bridge = firstSeparatedComponentPair(
+      predecessorIds,
+      predecessorComponents,
+      width,
+      height,
+      minimumClearSeparationPixels,
+    );
+    if (bridge === null) continue;
+    bridgingCandidateComponentCount += 1;
+    firstBridge ??= {
+      candidate_component: candidateId,
+      predecessor_components: bridge,
+    };
+  }
+
+  return {
+    schema: COMPONENT_BRIDGE_METRICS_SCHEMA,
+    rectangle: config.rectangle,
+    connectivity: 4,
+    minimum_clear_separation_pixels: minimumClearSeparationPixels,
+    predecessor_component_count: predecessorComponents.components.length,
+    candidate_component_count: candidateComponents.components.length,
+    bridging_candidate_component_count: bridgingCandidateComponentCount,
+    first_bridge: firstBridge,
   };
 }
 
@@ -369,6 +433,90 @@ function analyzeComponents(mask, width, height) {
     includeComponent(summaries[mask[start]], component);
   }
   return { background: summaries[0], foreground: summaries[1] };
+}
+
+function labelForegroundComponents(mask, width, height) {
+  const labels = new Int32Array(mask.length);
+  labels.fill(-1);
+  const components = [];
+  const queue = new Uint32Array(mask.length);
+  for (let start = 0; start < mask.length; start += 1) {
+    if (!mask[start] || labels[start] !== -1) continue;
+    const id = components.length;
+    const pixels = [];
+    let head = 0;
+    let tail = 1;
+    queue[0] = start;
+    labels[start] = id;
+    while (head < tail) {
+      const index = queue[head];
+      head += 1;
+      pixels.push(index);
+      const x = index % width;
+      const y = Math.floor(index / width);
+      tail = enqueueLabeledNeighbor(labels, mask, queue, tail, id, index - 1, x > 0);
+      tail = enqueueLabeledNeighbor(labels, mask, queue, tail, id, index + 1, x + 1 < width);
+      tail = enqueueLabeledNeighbor(labels, mask, queue, tail, id, index - width, y > 0);
+      tail = enqueueLabeledNeighbor(labels, mask, queue, tail, id, index + width, y + 1 < height);
+    }
+    components.push(pixels);
+  }
+  return { labels, components };
+}
+
+function enqueueLabeledNeighbor(labels, mask, queue, tail, id, neighbor, inside) {
+  if (!inside || !mask[neighbor] || labels[neighbor] !== -1) return tail;
+  labels[neighbor] = id;
+  queue[tail] = neighbor;
+  return tail + 1;
+}
+
+function overlappingComponentIds(candidatePixels, predecessorLabels) {
+  const ids = new Set();
+  for (const index of candidatePixels) {
+    const id = predecessorLabels[index];
+    if (id !== -1) ids.add(id);
+  }
+  return [...ids].sort((left, right) => left - right);
+}
+
+function firstSeparatedComponentPair(ids, labeled, width, height, minimumClearPixels) {
+  for (let leftIndex = 0; leftIndex < ids.length; leftIndex += 1) {
+    for (let rightIndex = leftIndex + 1; rightIndex < ids.length; rightIndex += 1) {
+      const left = ids[leftIndex];
+      const right = ids[rightIndex];
+      if (!componentsWithinManhattanDistance(
+        labeled,
+        left,
+        right,
+        width,
+        height,
+        minimumClearPixels,
+      )) return [left, right];
+    }
+  }
+  return null;
+}
+
+function componentsWithinManhattanDistance(labeled, left, right, width, height, distance) {
+  const [searchPixels, target] = labeled.components[left].length <= labeled.components[right].length
+    ? [labeled.components[left], right]
+    : [labeled.components[right], left];
+  for (const index of searchPixels) {
+    const originX = index % width;
+    const originY = Math.floor(index / width);
+    for (let deltaY = -distance; deltaY <= distance; deltaY += 1) {
+      const y = originY + deltaY;
+      if (y < 0 || y >= height) continue;
+      const remaining = distance - Math.abs(deltaY);
+      for (let deltaX = -remaining; deltaX <= remaining; deltaX += 1) {
+        const x = originX + deltaX;
+        if (x < 0 || x >= width) continue;
+        if (labeled.labels[y * width + x] === target) return true;
+      }
+    }
+  }
+  return false;
 }
 
 function traverseComponent(mask, visited, queue, start, width, height) {
