@@ -202,6 +202,11 @@ test("the implementation and verifier pins reject abbreviated or stale identitie
   staleVerifier.pins.verifier.sha256 = "00".repeat(32);
   await assert.rejects(() => verifyFixture(staleVerifier), /verify-browser-visual-baseline\.mjs SHA-256 drifted/);
 
+  const omittedVisualModule = await pinnedBaselineFixture();
+  omittedVisualModule.pins.qualified_paths = omittedVisualModule.pins.qualified_paths
+    .filter((qualifiedPath) => qualifiedPath !== "apps/browser-demo/web/visual-selection.js");
+  await assert.rejects(() => verifyFixture(omittedVisualModule), /qualified paths omit apps\/browser-demo\/web\/visual-selection\.js/);
+
   const commit = "1".repeat(40);
   const calls = [];
   const bytes = readPinnedFile(commit, "fixtures/bounded.bin", {
