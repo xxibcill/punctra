@@ -47,6 +47,7 @@ import {
   createUnobservedRubricObservation,
 } from "./visual-rubric.js";
 import { visualVerifyProvenanceFromUrl } from "./visual-provenance.js";
+import { VisualRunSession } from "./visual-run-session.js";
 
 const EVIDENCE_SCHEMA = "punctra-browser-visual-evidence-v1";
 const RUNNER_STATE_SCHEMA = "punctra-browser-visual-runner-state-v1";
@@ -77,79 +78,8 @@ const rubricStatus = document.querySelector("#rubric-status");
 const transportStatus = document.querySelector("#transport-status");
 const provenanceStatus = document.querySelector("#provenance-status");
 
-let artifactRegistry;
-let wasmInitialization;
-let wasmRuntimeBytes;
-let wasmRuntimeIdentity;
-let activeRun;
-let currentReport;
-let currentDraft;
-let currentCorpus;
-let currentTransportPolicy;
-let currentArtifactByteCeiling;
-let currentBaselineInputsEntry;
-let activeRubricReview;
-let configuredVerifyProvenance = null;
-let runnerState = {
-  schema: RUNNER_STATE_SCHEMA,
-  status: "idle",
-  mode: null,
-  trial_id: null,
-  recreation_index: null,
-  completed_trials: 0,
-  total_trials: 0,
-  message: "Idle",
-};
-
-configureModeFromUrl();
-configureVerifyProvenance();
-configureArchiveTransport();
-configureRubricFields();
-publishRunnerState(runnerState);
-
-const browserVisualApi = Object.freeze({
-  schema: RUNNER_STATE_SCHEMA,
-  run: (options = {}) => startRun(options),
-  submitReview: (answers) => submitRubricReview(answers),
-  state: () => cloneJson(runnerState),
-  report: () => currentReport === undefined ? null : cloneJson(currentReport),
-  draft: () => currentDraft === undefined ? null : cloneJson(currentDraft),
-  baselineInputs: () => currentBaselineInputsEntry === undefined
-    ? null
-    : cloneJson(currentBaselineInputsEntry.manifest),
-  artifacts: () => artifactRegistry.metadata(),
-  downloadEvidence: () => downloadEvidence(),
-  downloadBundle: () => downloadBundle(),
-});
-window.__PUNCTRA_BROWSER_VISUAL__ = browserVisualApi;
-
-runButton.addEventListener("click", () => {
-  void startRun({
-    mode: modeSelect.value,
-    provenance: modeSelect.value === "verify" ? configuredVerifyProvenance : undefined,
-  }).catch((error) => {
-    statusOutput.textContent = `Visual run failed: ${errorMessage(error)}`;
-  });
-});
-modeSelect.addEventListener("change", () => configureVerifyProvenance());
-downloadEvidenceButton.addEventListener("click", () => downloadEvidence());
-downloadBundleButton.addEventListener("click", () => {
-  void downloadBundle().catch((error) => {
-    transportStatus.textContent = `Bundle export failed: ${errorMessage(error)}`;
-  });
-});
-submitRubricButton.addEventListener("click", () => {
-  void submitRubricReview();
-});
-
 async function startRun(options) {
-  if (activeRun !== undefined) return activeRun;
-  requireCondition(currentDraft === undefined, "submit the pending post-capture review before starting another run");
-  activeRun = runVisualCorpus(options)
-    .finally(() => {
-      activeRun = undefined;
-    });
-  return activeRun;
+  return session.start(() => runVisualCorpus(options));
 }
 
 async function runVisualCorpus(options) {
@@ -157,13 +87,7 @@ async function runVisualCorpus(options) {
   modeSelect.value = mode;
   setRunControlsEnabled(false);
   resetRubricReview();
-  artifactRegistry.clear();
-  currentReport = undefined;
-  currentDraft = undefined;
-  currentCorpus = undefined;
-  currentTransportPolicy = undefined;
-  currentArtifactByteCeiling = undefined;
-  currentBaselineInputsEntry = undefined;
+  session.resetForRun();
   evidenceOutput.textContent = "Preparing the immutable corpus and private Wasm runtime…";
   const startedAt = new Date().toISOString();
   const record = {
@@ -203,8 +127,7 @@ async function runVisualCorpus(options) {
     const loaded = await loadVisualCorpus(CORPUS_URL);
     corpus = loaded.corpus;
     corpusUrl = loaded.corpus_url;
-    currentTransportPolicy = cloneJson(corpus.transport);
-    currentArtifactByteCeiling = corpus.resource_limits.total_encoded_artifact_bytes;
+    session.configureTransport(corpus.transport, corpus.resource_limits.total_encoded_artifact_bytes);
     for (const profile of Object.values(corpus.tolerance_profiles)) validateToleranceProfile(profile);
     record.corpus = {
       path: "apps/browser-demo/web/fixtures/visual-v1/corpus.json",
@@ -265,29 +188,28 @@ async function runVisualCorpus(options) {
     }
 
     requireCondition(record.environment !== null, "no successful viewer recreation produced environment facts");
-    record.artifacts = artifactRegistry.metadata();
+    record.artifacts = session.artifacts.metadata();
     const failedTrials = record.trials.filter((trial) => !trial.passed);
     requireCondition(
       failedTrials.length === 0,
       `visual trials failed before baseline-input publication: ${failedTrials.map((trial) => trial.trial_id).join(", ")}`,
     );
-    currentBaselineInputsEntry = await resolveBaselineInputs({
+    session.setBaselineInputsEntry(await resolveBaselineInputs({
       mode,
       corpus,
       corpusUrl,
       artifacts: record.artifacts,
       runtimeArtifacts: record.provenance.package_artifact.runtime_artifacts,
-    });
+    }));
     record.baseline_inputs = {
-      path: currentBaselineInputsEntry.path,
-      schema: currentBaselineInputsEntry.manifest.schema,
-      byte_length: currentBaselineInputsEntry.bytes.byteLength,
-      sha256: await sha256Hex(currentBaselineInputsEntry.bytes),
+      path: session.baselineInputsEntry.path,
+      schema: session.baselineInputsEntry.manifest.schema,
+      byte_length: session.baselineInputsEntry.bytes.byteLength,
+      sha256: await sha256Hex(session.baselineInputsEntry.bytes),
     };
     record.artifact_resources = artifactResourceEvidence(corpus);
     record.capture_completed_at = new Date().toISOString();
-    currentDraft = record;
-    currentCorpus = corpus;
+    session.stageReview(record, corpus);
     await prepareRubricReview(corpus.rubric, record);
     reviewPending = true;
   } catch (error) {
@@ -300,7 +222,7 @@ async function runVisualCorpus(options) {
       review_status: "not_reached",
       observation: createUnobservedRubricObservation(corpus.rubric),
     };
-    record.artifacts = artifactRegistry.metadata();
+    record.artifacts = session.artifacts.metadata();
     record.artifact_resources = corpus === undefined ? null : artifactResourceEvidence(corpus);
     record.summary = {
       passed: false,
@@ -310,7 +232,7 @@ async function runVisualCorpus(options) {
       failed_trials: record.trials.filter((trial) => !trial.passed).map((trial) => trial.trial_id),
       non_gating_rubric_complete: record.rubric !== null,
       artifact_count: record.artifacts.length,
-      total_encoded_artifact_bytes: artifactRegistry.totalEncodedBytes(),
+      total_encoded_artifact_bytes: session.artifacts.totalEncodedBytes(),
       failures: [`fatal:${record.fatal_error.message}`],
     };
   }
@@ -331,9 +253,7 @@ async function runVisualCorpus(options) {
       artifact_count: record.artifacts.length,
     };
   }
-  currentReport = record;
-  currentDraft = undefined;
-  currentCorpus = undefined;
+  session.completeRun(record);
   const passed = record.summary?.passed === true;
   updateRunnerState({
     status: passed ? "passed" : "failed",
@@ -344,7 +264,7 @@ async function runVisualCorpus(options) {
       : `Visual evidence failed: ${(record.summary?.failures ?? [record.fatal_error?.message]).join("; ")}`,
   });
   evidenceOutput.textContent = JSON.stringify(record, null, 2);
-  const transportAvailable = currentTransportPolicy !== undefined;
+  const transportAvailable = session.transportPolicy !== undefined;
   downloadEvidenceButton.disabled = !transportAvailable;
   downloadBundleButton.disabled = !transportAvailable;
   setRunControlsEnabled(true);
@@ -363,7 +283,7 @@ async function runTrial(context) {
     const loadedBaseline = await loadExistingBaseline(trial, corpusUrl, baselinePath);
     baselinePng = loadedBaseline.bytes;
     baselineMetadata = loadedBaseline.metadata;
-    artifactRegistry.recordMetadata(baselineMetadata, baselinePng);
+    session.artifacts.recordMetadata(baselineMetadata, baselinePng);
   }
 
   const recreations = [];
@@ -439,7 +359,7 @@ async function runRecreation(options) {
     environmentTracker,
   } = options;
   const recreationStarted = performance.now();
-  const artifactStartedIndex = artifactRegistry.metadata().length;
+  const artifactStartedIndex = session.artifacts.metadata().length;
   let rawViewer;
   let disposed = false;
   try {
@@ -524,7 +444,7 @@ async function runRecreation(options) {
         settledCaptureTimings.push(cloneJson(capture.timing));
         let image = capture.image;
         const isFinalFrame = index === corpus.settling.quiet_frames - 1;
-        const artifact = await artifactRegistry.createPng(image, {
+        const artifact = await session.artifacts.createPng(image, {
           ...(isFinalFrame
             ? finalArtifact
             : {
@@ -623,7 +543,7 @@ async function runRecreation(options) {
     writeDifferenceImage(differenceReference, differenceReference, differenceCandidate);
     differenceCandidate = undefined;
     const differenceDerivationMilliseconds = performance.now() - differenceDerivationStarted;
-    const differenceArtifact = await artifactRegistry.createPng(differenceReference, {
+    const differenceArtifact = await session.artifacts.createPng(differenceReference, {
       kind: "settled_quiet_worst_difference_png",
       path: observationArtifactPath(trial.id, recreationIndex, "quiet-worst-difference"),
       trial_id: trial.id,
@@ -666,7 +586,7 @@ async function runRecreation(options) {
       settledComparisonSamples: quietPairs.map(({ comparison_milliseconds: value }) => value),
       settledComparisonMilliseconds: temporalComparisonMilliseconds,
       differenceDerivationMilliseconds,
-      artifactTimingSamples: artifactRegistry.metadata().slice(artifactStartedIndex).map((artifact) => ({
+      artifactTimingSamples: session.artifacts.metadata().slice(artifactStartedIndex).map((artifact) => ({
         path: artifact.path,
         png_encode_milliseconds: artifact.png_encode_milliseconds,
         artifact_encoding_milliseconds: artifact.artifact_encoding_milliseconds,
@@ -784,7 +704,7 @@ async function captureMixedLodTransition(options) {
     );
     captureTimings.push(cloneJson(capture.timing));
     let image = capture.image;
-    const artifact = await artifactRegistry.createPng(image, {
+    const artifact = await session.artifacts.createPng(image, {
       kind: "mixed_lod_transition_png",
       path: observationArtifactPath(trial.id, recreationIndex, `transition-${String(frameIndex).padStart(2, "0")}`),
       trial_id: trial.id,
@@ -1094,8 +1014,8 @@ function recreationResourceFacts(options) {
       staging_buffer_bytes: capture.facts.staging_buffer_bytes,
       row_aligned_readback_bytes: capture.facts.staging_buffer_bytes,
       canonical_pixel_bytes: capture.facts.canonical_pixel_bytes,
-      encoded_png_bytes: Math.max(finalArtifact.encoded_byte_length, artifactRegistry.maximumEncodedBytes()),
-      total_encoded_artifact_bytes: artifactRegistry.totalEncodedBytes(),
+      encoded_png_bytes: Math.max(finalArtifact.encoded_byte_length, session.artifacts.maximumEncodedBytes()),
+      total_encoded_artifact_bytes: session.artifacts.totalEncodedBytes(),
       png_scanline_bytes: corpus.resource_limits.png_scanline_bytes,
       encoder_working_bytes: corpus.resource_limits.canonical_pixel_bytes
         + corpus.resource_limits.png_scanline_bytes
@@ -1362,12 +1282,7 @@ function bindWasmRuntime(runtimeArtifacts) {
   );
   requireCondition(record !== undefined, "captured runtime omitted the Wasm artifact identity");
   const identity = `${record.byte_length}:${record.sha256}`;
-  if (wasmRuntimeIdentity === undefined) {
-    wasmRuntimeIdentity = identity;
-    wasmRuntimeBytes = runtimeArtifacts.wasmBytes.slice();
-    return;
-  }
-  requireCondition(identity === wasmRuntimeIdentity, "Wasm runtime bytes changed after module initialization");
+  session.bindWasmRuntime(identity, runtimeArtifacts.wasmBytes);
 }
 
 async function resolveBaselineInputs(options) {
@@ -1409,9 +1324,7 @@ async function resolveBaselineInputs(options) {
 }
 
 async function createPrivateViewer() {
-  requireCondition(wasmRuntimeBytes instanceof Uint8Array, "Wasm runtime bytes were not captured before viewer creation");
-  wasmInitialization ??= initializeWasm({ module_or_path: wasmRuntimeBytes });
-  await wasmInitialization;
+  await session.initializeWasm((wasmRuntimeBytes) => initializeWasm({ module_or_path: wasmRuntimeBytes }));
   return createRawViewer(
     canvas,
     VISUAL_VIEWPORT.css_width,
@@ -1520,18 +1433,18 @@ function summarizeEvidence(record, corpus) {
     failed_trials: failedTrials,
     recreations_per_trial: RECREATION_COUNT,
     non_gating_rubric_complete: rubricComplete,
-    artifact_count: artifactRegistry.metadata().length,
-    total_encoded_artifact_bytes: artifactRegistry.totalEncodedBytes(),
+    artifact_count: session.artifacts.metadata().length,
+    total_encoded_artifact_bytes: session.artifacts.totalEncodedBytes(),
     failures,
   };
 }
 
 function artifactResourceEvidence(corpus) {
-  const totalEncodedBytes = artifactRegistry.totalEncodedBytes();
+  const totalEncodedBytes = session.artifacts.totalEncodedBytes();
   const ceiling = corpus.resource_limits.total_encoded_artifact_bytes;
   return {
     schema: "punctra-browser-visual-artifact-resources-v1",
-    artifact_count: artifactRegistry.metadata().length,
+    artifact_count: session.artifacts.metadata().length,
     total_encoded_artifact_bytes: totalEncodedBytes,
     total_encoded_artifact_bytes_ceiling: ceiling,
     passed: totalEncodedBytes <= ceiling,
@@ -1589,7 +1502,7 @@ function externalEvidenceNonclaims() {
 
 async function prepareRubricReview(policy, record) {
   requireCondition(document.visibilityState === "visible", "rubric images require a visible attended document");
-  const plan = createRubricReviewPlan(policy, record.trials, artifactRegistry.metadata());
+  const plan = createRubricReviewPlan(policy, record.trials, session.artifacts.metadata());
   const review = {
     policy,
     plan,
@@ -1601,7 +1514,7 @@ async function prepareRubricReview(policy, record) {
     selectionSequence: 0,
     ready: false,
   };
-  activeRubricReview = review;
+  session.rubricReview = review;
   rubricStatus.textContent = "Loading the fixed post-capture artifact bindings…";
   for (const prompt of RUBRIC_PROMPTS) {
     const row = rubricRow(prompt);
@@ -1642,10 +1555,12 @@ async function prepareRubricReview(policy, record) {
 }
 
 async function submitRubricReview(programmaticAnswers) {
-  requireCondition(activeRubricReview?.ready === true, "post-capture rubric review is not ready");
-  requireCondition(currentDraft !== undefined && currentCorpus !== undefined, "post-capture evidence draft is unavailable");
+  requireCondition(session.rubricReview?.ready === true, "post-capture rubric review is not ready");
+  requireCondition(session.draft !== undefined && session.corpus !== undefined, "post-capture evidence draft is unavailable");
   if (programmaticAnswers !== undefined) applyProgrammaticRubricAnswers(programmaticAnswers);
-  const review = activeRubricReview;
+  const review = session.rubricReview;
+  const draft = session.draft;
+  const corpus = session.corpus;
   const submittedAnswers = {};
   review.selectionSequence = 0;
   for (const prompt of RUBRIC_PROMPTS) {
@@ -1670,36 +1585,33 @@ async function submitRubricReview(programmaticAnswers) {
     sessionLabel: sessionLabel.value,
     answers: submittedAnswers,
   });
-  currentDraft.rubric = {
-    schema: currentCorpus.rubric.schema,
+  draft.rubric = {
+    schema: corpus.rubric.schema,
     gating: false,
     review_status: "submitted",
     observation,
   };
-  currentDraft.artifacts = artifactRegistry.metadata();
-  currentDraft.artifact_resources = artifactResourceEvidence(currentCorpus);
-  currentDraft.completed_at = submittedAt;
-  currentDraft.summary = summarizeEvidence(currentDraft, currentCorpus);
-  currentReport = currentDraft;
-  currentDraft = undefined;
-  currentCorpus = undefined;
-  activeRubricReview = undefined;
+  draft.artifacts = session.artifacts.metadata();
+  draft.artifact_resources = artifactResourceEvidence(corpus);
+  draft.completed_at = submittedAt;
+  draft.summary = summarizeEvidence(draft, corpus);
+  const report = session.completeReview();
   setRubricControlsEnabled(false);
-  const passed = currentReport.summary.passed;
+  const passed = report.summary.passed;
   updateRunnerState({
     status: passed ? "passed" : "failed",
     trial_id: null,
     recreation_index: null,
     message: passed
-      ? `Passed ${currentReport.summary.passed_trials}/${currentReport.summary.trial_count} trials. Download and verify the evidence files.`
-      : `Visual evidence failed: ${currentReport.summary.failures.join("; ")}`,
+      ? `Passed ${report.summary.passed_trials}/${report.summary.trial_count} trials. Download and verify the evidence files.`
+      : `Visual evidence failed: ${report.summary.failures.join("; ")}`,
   });
   rubricStatus.textContent = "Post-capture attended review submitted and frozen into the evidence record.";
-  evidenceOutput.textContent = JSON.stringify(currentReport, null, 2);
+  evidenceOutput.textContent = JSON.stringify(report, null, 2);
   downloadEvidenceButton.disabled = false;
   downloadBundleButton.disabled = false;
   setRunControlsEnabled(true);
-  return cloneJson(currentReport);
+  return cloneJson(report);
 }
 
 function applyProgrammaticRubricAnswers(value) {
@@ -1721,15 +1633,16 @@ function applyProgrammaticRubricAnswers(value) {
 }
 
 function recordRubricSelection(prompt) {
-  if (activeRubricReview?.ready !== true) return;
-  activeRubricReview.selections[prompt] = {
+  const review = session.rubricReview;
+  if (review?.ready !== true) return;
+  review.selections[prompt] = {
     selected_at: new Date().toISOString(),
-    selection_order: ++activeRubricReview.selectionSequence,
+    selection_order: ++review.selectionSequence,
   };
 }
 
 function loadRubricPresentationImage({ gallery, artifact, trialId, review }) {
-  const source = artifactRegistry.presentationSource(artifact.path);
+  const source = session.artifacts.presentationSource(artifact.path);
   requireCondition(JSON.stringify(artifactIdentity(source.metadata)) === JSON.stringify(artifact), `rubric artifact ${artifact.path} identity changed before presentation`);
   const figure = document.createElement("figure");
   const image = document.createElement("img");
@@ -1817,17 +1730,17 @@ function configureModeFromUrl() {
 }
 
 function configureVerifyProvenance() {
-  configuredVerifyProvenance = null;
+  session.verifyProvenance = null;
   if (modeSelect.value !== "verify") {
     provenanceStatus.textContent = "Record mode creates commit-free baseline inputs; final pin provenance is intentionally absent.";
     if (!modeSelect.disabled) runButton.disabled = false;
     return;
   }
   try {
-    configuredVerifyProvenance = visualVerifyProvenanceFromUrl(window.location.href);
-    provenanceStatus.textContent = configuredVerifyProvenance === null
+    session.verifyProvenance = visualVerifyProvenanceFromUrl(window.location.href);
+    provenanceStatus.textContent = session.verifyProvenance === null
       ? "Final verify requires the documented implementation commit and verifier identity in this page URL."
-      : `Final verify pin loaded for implementation ${configuredVerifyProvenance.implementation_commit}.`;
+      : `Final verify pin loaded for implementation ${session.verifyProvenance.implementation_commit}.`;
   } catch (error) {
     provenanceStatus.textContent = `Final verify provenance rejected: ${errorMessage(error)}`;
   }
@@ -1835,7 +1748,7 @@ function configureVerifyProvenance() {
 }
 
 function verifyProvenanceMissing() {
-  return modeSelect.value === "verify" && configuredVerifyProvenance === null;
+  return modeSelect.value === "verify" && session.verifyProvenance === null;
 }
 
 function buildProgressList(trials) {
@@ -1857,8 +1770,7 @@ function markTrialProgress(trialId, state, detail) {
 }
 
 function updateRunnerState(patch) {
-  runnerState = { ...runnerState, ...patch };
-  publishRunnerState(runnerState);
+  publishRunnerState(session.updateRunnerState(patch));
 }
 
 function publishRunnerState(state) {
@@ -1890,7 +1802,7 @@ function setRubricControlsEnabled(enabled) {
 }
 
 function resetRubricReview() {
-  activeRubricReview = undefined;
+  session.rubricReview = undefined;
   setRubricControlsEnabled(false);
   rubricStatus.textContent = "Run the corpus first. Exact captured images will be bound and presented here afterward.";
   for (const prompt of RUBRIC_PROMPTS) {
@@ -1904,51 +1816,51 @@ function resetRubricReview() {
 }
 
 function downloadEvidence() {
-  requireCondition(currentReport !== undefined, "no visual evidence record is available");
+  requireCondition(session.report !== undefined, "no visual evidence record is available");
   const bytes = evidenceJsonBytes();
-  requireCondition(currentTransportPolicy !== undefined, "visual transport policy is unavailable");
-  requireCondition(bytes.byteLength <= currentTransportPolicy.maximum_evidence_json_bytes, "evidence JSON exceeds its byte ceiling");
+  requireCondition(session.transportPolicy !== undefined, "visual transport policy is unavailable");
+  requireCondition(bytes.byteLength <= session.transportPolicy.maximum_evidence_json_bytes, "evidence JSON exceeds its byte ceiling");
   triggerBlobDownload(bytes, "application/json", EVIDENCE_FILENAME);
   return {
     filename: EVIDENCE_FILENAME,
     mime_type: "application/json",
     byte_length: bytes.byteLength,
-    byte_length_ceiling: currentTransportPolicy.maximum_evidence_json_bytes,
+    byte_length_ceiling: session.transportPolicy.maximum_evidence_json_bytes,
   };
 }
 
 async function downloadBundle() {
-  requireCondition(currentReport !== undefined, "no visual evidence record is available");
-  requireCondition(currentTransportPolicy !== undefined && currentArtifactByteCeiling !== undefined, "visual transport policy is unavailable");
+  requireCondition(session.report !== undefined, "no visual evidence record is available");
+  requireCondition(session.transportPolicy !== undefined && session.artifactByteCeiling !== undefined, "visual transport policy is unavailable");
   const evidenceBytes = evidenceJsonBytes();
-  requireCondition(evidenceBytes.byteLength <= currentTransportPolicy.maximum_evidence_json_bytes, "evidence JSON exceeds its byte ceiling");
-  const artifactEntries = artifactRegistry.bundleEntries();
+  requireCondition(evidenceBytes.byteLength <= session.transportPolicy.maximum_evidence_json_bytes, "evidence JSON exceeds its byte ceiling");
+  const artifactEntries = session.artifacts.bundleEntries();
   const encodedArtifactBytes = artifactEntries.reduce((total, entry) => total + entry.bytes.byteLength, 0);
-  requireCondition(encodedArtifactBytes === artifactRegistry.totalEncodedBytes(), "transport artifact byte accounting differs");
-  requireCondition(encodedArtifactBytes <= currentArtifactByteCeiling, "transport artifacts exceed their byte ceiling");
+  requireCondition(encodedArtifactBytes === session.artifacts.totalEncodedBytes(), "transport artifact byte accounting differs");
+  requireCondition(encodedArtifactBytes <= session.artifactByteCeiling, "transport artifacts exceed their byte ceiling");
   requireCondition(
-    currentBaselineInputsEntry === undefined
-      || currentBaselineInputsEntry.bytes.byteLength <= currentTransportPolicy.maximum_baseline_inputs_json_bytes,
+    session.baselineInputsEntry === undefined
+      || session.baselineInputsEntry.bytes.byteLength <= session.transportPolicy.maximum_baseline_inputs_json_bytes,
     "baseline-input manifest exceeds its byte ceiling",
   );
   const archive = encodeVisualArchive([
     ...artifactEntries,
-    ...(currentBaselineInputsEntry === undefined ? [] : [{
-      path: currentBaselineInputsEntry.path,
-      bytes: currentBaselineInputsEntry.bytes,
+    ...(session.baselineInputsEntry === undefined ? [] : [{
+      path: session.baselineInputsEntry.path,
+      bytes: session.baselineInputsEntry.bytes,
     }]),
-    { path: currentTransportPolicy.evidence_repository_path, bytes: evidenceBytes },
+    { path: session.transportPolicy.evidence_repository_path, bytes: evidenceBytes },
   ], {
-    maximumEntries: currentTransportPolicy.maximum_entries,
-    maximumArchiveBytes: currentTransportPolicy.maximum_archive_bytes,
+    maximumEntries: session.transportPolicy.maximum_entries,
+    maximumArchiveBytes: session.transportPolicy.maximum_archive_bytes,
   });
   requireCondition(
-    archive.facts.archive_structure_bytes <= currentTransportPolicy.maximum_archive_structure_bytes,
+    archive.facts.archive_structure_bytes <= session.transportPolicy.maximum_archive_structure_bytes,
     "transport archive structure exceeds its byte ceiling",
   );
   const archiveOverheadBytes = archive.bytes.byteLength - encodedArtifactBytes;
   requireCondition(
-    archiveOverheadBytes <= currentTransportPolicy.maximum_archive_overhead_bytes,
+    archiveOverheadBytes <= session.transportPolicy.maximum_archive_overhead_bytes,
     "transport archive overhead exceeds its byte ceiling",
   );
   const sha256 = await sha256Hex(archive.bytes);
@@ -1958,28 +1870,28 @@ async function downloadBundle() {
     transportStatus.textContent = "Writing the bounded TAR once through the opt-in same-origin local server…";
     localExportReceipt = await exportVisualArchiveToLocalServer({
       archiveBytes: archive.bytes,
-      filename: currentTransportPolicy.archive_filename,
+      filename: session.transportPolicy.archive_filename,
       sha256,
       pageUrl: window.location.href,
     });
     downloadBundleButton.disabled = true;
     transportStatus.textContent = `Local TAR export verified: ${localExportReceipt.byte_length} bytes, SHA-256 ${localExportReceipt.sha256}.`;
   } else {
-    triggerBlobDownload(archive.bytes, "application/x-tar", currentTransportPolicy.archive_filename);
+    triggerBlobDownload(archive.bytes, "application/x-tar", session.transportPolicy.archive_filename);
     transportStatus.textContent = "Standard browser TAR download prepared. Extract it only into a fresh directory.";
   }
   return {
     ...archive.facts,
-    filename: currentTransportPolicy.archive_filename,
+    filename: session.transportPolicy.archive_filename,
     mime_type: "application/x-tar",
     sha256,
     encoded_artifact_bytes: encodedArtifactBytes,
     evidence_json_bytes: evidenceBytes.byteLength,
-    baseline_inputs_bytes: currentBaselineInputsEntry?.bytes.byteLength ?? 0,
+    baseline_inputs_bytes: session.baselineInputsEntry?.bytes.byteLength ?? 0,
     allocation_bytes: archive.bytes.byteLength,
-    allocation_ceiling_bytes: currentTransportPolicy.maximum_archive_bytes,
+    allocation_ceiling_bytes: session.transportPolicy.maximum_archive_bytes,
     allocation_overhead_bytes: archiveOverheadBytes,
-    allocation_overhead_ceiling_bytes: currentTransportPolicy.maximum_archive_overhead_bytes,
+    allocation_overhead_ceiling_bytes: session.transportPolicy.maximum_archive_overhead_bytes,
     evidence_artifact: false,
     private_transport_only: true,
     transport,
@@ -1988,7 +1900,7 @@ async function downloadBundle() {
 }
 
 function evidenceJsonBytes() {
-  return new TextEncoder().encode(`${JSON.stringify(currentReport, null, 2)}\n`);
+  return new TextEncoder().encode(`${JSON.stringify(session.report, null, 2)}\n`);
 }
 
 function triggerBlobDownload(bytes, mimeType, filename) {
@@ -2169,5 +2081,49 @@ class ArtifactRegistry {
   }
 }
 
-artifactRegistry = new ArtifactRegistry(artifactList);
+const session = new VisualRunSession({
+  artifactRegistry: new ArtifactRegistry(artifactList),
+  runnerStateSchema: RUNNER_STATE_SCHEMA,
+});
+
+configureModeFromUrl();
+configureVerifyProvenance();
+configureArchiveTransport();
+configureRubricFields();
+publishRunnerState(session.runnerState());
+
+window.__PUNCTRA_BROWSER_VISUAL__ = Object.freeze({
+  schema: RUNNER_STATE_SCHEMA,
+  run: (options = {}) => startRun(options),
+  submitReview: (answers) => submitRubricReview(answers),
+  state: () => session.runnerState(),
+  report: () => session.report === undefined ? null : cloneJson(session.report),
+  draft: () => session.draft === undefined ? null : cloneJson(session.draft),
+  baselineInputs: () => session.baselineInputsEntry === undefined
+    ? null
+    : cloneJson(session.baselineInputsEntry.manifest),
+  artifacts: () => session.artifacts.metadata(),
+  downloadEvidence: () => downloadEvidence(),
+  downloadBundle: () => downloadBundle(),
+});
+
+runButton.addEventListener("click", () => {
+  void startRun({
+    mode: modeSelect.value,
+    provenance: modeSelect.value === "verify" ? session.verifyProvenance : undefined,
+  }).catch((error) => {
+    statusOutput.textContent = `Visual run failed: ${errorMessage(error)}`;
+  });
+});
+modeSelect.addEventListener("change", () => configureVerifyProvenance());
+downloadEvidenceButton.addEventListener("click", () => downloadEvidence());
+downloadBundleButton.addEventListener("click", () => {
+  void downloadBundle().catch((error) => {
+    transportStatus.textContent = `Bundle export failed: ${errorMessage(error)}`;
+  });
+});
+submitRubricButton.addEventListener("click", () => {
+  void submitRubricReview();
+});
+
 requireCondition(DISPLAY_MODES.length === 5, "display-mode contract differs");
