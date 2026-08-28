@@ -152,9 +152,9 @@ function trustedActivation(controlId, eventType, recordedAt) {
     schema: "punctra-browser-trusted-control-activation-v1",
     control_id: controlId,
     event_type: eventType,
-    trust_source: "event_is_trusted",
+    trust_source: "transient_user_activation",
     event_is_trusted: true,
-    transient_user_activation: false,
+    transient_user_activation: true,
     document_visibility_state: "visible",
     recorded_at: recordedAt,
   };

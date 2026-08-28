@@ -1319,11 +1319,8 @@ function verifyTrustedControlActivation(activation, controlId, eventType) {
   assert.equal(activation.event_type, eventType);
   assert.equal(typeof activation.event_is_trusted, "boolean");
   assert.equal(typeof activation.transient_user_activation, "boolean");
-  assert(activation.event_is_trusted || activation.transient_user_activation, `${controlId} lacks browser activation proof`);
-  assert.equal(
-    activation.trust_source,
-    activation.event_is_trusted ? "event_is_trusted" : "transient_user_activation",
-  );
+  assert.equal(activation.transient_user_activation, true, `${controlId} lacks transient user activation`);
+  assert.equal(activation.trust_source, "transient_user_activation");
   assert.equal(activation.document_visibility_state, "visible");
   assert.match(activation.recorded_at, /^\d{4}-\d{2}-\d{2}T/);
   const activationMilliseconds = Date.parse(activation.recorded_at);

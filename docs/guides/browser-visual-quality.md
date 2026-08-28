@@ -317,6 +317,9 @@ checkout/verifier identity exposed by the strict local server. Click that
 button, run the same corpus against the
 checked-in baselines, wait for the post-capture images, record and submit the
 final maintainer-labelled rubric, and wait for the page to report `passed`.
+The Run click, every rubric selection, and rubric submission each require active
+browser transient user activation; a trusted event without active transient
+activation is rejected.
 Download the one repository TAR bundle, inspect and extract it into a fresh
 directory, and place its evidence JSON and PNG artifacts at their recorded
 repository-relative paths. Only this verify-mode evidence is eligible for

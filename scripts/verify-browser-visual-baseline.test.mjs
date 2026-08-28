@@ -373,9 +373,8 @@ test("coverage authority, capture-bound batches, callback facts, cleanup, and pe
     evidence.trials[0].coverage.declared_authority = "presentation_only";
   }, /Coverage|deep-equal/);
   await rejectEvidenceMutation(fixture, (evidence) => {
-    evidence.provenance.run_initiation.event_is_trusted = false;
     evidence.provenance.run_initiation.transient_user_activation = false;
-  }, /browser activation proof/);
+  }, /transient user activation/);
   await rejectEvidenceMutation(fixture, (evidence) => {
     evidence.trials[0].recreations[0].diagnostics.display_authority = "presentation_only";
   }, /Expected values to be strictly equal/);
@@ -465,9 +464,8 @@ test("post-capture rubric presentation, paths, ordering, and shown state are imm
     evidence.rubric.observation.answers.depth.selected_at = "2026-08-28T08:30:00.000Z";
   }, /selection predates presentation|Expected values to be strictly equal/);
   await rejectEvidenceMutation(fixture, (evidence) => {
-    evidence.rubric.observation.answers.depth.selection_activation.event_is_trusted = false;
     evidence.rubric.observation.answers.depth.selection_activation.transient_user_activation = false;
-  }, /browser activation proof/);
+  }, /transient user activation/);
   await rejectEvidenceMutation(fixture, (evidence) => {
     evidence.rubric.observation.submission.event_type = "programmatic";
   }, /Expected values to be strictly equal/);
@@ -1667,9 +1665,9 @@ function trustedControlActivation(controlId, eventType, recordedAt) {
     schema: VISUAL_TRUSTED_CONTROL_SCHEMA,
     control_id: controlId,
     event_type: eventType,
-    trust_source: "event_is_trusted",
+    trust_source: "transient_user_activation",
     event_is_trusted: true,
-    transient_user_activation: false,
+    transient_user_activation: true,
     document_visibility_state: "visible",
     recorded_at: recordedAt,
   };
@@ -1706,9 +1704,9 @@ function evidenceProvenance(verified) {
       schema: VISUAL_TRUSTED_CONTROL_SCHEMA,
       control_id: "run-corpus",
       event_type: "click",
-      trust_source: "event_is_trusted",
+      trust_source: "transient_user_activation",
       event_is_trusted: true,
-      transient_user_activation: false,
+      transient_user_activation: true,
       document_visibility_state: "visible",
       recorded_at: "2026-08-28T08:00:00.000Z",
     },
@@ -1803,9 +1801,9 @@ async function emptyEvidenceFixture(verified) {
         schema: VISUAL_TRUSTED_CONTROL_SCHEMA,
         control_id: "run-corpus",
         event_type: "click",
-        trust_source: "event_is_trusted",
+        trust_source: "transient_user_activation",
         event_is_trusted: true,
-        transient_user_activation: false,
+        transient_user_activation: true,
         document_visibility_state: "visible",
         recorded_at: "2026-08-28T08:00:00.000Z",
       },

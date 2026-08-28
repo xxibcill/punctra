@@ -102,7 +102,7 @@ test("final verify provenance must match the running checkout and verifier bytes
   );
 });
 
-test("trusted control activations are visible, browser-issued, and single use", () => {
+test("trusted control activations require transient activation and remain single use", () => {
   const gate = new VisualTrustedControlGate();
   const control = {};
   const event = {
@@ -114,15 +114,16 @@ test("trusted control activations are visible, browser-issued, and single use", 
     control,
     controlId: "run-corpus",
     visibilityState: "visible",
+    userActivationIsActive: true,
     recordedAt: "2026-08-28T08:00:00.000Z",
   });
   assert.deepEqual(gate.consume(activation, "run-corpus"), {
     schema: VISUAL_TRUSTED_CONTROL_SCHEMA,
     control_id: "run-corpus",
     event_type: "click",
-    trust_source: "event_is_trusted",
+    trust_source: "transient_user_activation",
     event_is_trusted: true,
-    transient_user_activation: false,
+    transient_user_activation: true,
     document_visibility_state: "visible",
     recorded_at: "2026-08-28T08:00:00.000Z",
   });
@@ -151,18 +152,24 @@ test("transient user activation supplies browser trust when the control event is
   });
 });
 
-test("synthetic inactive and hidden-document control activations are rejected", () => {
+test("inactive and hidden-document control activations are rejected", () => {
   const gate = new VisualTrustedControlGate();
   const control = {};
   assert.throws(() => gate.issue({ type: "click", isTrusted: false, currentTarget: control }, {
     control,
     controlId: "run-corpus",
     visibilityState: "visible",
-  }), /browser-trusted event or active transient user activation/);
+  }), /active transient user activation/);
+  assert.throws(() => gate.issue({ type: "click", isTrusted: true, currentTarget: control }, {
+    control,
+    controlId: "run-corpus",
+    visibilityState: "visible",
+  }), /active transient user activation/);
   assert.throws(() => gate.issue({ type: "click", isTrusted: true, currentTarget: control }, {
     control,
     controlId: "run-corpus",
     visibilityState: "hidden",
+    userActivationIsActive: true,
   }), /visible document/);
 });
 

@@ -385,7 +385,10 @@ verifier bytes reported by the strict local server. Click it to run the same
 nine-trial, three-recreation
 corpus against the checked-in baselines, wait for the exact post-capture images,
 record and submit the final maintainer-labelled rubric, and wait for
-`document.body.dataset.visualBaseline === "passed"`. Download the single
+`document.body.dataset.visualBaseline === "passed"`.
+The Run click, every rubric selection, and rubric submission each require active
+browser transient user activation; `event.isTrusted` alone is not sufficient.
+Download the single
 repository TAR bundle; separate evidence-JSON and per-artifact links are
 diagnostic conveniences, not the documented transport workflow. For the
 server fallback, append `&transport=server` to that same pinned URL. Inspect

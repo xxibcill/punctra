@@ -35,8 +35,8 @@ export class VisualTrustedControlGate {
     const eventIsTrusted = event.isTrusted === true;
     const transientUserActivation = userActivationIsActive === true;
     requireCondition(
-      eventIsTrusted || transientUserActivation,
-      "attended control requires a browser-trusted event or active transient user activation",
+      transientUserActivation,
+      "attended control requires active transient user activation",
     );
     requireCondition(event.currentTarget === control, "attended control event target is invalid");
     requireCondition(visibilityState === "visible", "attended control requires a visible document");
@@ -47,7 +47,7 @@ export class VisualTrustedControlGate {
         schema: VISUAL_TRUSTED_CONTROL_SCHEMA,
         control_id: controlId,
         event_type: eventType,
-        trust_source: eventIsTrusted ? "event_is_trusted" : "transient_user_activation",
+        trust_source: "transient_user_activation",
         event_is_trusted: eventIsTrusted,
         transient_user_activation: transientUserActivation,
         document_visibility_state: visibilityState,
@@ -72,18 +72,14 @@ export function validateTrustedControlActivationEvidence(value, { controlId, eve
   requireCondition(value.control_id === controlId, `${controlId} trusted control activation identity differs`);
   requireCondition(value.event_type === eventType, `${controlId} trusted control event type differs`);
   requireCondition(
-    value.trust_source === "event_is_trusted" || value.trust_source === "transient_user_activation",
+    value.trust_source === "transient_user_activation",
     `${controlId} trusted control activation source differs`,
   );
   requireCondition(typeof value.event_is_trusted === "boolean", `${controlId} event trust fact is invalid`);
   requireCondition(typeof value.transient_user_activation === "boolean", `${controlId} transient user activation fact is invalid`);
   requireCondition(
-    value.event_is_trusted || value.transient_user_activation,
-    `${controlId} control lacked browser trust and transient user activation`,
-  );
-  requireCondition(
-    value.trust_source === (value.event_is_trusted ? "event_is_trusted" : "transient_user_activation"),
-    `${controlId} trusted control activation source is inconsistent`,
+    value.transient_user_activation,
+    `${controlId} control lacked transient user activation`,
   );
   requireCondition(value.document_visibility_state === "visible", `${controlId} control event was not visible`);
   requireCondition(typeof value.recorded_at === "string" && Number.isFinite(Date.parse(value.recorded_at)), `${controlId} control timestamp is invalid`);
