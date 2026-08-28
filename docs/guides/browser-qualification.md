@@ -1,11 +1,11 @@
 # Browser qualification and recovery
 
-Punctra `0.19.0-alpha.1` qualifies one exact local browser/device lane for the
-fixed repository workload. The machine-readable [browser matrix](../releases/v0.19-browser-matrix.json)
+Punctra `0.20.0-alpha.1` qualifies one exact local browser/device lane for the
+fixed repository workload and packed quickstart. The machine-readable [browser matrix](../releases/v0.20-browser-matrix.json)
 is the support authority: a platform absent from its `qualified_entries` is
 unqualified even when the SDK initializes successfully.
 
-This is deliberately narrower than a browser-support promise. The v0.19 lane is
+This is deliberately narrower than a browser-support promise. The v0.20 lane is
 the Codex in-app browser reporting Chromium 151 on macOS 26.5.2/arm64 and the
 local Apple M5 Pro machine. The browser exposed a generic WebGPU adapter name,
 so the physical-GPU mapping is recorded as a local-system inference rather than
@@ -20,6 +20,7 @@ Run the repository checks and build the packed SDK:
 node --test apps/browser-demo/web/*.test.mjs packages/react/*.test.mjs scripts/*.test.mjs
 scripts/build-browser-sdk.sh
 node scripts/verify-browser-sdk.mjs
+node scripts/verify-browser-integration-baseline.mjs
 node scripts/verify-browser-qualification.mjs
 ```
 
@@ -49,7 +50,7 @@ The page passes only after it exercises:
 - 30 settled foreground frames plus first-Coverage, settled-View, main-thread,
   network, worker, cache, logical renderer, canvas, and optional heap evidence;
   and
-- every fixed ceiling in the accepted v0.19 design.
+- every fixed ceiling in the accepted v0.20 design.
 
 Record the raw `punctra-browser-qualification-v1` artifact before changing the
 browser, viewport, display, adapter, operating system, package, fixture, server,
@@ -129,12 +130,12 @@ cookies, credentials, or unrelated storage.
 
 ## Remaining evidence
 
-v0.19 does not qualify installed Chrome, Safari, another operating system/GPU,
+v0.20 does not qualify installed Chrome, Safari, another operating system/GPU,
 mobile, registry/CDN deployment, authentication, offline-first behavior,
 independent adoption, API stability, visual quality, or support operations.
 Those remain external evidence or later accepted work; this release is not a
 beta or release candidate.
 
-The [v0.19 repository verification record](../releases/v0.19.0.md) pins the
+The [v0.20 repository verification record](../releases/v0.20.0.md) pins the
 exact implementation commit, environment, attended observations, full local
 command matrix, and outstanding exits.

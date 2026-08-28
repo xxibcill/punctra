@@ -1,6 +1,6 @@
 {
   "name": "@punctra/viewer",
-  "version": "0.19.0-alpha.1",
+  "version": "0.20.0-alpha.1",
   "description": "Framework-neutral Punctra WebGPU point-cloud viewer SDK.",
   "type": "module",
   "license": "MIT OR Apache-2.0",
@@ -30,7 +30,9 @@
   "files": [
     "camera-policy.js",
     "exact-query.d.ts",
+    "exact-query-error.js",
     "exact-query.js",
+    "las-exact-decoder.js",
     "module-loader.js",
     "pkg/browser_demo.d.ts",
     "pkg/browser_demo.js",

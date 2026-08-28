@@ -165,6 +165,21 @@ The [v0.19 repository verification record](docs/releases/v0.19.0.md) owns the
 exact implementation, environment, command, browser, GPU, benchmark, and
 nonclaim facts.
 
+The completed bounded [v0.20 Stable Browser-Engine Integration Baseline
+design](docs/design/browser-integration-baseline-v0.20.md) consolidates that
+path into one packed consumer. `examples/browser-typescript` is the canonical
+quickstart: it imports only the root, input, and exact-query entries, owns its
+canvas/navigation/recovery UI, and completes load, display/projection,
+provisional pick, presentation highlight, exact confirmation, cancellation,
+pause/resume, and disposal. LAS header and record decoders remain internal.
+The [integration baseline](docs/releases/v0.20-browser-baseline.json) freezes
+the package, fixture, generated-scene, presentation, recovery, and limit facts;
+the [v0.20 browser matrix](docs/releases/v0.20-browser-matrix.json) remains a
+one-entry exact local support authority. Independent adoption, registry/CDN
+delivery, other browser/device evidence, API stability, visual-quality
+completion, support qualification, beta, v1, and release-candidate status are
+not implied by repository completion.
+
 ## Artifact
 
 An immutable result produced from a Source, Snapshot, or explicitly detached input with recorded construction parameters, such as a Spatial Index, Terrain Surface, or Profile. Its provenance identifies the Source and either the Workspace Revision or detached input content that was used, plus its construction version. A rebuildable persistent Artifact may be deleted and reproduced from that authority; persistence does not make it Workspace state.

@@ -20,29 +20,6 @@ export class ExactQueryError extends Error {
   constructor(code: ExactQueryErrorCode, message: string);
 }
 
-export interface LasExactQueryLayout {
-  readonly pointDataOffset: number;
-  readonly pointFormat: 3;
-  readonly pointRecordBytes: 34;
-  readonly pointCount: number;
-  readonly scale: readonly [number, number, number];
-  readonly offset: readonly [number, number, number];
-}
-
-export interface LasExactQueryDeployment {
-  readonly source: Readonly<{
-    sourceIdentity: string;
-    byteLength: number;
-    pointCount: number;
-  }>;
-  readonly index: Readonly<{
-    transform: Readonly<{
-      scale: readonly [number, number, number];
-      offset: readonly [number, number, number];
-    }>;
-  }>;
-}
-
 export interface LasExactQueryBridge {
   confirm(request: {
     readonly sourceIdentity: string;
@@ -61,16 +38,3 @@ export interface LasExactQueryBridgeOptions {
 export function createLasExactQueryBridge(
   options: LasExactQueryBridgeOptions,
 ): Readonly<LasExactQueryBridge>;
-
-export function decodeLasLayout(
-  bytes: Uint8Array,
-  deployment: LasExactQueryDeployment,
-): Readonly<LasExactQueryLayout>;
-
-export function decodeLasPointRecord(
-  bytes: Uint8Array,
-  sourceIdentity: string,
-  pointOrdinal: number,
-  generation: number,
-  layout: LasExactQueryLayout,
-): ExactPoint;

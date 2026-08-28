@@ -8,6 +8,7 @@ import {
   captureJsHeap,
   evaluateQualification,
   evaluateQualificationLane,
+  evaluateStreamingResult,
   measureForegroundFrames,
   QUALIFICATION_RUNTIME_LANE,
   recreationRequiredRecoveryEvidence,
@@ -77,6 +78,47 @@ test("JavaScript heap observations are explicit when the non-standard API is abs
     usedBytes: 42_000,
   });
 });
+
+test("streaming evidence distinguishes full Source size from sampled viewer residency", () => {
+  const result = streamingResult();
+  assert.deepEqual(evaluateStreamingResult(result), { passed: true, failures: [] });
+
+  result.state.source.expectedPoints = QUALIFICATION_WORKLOAD.sourcePoints;
+  const incorrect = evaluateStreamingResult(result);
+  assert.equal(incorrect.passed, false);
+  assert(incorrect.failures.some((failure) => failure.includes("state sampled Point count")));
+});
+
+function streamingResult() {
+  return {
+    deployment: {
+      deployment_id: QUALIFICATION_WORKLOAD.deploymentId,
+      source_identity: QUALIFICATION_WORKLOAD.sourceIdentity,
+      source_point_count: QUALIFICATION_WORKLOAD.sourcePoints,
+      root_coverage: QUALIFICATION_WORKLOAD.coverage,
+    },
+    state: {
+      source: {
+        identity: QUALIFICATION_WORKLOAD.sourceIdentity,
+        expectedPoints: QUALIFICATION_WORKLOAD.sampledPoints,
+        coverage: QUALIFICATION_WORKLOAD.coverage,
+        publishedPoints: QUALIFICATION_WORKLOAD.sampledPoints,
+        publishedBatches: QUALIFICATION_WORKLOAD.publishedBatches,
+        retainedRecordBytes: QUALIFICATION_WORKLOAD.transferRecordBytes,
+      },
+      render: {
+        drawnPoints: QUALIFICATION_WORKLOAD.sampledPoints,
+        residentBytes: QUALIFICATION_WORKLOAD.rendererResidentBytes,
+      },
+    },
+    pointOrdinals: { length: QUALIFICATION_WORKLOAD.sampledPoints },
+    metrics: {
+      concurrentResponseBytesHighWater: QUALIFICATION_LIMITS.concurrentResponseBytes,
+      decodedStagingBytesHighWater: QUALIFICATION_LIMITS.workerStagingBytes,
+      transferredBytes: QUALIFICATION_WORKLOAD.transferRecordBytes,
+    },
+  };
+}
 
 test("environment capture bounds caller-visible browser facts", () => {
   const environment = captureEnvironment({

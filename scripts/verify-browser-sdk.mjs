@@ -1,20 +1,30 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   cpSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
   rmSync,
+  writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { captureChildExit } from "./child-process.mjs";
+import {
+  BROWSER_SDK_REFERENCE_SECTIONS,
+  publicDeclaration,
+} from "./generate-browser-sdk-reference.mjs";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const artifactDirectory = path.join(repositoryRoot, "target/npm");
+const sourceViewerManifest = JSON.parse(readFileSync(
+  path.join(repositoryRoot, "apps/browser-demo/web/package.json"),
+  "utf8",
+));
 let developmentServerSequence = 0;
 const viewerArtifact = onlyArtifact("punctra-viewer-");
 const reactArtifact = onlyArtifact("punctra-react-");
@@ -22,7 +32,9 @@ const reactArtifact = onlyArtifact("punctra-react-");
 verifyPackedFiles(viewerArtifact, [
   "package/camera-policy.js",
   "package/exact-query.d.ts",
+  "package/exact-query-error.js",
   "package/exact-query.js",
+  "package/las-exact-decoder.js",
   "package/module-loader.js",
   "package/package.json",
   "package/pkg/browser_demo.d.ts",
@@ -51,9 +63,14 @@ verifyPackedFiles(reactArtifact, [
   "package/lifecycle.js",
   "package/package.json",
 ]);
+verifyGeneratedApiReference(viewerArtifact, reactArtifact);
 
 run("node", ["--test", "packages/react/lifecycle.test.mjs"], repositoryRoot);
-await verifyTrial("browser-typescript", [viewerArtifact], { requireCodeSplit: true });
+await verifyTrial("browser-typescript", [viewerArtifact], {
+  publishDistribution: true,
+  requireCodeSplit: true,
+  runPackageTests: true,
+});
 await verifyTrial("browser-react", [viewerArtifact, reactArtifact], { runPackageTests: true });
 
 console.log("browser SDK packed-artifact trials passed");
@@ -62,14 +79,66 @@ function verifyQualificationConsumer() {
   const qualificationRoot = path.join(repositoryRoot, "apps/browser-demo/web");
   const viewerPackage = path.join(qualificationRoot, "node_modules/@punctra/viewer");
   const packageManifest = JSON.parse(readFileSync(path.join(viewerPackage, "package.json"), "utf8"));
-  assert.equal(packageManifest.name, "@punctra/viewer");
-  assert.equal(packageManifest.version, "0.19.0-alpha.1");
+  assert.equal(packageManifest.name, sourceViewerManifest.name);
+  assert.equal(packageManifest.version, sourceViewerManifest.version);
   const index = readFileSync(path.join(qualificationRoot, "index.html"), "utf8");
   assert.match(index, /"@punctra\/viewer":\s*"\.\/node_modules\/\@punctra\/viewer\/sdk\.js"/);
   assert.match(index, /"@punctra\/viewer\/input":\s*"\.\/node_modules\/\@punctra\/viewer\/viewer-input\.js"/);
   assert.match(index, /"@punctra\/viewer\/exact-query":\s*"\.\/node_modules\/\@punctra\/viewer\/exact-query\.js"/);
   const worker = readFileSync(path.join(qualificationRoot, "qualification-worker.js"), "utf8");
   assert.match(worker, /node_modules\/\@punctra\/viewer\/stream-worker\.js/);
+}
+
+function verifyGeneratedApiReference(viewer, react) {
+  const reference = readFileSync(path.join(repositoryRoot, "docs/api/browser-sdk.md"), "utf8");
+  const viewerManifest = packedJson(viewer, "package/package.json");
+  const reactManifest = packedJson(react, "package/package.json");
+  assert.ok(reference.includes(`packed in Punctra \`${viewerManifest.version}\``));
+  const packedPackages = {
+    viewer: { artifact: viewer, packageName: viewerManifest.name },
+    react: { artifact: react, packageName: reactManifest.name },
+  };
+  for (const { title, packageKey, declarationPath } of BROWSER_SDK_REFERENCE_SECTIONS) {
+    const { artifact, packageName } = packedPackages[packageKey];
+    const expectedDeclaration = publicDeclaration(
+      declarationPath,
+      packedText(artifact, `package/${declarationPath}`),
+    ).trim();
+    const section = readReferenceSection(reference, title);
+    assert.equal(
+      section.packedDeclaration,
+      `${packageName}/${declarationPath}`,
+      `${title} names the wrong packed declaration`,
+    );
+    assert.equal(
+      section.declaration,
+      expectedDeclaration,
+      `${title} differs from packed ${packageName}/${declarationPath}`,
+    );
+  }
+}
+
+function readReferenceSection(reference, title) {
+  const heading = `## ${title}\n\n`;
+  const headingStart = reference.indexOf(heading);
+  assert.notEqual(headingStart, -1, `generated API reference omitted ${title}`);
+  const bodyStart = headingStart + heading.length;
+  const nextHeading = reference.indexOf("\n\n## ", bodyStart);
+  const body = reference.slice(
+    bodyStart,
+    nextHeading === -1 ? reference.length : nextHeading,
+  ).trimEnd();
+  const parsed = /^Packed declaration: `([^`]+)`\n\n```ts\n([\s\S]*?)\n```$/.exec(body);
+  assert(parsed, `generated API reference has a malformed ${title} section`);
+  return { packedDeclaration: parsed[1], declaration: parsed[2] };
+}
+
+function packedJson(artifact, entry) {
+  return JSON.parse(packedText(artifact, entry));
+}
+
+function packedText(artifact, entry) {
+  return run("tar", ["-xOzf", artifact, entry], repositoryRoot).stdout;
 }
 
 function onlyArtifact(prefix) {
@@ -87,11 +156,20 @@ function verifyPackedFiles(artifact, expectedFiles) {
   assert.deepEqual(actualFiles, [...expectedFiles].sort(), `${artifact} contents differ`);
 }
 
-async function verifyTrial(name, artifacts, { requireCodeSplit = false, runPackageTests = false }) {
+async function verifyTrial(
+  name,
+  artifacts,
+  {
+    publishDistribution = false,
+    requireCodeSplit = false,
+    runPackageTests = false,
+  },
+) {
   const temporaryRoot = mkdtempSync(path.join(tmpdir(), `punctra-${name}-`));
   const trial = path.join(temporaryRoot, name);
   try {
     cpSync(path.join(repositoryRoot, "examples", name), trial, { recursive: true });
+    if (publishDistribution) prepareQuickstartFixture(trial);
     run("npm", ["ci", "--ignore-scripts", "--no-audit", "--no-fund"], trial);
     run("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund", "--no-save", ...artifacts], trial);
     if (runPackageTests) run("npm", ["test"], trial);
@@ -100,10 +178,39 @@ async function verifyTrial(name, artifacts, { requireCodeSplit = false, runPacka
     verifyProductionAssets(path.join(trial, "dist"), requireCodeSplit);
     run("npm", ["run", "build"], trial);
     verifyProductionAssets(path.join(trial, "dist"), requireCodeSplit);
+    if (publishDistribution) {
+      const packedViewerArtifact = artifacts.find((artifact) => path.basename(artifact).startsWith("punctra-viewer-"));
+      assert(packedViewerArtifact, "packed quickstart is missing its viewer artifact");
+      publishQuickstart(path.join(trial, "dist"), packedViewerArtifact);
+    }
     await verifyDevelopmentServer(trial);
   } finally {
     rmSync(temporaryRoot, { recursive: true, force: true });
   }
+}
+
+function prepareQuickstartFixture(trial) {
+  const fixtureSource = path.join(repositoryRoot, "apps/browser-demo/web/fixtures/v1");
+  const fixtureTarget = path.join(trial, "public/fixtures/v1");
+  cpSync(fixtureSource, fixtureTarget, { recursive: true });
+}
+
+function publishQuickstart(distribution, viewerArtifact) {
+  const target = path.join(repositoryRoot, "target/browser-quickstart");
+  rmSync(target, { recursive: true, force: true });
+  cpSync(distribution, target, { recursive: true });
+  writeFileSync(
+    path.join(target, "punctra-packed-runtime.json"),
+    `${JSON.stringify({
+      schema: "punctra-browser-packed-runtime-v1",
+      build: "production",
+      serverContract: "punctra-strict-range-v1",
+      viewerPackage: sourceViewerManifest.name,
+      viewerVersion: sourceViewerManifest.version,
+      viewerArtifactSha256: createHash("sha256").update(readFileSync(viewerArtifact)).digest("hex"),
+    }, null, 2)}\n`,
+    "utf8",
+  );
 }
 
 function verifyProductionAssets(distribution, requireCodeSplit) {

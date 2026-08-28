@@ -18,6 +18,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 
 
 WEB_ROOT = (Path(__file__).resolve().parent.parent / "apps/browser-demo/web").resolve()
+VIEWER_PACKAGE = json.loads((WEB_ROOT / "package.json").read_text(encoding="utf-8"))
 EXPOSED_HEADERS = "Accept-Ranges, Content-Encoding, Content-Length, Content-Range, ETag"
 FILE_CHUNK_BYTES = 64 * 1024
 FAULTS = {"disconnect", "redirect", "retry", "truncated", "corrupt", "validator_drift"}
@@ -69,8 +70,8 @@ def qualification_host_facts() -> dict[str, object]:
         },
         "display_path": display_path(primary_display),
         "package": {
-            "name": "@punctra/viewer",
-            "version": "0.19.0-alpha.1",
+            "name": VIEWER_PACKAGE["name"],
+            "version": VIEWER_PACKAGE["version"],
         },
     }
 
@@ -132,6 +133,12 @@ class BrowserDemoHandler(BaseHTTPRequestHandler):
     """Serve one immutable repository tree without redirects or transformation."""
 
     server_version = "PunctraBrowserRange/1"
+
+    def handle_one_request(self) -> None:
+        try:
+            super().handle_one_request()
+        except (BrokenPipeError, ConnectionResetError):
+            self.close_connection = True
 
     def do_OPTIONS(self) -> None:  # noqa: N802
         self.send_response(HTTPStatus.NO_CONTENT)
@@ -195,7 +202,7 @@ class BrowserDemoHandler(BaseHTTPRequestHandler):
         self.send_response(HTTPStatus.PARTIAL_CONTENT if partial else HTTPStatus.OK)
         self._send_cors_headers()
         self.send_header("Accept-Ranges", "bytes")
-        self.send_header("Cache-Control", cache_control(path))
+        self.send_header("Cache-Control", cache_control(path, self.server.web_root))
         self.send_header("Content-Encoding", "identity")
         self.send_header("Content-Length", str(body_length))
         self.send_header("Content-Type", content_type(path))
@@ -244,8 +251,9 @@ class BrowserDemoHandler(BaseHTTPRequestHandler):
     def _resolve_path(self) -> Path:
         raw_path = unquote(urlsplit(self.path).path)
         relative = raw_path.removeprefix("/") or "index.html"
-        candidate = (WEB_ROOT / relative).resolve()
-        if candidate != WEB_ROOT and WEB_ROOT not in candidate.parents:
+        web_root = self.server.web_root
+        candidate = (web_root / relative).resolve()
+        if candidate != web_root and web_root not in candidate.parents:
             raise FileNotFoundError(relative)
         if not candidate.is_file():
             raise FileNotFoundError(relative)
@@ -300,8 +308,8 @@ def content_type(path: Path) -> str:
     return mimetypes.guess_type(path.name)[0] or "application/octet-stream"
 
 
-def cache_control(path: Path) -> str:
-    fixture_root = WEB_ROOT / "fixtures" / "v1"
+def cache_control(path: Path, web_root: Path = WEB_ROOT) -> str:
+    fixture_root = web_root / "fixtures" / "v1"
     if path == fixture_root or fixture_root in path.parents:
         return "public, max-age=31536000, immutable, no-transform"
     return "no-store, no-transform"
@@ -327,14 +335,24 @@ def arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", default=8000, type=int)
+    parser.add_argument("--root", default=WEB_ROOT, type=Path)
     return parser.parse_args()
+
+
+class BrowserDemoServer(ThreadingHTTPServer):
+    def __init__(self, address: tuple[str, int], web_root: Path) -> None:
+        resolved_root = web_root.resolve()
+        if not resolved_root.is_dir():
+            raise ValueError(f"browser root is not a directory: {resolved_root}")
+        self.web_root = resolved_root
+        super().__init__(address, BrowserDemoHandler)
 
 
 def main() -> None:
     options = arguments()
-    server = ThreadingHTTPServer((options.host, options.port), BrowserDemoHandler)
+    server = BrowserDemoServer((options.host, options.port), options.root)
     host, port = server.server_address[:2]
-    print(f"Serving {WEB_ROOT} at http://{host}:{port}/", flush=True)
+    print(f"Serving {server.web_root} at http://{host}:{port}/", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

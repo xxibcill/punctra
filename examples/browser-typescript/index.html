@@ -2,11 +2,87 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Punctra TypeScript embedding trial</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="color-scheme" content="light">
+    <title>Punctra browser integration quickstart</title>
   </head>
   <body>
-    <canvas id="viewer" width="960" height="540"></canvas>
+    <a class="skip-link" href="#controls">Skip to viewer controls</a>
+    <main class="instrument">
+      <header class="masthead">
+        <div>
+          <p class="eyebrow">Punctra / packed consumer baseline</p>
+          <h1>Browser integration quickstart</h1>
+        </div>
+        <div class="release-stamp">v0.20 · LOCAL</div>
+      </header>
+
+      <div class="workspace">
+        <section class="view-column" aria-labelledby="view-heading">
+          <h2 id="view-heading" class="label">Progressive display · non-authoritative</h2>
+          <div class="canvas-frame">
+            <canvas id="viewer" width="960" height="600" tabindex="0" aria-label="Punctra point-cloud viewer"></canvas>
+            <p class="canvas-note">Drag to orbit. Shift-drag to pan. Wheel to zoom. Press P to change projection. Select the canvas to pick.</p>
+          </div>
+          <div class="status-strip" aria-live="polite">
+            <span id="operation">Viewer not initialized</span>
+            <output id="acceptance-state" data-state="idle">IDLE</output>
+            <span id="resource-line">No viewer resource facts.</span>
+          </div>
+        </section>
+
+        <aside class="control-column" id="controls" aria-label="Viewer controls and exact facts">
+          <section class="control-group">
+            <h2>Lifecycle</h2>
+            <div class="button-row">
+              <button id="initialize" type="button">Initialize viewer</button>
+              <button id="load-source" type="button">Load immutable Source</button>
+              <button id="pause" type="button">Pause presentation</button>
+              <button id="resume" type="button">Resume presentation</button>
+              <button id="dispose" type="button">Dispose viewer</button>
+              <button id="run-acceptance" type="button">Run baseline check</button>
+            </div>
+          </section>
+
+          <section class="control-group">
+            <h2>View</h2>
+            <label for="display-mode">
+              Display mapping
+              <select id="display-mode"></select>
+            </label>
+            <button id="projection" type="button">Change projection</button>
+          </section>
+
+          <section class="control-group">
+            <h2>Point authority</h2>
+            <div class="button-row">
+              <button id="highlight" type="button" disabled>Highlight picked Point</button>
+              <button id="confirm" type="button" disabled>Confirm exact record</button>
+              <button id="clear" type="button" disabled>Clear highlights</button>
+            </div>
+            <dl class="facts">
+              <div><dt>Pick</dt><dd id="pick-authority">none</dd></div>
+              <div><dt>Exact</dt><dd id="exact-authority">not confirmed</dd></div>
+            </dl>
+          </section>
+
+          <section class="control-group">
+            <h2>Integration facts</h2>
+            <dl class="facts">
+              <div><dt>Package</dt><dd id="package-version">—</dd></div>
+              <div><dt>Lifecycle</dt><dd id="lifecycle">not initialized</dd></div>
+              <div><dt>Coverage</dt><dd id="coverage">none</dd></div>
+              <div><dt>Points</dt><dd id="displayed-points">—</dd></div>
+              <div><dt>Generation</dt><dd id="generation">—</dd></div>
+              <div><dt>Projection</dt><dd id="projection-value">—</dd></div>
+              <div><dt>Source</dt><dd id="source-identity">none</dd></div>
+            </dl>
+            <p class="safe-action"><span class="label">Safe action</span><br><span id="safe-action">No recovery action required.</span></p>
+            <output id="acceptance-record" aria-label="Machine-readable acceptance record"></output>
+          </section>
+        </aside>
+      </div>
+    </main>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

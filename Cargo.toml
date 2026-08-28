@@ -19,7 +19,7 @@ members = [
 resolver = "3"
 
 [workspace.package]
-version = "0.19.0-alpha.1"
+version = "0.20.0-alpha.1"
 edition = "2024"
 rust-version = "1.90"
 license = "MIT OR Apache-2.0"
@@ -36,7 +36,7 @@ bytemuck = { version = "1.25.2", features = ["derive"] }
 criterion = "0.7.0"
 console_error_panic_hook = "0.1.7"
 delaunator = "=1.1.0"
-foundation-runtime = { path = "crates/foundation-runtime", version = "=0.19.0-alpha.1" }
+foundation-runtime = { path = "crates/foundation-runtime", version = "=0.20.0-alpha.1" }
 getrandom = "0.3.4"
 glam = "0.33.3"
 js-sys = "=0.3.104"
@@ -47,22 +47,22 @@ libm = "0.2.16"
 num-bigint = "=0.4.6"
 pollster = "1.0.1"
 quick-xml = "=0.41.0"
-point-contracts = { path = "crates/point-contracts", version = "=0.19.0-alpha.1" }
-point-index = { path = "crates/point-index", version = "=0.19.0-alpha.1" }
-point-review = { path = "crates/point-review", version = "=0.19.0-alpha.1" }
-point-terrain = { path = "crates/point-terrain", version = "=0.19.0-alpha.1" }
-point-workspace = { path = "crates/point-workspace", version = "=0.19.0-alpha.1" }
-point-source = { path = "crates/point-source", version = "=0.19.0-alpha.1" }
-point-view = { path = "crates/point-view", version = "=0.19.0-alpha.1" }
-render-protocol = { path = "crates/render-protocol", version = "=0.19.0-alpha.1" }
-render-wgpu = { path = "crates/render-wgpu", version = "=0.19.0-alpha.1" }
+point-contracts = { path = "crates/point-contracts", version = "=0.20.0-alpha.1" }
+point-index = { path = "crates/point-index", version = "=0.20.0-alpha.1" }
+point-review = { path = "crates/point-review", version = "=0.20.0-alpha.1" }
+point-terrain = { path = "crates/point-terrain", version = "=0.20.0-alpha.1" }
+point-workspace = { path = "crates/point-workspace", version = "=0.20.0-alpha.1" }
+point-source = { path = "crates/point-source", version = "=0.20.0-alpha.1" }
+point-view = { path = "crates/point-view", version = "=0.20.0-alpha.1" }
+render-protocol = { path = "crates/render-protocol", version = "=0.20.0-alpha.1" }
+render-wgpu = { path = "crates/render-wgpu", version = "=0.20.0-alpha.1" }
 robust = "=1.2.0"
 roxmltree = "=0.21.1"
 serde = { version = "1.0.229", features = ["derive", "rc"] }
 serde_json = "=1.0.151"
 sha2 = "=0.10.9"
-source-las = { path = "crates/source-las", version = "=0.19.0-alpha.1" }
-source-memory = { path = "crates/source-memory", version = "=0.19.0-alpha.1" }
+source-las = { path = "crates/source-las", version = "=0.20.0-alpha.1" }
+source-memory = { path = "crates/source-memory", version = "=0.20.0-alpha.1" }
 tempfile = "=3.24.0"
 thiserror = "2.0.20"
 wgpu = "30.0.0"

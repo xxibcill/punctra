@@ -12,8 +12,9 @@ and repository-verified; v0.15 bounded local WebAssembly/WebGPU browser-
 foundation slice Complete and repository-verified; v0.16 private HTTP Range,
 cache, and worker streaming slice Complete and repository-verified; v0.17
 framework-neutral viewer API and exact-Point bridge plus v0.18 packed SDK and
-thin React adapter plus v0.19 exact local browser/device qualification Complete
-and repository-verified; later
+thin React adapter plus v0.19 exact local browser/device qualification plus
+v0.20 clean packed-consumer integration baseline Complete and repository-
+verified; later
 crates are created only with accepted behavior
 and a caller
 
@@ -40,6 +41,7 @@ apps/
       scene.rs
       streaming.rs
       bin/generate_stream_fixture.rs
+      bin/scene_facts.rs
     web/
       package.json
       sdk.js
@@ -61,6 +63,8 @@ apps/
       exact-query.js
       exact-query.d.ts
       exact-query.test.mjs
+      exact-query-error.js
+      las-exact-decoder.js
       range-response.js
       range-response.test.mjs
       failure-policy.js
@@ -558,13 +562,13 @@ versions, and LandXML/journal/report format versions are separate axes. A Cargo
 `0.9` version does not imply Workspace disk schema or terrain algorithm version
 9.
 
-The v0.19 work advances all public Rust libraries as one `0.19.0-alpha.1` package
+The v0.20 work advances all public Rust libraries as one `0.20.0-alpha.1` package
 set with exact inter-Punctra registry requirements and
 local development paths. Their empty default features, dependency roles,
 MSRV, publication order, and pre-v1 policy are documented in the [library
 packaging guide](../guides/library-packaging.md). The separately versioned
 `@punctra/viewer` and `@punctra/react` npm tarballs use the same
-`0.19.0-alpha.1` release identity but remain local packed artifacts governed by
+`0.20.0-alpha.1` release identity but remain local packed artifacts governed by
 the [browser SDK guide](../guides/browser-sdk.md); Cargo and npm publication
 remain separate decisions.
 

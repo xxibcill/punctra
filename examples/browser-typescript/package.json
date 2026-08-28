@@ -1,9 +1,10 @@
 {
-  "name": "punctra-browser-typescript-trial",
+  "name": "punctra-browser-quickstart",
   "version": "0.0.0",
   "private": true,
   "type": "module",
   "scripts": {
+    "test": "node --test src/*.test.ts",
     "typecheck": "tsc --noEmit",
     "build": "vite build",
     "build:development": "vite build --mode development"

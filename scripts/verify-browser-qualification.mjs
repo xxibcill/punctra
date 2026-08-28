@@ -18,14 +18,18 @@ import {
 } from "../apps/browser-demo/web/qualification-lane.js";
 
 const changelogUrl = new URL("../CHANGELOG.md", import.meta.url);
-const matrixUrl = new URL("../docs/releases/v0.19-browser-matrix.json", import.meta.url);
-const releaseRecordUrl = new URL("../docs/releases/v0.19.0.md", import.meta.url);
+const matrixUrl = new URL("../docs/releases/v0.20-browser-matrix.json", import.meta.url);
+const releaseRecordUrl = new URL("../docs/releases/v0.20.0.md", import.meta.url);
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
 const qualificationViewerPackage = path.join(
   repositoryRoot,
   "apps/browser-demo/web/node_modules/@punctra/viewer",
 );
 const qualificationViewerSource = path.join(repositoryRoot, "apps/browser-demo/web");
+const qualificationViewerManifest = JSON.parse(await readFile(
+  path.join(qualificationViewerSource, "package.json"),
+  "utf8",
+));
 const qualificationFixtureRoot = path.join(
   repositoryRoot,
   "apps/browser-demo/web/fixtures/v1",
@@ -33,22 +37,41 @@ const qualificationFixtureRoot = path.join(
 const qualificationManifestPath = path.join(qualificationFixtureRoot, "deployment.json");
 const qualificationViewerArtifact = path.join(
   repositoryRoot,
-  "target/npm/punctra-viewer-0.19.0-alpha.1.tgz",
+  `target/npm/punctra-viewer-${qualificationViewerManifest.version}.tgz`,
 );
 const verifierSource = await readFile(new URL("./verify-browser-qualification.mjs", import.meta.url), "utf8");
 const QUALIFICATION_VERIFIER_SHA256 = createHash("sha256").update(verifierSource).digest("hex");
-const EXPECTED_OBSERVATION_DATE = "2026-08-26";
+const EXPECTED_OBSERVATION_DATE = "2026-08-27";
+const EXPECTED_UNQUALIFIED_ENTRIES = Object.freeze([
+  Object.freeze({
+    browser: "Google Chrome 150.0.7871.115",
+    reason: "Installed locally but no connected browser-control surface was available for an attended packed-consumer WebGPU run.",
+  }),
+  Object.freeze({
+    browser: "Safari 26.5.2",
+    reason: "Installed locally but no supported browser-control surface was available for an attended packed-consumer WebGPU run.",
+  }),
+  Object.freeze({
+    browser: "All other browser, OS, adapter, display, and mobile combinations",
+    reason: "Not executed in the v0.20 repository qualification lane.",
+  }),
+]);
 const QUALIFIED_IMPLEMENTATION_PATHS = [
   "Cargo.toml",
   "Cargo.lock",
+  "fuzz",
   "crates",
   "examples",
-  "apps/browser-demo/web",
+  "apps",
   "packages",
   "scripts/build-browser-demo.sh",
   "scripts/build-browser-sdk.sh",
   "scripts/generate-browser-sdk-reference.mjs",
   "scripts/serve-browser-demo.py",
+  "scripts/verify-browser-qualification.mjs",
+  "scripts/verify-browser-integration-baseline.mjs",
+  "scripts/verify-browser-integration-baseline.test.mjs",
+  "scripts/verify-browser-qualification.test.mjs",
   "scripts/verify-browser-sdk.mjs",
 ];
 const JAVASCRIPT_HEAP_PHASE_FIELDS = Object.freeze([
@@ -59,7 +82,7 @@ const JAVASCRIPT_HEAP_PHASE_FIELDS = Object.freeze([
 ]);
 export function verifyBrowserQualificationMatrix(matrix, implementationCommit) {
   assert.equal(matrix.schema, "punctra-browser-qualification-matrix-v1");
-  assert.equal(matrix.release, "0.19.0-alpha.1");
+  assert.equal(matrix.release, qualificationViewerManifest.version);
   assert.match(matrix.verifier_sha256, /^[0-9a-f]{64}$/);
   assert.equal(
     matrix.verifier_sha256,
@@ -71,7 +94,7 @@ export function verifyBrowserQualificationMatrix(matrix, implementationCommit) {
   verifyImplementationCommit(matrix.implementation_commit);
   assert.equal(matrix.observed_on, EXPECTED_OBSERVATION_DATE);
   assert.equal(matrix.qualified_entries.length, 1);
-  assert.ok(matrix.unqualified_entries.length >= 1);
+  verifyUnqualifiedEntries(matrix.unqualified_entries);
 
   const entry = matrix.qualified_entries[0];
   const observations = entry.observations;
@@ -132,6 +155,14 @@ export function verifyBrowserQualificationMatrix(matrix, implementationCommit) {
   return true;
 }
 
+export function verifyUnqualifiedEntries(entries) {
+  assert.deepEqual(
+    entries,
+    EXPECTED_UNQUALIFIED_ENTRIES,
+    "unqualified platform classes must match the frozen v0.20 matrix",
+  );
+}
+
 export function releaseImplementationCommit(releaseRecord) {
   const match = releaseRecord.match(/^- Implementation commit: `([0-9a-f]{40})`$/m);
   assert.ok(match, "release record must contain one full implementation commit SHA");
@@ -146,7 +177,7 @@ export function releaseVerifierSha256(releaseRecord) {
 
 export function changelogImplementationCommit(changelog) {
   const match = changelog.match(/implementation commit `([0-9a-f]{40})`/);
-  assert.ok(match, "changelog must contain one full v0.19 implementation commit SHA");
+  assert.ok(match, "changelog must contain one full v0.20 implementation commit SHA");
   return match[1];
 }
 

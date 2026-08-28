@@ -13,6 +13,7 @@ const [
     captureJsHeap,
     evaluateQualificationLane,
     evaluateQualification,
+    evaluateStreamingResult,
     measureForegroundFrames,
     QUALIFICATION_LIMITS,
     QUALIFICATION_WORKLOAD,
@@ -121,6 +122,7 @@ function publishState(state) {
     ["Secure context", capabilities.secure_context ? "available" : "unavailable"],
     ["WebGPU", capabilities.webgpu ? "available" : "unavailable"],
     ["Browser", capabilities.browser_user_agent ?? "unreported"],
+    ["Screen", `${screen.width} × ${screen.height} CSS px / ${screen.colorDepth}-bit`],
     ["Adapter", capabilities.adapter_name ?? "unreported"],
     ["Backend", capabilities.backend ?? "unreported"],
     ["Surface", capabilities.surface_format ?? "unreported"],
@@ -319,7 +321,7 @@ async function runSmokePath() {
 function assertInitialQualification(initial, runtimeLane) {
   assertFact(runtimeLane.passed, `exact qualification lane: ${runtimeLane.failures.join("; ")}`);
   const state = viewer.render();
-  assertFact(state.packageVersion === "0.19.0-alpha.1", "v0.19 package version");
+  assertFact(state.packageVersion === "0.20.0-alpha.1", "v0.20 package version");
   assertFact(state.capabilities.secure_context === true, "secure context");
   assertFact(state.capabilities.webgpu === true, "WebGPU capability");
   assertFact(state.source.publishedPoints === 1_089, "generated fixture Points");
@@ -591,70 +593,8 @@ async function exercisePrepublicationRecovery({ manifestUrl, expectedCode, label
 }
 
 function verifyStreamingResult(result, label) {
-  assertFact(
-    result.deployment.deployment_id === QUALIFICATION_WORKLOAD.deploymentId,
-    `${label} deployment identity`,
-  );
-  assertFact(
-    result.deployment.source_identity === QUALIFICATION_WORKLOAD.sourceIdentity,
-    `${label} Source identity`,
-  );
-  assertFact(
-    result.deployment.source_point_count === QUALIFICATION_WORKLOAD.sourcePoints,
-    `${label} Source point count`,
-  );
-  assertFact(
-    result.deployment.root_coverage === QUALIFICATION_WORKLOAD.coverage,
-    `${label} deployment Coverage`,
-  );
-  assertFact(
-    result.state.source.identity === QUALIFICATION_WORKLOAD.sourceIdentity,
-    `${label} state Source identity`,
-  );
-  assertFact(
-    result.state.source.expectedPoints === QUALIFICATION_WORKLOAD.sourcePoints,
-    `${label} state Source point count`,
-  );
-  assertFact(
-    result.state.source.coverage === QUALIFICATION_WORKLOAD.coverage,
-    `${label} Sampled Coverage`,
-  );
-  assertFact(
-    result.state.source.publishedPoints === QUALIFICATION_WORKLOAD.sampledPoints,
-    `${label} published Points`,
-  );
-  assertFact(
-    result.state.source.publishedBatches === QUALIFICATION_WORKLOAD.publishedBatches,
-    `${label} published batches`,
-  );
-  assertFact(
-    result.state.source.retainedRecordBytes === QUALIFICATION_WORKLOAD.transferRecordBytes,
-    `${label} retained records`,
-  );
-  assertFact(
-    result.state.render.drawnPoints === QUALIFICATION_WORKLOAD.sampledPoints,
-    `${label} drawn Points`,
-  );
-  assertFact(
-    result.state.render.residentBytes === QUALIFICATION_WORKLOAD.rendererResidentBytes,
-    `${label} GPU vertex bytes`,
-  );
-  assertFact(
-    result.pointOrdinals.length === QUALIFICATION_WORKLOAD.sampledPoints,
-    `${label} Point identities`,
-  );
-  assertFact(
-    result.metrics.concurrentResponseBytesHighWater <= QUALIFICATION_LIMITS.concurrentResponseBytes,
-    `${label} response ceiling`,
-  );
-  assertFact(
-    result.metrics.decodedStagingBytesHighWater <= QUALIFICATION_LIMITS.workerStagingBytes,
-    `${label} staging ceiling`,
-  );
-  assertFact(
-    result.metrics.transferredBytes === QUALIFICATION_WORKLOAD.transferRecordBytes,
-    `${label} transfer-v2 bytes`,
-  );
+  const evaluation = evaluateStreamingResult(result);
+  assertFact(evaluation.passed, `${label}: ${evaluation.failures.join("; ")}`);
 }
 
 function observedWorkload(result) {

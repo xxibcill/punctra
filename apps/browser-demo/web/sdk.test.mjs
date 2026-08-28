@@ -17,7 +17,7 @@ test("SDK exports the public viewer surface and package-relative assets", async 
   const assets = resolveViewerAssets();
 
   assert.equal(packageManifest.name, "@punctra/viewer");
-  assert.equal(packageManifest.version, "0.19.0-alpha.1");
+  assert.equal(packageManifest.version, "0.20.0-alpha.1");
   assert.deepEqual(DISPLAY_MODES, ["neutral", "elevation", "rgb", "intensity", "classification"]);
   assert.equal(typeof assets.wasmUrl, "string");
   assert.equal(typeof assets.workerUrl, "string");

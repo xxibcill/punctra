@@ -305,13 +305,32 @@ The [v0.19 repository verification record](docs/releases/v0.19.0.md) pins the
 exact implementation commit, local command matrix, attended browser evidence,
 GPU acceptance, benchmarks, and remaining external exits.
 
+Version 0.20.0-alpha.1 completes the bounded [Stable Browser-Engine Integration
+Baseline design](docs/design/browser-integration-baseline-v0.20.md). The plain
+TypeScript example is now a clean packed-consumer
+[quickstart](docs/guides/browser-quickstart.md) that owns its canvas and
+navigation policy while exercising Source load, all five display modes, both
+projections, provisional pick, presentation highlight, exact immutable-record
+confirmation, recovery, pause/resume, and disposal through supported package
+entry points only.
+
+The [machine-readable integration baseline](docs/releases/v0.20-browser-baseline.json)
+freezes package exports, deployable assets, generated API reference, fixture
+bytes, generated scene, presentation policy, recovery dispositions, and
+qualification limits. The updated [browser matrix](docs/releases/v0.20-browser-matrix.json)
+records the one exact attended Chromium/macOS/Apple-GPU lane. See the
+[known limitations](docs/guides/browser-known-limitations.md) before embedding.
+Independent adoption, registry/CDN publication, other browsers and devices,
+API stability, visual-quality completion, support qualification, beta, v1, and
+release-candidate status remain outstanding.
+
 To try the implemented View safely, follow the five-minute [first LAS/LAZ
 guide](docs/guides/first-las-laz.md). It separates position-only disk-v1 and
 attributed disk-v2 caches and explains what progressive Coverage does and does
 not mean.
 
 Later direction and the exact external product gates are described in the
-[living roadmap](ROADMAP.md). The linked v0.15 through v0.19 designs define the
+[living roadmap](ROADMAP.md). The linked v0.15 through v0.20 designs define the
 completed bounded repository scopes. Later Candidate themes do not expand
 accepted scope by themselves.
 

@@ -9,17 +9,20 @@ import {
   releaseVerifierSha256,
   verifyBrowserQualificationMatrix,
   verifyImplementationCommit,
-  verifyWorkloadObservations,
   verifyQualificationRuntimeTree,
+  verifyUnqualifiedEntries,
+  verifyWorkloadObservations,
 } from "./verify-browser-qualification.mjs";
 
 const changelogUrl = new URL("../CHANGELOG.md", import.meta.url);
-const matrixUrl = new URL("../docs/releases/v0.19-browser-matrix.json", import.meta.url);
-const releaseRecordUrl = new URL("../docs/releases/v0.19.0.md", import.meta.url);
-const [changelog, matrixSource, releaseRecord] = await Promise.all([
+const matrixUrl = new URL("../docs/releases/v0.20-browser-matrix.json", import.meta.url);
+const releaseRecordUrl = new URL("../docs/releases/v0.20.0.md", import.meta.url);
+const verifierUrl = new URL("./verify-browser-qualification.mjs", import.meta.url);
+const [changelog, matrixSource, releaseRecord, verifierSource] = await Promise.all([
   readFile(changelogUrl, "utf8"),
   readFile(matrixUrl, "utf8"),
   readFile(releaseRecordUrl, "utf8"),
+  readFile(verifierUrl, "utf8"),
 ]);
 const matrix = JSON.parse(matrixSource);
 const implementationCommit = releaseImplementationCommit(releaseRecord);
@@ -28,8 +31,29 @@ test("the checked-in browser qualification matrix derives a passing result", () 
   assert.equal(verifyBrowserQualificationMatrix(matrix, implementationCommit), true);
 });
 
+test("the exact unqualified platform classes are frozen", () => {
+  assert.doesNotThrow(() => verifyUnqualifiedEntries(matrix.unqualified_entries));
+  for (const mutate of [
+    (entries) => { entries.shift(); },
+    (entries) => { entries[0].browser = "Other Chrome"; },
+    (entries) => { entries[1].reason = "Not recorded"; },
+    (entries) => { entries.push({ browser: "Other", reason: "Not run" }); },
+  ]) {
+    const entries = structuredClone(matrix.unqualified_entries);
+    mutate(entries);
+    assert.throws(
+      () => verifyUnqualifiedEntries(entries),
+      /unqualified platform classes must match the frozen v0.20 matrix/,
+    );
+  }
+});
+
 test("the qualification runtime package matches its packed and source files", () => {
   assert.doesNotThrow(verifyQualificationRuntimeTree);
+});
+
+test("the implementation pin includes the qualification verifier", () => {
+  assert.match(verifierSource, /^\s+"scripts\/verify-browser-qualification\.mjs",$/m);
 });
 
 test("an over-limit observation fails even when the recorded pass flag is true", () => {
@@ -194,6 +218,8 @@ test("JavaScript heap status and high-water agree with phase observations", () =
   const inconsistentStatus = structuredClone(matrix);
   inconsistentStatus.qualified_entries[0].observations.resources.javascript_heap_status =
     "non_standard_observation";
+  inconsistentStatus
+    .qualified_entries[0].observations.resources.javascript_heap_before_bytes = null;
   assert.throws(
     () => verifyBrowserQualificationMatrix(inconsistentStatus, implementationCommit),
     /non-standard JavaScript heap observations must include every numeric phase/,
@@ -233,6 +259,11 @@ test("the implementation pin rejects later changes to qualified browser files", 
     () => verifyImplementationCommit("7c3ceec11fc2cc4d3eae5db9ebd2399271c0cb18"),
     /qualified implementation files changed after/,
   );
+});
+
+test("the implementation pin covers every executable application tree", () => {
+  assert.match(verifierSource, /^\s*"apps",$/m);
+  assert.doesNotMatch(verifierSource, /^\s*"apps\/browser-demo\/web",$/m);
 });
 
 test("the qualified entry rejects exact lane and workload drift", () => {

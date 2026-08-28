@@ -1,0 +1,42 @@
+{
+  "schema": "punctra-browser-quickstart-evidence-v1",
+  "observed_on": "2026-08-27",
+  "lane_id": "codex-iab-chromium-151-macos-26-apple-m5-pro",
+  "acceptance": {
+    "schema": "punctra-browser-quickstart-acceptance-v1",
+    "packageVersion": "0.20.0-alpha.1",
+    "sourceIdentity": "c459ff39717b7d6994aaebf344641f5a3add7faf65e249b85933ebd066d1c26e",
+    "generation": 1,
+    "displayedPoints": 4096,
+    "displayModes": [
+      "neutral",
+      "elevation",
+      "rgb",
+      "intensity",
+      "classification"
+    ],
+    "projections": [
+      "orthographic",
+      "perspective"
+    ],
+    "cancellationRetainedViewer": true,
+    "cancellationRetainedFrame": true,
+    "recoverableFailureCode": "offline",
+    "retryRetainedViewer": true,
+    "retrySucceeded": true,
+    "recreationFailureCode": "cancelled",
+    "recreationRequired": true,
+    "recreationSucceeded": true,
+    "provisionalAuthority": "provisional_gpu_hint",
+    "exactAuthority": "exact_source_record",
+    "disposed": true,
+    "packedRuntime": {
+      "schema": "punctra-browser-packed-runtime-v1",
+      "build": "production",
+      "serverContract": "punctra-strict-range-v1",
+      "viewerPackage": "@punctra/viewer",
+      "viewerVersion": "0.20.0-alpha.1",
+      "viewerArtifactSha256": "3282f7192fc60f4e45acfaa79be8b7e542d771582a5095f48ecea404b590703c"
+    }
+  }
+}
