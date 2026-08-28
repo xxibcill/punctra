@@ -1,6 +1,6 @@
 use render_protocol::{
-    BatchKey, BatchVersion, PointBatch, PointId, ProtocolError, RenderPoint, RenderUpdate,
-    SourceId, ViewGenerationKey, ViewId,
+    BatchKey, BatchVersion, PointBatch, PointId, PresentationWeight, ProtocolError, RenderPoint,
+    RenderUpdate, SourceId, ViewGenerationKey, ViewId,
 };
 use serde::Serialize;
 use thiserror::Error;
@@ -33,6 +33,36 @@ pub(crate) enum StreamPhase {
     Idle,
     Receiving,
     Complete,
+}
+
+/// One resident batch from the exact renderer-accepted update state used for capture.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+pub(crate) struct VisualBatchFacts {
+    batch_index: u32,
+    key: u64,
+    version: u64,
+    point_count: u64,
+    state: &'static str,
+    presentation_weight_u8: u8,
+}
+
+impl VisualBatchFacts {
+    pub(crate) const fn resident(
+        batch_index: u32,
+        key: u64,
+        version: u64,
+        point_count: u64,
+        presentation_weight_u8: u8,
+    ) -> Self {
+        Self {
+            batch_index,
+            key,
+            version,
+            point_count,
+            state: "resident",
+            presentation_weight_u8,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
@@ -222,6 +252,8 @@ impl StreamingScene {
         let stream_batch = StreamBatch {
             key: BatchKey::new(u64::from(batch_index) + 1),
             samples,
+            presentation_weight: PresentationWeight::OPAQUE,
+            retired: false,
         };
         let batch =
             self.render_batch(&stream_batch, self.display_mode, self.presentation_version)?;
@@ -255,6 +287,27 @@ impl StreamingScene {
         self.display_mode
     }
 
+    /// Reports the resident renderer-accepted batch state used by private capture.
+    pub(crate) fn capture_batch_facts(&self) -> Result<Vec<VisualBatchFacts>, StreamError> {
+        if self.facts.phase != StreamPhase::Complete {
+            return Err(StreamError::NotComplete);
+        }
+        self.batches
+            .iter()
+            .enumerate()
+            .filter(|(_, batch)| !batch.retired)
+            .map(|(index, batch)| {
+                Ok(VisualBatchFacts::resident(
+                    u32::try_from(index).map_err(|_| StreamError::SizeOverflow)?,
+                    batch.key.get(),
+                    self.presentation_version,
+                    u64::try_from(batch.samples.len()).map_err(|_| StreamError::SizeOverflow)?,
+                    batch.presentation_weight.get(),
+                ))
+            })
+            .collect()
+    }
+
     pub(crate) fn set_display_mode(
         &mut self,
         mode: DisplayMode,
@@ -271,19 +324,79 @@ impl StreamingScene {
             .presentation_version
             .checked_add(1)
             .ok_or(StreamError::BatchVersionOverflow)?;
-        let updates = self
-            .batches
-            .iter()
-            .map(|batch| {
-                self.render_batch(batch, mode, version)
-                    .map(|batch| RenderUpdate::Upsert { batch })
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+        let mut updates = Vec::new();
+        for batch in self.batches.iter().filter(|batch| !batch.retired) {
+            updates.push(RenderUpdate::Upsert {
+                batch: self.render_batch(batch, mode, version)?,
+            });
+            if batch.presentation_weight != PresentationWeight::OPAQUE {
+                updates.push(RenderUpdate::SetBatchPresentation {
+                    view_generation: self.view_generation.ok_or(StreamError::NotReceiving)?,
+                    key: batch.key,
+                    expected_version: BatchVersion::new(version),
+                    weight: batch.presentation_weight,
+                });
+            }
+        }
         self.display_mode = mode;
         self.presentation_version = version;
         self.facts.display_mode = mode;
         self.facts.presentation_version = version;
         Ok(updates)
+    }
+
+    /// Builds a color-only transition update for the private visual-quality harness.
+    ///
+    /// This deliberately leaves stream accounting unchanged: the renderer's frame
+    /// report is the authority for transition residency and draw coverage.
+    pub(crate) fn visual_batch_presentation(
+        &self,
+        batch_index: u32,
+        weight: PresentationWeight,
+    ) -> Result<RenderUpdate, StreamError> {
+        let (view_generation, batch) = self.visual_batch(batch_index)?;
+        Ok(RenderUpdate::SetBatchPresentation {
+            view_generation,
+            key: batch.key,
+            expected_version: BatchVersion::new(self.presentation_version),
+            weight,
+        })
+    }
+
+    /// Records a renderer-accepted presentation change so a later display-mode
+    /// rebuild preserves the in-progress visual transition.
+    pub(crate) fn commit_visual_batch_presentation(
+        &mut self,
+        batch_index: u32,
+        weight: PresentationWeight,
+    ) -> Result<(), StreamError> {
+        self.visual_batch(batch_index)?;
+        self.batch_mut(batch_index)?.presentation_weight = weight;
+        Ok(())
+    }
+
+    /// Builds a conditional retirement update for the private visual-quality harness.
+    pub(crate) fn visual_batch_removal(
+        &self,
+        batch_index: u32,
+    ) -> Result<RenderUpdate, StreamError> {
+        let (view_generation, batch) = self.visual_batch(batch_index)?;
+        Ok(RenderUpdate::Remove {
+            view_generation,
+            key: batch.key,
+            expected_version: BatchVersion::new(self.presentation_version),
+        })
+    }
+
+    /// Records a renderer-accepted retirement so later presentation rebuilds
+    /// cannot republish the removed batch.
+    pub(crate) fn commit_visual_batch_removal(
+        &mut self,
+        batch_index: u32,
+    ) -> Result<(), StreamError> {
+        self.visual_batch(batch_index)?;
+        self.batch_mut(batch_index)?.retired = true;
+        Ok(())
     }
 
     pub(crate) const fn facts(&self) -> StreamFacts {
@@ -324,6 +437,36 @@ impl StreamingScene {
         } else {
             Err(StreamError::NotReceiving)
         }
+    }
+
+    fn visual_batch(
+        &self,
+        batch_index: u32,
+    ) -> Result<(ViewGenerationKey, &StreamBatch), StreamError> {
+        if self.facts.phase != StreamPhase::Complete {
+            return Err(StreamError::NotComplete);
+        }
+        let view_generation = self.view_generation.ok_or(StreamError::NotComplete)?;
+        let batch = self
+            .batches
+            .get(
+                usize::try_from(batch_index)
+                    .map_err(|_| StreamError::UnknownBatch { batch_index })?,
+            )
+            .ok_or(StreamError::UnknownBatch { batch_index })?;
+        if batch.retired {
+            return Err(StreamError::RetiredBatch { batch_index });
+        }
+        Ok((view_generation, batch))
+    }
+
+    fn batch_mut(&mut self, batch_index: u32) -> Result<&mut StreamBatch, StreamError> {
+        self.batches
+            .get_mut(
+                usize::try_from(batch_index)
+                    .map_err(|_| StreamError::UnknownBatch { batch_index })?,
+            )
+            .ok_or(StreamError::UnknownBatch { batch_index })
     }
 
     fn validate_batch_index(&self, batch_index: u32) -> Result<(), StreamError> {
@@ -409,6 +552,12 @@ pub(crate) enum StreamError {
     EmptyStream,
     #[error("stream is not receiving batches")]
     NotReceiving,
+    #[error("visual transition updates require a complete stream")]
+    NotComplete,
+    #[error("visual transition batch {batch_index} is not part of the complete stream")]
+    UnknownBatch { batch_index: u32 },
+    #[error("visual transition batch {batch_index} has already been retired")]
+    RetiredBatch { batch_index: u32 },
     #[error("stream batch {actual} does not match the next batch {expected}")]
     BatchSequence { expected: u64, actual: u64 },
     #[error("stream batch payload must be non-empty and a multiple of 32 bytes")]
@@ -478,6 +627,8 @@ fn decode_samples(
 struct StreamBatch {
     key: BatchKey,
     samples: Vec<DecodedSample>,
+    presentation_weight: PresentationWeight,
+    retired: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -672,6 +823,129 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn visual_transition_updates_target_complete_stream_batches() {
+        let mut stream = StreamingScene::idle();
+        let reset = stream.begin(SOURCE, 2, [0.0; 3], SOURCE_Z_RANGE).unwrap();
+        let parent = stream.publish(0, &payload(&[(2, [0.0; 3])])).unwrap();
+        let replacement = stream
+            .publish(1, &payload(&[(5, [0.0, 0.0, 1.0])]))
+            .unwrap();
+        stream.complete().unwrap();
+
+        let fade = stream
+            .visual_batch_presentation(0, PresentationWeight::new(96))
+            .unwrap();
+        assert!(matches!(
+            fade,
+            RenderUpdate::SetBatchPresentation {
+                key,
+                expected_version,
+                weight,
+                ..
+            } if key == BatchKey::new(1)
+                && expected_version == BatchVersion::new(1)
+                && weight == PresentationWeight::new(96)
+        ));
+        stream
+            .commit_visual_batch_presentation(0, PresentationWeight::new(96))
+            .unwrap();
+        assert_eq!(
+            stream.capture_batch_facts().unwrap(),
+            vec![
+                VisualBatchFacts::resident(0, 1, 1, 1, 96),
+                VisualBatchFacts::resident(1, 2, 1, 1, 255),
+            ]
+        );
+        let retire = stream.visual_batch_removal(0).unwrap();
+        assert!(matches!(
+            retire,
+            RenderUpdate::Remove {
+                key,
+                expected_version,
+                ..
+            } if key == BatchKey::new(1) && expected_version == BatchVersion::new(1)
+        ));
+        stream.commit_visual_batch_removal(0).unwrap();
+        assert!(matches!(
+            stream.visual_batch_presentation(0, PresentationWeight::OPAQUE),
+            Err(StreamError::RetiredBatch { batch_index: 0 })
+        ));
+        let recolor = stream.set_display_mode(DisplayMode::Neutral).unwrap();
+        assert_eq!(
+            stream.capture_batch_facts().unwrap(),
+            vec![VisualBatchFacts::resident(1, 2, 2, 1, 255)]
+        );
+        assert_eq!(recolor.len(), 1);
+        assert!(matches!(
+            &recolor[0],
+            RenderUpdate::Upsert { batch }
+                if batch.key() == BatchKey::new(2)
+                    && batch.version() == BatchVersion::new(2)
+        ));
+
+        let mut renderer = RenderStateModel::new(render_limits());
+        for update in [&reset, &parent, &replacement, &fade, &retire, &recolor[0]] {
+            renderer.apply(update).unwrap();
+        }
+        assert_eq!(renderer.snapshot().resident().batch_count(), 1);
+        assert_eq!(renderer.snapshot().resident().point_count(), 1);
+    }
+
+    #[test]
+    fn display_change_preserves_an_in_progress_visual_batch_weight() {
+        let mut stream = StreamingScene::idle();
+        let reset = stream.begin(SOURCE, 2, [0.0; 3], SOURCE_Z_RANGE).unwrap();
+        let parent = stream.publish(0, &payload(&[(2, [0.0; 3])])).unwrap();
+        let child = stream
+            .publish(1, &payload(&[(5, [0.0, 0.0, 1.0])]))
+            .unwrap();
+        stream.complete().unwrap();
+        let faded = PresentationWeight::new(96);
+        let fade = stream.visual_batch_presentation(0, faded).unwrap();
+        stream.commit_visual_batch_presentation(0, faded).unwrap();
+
+        let updates = stream.set_display_mode(DisplayMode::Neutral).unwrap();
+        assert_eq!(updates.len(), 3);
+        assert!(matches!(
+            &updates[1],
+            RenderUpdate::SetBatchPresentation {
+                key,
+                expected_version,
+                weight,
+                ..
+            } if *key == BatchKey::new(1)
+                && *expected_version == BatchVersion::new(2)
+                && *weight == faded
+        ));
+
+        let mut renderer = RenderStateModel::new(render_limits());
+        for update in [&reset, &parent, &child, &fade] {
+            renderer.apply(update).unwrap();
+        }
+        for update in &updates {
+            renderer.apply(update).unwrap();
+        }
+        assert_eq!(renderer.snapshot().resident().batch_count(), 2);
+    }
+
+    #[test]
+    fn visual_transition_updates_reject_incomplete_or_unknown_batches() {
+        let mut stream = StreamingScene::idle();
+        stream.begin(SOURCE, 1, [0.0; 3], SOURCE_Z_RANGE).unwrap();
+        stream.publish(0, &payload(&[(2, [0.0; 3])])).unwrap();
+        assert!(matches!(
+            stream.visual_batch_removal(0),
+            Err(StreamError::NotComplete)
+        ));
+
+        stream.complete().unwrap();
+        assert!(matches!(
+            stream.visual_batch_presentation(1, PresentationWeight::OPAQUE),
+            Err(StreamError::UnknownBatch { batch_index: 1 })
+        ));
     }
 
     #[test]

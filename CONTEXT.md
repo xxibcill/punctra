@@ -17,8 +17,11 @@ outstanding; v0.14 exact Terrain QA/correction, v0.15 local browser-foundation,
 v0.16 bounded HTTP Range streaming, v0.17 bounded framework-neutral browser
 viewer API, and v0.18 packed SDK/React lifecycle slices are Complete and
 repository-verified while their declared external exits remain outstanding;
-broader selection, arbitrary browser Source delivery, broad platform/support
-qualification, and product terms remain deferred
+v0.19 exact local browser/device qualification and v0.20 packed integration
+baseline are Complete and repository-verified; the accepted bounded v0.21
+visual-quality baseline implementation is in progress while attended evidence,
+independent interpretation/adoption, broader platform/support qualification,
+and final visual-quality claims remain outstanding
 
 Punctra v0.11 builds on the reusable render engine, renderer-neutral View
 planner, and verified Source path described in the accepted [v0.1 renderer
@@ -180,6 +183,19 @@ delivery, other browser/device evidence, API stability, visual-quality
 completion, support qualification, beta, v1, and release-candidate status are
 not implied by repository completion.
 
+The accepted [v0.21 Visual-Quality Baseline and Regression Corpus
+design](docs/design/visual-quality-baseline-v0.21.md) fixes the meanings of
+Visual Corpus, Visual Trial, Settled Cut, Canonical Image, Unstable Pixel,
+Feature Region, and Interpretation Rubric. It accepts deterministic generated
+inputs and one permission-bound derived Autzen sample as a bounded repository
+corpus because v0.20's functional scenes were not representative. Visual
+evidence remains presentation-only; it cannot change Point authority, Coverage
+truth, selection membership, or exact Query meaning. Repository implementation
+is active, but final attended evidence and release verification are not yet
+recorded. Acceptance first records the canonical baseline inputs, freezes them
+in the implementation pin, and then verifies a rebuilt pinned implementation;
+record-mode evidence cannot substitute for the later verify-mode record.
+
 ## Artifact
 
 An immutable result produced from a Source, Snapshot, or explicitly detached input with recorded construction parameters, such as a Spatial Index, Terrain Surface, or Profile. Its provenance identifies the Source and either the Workspace Revision or detached input content that was used, plus its construction version. A rebuildable persistent Artifact may be deleted and reproduced from that authority; persistence does not make it Workspace state.
@@ -232,6 +248,15 @@ download an arbitrary file in full.
 
 _Avoid:_ remote Source when the binding is absent, URL loader, browser Source
 adapter, cache manifest
+
+## Canonical Image
+
+A fixed physical-pixel RGBA8 presentation result with declared channel order,
+origin, encoding, dimensions, and immutable identity. It is renderer evidence,
+not operating-system composition, a display-panel observation, or
+authoritative Point geometry.
+
+_Avoid:_ screenshot when the capture path matters, exact geometry
 
 ## Check Point
 
@@ -345,6 +370,14 @@ explicit per Source; redistribution permission is separate.
 
 _Avoid:_ public dataset, benchmark proof, production evidence without permission
 
+## Feature Region
+
+A predeclared image-space region with a bounded foreground, occupancy, or
+centroid expectation for one Visual Trial. It detects a lost, displaced, or
+falsely filled presentation feature without asserting Source semantics.
+
+_Avoid:_ exact feature, semantic annotation, selected Point Set
+
 ## Ground Input
 
 The complete set of Snapshot Points selected by one explicit effective ground
@@ -361,6 +394,15 @@ and one caller-returned deliverable under an explicit Tolerance Profile. It
 qualifies the compared artifacts, not an application, vendor, firm, or product.
 
 _Avoid:_ certification, application support, partner acceptance
+
+## Interpretation Rubric
+
+A fixed set of prompts and closed outcomes for recording what an observer did
+or did not perceive in bound Canonical Images. It preserves ambiguous,
+false-feature, not-visible, and not-observed results and is not a quality score
+or professional acceptance gate.
+
+_Avoid:_ usability certification, visual pass/fail score
 
 ## Operation Identity
 
@@ -513,6 +555,15 @@ occlusion, and visible-surface depth do not remove matches.
 
 _Avoid:_ visible-only selection, GPU selection, Pick region, occlusion query
 
+## Settled Cut
+
+The declared resident presentation state after required publication,
+replacement, retirement, and scheduled rendering have ended and a Visual Trial
+has completed its quiet-frame precondition. A moving or perpetually loading
+View is not settled.
+
+_Avoid:_ last frame, apparently still image
+
 ## Run Checkpoint
 
 An immutable checksummed frame proving that one Workflow phase fact was
@@ -591,7 +642,19 @@ The caller-declared inclusive horizontal and vertical differences permitted by
 one Interoperability Qualification. It is recorded exactly and is never
 inferred from coordinates, display precision, or a downstream application.
 
+For a Visual Trial, the named visual Tolerance Profile instead declares fixed
+decoded-channel, unstable-pixel, Coverage, occupancy, and centroid bounds. It
+never relaxes exact Source or Query meaning.
+
 _Avoid:_ fuzz, epsilon, automatic tolerance
+
+## Unstable Pixel
+
+A physical pixel whose maximum absolute decoded channel difference exceeds the
+Visual Trial's fixed threshold. Aggregate similarity cannot make an Unstable
+Pixel exact or excuse a separate feature, temporal, Coverage, or resource gate.
+
+_Avoid:_ noisy pixel without a named comparison profile
 
 ## View
 
@@ -608,6 +671,23 @@ _Avoid:_ scene when referring to a request
 A bounded, renderer-neutral group of origin-relative display values and stable Point Identities produced for a View. A View Batch is disposable and is never authoritative geometry.
 
 _Avoid:_ GPU buffer, render chunk
+
+## Visual Corpus
+
+The closed versioned set of immutable generated or permission-bound derived
+inputs, Visual Trials, Canonical Images, and comparison rules accepted for one
+visual baseline. Changing an input or trial creates a new baseline revision.
+
+_Avoid:_ screenshot gallery, arbitrary examples, production corpus
+
+## Visual Trial
+
+One immutable tuple of input, camera, projection, display mode, viewport,
+device-pixel ratio, settling rule, capability state, highlight state, capture
+rule, Tolerance Profile, Feature Regions, and resource limits. Its identifier
+names the whole tuple rather than configurable runtime fields.
+
+_Avoid:_ manual screenshot, ad hoc camera test
 
 ## Viewing Report
 

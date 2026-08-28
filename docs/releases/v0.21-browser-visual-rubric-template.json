@@ -1,0 +1,74 @@
+{
+  "schema": "punctra-browser-interpretation-rubric-v1",
+  "release": "0.21.0-alpha.1",
+  "template": true,
+  "session_label": "not_observed",
+  "answers": {
+    "depth": {
+      "outcome": "not_observed",
+      "note": "",
+      "shown": false,
+      "trial_ids": [
+        "generated-elevation-layered-orthographic"
+      ]
+    },
+    "shape": {
+      "outcome": "not_observed",
+      "note": "",
+      "shown": false,
+      "trial_ids": [
+        "generated-intensity-sparse-orthographic"
+      ]
+    },
+    "density_transition": {
+      "outcome": "not_observed",
+      "note": "",
+      "shown": false,
+      "trial_ids": [
+        "generated-neutral-mixed-lod-perspective"
+      ]
+    },
+    "color_meaning": {
+      "outcome": "not_observed",
+      "note": "",
+      "shown": false,
+      "trial_ids": [
+        "generated-rgb-hdr-perspective",
+        "generated-intensity-sparse-orthographic",
+        "generated-classification-selection-perspective",
+        "autzen-rgb-perspective"
+      ]
+    },
+    "selection": {
+      "outcome": "not_observed",
+      "note": "",
+      "shown": false,
+      "trial_ids": [
+        "generated-classification-selection-perspective"
+      ]
+    },
+    "false_feature": {
+      "outcome": "not_observed",
+      "note": "",
+      "shown": false,
+      "trial_ids": [
+        "generated-neutral-mixed-lod-perspective",
+        "generated-elevation-layered-orthographic",
+        "autzen-rgb-perspective"
+      ]
+    }
+  },
+  "privacy": {
+    "anonymous_session_label_only": true,
+    "stores_name": false,
+    "stores_contact_information": false,
+    "stores_employer_or_credentials": false,
+    "stores_private_source_path": false,
+    "stores_unrelated_browser_data": false
+  },
+  "authority": {
+    "gating": false,
+    "independent_human_evidence": false,
+    "professional_usability_evidence": false
+  }
+}

@@ -1,0 +1,117 @@
+{
+  "schema": "punctra-browser-visual-baseline-inputs-v1",
+  "release": "0.21.0-alpha.1",
+  "package_artifact": {
+    "package_name": "@punctra/viewer",
+    "package_version": "0.21.0-alpha.1",
+    "runtime_artifacts": [
+      {
+        "path": "apps/browser-demo/web/package.json",
+        "byte_length": 1371,
+        "sha256": "fa33501eebbd1b0dd7dddc610e8632c8bb84a82edaf6774750538d73a5ff03c3"
+      },
+      {
+        "path": "apps/browser-demo/web/pkg/browser_demo.js",
+        "byte_length": 85045,
+        "sha256": "2bc87f1d3df50cdcfb56e7dba6fadf0d64133b841b556315bde016b98b0f7d33"
+      },
+      {
+        "path": "apps/browser-demo/web/pkg/browser_demo_bg.wasm",
+        "byte_length": 792815,
+        "sha256": "ddf0e0d62926260e8ef28866dab6d9f032da4d267eb6d4998a7cbcebee5a2cb1"
+      }
+    ]
+  },
+  "canonical_baselines": [
+    {
+      "trial_id": "generated-neutral-mixed-lod-perspective",
+      "path": "apps/browser-demo/web/fixtures/visual-v1/baselines/generated-neutral-mixed-lod-perspective.png",
+      "width": 640,
+      "height": 480,
+      "encoded_byte_length": 7391,
+      "encoded_sha256": "200422ed92fc8aff6dcb013d5957f2c1915aa88a816c0f69f0abdbc3d52c37bd",
+      "decoded_byte_length": 1228800,
+      "decoded_sha256": "15192d6f3acda855b9f8255a99422d6703dd8fa03b689977200397f482fb733d"
+    },
+    {
+      "trial_id": "generated-elevation-layered-orthographic",
+      "path": "apps/browser-demo/web/fixtures/visual-v1/baselines/generated-elevation-layered-orthographic.png",
+      "width": 640,
+      "height": 480,
+      "encoded_byte_length": 18869,
+      "encoded_sha256": "a63dd46aa271f7440dd1787d059e0a2826a4a6b2d276654c9f2b95d804812148",
+      "decoded_byte_length": 1228800,
+      "decoded_sha256": "0c3d41fd8e8b376ac1ca3b76a081aa1275403054dff5853e5e2ffca78b063600"
+    },
+    {
+      "trial_id": "generated-rgb-hdr-perspective",
+      "path": "apps/browser-demo/web/fixtures/visual-v1/baselines/generated-rgb-hdr-perspective.png",
+      "width": 640,
+      "height": 480,
+      "encoded_byte_length": 15810,
+      "encoded_sha256": "d5afb1249999329121ecf41eca73ae29c51cac29035e81f6e6a71bb4bde9eca7",
+      "decoded_byte_length": 1228800,
+      "decoded_sha256": "b6a89f0c945f73b9fe97cb4b8dfdea97c0f5c886f209f66cb276fe591c84af10"
+    },
+    {
+      "trial_id": "generated-intensity-sparse-orthographic",
+      "path": "apps/browser-demo/web/fixtures/visual-v1/baselines/generated-intensity-sparse-orthographic.png",
+      "width": 640,
+      "height": 480,
+      "encoded_byte_length": 25047,
+      "encoded_sha256": "4b947d9becc14f451c705ec7448e3349507a20623880e34059f4d6e324577479",
+      "decoded_byte_length": 1228800,
+      "decoded_sha256": "0c562b8316232553ecbda97010d5affcfa1e8786d908dfbb0408c12f4c9325f5"
+    },
+    {
+      "trial_id": "generated-classification-selection-perspective",
+      "path": "apps/browser-demo/web/fixtures/visual-v1/baselines/generated-classification-selection-perspective.png",
+      "width": 640,
+      "height": 480,
+      "encoded_byte_length": 16987,
+      "encoded_sha256": "83c52edffa04d52d4f86a129b60566a81662763ab9b27f726b296f86d3ddd3c6",
+      "decoded_byte_length": 1228800,
+      "decoded_sha256": "297c8eaaa0424ef0d1c08c4b615ccf5a101610bfec98ec9f7bd3488a16c59b12"
+    },
+    {
+      "trial_id": "autzen-rgb-perspective",
+      "path": "apps/browser-demo/web/fixtures/visual-v1/baselines/autzen-rgb-perspective.png",
+      "width": 640,
+      "height": 480,
+      "encoded_byte_length": 15337,
+      "encoded_sha256": "7cdb8f7e2b8730e60504d9a4d45f772111ed3ec0fe05740ab1c444eba71a8cc2",
+      "decoded_byte_length": 1228800,
+      "decoded_sha256": "66aaed66d7bdc2cbfc74a27ac78ebd0900bd6b33e345ada847ebbfbd79e6134f"
+    },
+    {
+      "trial_id": "autzen-classification-perspective",
+      "path": "apps/browser-demo/web/fixtures/visual-v1/baselines/autzen-classification-perspective.png",
+      "width": 640,
+      "height": 480,
+      "encoded_byte_length": 5387,
+      "encoded_sha256": "5bbf4163a7f8f79aa2dbc45b1b619f9dfab6531326acd5debab7aa5bf2ab4437",
+      "decoded_byte_length": 1228800,
+      "decoded_sha256": "e4f1497a7247e7c93f669ec6fbb948345624a8d277effd231c9afeef9dc550c2"
+    },
+    {
+      "trial_id": "autzen-intensity-perspective",
+      "path": "apps/browser-demo/web/fixtures/visual-v1/baselines/autzen-intensity-perspective.png",
+      "width": 640,
+      "height": 480,
+      "encoded_byte_length": 13999,
+      "encoded_sha256": "d13be19a007924e543be1c217e2515980d12bde7ab0c49efa30657c16e9bb166",
+      "decoded_byte_length": 1228800,
+      "decoded_sha256": "83d85d286f62a096258256ef1bfd5cc65bbc3c39b25ec8308920879c7394d667"
+    },
+    {
+      "trial_id": "autzen-elevation-perspective",
+      "path": "apps/browser-demo/web/fixtures/visual-v1/baselines/autzen-elevation-perspective.png",
+      "width": 640,
+      "height": 480,
+      "encoded_byte_length": 10516,
+      "encoded_sha256": "22a72d45da0b2fd75314356b9c65d1604851245307dca988e1e22d87636f8c0b",
+      "decoded_byte_length": 1228800,
+      "decoded_sha256": "63c70ae3a52244b3d749d421c0c36113c8e21f7a21d5534f8f027cd1ed71d403"
+    }
+  ]
+}

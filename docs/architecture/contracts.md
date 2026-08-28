@@ -8,7 +8,12 @@ repository-verified for the bounded persistent-terrain slice; field activation,
 production-scale accuracy, true out-of-core adoption, independent adoption,
 partner validation, and support qualification outstanding; broader terrain,
 export, and product contracts remain outstanding; v0.14 bounded exact Terrain
-QA and correction-loop slice Complete and repository-verified
+QA and correction-loop slice Complete and repository-verified; v0.15 browser
+foundation, v0.16 Range/cache/Worker streaming, v0.17 viewer/exact-Point,
+v0.18 packed SDK/React lifecycle, v0.19 exact local qualification, and v0.20
+packed-consumer integration contracts Complete and repository-verified; v0.21
+private visual-baseline contracts Accepted and in progress while attended
+record/verify evidence and release verification remain outstanding
 
 The versioned designs in [`docs/design`](../design) control exact release
 scope. This document summarizes the invariants that cross current crate seams.
@@ -599,6 +604,29 @@ is an explicit invalid request, not a fallback. Every mapping changes only
 RGBA8: identity, position, geometry, generation/version, and Coverage remain
 equal across modes.
 
+The browser host owns its canvas, WebGPU device/queue/surface lifecycle,
+visibility/DPR policy, Source deployment choice, recovery, and disposal. The
+public viewer composes only the accepted lifecycle, camera, streaming,
+presentation, provisional-pick, and exact fixture bridge. Range transport,
+Worker decoding, cache policy, raw Wasm publication, and qualification remain
+private implementation or repository-host policy.
+
+The v0.21 Visual Trial seam is also private and closed over nine checked-in
+identifiers. Record mode may create only the canonical baseline PNGs and a
+commit-free baseline-input manifest that cross the implementation pin. Final
+evidence must come from a later verify-mode run of that exact pinned build.
+Rubric input follows capture and visible loading of its exact bound images. The
+verify page accepts one nonrepeating query tuple: a full lowercase 40-hex
+implementation commit, positive decimal verifier byte length, and lowercase
+64-hex verifier SHA-256. It fixes the verifier path and attended-lane identity;
+the visible Run control remains disabled for an absent or malformed tuple. The
+USTAR bundle preserves repository-relative paths for private transport but is
+not itself evidence. Its standard browser Blob download may fall back to an
+explicitly enabled same-origin local-server POST only; that fallback is bounded
+to the same archive, rejects existing targets rather than overwriting them, and
+does not create evidence. Canonical images and feature facts remain presentation-
+only and cannot change Source, Point, Coverage, selection, or Query authority.
+
 The host presents demanded nodes, load candidates, actually issued work,
 retention/retirement, queue/staging, requested/resident nodes, and Sampled
 versus Complete resident Coverage as separate facts. Pausing issues no new
@@ -665,6 +693,9 @@ publication. Separate ledgers cover:
 - renderer-demo hierarchy, request queue, staging, renderer residency, corpus
   manifest/report, navigation-trace, index temporary disk, and Source
   verification measurement limits; and
+- browser visual renderer/canvas residency, capture/readback, canonical pixels,
+  PNG encoding, comparison, evidence JSON, baseline-input manifest, and private
+  USTAR transport limits; and
 - qualification XML input, node, text/attribute, semantic-model, comparison,
   evidence output/staging/buffer, and retained-witness bytes.
 

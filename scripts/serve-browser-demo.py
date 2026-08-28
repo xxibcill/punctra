@@ -5,8 +5,10 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import ipaddress
 import json
 import mimetypes
+import os
 import platform
 import subprocess
 import time
@@ -23,6 +25,10 @@ EXPOSED_HEADERS = "Accept-Ranges, Content-Encoding, Content-Length, Content-Rang
 FILE_CHUNK_BYTES = 64 * 1024
 FAULTS = {"disconnect", "redirect", "retry", "truncated", "corrupt", "validator_drift"}
 QUALIFICATION_HOST_SCHEMA = "punctra-qualification-host-v1"
+VISUAL_EXPORT_PATH = "/qualification-visual-export"
+VISUAL_EXPORT_FILENAME = "v0.21-browser-visual-evidence.tar"
+VISUAL_EXPORT_RECEIPT_SCHEMA = "punctra-browser-visual-export-receipt-v1"
+MAX_VISUAL_EXPORT_BYTES = 1_243_611_136
 
 
 def fixture_validators() -> dict[Path, str]:
@@ -153,6 +159,134 @@ class BrowserDemoHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802
         self._serve(send_body=True)
+
+    def do_POST(self) -> None:  # noqa: N802
+        if urlsplit(self.path).path != VISUAL_EXPORT_PATH:
+            self.send_error(HTTPStatus.NOT_FOUND)
+            return
+        if self.server.visual_export_dir is None:
+            self.send_error(HTTPStatus.NOT_FOUND)
+            return
+        if not self._is_same_origin_request():
+            self.send_error(HTTPStatus.FORBIDDEN)
+            return
+        if self.headers.get_all("Content-Type", []) != ["application/x-tar"]:
+            self.send_error(HTTPStatus.UNSUPPORTED_MEDIA_TYPE)
+            return
+
+        content_lengths = self.headers.get_all("Content-Length", [])
+        if not content_lengths:
+            self.send_error(HTTPStatus.LENGTH_REQUIRED)
+            return
+        if len(content_lengths) != 1 or not content_lengths[0].isdecimal():
+            self.send_error(
+                HTTPStatus.BAD_REQUEST,
+                "Content-Length must be one decimal integer",
+            )
+            return
+        content_length = int(content_lengths[0])
+        if content_length == 0:
+            self.send_error(HTTPStatus.BAD_REQUEST, "Content-Length must be greater than zero")
+            return
+        if content_length > MAX_VISUAL_EXPORT_BYTES:
+            self.send_error(HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
+            return
+
+        export_path = self.server.visual_export_dir / VISUAL_EXPORT_FILENAME
+        staging_path = export_path.with_name(f"{export_path.name}.part")
+        if os.path.lexists(export_path):
+            self.send_error(HTTPStatus.CONFLICT)
+            return
+
+        try:
+            digest = self._persist_visual_export(
+                staging_path=staging_path,
+                export_path=export_path,
+                content_length=content_length,
+            )
+        except FileExistsError:
+            self.send_error(HTTPStatus.CONFLICT)
+            return
+        except EOFError:
+            self.send_error(HTTPStatus.BAD_REQUEST, "request body ended before Content-Length")
+            return
+        except OSError:
+            self.send_error(HTTPStatus.INTERNAL_SERVER_ERROR)
+            return
+
+        body = json.dumps(
+            {
+                "schema": VISUAL_EXPORT_RECEIPT_SCHEMA,
+                "filename": VISUAL_EXPORT_FILENAME,
+                "path": str(export_path),
+                "byte_length": content_length,
+                "sha256": digest,
+            },
+            separators=(",", ":"),
+        ).encode("utf-8")
+        self.send_response(HTTPStatus.CREATED)
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _is_same_origin_request(self) -> bool:
+        hosts = self.headers.get_all("Host", [])
+        origins = self.headers.get_all("Origin", [])
+        if len(hosts) != 1:
+            return False
+        allowed_hosts = {"127.0.0.1", "localhost", "::1"}
+        bound_host, bound_port = self.server.server_address[:2]
+        try:
+            if ipaddress.ip_address(bound_host).is_loopback:
+                allowed_hosts.add(bound_host)
+        except ValueError:
+            pass
+        allowed_authorities = {
+            f"[{host}]:{bound_port}" if ":" in host else f"{host}:{bound_port}"
+            for host in allowed_hosts
+        }
+        return hosts[0] in allowed_authorities and origins == [f"http://{hosts[0]}"]
+
+    def _persist_visual_export(
+        self,
+        *,
+        staging_path: Path,
+        export_path: Path,
+        content_length: int,
+    ) -> str:
+        digest = hashlib.sha256()
+        owns_staging_path = False
+        published = False
+        try:
+            with staging_path.open("xb") as destination:
+                owns_staging_path = True
+                remaining = content_length
+                while remaining:
+                    chunk = self.rfile.read(min(remaining, FILE_CHUNK_BYTES))
+                    if not chunk:
+                        raise EOFError
+                    destination.write(chunk)
+                    digest.update(chunk)
+                    remaining -= len(chunk)
+                destination.flush()
+                os.fsync(destination.fileno())
+                if destination.tell() != content_length:
+                    raise OSError("visual export length drift")
+
+            os.link(staging_path, export_path)
+            published = True
+            staging_path.unlink()
+            owns_staging_path = False
+            if export_path.stat().st_size != content_length:
+                raise OSError("published visual export length drift")
+            return digest.hexdigest()
+        finally:
+            if owns_staging_path:
+                staging_path.unlink(missing_ok=True)
+            if published and not export_path.exists():
+                raise OSError("visual export publication disappeared")
 
     def _serve(self, *, send_body: bool) -> None:
         if urlsplit(self.path).path == "/qualification-host.json":
@@ -336,21 +470,40 @@ def arguments() -> argparse.Namespace:
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", default=8000, type=int)
     parser.add_argument("--root", default=WEB_ROOT, type=Path)
+    parser.add_argument("--visual-export-dir", type=Path)
     return parser.parse_args()
 
 
 class BrowserDemoServer(ThreadingHTTPServer):
-    def __init__(self, address: tuple[str, int], web_root: Path) -> None:
+    def __init__(
+        self,
+        address: tuple[str, int],
+        web_root: Path,
+        visual_export_dir: Path | None = None,
+    ) -> None:
         resolved_root = web_root.resolve()
         if not resolved_root.is_dir():
             raise ValueError(f"browser root is not a directory: {resolved_root}")
         self.web_root = resolved_root
+        if visual_export_dir is None:
+            self.visual_export_dir = None
+        else:
+            resolved_export_dir = visual_export_dir.resolve()
+            if not resolved_export_dir.is_dir():
+                raise ValueError(
+                    f"visual export directory is not a directory: {resolved_export_dir}"
+                )
+            self.visual_export_dir = resolved_export_dir
         super().__init__(address, BrowserDemoHandler)
 
 
 def main() -> None:
     options = arguments()
-    server = BrowserDemoServer((options.host, options.port), options.root)
+    server = BrowserDemoServer(
+        (options.host, options.port),
+        options.root,
+        options.visual_export_dir,
+    )
     host, port = server.server_address[:2]
     print(f"Serving {server.web_root} at http://{host}:{port}/", flush=True)
     try:

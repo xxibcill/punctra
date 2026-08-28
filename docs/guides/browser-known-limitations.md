@@ -1,13 +1,18 @@
 # Browser integration known limitations
 
-Punctra `0.20.0-alpha.1` is complete only for the bounded packed integration
-baseline and one exact local Chromium/macOS/Apple-GPU consumer lane. The
-[machine-readable baseline](../releases/v0.20-browser-baseline.json) and
-[browser matrix](../releases/v0.20-browser-matrix.json) are the authorities.
+Punctra `0.21.0-alpha.1` carries forward the bounded packed integration
+baseline and one exact local Chromium/macOS/Apple-GPU functional lane while its
+accepted visual-baseline evidence remains in progress. The current
+[machine-readable baseline](../releases/v0.21-browser-baseline.json) and
+[browser matrix](../releases/v0.21-browser-matrix.json) describe that current
+functional target but are not final release authority until locally rerun and
+pinned. The v0.20 [baseline](../releases/v0.20-browser-baseline.json) and
+[matrix](../releases/v0.20-browser-matrix.json) remain the immutable completed
+historical evidence.
 
 ## Unsupported
 
-These conditions cannot create a usable viewer in v0.20:
+These conditions cannot create a usable viewer in v0.21:
 
 - insecure context, unavailable WebGPU/adapter, unsupported surface format,
   presentation mode, alpha mode, renderer limit, or invalid physical viewport;
@@ -25,7 +30,9 @@ they must not silently substitute a different renderer, Source, or cache mode.
 
 ## Unqualified
 
-Only the exact entry in `v0.20-browser-matrix.json` is repository-qualified.
+Only the exact entry in `v0.21-browser-matrix.json` is eligible for the current
+repository functional lane, and it is not final v0.21 evidence until the rerun
+and pins are complete.
 Installed Chrome, Safari, other Chromium builds, other screens, operating
 systems, GPUs, adapters, mobile devices, bundlers, framework versions, CDNs,
 authentication stacks, CSP variants, and production networks remain
@@ -35,10 +42,11 @@ Initialization success does not promote an unqualified platform to supported.
 
 ## Deferred
 
-The following are intentionally outside this integration baseline:
+The following are intentionally outside the accepted v0.21 slice:
 
-- complete Source Coverage, dense/sparse/layered/mixed-LOD visual corpus,
-  stable visual metrics, final display policy, and visual-quality sign-off;
+- complete Source Coverage, intentional point-appearance changes, final
+  display policy, cross-browser/compositor/display equivalence, and visual-
+  quality sign-off;
 - editing, terrain workflows, export, host UI, offline-first behavior, service
   workers, telemetry, application persistence, and automatic recovery;
 - registry or CDN publication, independent-adopter completion, setup-time and
@@ -47,9 +55,49 @@ The following are intentionally outside this integration baseline:
 - physical GPU completion, process RSS, physical cache allocation, driver/GPU
   allocation, energy, thermals, or general remote-network performance claims.
 
-The fixed generated scene and sampled LAS root preserve functional and
-appearance continuity; they are not the representative visual corpus planned
-for v0.21.
+The v0.20 fixed generated scene and sampled LAS root still preserve functional
+and appearance continuity; they did not satisfy v0.21's representative-corpus
+gate. The 2026-08-28 activation decision therefore permits a separate closed
+v0.21 corpus rather than relabeling those old scenes.
+
+## Visual-baseline boundary
+
+The repository now contains nine fixed trials: five deterministic generated
+trials and four Autzen-derived display-mode trials over one 4,096-Point CC BY
+4.0 sample. The derivative binds
+upstream/derived identity, deterministic selection, attribution, modification,
+and image-publication permission. This is a permitted bounded sample, not the
+complete Autzen survey, an independent partner Source, or a general browser
+LAS/LAZ loader.
+
+Canonical trials require a 320 by 240 CSS-pixel canvas at requested DPR 2,
+exactly 640 by 480 physical pixels, 30 unchanged foreground frames before
+capture, and three complete viewer/harness recreations per trial. Capture
+is a private offscreen GPU readback normalized to top-left RGBA8; it does not
+observe OS composition, display color management, or the physical panel.
+
+Decoded comparisons keep maximum channel delta, unstable-pixel fraction,
+Coverage, Feature Region, exact settled-generated temporal, and resource gates
+independent. The tolerance caps are channel threshold 2, unstable-pixel
+fraction 0.001, maximum channel delta 4, and one physical pixel of feature
+displacement. These are regression bounds, not perceptual-quality scores.
+
+The rubric records depth, shape, density-transition, color-meaning, selection,
+and false-feature observations but is deliberately non-gating. The static
+corpus/policy implementation does not become completed visual evidence until
+the accepted images, three complete recreations, maintainer observation, machine-
+readable evidence, implementation/verifier pins, and release record exist and
+pass. See the [visual-quality guide](browser-visual-quality.md).
+
+Record and verify are sequential. The attended record stage supplies only the
+baseline PNGs and commit-free baseline-input manifest that cross the
+implementation pin. After the pinned build repeats inherited qualification, a
+separate attended verify stage supplies final evidence. Rubric review follows
+capture, and one uncompressed TAR transports repository-relative artifacts
+without becoming evidence itself. Standard Blob download remains primary. The
+opt-in `transport=server` path is only a same-origin, no-overwrite fallback for
+an in-app browser that does not materialize the Blob; its local-server receipt
+and TAR are still not evidence.
 
 ## Host-owned
 

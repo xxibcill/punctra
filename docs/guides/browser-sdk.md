@@ -1,6 +1,6 @@
 # Browser SDK installation and deployment
 
-Punctra `0.20.0-alpha.1` packages the framework-neutral browser viewer as
+Punctra `0.21.0-alpha.1` packages the framework-neutral browser viewer as
 `@punctra/viewer` and the one qualified lifecycle adapter as `@punctra/react`.
 The repository verifies locally packed npm tarballs; it does not claim that
 either package has been published to a registry.
@@ -17,10 +17,11 @@ The artifacts are written under `target/npm/`. A clean application can install
 the exact viewer artifact directly:
 
 ```bash
-npm install /absolute/path/to/target/npm/punctra-viewer-0.20.0-alpha.1.tgz
+npm install /absolute/path/to/target/npm/punctra-viewer-0.21.0-alpha.1.tgz
 ```
 
-The checked-in `examples/browser-typescript` consumer is the v0.20
+The checked-in `examples/browser-typescript` consumer is the v0.21 package-
+version continuation of the v0.20
 [five-minute quickstart](browser-quickstart.md); `examples/browser-react`
 remains the thin React trial. Both intentionally contain no repository-relative
 Punctra dependency.
@@ -76,8 +77,8 @@ Install both packed artifacts plus a qualified React version:
 
 ```bash
 npm install \
-  /absolute/path/to/target/npm/punctra-viewer-0.20.0-alpha.1.tgz \
-  /absolute/path/to/target/npm/punctra-react-0.20.0-alpha.1.tgz \
+  /absolute/path/to/target/npm/punctra-viewer-0.21.0-alpha.1.tgz \
+  /absolute/path/to/target/npm/punctra-react-0.21.0-alpha.1.tgz \
   react react-dom
 ```
 
@@ -135,7 +136,7 @@ const viewer = await createViewer({
   assets: {
     wasmUrl: new URL("/assets/punctra/browser_demo_bg.wasm", location.origin),
     workerUrl: new URL("/assets/punctra/stream-worker.js", location.origin),
-    cacheKey: "0.20.0-alpha.1-build-7",
+    cacheKey: "0.21.0-alpha.1-build-7",
   },
 });
 ```
@@ -154,7 +155,7 @@ requires the exact Range and validator behavior in the
 
 ## Content Security Policy and isolation
 
-The v0.20 path uses a module Worker and WebAssembly, but no inline/evaluated
+The v0.21 path uses a module Worker and WebAssembly, but no inline/evaluated
 JavaScript, `blob:` Worker, `SharedArrayBuffer`, or service worker. It does not
 require COOP/COEP cross-origin isolation. A restrictive same-origin starting
 policy is:
@@ -179,14 +180,30 @@ Run:
 scripts/build-browser-sdk.sh
 node scripts/verify-browser-sdk.mjs
 node scripts/verify-browser-integration-baseline.mjs
+node scripts/verify-browser-visual-baseline.mjs
 node scripts/generate-browser-sdk-reference.mjs --check
 ```
 
 The [generated API reference](../api/browser-sdk.md) is derived from the exact
-packed declarations. The v0.20 [integration baseline](../releases/v0.20-browser-baseline.json),
-[browser matrix](../releases/v0.20-browser-matrix.json), and [qualification
-guide](browser-qualification.md) pin the package boundary and the only exact
-browser/device lane that has passed the resource, latency, and recovery gates.
+packed declarations. The v0.20 [integration
+baseline](../releases/v0.20-browser-baseline.json) and [browser
+matrix](../releases/v0.20-browser-matrix.json) remain immutable historical
+evidence. The current v0.21 [integration
+baseline](../releases/v0.21-browser-baseline.json), [browser
+matrix](../releases/v0.21-browser-matrix.json), and [qualification
+guide](browser-qualification.md) describe the package-facing continuation and
+the one exact lane that must repeat the inherited resource, latency, and
+recovery gates. They become v0.21 release evidence only after the current
+implementation and verifier are locally rerun and pinned.
+
+The v0.21 visual corpus, raw Wasm capture/readback, PNG codec, comparison, and
+evidence runner remain repository-private and add no package export. See the
+[browser visual-quality guide](browser-visual-quality.md) for the bounded local
+baseline workflow. Its attended record stage creates baseline inputs before the
+implementation pin; a later verify stage of the rebuilt pin supplies final
+evidence only after the inherited packed quickstart and qualification pass.
+Static policy implementation is not final attended visual evidence,
+cross-browser equivalence, or a physical-display claim.
 The LAS header and Point-record decoders used by `exact-query` are deliberately
 package-private and are not supported exports. Other bundlers,
 frameworks, browsers, devices, hosting stacks, and CSP deployments require

@@ -15,7 +15,9 @@ bounded local WebAssembly/WebGPU browser-host workflow Complete and repository-
 verified; v0.16 bounded immutable-LAS Range/cache/Worker workflow Complete and
 repository-verified; v0.17 bounded viewer API/exact-Point, v0.18 packed SDK/React
 lifecycle, v0.19 exact local qualification, and v0.20 clean packed-consumer
-integration workflows Complete and repository-verified; arbitrary remote browser
+integration workflows Complete and repository-verified; v0.21 private visual-
+trial/capture/evidence workflow Accepted and in progress, with attended
+evidence and release verification outstanding; arbitrary remote browser
 delivery and broader workflows remain outstanding**
 
 The host composes sibling modules explicitly. Lower crates never call back into
@@ -801,6 +803,107 @@ owns generation-safe state and bounded operations. The bridge's LAS decoders
 remain package-private; no step turns the fixed deployment into general Source
 or Query support.
 
+## 11h. Reproduce one private visual baseline
+
+The accepted v0.21 workflow crosses one closed private Visual Trial seam. A
+trial identifier fixes its generated or permission-bound derived input,
+camera, mode, projection, highlight, viewport, settling, feature, tolerance,
+and resource facts; the runner exposes none of those as a configurable public
+capture interface:
+
+~~~mermaid
+sequenceDiagram
+    participant RUNNER as private visual runner
+    participant CORPUS as closed Visual Corpus
+    participant VIEW as browser viewer/harness
+    participant GPU as private capture target
+    participant REVIEW as attended post-capture review
+    participant BUNDLE as private USTAR transport
+    participant EXPORT as opt-in same-origin export
+    participant REPO as pinned repository inputs
+    participant VERIFY as visual verifier
+
+    Note over RUNNER,REPO: Stage 1: attended record mode
+    loop nine trials, three complete recreations each
+        RUNNER->>CORPUS: resolve immutable trial identifier
+        CORPUS-->>RUNNER: input, camera, features, limits, permission facts
+        RUNNER->>VIEW: create at 320x240 CSS, requested DPR 2
+        RUNNER->>VIEW: publish exact trial batches and presentation state
+        VIEW-->>RUNNER: Settled Cut plus 30 unchanged foreground frames
+        RUNNER->>GPU: render same frame and read bounded copyable target
+        GPU-->>RUNNER: top-left canonical 640x480 RGBA8
+        RUNNER->>VIEW: dispose viewer, mapped buffers, textures, capture state
+    end
+    RUNNER->>REVIEW: load exact bound images after capture
+    REVIEW-->>RUNNER: submit calibration-only rubric
+    RUNNER->>BUNDLE: one repository-relative record bundle
+    alt standard Blob download
+        BUNDLE-->>REPO: operator extracts retained baseline inputs
+    else explicit transport=server fallback
+        BUNDLE->>EXPORT: same-origin bounded TAR POST
+        EXPORT-->>RUNNER: fixed no-replace local TAR plus non-evidence receipt
+        RUNNER-->>REPO: operator extracts retained baseline inputs
+    end
+    REPO->>REPO: freeze qualified paths and implementation pin
+
+    Note over RUNNER,VERIFY: Stage 2: rebuild pin, qualify, then attended verify mode
+    REPO->>RUNNER: open pinned URL and use visible Run gesture
+    loop nine trials, three complete recreations each
+        RUNNER->>VIEW: reproduce pinned trial and Settled Cut
+        VIEW-->>RUNNER: 30 unchanged foreground frames
+        RUNNER->>GPU: capture canonical RGBA8
+        RUNNER->>VERIFY: image, temporal, Coverage, feature, authority, resource facts
+        RUNNER->>VIEW: dispose all recreation state
+    end
+    RUNNER->>REVIEW: load exact verify images after capture
+    REVIEW-->>RUNNER: submit final non-gating maintainer rubric
+    RUNNER->>BUNDLE: one repository-relative verify bundle
+    alt standard Blob download
+        BUNDLE-->>VERIFY: operator extracts evidence JSON and PNGs
+    else explicit transport=server fallback
+        BUNDLE->>EXPORT: same-origin bounded TAR POST
+        EXPORT-->>RUNNER: fixed no-replace local TAR plus non-evidence receipt
+        RUNNER-->>VERIFY: operator extracts evidence JSON and PNGs
+    end
+    VERIFY-->>RUNNER: derived pass/fail or explicit incomplete evidence
+~~~
+
+The generated mixed-LOD trial records its bounded nine-step parent/child
+transition and then requires exact settled temporal pixels. Other decoded
+comparisons use the named profile, whose caps are channel threshold 2,
+unstable-pixel fraction 0.001, maximum channel delta 4, and one physical pixel
+of feature displacement. Coverage, feature, authority, and each independent
+renderer/canvas/capture/readback/canonical/encoded resource gate remain
+separate from the image aggregate.
+
+Record and verify are sequential rather than alternative modes. Record-mode
+evidence, rubric, recreation, transition, and difference images are calibration
+output; only its nine canonical baselines and commit-free baseline-input
+manifest cross the implementation pin. The pinned checkout is rebuilt and must
+repeat inherited quickstart and browser qualification before verify mode.
+Only the later verify-mode evidence is eligible for final acceptance. Its URL
+supplies the exact implementation commit, verifier byte length, and verifier
+SHA-256; the runner fixes the attended-lane identity and disables the visible
+Run control until those pins are valid.
+
+In both stages the rubric begins only after capture and exact bound images have
+loaded in the visible document. The uncompressed TAR preserves repository paths
+for transport but is not itself evidence and is not checked in. Standard Blob
+download is primary. If it does not materialize, an explicitly enabled same-
+origin local-server endpoint may receive that same bounded archive and publish
+it below an operator-selected export directory with no replacement; cross-
+origin POST and an existing target fail closed. This path requires
+`--visual-export-dir <existing-fresh-dir>` and `transport=server`; it POSTs
+`application/x-tar` to `/qualification-visual-export`. The endpoint receipt is
+not evidence. The capture
+target observes renderer output before OS composition and display color
+management. Its callback intervals include scheduling delay and do not measure
+physical GPU-completion time. It is presentation-only evidence and cannot
+publish Source geometry, exact Query truth, or a browser/display support claim.
+The evidence workflow remains incomplete until every fixed trial, recreation,
+accepted artifact, interpretation binding, implementation pin, and verifier pin
+exists and passes.
+
 ## 12. Cancellation and crash matrix
 
 | Operation | Safe cancellation boundary | Permitted residue | Published truth |
@@ -823,6 +926,7 @@ or Query support.
 | Browser acceptance host | Before viewer return and at explicit frame/pick boundaries; shutdown is fused | Disposable WebGPU resources and ignored generated bindings | No viewer, one active private viewer, or one shut-down viewer; Workspace and Sources unchanged |
 | Browser streaming worker | Abortable between manifest, Source probe, index-header, and sample ranges; late operation messages are ignored | Verified identity-versioned cache entries selected by caller policy | No remote generation, bounded partial sampled renderer batches for the active identity, or one complete sampled root; never a complete or authoritative Source result |
 | Browser viewer/exact bridge | Abortable before and after worker or exact-record waits; generation and Source identity rechecked before presentation | Last complete frame plus caller-selected verified cache entries | No viewer, one complete active generation with provisional presentation, or one independently confirmed exact Point; stale work is never current |
+| Browser visual trial | Between trial preparation, quiet-frame sampling, capture map, comparison, and artifact staging; no partial trial is publishable | Disposable viewer/capture resources and an unaccepted private partial observation | No evidence for that repetition, or one complete immutable trial result bound to exact input and environment facts; never Source or Query authority |
 | Viewing Report | Before no-replace link of a synced, read-back-verified owned stage | Recognized identity-checked owned stage, or one complete target | No report, exact-existing reconciliation, one complete new report, or conflict without replacement |
 
 ## 13. Staleness

@@ -3,6 +3,61 @@
 All notable changes to Punctra are documented here. The project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased - 0.21.0-alpha.1
+
+- Accepted and implemented the bounded [v0.21 Visual-Quality Baseline and
+  Regression Corpus design](docs/design/visual-quality-baseline-v0.21.md),
+  while leaving final attended evidence, implementation/verifier pins, and the
+  human-readable release record outstanding.
+- Added a closed private browser corpus with nine fixed trials: five
+  deterministic generated trials and four display-mode trials over one
+  4,096-Point derivative of the CC BY 4.0 Autzen fixture. The derivation binds
+  the upstream bytes, exact ordinal-block recipe, output payload, Source facts,
+  attribution, modification notice, and permission to publish the derivative
+  and rendered evidence.
+- Added private renderer capture/readback and canonical lossless RGBA8 PNG
+  handling for an exact 320 by 240 CSS-pixel canvas at requested DPR 2, or 640
+  by 480 physical pixels. The path records offscreen GPU renderer evidence and
+  explicitly does not claim operating-system composition or physical-display
+  presentation.
+- Added closed visual trials for all five display modes, both projections,
+  generated sparse/dense/layered/high-dynamic-range/classification/large-world/
+  mixed-LOD conditions, fixed feature regions, a nine-step mixed-LOD trace,
+  30 quiet foreground frames, and three complete viewer/harness recreations.
+- Added tolerant decoded-pixel, exact generated temporal, Coverage, feature-
+  location, authority, resource, and cleanup policy. Canonical tolerances are
+  capped at channel threshold 2, unstable-pixel fraction 0.001, maximum channel
+  delta 4, and one physical pixel of feature displacement.
+- Added a non-gating interpretation rubric for depth, shape, density
+  transitions, color meaning, selection, and false features. Unfavorable or
+  unobserved answers remain evidence and cannot be rewritten into a pass.
+- Added the mandatory attended record-then-verify workflow. Record mode creates
+  the canonical PNGs and commit-free baseline-input manifest as its only outputs
+  that cross the implementation pin; the later pinned verify run supplies final
+  evidence.
+  Rubric images load after capture, and one deterministic uncompressed TAR
+  transports all repository-relative artifacts without becoming evidence
+  itself.
+- Added an opt-in same-origin local-server fallback for in-app browsers that do
+  not materialize the standard TAR Blob download. It accepts only the same
+  bounded private archive, is disabled by default, and cannot overwrite an
+  existing export; neither its receipt nor the TAR is evidence.
+- Added exact URL-derived final-verify provenance for the implementation commit
+  and verifier byte identity. The runner fixes the accepted attended lane and
+  disables its visible Run control when the pin tuple is absent or malformed.
+- Added independent ceilings for capture callback intervals from the begin-
+  capture monotonic origin without presenting callback or browser-scheduling
+  delay as physical GPU-completion time.
+- Advanced the Rust and JavaScript package-facing release identity to
+  `0.21.0-alpha.1` without changing the public viewer seams or the inherited
+  v0.20 point-appearance policy. The v0.20 records remain immutable historical
+  evidence.
+- Preserved the evidence boundary: v0.21 is not yet locally verified or pinned
+  and does not claim cross-browser equivalence, compositor/display evidence,
+  independent human interpretation, independent adoption, improved or final
+  visual quality, support qualification, beta, v1, or release-candidate
+  status.
+
 ## Unreleased - 0.20.0-alpha.1
 
 - Completed and locally repository-verified the bounded v0.20 packed browser

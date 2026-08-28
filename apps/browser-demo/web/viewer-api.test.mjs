@@ -1303,7 +1303,7 @@ class PendingRawViewer extends FakeRawViewer {
 function diagnosticsFixture() {
   return {
     schema: "punctra-browser-viewer-v1",
-    package_version: "0.20.0-alpha.1",
+    package_version: "0.21.0-alpha.1",
     phase: "ready",
     rendered_frames: 0,
     hidden_frame_skips: 0,

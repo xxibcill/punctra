@@ -29,6 +29,7 @@ pub(crate) struct Diagnostics<'a> {
     pub(crate) scene: SceneFacts,
     pub(crate) streaming: StreamFacts,
     pub(crate) streaming_limits: StreamingLimitFacts,
+    pub(crate) capture_resources: CaptureResourceFacts,
     pub(crate) frame: Option<FrameFacts>,
     pub(crate) pick: &'a PickFacts,
     pub(crate) camera: CameraFacts,
@@ -36,6 +37,37 @@ pub(crate) struct Diagnostics<'a> {
     pub(crate) highlights: HighlightFacts,
     pub(crate) display_authority: &'static str,
     pub(crate) safe_shutdown_action: &'static str,
+}
+
+/// Exact browser-host ownership facts for the private capture ticket.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+pub(crate) struct CaptureResourceFacts {
+    pending_tickets: u64,
+    owned_textures: u64,
+    owned_readback_buffers: u64,
+}
+
+impl CaptureResourceFacts {
+    pub(crate) const fn released() -> Self {
+        Self {
+            pending_tickets: 0,
+            owned_textures: 0,
+            owned_readback_buffers: 0,
+        }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) const fn from_pending(pending: bool) -> Self {
+        if pending {
+            Self {
+                pending_tickets: 1,
+                owned_textures: 1,
+                owned_readback_buffers: 1,
+            }
+        } else {
+            Self::released()
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
@@ -342,6 +374,12 @@ pub(crate) enum FailureCode {
     DeviceLost,
     DevicePoll,
     DiagnosticSerialization,
+    FrameCaptureFacts,
+    FrameCaptureNotRequested,
+    FrameCapturePending,
+    FrameCaptureReadback,
+    FrameCaptureRecording,
+    FrameCaptureValidation,
     FrameRecording,
     FrameValidation,
     CameraValidation,
@@ -450,6 +488,7 @@ mod tests {
             scene: scene.facts(),
             streaming: StreamingScene::idle().facts(),
             streaming_limits: StreamingLimitFacts::fixed(),
+            capture_resources: CaptureResourceFacts::released(),
             frame: None,
             pick: &pick,
             camera: CameraFacts::from_camera(scene.camera()),
@@ -475,6 +514,9 @@ mod tests {
         assert_eq!(value["viewport"]["surface_bytes"], 6_400_000);
         assert_eq!(value["pick"]["status"], "not_requested");
         assert_eq!(value["streaming"]["phase"], "idle");
+        assert_eq!(value["capture_resources"]["pending_tickets"], 0);
+        assert_eq!(value["capture_resources"]["owned_textures"], 0);
+        assert_eq!(value["capture_resources"]["owned_readback_buffers"], 0);
         assert_eq!(value["streaming_limits"]["range_bytes"], 262_144);
         assert_eq!(value["capabilities"]["composite_alpha_mode"], "Opaque");
         assert_eq!(
@@ -528,105 +570,81 @@ mod tests {
 
     #[test]
     fn failure_codes_preserve_the_existing_json_vocabulary() {
-        assert_eq!(
-            serde_json::to_value(
-                &[
-                    FailureCode::CapabilityInspection,
-                    FailureCode::CanvasSurface,
-                    FailureCode::DeviceLost,
-                    FailureCode::DevicePoll,
-                    FailureCode::DiagnosticSerialization,
-                    FailureCode::FrameRecording,
-                    FailureCode::FrameValidation,
-                    FailureCode::CameraValidation,
-                    FailureCode::HostModel,
-                    FailureCode::InitialViewport,
-                    FailureCode::InsecureContext,
-                    FailureCode::MissingRecordedFrame,
-                    FailureCode::MissingWindow,
-                    FailureCode::PickInvariant,
-                    FailureCode::PickNotRequested,
-                    FailureCode::PickOutsideViewport,
-                    FailureCode::PickPending,
-                    FailureCode::PickReadback,
-                    FailureCode::PickRecording,
-                    FailureCode::HighlightValidation,
-                    FailureCode::PresentationMode,
-                    FailureCode::RendererCapability,
-                    FailureCode::ResizeViewport,
-                    FailureCode::ScenePlanning,
-                    FailureCode::ScenePublication,
-                    FailureCode::SceneValidation,
-                    FailureCode::StreamPublication,
-                    FailureCode::StreamValidation,
-                    FailureCode::StaleGeneration,
-                    FailureCode::DisplayMode,
-                    FailureCode::SurfaceAlphaMode,
-                    FailureCode::SurfaceConfiguration,
-                    FailureCode::SurfaceFormat,
-                    FailureCode::SurfaceLost,
-                    FailureCode::SurfaceOccluded,
-                    FailureCode::SurfaceOutdated,
-                    FailureCode::SurfaceReconfiguration,
-                    FailureCode::SurfaceTimeout,
-                    FailureCode::SurfaceValidation,
-                    FailureCode::TransientTextureLimit,
-                    FailureCode::ViewerHidden,
-                    FailureCode::ViewportValidation,
-                    FailureCode::WebGpuAdapter,
-                    FailureCode::WebGpuDevice,
-                    FailureCode::WebGpuUnavailable,
-                ][..]
-            )
-            .unwrap(),
-            json!([
-                "capability_inspection",
-                "canvas_surface",
-                "device_lost",
-                "device_poll",
+        let cases = [
+            (FailureCode::CapabilityInspection, "capability_inspection"),
+            (FailureCode::CanvasSurface, "canvas_surface"),
+            (FailureCode::DeviceLost, "device_lost"),
+            (FailureCode::DevicePoll, "device_poll"),
+            (
+                FailureCode::DiagnosticSerialization,
                 "diagnostic_serialization",
-                "frame_recording",
-                "frame_validation",
-                "camera_validation",
-                "host_model",
-                "initial_viewport",
-                "insecure_context",
-                "missing_recorded_frame",
-                "missing_window",
-                "pick_invariant",
-                "pick_not_requested",
-                "pick_outside_viewport",
-                "pick_pending",
-                "pick_readback",
-                "pick_recording",
-                "highlight_validation",
-                "presentation_mode",
-                "renderer_capability",
-                "resize_viewport",
-                "scene_planning",
-                "scene_publication",
-                "scene_validation",
-                "stream_publication",
-                "stream_validation",
-                "stale_generation",
-                "display_mode",
-                "surface_alpha_mode",
-                "surface_configuration",
-                "surface_format",
-                "surface_lost",
-                "surface_occluded",
-                "surface_outdated",
+            ),
+            (FailureCode::FrameCaptureFacts, "frame_capture_facts"),
+            (
+                FailureCode::FrameCaptureNotRequested,
+                "frame_capture_not_requested",
+            ),
+            (FailureCode::FrameCapturePending, "frame_capture_pending"),
+            (FailureCode::FrameCaptureReadback, "frame_capture_readback"),
+            (
+                FailureCode::FrameCaptureRecording,
+                "frame_capture_recording",
+            ),
+            (
+                FailureCode::FrameCaptureValidation,
+                "frame_capture_validation",
+            ),
+            (FailureCode::FrameRecording, "frame_recording"),
+            (FailureCode::FrameValidation, "frame_validation"),
+            (FailureCode::CameraValidation, "camera_validation"),
+            (FailureCode::HostModel, "host_model"),
+            (FailureCode::InitialViewport, "initial_viewport"),
+            (FailureCode::InsecureContext, "insecure_context"),
+            (FailureCode::MissingRecordedFrame, "missing_recorded_frame"),
+            (FailureCode::MissingWindow, "missing_window"),
+            (FailureCode::PickInvariant, "pick_invariant"),
+            (FailureCode::PickNotRequested, "pick_not_requested"),
+            (FailureCode::PickOutsideViewport, "pick_outside_viewport"),
+            (FailureCode::PickPending, "pick_pending"),
+            (FailureCode::PickReadback, "pick_readback"),
+            (FailureCode::PickRecording, "pick_recording"),
+            (FailureCode::HighlightValidation, "highlight_validation"),
+            (FailureCode::PresentationMode, "presentation_mode"),
+            (FailureCode::RendererCapability, "renderer_capability"),
+            (FailureCode::ResizeViewport, "resize_viewport"),
+            (FailureCode::ScenePlanning, "scene_planning"),
+            (FailureCode::ScenePublication, "scene_publication"),
+            (FailureCode::SceneValidation, "scene_validation"),
+            (FailureCode::StreamPublication, "stream_publication"),
+            (FailureCode::StreamValidation, "stream_validation"),
+            (FailureCode::StaleGeneration, "stale_generation"),
+            (FailureCode::DisplayMode, "display_mode"),
+            (FailureCode::SurfaceAlphaMode, "surface_alpha_mode"),
+            (FailureCode::SurfaceConfiguration, "surface_configuration"),
+            (FailureCode::SurfaceFormat, "surface_format"),
+            (FailureCode::SurfaceLost, "surface_lost"),
+            (FailureCode::SurfaceOccluded, "surface_occluded"),
+            (FailureCode::SurfaceOutdated, "surface_outdated"),
+            (
+                FailureCode::SurfaceReconfiguration,
                 "surface_reconfiguration",
-                "surface_timeout",
-                "surface_validation",
+            ),
+            (FailureCode::SurfaceTimeout, "surface_timeout"),
+            (FailureCode::SurfaceValidation, "surface_validation"),
+            (
+                FailureCode::TransientTextureLimit,
                 "transient_texture_limit",
-                "viewer_hidden",
-                "viewport_validation",
-                "webgpu_adapter",
-                "webgpu_device",
-                "webgpu_unavailable"
-            ])
-        );
+            ),
+            (FailureCode::ViewerHidden, "viewer_hidden"),
+            (FailureCode::ViewportValidation, "viewport_validation"),
+            (FailureCode::WebGpuAdapter, "webgpu_adapter"),
+            (FailureCode::WebGpuDevice, "webgpu_device"),
+            (FailureCode::WebGpuUnavailable, "webgpu_unavailable"),
+        ];
+
+        for (code, expected) in cases {
+            assert_eq!(serde_json::to_value(code).unwrap(), json!(expected));
+        }
     }
 
     #[test]

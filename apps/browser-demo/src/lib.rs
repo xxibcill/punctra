@@ -9,6 +9,8 @@
 #![warn(missing_docs)]
 
 #[cfg(any(target_arch = "wasm32", test))]
+mod capture;
+#[cfg(any(target_arch = "wasm32", test))]
 mod diagnostics;
 #[cfg(any(target_arch = "wasm32", test))]
 mod display;

@@ -82,7 +82,7 @@ export const QUALIFICATION_RUNTIME_LANE = deepFreeze({
     displayPath: QUALIFICATION_LANE.display.display_path,
     package: {
       name: "@punctra/viewer",
-      version: "0.20.0-alpha.1",
+      version: "0.21.0-alpha.1",
     },
   },
   browser: {

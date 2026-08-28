@@ -1,0 +1,738 @@
+{
+  "schema": "punctra-browser-visual-corpus-v1",
+  "release": "0.21.0-alpha.1",
+  "viewport": {
+    "css_width": 320,
+    "css_height": 240,
+    "requested_device_pixel_ratio": 2,
+    "physical_width": 640,
+    "physical_height": 480
+  },
+  "settling": {
+    "quiet_frames": 30,
+    "capture_poll_frame_ceiling": 240,
+    "transition_frame_count": 9
+  },
+  "timing_limits": {
+    "schema": "punctra-browser-visual-timing-limits-v1",
+    "first_coverage_milliseconds": 10000,
+    "settled_view_milliseconds": 15000,
+    "representative_frame_interval_p95_milliseconds": 50,
+    "representative_frame_submission_p95_milliseconds": 16.7,
+    "capture_begin_submission_milliseconds_per_frame": 100,
+    "capture_poll_wait_milliseconds_per_frame": 5000,
+    "capture_poll_call_milliseconds_per_frame": 100,
+    "capture_canonical_copy_milliseconds_per_frame": 100,
+    "capture_submitted_work_done_callback_milliseconds_per_frame": 5000,
+    "capture_readback_mapping_callback_milliseconds_per_frame": 5000,
+    "png_encode_milliseconds_per_artifact": 5000,
+    "artifact_encoding_milliseconds_per_artifact": 7500,
+    "comparison_milliseconds_per_pair": 5000,
+    "settled_capture_total_milliseconds_per_recreation": 150000,
+    "transition_capture_total_milliseconds_per_recreation": 45000,
+    "settled_comparison_total_milliseconds_per_recreation": 150000,
+    "transition_comparison_total_milliseconds_per_recreation": 45000,
+    "artifact_encoding_total_milliseconds_per_recreation": 300000
+  },
+  "transport": {
+    "format": "ustar-uncompressed",
+    "archive_filename": "v0.21-browser-visual-evidence.tar",
+    "evidence_repository_path": "docs/releases/v0.21-browser-visual-evidence.json",
+    "maximum_entries": 896,
+    "maximum_evidence_json_bytes": 33554432,
+    "maximum_baseline_inputs_json_bytes": 1048576,
+    "maximum_archive_structure_bytes": 1048576,
+    "maximum_archive_overhead_bytes": 35651584,
+    "maximum_archive_bytes": 1243611136
+  },
+  "capture": {
+    "schema": "punctra-browser-frame-capture-v1",
+    "kind": "private_offscreen_gpu_readback",
+    "canonical_format": "rgba8",
+    "canonical_channel_order": "rgba",
+    "canonical_encoding": "linear",
+    "origin": "top_left",
+    "lossless_artifact": "png-rgba8-filter-0",
+    "presentation_claim": "offscreen_not_presented"
+  },
+  "presentation_policy": {
+    "default_point_size_physical_pixels": 7,
+    "display_point_size_physical_pixels": 7,
+    "highlight_linear_rgb": [0.78, 0.66, 0.2],
+    "clear_linear_rgba": [0.075, 0.078, 0.075, 1],
+    "canonical_clear_rgba8": [19, 20, 19, 255],
+    "depth_compare": "less_equal",
+    "depth_write_enabled": true,
+    "color_blend": "alpha_blending",
+    "primitive_topology": "triangle_list",
+    "presentation_latency_frames": 2,
+    "display_authority": "progressive_gpu_non_authoritative"
+  },
+  "required_capabilities": {
+    "secure_context": true,
+    "webgpu": true,
+    "fallback_allowed": false,
+    "fallback_state": "none",
+    "surface_format": "Bgra8Unorm",
+    "surface_color_space": "srgb",
+    "composite_alpha_mode": "Opaque",
+    "present_mode": "fifo",
+    "render_attachment": true,
+    "blendable": true,
+    "capture_source_format": "bgra8_unorm",
+    "capture_source_channel_order": "bgra",
+    "capture_canonicalization": "bgra_to_rgba"
+  },
+  "resource_limits": {
+    "renderer_resident_points": 8192,
+    "renderer_resident_bytes": 196608,
+    "renderer_batches": 8,
+    "highlight_points": 32,
+    "canvas_surface_bytes": 33554432,
+    "renderer_transient_texture_bytes": 67108864,
+    "retained_record_bytes": 262144,
+    "worker_staging_bytes": 327680,
+    "queued_range_bytes": 524288,
+    "concurrent_response_bytes": 262144,
+    "memory_cache_bytes": 524288,
+    "persistent_cache_bytes": 4194304,
+    "canonical_pixel_bytes": 1228800,
+    "capture_texture_bytes": 1228800,
+    "staging_buffer_bytes": 1228800,
+    "row_aligned_readback_bytes": 1228800,
+    "png_scanline_bytes": 1229280,
+    "encoder_working_bytes": 2524096,
+    "encoded_png_bytes": 1310720,
+    "total_encoded_artifact_bytes": 1207959552,
+    "evidence_json_bytes": 33554432,
+    "baseline_inputs_json_bytes": 1048576,
+    "comparison_workspace_bytes": 65536,
+    "peak_live_canonical_images": 2
+  },
+  "tolerance_profiles": {
+    "canonical-lane-v1": {
+      "channel_threshold": 2,
+      "maximum_channel_delta": 4,
+      "mean_channel_delta": 0.25,
+      "rms_channel_delta": 0.75,
+      "p95_channel_delta": 2,
+      "unstable_pixel_fraction": 0.001,
+      "coverage_fraction_delta": 0.001,
+      "feature_occupancy_fraction_delta": 0.005,
+      "feature_centroid_distance_pixels": 1
+    },
+    "settled-generated-exact-v1": {
+      "channel_threshold": 0,
+      "maximum_channel_delta": 0,
+      "mean_channel_delta": 0,
+      "rms_channel_delta": 0,
+      "p95_channel_delta": 0,
+      "unstable_pixel_fraction": 0,
+      "coverage_fraction_delta": 0,
+      "feature_occupancy_fraction_delta": 0,
+      "feature_centroid_distance_pixels": 0
+    }
+  },
+  "rubric": {
+    "schema": "punctra-browser-interpretation-rubric-v1",
+    "prompts": [
+      "depth",
+      "shape",
+      "density_transition",
+      "color_meaning",
+      "selection",
+      "false_feature"
+    ],
+    "outcomes": [
+      "clear",
+      "ambiguous",
+      "false_feature",
+      "not_visible",
+      "not_observed"
+    ],
+    "note_character_limit": 280,
+    "gating": false,
+    "trial_bindings": {
+      "depth": ["generated-elevation-layered-orthographic"],
+      "shape": ["generated-intensity-sparse-orthographic"],
+      "density_transition": ["generated-neutral-mixed-lod-perspective"],
+      "color_meaning": [
+        "generated-rgb-hdr-perspective",
+        "generated-intensity-sparse-orthographic",
+        "generated-classification-selection-perspective",
+        "autzen-rgb-perspective"
+      ],
+      "selection": ["generated-classification-selection-perspective"],
+      "false_feature": [
+        "generated-neutral-mixed-lod-perspective",
+        "generated-elevation-layered-orthographic",
+        "autzen-rgb-perspective"
+      ]
+    }
+  },
+  "sources": [
+    {
+      "id": "generated-visual-composite-v1",
+      "kind": "generated",
+      "generator": "generated-visual-composite-v1",
+      "source_identity": "2121212121212121212121212121212121212121212121212121212121212121",
+      "point_count": 2103,
+      "batch_count": 5,
+      "transfer_byte_length": 67296,
+      "payload_sha256": "dec11f50be83a59f8567440207d17eaea5650063ce88b73d56721f5614f3fd99",
+      "expected_view": {
+        "view_id": 16,
+        "generation": 1,
+        "published_points": 2103,
+        "published_batches": 5,
+        "transferred_bytes": 67296,
+        "stream_coverage": "sampled",
+        "batch_keys": [1, 2, 3, 4, 5],
+        "initial_batch_version": 1,
+        "initial_batch_versions": [1, 1, 1, 1, 1],
+        "settled_removed_batch_indices": [0],
+        "settled_resident_points": 1878,
+        "settled_drawn_points": 1878,
+        "settled_draw_calls": 4,
+        "settled_presentation_weights_u8": [0, 255, 255, 255, 255]
+      },
+      "condition_facts": {
+        "sparse_batch": { "batch_index": 3, "point_count": 192, "maximum_points": 256 },
+        "dense_batches": [
+          { "batch_index": 1, "point_count": 841 },
+          { "batch_index": 2, "point_count": 800 }
+        ],
+        "layer_pairs": { "batch_index": 2, "paired_xy_count": 400, "minimum_z_separation": 5.5 },
+        "attribute_extrema": {
+          "intensity": [0, 65535],
+          "rgb_channel": [0, 65535],
+          "classifications": [1, 2, 5, 6, 9, 17, 31]
+        },
+        "large_world_origin": [6378137.25, 4782951.5, 1234.75],
+        "minimum_dense_axis_spacing": 0.5714282989501953,
+        "lod_relation": { "parent_batch_index": 0, "parent_points": 225, "child_batch_index": 1, "child_points": 841 },
+        "stable_lod_cut": {
+          "dense_batch_index": 1,
+          "dense_points": 841,
+          "dense_xy_bounds": { "min": [-18, -12], "max": [-2, 12] },
+          "dense_points_per_xy_area": 2.1901041666666665,
+          "coarse_batch_index": 4,
+          "coarse_points": 45,
+          "coarse_xy_bounds": { "min": [-1.5, -12], "max": [1.5, 12] },
+          "coarse_points_per_xy_area": 0.625,
+          "adjacent_x_gap": 0.5,
+          "density_ratio": 3.5041666666666664,
+          "settled_dense_weight_u8": 255,
+          "settled_coarse_weight_u8": 255,
+          "distinct_from_parent_child_replacement": true
+        }
+      },
+      "conditions": [
+        "sparse",
+        "dense",
+        "layered",
+        "high_dynamic_range",
+        "classification",
+        "large_world",
+        "mixed_lod"
+      ]
+    },
+    {
+      "id": "autzen-classified-derived-sample-v1",
+      "kind": "derived_pvis",
+      "fixture_id": "autzen-classified-derived-sample-v1",
+      "manifest_path": "./autzen-classified-sample.json",
+      "expected_view": {
+        "view_id": 16,
+        "generation": 1,
+        "published_points": 4096,
+        "published_batches": 4,
+        "transferred_bytes": 131072,
+        "stream_coverage": "sampled",
+        "batch_keys": [1, 2, 3, 4],
+        "initial_batch_version": 1,
+        "initial_batch_versions": [1, 1, 1, 1],
+        "settled_removed_batch_indices": [],
+        "settled_resident_points": 4096,
+        "settled_drawn_points": 4096,
+        "settled_draw_calls": 4,
+        "settled_presentation_weights_u8": [255, 255, 255, 255]
+      },
+      "condition_derivation": {
+        "kind": "licensed-fixed-ordinal-block-sample",
+        "fixture_manifest": "./autzen-classified-sample.json",
+        "payload": "./autzen-classified-sample.pvis",
+        "measured_from": ["source.bounds", "sample transfer-v2 intensity/classification/rgb", "sample point positions"],
+        "not_claimed": ["complete_source_coverage", "professional_feature_interpretation"]
+      },
+      "conditions": [
+        "permitted_real_source",
+        "sparse",
+        "dense",
+        "layered",
+        "high_dynamic_range",
+        "classification",
+        "large_world"
+      ]
+    }
+  ],
+  "condition_coverage": {
+    "schema": "punctra-browser-visual-condition-coverage-v1",
+    "generated": [
+      {
+        "condition": "sparse",
+        "source_id": "generated-visual-composite-v1",
+        "trial_ids": [
+          "generated-neutral-mixed-lod-perspective",
+          "generated-intensity-sparse-orthographic",
+          "generated-classification-selection-perspective"
+        ],
+        "fact_paths": ["condition_facts.sparse_batch"]
+      },
+      {
+        "condition": "dense",
+        "source_id": "generated-visual-composite-v1",
+        "trial_ids": [
+          "generated-neutral-mixed-lod-perspective",
+          "generated-rgb-hdr-perspective",
+          "generated-classification-selection-perspective"
+        ],
+        "fact_paths": ["condition_facts.dense_batches"]
+      },
+      {
+        "condition": "layered",
+        "source_id": "generated-visual-composite-v1",
+        "trial_ids": ["generated-elevation-layered-orthographic"],
+        "fact_paths": ["condition_facts.layer_pairs"]
+      },
+      {
+        "condition": "high_dynamic_range",
+        "source_id": "generated-visual-composite-v1",
+        "trial_ids": [
+          "generated-rgb-hdr-perspective",
+          "generated-intensity-sparse-orthographic"
+        ],
+        "fact_paths": [
+          "condition_facts.attribute_extrema.intensity",
+          "condition_facts.attribute_extrema.rgb_channel"
+        ]
+      },
+      {
+        "condition": "classification",
+        "source_id": "generated-visual-composite-v1",
+        "trial_ids": ["generated-classification-selection-perspective"],
+        "fact_paths": ["condition_facts.attribute_extrema.classifications"]
+      },
+      {
+        "condition": "large_world",
+        "source_id": "generated-visual-composite-v1",
+        "trial_ids": [
+          "generated-neutral-mixed-lod-perspective",
+          "generated-elevation-layered-orthographic",
+          "generated-rgb-hdr-perspective",
+          "generated-intensity-sparse-orthographic",
+          "generated-classification-selection-perspective"
+        ],
+        "fact_paths": [
+          "condition_facts.large_world_origin",
+          "condition_facts.minimum_dense_axis_spacing"
+        ]
+      },
+      {
+        "condition": "mixed_lod",
+        "source_id": "generated-visual-composite-v1",
+        "trial_ids": ["generated-neutral-mixed-lod-perspective"],
+        "fact_paths": [
+          "condition_facts.lod_relation",
+          "condition_facts.stable_lod_cut"
+        ],
+        "required_temporal_trace": "mixed_lod_parent_child"
+      }
+    ],
+    "derived_modes": [
+      {
+        "source_id": "autzen-classified-derived-sample-v1",
+        "trial_id": "autzen-classification-perspective",
+        "display_mode": "classification",
+        "fact_paths": [
+          "condition_facts.classifications",
+          "condition_facts.xy_grid",
+          "condition_facts.maximum_absolute_world_origin"
+        ]
+      },
+      {
+        "source_id": "autzen-classified-derived-sample-v1",
+        "trial_id": "autzen-elevation-perspective",
+        "display_mode": "elevation",
+        "fact_paths": [
+          "condition_facts.relative_bounds",
+          "condition_facts.overlapping_depth",
+          "condition_facts.xy_grid",
+          "condition_facts.maximum_absolute_world_origin"
+        ]
+      },
+      {
+        "source_id": "autzen-classified-derived-sample-v1",
+        "trial_id": "autzen-intensity-perspective",
+        "display_mode": "intensity",
+        "fact_paths": [
+          "condition_facts.intensity",
+          "condition_facts.xy_grid",
+          "condition_facts.maximum_absolute_world_origin"
+        ]
+      },
+      {
+        "source_id": "autzen-classified-derived-sample-v1",
+        "trial_id": "autzen-rgb-perspective",
+        "display_mode": "rgb",
+        "fact_paths": [
+          "condition_facts.rgb_channel",
+          "condition_facts.overlapping_depth",
+          "condition_facts.xy_grid",
+          "condition_facts.maximum_absolute_world_origin"
+        ]
+      }
+    ]
+  },
+  "trials": [
+    {
+      "id": "generated-neutral-mixed-lod-perspective",
+      "source_id": "generated-visual-composite-v1",
+      "display_mode": "neutral",
+      "coverage": "authored",
+      "conditions": ["sparse", "dense", "large_world", "mixed_lod"],
+      "camera": {
+        "projection": "perspective",
+        "eye": [6378137.25, 4782911.5, 1264.75],
+        "target": [6378137.25, 4782951.5, 1235.75],
+        "up": [0, 0, 1],
+        "vertical_field_of_view_radians": 1.0471975511965976,
+        "near_distance": 0.1,
+        "far_distance": 200
+      },
+      "selection": { "ordinals": [] },
+      "features": [
+        {
+          "id": "lod-transition-and-stable-cut-seam",
+          "rectangle": { "x": 0, "y": 24, "width": 330, "height": 432 },
+          "minimum_foreground_pixels": 1,
+          "binding": {
+            "kind": "authored_point_projection",
+            "source_identity": "2121212121212121212121212121212121212121212121212121212121212121",
+            "projection_rule": "punctra-authored-camera-projection-v1",
+            "authored_point_ordinals": [112, 645, 659, 2078],
+            "expected_pixels": [[238, 252], [238, 252], [304, 252], [308, 254]],
+            "tolerance_pixels": 1
+          }
+        },
+        {
+          "id": "sparse-ridge",
+          "rectangle": { "x": 32, "y": 0, "width": 576, "height": 260 },
+          "minimum_foreground_pixels": 1,
+          "binding": {
+            "kind": "authored_point_projection",
+            "source_identity": "2121212121212121212121212121212121212121212121212121212121212121",
+            "projection_rule": "punctra-authored-camera-projection-v1",
+            "authored_point_ordinals": [1866, 1913, 1961],
+            "expected_pixels": [[178, 158], [318, 154], [463, 155]],
+            "tolerance_pixels": 1
+          }
+        }
+      ],
+      "temporal_trace": {
+        "kind": "mixed_lod_parent_child",
+        "parent_batch_index": 0,
+        "child_batch_index": 1,
+        "child_weights_u8": [0, 32, 64, 96, 128, 160, 192, 224, 255],
+        "remove_parent_after_transition": true
+      },
+      "expected_presentation_version": 2,
+      "expected_settled_batch_versions": [2, 2, 2, 2, 2],
+      "tolerance_profile": "canonical-lane-v1",
+      "temporal_tolerance_profile": "settled-generated-exact-v1",
+      "baseline_path": "./baselines/generated-neutral-mixed-lod-perspective.png"
+    },
+    {
+      "id": "generated-elevation-layered-orthographic",
+      "source_id": "generated-visual-composite-v1",
+      "display_mode": "elevation",
+      "coverage": "authored",
+      "conditions": ["layered", "large_world"],
+      "camera": {
+        "projection": "orthographic",
+        "eye": [6378137.25, 4782911.5, 1264.75],
+        "target": [6378137.25, 4782951.5, 1235.75],
+        "up": [0, 0, 1],
+        "vertical_world_height": 38,
+        "near_distance": 0.1,
+        "far_distance": 200
+      },
+      "selection": { "ordinals": [] },
+      "features": [
+        {
+          "id": "overlapping-depth-layers",
+          "rectangle": { "x": 300, "y": 32, "width": 340, "height": 416 },
+          "minimum_foreground_pixels": 1,
+          "binding": {
+            "kind": "authored_point_projection",
+            "source_identity": "2121212121212121212121212121212121212121212121212121212121212121",
+            "projection_rule": "punctra-authored-camera-projection-v1",
+            "authored_point_ordinals": [1276, 1676],
+            "expected_pixels": [[452, 269], [452, 212]],
+            "tolerance_pixels": 1
+          }
+        }
+      ],
+      "temporal_trace": { "kind": "static" },
+      "expected_presentation_version": 2,
+      "expected_settled_batch_versions": [2, 2, 2, 2, 2],
+      "tolerance_profile": "canonical-lane-v1",
+      "temporal_tolerance_profile": "settled-generated-exact-v1",
+      "baseline_path": "./baselines/generated-elevation-layered-orthographic.png"
+    },
+    {
+      "id": "generated-rgb-hdr-perspective",
+      "source_id": "generated-visual-composite-v1",
+      "display_mode": "rgb",
+      "coverage": "authored",
+      "conditions": ["dense", "high_dynamic_range", "large_world"],
+      "camera": {
+        "projection": "perspective",
+        "eye": [6378137.25, 4782911.5, 1264.75],
+        "target": [6378137.25, 4782951.5, 1235.75],
+        "up": [0, 0, 1],
+        "vertical_field_of_view_radians": 1.0471975511965976,
+        "near_distance": 0.1,
+        "far_distance": 200
+      },
+      "selection": { "ordinals": [] },
+      "features": [
+        {
+          "id": "dark-bright-attributes",
+          "rectangle": { "x": 0, "y": 0, "width": 640, "height": 480 },
+          "minimum_foreground_pixels": 1,
+          "binding": {
+            "kind": "authored_point_projection",
+            "source_identity": "2121212121212121212121212121212121212121212121212121212121212121",
+            "projection_rule": "punctra-authored-camera-projection-v1",
+            "authored_point_ordinals": [0, 1, 2, 3, 4],
+            "expected_pixels": [[138, 331], [149, 329], [160, 328], [173, 331], [184, 329]],
+            "tolerance_pixels": 1
+          }
+        }
+      ],
+      "temporal_trace": { "kind": "static" },
+      "expected_presentation_version": 1,
+      "expected_settled_batch_versions": [1, 1, 1, 1, 1],
+      "tolerance_profile": "canonical-lane-v1",
+      "temporal_tolerance_profile": "settled-generated-exact-v1",
+      "baseline_path": "./baselines/generated-rgb-hdr-perspective.png"
+    },
+    {
+      "id": "generated-intensity-sparse-orthographic",
+      "source_id": "generated-visual-composite-v1",
+      "display_mode": "intensity",
+      "coverage": "authored",
+      "conditions": ["sparse", "high_dynamic_range", "large_world"],
+      "camera": {
+        "projection": "orthographic",
+        "eye": [6378137.25, 4782911.5, 1264.75],
+        "target": [6378137.25, 4782951.5, 1235.75],
+        "up": [0, 0, 1],
+        "vertical_world_height": 38,
+        "near_distance": 0.1,
+        "far_distance": 200
+      },
+      "selection": { "ordinals": [] },
+      "features": [
+        {
+          "id": "thin-sparse-crossing",
+          "rectangle": { "x": 176, "y": 0, "width": 288, "height": 480 },
+          "minimum_foreground_pixels": 1,
+          "binding": {
+            "kind": "authored_point_projection",
+            "source_identity": "2121212121212121212121212121212121212121212121212121212121212121",
+            "projection_rule": "punctra-authored-camera-projection-v1",
+            "authored_point_ordinals": [1913, 1962],
+            "expected_pixels": [[317, 89], [320, 293]],
+            "tolerance_pixels": 1
+          }
+        }
+      ],
+      "temporal_trace": { "kind": "static" },
+      "expected_presentation_version": 2,
+      "expected_settled_batch_versions": [2, 2, 2, 2, 2],
+      "tolerance_profile": "canonical-lane-v1",
+      "temporal_tolerance_profile": "settled-generated-exact-v1",
+      "baseline_path": "./baselines/generated-intensity-sparse-orthographic.png"
+    },
+    {
+      "id": "generated-classification-selection-perspective",
+      "source_id": "generated-visual-composite-v1",
+      "display_mode": "classification",
+      "coverage": "authored",
+      "conditions": ["classification", "sparse", "dense", "large_world"],
+      "camera": {
+        "projection": "perspective",
+        "eye": [6378137.25, 4782911.5, 1264.75],
+        "target": [6378137.25, 4782951.5, 1235.75],
+        "up": [0, 0, 1],
+        "vertical_field_of_view_radians": 1.0471975511965976,
+        "near_distance": 0.1,
+        "far_distance": 200
+      },
+      "selection": {
+        "ordinals": [1866, 1913],
+        "point_identity_authority": "authored_source_fact",
+        "highlight_authority": "presentation_only",
+        "nominal_pick_coverage_authority": "projected_authored_point_fact",
+        "nominal_pick_regions": [
+          { "ordinal": 1866, "feature_id": "selected-point-1866-nominal-pick" },
+          { "ordinal": 1913, "feature_id": "selected-point-1913-nominal-pick" }
+        ]
+      },
+      "features": [
+        {
+          "id": "selected-point-1866-nominal-pick",
+          "rectangle": { "x": 166, "y": 146, "width": 24, "height": 24 },
+          "minimum_foreground_pixels": 1,
+          "binding": {
+            "kind": "authored_point_projection",
+            "source_identity": "2121212121212121212121212121212121212121212121212121212121212121",
+            "projection_rule": "punctra-authored-camera-projection-v1",
+            "authored_point_ordinals": [1866],
+            "expected_pixels": [[178, 158]],
+            "tolerance_pixels": 1
+          }
+        },
+        {
+          "id": "selected-point-1913-nominal-pick",
+          "rectangle": { "x": 306, "y": 142, "width": 24, "height": 24 },
+          "minimum_foreground_pixels": 1,
+          "binding": {
+            "kind": "authored_point_projection",
+            "source_identity": "2121212121212121212121212121212121212121212121212121212121212121",
+            "projection_rule": "punctra-authored-camera-projection-v1",
+            "authored_point_ordinals": [1913],
+            "expected_pixels": [[318, 154]],
+            "tolerance_pixels": 1
+          }
+        }
+      ],
+      "temporal_trace": { "kind": "static" },
+      "expected_presentation_version": 2,
+      "expected_settled_batch_versions": [2, 2, 2, 2, 2],
+      "tolerance_profile": "canonical-lane-v1",
+      "temporal_tolerance_profile": "settled-generated-exact-v1",
+      "baseline_path": "./baselines/generated-classification-selection-perspective.png"
+    },
+    {
+      "id": "autzen-rgb-perspective",
+      "source_id": "autzen-classified-derived-sample-v1",
+      "display_mode": "rgb",
+      "coverage": "sampled",
+      "conditions": ["permitted_real_source", "dense", "layered", "high_dynamic_range", "large_world"],
+      "camera": "source",
+      "selection": { "ordinals": [] },
+      "features": [
+        {
+          "id": "autzen-sampled-structure",
+          "rectangle": { "x": 64, "y": 48, "width": 512, "height": 384 },
+          "minimum_foreground_pixels": 1,
+          "binding": {
+            "kind": "derived_sample_region",
+            "fixture_id": "autzen-classified-derived-sample-v1",
+            "sample_sha256": "149718ce9ac5b3cfea39ac40fdd3c3148dfec1fa6ff56eb2571e4f0b762d686c"
+          }
+        }
+      ],
+      "temporal_trace": { "kind": "static" },
+      "expected_presentation_version": 1,
+      "expected_settled_batch_versions": [1, 1, 1, 1],
+      "tolerance_profile": "canonical-lane-v1",
+      "temporal_tolerance_profile": "canonical-lane-v1",
+      "baseline_path": "./baselines/autzen-rgb-perspective.png"
+    },
+    {
+      "id": "autzen-classification-perspective",
+      "source_id": "autzen-classified-derived-sample-v1",
+      "display_mode": "classification",
+      "coverage": "sampled",
+      "conditions": ["permitted_real_source", "dense", "classification", "large_world"],
+      "camera": "source",
+      "selection": { "ordinals": [] },
+      "features": [
+        {
+          "id": "autzen-classification-sampled-structure",
+          "rectangle": { "x": 64, "y": 48, "width": 512, "height": 384 },
+          "minimum_foreground_pixels": 1,
+          "binding": {
+            "kind": "derived_sample_region",
+            "fixture_id": "autzen-classified-derived-sample-v1",
+            "sample_sha256": "149718ce9ac5b3cfea39ac40fdd3c3148dfec1fa6ff56eb2571e4f0b762d686c"
+          }
+        }
+      ],
+      "temporal_trace": { "kind": "static" },
+      "expected_presentation_version": 2,
+      "expected_settled_batch_versions": [2, 2, 2, 2],
+      "tolerance_profile": "canonical-lane-v1",
+      "temporal_tolerance_profile": "canonical-lane-v1",
+      "baseline_path": "./baselines/autzen-classification-perspective.png"
+    },
+    {
+      "id": "autzen-intensity-perspective",
+      "source_id": "autzen-classified-derived-sample-v1",
+      "display_mode": "intensity",
+      "coverage": "sampled",
+      "conditions": ["permitted_real_source", "dense", "high_dynamic_range", "large_world"],
+      "camera": "source",
+      "selection": { "ordinals": [] },
+      "features": [
+        {
+          "id": "autzen-intensity-sampled-structure",
+          "rectangle": { "x": 64, "y": 48, "width": 512, "height": 384 },
+          "minimum_foreground_pixels": 1,
+          "binding": {
+            "kind": "derived_sample_region",
+            "fixture_id": "autzen-classified-derived-sample-v1",
+            "sample_sha256": "149718ce9ac5b3cfea39ac40fdd3c3148dfec1fa6ff56eb2571e4f0b762d686c"
+          }
+        }
+      ],
+      "temporal_trace": { "kind": "static" },
+      "expected_presentation_version": 2,
+      "expected_settled_batch_versions": [2, 2, 2, 2],
+      "tolerance_profile": "canonical-lane-v1",
+      "temporal_tolerance_profile": "canonical-lane-v1",
+      "baseline_path": "./baselines/autzen-intensity-perspective.png"
+    },
+    {
+      "id": "autzen-elevation-perspective",
+      "source_id": "autzen-classified-derived-sample-v1",
+      "display_mode": "elevation",
+      "coverage": "sampled",
+      "conditions": ["permitted_real_source", "dense", "layered", "large_world"],
+      "camera": "source",
+      "selection": { "ordinals": [] },
+      "features": [
+        {
+          "id": "autzen-elevation-sampled-structure",
+          "rectangle": { "x": 64, "y": 48, "width": 512, "height": 384 },
+          "minimum_foreground_pixels": 1,
+          "binding": {
+            "kind": "derived_sample_region",
+            "fixture_id": "autzen-classified-derived-sample-v1",
+            "sample_sha256": "149718ce9ac5b3cfea39ac40fdd3c3148dfec1fa6ff56eb2571e4f0b762d686c"
+          }
+        }
+      ],
+      "temporal_trace": { "kind": "static" },
+      "expected_presentation_version": 2,
+      "expected_settled_batch_versions": [2, 2, 2, 2],
+      "tolerance_profile": "canonical-lane-v1",
+      "temporal_tolerance_profile": "canonical-lane-v1",
+      "baseline_path": "./baselines/autzen-elevation-perspective.png"
+    }
+  ]
+}
