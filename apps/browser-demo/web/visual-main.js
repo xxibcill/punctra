@@ -48,6 +48,7 @@ import {
 } from "./visual-rubric.js";
 import { visualVerifyProvenanceFromUrl } from "./visual-provenance.js";
 import { VisualRunSession } from "./visual-run-session.js";
+import { createVisualValidator } from "./visual-validation.js";
 
 const EVIDENCE_SCHEMA = "punctra-browser-visual-evidence-v1";
 const RUNNER_STATE_SCHEMA = "punctra-browser-visual-runner-state-v1";
@@ -61,6 +62,7 @@ const RECREATION_COUNT = 3;
 const VISUAL_ARTIFACT_ROOT = "docs/releases/v0.21-browser-visual-artifacts";
 const EVIDENCE_FILENAME = "v0.21-browser-visual-evidence.json";
 const TRANSFER_VERTEX_BYTES = 24;
+const { requireCondition } = createVisualValidator("Visual runner failed");
 
 const canvas = document.querySelector("#visual-canvas");
 const runButton = document.querySelector("#run-corpus");
@@ -1963,10 +1965,6 @@ function cloneJson(value) {
 
 function nextAnimationFrame() {
   return new Promise((resolve) => requestAnimationFrame(resolve));
-}
-
-function requireCondition(condition, message) {
-  if (!condition) throw new Error(`Visual runner failed: ${message}`);
 }
 
 class ArtifactRegistry {

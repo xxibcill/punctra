@@ -1,3 +1,5 @@
+import { createVisualValidator } from "./visual-validation.js";
+
 export const BASELINE_INPUTS_SCHEMA = "punctra-browser-visual-baseline-inputs-v1";
 export const BASELINE_INPUTS_PATH = "apps/browser-demo/web/fixtures/visual-v1/baseline-inputs.json";
 
@@ -11,6 +13,7 @@ const BASELINE_IDENTITY_FIELDS = Object.freeze([
   "decoded_byte_length",
   "decoded_sha256",
 ]);
+const { requireCondition, requireRecord } = createVisualValidator("Visual baseline inputs invalid");
 
 /** Creates the deterministic pre-pin input manifest from one record-mode run. */
 export function createBaselineInputsManifest(options) {
@@ -115,12 +118,4 @@ function cloneJson(value) {
 
 function deepEqual(left, right) {
   return JSON.stringify(left) === JSON.stringify(right);
-}
-
-function requireRecord(value, label) {
-  requireCondition(value !== null && typeof value === "object" && !Array.isArray(value), `${label} must be an object`);
-}
-
-function requireCondition(condition, message) {
-  if (!condition) throw new Error(`Visual baseline inputs invalid: ${message}`);
 }

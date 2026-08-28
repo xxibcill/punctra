@@ -1,3 +1,5 @@
+import { createVisualValidator } from "./visual-validation.js";
+
 export const RUBRIC_REVIEW_PLAN_SCHEMA = "punctra-browser-visual-rubric-review-plan-v1";
 export const RUBRIC_PRESENTATION_SCHEMA = "punctra-browser-visual-rubric-presentation-v1";
 
@@ -14,6 +16,7 @@ const ARTIFACT_IDENTITY_FIELDS = Object.freeze([
   "decoded_byte_length",
   "decoded_sha256",
 ]);
+const { requireCondition, requireRecord } = createVisualValidator("Visual rubric invalid");
 
 /**
  * Binds every rubric prompt to one already-recorded final capture per trial.
@@ -286,12 +289,4 @@ function cloneJson(value) {
 
 function deepEqual(left, right) {
   return JSON.stringify(left) === JSON.stringify(right);
-}
-
-function requireRecord(value, label) {
-  requireCondition(value !== null && typeof value === "object" && !Array.isArray(value), `${label} must be an object`);
-}
-
-function requireCondition(condition, message) {
-  if (!condition) throw new Error(`Visual rubric invalid: ${message}`);
 }

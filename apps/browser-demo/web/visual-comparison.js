@@ -1,3 +1,5 @@
+import { createVisualValidator } from "./visual-validation.js";
+
 export const IMAGE_COMPARISON_SCHEMA = "punctra-canonical-image-comparison-v1";
 export const TEMPORAL_COMPARISON_SCHEMA = "punctra-temporal-image-comparison-v1";
 export const DIFFERENCE_IMAGE_POLICY = "maximum-absolute-rgba-channel-delta-as-opaque-grayscale-v1";
@@ -12,6 +14,7 @@ export const HARD_TOLERANCE_CAPS = Object.freeze({
   feature_occupancy_fraction_delta: 0.005,
   feature_centroid_distance_pixels: 1,
 });
+const { requireCondition, requireRecord } = createVisualValidator("Visual comparison invalid");
 
 /** Validates a complete tolerance profile against the non-relaxable v0.21 caps. */
 export function validateToleranceProfile(profile) {
@@ -461,12 +464,4 @@ function finishBounds(bounds) {
     width: bounds.maximumX - bounds.minimumX + 1,
     height: bounds.maximumY - bounds.minimumY + 1,
   };
-}
-
-function requireRecord(value, label) {
-  requireCondition(value !== null && typeof value === "object" && !Array.isArray(value), `${label} must be an object`);
-}
-
-function requireCondition(condition, message) {
-  if (!condition) throw new Error(`Visual comparison invalid: ${message}`);
 }

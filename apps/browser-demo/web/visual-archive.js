@@ -1,9 +1,12 @@
+import { createVisualValidator } from "./visual-validation.js";
+
 export const VISUAL_ARCHIVE_SCHEMA = "punctra-browser-visual-transport-archive-v1";
 export const VISUAL_ARCHIVE_FORMAT = "ustar-uncompressed";
 
 const BLOCK_BYTES = 512;
 const FINAL_ZERO_BLOCKS = 2;
 const ASCII_PATH = /^[A-Za-z0-9._/-]+$/;
+const { requireCondition } = createVisualValidator("Visual archive invalid");
 
 /** Encodes repository-relative byte artifacts into one deterministic USTAR archive. */
 export function encodeVisualArchive(entries, options = {}) {
@@ -127,8 +130,4 @@ function paddedLength(length) {
 function boundedInteger(value, label, minimum, maximum) {
   requireCondition(Number.isSafeInteger(value) && value >= minimum && value <= maximum, `${label} is invalid`);
   return value;
-}
-
-function requireCondition(condition, message) {
-  if (!condition) throw new Error(`Visual archive invalid: ${message}`);
 }

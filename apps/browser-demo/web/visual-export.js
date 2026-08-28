@@ -1,9 +1,12 @@
+import { createVisualValidator } from "./visual-validation.js";
+
 export const VISUAL_EXPORT_RECEIPT_SCHEMA = "punctra-browser-visual-export-receipt-v1";
 export const VISUAL_EXPORT_ENDPOINT = "/qualification-visual-export";
 export const VISUAL_EXPORT_ARCHIVE_FILENAME = "v0.21-browser-visual-evidence.tar";
 
 const SHA256_HEX = /^[0-9a-f]{64}$/;
 const LOCAL_HOSTNAMES = new Set(["127.0.0.1", "localhost", "[::1]"]);
+const { requireCondition } = createVisualValidator("Visual export invalid");
 
 /** Selects the private archive transport explicitly requested by the page URL. */
 export function visualArchiveTransportFromUrl(pageUrl) {
@@ -91,8 +94,4 @@ function isPlainObject(value) {
 
 function errorMessage(error) {
   return error instanceof Error ? error.message : String(error);
-}
-
-function requireCondition(condition, message) {
-  if (!condition) throw new Error(`Visual export invalid: ${message}`);
 }

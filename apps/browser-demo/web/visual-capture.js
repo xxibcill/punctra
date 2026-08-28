@@ -1,6 +1,9 @@
+import { createVisualValidator } from "./visual-validation.js";
+
 export const QUIET_WINDOW_SCHEMA = "punctra-browser-quiet-window-v1";
 export const CAPTURE_RESULT_SCHEMA = "punctra-browser-canonical-capture-v1";
 export const ENVIRONMENT_SCHEMA = "punctra-browser-visual-environment-v1";
+const { requireCondition, requireRecord } = createVisualValidator("Visual capture invalid");
 
 /**
  * Waits for a bounded GPU readback without conflating map completion with
@@ -529,12 +532,4 @@ function deepEqual(left, right) {
 
 function cloneJson(value) {
   return JSON.parse(JSON.stringify(value));
-}
-
-function requireRecord(value, label) {
-  requireCondition(value !== null && typeof value === "object" && !Array.isArray(value), `${label} must be an object`);
-}
-
-function requireCondition(condition, message) {
-  if (!condition) throw new Error(`Visual capture invalid: ${message}`);
 }

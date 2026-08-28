@@ -1,3 +1,7 @@
+import { createVisualValidator } from "./visual-validation.js";
+
+const { requireCondition } = createVisualValidator("Visual runner failed");
+
 export class VisualRunSession {
   #activeRun;
   #artifactRegistry;
@@ -145,10 +149,6 @@ export class VisualRunSession {
     this.#wasmInitialization ??= initialize(this.#wasmRuntimeBytes);
     return this.#wasmInitialization;
   }
-}
-
-function requireCondition(condition, message) {
-  if (!condition) throw new Error(`Visual runner failed: ${message}`);
 }
 
 function cloneJson(value) {

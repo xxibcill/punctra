@@ -1,3 +1,5 @@
+import { createVisualValidator } from "./visual-validation.js";
+
 export const VISUAL_VERIFIER_PATH = "scripts/verify-browser-visual-baseline.mjs";
 export const VISUAL_ATTENDED_LANE = Object.freeze({
   id: "codex-iab-chromium-151-macos-26-apple-m5-pro",
@@ -13,6 +15,7 @@ const QUERY_FIELDS = Object.freeze([
   "verifier_byte_length",
   "verifier_sha256",
 ]);
+const { requireCondition } = createVisualValidator("Visual provenance invalid");
 
 /** Reads the final implementation and verifier pins used by the visible verify button. */
 export function visualVerifyProvenanceFromUrl(pageUrl) {
@@ -54,8 +57,4 @@ function parsePageUrl(value) {
 
 function errorMessage(error) {
   return error instanceof Error ? error.message : String(error);
-}
-
-function requireCondition(condition, message) {
-  if (!condition) throw new Error(`Visual provenance invalid: ${message}`);
 }

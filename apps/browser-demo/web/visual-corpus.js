@@ -1,5 +1,6 @@
 import { sha256Hex } from "./visual-png.js";
 import { validateRubricEvidenceShape } from "./visual-rubric.js";
+import { createVisualValidator } from "./visual-validation.js";
 
 export const VISUAL_CORPUS_SCHEMA = "punctra-browser-visual-corpus-v1";
 export const TRANSFER_SCHEMA = "punctra-browser-transfer-v2";
@@ -13,6 +14,7 @@ export const VISUAL_VIEWPORT = Object.freeze({
   physical_width: 640,
   physical_height: 480,
 });
+const { requireCondition, requireRecord } = createVisualValidator("Visual corpus invalid");
 export const REQUIRED_GENERATED_CONDITIONS = Object.freeze([
   "sparse",
   "dense",
@@ -1182,15 +1184,7 @@ function requireInteger(value, label, minimum, maximum) {
   requireCondition(Number.isInteger(value) && value >= minimum && value <= maximum, `${label} must be an integer from ${minimum} through ${maximum}`);
 }
 
-function requireRecord(value, label) {
-  requireCondition(value !== null && typeof value === "object" && !Array.isArray(value), `${label} must be an object`);
-}
-
 function arrayEquals(left, right) {
   return Array.isArray(left) && Array.isArray(right) && left.length === right.length
     && left.every((value, index) => value === right[index]);
-}
-
-function requireCondition(condition, message) {
-  if (!condition) throw new Error(`Visual corpus invalid: ${message}`);
 }
