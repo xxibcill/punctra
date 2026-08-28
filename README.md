@@ -354,7 +354,7 @@ is valid.
 The checked-in corpus, derivative, private capture path, comparison policy,
 baseline inputs, verifier, and verify-mode evidence are Complete and repository-
 verified at implementation commit
-`124fab07ab993059ef5df179cb227f7b0ba9b19e`. All nine trials passed through
+`f5d04d2c6091deda1136c2304cf8f97b9b40a755`. All nine trials passed through
 three complete recreations, producing 873 checked-in PNG artifacts. All six
 post-capture non-gating rubric outcomes are explicitly `not_observed` under the
 session label `codex-local-maintainer-not-human`; no favorable or independent-

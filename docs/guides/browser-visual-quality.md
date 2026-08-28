@@ -310,7 +310,7 @@ http://127.0.0.1:8000/visual.html?mode=verify&implementation_commit=<40hex>&veri
 ```
 
 The page fixes the attended lane to
-`codex-iab-chromium-151-macos-26-apple-m5-pro`, `visible_user_gesture`, and
+`codex-iab-chromium-151-macos-26-apple-m5-pro`, `browser_trusted_activation`, and
 `exact_observed_lane_only`. It disables the visible Run button until every pin
 is present and valid. Click that button, run the same corpus against the
 checked-in baselines, wait for the post-capture images, record and submit the
@@ -341,7 +341,7 @@ node scripts/verify-browser-visual-baseline.mjs \
 
 The completed record stage produced the checked-in baseline inputs. The later
 verify stage at implementation commit
-`124fab07ab993059ef5df179cb227f7b0ba9b19e` passed all nine trials through
+`f5d04d2c6091deda1136c2304cf8f97b9b40a755` passed all nine trials through
 three complete recreations and retained 873 PNG artifacts. All six rubric
 outcomes are explicitly `not_observed` under
 `codex-local-maintainer-not-human`; they are not favorable or independent-human

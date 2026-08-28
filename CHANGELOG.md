@@ -7,10 +7,10 @@ All notable changes to Punctra are documented here. The project follows
 
 - Completed and repository-verified the bounded [v0.21 Visual-Quality Baseline
   and Regression Corpus design](docs/design/visual-quality-baseline-v0.21.md)
-  at implementation commit `124fab07ab993059ef5df179cb227f7b0ba9b19e`;
+  at implementation commit `f5d04d2c6091deda1136c2304cf8f97b9b40a755`;
   the [final verification record](docs/releases/v0.21.0.md) pins the exact
   functional and visual observations, verifier identities, and artifacts.
-- Implementation commit: `124fab07ab993059ef5df179cb227f7b0ba9b19e`
+- Implementation commit: `f5d04d2c6091deda1136c2304cf8f97b9b40a755`
 - Qualification verifier SHA-256: `3bc9ef7ad67c54903c16090ddd0ae032228ba02ba9a9f888228e65ebab32b336`
 - Added a closed private browser corpus with nine fixed trials: five
   deterministic generated trials and four display-mode trials over one

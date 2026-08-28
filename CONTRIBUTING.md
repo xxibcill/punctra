@@ -377,7 +377,7 @@ http://127.0.0.1:8000/visual.html?mode=verify&implementation_commit=<40hex>&veri
 ```
 
 The runner fixes the attended lane to
-`codex-iab-chromium-151-macos-26-apple-m5-pro`, `visible_user_gesture`, and
+`codex-iab-chromium-151-macos-26-apple-m5-pro`, `browser_trusted_activation`, and
 `exact_observed_lane_only`; the URL cannot substitute a different lane. The
 visible **Run three-recreation corpus** button remains disabled until all three
 pin values are valid. Click it to run the same nine-trial, three-recreation

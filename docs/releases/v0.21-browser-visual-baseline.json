@@ -5,11 +5,11 @@
     "artifact": {
       "path": "apps/browser-demo/web/fixtures/visual-v1/baseline-inputs.json",
       "byte_length": 5100,
-      "sha256": "ec45107078bb90c58964f85e13316953bdaf3db1576b7fdfb6f9e38304c3c49a"
+      "sha256": "f4f2a5714f17dbb1d285308d74886ea7aee63e0aa52df4dca9b01d7cb7d0993b"
     }
   },
   "pins": {
-    "implementation_commit": "124fab07ab993059ef5df179cb227f7b0ba9b19e",
+    "implementation_commit": "f5d04d2c6091deda1136c2304cf8f97b9b40a755",
     "qualified_paths": [
       "Cargo.lock",
       "Cargo.toml",
@@ -154,8 +154,8 @@
     ],
     "verifier": {
       "path": "scripts/verify-browser-visual-baseline.mjs",
-      "byte_length": 153403,
-      "sha256": "5c0fdbe41917cc40adf9d22f0af4d76a220a23c1b1e7875c53efb300bd33c837"
+      "byte_length": 158424,
+      "sha256": "65ce5240191622d3939ec1f8f06d4ade4fd94bd2350abd1a11c667829b0a9fe3"
     }
   },
   "predecessor": {
@@ -256,7 +256,7 @@
     "artifact": {
       "path": "apps/browser-demo/web/fixtures/visual-v1/corpus.json",
       "byte_length": 28119,
-      "sha256": "0b720e96b6a283238894f3704f9549f848af49ad4243f768985c684ba4178e64"
+      "sha256": "f8d78105861a6822523be62c914469c98072201f2f343f290b288e607061e580"
     },
     "generated": {
       "id": "generated-visual-composite-v1",
@@ -780,8 +780,8 @@
     "qualification_status": "repository_qualified_exact_lane",
     "qualification_lane_record": {
       "path": "apps/browser-demo/web/qualification-lane.js",
-      "byte_length": 5338,
-      "sha256": "c64d215d5a3591ee0655d64db3858725a045727941815f3ff986fd143ff90e07"
+      "byte_length": 5340,
+      "sha256": "dacae65de069a216a1aa4e62093fde1664716814ad34ffd1b6dc8c303acdb2bb"
     },
     "viewport": {
       "css_width": 320,
