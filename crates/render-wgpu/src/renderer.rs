@@ -20,7 +20,10 @@ use wgpu::util::DeviceExt;
 
 use crate::{
     Frame,
-    footprint::{PointFootprint, PointFootprintPlan, PointFootprintStatus},
+    footprint::{
+        PointFootprint, PointFootprintPlan, PointFootprintStatus, fallback_fits_transient_ceiling,
+        fallback_transient_bytes,
+    },
     gpu::{BatchUniform, CameraUniform, EdlUniform, GpuPoint},
     pick::{
         PICK_READBACK_ROW_BYTES, PICK_TOKEN_BYTES, PickError, PickRecord, PickRequest, PickTable,
@@ -489,6 +492,14 @@ impl WgpuRenderer {
         let snapshot = self.state.snapshot();
         let active_view_generation =
             self.require_active_view_generation(frame.view_generation())?;
+        let viewport = frame.viewport();
+        if !fallback_fits_transient_ceiling(viewport) {
+            return Err(RendererError::TransientTextureLimitExceeded {
+                viewport: viewport.dimensions(),
+                requested_bytes: fallback_transient_bytes(viewport).unwrap_or(u64::MAX),
+                max_bytes: crate::footprint::MAX_TRANSIENT_TEXTURE_BYTES,
+            });
+        }
         let batches = self.recorded_batches(frame.camera());
         let pick_table = Arc::clone(
             self.pick_table
@@ -496,7 +507,6 @@ impl WgpuRenderer {
                 .ok_or(RendererError::PickMetadataUnavailable)?,
         );
 
-        let viewport = frame.viewport();
         let point_footprint_status = self.point_footprint_status(viewport);
         let eye_dome_lighting_applied =
             self.eye_dome.is_active() && self.point_footprint.allows_eye_dome(viewport);
@@ -1310,6 +1320,18 @@ pub enum RendererError {
         pixel: [u32; 2],
         /// The current physical viewport.
         viewport: [u32; 2],
+    },
+    /// Renderer-owned fallback targets would exceed the transient texture ceiling.
+    #[error(
+        "fallback targets for viewport {viewport:?} need {requested_bytes} bytes, exceeding the renderer ceiling {max_bytes}"
+    )]
+    TransientTextureLimitExceeded {
+        /// The rejected physical viewport.
+        viewport: [u32; 2],
+        /// Exact depth-plus-pick bytes required by the fallback path.
+        requested_bytes: u64,
+        /// Maximum renderer-owned transient texture bytes.
+        max_bytes: u64,
     },
     /// Internal generation pick metadata was unexpectedly absent.
     #[error("active View generation has no pick metadata")]

@@ -5,6 +5,7 @@ use crate::pipeline::{DEPTH_FORMAT, PICK_FORMAT};
 pub(crate) const MULTISAMPLE_COUNT: u32 = 4;
 pub(crate) const MAX_ANTIALIASED_PIXELS: u64 = 1_310_720;
 pub(crate) const MAX_TRANSIENT_TEXTURE_BYTES: u64 = 67_108_864;
+pub(crate) const FALLBACK_BYTES_PER_PIXEL: u64 = 8;
 
 /// Requested color-edge treatment for rendered Points.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -108,6 +109,14 @@ impl PointFootprintPlan {
 
 fn viewport_pixels(viewport: Viewport) -> u64 {
     u64::from(viewport.width()) * u64::from(viewport.height())
+}
+
+pub(crate) fn fallback_transient_bytes(viewport: Viewport) -> Option<u64> {
+    viewport_pixels(viewport).checked_mul(FALLBACK_BYTES_PER_PIXEL)
+}
+
+pub(crate) fn fallback_fits_transient_ceiling(viewport: Viewport) -> bool {
+    fallback_transient_bytes(viewport).is_some_and(|bytes| bytes <= MAX_TRANSIENT_TEXTURE_BYTES)
 }
 
 fn fits_transient_ceiling(viewport: Viewport, bytes_per_pixel: u64) -> bool {
@@ -305,6 +314,19 @@ mod tests {
             }),
             None,
         );
+    }
+
+    #[test]
+    fn fallback_targets_stay_within_the_renderer_ceiling() {
+        let largest_bounded_viewport = Viewport::new(4_096, 2_048).unwrap();
+        let first_unbounded_viewport = Viewport::new(4_096, 2_049).unwrap();
+
+        assert_eq!(
+            fallback_transient_bytes(largest_bounded_viewport),
+            Some(MAX_TRANSIENT_TEXTURE_BYTES)
+        );
+        assert!(fallback_fits_transient_ceiling(largest_bounded_viewport));
+        assert!(!fallback_fits_transient_ceiling(first_unbounded_viewport));
     }
 
     fn selection_evidence_facts(
