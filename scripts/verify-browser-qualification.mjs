@@ -41,7 +41,7 @@ const qualificationViewerArtifact = path.join(
 );
 const verifierSource = await readFile(new URL("./verify-browser-qualification.mjs", import.meta.url), "utf8");
 const QUALIFICATION_VERIFIER_SHA256 = createHash("sha256").update(verifierSource).digest("hex");
-const EXPECTED_OBSERVATION_DATE = "2026-08-29";
+const EXPECTED_OBSERVATION_DATE = "2026-08-30";
 const EXPECTED_UNQUALIFIED_ENTRIES = Object.freeze([
   Object.freeze({
     browser: "Google Chrome 150.0.7871.115",
