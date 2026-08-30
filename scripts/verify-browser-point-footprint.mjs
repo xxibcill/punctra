@@ -98,6 +98,8 @@ async function verifyExactPins(baseline, corpus, commit) {
   for (const record of baseline.pins.implementation.files) {
     const bytes = await readPinnedFile(commit, record.path);
     verifyDigest(bytes, record, `implementation pin ${record.path}`);
+    const executingBytes = await readFile(repositoryPath(record.path));
+    verifyDigest(executingBytes, record, `executing implementation ${record.path}`);
     implementationRecords.set(record.path, record);
   }
   const verifierRecord = implementationRecords.get(baseline.pins.verifier.path);
