@@ -101,12 +101,21 @@ export function measureRegionTopology(image, options) {
     normalization: normalizationFacts(config),
     foreground_threshold: config.foregroundThreshold,
     foreground_pixels: foregroundPixels,
+    partial_edge_pixels: countPartialCoverage(coverage),
     background_pixels: mask.length - foregroundPixels,
     foreground_fraction: foregroundPixels / mask.length,
     solid_2x2_blocks: countSolidBlocks(mask, config.rectangle.width, config.rectangle.height),
     foreground: components.foreground,
     background: components.background,
   };
+}
+
+function countPartialCoverage(coverage) {
+  let partialPixels = 0;
+  for (const value of coverage) {
+    if (isPartialCoverage(value)) partialPixels += 1;
+  }
+  return partialPixels;
 }
 
 /** Detects candidate components that coalesce separated predecessor components. */

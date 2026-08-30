@@ -427,6 +427,7 @@ function topologyMeasurement(rectangle) {
       rectangle: structuredClone(rectangle),
       foreground_threshold: 0.5,
       foreground_pixels: 1,
+      partial_edge_pixels: 0,
       foreground_fraction: 0.5,
       solid_2x2_blocks: 1,
       foreground: componentFacts(),

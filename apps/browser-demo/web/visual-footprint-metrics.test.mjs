@@ -149,6 +149,21 @@ test("solid blobs and enclosed holes have exact 2x2 and component facts", () => 
   assert.equal(holeReport.background.largest_interior_component_pixels, 1);
 });
 
+test("topology counts partial coverage before thresholding", () => {
+  const image = solidImage(3, 1, BLACK);
+  setPixel(image, 0, 0, [64, 64, 64, 255]);
+  setPixel(image, 1, 0, WHITE);
+  const report = measureRegionTopology(image, {
+    rectangle: { x: 0, y: 0, width: 3, height: 1 },
+    foregroundRgba: WHITE,
+    backgroundRgba: BLACK,
+    foregroundThreshold: 0.5,
+  });
+
+  assert.equal(report.foreground_pixels, 1);
+  assert.equal(report.partial_edge_pixels, 1);
+});
+
 test("a one-pixel thin bridge is distinguished from the same feature with a break", () => {
   const continuous = binaryImage(7, 3, (_x, y) => y === 1);
   const continuousReport = topologyReport(continuous);

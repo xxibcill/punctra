@@ -1324,6 +1324,8 @@ function validateTopologyReport(report, rectangle, label) {
   requireCondition(report.schema === REGION_TOPOLOGY_METRICS_SCHEMA, `${label} report schema differs`);
   requireJsonEqual(report.rectangle, rectangle, `${label} report rectangle`);
   requireCondition(Number.isSafeInteger(report.foreground_pixels) && report.foreground_pixels >= 0, `${label} foreground pixels are invalid`);
+  requireCondition(Number.isSafeInteger(report.partial_edge_pixels) && report.partial_edge_pixels >= 0,
+    `${label} partial-edge pixels are invalid`);
   requireCondition(Number.isFinite(report.foreground_fraction) && report.foreground_fraction >= 0
     && report.foreground_fraction <= 1, `${label} foreground fraction is invalid`);
   requireCondition(Number.isSafeInteger(report.solid_2x2_blocks) && report.solid_2x2_blocks >= 0, `${label} solid blocks are invalid`);
