@@ -92,6 +92,14 @@ export function createPointFootprintBaselineRecord(options) {
   return validatePointFootprintBaseline(baseline, footprint);
 }
 
+export function recordPointFootprintArchiveEntries(entries, baselineArtifacts, baselinePath) {
+  const baselinePaths = new Set([
+    baselinePath,
+    ...baselineArtifacts.map(({ artifact }) => artifact.path),
+  ]);
+  return entries.filter(({ path }) => baselinePaths.has(path));
+}
+
 export function createPointFootprintEvidenceRecord(options) {
   const {
     startedAt,

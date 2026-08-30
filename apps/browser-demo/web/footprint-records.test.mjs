@@ -18,6 +18,7 @@ import {
   createPointFootprintBaselineRecord,
   createPointFootprintEvidenceRecord,
   pointFootprintLocalTestCase,
+  recordPointFootprintArchiveEntries,
 } from "./footprint-records.js";
 
 const corpus = JSON.parse(await readFile(
@@ -46,6 +47,24 @@ test("record builders import without browser globals and local cases are cloned"
     () => pointFootprintLocalTestCase(localTests, "unbound-case"),
     /outside the closed contract/,
   );
+});
+
+test("record archives retain only baseline artifacts", () => {
+  const entries = [
+    { path: "docs/releases/v0.22-browser-point-footprint-artifacts/candidate.png" },
+    { path: "apps/browser-demo/web/fixtures/footprint-v1/baselines/trial.png" },
+    { path: "docs/releases/v0.22-browser-point-footprint-baseline.json" },
+    { path: "docs/releases/v0.22-browser-point-footprint-evidence.json" },
+  ];
+  const selected = recordPointFootprintArchiveEntries(
+    entries,
+    [{ artifact: { path: "apps/browser-demo/web/fixtures/footprint-v1/baselines/trial.png" } }],
+    "docs/releases/v0.22-browser-point-footprint-baseline.json",
+  );
+  assert.deepEqual(selected.map(({ path }) => path), [
+    "apps/browser-demo/web/fixtures/footprint-v1/baselines/trial.png",
+    "docs/releases/v0.22-browser-point-footprint-baseline.json",
+  ]);
 });
 
 test("baseline records project canonical and focused runner artifacts", () => {

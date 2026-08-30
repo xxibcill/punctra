@@ -33,6 +33,7 @@ import {
   createPointFootprintEnvironment,
   createPointFootprintEvidenceRecord,
   pointFootprintLocalTestCase,
+  recordPointFootprintArchiveEntries,
 } from "./footprint-records.js";
 import {
   evaluateRepresentativeTiming,
@@ -187,6 +188,20 @@ export async function runPointFootprintQualification(options) {
     "attended session facts disappeared before evidence assembly");
   requireCondition(isPageVisible(),
     "the attended page became hidden before evidence assembly");
+  if (mode === "record") {
+    const archive = await encodePointFootprintArchive(recordPointFootprintArchiveEntries(
+      artifacts.entries(),
+      baselineArtifacts,
+      BASELINE_REPOSITORY_PATH,
+    ));
+    const transportReceipt = await publishArchive(archive.bytes, archive.sha256);
+    return {
+      baseline: baselineRecord,
+      evidence: null,
+      archive,
+      transportReceipt,
+    };
+  }
   const evidence = createPointFootprintEvidenceRecord({
     startedAt,
     readCompletedAt: () => new Date().toISOString(),
@@ -210,6 +225,7 @@ export async function runPointFootprintQualification(options) {
   const archive = await encodePointFootprintArchive(artifacts.entries());
   const transportReceipt = await publishArchive(archive.bytes, archive.sha256);
   return {
+    baseline: baselineRecord,
     evidence,
     archive,
     transportReceipt,

@@ -91,19 +91,23 @@ async function startRun(options = {}, activation) {
     });
     latestEvidence = result.evidence;
     latestArchive = result.archive;
-    evidenceOutput.textContent = JSON.stringify(result.evidence, null, 2);
+    const recordMode = result.evidence === null;
+    const displayedRecord = recordMode ? result.baseline : result.evidence;
+    evidenceOutput.textContent = JSON.stringify(displayedRecord, null, 2);
     downloadArchiveButton.disabled = false;
-    const state = result.evidence.summary.passed ? "passed" : "failed";
-    updateState(
-      state,
-      result.evidence.summary.passed
+    const state = recordMode
+      ? "passed"
+      : result.evidence.summary.passed ? "passed" : "failed";
+    const message = recordMode
+      ? "RECORD COMPLETE — baseline manifest and PNGs are ready for the pinning stage."
+      : result.evidence.summary.passed
         ? `PASS — ${result.evidence.summary.canonical_trials}/9 canonical trials, focused DPR checks, and resource fallback are bound.`
-        : `FAIL — ${result.evidence.summary.failures.join("; ")}`,
-    );
+        : `FAIL — ${result.evidence.summary.failures.join("; ")}`;
+    updateState(state, message);
     if (result.transportReceipt !== null) {
       transportOutput.textContent = `Archive persisted: ${result.transportReceipt.path}`;
     }
-    return structuredClone(result.evidence);
+    return structuredClone(displayedRecord);
   } catch (error) {
     const failure = errorRecord(error);
     evidenceOutput.textContent = JSON.stringify(failure, null, 2);
