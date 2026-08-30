@@ -26,12 +26,15 @@ All notable changes to Punctra are documented here. The project follows
 - Advanced the Rust and JavaScript package-facing release identity to
   `0.22.0-alpha.1`. The public browser SDK declaration surface is unchanged;
   the Point-footprint runner and evidence machinery remain repository-private.
-- The final v0.22 implementation commit is **PENDING** until the two-pass
-  baseline-image pin is created.
-- Final attended record, implementation pin, rebuilt functional qualification,
-  verify evidence, and release observations are pending. No v0.22 completion,
-  physical-display, cross-browser/device, independent-human/adopter, support,
-  beta, release-candidate, or v1 claim is made yet.
+- The attended v0.22 functional qualification is recorded at implementation commit `1ea86a9c65f4d85630e57173c6a3bb68a22b3e17`; the qualification
+  verifier SHA-256 is
+  `e03159e9363d89814a7eb5aea64d43b2bd8395a55477681da531e01781d59eed`.
+  The packed quickstart evidence, exact browser matrix, and functional
+  integration baseline are recorded under `docs/releases/`.
+- The separate Point-footprint record/verify stage and final release
+  completion remain pending. No v0.22 completion, physical-display,
+  cross-browser/device, independent-human/adopter, support, beta,
+  release-candidate, or v1 claim is made yet.
 
 ## 0.21.0-alpha.1
 
