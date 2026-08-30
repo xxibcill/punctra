@@ -434,6 +434,7 @@ First run the focused static and GPU checks:
 cargo test -p render-wgpu --test contracts
 cargo test -p browser-demo
 cargo test -p renderer-demo --bin renderer-demo appearance::tests
+scripts/build-browser-sdk.sh
 node --test \
   apps/browser-demo/web/footprint-artifacts.test.mjs \
   apps/browser-demo/web/footprint-corpus.test.mjs \
