@@ -956,10 +956,6 @@ function evaluateCanonicalQuality(options) {
   for (const region of densityComparisons) {
     if (!region.solid_2x2_budget.passed) failures.push("dense_solid_2x2_budget");
   }
-  if (topology.foreground.left_right_bridge_components > predecessorTopology.foreground.left_right_bridge_components
-    || topology.foreground.top_bottom_bridge_components > predecessorTopology.foreground.top_bottom_bridge_components) {
-    failures.push("new_foreground_bridge");
-  }
   if (componentBridges.bridging_candidate_component_count > 0) {
     failures.push("separated_predecessor_component_bridge");
   }

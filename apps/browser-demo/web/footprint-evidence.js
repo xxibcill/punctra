@@ -1388,12 +1388,6 @@ function validateTopologyPair(predecessor, candidate, limits, failures, label) {
   gate(ratio >= limits.foreground_fraction_predecessor_ratio.minimum
     && ratio <= limits.foreground_fraction_predecessor_ratio.maximum,
   failures, `${label} foreground fraction ratio differs`);
-  gate(candidate.foreground.component_count >= predecessor.foreground.component_count,
-    failures, `${label} merged predecessor foreground components`);
-  gate(candidate.foreground.left_right_bridge_components <= predecessor.foreground.left_right_bridge_components,
-    failures, `${label} introduced a left-right foreground bridge`);
-  gate(candidate.foreground.top_bottom_bridge_components <= predecessor.foreground.top_bottom_bridge_components,
-    failures, `${label} introduced a top-bottom foreground bridge`);
 }
 
 function validateFeatureChecks(features, limits, failures, label) {

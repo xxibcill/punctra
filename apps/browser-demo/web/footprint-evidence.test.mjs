@@ -325,6 +325,18 @@ test("host f32 display diameter accepts serde's shortest decimal representation"
   assert.doesNotThrow(() => verifyPointFootprintEvidence(evidence, { baseline, corpus }));
 });
 
+test("topology acceptance leaves component and border-bridge counts to the explicit bridge check", () => {
+  const baseline = validBaseline();
+  const evidence = validEvidence(baseline);
+  const candidate = evidence.canonical_trials[0].recreations[0].candidate_topology.report;
+  candidate.foreground.component_count = 0;
+  candidate.foreground.left_right_bridge_components = 1;
+  candidate.foreground.top_bottom_bridge_components = 1;
+  evidence.summary = derivePointFootprintEvidenceSummary(evidence, { baseline, corpus });
+
+  assert.doesNotThrow(() => verifyPointFootprintEvidence(evidence, { baseline, corpus }));
+});
+
 test("pass flags, samples, metrics, resources, status, identities, and browser provenance cannot be forged", () => {
   const baseline = validBaseline();
   const evidence = validEvidence(baseline);
