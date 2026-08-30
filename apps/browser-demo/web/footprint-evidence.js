@@ -1,4 +1,4 @@
-import { validateFootprintCorpus } from "./footprint-corpus.js";
+import { footprintRegionCenter, validateFootprintCorpus } from "./footprint-corpus.js";
 import {
   COMPONENT_BRIDGE_METRICS_SCHEMA,
   POINT_FOOTPRINT_METRICS_SCHEMA,
@@ -855,7 +855,7 @@ function validateFocusedTrials(trials, baseline, corpus, artifacts, metricBindin
     requireRecord(trial, label);
     requireExactKeys(trial, [
       "trial_id", "profile_id", "adapter", "resident_points", "point_footprint", "resources", "candidate_artifact_path",
-      "baseline_artifact_path", "isolated_footprints",
+      "baseline_artifact_path", "isolated_footprints", "thin_feature_centers",
     ], label);
     requireCondition(trial.trial_id === expectedTrial.id && trial.profile_id === profile.id, `${label} order differs`);
     validateAdapter(trial.adapter, label);
@@ -885,6 +885,7 @@ function validateFocusedTrials(trials, baseline, corpus, artifacts, metricBindin
     gate(artifact.decoded_sha256 === pinnedBaseline.decoded_sha256, failures,
       `${label} candidate differs from the same-pin focused baseline`);
     validateIsolatedFootprints(trial.isolated_footprints, expectedTrial, trial, corpus, metricBindings, failures, label);
+    validateThinFeatureCenters(trial.thin_feature_centers, expectedTrial, profile, corpus, failures, label);
   }
 }
 
@@ -910,6 +911,25 @@ function validateIsolatedFootprints(samples, expectedTrial, trial, corpus, metri
     gate(candidate.centroid.error_pixels !== null
       && candidate.centroid.error_pixels <= corpus.metric_limits.maximum_centroid_distance_pixels,
     failures, `${label} footprint ${ordinal} centroid exceeds ceiling`);
+  }
+}
+
+function validateThinFeatureCenters(samples, expectedTrial, profile, corpus, failures, label) {
+  const regions = expectedTrial.thin_feature_regions ?? [];
+  requireArray(samples, `${label} thin-feature centers`);
+  requireCondition(samples.length === regions.length, `${label} thin-feature center count differs`);
+  const displayScale = profile.requested_device_pixel_ratio
+    / corpus.canonical_profile.requested_device_pixel_ratio;
+  for (let index = 0; index < samples.length; index += 1) {
+    const sample = samples[index];
+    const expectedCenter = footprintRegionCenter(regions[index]).map((value) => value * displayScale);
+    const centerLabel = `${label} thin-feature center ${index}`;
+    requireRecord(sample, centerLabel);
+    requireExactKeys(sample, ["center", "center_foreground"], centerLabel);
+    requireJsonEqual(sample.center, expectedCenter, `${centerLabel} position`);
+    requireCondition(typeof sample.center_foreground === "boolean",
+      `${centerLabel} foreground fact is invalid`);
+    gate(sample.center_foreground === true, failures, `${centerLabel} disappeared`);
   }
 }
 

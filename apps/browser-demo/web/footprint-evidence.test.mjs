@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 
+import { footprintRegionCenter } from "./footprint-corpus.js";
 import {
   FOOTPRINT_BASELINE_SCHEMA,
   FOOTPRINT_EVIDENCE_SCHEMA,
@@ -334,6 +335,7 @@ test("pass flags, samples, metrics, resources, status, identities, and browser p
     (value) => { value.canonical_trials[0].recreations[0].timing.frame_interval.p95 = 2; },
     (value) => { value.focused_trials[0].isolated_footprints[0].candidate.report.coverage.root_mean_square_error = 0.19; },
     (value) => { value.focused_trials[0].isolated_footprints[0].candidate.report.corner_leakage.all_quad_corners_clear = false; },
+    (value) => { value.focused_trials[0].thin_feature_centers[0].center_foreground = false; },
     (value) => {
       const binding = value.canonical_trials[0].recreations[0].component_bridge_check;
       binding.report.bridging_candidate_component_count = 1;
@@ -563,6 +565,11 @@ function validEvidence(baseline) {
         ordinal,
         center_foreground: true,
         candidate: footprintBinding(`${prefix}/point/${ordinal}/candidate`, candidate.path, 0.1),
+      })),
+      thin_feature_centers: (expectedTrial.thin_feature_regions ?? []).map((region) => ({
+        center: footprintRegionCenter(region).map((value) => value * profile.requested_device_pixel_ratio
+          / corpus.canonical_profile.requested_device_pixel_ratio),
+        center_foreground: true,
       })),
     };
   }));

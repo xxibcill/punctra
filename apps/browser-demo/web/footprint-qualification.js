@@ -1,4 +1,5 @@
 import initializeWasm, { createViewer as createRawViewer } from "./pkg/browser_demo.js";
+import { footprintRegionCenter } from "./footprint-corpus.js";
 import {
   ArtifactRegistry,
   encodePointFootprintArchive,
@@ -566,6 +567,15 @@ async function runFocusedScaleTrials(options) {
           ...report,
         };
       });
+      const displayScale = profile.requested_device_pixel_ratio
+        / footprint.canonical_profile.requested_device_pixel_ratio;
+      const thinFeatureCenters = (focused.thin_feature_regions ?? []).map((region) => {
+        const center = footprintRegionCenter(region).map((value) => value * displayScale);
+        return {
+          center,
+          center_foreground: foregroundAtCenter(image, center, BACKGROUND_RGBA),
+        };
+      });
       const baselineComparison = mode === "verify" && profile.id !== footprint.canonical_profile.id
         ? compareCanonicalImages(
           (await loadFocusedBaseline(baseline, trial.id, profile.id)).image,
@@ -592,6 +602,9 @@ async function runFocusedScaleTrials(options) {
         if (!metrics.corner_leakage.all_quad_corners_clear) failures.push(`ordinal-${measurement.ordinal}:quad_corner_leakage`);
         if (metrics.centroid.error_pixels === null || metrics.centroid.error_pixels > footprint.metric_limits.maximum_centroid_distance_pixels) failures.push(`ordinal-${measurement.ordinal}:centroid`);
       }
+      for (const [index, measurement] of thinFeatureCenters.entries()) {
+        if (!measurement.center_foreground) failures.push(`thin-feature-${index}:center`);
+      }
       if (baselineComparison !== null && !baselineComparison.passed) failures.push(...baselineComparison.failures.map((failure) => `baseline:${failure}`));
       results.push({
         trial_id: trial.id,
@@ -608,6 +621,7 @@ async function runFocusedScaleTrials(options) {
         display_size_physical_pixels: diameter,
         nominal_pick_size_physical_pixels: diagnostics.point_footprint.nominal_pick_size_physical_pixels,
         measurements,
+        thin_feature_centers: thinFeatureCenters,
         capture: profile.id === footprint.canonical_profile.id
           ? { reused_canonical_capture: true, facts: capture, artifact: artifact.metadata }
           : { reused_canonical_capture: false, facts: capture, artifact: artifact.metadata },
@@ -1155,6 +1169,17 @@ function normalizedCenterCoverage(image, measurement) {
     numerator += (image.data[offset + channel] - background[channel]) * direction[channel];
   }
   return Math.min(1, Math.max(0, numerator / denominator));
+}
+
+function foregroundAtCenter(image, center, backgroundRgba) {
+  const x = Math.floor(center[0]);
+  const y = Math.floor(center[1]);
+  requireCondition(x >= 0 && x < image.width && y >= 0 && y < image.height,
+    "thin-feature center is outside the image");
+  const offset = (y * image.width + x) * 4;
+  return backgroundRgba.some((value, channel) => (
+    Math.abs(image.data[offset + channel] - value) > 2
+  ));
 }
 
 function decodedPoints(batches) {

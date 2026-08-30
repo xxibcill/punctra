@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
+import { footprintRegionCenter } from "./footprint-corpus.js";
 import {
   FOOTPRINT_BASELINE_SCHEMA,
   FOOTPRINT_EVIDENCE_SCHEMA,
@@ -245,6 +246,11 @@ function focusedRunnerTrials(canonicalTrials) {
         ordinal,
         center_foreground: true,
         ...footprintMeasurement(),
+      })),
+      thin_feature_centers: (trial.thin_feature_regions ?? []).map((region) => ({
+        center: footprintRegionCenter(region).map((value) => value * profile.requested_device_pixel_ratio
+          / corpus.canonical_profile.requested_device_pixel_ratio),
+        center_foreground: true,
       })),
       passed: true,
     };

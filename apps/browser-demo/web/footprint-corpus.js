@@ -156,6 +156,10 @@ function validateFocusedTrial(trial, canonicalIds) {
   }
 }
 
+export function footprintRegionCenter(region) {
+  return [region.x + region.width / 2, region.y + region.height / 2];
+}
+
 function validateRegion(region, label) {
   requireRecord(region, label);
   for (const field of ["x", "y", "width", "height"]) {

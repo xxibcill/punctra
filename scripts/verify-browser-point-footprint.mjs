@@ -15,7 +15,10 @@ import {
   validatePointFootprintLocalTestArtifact,
   verifyPointFootprintEvidence,
 } from "../apps/browser-demo/web/footprint-evidence.js";
-import { validateFootprintCorpus } from "../apps/browser-demo/web/footprint-corpus.js";
+import {
+  footprintRegionCenter,
+  validateFootprintCorpus,
+} from "../apps/browser-demo/web/footprint-corpus.js";
 import {
   measureForegroundComponentBridges,
   measurePointFootprint,
@@ -27,6 +30,7 @@ const repositoryRoot = path.resolve(fileURLToPath(new URL("../", import.meta.url
 const MAX_GIT_OBJECT_BYTES = 96 * 1024 * 1024;
 const WHITE = Object.freeze([255, 255, 255, 255]);
 const BLACK = Object.freeze([0, 0, 0, 255]);
+const FOOTPRINT_BACKGROUND_RGBA = Object.freeze([19, 20, 19, 255]);
 
 export async function verifyBrowserPointFootprintFiles({ baselinePath, evidencePath }) {
   const baselineLocation = repositoryLocation(baselinePath, "baseline");
@@ -67,7 +71,7 @@ export async function verifyBrowserPointFootprintFiles({ baselinePath, evidenceP
   });
   const recomputedMetrics = await recomputeMetricBindings(evidence, imageLoader);
   await verifyDerivedFeatureFacts(evidence, predecessorEvidence, imageLoader);
-  await verifyFocusedPixelFacts(evidence, imageLoader);
+  await verifyFocusedPixelFacts(evidence, corpus, imageLoader);
   verifyPickIdentityReference(evidence.pick_identity_reference, predecessorEvidence);
 
   const derived = derivePointFootprintEvidenceSummary(evidence, {
@@ -404,13 +408,34 @@ async function verifyDerivedFeatureFacts(evidence, predecessorEvidence, loadImag
   }
 }
 
-async function verifyFocusedPixelFacts(evidence, loadImage) {
+async function verifyFocusedPixelFacts(evidence, corpus, loadImage) {
   for (const trial of evidence.focused_trials) {
+    const expectedTrial = corpus.focused_trials.find(({ id }) => id === trial.trial_id);
+    assert(expectedTrial, `focused trial ${trial.trial_id} is not in the corpus`);
+    const profiles = [corpus.canonical_profile, ...corpus.scale_profiles];
+    const profile = profiles.find(({ id }) => id === trial.profile_id);
+    assert(profile, `focused profile ${trial.profile_id} is not in the corpus`);
     const candidateImage = await loadImage(trial.candidate_artifact_path);
     for (const sample of trial.isolated_footprints) {
       const foreground = normalizedPixelCoverage(candidateImage, sample.candidate);
       assert.equal(sample.center_foreground, foreground > 0,
         `${sample.candidate.metric_id} center-foreground fact differs from its PNG`);
+    }
+    const regions = expectedTrial.thin_feature_regions ?? [];
+    assert.equal(trial.thin_feature_centers.length, regions.length,
+      `${trial.trial_id}/${trial.profile_id} thin-feature center count differs`);
+    const displayScale = profile.requested_device_pixel_ratio
+      / corpus.canonical_profile.requested_device_pixel_ratio;
+    for (let index = 0; index < regions.length; index += 1) {
+      const sample = trial.thin_feature_centers[index];
+      const expectedCenter = footprintRegionCenter(regions[index]).map((value) => value * displayScale);
+      assert.deepEqual(sample.center, expectedCenter,
+        `${trial.trial_id}/${trial.profile_id} thin-feature center ${index} differs from the corpus`);
+      const foreground = isForegroundPixel(candidateImage, sample.center, FOOTPRINT_BACKGROUND_RGBA);
+      assert.equal(sample.center_foreground, foreground,
+        `${trial.trial_id}/${trial.profile_id} thin-feature center ${index} fact differs from its PNG`);
+      assert.equal(foreground, true,
+        `${trial.trial_id}/${trial.profile_id} thin-feature center ${index} is not foreground`);
     }
   }
 }
@@ -512,6 +537,17 @@ function normalizedPixelCoverage(image, binding) {
     numerator += (image.data[offset + channel] - binding.background_rgba[channel]) * direction[channel];
   }
   return Math.min(1, Math.max(0, numerator / denominator));
+}
+
+function isForegroundPixel(image, center, backgroundRgba) {
+  const x = Math.floor(center[0]);
+  const y = Math.floor(center[1]);
+  assert(x >= 0 && x < image.width && y >= 0 && y < image.height,
+    "thin-feature center is outside the candidate image");
+  const offset = (y * image.width + x) * 4;
+  return backgroundRgba.some((value, channel) => (
+    Math.abs(image.data[offset + channel] - value) > 2
+  ));
 }
 
 function pointDistance(left, right) {

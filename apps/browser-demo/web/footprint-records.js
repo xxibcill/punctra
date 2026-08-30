@@ -317,6 +317,10 @@ function focusedTrialEvidence(trial, baseline, footprint) {
         measurement,
       }),
     })),
+    thin_feature_centers: trial.thin_feature_centers.map((measurement) => ({
+      center: [...measurement.center],
+      center_foreground: measurement.center_foreground,
+    })),
   };
 }
 
