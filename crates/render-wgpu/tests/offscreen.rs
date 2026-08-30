@@ -168,6 +168,11 @@ fn eye_dome_visibility_depth_uses_nominal_size_for_single_and_multisample_color(
 }
 
 #[test]
+fn eye_dome_visibility_depth_does_not_shade_display_only_pixels() {
+    with_gpu(assert_eye_dome_visibility_depth_does_not_shade_display_only_pixels);
+}
+
+#[test]
 fn resource_fallback_suppresses_eye_dome_and_stays_at_eight_bytes_per_pixel() {
     with_gpu(assert_resource_fallback_suppresses_eye_dome);
 }
@@ -1306,6 +1311,64 @@ fn assert_eye_dome_visibility_depth_uses_nominal_size(gpu: &GpuContext) {
             shaded_nominal_pixels > 0,
             "{footprint:?} EDL fixture did not shade"
         );
+    }
+}
+
+fn assert_eye_dome_visibility_depth_does_not_shade_display_only_pixels(gpu: &GpuContext) {
+    for (index, footprint) in [PointFootprint::SingleSample, PointFootprint::Antialiased]
+        .into_iter()
+        .enumerate()
+    {
+        let cue = EyeDomeLighting::new(1.25, 1).unwrap();
+        let base_config =
+            RendererConfig::new(FORMAT, roomy_limits()).with_point_footprint(footprint);
+        let mut reference = OffscreenRenderer::with_config(gpu, base_config);
+        let mut subject =
+            OffscreenRenderer::with_config(gpu, base_config.with_eye_dome_lighting(cue));
+        let view_generation =
+            ViewGenerationKey::new(ViewId::new(32 + u64::try_from(index).unwrap()), 1);
+        let identity = point_id(3_200 + u64::try_from(index).unwrap());
+        for renderer in [&mut reference, &mut subject] {
+            renderer.apply(&RenderUpdate::Reset { view_generation });
+            renderer.apply(&RenderUpdate::Upsert {
+                batch: batch(
+                    view_generation,
+                    1,
+                    1,
+                    WORLD_ORIGIN,
+                    vec![point([0.0; 3], RED, identity.ordinal())],
+                ),
+            });
+        }
+        let style = PointStyle::new(2.4, [1.0; 3], [0.075, 0.078, 0.075, 1.0])
+            .unwrap()
+            .with_display_size_pixels(1.0)
+            .unwrap();
+        let frame = frame_with_style(view_generation, VIEWPORT, style);
+        let reference = reference.render(&frame);
+        let rendered = subject.render(&frame);
+        assert!(rendered.report.eye_dome_lighting_applied());
+
+        let display_outer_radius = f64::from(style.display_size_pixels()) / 2.0 + 0.75;
+        let nominal_outer_radius = f64::from(style.default_size_pixels()) / 2.0 + 0.75;
+        let mut display_only_pixels = 0_u64;
+        for y in 0..VIEWPORT[1] {
+            for x in 0..VIEWPORT[0] {
+                let dx = f64::from(x) + 0.5 - f64::from(CENTER[0]);
+                let dy = f64::from(y) + 0.5 - f64::from(CENTER[1]);
+                let distance = dx.hypot(dy);
+                if distance <= display_outer_radius || distance > nominal_outer_radius {
+                    continue;
+                }
+                display_only_pixels += 1;
+                assert_eq!(
+                    rendered.image.pixel([x, y]),
+                    reference.image.pixel([x, y]),
+                    "{footprint:?} EDL shaded display-only pixel [{x}, {y}]",
+                );
+            }
+        }
+        assert!(display_only_pixels > 0);
     }
 }
 

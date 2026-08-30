@@ -259,6 +259,7 @@ pub struct WgpuRenderer {
 enum EyeDomeState {
     Inactive(DepthCueStatus),
     Active {
+        config: EyeDomeLighting,
         pipeline: EdlPipeline,
         uniform_buffer: wgpu::Buffer,
     },
@@ -274,6 +275,24 @@ impl EyeDomeState {
 
     const fn is_active(&self) -> bool {
         matches!(self, Self::Active { .. })
+    }
+
+    fn uniform_upload(&self, device: &wgpu::Device, clear_alpha: f32) -> Option<wgpu::Buffer> {
+        let Self::Active { config, .. } = self else {
+            return None;
+        };
+        Some(
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("punctra eye-dome frame uniform upload"),
+                contents: bytemuck::bytes_of(&EdlUniform {
+                    strength: config.strength(),
+                    radius_pixels: config.radius_pixels(),
+                    clear_alpha,
+                    _padding: 0,
+                }),
+                usage: wgpu::BufferUsages::COPY_SRC,
+            }),
+        )
     }
 }
 
@@ -303,15 +322,17 @@ impl WgpuRenderer {
 
         let eye_dome = match (depth_cue_status(device, config), config.eye_dome_lighting) {
             (DepthCueStatus::Active, Some(cue)) => EyeDomeState::Active {
+                config: cue,
                 pipeline: EdlPipeline::new(device, config.color_format),
                 uniform_buffer: device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some("punctra eye-dome uniform"),
                     contents: bytemuck::bytes_of(&EdlUniform {
                         strength: cue.strength(),
                         radius_pixels: cue.radius_pixels(),
-                        _padding: [0; 2],
+                        clear_alpha: 1.0,
+                        _padding: 0,
                     }),
-                    usage: wgpu::BufferUsages::UNIFORM,
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                 }),
             },
             (DepthCueStatus::Disabled, _) => EyeDomeState::Inactive(DepthCueStatus::Disabled),
@@ -551,6 +572,10 @@ impl WgpuRenderer {
         })
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "the frame pass owns the complete EDL and fallback target-selection matrix"
+    )]
     fn record_frame_passes(
         &mut self,
         encoder: &mut wgpu::CommandEncoder,
@@ -572,9 +597,19 @@ impl WgpuRenderer {
             camera_bind_group: &self.camera_bind_group,
             batches,
         };
+        let clear_color = frame.style().clear_color();
+        #[allow(
+            clippy::cast_possible_truncation,
+            reason = "the validated alpha is inside 0..=1"
+        )]
+        let clear_alpha = clear_color[3] as f32;
+        let eye_dome_lighting_applied = nominal_camera_upload.is_some();
+        let edl_uniform_upload = eye_dome_lighting_applied
+            .then(|| self.eye_dome.uniform_upload(&self.device, clear_alpha))
+            .flatten();
         if point_footprint_status == PointFootprintStatus::ResourceFallback {
             let depth = self.targets.single_sample_depth(&self.device, viewport);
-            pass.record_points(target, None, depth, &self.pipelines.single_sample);
+            pass.record_points(target, None, depth, &self.pipelines.single_sample, false);
             return;
         }
         match (
@@ -587,6 +622,7 @@ impl WgpuRenderer {
                 EyeDomeState::Active {
                     pipeline,
                     uniform_buffer,
+                    ..
                 },
                 Some(depth_pipeline),
                 Some(point_pipelines),
@@ -595,11 +631,18 @@ impl WgpuRenderer {
                 let (color, depth, visibility_depth, resolved_color, bind_group) = self
                     .targets
                     .multisample_eye_dome(&self.device, viewport, &pipeline.layout, uniform_buffer);
+                pass.stage_edl_uniform(
+                    edl_uniform_upload
+                        .as_ref()
+                        .expect("active eye-dome frames stage their uniform"),
+                    uniform_buffer,
+                );
                 pass.record_points(
                     color.view(),
                     Some(resolved_color.view()),
                     depth,
                     point_pipelines,
+                    true,
                 );
                 pass.stage_camera_uniform(nominal_camera_upload);
                 pass.record_eye_dome_depth(visibility_depth, depth_pipeline);
@@ -609,6 +652,7 @@ impl WgpuRenderer {
                 EyeDomeState::Active {
                     pipeline,
                     uniform_buffer,
+                    ..
                 },
                 Some(depth_pipeline),
                 None,
@@ -617,18 +661,30 @@ impl WgpuRenderer {
                 let (depth, color, bind_group) =
                     self.targets
                         .eye_dome(&self.device, viewport, &pipeline.layout, uniform_buffer);
-                pass.record_points(color.view(), None, depth, &self.pipelines.single_sample);
+                pass.stage_edl_uniform(
+                    edl_uniform_upload
+                        .as_ref()
+                        .expect("active eye-dome frames stage their uniform"),
+                    uniform_buffer,
+                );
+                pass.record_points(
+                    color.view(),
+                    None,
+                    depth,
+                    &self.pipelines.single_sample,
+                    true,
+                );
                 pass.stage_camera_uniform(nominal_camera_upload);
                 pass.record_eye_dome_depth(depth, depth_pipeline);
                 pass.record_eye_dome(pipeline, bind_group);
             }
             (_, _, Some(point_pipelines), _) => {
                 let (color, depth) = self.targets.multisample(&self.device, viewport);
-                pass.record_points(color.view(), Some(target), depth, point_pipelines);
+                pass.record_points(color.view(), Some(target), depth, point_pipelines, false);
             }
             (_, _, None, _) => {
                 let depth = self.targets.single_sample_depth(&self.device, viewport);
-                pass.record_points(target, None, depth, &self.pipelines.single_sample);
+                pass.record_points(target, None, depth, &self.pipelines.single_sample, false);
             }
         }
     }
@@ -1025,18 +1081,35 @@ impl FramePass<'_> {
         resolve_target: Option<&wgpu::TextureView>,
         depth: &DepthTarget,
         pipelines: &PointPipelinePair,
+        transparent_clear_alpha: bool,
     ) {
+        let clear = if transparent_clear_alpha {
+            [self.clear[0], self.clear[1], self.clear[2], 0.0]
+        } else {
+            self.clear
+        };
         record_point_pass(
             self.encoder,
             PointPassDescriptor {
                 target,
                 resolve_target,
                 depth,
-                clear: self.clear,
+                clear,
                 pipelines,
                 camera_bind_group: self.camera_bind_group,
                 batches: self.batches,
             },
+        );
+    }
+
+    fn stage_edl_uniform(&mut self, upload: &wgpu::Buffer, destination: &wgpu::Buffer) {
+        self.encoder.copy_buffer_to_buffer(
+            upload,
+            0,
+            destination,
+            0,
+            u64::try_from(size_of::<EdlUniform>())
+                .expect("EdlUniform size always fits a wgpu buffer address"),
         );
     }
 

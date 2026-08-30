@@ -1,7 +1,8 @@
 struct EyeDomeConfig {
     strength: f32,
     radius_pixels: u32,
-    _padding: vec2<u32>,
+    clear_alpha: f32,
+    _padding: u32,
 }
 
 @group(0) @binding(0)
@@ -30,7 +31,7 @@ fn eye_dome_fragment(@builtin(position) position: vec4<f32>) -> @location(0) vec
     let color = textureLoad(point_color, pixel, 0);
     let center = textureLoad(point_depth, pixel, 0);
     if center >= 1.0 || color.a <= 0.0 {
-        return color;
+        return vec4<f32>(color.rgb, config.clear_alpha);
     }
 
     let radius = i32(config.radius_pixels);
