@@ -20,12 +20,16 @@ use wgpu::util::DeviceExt;
 
 use crate::{
     Frame,
+    footprint::{
+        PointFootprint, PointFootprintPlan, PointFootprintStatus, fallback_fits_transient_ceiling,
+        fallback_transient_bytes,
+    },
     gpu::{BatchUniform, CameraUniform, EdlUniform, GpuPoint},
     pick::{
         PICK_READBACK_ROW_BYTES, PICK_TOKEN_BYTES, PickError, PickRecord, PickRequest, PickTable,
         PickTicket,
     },
-    pipeline::{DEPTH_FORMAT, EdlPipeline, PointPipelines},
+    pipeline::{DEPTH_FORMAT, EdlPipeline, PointPipelinePair, PointPipelines},
     targets::{DepthTarget, PickTarget, RenderTargets},
 };
 
@@ -35,6 +39,7 @@ pub struct RendererConfig {
     color_format: wgpu::TextureFormat,
     limits: RenderLimits,
     eye_dome_lighting: Option<EyeDomeLighting>,
+    point_footprint: PointFootprint,
 }
 
 impl RendererConfig {
@@ -45,6 +50,7 @@ impl RendererConfig {
             color_format,
             limits,
             eye_dome_lighting: None,
+            point_footprint: PointFootprint::SingleSample,
         }
     }
 
@@ -53,6 +59,16 @@ impl RendererConfig {
     #[must_use]
     pub const fn with_eye_dome_lighting(mut self, config: EyeDomeLighting) -> Self {
         self.eye_dome_lighting = Some(config);
+        self
+    }
+
+    /// Requests one immutable Point-footprint policy.
+    ///
+    /// Four-sample coverage falls back explicitly for an unsupported target or
+    /// a viewport outside the bounded resource envelope.
+    #[must_use]
+    pub const fn with_point_footprint(mut self, point_footprint: PointFootprint) -> Self {
+        self.point_footprint = point_footprint;
         self
     }
 
@@ -66,6 +82,12 @@ impl RendererConfig {
     #[must_use]
     pub const fn limits(self) -> RenderLimits {
         self.limits
+    }
+
+    /// Returns the requested Point-footprint policy.
+    #[must_use]
+    pub const fn point_footprint(self) -> PointFootprint {
+        self.point_footprint
     }
 }
 
@@ -122,12 +144,13 @@ pub enum DepthCueError {
     InvalidRadius,
 }
 
-/// Runtime disposition of the optional eye-dome lighting path.
+/// Renderer-wide capability disposition of the optional eye-dome path.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DepthCueStatus {
     /// The caller explicitly left the depth cue disabled.
     Disabled,
-    /// Eye-dome lighting is active.
+    /// Eye-dome lighting is available and used unless a frame enters its
+    /// bounded Point-footprint resource fallback.
     Active,
     /// The caller enabled it, but the renderer safely uses the unenhanced path.
     UnsupportedFallback,
@@ -142,6 +165,7 @@ pub struct FrameReport {
     resident_bytes: u64,
     encoding_time: Duration,
     transient_texture_bytes: u64,
+    eye_dome_lighting_applied: bool,
 }
 
 impl FrameReport {
@@ -181,6 +205,16 @@ impl FrameReport {
     pub const fn transient_texture_bytes(self) -> u64 {
         self.transient_texture_bytes
     }
+
+    /// Returns whether eye-dome lighting was actually encoded for this frame.
+    ///
+    /// This may be false while [`WgpuRenderer::depth_cue_status`] reports
+    /// [`DepthCueStatus::Active`] when the frame's Point footprint uses its
+    /// bounded [`PointFootprintStatus::ResourceFallback`] path.
+    #[must_use]
+    pub const fn eye_dome_lighting_applied(self) -> bool {
+        self.eye_dome_lighting_applied
+    }
 }
 
 /// An exact GPU-resource snapshot of one frame recorded by a [`WgpuRenderer`].
@@ -219,11 +253,13 @@ pub struct WgpuRenderer {
     targets: RenderTargets,
     pick_table: Option<Arc<PickTable>>,
     eye_dome: EyeDomeState,
+    point_footprint: PointFootprintPlan,
 }
 
 enum EyeDomeState {
     Inactive(DepthCueStatus),
     Active {
+        config: EyeDomeLighting,
         pipeline: EdlPipeline,
         uniform_buffer: wgpu::Buffer,
     },
@@ -239,6 +275,24 @@ impl EyeDomeState {
 
     const fn is_active(&self) -> bool {
         matches!(self, Self::Active { .. })
+    }
+
+    fn uniform_upload(&self, device: &wgpu::Device, clear_alpha: f32) -> Option<wgpu::Buffer> {
+        let Self::Active { config, .. } = self else {
+            return None;
+        };
+        Some(
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("punctra eye-dome frame uniform upload"),
+                contents: bytemuck::bytes_of(&EdlUniform {
+                    strength: config.strength(),
+                    radius_pixels: config.radius_pixels(),
+                    clear_alpha,
+                    _padding: 0,
+                }),
+                usage: wgpu::BufferUsages::COPY_SRC,
+            }),
+        )
     }
 }
 
@@ -268,15 +322,17 @@ impl WgpuRenderer {
 
         let eye_dome = match (depth_cue_status(device, config), config.eye_dome_lighting) {
             (DepthCueStatus::Active, Some(cue)) => EyeDomeState::Active {
+                config: cue,
                 pipeline: EdlPipeline::new(device, config.color_format),
                 uniform_buffer: device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some("punctra eye-dome uniform"),
                     contents: bytemuck::bytes_of(&EdlUniform {
                         strength: cue.strength(),
                         radius_pixels: cue.radius_pixels(),
-                        _padding: [0; 2],
+                        clear_alpha: 1.0,
+                        _padding: 0,
                     }),
-                    usage: wgpu::BufferUsages::UNIFORM,
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                 }),
             },
             (DepthCueStatus::Disabled, _) => EyeDomeState::Inactive(DepthCueStatus::Disabled),
@@ -285,7 +341,18 @@ impl WgpuRenderer {
             }
         };
         let edl_active = eye_dome.is_active();
-        let pipelines = PointPipelines::new(device, config.color_format, edl_active);
+        let point_footprint = PointFootprintPlan::new(
+            device,
+            config.color_format,
+            config.point_footprint,
+            edl_active,
+        );
+        let pipelines = PointPipelines::new(
+            device,
+            config.color_format,
+            edl_active,
+            point_footprint.creates_multisample_pipelines(),
+        );
         let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("punctra camera uniform"),
             contents: bytemuck::bytes_of(&CameraUniform::zeroed()),
@@ -305,17 +372,45 @@ impl WgpuRenderer {
             camera_buffer,
             camera_bind_group,
             batches: BTreeMap::new(),
-            targets: RenderTargets::new(edl_active.then_some(config.color_format)),
+            targets: RenderTargets::new(
+                config.color_format,
+                edl_active.then_some(config.color_format),
+            ),
             pick_table: None,
             eye_dome,
+            point_footprint,
         })
     }
 
     /// Returns whether the requested eye-dome path is disabled, active, or
-    /// using its explicit unenhanced fallback.
+    /// using its explicit capability fallback.
+    ///
+    /// This is renderer-wide capability status. A frame whose Point footprint
+    /// cannot retain its complete eye-dome and pick target set within the exact
+    /// transient ceiling suppresses eye-dome staging for that frame; this method
+    /// continues to report [`DepthCueStatus::Active`].
     #[must_use]
     pub const fn depth_cue_status(&self) -> DepthCueStatus {
         self.eye_dome.status()
+    }
+
+    /// Returns the Point-footprint path selected for one physical viewport.
+    ///
+    /// Selection is a pure preflight result: it does not allocate targets and
+    /// remains unchanged before and after rendering the same viewport.
+    #[must_use]
+    pub fn point_footprint_status(&self, viewport: Viewport) -> PointFootprintStatus {
+        self.point_footprint.status(viewport)
+    }
+
+    /// Returns the exact bytes retained by the renderer's current transient
+    /// color, depth, and pick targets.
+    ///
+    /// The value changes lazily as rendering and picking allocate targets for
+    /// the current viewport, and returns zero before any target is allocated.
+    #[must_use]
+    pub fn transient_texture_bytes(&self) -> u64 {
+        self.targets.transient_texture_bytes()
     }
 
     /// Returns the number of resident Points currently carrying the highlight
@@ -418,6 +513,14 @@ impl WgpuRenderer {
         let snapshot = self.state.snapshot();
         let active_view_generation =
             self.require_active_view_generation(frame.view_generation())?;
+        let viewport = frame.viewport();
+        if !fallback_fits_transient_ceiling(viewport) {
+            return Err(RendererError::TransientTextureLimitExceeded {
+                viewport: viewport.dimensions(),
+                requested_bytes: fallback_transient_bytes(viewport).unwrap_or(u64::MAX),
+                max_bytes: crate::footprint::MAX_TRANSIENT_TEXTURE_BYTES,
+            });
+        }
         let batches = self.recorded_batches(frame.camera());
         let pick_table = Arc::clone(
             self.pick_table
@@ -425,55 +528,30 @@ impl WgpuRenderer {
                 .ok_or(RendererError::PickMetadataUnavailable)?,
         );
 
-        let viewport = frame.viewport();
+        let point_footprint_status = self.point_footprint_status(viewport);
+        let eye_dome_lighting_applied =
+            self.eye_dome.is_active() && self.point_footprint.allows_eye_dome(viewport);
         self.record_frame_uniforms(
             encoder,
             frame,
             frame.style().display_size_pixels(),
             &batches,
         )?;
-
-        let clear = frame.style().clear_color();
-        if let (
-            EyeDomeState::Active {
-                pipeline: edl_pipeline,
-                uniform_buffer: edl_uniform,
-            },
-            Some(eye_dome_depth_pipeline),
-        ) = (&self.eye_dome, self.pipelines.eye_dome_depth.as_ref())
-        {
-            let (depth, color, edl_bind_group) =
-                self.targets
-                    .eye_dome(&self.device, viewport, &edl_pipeline.layout, edl_uniform);
-            record_point_pass(
-                encoder,
-                color.view(),
-                depth,
-                clear,
-                &self.pipelines,
-                &self.camera_bind_group,
-                &batches,
-            );
-            record_eye_dome_depth_pass(
-                encoder,
-                depth,
-                eye_dome_depth_pipeline,
-                &self.camera_bind_group,
-                &batches,
-            );
-            record_eye_dome_pass(encoder, target, edl_pipeline, edl_bind_group);
-        } else {
-            let depth = self.targets.depth(&self.device, viewport);
-            record_point_pass(
-                encoder,
-                target,
-                depth,
-                clear,
-                &self.pipelines,
-                &self.camera_bind_group,
-                &batches,
-            );
-        }
+        let nominal_camera_upload = eye_dome_lighting_applied.then(|| {
+            self.camera_uniform_upload(
+                frame,
+                frame.style().default_size_pixels(),
+                "punctra nominal visibility camera upload",
+            )
+        });
+        self.record_frame_passes(
+            encoder,
+            target,
+            frame,
+            &batches,
+            point_footprint_status,
+            nominal_camera_upload.as_ref(),
+        );
         let transient_texture_bytes = self.targets.transient_texture_bytes();
 
         let report = FrameReport {
@@ -483,6 +561,7 @@ impl WgpuRenderer {
             resident_bytes: snapshot.resident().estimated_gpu_bytes(),
             encoding_time: started_at.elapsed(),
             transient_texture_bytes,
+            eye_dome_lighting_applied,
         };
         Ok(RecordedFrame {
             renderer: Arc::clone(&self.identity),
@@ -491,6 +570,123 @@ impl WgpuRenderer {
             pick_table,
             report,
         })
+    }
+
+    #[allow(
+        clippy::too_many_lines,
+        reason = "the frame pass owns the complete EDL and fallback target-selection matrix"
+    )]
+    fn record_frame_passes(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        target: &wgpu::TextureView,
+        frame: &Frame,
+        batches: &[RecordedBatch],
+        point_footprint_status: PointFootprintStatus,
+        nominal_camera_upload: Option<&wgpu::Buffer>,
+    ) {
+        let viewport = frame.viewport();
+        let multisample = (point_footprint_status == PointFootprintStatus::Multisample4x)
+            .then_some(self.pipelines.multisample.as_ref())
+            .flatten();
+        let mut pass = FramePass {
+            encoder,
+            target,
+            clear: frame.style().clear_color(),
+            camera_buffer: &self.camera_buffer,
+            camera_bind_group: &self.camera_bind_group,
+            batches,
+        };
+        let clear_color = frame.style().clear_color();
+        #[allow(
+            clippy::cast_possible_truncation,
+            reason = "the validated alpha is inside 0..=1"
+        )]
+        let clear_alpha = clear_color[3] as f32;
+        let eye_dome_lighting_applied = nominal_camera_upload.is_some();
+        let edl_uniform_upload = eye_dome_lighting_applied
+            .then(|| self.eye_dome.uniform_upload(&self.device, clear_alpha))
+            .flatten();
+        if point_footprint_status == PointFootprintStatus::ResourceFallback {
+            let depth = self.targets.single_sample_depth(&self.device, viewport);
+            pass.record_points(target, None, depth, &self.pipelines.single_sample, false);
+            return;
+        }
+        match (
+            &self.eye_dome,
+            self.pipelines.eye_dome_depth.as_ref(),
+            multisample,
+            nominal_camera_upload,
+        ) {
+            (
+                EyeDomeState::Active {
+                    pipeline,
+                    uniform_buffer,
+                    ..
+                },
+                Some(depth_pipeline),
+                Some(point_pipelines),
+                Some(nominal_camera_upload),
+            ) => {
+                let (color, depth, visibility_depth, resolved_color, bind_group) = self
+                    .targets
+                    .multisample_eye_dome(&self.device, viewport, &pipeline.layout, uniform_buffer);
+                pass.stage_edl_uniform(
+                    edl_uniform_upload
+                        .as_ref()
+                        .expect("active eye-dome frames stage their uniform"),
+                    uniform_buffer,
+                );
+                pass.record_points(
+                    color.view(),
+                    Some(resolved_color.view()),
+                    depth,
+                    point_pipelines,
+                    true,
+                );
+                pass.stage_camera_uniform(nominal_camera_upload);
+                pass.record_eye_dome_depth(visibility_depth, depth_pipeline);
+                pass.record_eye_dome(pipeline, bind_group);
+            }
+            (
+                EyeDomeState::Active {
+                    pipeline,
+                    uniform_buffer,
+                    ..
+                },
+                Some(depth_pipeline),
+                None,
+                Some(nominal_camera_upload),
+            ) => {
+                let (depth, color, bind_group) =
+                    self.targets
+                        .eye_dome(&self.device, viewport, &pipeline.layout, uniform_buffer);
+                pass.stage_edl_uniform(
+                    edl_uniform_upload
+                        .as_ref()
+                        .expect("active eye-dome frames stage their uniform"),
+                    uniform_buffer,
+                );
+                pass.record_points(
+                    color.view(),
+                    None,
+                    depth,
+                    &self.pipelines.single_sample,
+                    true,
+                );
+                pass.stage_camera_uniform(nominal_camera_upload);
+                pass.record_eye_dome_depth(depth, depth_pipeline);
+                pass.record_eye_dome(pipeline, bind_group);
+            }
+            (_, _, Some(point_pipelines), _) => {
+                let (color, depth) = self.targets.multisample(&self.device, viewport);
+                pass.record_points(color.view(), Some(target), depth, point_pipelines, false);
+            }
+            (_, _, None, _) => {
+                let depth = self.targets.single_sample_depth(&self.device, viewport);
+                pass.record_points(target, None, depth, &self.pipelines.single_sample, false);
+            }
+        }
     }
 
     /// Records a provisional point-ID pass and asynchronous one-pixel readback.
@@ -528,7 +724,11 @@ impl WgpuRenderer {
             frame.style().default_size_pixels(),
             &recorded_frame.batches,
         )?;
-        let (depth, pick_target) = self.targets.depth_and_pick(&self.device, viewport);
+        let separate_pick_depth =
+            self.point_footprint_status(viewport) == PointFootprintStatus::Multisample4x;
+        let (depth, pick_target) =
+            self.targets
+                .depth_and_pick(&self.device, viewport, separate_pick_depth);
         Self::record_pick_pass(
             encoder,
             pick_target,
@@ -673,18 +873,8 @@ impl WgpuRenderer {
     ) -> Result<(), RendererError> {
         let staging =
             preflight_frame_uniform_staging(batches.len(), self.device.limits().max_buffer_size)?;
-        let viewport = frame.viewport();
-        let viewport_f32 = viewport_as_f32(viewport);
-        let style = frame.style();
         let camera = frame.camera();
-        let camera_uniform = CameraUniform {
-            view_projection: frame.view_projection().to_cols_array_2d(),
-            viewport_size: viewport_f32,
-            default_point_size: point_size_pixels,
-            _padding: 0.0,
-            highlight_color: style.highlight_color(),
-            _highlight_padding: 0.0,
-        };
+        let camera_uniform = frame_camera_uniform(frame, point_size_pixels);
         let eye = camera.eye();
         let camera_bytes = bytemuck::bytes_of(&camera_uniform);
         let mut upload_bytes = Vec::with_capacity(staging.allocation_capacity);
@@ -729,6 +919,20 @@ impl WgpuRenderer {
             );
         }
         Ok(())
+    }
+
+    fn camera_uniform_upload(
+        &self,
+        frame: &Frame,
+        point_size_pixels: f32,
+        label: &'static str,
+    ) -> wgpu::Buffer {
+        self.device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(label),
+                contents: bytemuck::bytes_of(&frame_camera_uniform(frame, point_size_pixels)),
+                usage: wgpu::BufferUsages::COPY_SRC,
+            })
     }
 }
 
@@ -850,6 +1054,84 @@ impl GpuBatch {
     }
 }
 
+struct FramePass<'a> {
+    encoder: &'a mut wgpu::CommandEncoder,
+    target: &'a wgpu::TextureView,
+    clear: [f64; 4],
+    camera_buffer: &'a wgpu::Buffer,
+    camera_bind_group: &'a wgpu::BindGroup,
+    batches: &'a [RecordedBatch],
+}
+
+impl FramePass<'_> {
+    fn stage_camera_uniform(&mut self, upload: &wgpu::Buffer) {
+        self.encoder.copy_buffer_to_buffer(
+            upload,
+            0,
+            self.camera_buffer,
+            0,
+            u64::try_from(size_of::<CameraUniform>())
+                .expect("CameraUniform size always fits a wgpu buffer address"),
+        );
+    }
+
+    fn record_points(
+        &mut self,
+        target: &wgpu::TextureView,
+        resolve_target: Option<&wgpu::TextureView>,
+        depth: &DepthTarget,
+        pipelines: &PointPipelinePair,
+        transparent_clear_alpha: bool,
+    ) {
+        let clear = if transparent_clear_alpha {
+            [self.clear[0], self.clear[1], self.clear[2], 0.0]
+        } else {
+            self.clear
+        };
+        record_point_pass(
+            self.encoder,
+            PointPassDescriptor {
+                target,
+                resolve_target,
+                depth,
+                clear,
+                pipelines,
+                camera_bind_group: self.camera_bind_group,
+                batches: self.batches,
+            },
+        );
+    }
+
+    fn stage_edl_uniform(&mut self, upload: &wgpu::Buffer, destination: &wgpu::Buffer) {
+        self.encoder.copy_buffer_to_buffer(
+            upload,
+            0,
+            destination,
+            0,
+            u64::try_from(size_of::<EdlUniform>())
+                .expect("EdlUniform size always fits a wgpu buffer address"),
+        );
+    }
+
+    fn record_eye_dome_depth(&mut self, depth: &DepthTarget, pipeline: &wgpu::RenderPipeline) {
+        record_eye_dome_depth_pass(
+            self.encoder,
+            depth,
+            pipeline,
+            self.camera_bind_group,
+            self.batches,
+        );
+    }
+
+    fn record_eye_dome(
+        &mut self,
+        pipeline: &crate::pipeline::EdlPipeline,
+        bind_group: &wgpu::BindGroup,
+    ) {
+        record_eye_dome_pass(self.encoder, self.target, pipeline, bind_group);
+    }
+}
+
 fn batch_world_center(world_origin: [f64; 3], points: &[GpuPoint]) -> [f64; 3] {
     let mut minimum = points[0].position;
     let mut maximum = points[0].position;
@@ -891,25 +1173,28 @@ fn record_point_batches<'pass>(
     }
 }
 
-fn record_point_pass(
-    encoder: &mut wgpu::CommandEncoder,
-    target: &wgpu::TextureView,
-    depth: &DepthTarget,
+#[derive(Clone, Copy)]
+struct PointPassDescriptor<'a> {
+    target: &'a wgpu::TextureView,
+    resolve_target: Option<&'a wgpu::TextureView>,
+    depth: &'a DepthTarget,
     clear: [f64; 4],
-    pipelines: &PointPipelines,
-    camera_bind_group: &wgpu::BindGroup,
-    batches: &[RecordedBatch],
-) {
+    pipelines: &'a PointPipelinePair,
+    camera_bind_group: &'a wgpu::BindGroup,
+    batches: &'a [RecordedBatch],
+}
+
+fn record_point_pass(encoder: &mut wgpu::CommandEncoder, descriptor: PointPassDescriptor<'_>) {
     let color_attachments = [Some(wgpu::RenderPassColorAttachment {
-        view: target,
+        view: descriptor.target,
         depth_slice: None,
-        resolve_target: None,
+        resolve_target: descriptor.resolve_target,
         ops: wgpu::Operations {
             load: wgpu::LoadOp::Clear(wgpu::Color {
-                r: clear[0],
-                g: clear[1],
-                b: clear[2],
-                a: clear[3],
+                r: descriptor.clear[0],
+                g: descriptor.clear[1],
+                b: descriptor.clear[2],
+                a: descriptor.clear[3],
             }),
             store: wgpu::StoreOp::Store,
         },
@@ -918,7 +1203,7 @@ fn record_point_pass(
         label: Some("punctra point pass"),
         color_attachments: &color_attachments,
         depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-            view: depth.view(),
+            view: descriptor.depth.view(),
             depth_ops: Some(wgpu::Operations {
                 load: wgpu::LoadOp::Clear(1.0),
                 store: wgpu::StoreOp::Store,
@@ -931,17 +1216,19 @@ fn record_point_pass(
     });
     record_point_batches(
         &mut pass,
-        &pipelines.draw,
-        camera_bind_group,
-        batches
+        &descriptor.pipelines.opaque,
+        descriptor.camera_bind_group,
+        descriptor
+            .batches
             .iter()
             .filter(|batch| batch.presentation_weight == PresentationWeight::OPAQUE),
     );
     record_point_batches(
         &mut pass,
-        &pipelines.draw_translucent,
-        camera_bind_group,
-        batches
+        &descriptor.pipelines.translucent,
+        descriptor.camera_bind_group,
+        descriptor
+            .batches
             .iter()
             .filter(|batch| batch.presentation_weight != PresentationWeight::OPAQUE),
     );
@@ -1107,6 +1394,18 @@ pub enum RendererError {
         /// The current physical viewport.
         viewport: [u32; 2],
     },
+    /// Renderer-owned fallback targets would exceed the transient texture ceiling.
+    #[error(
+        "fallback targets for viewport {viewport:?} need {requested_bytes} bytes, exceeding the renderer ceiling {max_bytes}"
+    )]
+    TransientTextureLimitExceeded {
+        /// The rejected physical viewport.
+        viewport: [u32; 2],
+        /// Exact depth-plus-pick bytes required by the fallback path.
+        requested_bytes: u64,
+        /// Maximum renderer-owned transient texture bytes.
+        max_bytes: u64,
+    },
     /// Internal generation pick metadata was unexpectedly absent.
     #[error("active View generation has no pick metadata")]
     PickMetadataUnavailable,
@@ -1143,6 +1442,17 @@ fn highlights(state: &RenderStateModel) -> BTreeSet<PointId> {
 #[allow(clippy::cast_precision_loss)]
 fn viewport_as_f32(viewport: Viewport) -> [f32; 2] {
     [viewport.width() as f32, viewport.height() as f32]
+}
+
+fn frame_camera_uniform(frame: &Frame, point_size_pixels: f32) -> CameraUniform {
+    CameraUniform {
+        view_projection: frame.view_projection().to_cols_array_2d(),
+        viewport_size: viewport_as_f32(frame.viewport()),
+        default_point_size: point_size_pixels,
+        _padding: 0.0,
+        highlight_color: frame.style().highlight_color(),
+        _highlight_padding: 0.0,
+    }
 }
 
 fn camera_relative_axis(
@@ -1217,6 +1527,390 @@ fn validate_batch_buffer_size(
 }
 
 #[cfg(test)]
+pub(crate) mod point_footprint_test_support {
+    use std::{fmt::Write as _, time::Duration};
+
+    use render_protocol::{BatchVersion, PointId, RenderPoint, SourceId, ViewId};
+    use serde_json::Value;
+    use sha2::{Digest, Sha256};
+
+    use super::*;
+    use crate::{
+        PickHit, PickPoll, PointStyle,
+        footprint::MAX_TRANSIENT_TEXTURE_BYTES,
+        gpu_support::{GpuContext, Rgba8Image, Rgba8Target, with_gpu},
+    };
+
+    const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
+    const SINGLE_SAMPLE_VIEWPORT: [u32; 2] = [64, 64];
+    const CLEAR: [u8; 4] = [0, 0, 0, 255];
+    const SOURCE: SourceId = SourceId::new([0x21; 32]);
+    const POINT_ORDINALS: [u64; 2] = [1_866, 2_005];
+    const BATCH_KEY: u64 = 4;
+    const BATCH_VERSION: u64 = 2;
+    const VIEW_GENERATION: u64 = 1;
+
+    #[derive(Clone, Copy)]
+    pub(crate) enum TestFootprintPath {
+        SingleSample,
+        UnsupportedFallback,
+    }
+
+    pub(crate) struct TestFootprintMeasurement {
+        pub(crate) environment: Value,
+        pub(crate) facts: Value,
+    }
+
+    pub(crate) fn measure(path: TestFootprintPath) -> TestFootprintMeasurement {
+        let mut proof = None;
+        with_gpu(|gpu| proof = Some(measure_with_gpu(gpu, path)));
+        proof.expect("private Point-footprint evidence requires a GPU adapter")
+    }
+
+    pub(crate) fn assert_resource_bounded_single_sample_eye_dome() {
+        with_gpu(|gpu| {
+            let limits = RenderLimits::new(1_024 * 1_024, 1_024, 16);
+            let eye_dome = EyeDomeLighting::new(1.0, 1).unwrap();
+            let config = RendererConfig::new(FORMAT, limits).with_eye_dome_lighting(eye_dome);
+            let mut renderer = configured_fixture_renderer(gpu, config);
+            renderer.point_footprint = PointFootprintPlan::forced_for_test(
+                PointFootprint::SingleSample,
+                true,
+                48,
+                MAX_TRANSIENT_TEXTURE_BYTES,
+            );
+            let viewport = SINGLE_SAMPLE_VIEWPORT;
+            let pixels = u64::from(viewport[0]) * u64::from(viewport[1]);
+            let frame = fixture_frame(viewport);
+
+            let (recorded, image) = render(gpu, &mut renderer, &frame, viewport);
+            assert_eq!(
+                renderer.point_footprint_status(frame.viewport()),
+                PointFootprintStatus::SingleSample
+            );
+            assert!(!recorded.report().eye_dome_lighting_applied());
+            assert_eq!(recorded.report().transient_texture_bytes(), pixels * 4);
+
+            let probe_pixels = fixture_probe_pixels(&image);
+            for (&point_ordinal, &pixel) in POINT_ORDINALS.iter().zip(&probe_pixels) {
+                let hit = pick(gpu, &mut renderer, &recorded, pixel)
+                    .expect("the resource-bounded SingleSample path should remain pickable");
+                assert_eq!(identity_json(&hit), fixture_identity(point_ordinal));
+            }
+            assert_eq!(renderer.transient_texture_bytes(), pixels * 8);
+        });
+    }
+
+    fn measure_with_gpu(gpu: &GpuContext, path: TestFootprintPath) -> TestFootprintMeasurement {
+        let mut reference = fixture_renderer(gpu, TestFootprintPath::SingleSample);
+        let mut observed = fixture_renderer(gpu, path);
+        let viewport = SINGLE_SAMPLE_VIEWPORT;
+        let frame = fixture_frame(viewport);
+        let expected_status = match path {
+            TestFootprintPath::SingleSample => PointFootprintStatus::SingleSample,
+            TestFootprintPath::UnsupportedFallback => PointFootprintStatus::UnsupportedFallback,
+        };
+        assert_eq!(
+            observed.point_footprint_status(frame.viewport()),
+            expected_status
+        );
+        assert!(observed.pipelines.multisample.is_none());
+
+        let (reference_frame, reference_image) = render(gpu, &mut reference, &frame, viewport);
+        let (observed_frame, observed_image) = render(gpu, &mut observed, &frame, viewport);
+        let pixels = u64::from(viewport[0]) * u64::from(viewport[1]);
+        assert_eq!(
+            observed_frame.report().transient_texture_bytes(),
+            pixels * 4
+        );
+        let reference_mask = foreground_mask(&reference_image, viewport);
+        let observed_mask = foreground_mask(&observed_image, viewport);
+        let reference_sha256 = sha256_hex(&reference_mask);
+        let observed_sha256 = sha256_hex(&observed_mask);
+        assert_eq!(reference_mask, observed_mask);
+
+        let probe_pixels = fixture_probe_pixels(&reference_image);
+        let mut observed_identities = Vec::with_capacity(POINT_ORDINALS.len());
+        let mut observed_pick_probes = Vec::with_capacity(POINT_ORDINALS.len());
+        for (&point_ordinal, &pixel) in POINT_ORDINALS.iter().zip(&probe_pixels) {
+            let expected_hit = fixture_identity(point_ordinal);
+            let reference_hit = pick(gpu, &mut reference, &reference_frame, pixel)
+                .expect("the SingleSample reference must preserve every preferred pick identity");
+            assert_eq!(identity_json(&reference_hit), expected_hit);
+            let observed_hit = pick(gpu, &mut observed, &observed_frame, pixel)
+                .expect("the selected fallback path must preserve every preferred pick identity");
+            let observed_identity = identity_json(&observed_hit);
+            let observed_pick_probe = pick_probe_json(&observed_hit);
+            assert_eq!(observed_identity, expected_hit);
+            assert_eq!(observed_pick_probe, fixture_pick_probe(point_ordinal));
+            observed_identities.push(observed_identity);
+            observed_pick_probes.push(observed_pick_probe);
+        }
+        assert_eq!(observed.transient_texture_bytes(), pixels * 8);
+
+        let adapter_info = gpu.device.adapter_info();
+        let adapter_name = if adapter_info.name.trim().is_empty() {
+            "local wgpu adapter".to_owned()
+        } else {
+            adapter_info.name
+        };
+        TestFootprintMeasurement {
+            environment: serde_json::json!({
+                "operating_system": std::env::consts::OS,
+                "adapter_name": adapter_name,
+                "backend": format!("{:?}", adapter_info.backend),
+            }),
+            facts: serde_json::json!({
+                "hard_circle_mask": {
+                    "width": viewport[0],
+                    "height": viewport[1],
+                    "byte_length": reference_mask.len(),
+                    "reference_sha256": reference_sha256,
+                    "observed_sha256": observed_sha256,
+                    "equivalent": true,
+                },
+                "pick_probes": observed_pick_probes,
+                "nominal_pick_identity": {
+                    "expected": fixture_identity(POINT_ORDINALS[0]),
+                    "observed": observed_identities[0],
+                    "matched": true,
+                },
+            }),
+        }
+    }
+
+    fn fixture_renderer(gpu: &GpuContext, path: TestFootprintPath) -> WgpuRenderer {
+        let limits = RenderLimits::new(1_024 * 1_024, 1_024, 16);
+        let config = RendererConfig::new(FORMAT, limits);
+        let mut renderer = configured_fixture_renderer(gpu, config);
+        if matches!(path, TestFootprintPath::UnsupportedFallback) {
+            renderer.point_footprint =
+                PointFootprintPlan::forced_for_test(PointFootprint::Antialiased, false, 40, 12);
+        }
+        renderer
+    }
+
+    fn configured_fixture_renderer(gpu: &GpuContext, config: RendererConfig) -> WgpuRenderer {
+        let mut renderer = WgpuRenderer::new(&gpu.device, config)
+            .expect("the private fallback fixture renderer should attach");
+        let view_generation = fixture_view_generation();
+        renderer
+            .apply(&RenderUpdate::Reset { view_generation })
+            .expect("the private fallback fixture reset should apply");
+        let points = vec![
+            RenderPoint::new(
+                [-1.0, 0.0, 0.0],
+                [255, 0, 0, 255],
+                PointId::new(SOURCE, POINT_ORDINALS[0]),
+            )
+            .expect("the first private fallback fixture point should be valid"),
+            RenderPoint::new(
+                [1.0, 0.0, 0.0],
+                [0, 255, 255, 255],
+                PointId::new(SOURCE, POINT_ORDINALS[1]),
+            )
+            .expect("the second private fallback fixture point should be valid"),
+        ];
+        let batch = PointBatch::new(
+            view_generation,
+            BatchKey::new(BATCH_KEY),
+            BatchVersion::new(BATCH_VERSION),
+            [0.0; 3],
+            points,
+        )
+        .expect("the private fallback fixture batch should be valid");
+        renderer
+            .apply(&RenderUpdate::Upsert { batch })
+            .expect("the private fallback fixture batch should apply");
+        renderer
+    }
+
+    fn fixture_frame(viewport: [u32; 2]) -> Frame {
+        let camera = render_protocol::Camera::perspective(
+            [0.0, -5.0, 0.0],
+            [0.0; 3],
+            [0.0, 0.0, 1.0],
+            std::f32::consts::FRAC_PI_3,
+            0.1,
+            100.0,
+        )
+        .expect("the private fallback fixture camera should be valid");
+        let style = PointStyle::new(7.0, [1.0; 3], [0.0, 0.0, 0.0, 1.0])
+            .expect("the private fallback fixture style should be valid")
+            .with_display_size_pixels(18.0)
+            .expect("the private fallback display size should be valid");
+        Frame::new(
+            fixture_view_generation(),
+            camera,
+            Viewport::new(viewport[0], viewport[1]).unwrap(),
+        )
+        .expect("the private fallback fixture frame should be valid")
+        .with_style(style)
+    }
+
+    fn render(
+        gpu: &GpuContext,
+        renderer: &mut WgpuRenderer,
+        frame: &Frame,
+        viewport: [u32; 2],
+    ) -> (RecordedFrame, Rgba8Image) {
+        let target = Rgba8Target::new(
+            &gpu.device,
+            viewport,
+            FORMAT,
+            "punctra private fallback evidence target",
+        );
+        let mut encoder = gpu
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("punctra private fallback evidence encoder"),
+            });
+        let recorded = renderer
+            .render(&mut encoder, &target.view, frame)
+            .expect("the private fallback fixture should render");
+        target.encode_copy(&mut encoder);
+        let receiver = target.map_after_submit(&mut encoder);
+        gpu.queue.submit([encoder.finish()]);
+        gpu.wait();
+        (recorded, target.read(&receiver))
+    }
+
+    fn pick(
+        gpu: &GpuContext,
+        renderer: &mut WgpuRenderer,
+        frame: &RecordedFrame,
+        pixel: [u32; 2],
+    ) -> Option<PickHit> {
+        let mut encoder = gpu
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("punctra private fallback pick encoder"),
+            });
+        let mut ticket = renderer
+            .pick(&mut encoder, frame, PickRequest::new(pixel))
+            .expect("the private fallback fixture pick should encode");
+        let submission = gpu.queue.submit([encoder.finish()]);
+        gpu.wait_for_submission(
+            &submission,
+            Duration::from_secs(2),
+            "private fallback pick",
+            || match ticket
+                .poll()
+                .expect("the private fallback pick should resolve")
+            {
+                PickPoll::Ready(hit) => Some(hit),
+                PickPoll::Pending => None,
+            },
+        )
+    }
+
+    fn foreground_mask(image: &Rgba8Image, viewport: [u32; 2]) -> Vec<u8> {
+        let mut mask = Vec::with_capacity(
+            usize::try_from(u64::from(viewport[0]) * u64::from(viewport[1])).unwrap(),
+        );
+        for y in 0..viewport[1] {
+            for x in 0..viewport[0] {
+                mask.push(u8::from(image.pixel([x, y]) != CLEAR));
+            }
+        }
+        mask
+    }
+
+    fn sha256_hex(bytes: &[u8]) -> String {
+        let digest = Sha256::digest(bytes);
+        let mut encoded = String::with_capacity(64);
+        for byte in digest {
+            write!(&mut encoded, "{byte:02x}").expect("writing to a String cannot fail");
+        }
+        encoded
+    }
+
+    fn fixture_view_generation() -> ViewGenerationKey {
+        ViewGenerationKey::new(ViewId::new(22), VIEW_GENERATION)
+    }
+
+    fn fixture_probe_pixels(image: &Rgba8Image) -> [[u32; 2]; 2] {
+        [
+            color_centroid_pixel(
+                image,
+                |pixel| pixel[0] > 200 && pixel[1] < 40 && pixel[2] < 40,
+                "the preferred ordinal 1866 should render red",
+            ),
+            color_centroid_pixel(
+                image,
+                |pixel| pixel[0] < 40 && pixel[1] > 200 && pixel[2] > 200,
+                "the preferred ordinal 2005 should render cyan",
+            ),
+        ]
+    }
+
+    fn color_centroid_pixel(
+        image: &Rgba8Image,
+        predicate: impl Fn([u8; 4]) -> bool,
+        missing_message: &str,
+    ) -> [u32; 2] {
+        let mut sum = [0_u64; 2];
+        let mut count = 0_u64;
+        for y in 0..SINGLE_SAMPLE_VIEWPORT[1] {
+            for x in 0..SINGLE_SAMPLE_VIEWPORT[0] {
+                if predicate(image.pixel([x, y])) {
+                    sum[0] += u64::from(x);
+                    sum[1] += u64::from(y);
+                    count += 1;
+                }
+            }
+        }
+        assert!(count > 0, "{missing_message}");
+        [
+            u32::try_from((sum[0] + count / 2) / count).unwrap(),
+            u32::try_from((sum[1] + count / 2) / count).unwrap(),
+        ]
+    }
+
+    fn fixture_identity(point_ordinal: u64) -> Value {
+        serde_json::json!({
+            "generation": VIEW_GENERATION,
+            "source_identity": SOURCE.to_string(),
+            "batch_key": BATCH_KEY,
+            "batch_version": BATCH_VERSION,
+            "point_ordinal": point_ordinal,
+        })
+    }
+
+    fn fixture_pick_probe(point_ordinal: u64) -> Value {
+        serde_json::json!({
+            "ordinal": point_ordinal,
+            "generation": VIEW_GENERATION,
+            "source_identity": SOURCE.to_string(),
+            "batch_key": BATCH_KEY,
+            "batch_version": BATCH_VERSION,
+            "point_ordinal": point_ordinal.to_string(),
+        })
+    }
+
+    fn identity_json(hit: &PickHit) -> Value {
+        serde_json::json!({
+            "generation": hit.view_generation().generation(),
+            "source_identity": hit.point().source().to_string(),
+            "batch_key": hit.batch().get(),
+            "batch_version": hit.version().get(),
+            "point_ordinal": hit.point().ordinal(),
+        })
+    }
+
+    fn pick_probe_json(hit: &PickHit) -> Value {
+        serde_json::json!({
+            "ordinal": hit.point().ordinal(),
+            "generation": hit.view_generation().generation(),
+            "source_identity": hit.point().source().to_string(),
+            "batch_key": hit.batch().get(),
+            "batch_version": hit.version().get(),
+            "point_ordinal": hit.point().ordinal().to_string(),
+        })
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -1225,6 +1919,11 @@ mod tests {
     #[test]
     fn renderer_config_preserves_exact_equality() {
         assert_eq_implementation::<RendererConfig>();
+    }
+
+    #[test]
+    fn resource_bounded_single_sample_suppresses_eye_dome_targets() {
+        point_footprint_test_support::assert_resource_bounded_single_sample_eye_dome();
     }
 
     #[test]

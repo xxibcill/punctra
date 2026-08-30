@@ -16,6 +16,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
+import { FOOTPRINT_IMPLEMENTATION_PATHS } from "./footprint-evidence.js";
 import { loadStreamingProtocol } from "./module-loader.js";
 
 const { runStreamingOperation } = await loadStreamingProtocol("range-server-test");
@@ -25,6 +26,7 @@ const serverPath = fileURLToPath(
 );
 const webRoot = fileURLToPath(new URL("./", import.meta.url));
 const visualExportFilename = "v0.21-browser-visual-evidence.tar";
+const footprintExportFilename = "v0.22-browser-point-footprint-evidence.tar";
 const maxVisualExportBytes = 1_243_611_136;
 
 test("qualification pin endpoint binds the running checkout and verifier bytes", async () => {
@@ -65,6 +67,113 @@ test("qualification pin endpoint binds the running checkout and verifier bytes",
       },
       running: runningPins,
     });
+  } finally {
+    await stopServer(server);
+  }
+});
+
+test("point-footprint pin endpoint binds the running checkout and verifier", async () => {
+  const { server, port } = await startServer();
+  try {
+    const response = await fetch(
+      `http://127.0.0.1:${port}/qualification-footprint-pins.json`,
+    );
+    const verifierPath = fileURLToPath(
+      new URL("../../../scripts/verify-browser-point-footprint.mjs", import.meta.url),
+    );
+    const verifierBytes = await readFile(verifierPath);
+    const payload = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(payload.schema, "punctra-browser-point-footprint-verify-pins-v1");
+    assert.equal(payload.running.implementation.commit, execFileSync(
+      "git",
+      ["rev-parse", "HEAD"],
+      { cwd: fileURLToPath(new URL("../../../", import.meta.url)), encoding: "utf8" },
+    ).trim());
+    assert.deepEqual(payload.running.verifier, {
+      path: "scripts/verify-browser-point-footprint.mjs",
+      byte_length: verifierBytes.byteLength,
+      sha256: createHash("sha256").update(verifierBytes).digest("hex"),
+    });
+    assert.equal(payload.running.runtime.package_name, "@punctra/viewer");
+    assert.equal(payload.running.runtime.package_version, "0.22.0-alpha.1");
+    assert.deepEqual(
+      payload.running.runtime.artifacts.map(({ path: artifactPath }) => artifactPath),
+      [
+        "apps/browser-demo/web/package.json",
+        "apps/browser-demo/web/pkg/browser_demo.js",
+        "apps/browser-demo/web/pkg/browser_demo_bg.wasm",
+      ],
+    );
+    assert.equal(
+      payload.running.corpus.path,
+      "apps/browser-demo/web/fixtures/footprint-v1/corpus.json",
+    );
+    assert.equal(payload.running.predecessor.release, "0.21.0-alpha.1");
+    const implementationPaths = payload.running.implementation.files.map(
+      ({ path: implementationPath }) => implementationPath,
+    );
+    assert.deepEqual(
+      implementationPaths,
+      FOOTPRINT_IMPLEMENTATION_PATHS,
+      "server implementation pins must exactly match the closed evidence boundary",
+    );
+    for (const requiredPath of [
+      "apps/browser-demo/src/host.rs",
+      "apps/browser-demo/src/display.rs",
+      "apps/browser-demo/src/lib.rs",
+      "apps/browser-demo/web/footprint-artifacts.js",
+      "apps/browser-demo/web/footprint-artifacts.test.mjs",
+      "apps/browser-demo/web/footprint-corpus.test.mjs",
+      "apps/browser-demo/web/footprint-evidence.test.mjs",
+      "apps/browser-demo/web/footprint-export.test.mjs",
+      "apps/browser-demo/web/footprint-main.js",
+      "apps/browser-demo/web/footprint-qualification.js",
+      "apps/browser-demo/web/footprint-records.js",
+      "apps/browser-demo/web/footprint-records.test.mjs",
+      "apps/browser-demo/web/footprint-evidence.js",
+      "apps/browser-demo/web/footprint-runner-core.test.mjs",
+      "apps/browser-demo/web/visual-capture.js",
+      "apps/browser-demo/web/visual-corpus.test.mjs",
+      "apps/browser-demo/web/visual-footprint-metrics.test.mjs",
+      "apps/browser-demo/web/visual-provenance.js",
+      "apps/browser-demo/web/visual-rubric.js",
+      "apps/browser-demo/src/streaming.rs",
+      "apps/renderer-demo/src/appearance.rs",
+      "crates/render-wgpu/tests/offscreen.rs",
+      "crates/render-wgpu/src/eye_dome.wgsl",
+      "crates/render-wgpu/src/frame.rs",
+      "crates/render-wgpu/src/gpu.rs",
+      "crates/render-wgpu/src/pick.rs",
+      "scripts/build-browser-demo.sh",
+      "scripts/serve-browser-demo.py",
+      "scripts/verify-browser-point-footprint.mjs",
+      "crates/render-wgpu/test-support/gpu.rs",
+    ]) {
+      assert.equal(implementationPaths.includes(requiredPath), true, requiredPath);
+    }
+    assert.equal(
+      implementationPaths.includes("apps/browser-demo/web/package.json"),
+      false,
+      "package metadata must be pinned only as a runtime artifact",
+    );
+    assert.equal(
+      implementationPaths.includes("apps/browser-demo/web/pkg/browser_demo.js"),
+      false,
+      "ignored runtime JavaScript must be pinned only as a runtime artifact",
+    );
+    assert.equal(
+      implementationPaths.includes("apps/browser-demo/web/pkg/browser_demo_bg.wasm"),
+      false,
+      "ignored runtime Wasm must be pinned only as a runtime artifact",
+    );
+    const verifierImplementationPin = payload.running.implementation.files.find(
+      ({ path: implementationPath }) => (
+        implementationPath === "scripts/verify-browser-point-footprint.mjs"
+      ),
+    );
+    assert.deepEqual(verifierImplementationPin, payload.running.verifier);
+    assert.equal(payload.accepted === null || typeof payload.accepted === "object", true);
   } finally {
     await stopServer(server);
   }
@@ -128,6 +237,43 @@ test("opt-in local server persists a bounded visual evidence TAR", async () => {
       persisted,
     );
     assert.deepEqual(await readdir(exportDirectory), [visualExportFilename]);
+  } finally {
+    await stopServer(server);
+    await rm(exportDirectory, { recursive: true });
+  }
+});
+
+test("opt-in local server keeps the v0.22 footprint export separate", async () => {
+  const exportDirectory = await mkdtemp(
+    path.join(tmpdir(), "punctra-footprint-export-"),
+  );
+  const { server, port } = await startServer([
+    "--footprint-export-dir",
+    exportDirectory,
+  ]);
+  const origin = `http://127.0.0.1:${port}`;
+  const bytes = Uint8Array.of(0x75, 0x73, 0x74, 0x61, 0x72, 0x32, 0x32);
+
+  try {
+    const response = await fetch(`${origin}/qualification-footprint-export`, {
+      method: "POST",
+      headers: {
+        "Content-Length": String(bytes.byteLength),
+        "Content-Type": "application/x-tar",
+        Origin: origin,
+      },
+      body: bytes,
+    });
+    assert.equal(response.status, 201);
+    assert.deepEqual(await response.json(), {
+      schema: "punctra-browser-point-footprint-export-receipt-v1",
+      filename: footprintExportFilename,
+      path: path.join(await realpath(exportDirectory), footprintExportFilename),
+      byte_length: bytes.byteLength,
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+    });
+    assert.deepEqual(await readFile(path.join(exportDirectory, footprintExportFilename)), Buffer.from(bytes));
+    assert.deepEqual(await readdir(exportDirectory), [footprintExportFilename]);
   } finally {
     await stopServer(server);
     await rm(exportDirectory, { recursive: true });

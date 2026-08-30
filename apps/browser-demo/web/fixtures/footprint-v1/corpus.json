@@ -1,0 +1,250 @@
+{
+  "schema": "punctra-browser-point-footprint-corpus-v1",
+  "release": "0.22.0-alpha.1",
+  "predecessor": {
+    "release": "0.21.0-alpha.1",
+    "corpus": {
+      "path": "../visual-v1/corpus.json",
+      "byte_length": 28119,
+      "sha256": "f8d78105861a6822523be62c914469c98072201f2f343f290b288e607061e580"
+    },
+    "baseline_inputs": {
+      "path": "../visual-v1/baseline-inputs.json",
+      "byte_length": 5100,
+      "sha256": "f4f2a5714f17dbb1d285308d74886ea7aee63e0aa52df4dca9b01d7cb7d0993b"
+    },
+    "release_baseline": {
+      "path": "../../../../../docs/releases/v0.21-browser-visual-baseline.json",
+      "byte_length": 33876,
+      "sha256": "ce17514938a1259924e341220ec5bb90b705ede4b76668944f2a2fe95ad4b7a5"
+    },
+    "release_evidence": {
+      "path": "../../../../../docs/releases/v0.21-browser-visual-evidence.json",
+      "byte_length": 22737391,
+      "sha256": "eaee2981f4bab9a8bc36f50b7b05e453257637aa50ad82980828514d503b4bfe"
+    }
+  },
+  "policy": {
+    "requested_footprint": "antialiased",
+    "preferred_status": "multisample4x",
+    "capability_fallback_status": "unsupported_fallback",
+    "resource_fallback_status": "resource_fallback",
+    "nominal_pick_diameter_physical_pixels": 7,
+    "display_diameter": {
+      "kind": "projected_density_v1",
+      "spacing_fraction": 0.55,
+      "minimum_physical_pixels": 2,
+      "maximum_physical_pixels": 6,
+      "count_authority": "non_retired_resident_points"
+    },
+    "multisample_count": 4,
+    "maximum_multisample_physical_pixels": 1310720,
+    "renderer_transient_byte_ceiling": 67108864
+  },
+  "canonical_profile": {
+    "id": "canonical-dpr2",
+    "css_width": 320,
+    "css_height": 240,
+    "requested_device_pixel_ratio": 2,
+    "physical_width": 640,
+    "physical_height": 480,
+    "expected_status": "multisample4x",
+    "recreations": 3,
+    "quiet_frames": 30
+  },
+  "scale_profiles": [
+    {
+      "id": "focused-dpr1",
+      "css_width": 320,
+      "css_height": 240,
+      "requested_device_pixel_ratio": 1,
+      "physical_width": 320,
+      "physical_height": 240,
+      "expected_status": "multisample4x"
+    },
+    {
+      "id": "focused-dpr4",
+      "css_width": 320,
+      "css_height": 240,
+      "requested_device_pixel_ratio": 4,
+      "physical_width": 1280,
+      "physical_height": 960,
+      "expected_status": "multisample4x"
+    }
+  ],
+  "fallback_profile": {
+    "id": "resource-fallback",
+    "css_width": 640,
+    "css_height": 513,
+    "requested_device_pixel_ratio": 2,
+    "physical_width": 1280,
+    "physical_height": 1026,
+    "expected_status": "resource_fallback",
+    "capture": false
+  },
+  "canonical_trials": [
+    {
+      "id": "generated-neutral-mixed-lod-perspective",
+      "predecessor_baseline": {
+        "path": "../visual-v1/baselines/generated-neutral-mixed-lod-perspective.png",
+        "byte_length": 7391,
+        "sha256": "200422ed92fc8aff6dcb013d5957f2c1915aa88a816c0f69f0abdbc3d52c37bd"
+      },
+      "predecessor_timing": {
+        "maximum_recreation_frame_interval_p95_milliseconds": 34,
+        "maximum_recreation_frame_submission_p95_milliseconds": 0.6000000014901161
+      }
+    },
+    {
+      "id": "generated-elevation-layered-orthographic",
+      "predecessor_baseline": {
+        "path": "../visual-v1/baselines/generated-elevation-layered-orthographic.png",
+        "byte_length": 18869,
+        "sha256": "a63dd46aa271f7440dd1787d059e0a2826a4a6b2d276654c9f2b95d804812148"
+      },
+      "predecessor_timing": {
+        "maximum_recreation_frame_interval_p95_milliseconds": 34.19999999552965,
+        "maximum_recreation_frame_submission_p95_milliseconds": 0.6999999955296516
+      }
+    },
+    {
+      "id": "generated-rgb-hdr-perspective",
+      "predecessor_baseline": {
+        "path": "../visual-v1/baselines/generated-rgb-hdr-perspective.png",
+        "byte_length": 15810,
+        "sha256": "d5afb1249999329121ecf41eca73ae29c51cac29035e81f6e6a71bb4bde9eca7"
+      },
+      "predecessor_timing": {
+        "maximum_recreation_frame_interval_p95_milliseconds": 34.29999999701977,
+        "maximum_recreation_frame_submission_p95_milliseconds": 0.6000000014901161
+      }
+    },
+    {
+      "id": "generated-intensity-sparse-orthographic",
+      "predecessor_baseline": {
+        "path": "../visual-v1/baselines/generated-intensity-sparse-orthographic.png",
+        "byte_length": 25047,
+        "sha256": "4b947d9becc14f451c705ec7448e3349507a20623880e34059f4d6e324577479"
+      },
+      "predecessor_timing": {
+        "maximum_recreation_frame_interval_p95_milliseconds": 34.100000001490116,
+        "maximum_recreation_frame_submission_p95_milliseconds": 0.30000000447034836
+      }
+    },
+    {
+      "id": "generated-classification-selection-perspective",
+      "predecessor_baseline": {
+        "path": "../visual-v1/baselines/generated-classification-selection-perspective.png",
+        "byte_length": 16982,
+        "sha256": "ff2d787546a3f568123152ac2da58b48dae59245f7eaadf0d30ee5a30dc0e335"
+      },
+      "predecessor_timing": {
+        "maximum_recreation_frame_interval_p95_milliseconds": 34.29999999701977,
+        "maximum_recreation_frame_submission_p95_milliseconds": 0.6000000014901161
+      }
+    },
+    {
+      "id": "autzen-rgb-perspective",
+      "predecessor_baseline": {
+        "path": "../visual-v1/baselines/autzen-rgb-perspective.png",
+        "byte_length": 15337,
+        "sha256": "7cdb8f7e2b8730e60504d9a4d45f772111ed3ec0fe05740ab1c444eba71a8cc2"
+      },
+      "predecessor_timing": {
+        "maximum_recreation_frame_interval_p95_milliseconds": 33.899999998509884,
+        "maximum_recreation_frame_submission_p95_milliseconds": 0.6000000014901161
+      }
+    },
+    {
+      "id": "autzen-classification-perspective",
+      "predecessor_baseline": {
+        "path": "../visual-v1/baselines/autzen-classification-perspective.png",
+        "byte_length": 5387,
+        "sha256": "5bbf4163a7f8f79aa2dbc45b1b619f9dfab6531326acd5debab7aa5bf2ab4437"
+      },
+      "predecessor_timing": {
+        "maximum_recreation_frame_interval_p95_milliseconds": 33.600000001490116,
+        "maximum_recreation_frame_submission_p95_milliseconds": 0.6999999955296516
+      }
+    },
+    {
+      "id": "autzen-intensity-perspective",
+      "predecessor_baseline": {
+        "path": "../visual-v1/baselines/autzen-intensity-perspective.png",
+        "byte_length": 13999,
+        "sha256": "d13be19a007924e543be1c217e2515980d12bde7ab0c49efa30657c16e9bb166"
+      },
+      "predecessor_timing": {
+        "maximum_recreation_frame_interval_p95_milliseconds": 34.29999999701977,
+        "maximum_recreation_frame_submission_p95_milliseconds": 0.6999999955296516
+      }
+    },
+    {
+      "id": "autzen-elevation-perspective",
+      "predecessor_baseline": {
+        "path": "../visual-v1/baselines/autzen-elevation-perspective.png",
+        "byte_length": 10516,
+        "sha256": "22a72d45da0b2fd75314356b9c65d1604851245307dca988e1e22d87636f8c0b"
+      },
+      "predecessor_timing": {
+        "maximum_recreation_frame_interval_p95_milliseconds": 33.900000005960464,
+        "maximum_recreation_frame_submission_p95_milliseconds": 0.6999999955296516
+      }
+    }
+  ],
+  "focused_trials": [
+    {
+      "id": "generated-neutral-mixed-lod-perspective",
+      "isolated_ordinals": [1866, 1913, 1961],
+      "dense_regions": [
+        { "x": 128, "y": 196, "width": 182, "height": 142 },
+        { "x": 330, "y": 170, "width": 132, "height": 130 }
+      ],
+      "thin_feature_regions": [
+        { "x": 166, "y": 146, "width": 24, "height": 24 },
+        { "x": 306, "y": 142, "width": 24, "height": 24 },
+        { "x": 451, "y": 143, "width": 24, "height": 24 }
+      ]
+    },
+    {
+      "id": "generated-intensity-sparse-orthographic",
+      "isolated_ordinals": [1913, 1962],
+      "dense_regions": [
+        { "x": 88, "y": 170, "width": 224, "height": 190 },
+        { "x": 336, "y": 124, "width": 220, "height": 244 }
+      ],
+      "thin_feature_regions": [
+        { "x": 305, "y": 77, "width": 24, "height": 24 },
+        { "x": 308, "y": 281, "width": 24, "height": 24 }
+      ]
+    },
+    {
+      "id": "generated-classification-selection-perspective",
+      "isolated_ordinals": [1866, 2005],
+      "nominal_pick_ordinals": [1866, 2005],
+      "thin_feature_regions": [
+        { "x": 166, "y": 146, "width": 24, "height": 24 },
+        { "x": 308, "y": 145, "width": 24, "height": 24 }
+      ]
+    }
+  ],
+  "metric_limits": {
+    "ideal_supersample_axis": 16,
+    "coverage_rmse": 0.18,
+    "minimum_predecessor_rmse_improvement_fraction": 0.2,
+    "maximum_outer_leakage_pixels": 0,
+    "maximum_centroid_distance_pixels": 1,
+    "foreground_fraction_predecessor_ratio": { "minimum": 0.5, "maximum": 1.05 },
+    "dense_solid_block_predecessor_ratio": 1.02,
+    "maximum_dense_solid_2x2_fraction": 0.8,
+    "minimum_component_clear_separation_pixels": 2,
+    "maximum_feature_centroid_distance_pixels": 1
+  },
+  "timing_limits": {
+    "frame_interval_p95_milliseconds": 50,
+    "frame_submission_p95_milliseconds": 16.7,
+    "maximum_predecessor_ratio": 2,
+    "first_coverage_milliseconds": 10000,
+    "settled_view_milliseconds": 15000
+  }
+}

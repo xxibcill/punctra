@@ -16,6 +16,7 @@ import {
   loadVisualCorpus,
   materializeVisualTrial,
   projectAuthoredPoint,
+  projectAuthoredPointAtViewport,
   validateRubricObservation,
   validateVisualCorpus,
 } from "./visual-corpus.js";
@@ -187,6 +188,46 @@ test("authored feature projections bind Point identity to the fixed camera and r
   const tampered = structuredClone(corpus);
   tampered.trials[0].features[0].binding.expected_pixels[0][0] += 2;
   assert.throws(() => validateVisualCorpus(tampered), /feature projection differs/);
+});
+
+test("authored projection scales into bounded DPR and resource-fallback viewports", async () => {
+  const corpus = validateVisualCorpus(await readJson(CORPUS_URL));
+  const trial = corpus.trials.find(({ id }) => id === "generated-classification-selection-perspective");
+  const scene = generateVisualScene();
+  const point = scene.batches.flatMap(({ points }) => points).find(({ ordinal }) => ordinal === 1866);
+  const canonical = projectAuthoredPoint(point, scene.world_origin, trial.camera);
+  const dpr1 = projectAuthoredPointAtViewport(point, scene.world_origin, trial.camera, {
+    css_width: 320,
+    css_height: 240,
+    requested_device_pixel_ratio: 1,
+    physical_width: 320,
+    physical_height: 240,
+  });
+  const fallback = projectAuthoredPointAtViewport(point, scene.world_origin, trial.camera, {
+    css_width: 640,
+    css_height: 513,
+    requested_device_pixel_ratio: 2,
+    physical_width: 1280,
+    physical_height: 1026,
+  });
+  assert.deepEqual([dpr1.x, dpr1.y], [Math.round(canonical.x / 2), Math.round(canonical.y / 2)]);
+  assert.equal(dpr1.x, Math.round(dpr1.exact_x));
+  assert.equal(dpr1.y, Math.round(dpr1.exact_y));
+  assert(
+    !Number.isInteger(dpr1.exact_x) || !Number.isInteger(dpr1.exact_y),
+    "the exact shader-space center must retain its subpixel phase",
+  );
+  assert(Number.isSafeInteger(fallback.x) && Number.isSafeInteger(fallback.y));
+  assert.throws(
+    () => projectAuthoredPointAtViewport(point, scene.world_origin, trial.camera, {
+      css_width: 320,
+      css_height: 240,
+      requested_device_pixel_ratio: 4,
+      physical_width: 1279,
+      physical_height: 960,
+    }),
+    /physical width differs/,
+  );
 });
 
 test("selected ordinals use independent bounded nominal-pick regions", async () => {

@@ -135,13 +135,18 @@
 //! # }
 //! ```
 
+mod footprint;
 mod frame;
 mod gpu;
+#[cfg(test)]
+#[path = "../test-support/gpu.rs"]
+mod gpu_support;
 mod pick;
 mod pipeline;
 mod renderer;
 mod targets;
 
+pub use footprint::{PointFootprint, PointFootprintStatus};
 pub use frame::{Frame, FrameError, PointStyle};
 pub use pick::{PickError, PickHit, PickPoll, PickRequest, PickTicket};
 pub use render_protocol::{

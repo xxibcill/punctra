@@ -20,7 +20,10 @@ repository-verified while their declared external exits remain outstanding;
 v0.19 exact local browser/device qualification, v0.20 packed integration
 baseline, and v0.21 bounded visual-quality baseline are Complete and repository-
 verified while independent interpretation/adoption, broader platform/support
-qualification, and improved or final visual-quality claims remain outstanding
+qualification, and improved or final visual-quality claims remain outstanding;
+the accepted v0.22 Point-footprint and edge-quality implementation is active,
+with attended record, implementation pin, rebuilt functional qualification,
+final verify evidence, and release acceptance still pending
 
 Punctra v0.11 builds on the reusable render engine, renderer-neutral View
 planner, and verified Source path described in the accepted [v0.1 renderer
@@ -197,6 +200,29 @@ measurements, non-gating all-`not_observed` rubric, and nonclaims. That result i
 not independent-human/adopter evidence, broader browser/device support, a
 physical-display observation, improved/final visual quality, API stability,
 support qualification, beta, v1, or release-candidate status.
+
+The accepted [v0.22 Point Footprint and Edge Quality
+design](docs/design/point-footprint-edge-quality-v0.22.md) fixes Point Footprint
+as disposable color-presentation policy. `SingleSample` requests the inherited
+hard circular color mask; `Antialiased` requests deterministic four-sample
+coverage. The selected status is one of `SingleSample`, `Multisample4x`,
+`UnsupportedFallback`, or `ResourceFallback`; fallback changes no Point center,
+geometry, color, depth order, or identity.
+
+For the private Browser Host, Projected-Density Display Diameter means
+`clamp(sqrt(physical viewport pixels / max(non-retired resident Points, 1)) *
+0.55, 2.0, 6.0)` physical pixels for the next frame. The non-retired count
+includes replacement Points regardless of presentation weight. Nominal Pick
+Diameter remains exactly 7.0 physical pixels and controls the independent hard
+pick circle. Neither size creates exact Source or Query authority.
+
+The v0.22 Point-Footprint Baseline and Point-Footprint Evidence are new records
+derived against, but never substituted for, the immutable v0.21 Canonical
+Images. Offscreen readback and normalized edge/density measurements remain
+renderer evidence rather than operating-system composition or physical-display
+observation. Until the sequential record, pin, rebuild, and verify workflow is
+complete, these names describe the accepted evidence contract, not a completed
+release claim.
 
 ## Artifact
 

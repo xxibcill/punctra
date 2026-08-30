@@ -5,7 +5,7 @@ use render_protocol::{
     BatchKey, BatchVersion, PresentationWeight, RenderLimits, RenderUpdate, UpdateReport,
     ViewGenerationKey, Viewport,
 };
-use render_wgpu::{EyeDomeLighting, RendererConfig, RendererError, WgpuRenderer};
+use render_wgpu::{EyeDomeLighting, PointFootprint, RendererConfig, RendererError, WgpuRenderer};
 
 use crate::scene::Scene;
 
@@ -20,7 +20,9 @@ pub(crate) fn renderer_appearance_config(
 ) -> RendererConfig {
     let depth_cue = EyeDomeLighting::new(1.25, 1)
         .expect("the fixed renderer-demo depth cue must stay within render-wgpu bounds");
-    RendererConfig::new(color_format, limits).with_eye_dome_lighting(depth_cue)
+    RendererConfig::new(color_format, limits)
+        .with_eye_dome_lighting(depth_cue)
+        .with_point_footprint(PointFootprint::Antialiased)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -495,6 +497,16 @@ mod tests {
             status,
         )
         .unwrap()
+    }
+
+    #[test]
+    fn renderer_appearance_requests_antialiased_point_footprints() {
+        let config = renderer_appearance_config(
+            wgpu::TextureFormat::Rgba8Unorm,
+            RenderLimits::new(24, 1, 1),
+        );
+
+        assert_eq!(config.point_footprint(), PointFootprint::Antialiased);
     }
 
     fn resident(version: u64) -> NodeStatus {
