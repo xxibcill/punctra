@@ -125,11 +125,13 @@ export function validatePointFootprintBaseline(baseline, corpus) {
   validateFootprintCorpus(corpus);
   requireRecord(baseline, "baseline");
   requireExactKeys(baseline, [
-    "schema", "release", "pins", "candidate_images", "focused_images", "external_evidence",
+    "schema", "release", "pins", "environment", "candidate_images", "focused_images",
+    "external_evidence",
   ], "baseline");
   requireCondition(baseline.schema === FOOTPRINT_BASELINE_SCHEMA, "baseline schema differs");
   requireCondition(baseline.release === FOOTPRINT_RELEASE, "baseline release differs");
   validatePins(baseline.pins, corpus);
+  validatePointFootprintEnvironment(baseline.environment, corpus);
   validateCandidateImages(baseline.candidate_images, corpus);
   validateFocusedImages(baseline.focused_images, baseline.candidate_images, corpus);
   requireJsonEqual(baseline.external_evidence, FOOTPRINT_EXTERNAL_NONCLAIMS, "baseline external nonclaims");
@@ -616,13 +618,14 @@ function validateEvidenceEnvelope(evidence, baseline, corpus, baselineIdentity) 
   validateDigestRecord(evidence.baseline, "evidence baseline pin");
   if (baselineIdentity !== undefined) requireJsonEqual(evidence.baseline, baselineIdentity, "evidence baseline pin");
   requireJsonEqual(evidence.pins, baseline.pins, "evidence pins");
-  validateEnvironment(evidence.environment, corpus);
+  validatePointFootprintEnvironment(evidence.environment, corpus);
+  requireJsonEqual(evidence.environment, baseline.environment, "evidence environment differs from baseline");
   requireJsonEqual(evidence.external_evidence, FOOTPRINT_EXTERNAL_NONCLAIMS, "evidence external nonclaims");
   requireJsonEqual(evidence.unavailable_measurements, FOOTPRINT_UNAVAILABLE_MEASUREMENTS,
     "evidence unavailable measurements");
 }
 
-function validateEnvironment(environment, corpus) {
+export function validatePointFootprintEnvironment(environment, corpus) {
   requireRecord(environment, "environment");
   requireExactKeys(environment, [
     "browser_user_agent", "browser_platform", "operating_system", "adapter_name", "backend",

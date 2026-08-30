@@ -18,6 +18,27 @@ import { createVisualValidator } from "./visual-validation.js";
 
 const { requireCondition } = createVisualValidator("Point-footprint runner failed");
 
+export function createPointFootprintEnvironment(options) {
+  const {
+    browserUserAgent,
+    browserPlatform,
+    host,
+    canonicalTrials,
+    focusedTrials,
+    fallback,
+  } = options;
+  const adapter = oneObservedAdapter(canonicalTrials, focusedTrials, fallback);
+  return {
+    browser_user_agent: browserUserAgent,
+    browser_platform: browserPlatform || "unreported browser platform",
+    operating_system: operatingSystemName(host),
+    adapter_name: adapter.name,
+    backend: adapter.backend,
+    same_adapter_for_scale_trials: true,
+    physical_display_observed: false,
+  };
+}
+
 export function createPointFootprintBaselineRecord(options) {
   const {
     footprint,
@@ -26,6 +47,7 @@ export function createPointFootprintBaselineRecord(options) {
     focusedTrials,
     fallback,
     baselineArtifacts,
+    environment,
   } = options;
   requireCondition(canonicalTrials.every(({ passed }) => passed),
     "record baseline requires every canonical trial to pass");
@@ -62,6 +84,7 @@ export function createPointFootprintBaselineRecord(options) {
     schema: FOOTPRINT_BASELINE_SCHEMA,
     release: footprint.release,
     pins: structuredClone(pins),
+    environment: structuredClone(environment),
     candidate_images: candidateImages,
     focused_images: focusedImages,
     external_evidence: structuredClone(FOOTPRINT_EXTERNAL_NONCLAIMS),
@@ -86,6 +109,7 @@ export function createPointFootprintEvidenceRecord(options) {
     canonicalTrials,
     focusedTrials,
     fallback,
+    environment: providedEnvironment,
   } = options;
   validatePointFootprintBaseline(baseline, footprint);
   requireCondition(localTests.implementation_commit === pins.implementation.commit,
@@ -122,7 +146,14 @@ export function createPointFootprintEvidenceRecord(options) {
         trial.profile_id,
       )),
   ]);
-  const adapter = oneObservedAdapter(canonicalTrials, focusedTrials, fallback);
+  const environment = providedEnvironment ?? createPointFootprintEnvironment({
+    browserUserAgent,
+    browserPlatform,
+    host,
+    canonicalTrials,
+    focusedTrials,
+    fallback,
+  });
   const evidence = {
     schema: FOOTPRINT_EVIDENCE_SCHEMA,
     release: footprint.release,
@@ -131,15 +162,7 @@ export function createPointFootprintEvidenceRecord(options) {
     completed_at: readCompletedAt(),
     baseline: structuredClone(baselineIdentity),
     pins: structuredClone(pins),
-    environment: {
-      browser_user_agent: browserUserAgent,
-      browser_platform: browserPlatform || "unreported browser platform",
-      operating_system: operatingSystemName(host),
-      adapter_name: adapter.name,
-      backend: adapter.backend,
-      same_adapter_for_scale_trials: true,
-      physical_display_observed: false,
-    },
+    environment: structuredClone(environment),
     artifacts: {
       png,
       local_test_results: [{

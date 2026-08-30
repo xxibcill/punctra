@@ -420,6 +420,15 @@ function validBaseline() {
       corpus: digest("apps/browser-demo/web/fixtures/footprint-v1/corpus.json"),
       predecessor: structuredClone(corpus.predecessor),
     },
+    environment: {
+      browser_user_agent: "test-browser",
+      browser_platform: "test-platform",
+      operating_system: "test-os",
+      adapter_name: "test-adapter",
+      backend: "test-backend",
+      same_adapter_for_scale_trials: true,
+      physical_display_observed: false,
+    },
     candidate_images: corpus.canonical_trials.map((trial, index) => imageArtifact({
       kind: "candidate_baseline_png",
       trialId: trial.id,

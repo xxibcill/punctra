@@ -60,6 +60,7 @@ test("baseline records project canonical and focused runner artifacts", () => {
     baseline.focused_images.length,
     corpus.focused_trials.length * (1 + corpus.scale_profiles.length),
   );
+  assert.deepEqual(baseline.environment, validEnvironment());
   assert.deepEqual(baseline.external_evidence, FOOTPRINT_EXTERNAL_NONCLAIMS);
 });
 
@@ -97,7 +98,20 @@ function validBaselineRecord(pins = validPins()) {
     focusedTrials: corpus.focused_trials.map(() => ({ passed: true })),
     fallback: { passed: true },
     baselineArtifacts: baselineArtifacts(),
+    environment: validEnvironment(),
   });
+}
+
+function validEnvironment() {
+  return {
+    browser_user_agent: "test-browser",
+    browser_platform: "test-platform",
+    operating_system: "test-os",
+    adapter_name: "test-adapter",
+    backend: "test-backend",
+    same_adapter_for_scale_trials: true,
+    physical_display_observed: false,
+  };
 }
 
 function validEvidenceRecordOptions() {

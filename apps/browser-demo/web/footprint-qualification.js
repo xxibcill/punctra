@@ -30,6 +30,7 @@ import {
 } from "./footprint-evidence.js";
 import {
   createPointFootprintBaselineRecord,
+  createPointFootprintEnvironment,
   createPointFootprintEvidenceRecord,
   pointFootprintLocalTestCase,
 } from "./footprint-records.js";
@@ -152,6 +153,14 @@ export async function runPointFootprintQualification(options) {
     localTests: localTestBundle.json,
     runtime,
   });
+  const environment = createPointFootprintEnvironment({
+    browserUserAgent: browser.userAgent,
+    browserPlatform: browser.platform,
+    host,
+    canonicalTrials,
+    focusedTrials,
+    fallback,
+  });
 
   const baselineRecord = mode === "record"
     ? createPointFootprintBaselineRecord({
@@ -161,6 +170,7 @@ export async function runPointFootprintQualification(options) {
       focusedTrials,
       fallback,
       baselineArtifacts,
+      environment,
     })
     : baseline;
   let baselineIdentityRecord = loadedBaseline?.identity;
@@ -193,6 +203,7 @@ export async function runPointFootprintQualification(options) {
     canonicalTrials,
     focusedTrials,
     fallback,
+    environment,
   });
   const evidenceBytes = encodeJson(evidence);
   await artifacts.addBytes(EVIDENCE_REPOSITORY_PATH, evidenceBytes, "evidence_json");
