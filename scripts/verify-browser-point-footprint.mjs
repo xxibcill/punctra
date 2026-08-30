@@ -23,7 +23,7 @@ import {
 } from "../apps/browser-demo/web/visual-footprint-metrics.js";
 import { decodeRgba8Png } from "../apps/browser-demo/web/visual-png.js";
 
-const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
+const repositoryRoot = path.resolve(fileURLToPath(new URL("../", import.meta.url)));
 const MAX_GIT_OBJECT_BYTES = 96 * 1024 * 1024;
 const WHITE = Object.freeze([255, 255, 255, 255]);
 const BLACK = Object.freeze([0, 0, 0, 255]);
