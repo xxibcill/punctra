@@ -22,6 +22,9 @@ repository-verified; v0.19 exact local browser/device qualification and v0.20
 clean packed-consumer integration baseline Complete and repository-verified;
 v0.21 private visual-corpus, capture, comparison, rubric, and evidence workflow
 Complete and repository-verified for the bounded exact local attended lane;
+v0.22 bounded Point-footprint and edge-quality implementation Active with final
+attended record, pin, rebuilt functional qualification, and verify evidence
+pending;
 arbitrary Source delivery, broad bundler/framework/browser qualification,
 physical-display presentation, independent human interpretation and adoption,
 improved or final visual quality, API stability, support qualification, beta,
@@ -51,6 +54,7 @@ The accepted versioned designs are authoritative:
 - [v0.19 Browser and Device Qualification](../design/browser-device-qualification-v0.19.md)
 - [v0.20 Stable Browser-Engine Integration Baseline](../design/browser-integration-baseline-v0.20.md)
 - [v0.21 Visual-Quality Baseline and Regression Corpus](../design/visual-quality-baseline-v0.21.md)
+- [v0.22 Point Footprint and Edge Quality](../design/point-footprint-edge-quality-v0.22.md)
 
 The current foundation is headless and embeddable. It reads immutable Sources,
 prepares a complete rebuildable Spatial Index, resolves progressive display,
@@ -122,6 +126,18 @@ export is only a no-overwrite fallback when an attended in-app browser does not
 materialize that download. Final verify provenance comes from the exact pinned
 page URL; the runner fixes the accepted attended lane and disables its visible
 Run control until the complete pin tuple is valid.
+
+The active v0.22 implementation adds one deep Point-footprint policy inside
+`render-wgpu`: callers request single-sample or anti-aliased presentation and
+the renderer owns capability/resource selection, multisample attachments,
+resolve, shader coverage, fallback, and exact transient accounting. The private
+Browser Host computes one 2.0-to-6.0-physical-pixel projected-density display
+diameter from the complete non-retired resident count while nominal pick
+diameter remains 7.0 physical pixels. The private v0.22 corpus/metric/evidence
+runner compares separate candidate images against immutable v0.21 predecessors;
+it adds no viewer, React, or Rust capture export. See the [Point-footprint
+qualification guide](../guides/browser-point-footprint.md). Completion remains
+pending until the sequential record, pin, rebuild, and verify lane passes.
 
 The frozen [v0.9 public interface review](v0.9-interface-review.md) classifies
 reusable, adapter-author, test-support, and private application surfaces. The
@@ -398,3 +414,4 @@ external product-readiness claim.
 - [Packed browser quickstart](../guides/browser-quickstart.md)
 - [Browser integration known limitations](../guides/browser-known-limitations.md)
 - [Browser visual-quality baseline guide](../guides/browser-visual-quality.md)
+- [Browser Point-footprint qualification guide](../guides/browser-point-footprint.md)

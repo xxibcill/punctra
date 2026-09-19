@@ -6,6 +6,8 @@ use render_protocol::{
     PointId, ProtocolError, RenderLimits, RenderPoint, RenderUpdate, SourceId, ViewGenerationKey,
     ViewId, Viewport,
 };
+#[cfg(target_arch = "wasm32")]
+use render_wgpu::PointFootprint;
 use render_wgpu::{Frame, FrameError, PointStyle};
 use serde::Serialize;
 use thiserror::Error;
@@ -22,6 +24,12 @@ pub(crate) const MAX_RESIDENT_POINTS: u64 = crate::streaming::MAX_STREAM_POINTS;
 pub(crate) const MAX_RESIDENT_BYTES: u64 = MAX_RESIDENT_POINTS * ESTIMATED_GPU_BYTES_PER_POINT;
 pub(crate) const MAX_RESIDENT_BATCHES: u64 = crate::streaming::MAX_TRANSFER_BATCHES;
 pub(crate) const MAX_HIGHLIGHT_POINTS: u64 = 32;
+#[cfg(target_arch = "wasm32")]
+pub(crate) const REQUESTED_POINT_FOOTPRINT: PointFootprint = PointFootprint::Antialiased;
+pub(crate) const NOMINAL_PICK_SIZE_PHYSICAL_PIXELS: f32 = 7.0;
+const MIN_DISPLAY_SIZE_PHYSICAL_PIXELS: f64 = 2.0;
+const MAX_DISPLAY_SIZE_PHYSICAL_PIXELS: f64 = 6.0;
+const PROJECTED_DENSITY_SCALE: f64 = 0.55;
 
 const SOURCE_ID: SourceId = SourceId::new([0x15; 32]);
 const NODE_KEY: NodeKey = match NodeKey::new(1) {
@@ -110,8 +118,14 @@ impl PreparedScene {
         viewport: Viewport,
         view_generation: ViewGenerationKey,
         camera: Camera,
+        display_size_physical_pixels: f32,
     ) -> Result<Frame, FrameError> {
-        let style = PointStyle::new(7.0, [0.78, 0.66, 0.2], [0.075, 0.078, 0.075, 1.0])?;
+        let style = PointStyle::new(
+            NOMINAL_PICK_SIZE_PHYSICAL_PIXELS,
+            [0.78, 0.66, 0.2],
+            [0.075, 0.078, 0.075, 1.0],
+        )?
+        .with_display_size_pixels(display_size_physical_pixels)?;
         Ok(Frame::new(view_generation, camera, viewport)?.with_style(style))
     }
 
@@ -121,6 +135,23 @@ impl PreparedScene {
 
     pub(crate) const fn facts(&self) -> SceneFacts {
         self.facts
+    }
+}
+
+pub(crate) fn projected_density_display_size(
+    viewport: Viewport,
+    non_retired_resident_points: u64,
+) -> f32 {
+    let physical_pixels = f64::from(viewport.width()) * f64::from(viewport.height());
+    #[allow(clippy::cast_precision_loss)]
+    let resident_points = non_retired_resident_points.max(1) as f64;
+    let display_size = (physical_pixels / resident_points).sqrt() * PROJECTED_DENSITY_SCALE;
+    #[allow(clippy::cast_possible_truncation)]
+    {
+        display_size.clamp(
+            MIN_DISPLAY_SIZE_PHYSICAL_PIXELS,
+            MAX_DISPLAY_SIZE_PHYSICAL_PIXELS,
+        ) as f32
     }
 }
 
@@ -304,6 +335,7 @@ mod tests {
             Viewport::new(960, 600).unwrap(),
             VIEW_GENERATION,
             scene.camera(),
+            4.25,
         )
         .unwrap();
 
@@ -314,6 +346,14 @@ mod tests {
         assert_eq!(initial_facts.centre_point_ordinal, 544);
         assert!(!initial_facts.cpu_authoritative);
         assert_eq!(frame.view_generation(), VIEW_GENERATION);
+        assert_eq!(
+            frame.style().default_size_pixels().to_bits(),
+            NOMINAL_PICK_SIZE_PHYSICAL_PIXELS.to_bits()
+        );
+        assert_eq!(
+            frame.style().display_size_pixels().to_bits(),
+            4.25_f32.to_bits()
+        );
 
         scene.settle_after_publication().unwrap();
         assert_eq!(scene.facts().retained_nodes, 1);
@@ -321,6 +361,32 @@ mod tests {
             scene.settle_after_publication(),
             Err(SceneError::PlanningInvariant)
         ));
+    }
+
+    #[test]
+    fn projected_density_display_size_uses_exact_bounds_and_zero_floor() {
+        let viewport = Viewport::new(100, 100).unwrap();
+
+        assert_eq!(
+            projected_density_display_size(viewport, 10_000).to_bits(),
+            2.0_f32.to_bits()
+        );
+        assert_eq!(
+            projected_density_display_size(viewport, 400).to_bits(),
+            2.75_f32.to_bits()
+        );
+        assert_eq!(
+            projected_density_display_size(viewport, 1).to_bits(),
+            6.0_f32.to_bits()
+        );
+        assert_eq!(
+            projected_density_display_size(Viewport::new(10, 10).unwrap(), 0).to_bits(),
+            5.5_f32.to_bits()
+        );
+        assert_eq!(
+            projected_density_display_size(Viewport::new(10, 10).unwrap(), 0).to_bits(),
+            projected_density_display_size(Viewport::new(10, 10).unwrap(), 1).to_bits()
+        );
     }
 
     #[test]

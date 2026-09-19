@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <title>Punctra v0.22 point-footprint qualification</title>
+    <link rel="stylesheet" href="./footprint.css?v=22-point-footprint" />
+  </head>
+  <body data-footprint-runner="loading">
+    <a class="skip-link" href="#footprint-runner">Skip to point-footprint runner</a>
+    <header class="instrument-header">
+      <div>
+        <p class="instrument-kicker">Private attended qualification · presentation only</p>
+        <h1>Point footprint / v0.22</h1>
+      </div>
+      <dl class="instrument-readout" aria-label="Canonical capture dimensions">
+        <div><dt>CSS</dt><dd>320 × 240</dd></div>
+        <div><dt>DPR</dt><dd>2</dd></div>
+        <div><dt>GPU</dt><dd>WebGPU</dd></div>
+      </dl>
+    </header>
+
+    <main id="footprint-runner" class="instrument-grid">
+      <section class="capture-column" aria-labelledby="capture-heading">
+        <div class="instrument-section-heading">
+          <div>
+            <p class="instrument-kicker">Canonical offscreen readback</p>
+            <h2 id="capture-heading">Active frame</h2>
+          </div>
+          <p>Not operating-system composition or physical-display evidence.</p>
+        </div>
+
+        <div class="capture-stage">
+          <canvas
+            id="footprint-canvas"
+            width="640"
+            height="480"
+            aria-label="Punctra v0.22 point-footprint renderer"
+          ></canvas>
+          <div class="capture-ruler" aria-hidden="true">
+            <span>0</span><span>160</span><span>320 CSS px</span>
+          </div>
+        </div>
+
+        <section class="runner-state" aria-live="polite" aria-atomic="true">
+          <span class="state-lamp" aria-hidden="true"></span>
+          <div>
+            <p class="instrument-kicker">Runner state</p>
+            <p id="footprint-status">Loading the closed v0.22 corpus and private renderer…</p>
+          </div>
+        </section>
+
+        <div class="fact-strip" aria-label="Current renderer facts">
+          <div><span>Requested</span><strong id="requested-footprint">antialiased</strong></div>
+          <div><span>Resolved</span><strong id="resolved-footprint">—</strong></div>
+          <div><span>Display</span><strong id="display-diameter">— px</strong></div>
+          <div><span>Pick</span><strong id="pick-diameter">7 px</strong></div>
+          <div><span>Transient</span><strong id="transient-bytes">— B</strong></div>
+        </div>
+
+        <section class="progress-panel" aria-labelledby="footprint-progress-heading">
+          <div class="instrument-section-heading compact">
+            <h2 id="footprint-progress-heading">Trial log</h2>
+            <span id="footprint-progress-count">0 / 9</span>
+          </div>
+          <ol id="footprint-progress" class="trial-progress"></ol>
+        </section>
+
+        <section class="artifact-panel" aria-labelledby="footprint-artifacts-heading">
+          <div class="instrument-section-heading compact">
+            <h2 id="footprint-artifacts-heading">Bound artifacts</h2>
+            <button id="download-footprint-archive" type="button" disabled>Download TAR</button>
+          </div>
+          <p id="footprint-transport-status">Artifacts have not been staged.</p>
+          <ul id="footprint-artifacts" class="artifact-links"></ul>
+        </section>
+      </section>
+
+      <aside class="instrument-console" aria-labelledby="console-heading">
+        <div class="console-heading">
+          <p class="instrument-kicker">Closed release control</p>
+          <h2 id="console-heading">Qualification console</h2>
+        </div>
+
+        <div class="console-controls">
+          <label>
+            Evidence mode
+            <select id="footprint-mode">
+              <option value="verify">Verify pinned v0.22 baseline</option>
+              <option value="record">Record v0.22 baseline</option>
+            </select>
+          </label>
+          <label>
+            Anonymous attended session
+            <input id="footprint-session" value="maintainer-attended-1" maxlength="64" autocomplete="off" />
+          </label>
+          <button id="run-footprint" class="run-button" type="button" disabled>
+            Run bounded qualification
+          </button>
+          <p class="console-note">
+            Keep this task visible. The runner performs three fresh-viewer recreations,
+            thirty quiet frames per canonical trial, focused DPR checks, and explicit fallback probes.
+          </p>
+        </div>
+
+        <dl class="acceptance-ledger">
+          <div><dt>Coverage RMSE</dt><dd>≤ 0.18 and ≥ 20% better</dd></div>
+          <div><dt>Frame interval p95</dt><dd>≤ 50 ms</dd></div>
+          <div><dt>Submission p95</dt><dd>≤ 16.7 ms</dd></div>
+          <div><dt>Preferred area</dt><dd>≤ 1,310,720 px</dd></div>
+          <div><dt>Renderer transient</dt><dd>≤ 67,108,864 B</dd></div>
+        </dl>
+
+        <details class="evidence-details">
+          <summary>Live evidence record</summary>
+          <pre id="footprint-evidence">No point-footprint evidence has been produced.</pre>
+        </details>
+      </aside>
+    </main>
+
+    <footer class="instrument-footer">
+      <p>Point color is presentation-only. Pick identity remains a provisional GPU hint until exact source confirmation.</p>
+      <p><a href="./visual.html">Open the inherited v0.21 visual corpus</a></p>
+    </footer>
+
+    <script type="module" src="./footprint-main.js?v=22-point-footprint"></script>
+  </body>
+</html>

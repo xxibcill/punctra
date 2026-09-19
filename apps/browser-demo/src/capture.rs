@@ -5,6 +5,7 @@ use std::time::Duration;
 use serde::Serialize;
 use thiserror::Error;
 
+use crate::diagnostics::PointFootprintFacts;
 use crate::host::{MAX_CANVAS_DIMENSION, MAX_CANVAS_PIXELS};
 use crate::streaming::VisualBatchFacts;
 
@@ -85,13 +86,14 @@ impl CaptureCompletionFacts {
 }
 
 /// Immutable facts about the renderer work represented by one capture.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct CaptureFrameFacts {
     view_generation: u64,
     drawn_points: u64,
     draw_calls: u64,
     resident_bytes: u64,
     renderer_transient_texture_bytes: u64,
+    point_footprint: PointFootprintFacts,
     batches: Vec<VisualBatchFacts>,
 }
 
@@ -102,6 +104,7 @@ impl CaptureFrameFacts {
         draw_calls: u64,
         resident_bytes: u64,
         renderer_transient_texture_bytes: u64,
+        point_footprint: PointFootprintFacts,
         batches: Vec<VisualBatchFacts>,
     ) -> Self {
         Self {
@@ -110,6 +113,7 @@ impl CaptureFrameFacts {
             draw_calls,
             resident_bytes,
             renderer_transient_texture_bytes,
+            point_footprint,
             batches,
         }
     }
@@ -286,6 +290,7 @@ struct PendingCaptureFacts {
     draw_calls: u64,
     resident_bytes: u64,
     renderer_transient_texture_bytes: u64,
+    point_footprint: PointFootprintFacts,
     batch_state_authority: &'static str,
     batches: Vec<VisualBatchFacts>,
     source_format: &'static str,
@@ -319,6 +324,7 @@ impl PendingCaptureFacts {
             draw_calls: frame.draw_calls,
             resident_bytes: frame.resident_bytes,
             renderer_transient_texture_bytes: frame.renderer_transient_texture_bytes,
+            point_footprint: frame.point_footprint,
             batch_state_authority: "renderer_accepted_updates",
             batches: frame.batches,
             source_format: layout.source.format_name,
@@ -361,6 +367,7 @@ pub(crate) enum CaptureError {
 
 #[cfg(test)]
 mod tests {
+    use render_wgpu::{PointFootprint, PointFootprintStatus};
     use serde_json::json;
     use std::time::Duration;
 
@@ -506,6 +513,12 @@ mod tests {
             3,
             4_096,
             33_280,
+            PointFootprintFacts::new(
+                PointFootprint::Antialiased,
+                PointFootprintStatus::Multisample4x,
+                7.0,
+                4.25,
+            ),
             vec![VisualBatchFacts::resident(0, 1, 2, 42, 96)],
         );
         assert_eq!(layout.dimensions(), [65, 2]);
@@ -544,6 +557,12 @@ mod tests {
                 "draw_calls": 3,
                 "resident_bytes": 4_096,
                 "renderer_transient_texture_bytes": 33_280,
+                "point_footprint": {
+                    "requested": "antialiased",
+                    "selected": "multisample4x",
+                    "nominal_pick_size_physical_pixels": 7.0,
+                    "display_size_physical_pixels": 4.25
+                },
                 "batch_state_authority": "renderer_accepted_updates",
                 "batches": [{
                     "batch_index": 0,

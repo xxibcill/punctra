@@ -141,5 +141,11 @@ Dir.mktmpdir("punctra-package-verification-") do |verification_root|
     chdir: verification_root,
     exception: true,
   )
+  system(
+    { "CARGO_TARGET_DIR" => verification_target },
+    "cargo", "test", "-p", "render-wgpu", "--all-features", "--no-run",
+    chdir: verification_root,
+    exception: true,
+  )
 end
 puts "verified #{libraries.length} publishable library packages at #{version}"

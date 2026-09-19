@@ -1,6 +1,6 @@
 //! Demo-level planner-to-renderer GPU acceptance on an available headless adapter.
 
-#[path = "../../../tests/support/gpu.rs"]
+#[path = "../../../crates/render-wgpu/test-support/gpu.rs"]
 mod gpu_support;
 
 use point_view::{

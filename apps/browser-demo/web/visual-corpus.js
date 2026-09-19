@@ -418,10 +418,20 @@ export function decodeTransferV2(input, previousOrdinal = -1) {
 
 /** Projects one authored generated Point through the exact fixed trial camera. */
 export function projectAuthoredPoint(point, worldOrigin, camera, viewport = VISUAL_VIEWPORT) {
+  validateViewport(viewport);
+  return projectAuthoredPointInViewport(point, worldOrigin, camera, viewport);
+}
+
+/** Projects one authored Point into a bounded noncanonical physical viewport. */
+export function projectAuthoredPointAtViewport(point, worldOrigin, camera, viewport) {
+  validateProjectionViewport(viewport);
+  return projectAuthoredPointInViewport(point, worldOrigin, camera, viewport);
+}
+
+function projectAuthoredPointInViewport(point, worldOrigin, camera, viewport) {
   validateAuthoredPoint(point, -1);
   requireFiniteTriple(worldOrigin, "projection world origin");
   validateCamera(camera, "projection camera");
-  validateViewport(viewport);
   const world = point.relative_position.map((value, axis) => value + worldOrigin[axis]);
   const forward = normalize(subtract(camera.target, camera.eye));
   const right = normalize(cross(forward, camera.up));
@@ -442,11 +452,27 @@ export function projectAuthoredPoint(point, worldOrigin, camera, viewport = VISU
     normalizedX = cameraX / (camera.vertical_world_height * aspect / 2);
     normalizedY = cameraY / (camera.vertical_world_height / 2);
   }
+  const exactX = (normalizedX + 1) * viewport.physical_width / 2;
+  const exactY = (1 - normalizedY) * viewport.physical_height / 2;
   return {
-    x: Math.round((normalizedX + 1) * viewport.physical_width / 2),
-    y: Math.round((1 - normalizedY) * viewport.physical_height / 2),
+    x: Math.round(exactX),
+    y: Math.round(exactY),
+    exact_x: exactX,
+    exact_y: exactY,
     camera_depth: cameraDepth,
   };
+}
+
+function validateProjectionViewport(viewport) {
+  requireRecord(viewport, "projection viewport");
+  for (const field of ["css_width", "css_height", "requested_device_pixel_ratio", "physical_width", "physical_height"]) {
+    requireCondition(Number.isFinite(viewport[field]) && viewport[field] > 0, `projection viewport ${field} is invalid`);
+  }
+  requireCondition(Number.isSafeInteger(viewport.physical_width) && Number.isSafeInteger(viewport.physical_height), "projection viewport physical dimensions must be integers");
+  requireCondition(viewport.physical_width <= 4_096 && viewport.physical_height <= 4_096, "projection viewport axis exceeds its ceiling");
+  requireCondition(viewport.physical_width * viewport.physical_height <= 8_388_608, "projection viewport area exceeds its ceiling");
+  requireCondition(Math.round(viewport.css_width * viewport.requested_device_pixel_ratio) === viewport.physical_width, "projection viewport physical width differs");
+  requireCondition(Math.round(viewport.css_height * viewport.requested_device_pixel_ratio) === viewport.physical_height, "projection viewport physical height differs");
 }
 
 /** Validates a non-gating attended interpretation record. */

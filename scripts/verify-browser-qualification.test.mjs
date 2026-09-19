@@ -15,8 +15,8 @@ import {
 } from "./verify-browser-qualification.mjs";
 
 const changelogUrl = new URL("../CHANGELOG.md", import.meta.url);
-const matrixUrl = new URL("../docs/releases/v0.21-browser-matrix.json", import.meta.url);
-const releaseRecordUrl = new URL("../docs/releases/v0.21.0.md", import.meta.url);
+const matrixUrl = new URL("../docs/releases/v0.22-browser-matrix.json", import.meta.url);
+const releaseRecordUrl = new URL("../docs/releases/v0.22.0.md", import.meta.url);
 const verifierUrl = new URL("./verify-browser-qualification.mjs", import.meta.url);
 const [changelog, matrixSource, releaseRecord, verifierSource] = await Promise.all([
   readFile(changelogUrl, "utf8"),
@@ -43,7 +43,7 @@ test("the exact unqualified platform classes are frozen", () => {
     mutate(entries);
     assert.throws(
       () => verifyUnqualifiedEntries(entries),
-      /unqualified platform classes must match the frozen v0.21 matrix/,
+      /unqualified platform classes must match the frozen v0.22 matrix/,
     );
   }
 });

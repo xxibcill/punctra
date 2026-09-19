@@ -554,7 +554,10 @@ fn corpus_pre_v0_13_repository_lane_records_settlement_and_the_declared_matrix()
         assert_eq!(trace["quiet_observation_frames"], 300);
         assert_eq!(trace["quiet_window_complete"], true);
         assert!(trace["completed_frame_count"].as_u64().unwrap() >= 301);
-        assert!(trace["peak_transient_texture_bytes"].as_u64().unwrap() <= 8 * 640 * 480);
+        assert!(
+            trace["peak_transient_texture_bytes"].as_u64().unwrap() <= 48 * 640 * 480,
+            "v0.22 retains the complete bounded antialiased EDL-plus-pick ceiling"
+        );
     }
 }
 

@@ -21,6 +21,22 @@ export function jsonEqual(left, right) {
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
+/**
+ * Serializes a JSON value with recursively sorted object keys so that records
+ * built in the browser compare equal to the same values served by the local
+ * server, which emits `sort_keys=True` JSON.
+ */
+export function canonicalJson(value) {
+  return JSON.stringify(value, (_key, entry) => {
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) return entry;
+    return Object.fromEntries(Object.keys(entry).sort().map((key) => [key, entry[key]]));
+  });
+}
+
+export function canonicalJsonEqual(left, right) {
+  return canonicalJson(left) === canonicalJson(right);
+}
+
 export function errorMessage(error) {
   return error instanceof Error ? error.message : String(error);
 }

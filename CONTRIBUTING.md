@@ -146,6 +146,17 @@ independent-human or adopter evidence, improved/final visual quality, support
 qualification, API stability, beta, v1, or release-candidate status.
 Its exact completed repository observations and pins are recorded in the
 [v0.21 verification record](docs/releases/v0.21.0.md).
+The active bounded [v0.22 Point Footprint and Edge Quality
+scope](docs/design/point-footprint-edge-quality-v0.22.md) adds an explicit
+renderer Point-footprint request/status seam, deterministic four-sample circular
+color coverage, capability/resource fallback, one private browser projected-
+density display diameter, unchanged nominal pick coverage, exact target
+accounting, and separate quality/DPR/fallback/pick/cost evidence against the
+immutable v0.21 corpus. It does not change geometry, Point identity, Source or
+Query authority, View/LOD policy, display mappings, or public browser exports,
+and it does not authorize physical-display, cross-browser/device,
+independent-human/adopter, support, beta, release-candidate, or v1 claims. Its
+final attended evidence remains pending.
 Apart from the explicit v0.8 reader exception, the v0.17 browser-demo
 exact-query bridge is a narrowly scoped exception for the trusted immutable
 LAS fixture described by the accepted design. All other external format
@@ -230,6 +241,7 @@ test -f docs/guides/browser-qualification.md
 test -f docs/guides/browser-quickstart.md
 test -f docs/guides/browser-known-limitations.md
 test -f docs/guides/browser-visual-quality.md
+test -f docs/guides/browser-point-footprint.md
 test -f docs/api/browser-sdk.md
 ruby -rjson -e 'ARGV.each { |path| JSON.parse(File.read(path)) }' \
   docs/guides/field-corpus.example.json \
@@ -242,7 +254,8 @@ ruby -rjson -e 'ARGV.each { |path| JSON.parse(File.read(path)) }' \
   docs/releases/v0.21-browser-visual-baseline.json \
   docs/releases/v0.21-browser-visual-rubric-template.json \
   apps/browser-demo/web/fixtures/visual-v1/corpus.json \
-  apps/browser-demo/web/fixtures/visual-v1/autzen-classified-sample.json
+  apps/browser-demo/web/fixtures/visual-v1/autzen-classified-sample.json \
+  apps/browser-demo/web/fixtures/footprint-v1/corpus.json
 git diff --check
 ```
 
@@ -413,13 +426,177 @@ environment, evidence, and remaining nonclaims. Future reproductions must not
 replace those observations with placeholders. See the [browser visual-quality
 guide](docs/guides/browser-visual-quality.md).
 
+The v0.22 continuation is another mandatory sequential workflow. It never
+rewrites the v0.21 corpus, baselines, evidence, artifacts, or release record.
+First run the focused static and GPU checks:
+
+```bash
+cargo test -p render-wgpu --test contracts
+cargo test -p browser-demo
+cargo test -p renderer-demo --bin renderer-demo appearance::tests
+scripts/build-browser-sdk.sh
+node --test \
+  apps/browser-demo/web/footprint-artifacts.test.mjs \
+  apps/browser-demo/web/footprint-corpus.test.mjs \
+  apps/browser-demo/web/footprint-evidence.test.mjs \
+  apps/browser-demo/web/footprint-export.test.mjs \
+  apps/browser-demo/web/footprint-records.test.mjs \
+  apps/browser-demo/web/footprint-runner-core.test.mjs \
+  apps/browser-demo/web/visual-footprint-metrics.test.mjs \
+  apps/browser-demo/web/range-server.test.mjs
+PUNCTRA_REQUIRE_GPU=1 cargo test -p render-wgpu --test offscreen
+PUNCTRA_REQUIRE_GPU=1 cargo test -p renderer-demo --bin renderer-demo \
+  appearance::gpu_tests
+```
+
+Commit the complete record-stage implementation and make sure the working tree
+is clean. Generate the local GPU artifact from that exact `HEAD` before opening
+the browser runner; the ignored producer fails closed for a dirty tree and
+records its implementation commit, adapter, backend, operating system, exact
+invocation, hard-circle fallback masks, nominal picks, quality matrix, and
+resource measurements:
+
+```bash
+PUNCTRA_REQUIRE_GPU=1 \
+PUNCTRA_POINT_FOOTPRINT_EVIDENCE_PATH=apps/browser-demo/web/fixtures/footprint-v1/local-test-evidence.json \
+cargo test -p render-wgpu --test offscreen \
+  write_point_footprint_test_evidence -- --ignored --exact
+```
+
+Then build and serve that record-stage implementation:
+
+```bash
+scripts/build-browser-sdk.sh
+node scripts/verify-browser-sdk.mjs
+python3 scripts/serve-browser-demo.py --port 8000
+```
+
+Open `http://127.0.0.1:8000/footprint.html`, select **Record v0.22
+baseline**, keep the page visible, and click **Run bounded qualification**.
+The click must be both trusted and covered by active browser user activation;
+console or synthetic invocation is ineligible. The canonical canvas is 320 by
+240 CSS pixels at requested DPR 2 and 640 by 480 physical pixels. All nine
+inherited trials run through three fresh viewers and 30 quiet foreground frames;
+focused DPR and fallback trials run separately.
+
+Download the single `v0.22-browser-point-footprint-evidence.tar`, inspect it,
+and extract it into a fresh directory:
+
+```bash
+tar -tf /path/to/v0.22-browser-point-footprint-evidence.tar
+mkdir -p target/v0.22-footprint-record
+tar -xf /path/to/v0.22-browser-point-footprint-evidence.tar \
+  -C target/v0.22-footprint-record
+```
+
+This first pass is calibration. Retain only the canonical/focused PNGs under
+`apps/browser-demo/web/fixtures/footprint-v1/baselines/`. Discard its baseline
+manifest, record-mode evidence, and other candidate/diagnostic artifacts; they
+are bound to the pre-baseline commit and are not final evidence. The standard
+browser Blob TAR is the primary
+transport. If the in-app browser reports success but no TAR materializes, use a
+fresh no-overwrite directory and repeat only that attended stage through the
+verified same-origin fallback:
+
+```bash
+mkdir -p target/v0.22-footprint-record-export
+python3 scripts/serve-browser-demo.py --port 8000 \
+  --footprint-export-dir target/v0.22-footprint-record-export
+```
+
+Open `http://127.0.0.1:8000/footprint.html?transport=server`, select the same
+mode, and use the visible trusted Run button. The fixed
+`/qualification-footprint-export` endpoint accepts only the identical bounded
+`application/x-tar` body and publishes
+`v0.22-browser-point-footprint-evidence.tar` without replacement. Its
+`punctra-browser-point-footprint-export-receipt-v1` response and the TAR remain
+transport rather than evidence. Use a different fresh directory for a verify-
+stage fallback. Do not reconstruct evidence from the console or screenshots.
+
+Check in the retained candidate PNGs without changing any qualified
+implementation path. That clean commit is the accepted implementation pin.
+Record its exact inputs:
+
+```bash
+git rev-parse HEAD
+wc -c < scripts/verify-browser-point-footprint.mjs
+shasum -a 256 scripts/verify-browser-point-footprint.mjs
+```
+
+The baseline-image commit changes `HEAD`, so discard the calibration-stage
+local GPU JSON and run the exact ignored producer command above again from the
+clean accepted pin. Rebuild and run **Record v0.22 baseline** a second time.
+Require every returned PNG to be byte-identical to its checked-in image and
+retain only this second pass's uncommitted
+`docs/releases/v0.22-browser-point-footprint-baseline.json`. That manifest pins
+the accepted commit without trying to include itself in its own Git object. A
+local test artifact or manifest bound to the pre-baseline commit is ineligible.
+
+The accepted baseline pin binds the implementation commit and path digests,
+verifier path/length/SHA-256, package version and runtime artifact digests,
+Point-footprint corpus, and immutable v0.21 predecessor identities. Rebuild
+that exact pin and repeat package/reference verification:
+
+```bash
+scripts/build-browser-sdk.sh
+node scripts/verify-browser-sdk.mjs
+node scripts/generate-browser-sdk-reference.mjs --check
+```
+
+Repeat the attended packed quickstart and exact browser qualification using the
+strict server. Create fresh observations at
+`docs/releases/v0.22-browser-quickstart.json`,
+`docs/releases/v0.22-browser-matrix.json`, and
+`docs/releases/v0.22-browser-baseline.json`. The integration and qualification
+verifier/test live pointers must already target those files before commit I.
+Before running the qualification verifier, put P into the v0.22 release record
+and CHANGELOG entry and put the exact qualification-verifier SHA-256 into the
+release record. Then run:
+
+```bash
+node scripts/verify-browser-integration-baseline.mjs
+node scripts/verify-browser-qualification.mjs
+```
+
+Do not copy v0.21 observation dates, environment facts, timings, resources,
+artifact digests, verifier digests, or implementation commit. Until these
+fresh files and live pointers exist and pass, the functional continuation is
+pending.
+
+Finally restart the strict server from the pinned rebuilt tree, open
+`http://127.0.0.1:8000/footprint.html`, select **Verify pinned v0.22
+baseline**, and click the visible trusted Run button. The server-provided
+running implementation, verifier, runtime, corpus, and predecessor tuple must
+match the accepted baseline tuple. Extract the final TAR into another fresh
+directory and place only its recorded repository-relative verify evidence and
+artifacts at:
+
+```text
+docs/releases/v0.22-browser-point-footprint-evidence.json
+docs/releases/v0.22-browser-point-footprint-artifacts/
+```
+
+Only verify-mode evidence is eligible. Accept it only after:
+
+```bash
+node scripts/verify-browser-point-footprint.mjs \
+  --baseline docs/releases/v0.22-browser-point-footprint-baseline.json \
+  --evidence docs/releases/v0.22-browser-point-footprint-evidence.json
+```
+
+Fill the pending fields in `docs/releases/v0.22.0.md` only from that completed
+lane, rerun the complete local command matrix above, and leave the v0.22 roadmap
+item Active until every required result and artifact actually exists. See the
+[browser Point-footprint guide](docs/guides/browser-point-footprint.md).
+
 See the [browser streaming
 guide](docs/guides/browser-streaming.md) and [browser viewer API
 guide](docs/guides/browser-viewer.md), [browser SDK
 guide](docs/guides/browser-sdk.md), [browser quickstart
 guide](docs/guides/browser-quickstart.md), [known limitations](docs/guides/browser-known-limitations.md),
 [browser qualification guide](docs/guides/browser-qualification.md), and
-[browser visual-quality guide](docs/guides/browser-visual-quality.md).
+[browser visual-quality guide](docs/guides/browser-visual-quality.md), and
+[browser Point-footprint guide](docs/guides/browser-point-footprint.md).
 
 The default `point-index` benchmark generates one million Points. Use only the
 documented scale values when a larger local run is intended, for example:

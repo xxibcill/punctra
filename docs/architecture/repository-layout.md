@@ -16,6 +16,8 @@ thin React adapter plus v0.19 exact local browser/device qualification plus
 v0.20 clean packed-consumer integration baseline Complete and repository-
 verified; v0.21 private visual-corpus/capture/comparison/evidence implementation
 Complete and repository-verified for the bounded exact local attended lane;
+v0.22 Point-footprint renderer/host/evidence implementation Active with final
+attended record, functional continuation, and verify artifacts pending;
 broader browser/device support, physical-display presentation, independent-
 human/adopter evidence, improved or final visual quality, API stability,
 support qualification, beta, v1, and release-candidate status remain
@@ -81,6 +83,24 @@ apps/
       visual-selection.test.mjs
       visual-validation.js
       visual-validation.test.mjs
+      footprint.html
+      footprint.css
+      footprint-main.js
+      footprint-artifacts.js
+      footprint-artifacts.test.mjs
+      footprint-corpus.js
+      footprint-corpus.test.mjs
+      footprint-evidence.js
+      footprint-evidence.test.mjs
+      footprint-export.js
+      footprint-export.test.mjs
+      footprint-qualification.js
+      footprint-records.js
+      footprint-records.test.mjs
+      footprint-runner-core.js
+      footprint-runner-core.test.mjs
+      visual-footprint-metrics.js
+      visual-footprint-metrics.test.mjs
       qualification.js
       qualification.test.mjs
       qualification-worker.js
@@ -133,6 +153,9 @@ apps/
           generated-classification-selection-perspective.png
           autzen-rgb-perspective.png
           autzen-classification-perspective.png
+      fixtures/footprint-v1/
+        corpus.json
+        baselines/  # populated only by the attended v0.22 record stage
           autzen-intensity-perspective.png
           autzen-elevation-perspective.png
 
@@ -353,6 +376,7 @@ crates/
       pipeline.rs
       renderer.rs
       targets.rs
+      footprint.rs
       point.wgsl
     examples/third_party_host.rs
     tests/
@@ -363,6 +387,7 @@ docs/
   architecture/
   design/
   guides/browser-visual-quality.md
+  guides/browser-point-footprint.md
   releases/
     v0.21-browser-baseline.json
     v0.21-browser-matrix.json
@@ -372,6 +397,13 @@ docs/
     v0.21-browser-visual-rubric-template.json
     v0.21-browser-visual-artifacts/  # 864 bound PNGs
     v0.21.0.md
+    v0.22-browser-baseline.json                  # pending attended functional run
+    v0.22-browser-matrix.json                    # pending attended functional run
+    v0.22-browser-quickstart.json                # pending attended functional run
+    v0.22-browser-point-footprint-baseline.json  # pending attended record stage
+    v0.22-browser-point-footprint-evidence.json  # pending attended verify stage
+    v0.22-browser-point-footprint-artifacts/     # pending attended verify stage
+    v0.22.0.md                                   # pending release-record skeleton
   adr/
   research/
 
@@ -382,6 +414,7 @@ scripts/
   verify-browser-qualification.mjs
   verify-browser-visual-baseline.mjs
   verify-browser-visual-baseline.test.mjs
+  verify-browser-point-footprint.mjs
 ~~~
 
 Files inside a crate are private locality, not additional public modules. In
@@ -415,6 +448,16 @@ bundle; that bundle is transport only and is not checked in. `visual-export.js`
 may send the same bundle to the strict server only when `transport=server` and
 the server was started with `--visual-export-dir`; its fixed no-overwrite local
 target and receipt are not evidence.
+
+The v0.22 `render-wgpu/src/footprint.rs` file is private locality behind the
+renderer configuration/status seam. The browser `footprint-*` and
+`visual-footprint-metrics*` files, `fixtures/footprint-v1`, strict-server routes,
+and verifier form one private qualification module. Record mode will add only
+candidate canonical/focused baseline PNGs under the footprint fixture plus the
+v0.22 Point-footprint baseline manifest. Verify mode will later add a separate
+evidence JSON and bound release artifact directory. Those pending files must be
+created by attended execution; the repository layout does not authorize empty
+or predecessor-copied placeholders.
 
 ## Cargo dependency direction
 
@@ -647,13 +690,13 @@ versions, and LandXML/journal/report format versions are separate axes. A Cargo
 `0.9` version does not imply Workspace disk schema or terrain algorithm version
 9.
 
-The v0.21 work advances all public Rust libraries as one `0.21.0-alpha.1` package
+The v0.22 work advances all public Rust libraries as one `0.22.0-alpha.1` package
 set with exact inter-Punctra registry requirements and
 local development paths. Their empty default features, dependency roles,
 MSRV, publication order, and pre-v1 policy are documented in the [library
 packaging guide](../guides/library-packaging.md). The separately versioned
 `@punctra/viewer` and `@punctra/react` npm tarballs use the same
-`0.21.0-alpha.1` release identity but remain local packed artifacts governed by
+`0.22.0-alpha.1` release identity but remain local packed artifacts governed by
 the [browser SDK guide](../guides/browser-sdk.md); Cargo and npm publication
 remain separate decisions.
 
