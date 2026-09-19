@@ -145,6 +145,7 @@ export async function runPointFootprintQualification(options) {
     baseline,
     artifacts,
     baselineArtifacts,
+    canonicalTrials,
     canonicalObservations,
     runtime,
   });
@@ -485,6 +486,7 @@ async function runFocusedScaleTrials(options) {
     baseline,
     artifacts,
     baselineArtifacts,
+    canonicalTrials,
     canonicalObservations,
     runtime,
   } = options;
@@ -501,7 +503,12 @@ async function runFocusedScaleTrials(options) {
       let run;
       if (profile.id === footprint.canonical_profile.id) {
         const observation = canonicalObservations.get(trial.id);
-        requireCondition(observation !== undefined, `canonical observation for focused trial ${trial.id} is absent`);
+        const canonicalFailures = canonicalTrials.find(({ trial_id }) => trial_id === trial.id)?.failures ?? [];
+        requireCondition(
+          observation !== undefined,
+          `canonical observation for focused trial ${trial.id} is absent`
+            + (canonicalFailures.length === 0 ? "" : ` (canonical trial failed: ${canonicalFailures.join("; ")})`),
+        );
         image = observation.image;
         run = observation.recreation;
         diagnostics = { point_footprint: run.point_footprint };
