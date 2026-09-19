@@ -4,7 +4,7 @@ import {
   POINT_FOOTPRINT_METRICS_SCHEMA,
   REGION_TOPOLOGY_METRICS_SCHEMA,
 } from "./visual-footprint-metrics.js";
-import { createVisualValidator, jsonEqual } from "./visual-validation.js";
+import { canonicalJsonEqual, createVisualValidator } from "./visual-validation.js";
 
 export const FOOTPRINT_BASELINE_SCHEMA = "punctra-browser-point-footprint-baseline-v1";
 export const FOOTPRINT_EVIDENCE_SCHEMA = "punctra-browser-point-footprint-evidence-v1";
@@ -1662,8 +1662,9 @@ function requireExactKeys(record, keys, label) {
   requireJsonEqual(Object.keys(record).sort(), [...keys].sort(), `${label} fields`);
 }
 
+/** Compares JSON values; key order is serialization provenance, not evidence. */
 function requireJsonEqual(actual, expected, label) {
-  requireCondition(jsonEqual(actual, expected), `${label} differ`);
+  requireCondition(canonicalJsonEqual(actual, expected), `${label} differ`);
 }
 
 function isSafeRepositoryPath(value) {

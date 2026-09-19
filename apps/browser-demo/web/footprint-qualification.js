@@ -42,7 +42,7 @@ import {
   measureOccupancyComponentBridges,
   measureOccupancyTopology,
 } from "./footprint-runner-core.js";
-import { createVisualValidator, errorMessage } from "./visual-validation.js";
+import { canonicalJsonEqual, createVisualValidator, errorMessage } from "./visual-validation.js";
 
 const BASELINE_SCHEMA = FOOTPRINT_BASELINE_SCHEMA;
 const FOOTPRINT_CORPUS_URL = new URL("./fixtures/footprint-v1/corpus.json", import.meta.url);
@@ -94,7 +94,7 @@ export async function runPointFootprintQualification(options) {
     pins.running.implementation.commit,
   );
   requireCondition(
-    JSON.stringify(runtimeArtifacts.records) === JSON.stringify(pins.running.runtime.artifacts),
+    canonicalJsonEqual(runtimeArtifacts.records, pins.running.runtime.artifacts),
     "loaded runtime bytes differ from the running runtime pins",
   );
   await initializeWasm({ module_or_path: runtimeArtifacts.wasmBytes });

@@ -30,6 +30,7 @@ import {
   validatePointFootprintRunInputs,
   verifyPointFootprintEvidence,
 } from "./footprint-evidence.js";
+import { canonicalJson } from "./visual-validation.js";
 
 const corpus = JSON.parse(await readFile(
   new URL("./fixtures/footprint-v1/corpus.json", import.meta.url),
@@ -122,6 +123,26 @@ test("qualification binds the exact loaded corpora before running", () => {
       new RegExp(label),
     );
   }
+});
+
+test("run inputs bind server pins served with sorted keys", () => {
+  const inputs = validRunInputs();
+  const runningPins = validBaseline().pins;
+  runningPins.corpus = {
+    ...runningPins.corpus,
+    byte_length: inputs.footprint.byte_length,
+    sha256: inputs.footprint.sha256,
+  };
+  const servedPins = JSON.parse(canonicalJson(runningPins));
+  assert.notEqual(JSON.stringify(servedPins), JSON.stringify(runningPins));
+  assert.equal(validatePointFootprintRunInputs(inputs, servedPins), inputs);
+  assert.throws(
+    () => validatePointFootprintRunInputs(inputs, {
+      ...servedPins,
+      corpus: { ...servedPins.corpus, sha256: "0".repeat(64) },
+    }),
+    /footprint digest/,
+  );
 });
 
 test("implementation pins close every relative JavaScript import", async () => {
