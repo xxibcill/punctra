@@ -86,6 +86,35 @@ establish the visible depth winner at the tested pixel.
   one browser-runner branch used direct number equality. A shared comparison
   now covers all three call sites and rejects a different adjacent f32 value.
 
+## Local verification
+
+The full 68-command `CONTRIBUTING.md` matrix ran locally from October 2 into
+October 3, 2026 (Asia/Bangkok), with `PUNCTRA_REQUIRE_GPU=1` inherited by every
+command. The [command results](point-footprint-closeout-local-checks-2026-10-02.json)
+record 65 successful commands and three failures against executable source
+`58bb99870876865411176a2ec8714d648283e0bc`:
+
+- The full JavaScript suite passed 265 tests and failed 12 integration or
+  qualification tests because the existing evidence names an older
+  implementation or packed artifact.
+- `verify-browser-qualification.mjs` rejects qualified-file changes after the
+  recorded implementation `1ea86a9c65f4d85630e57173c6a3bb68a22b3e17`.
+- `verify-browser-integration-baseline.mjs` rejects the rebuilt viewer artifact
+  digest, which differs from the earlier quickstart observation.
+
+Workspace formatting, linting, all 891 workspace tests (three ignored),
+rustdoc, 12-library package verification, fuzz checks, WASM checks, fixture
+generation, SDK build/packed consumers/reference, immutable v0.21 visual
+verification, all nine benchmark commands, examples, explicit forced-GPU
+checks, documentation/JSON checks, and diff checks passed. Benchmark exit
+status is not a cross-revision performance claim.
+
+The new diagnostics and precision regression tests pass. Investigation and
+status documentation were edited during the command run, so these results
+are regression-check observations, not a clean-pin acceptance record. The
+earlier functional records remain intact; no digest or pin was replaced to
+make a failed qualification check appear successful.
+
 ## Proposed corrective scope
 
 Keep the v0.21 corpus, images, evidence, geometry, colors, camera, and authority
