@@ -24,7 +24,7 @@ import {
   FOOTPRINT_RUNTIME_PATHS,
   createPointFootprintResourceEvidence,
   evaluateDenseSolidBlockBudget,
-  projectedDensityDisplayDiameter,
+  matchesProjectedDensityDiameter,
   validatePointFootprintBaseline,
   validatePointFootprintLocalTestArtifact,
   validatePointFootprintRunInputs,
@@ -595,7 +595,8 @@ async function runFocusedScaleTrials(options) {
         )
         : null;
       const failures = [];
-      if (diameter !== expectedDisplayDiameter(
+      if (!matchesProjectedDensityDiameter(
+        diameter,
         profile,
         materialized.source.expected_view.settled_resident_points,
         runtime.footprintPolicy,
@@ -1085,21 +1086,15 @@ function validateFootprintFacts(facts, expectedStatus, density = null) {
   );
   if (density !== null) {
     requireCondition(
-      Object.is(
-        Math.fround(facts.display_size_physical_pixels),
-        expectedDisplayDiameter(density.profile, density.residentPoints, density.policy),
+      matchesProjectedDensityDiameter(
+        facts.display_size_physical_pixels,
+        density.profile,
+        density.residentPoints,
+        density.policy,
       ),
       "display diameter differs from the settled resident-point density",
     );
   }
-}
-
-function expectedDisplayDiameter(profile, residentPoints, policy) {
-  return projectedDensityDisplayDiameter(
-    profile,
-    residentPoints,
-    policy,
-  );
 }
 
 function adapterFacts(diagnostics) {
