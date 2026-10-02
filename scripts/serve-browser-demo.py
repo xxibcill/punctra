@@ -24,6 +24,78 @@ REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
 VISUAL_VERIFIER_REPOSITORY_PATH = "scripts/verify-browser-visual-baseline.mjs"
 VISUAL_VERIFIER_PATH = REPOSITORY_ROOT / VISUAL_VERIFIER_REPOSITORY_PATH
 VISUAL_BASELINE_PATH = REPOSITORY_ROOT / "docs/releases/v0.21-browser-visual-baseline.json"
+FOOTPRINT_VERIFIER_REPOSITORY_PATH = "scripts/verify-browser-point-footprint.mjs"
+FOOTPRINT_VERIFIER_PATH = REPOSITORY_ROOT / FOOTPRINT_VERIFIER_REPOSITORY_PATH
+FOOTPRINT_BASELINE_PATH = (
+    REPOSITORY_ROOT / "docs/releases/v0.22-browser-point-footprint-baseline.json"
+)
+FOOTPRINT_CORPUS_REPOSITORY_PATH = (
+    "apps/browser-demo/web/fixtures/footprint-v1/corpus.json"
+)
+FOOTPRINT_RUNTIME_REPOSITORY_PATHS = (
+    "apps/browser-demo/web/package.json",
+    "apps/browser-demo/web/pkg/browser_demo.js",
+    "apps/browser-demo/web/pkg/browser_demo_bg.wasm",
+)
+FOOTPRINT_IMPLEMENTATION_REPOSITORY_PATHS = (
+    "Cargo.lock",
+    "Cargo.toml",
+    "apps/browser-demo/Cargo.toml",
+    "apps/browser-demo/src/browser.rs",
+    "apps/browser-demo/src/capture.rs",
+    "apps/browser-demo/src/diagnostics.rs",
+    "apps/browser-demo/src/display.rs",
+    "apps/browser-demo/src/host.rs",
+    "apps/browser-demo/src/lib.rs",
+    "apps/browser-demo/src/scene.rs",
+    "apps/browser-demo/src/streaming.rs",
+    "apps/browser-demo/web/footprint-artifacts.js",
+    "apps/browser-demo/web/footprint-artifacts.test.mjs",
+    "apps/browser-demo/web/footprint-corpus.js",
+    "apps/browser-demo/web/footprint-corpus.test.mjs",
+    "apps/browser-demo/web/footprint-evidence.js",
+    "apps/browser-demo/web/footprint-evidence.test.mjs",
+    "apps/browser-demo/web/footprint-export.js",
+    "apps/browser-demo/web/footprint-export.test.mjs",
+    "apps/browser-demo/web/footprint-main.js",
+    "apps/browser-demo/web/footprint-qualification.js",
+    "apps/browser-demo/web/footprint-records.js",
+    "apps/browser-demo/web/footprint-records.test.mjs",
+    "apps/browser-demo/web/footprint-runner-core.js",
+    "apps/browser-demo/web/footprint-runner-core.test.mjs",
+    "apps/browser-demo/web/footprint.css",
+    "apps/browser-demo/web/footprint.html",
+    "apps/browser-demo/web/visual-archive.js",
+    "apps/browser-demo/web/visual-capture.js",
+    "apps/browser-demo/web/visual-comparison.js",
+    "apps/browser-demo/web/visual-corpus.js",
+    "apps/browser-demo/web/visual-corpus.test.mjs",
+    "apps/browser-demo/web/visual-footprint-metrics.js",
+    "apps/browser-demo/web/visual-footprint-metrics.test.mjs",
+    "apps/browser-demo/web/visual-png.js",
+    "apps/browser-demo/web/visual-provenance.js",
+    "apps/browser-demo/web/visual-rubric.js",
+    "apps/browser-demo/web/visual-validation.js",
+    FOOTPRINT_CORPUS_REPOSITORY_PATH,
+    "apps/renderer-demo/src/appearance.rs",
+    "crates/render-wgpu/Cargo.toml",
+    "crates/render-wgpu/src/footprint.rs",
+    "crates/render-wgpu/src/frame.rs",
+    "crates/render-wgpu/src/gpu.rs",
+    "crates/render-wgpu/src/eye_dome.wgsl",
+    "crates/render-wgpu/src/lib.rs",
+    "crates/render-wgpu/src/pick.rs",
+    "crates/render-wgpu/src/pipeline.rs",
+    "crates/render-wgpu/src/point.wgsl",
+    "crates/render-wgpu/src/renderer.rs",
+    "crates/render-wgpu/src/targets.rs",
+    "crates/render-wgpu/tests/contracts.rs",
+    "crates/render-wgpu/tests/offscreen.rs",
+    "crates/render-wgpu/test-support/gpu.rs",
+    "scripts/build-browser-demo.sh",
+    "scripts/serve-browser-demo.py",
+    FOOTPRINT_VERIFIER_REPOSITORY_PATH,
+)
 VIEWER_PACKAGE = json.loads((WEB_ROOT / "package.json").read_text(encoding="utf-8"))
 EXPOSED_HEADERS = "Accept-Ranges, Content-Encoding, Content-Length, Content-Range, ETag"
 FILE_CHUNK_BYTES = 64 * 1024
@@ -32,8 +104,15 @@ QUALIFICATION_HOST_SCHEMA = "punctra-qualification-host-v1"
 VISUAL_EXPORT_PATH = "/qualification-visual-export"
 VISUAL_EXPORT_FILENAME = "v0.21-browser-visual-evidence.tar"
 VISUAL_EXPORT_RECEIPT_SCHEMA = "punctra-browser-visual-export-receipt-v1"
+FOOTPRINT_EXPORT_PATH = "/qualification-footprint-export"
+FOOTPRINT_EXPORT_FILENAME = "v0.22-browser-point-footprint-evidence.tar"
+FOOTPRINT_EXPORT_RECEIPT_SCHEMA = (
+    "punctra-browser-point-footprint-export-receipt-v1"
+)
 VISUAL_VERIFY_PINS_SCHEMA = "punctra-browser-visual-verify-pins-v1"
+FOOTPRINT_VERIFY_PINS_SCHEMA = "punctra-browser-point-footprint-verify-pins-v1"
 MAX_VISUAL_EXPORT_BYTES = 1_243_611_136
+MAX_FOOTPRINT_EXPORT_BYTES = 134_217_728
 
 
 def fixture_validators() -> dict[Path, str]:
@@ -118,6 +197,59 @@ def visual_verify_pins() -> dict[str, object]:
     }
 
 
+@lru_cache(maxsize=1)
+def footprint_verify_pins() -> dict[str, object]:
+    implementation_commit = command_text(
+        "git",
+        "-C",
+        str(REPOSITORY_ROOT),
+        "rev-parse",
+        "HEAD",
+    )
+    if implementation_commit is None or len(implementation_commit) != 40:
+        raise RuntimeError("point-footprint implementation commit is unavailable")
+    verifier = repository_digest_record(FOOTPRINT_VERIFIER_REPOSITORY_PATH)
+    corpus_path = REPOSITORY_ROOT / FOOTPRINT_CORPUS_REPOSITORY_PATH
+    corpus = json.loads(corpus_path.read_text(encoding="utf-8"))
+    accepted = None
+    if FOOTPRINT_BASELINE_PATH.is_file():
+        baseline = json.loads(FOOTPRINT_BASELINE_PATH.read_text(encoding="utf-8"))
+        accepted = baseline["pins"]
+    return {
+        "schema": FOOTPRINT_VERIFY_PINS_SCHEMA,
+        "accepted": accepted,
+        "running": {
+            "implementation": {
+                "commit": implementation_commit,
+                "files": [
+                    repository_digest_record(path)
+                    for path in FOOTPRINT_IMPLEMENTATION_REPOSITORY_PATHS
+                ],
+            },
+            "verifier": verifier,
+            "runtime": {
+                "package_name": VIEWER_PACKAGE["name"],
+                "package_version": VIEWER_PACKAGE["version"],
+                "artifacts": [
+                    repository_digest_record(path)
+                    for path in FOOTPRINT_RUNTIME_REPOSITORY_PATHS
+                ],
+            },
+            "corpus": repository_digest_record(FOOTPRINT_CORPUS_REPOSITORY_PATH),
+            "predecessor": corpus["predecessor"],
+        },
+    }
+
+
+def repository_digest_record(repository_path: str) -> dict[str, object]:
+    bytes_ = (REPOSITORY_ROOT / repository_path).read_bytes()
+    return {
+        "path": repository_path,
+        "byte_length": len(bytes_),
+        "sha256": hashlib.sha256(bytes_).hexdigest(),
+    }
+
+
 def first_system_profiler_record(data_type: str) -> dict[str, object]:
     try:
         result = subprocess.run(
@@ -197,10 +329,14 @@ class BrowserDemoHandler(BaseHTTPRequestHandler):
         self._serve(send_body=True)
 
     def do_POST(self) -> None:  # noqa: N802
-        if urlsplit(self.path).path != VISUAL_EXPORT_PATH:
+        export_contract = self._export_contract()
+        if export_contract is None:
             self.send_error(HTTPStatus.NOT_FOUND)
             return
-        if self.server.visual_export_dir is None:
+        _, export_filename, receipt_schema, maximum_bytes, export_directory = (
+            export_contract
+        )
+        if export_directory is None:
             self.send_error(HTTPStatus.NOT_FOUND)
             return
         if not self._is_same_origin_request():
@@ -224,18 +360,18 @@ class BrowserDemoHandler(BaseHTTPRequestHandler):
         if content_length == 0:
             self.send_error(HTTPStatus.BAD_REQUEST, "Content-Length must be greater than zero")
             return
-        if content_length > MAX_VISUAL_EXPORT_BYTES:
+        if content_length > maximum_bytes:
             self.send_error(HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
             return
 
-        export_path = self.server.visual_export_dir / VISUAL_EXPORT_FILENAME
+        export_path = export_directory / export_filename
         staging_path = export_path.with_name(f"{export_path.name}.part")
         if os.path.lexists(export_path):
             self.send_error(HTTPStatus.CONFLICT)
             return
 
         try:
-            digest = self._persist_visual_export(
+            digest = self._persist_export(
                 staging_path=staging_path,
                 export_path=export_path,
                 content_length=content_length,
@@ -252,8 +388,8 @@ class BrowserDemoHandler(BaseHTTPRequestHandler):
 
         body = json.dumps(
             {
-                "schema": VISUAL_EXPORT_RECEIPT_SCHEMA,
-                "filename": VISUAL_EXPORT_FILENAME,
+                "schema": receipt_schema,
+                "filename": export_filename,
                 "path": str(export_path),
                 "byte_length": content_length,
                 "sha256": digest,
@@ -266,6 +402,26 @@ class BrowserDemoHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def _export_contract(self) -> tuple[str, str, str, int, Path | None] | None:
+        request_path = urlsplit(self.path).path
+        contracts = {
+            VISUAL_EXPORT_PATH: (
+                VISUAL_EXPORT_PATH,
+                VISUAL_EXPORT_FILENAME,
+                VISUAL_EXPORT_RECEIPT_SCHEMA,
+                MAX_VISUAL_EXPORT_BYTES,
+                self.server.visual_export_dir,
+            ),
+            FOOTPRINT_EXPORT_PATH: (
+                FOOTPRINT_EXPORT_PATH,
+                FOOTPRINT_EXPORT_FILENAME,
+                FOOTPRINT_EXPORT_RECEIPT_SCHEMA,
+                MAX_FOOTPRINT_EXPORT_BYTES,
+                self.server.footprint_export_dir,
+            ),
+        }
+        return contracts.get(request_path)
 
     def _is_same_origin_request(self) -> bool:
         hosts = self.headers.get_all("Host", [])
@@ -285,7 +441,7 @@ class BrowserDemoHandler(BaseHTTPRequestHandler):
         }
         return hosts[0] in allowed_authorities and origins == [f"http://{hosts[0]}"]
 
-    def _persist_visual_export(
+    def _persist_export(
         self,
         *,
         staging_path: Path,
@@ -330,6 +486,15 @@ class BrowserDemoHandler(BaseHTTPRequestHandler):
             return
         if urlsplit(self.path).path == "/qualification-visual-pins.json":
             self._serve_json(visual_verify_pins(), send_body=send_body)
+            return
+        if urlsplit(self.path).path == "/qualification-footprint-pins.json":
+            self._serve_json(footprint_verify_pins(), send_body=send_body)
+            return
+        if urlsplit(self.path).path == "/qualification-footprint-baseline.json":
+            if not FOOTPRINT_BASELINE_PATH.is_file():
+                self.send_error(HTTPStatus.NOT_FOUND)
+                return
+            self._serve_repository_json_file(FOOTPRINT_BASELINE_PATH, send_body=send_body)
             return
         try:
             delay_milliseconds = self._delay_milliseconds()
@@ -413,6 +578,17 @@ class BrowserDemoHandler(BaseHTTPRequestHandler):
         self.send_response(HTTPStatus.OK)
         if allow_cross_origin:
             self._send_cors_headers()
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        if send_body:
+            self.wfile.write(body)
+
+    def _serve_repository_json_file(self, path: Path, *, send_body: bool) -> None:
+        body = path.read_bytes()
+        json.loads(body)
+        self.send_response(HTTPStatus.OK)
         self.send_header("Cache-Control", "no-store")
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
@@ -524,6 +700,7 @@ def arguments() -> argparse.Namespace:
     parser.add_argument("--port", default=8000, type=int)
     parser.add_argument("--root", default=WEB_ROOT, type=Path)
     parser.add_argument("--visual-export-dir", type=Path)
+    parser.add_argument("--footprint-export-dir", type=Path)
     return parser.parse_args()
 
 
@@ -533,21 +710,30 @@ class BrowserDemoServer(ThreadingHTTPServer):
         address: tuple[str, int],
         web_root: Path,
         visual_export_dir: Path | None = None,
+        footprint_export_dir: Path | None = None,
     ) -> None:
         resolved_root = web_root.resolve()
         if not resolved_root.is_dir():
             raise ValueError(f"browser root is not a directory: {resolved_root}")
         self.web_root = resolved_root
-        if visual_export_dir is None:
-            self.visual_export_dir = None
-        else:
-            resolved_export_dir = visual_export_dir.resolve()
-            if not resolved_export_dir.is_dir():
-                raise ValueError(
-                    f"visual export directory is not a directory: {resolved_export_dir}"
-                )
-            self.visual_export_dir = resolved_export_dir
+        self.visual_export_dir = validated_export_directory(
+            visual_export_dir,
+            "visual",
+        )
+        self.footprint_export_dir = validated_export_directory(
+            footprint_export_dir,
+            "point-footprint",
+        )
         super().__init__(address, BrowserDemoHandler)
+
+
+def validated_export_directory(directory: Path | None, label: str) -> Path | None:
+    if directory is None:
+        return None
+    resolved = directory.resolve()
+    if not resolved.is_dir():
+        raise ValueError(f"{label} export directory is not a directory: {resolved}")
+    return resolved
 
 
 def main() -> None:
@@ -556,6 +742,7 @@ def main() -> None:
         (options.host, options.port),
         options.root,
         options.visual_export_dir,
+        options.footprint_export_dir,
     )
     host, port = server.server_address[:2]
     print(f"Serving {server.web_root} at http://{host}:{port}/", flush=True)

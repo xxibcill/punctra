@@ -120,29 +120,33 @@ export async function verifyBrowserVisualBaseline(baseline, options = {}) {
   assert.equal(baseline.schema, VISUAL_BASELINE_SCHEMA);
   assert.equal(baseline.release, VISUAL_RELEASE);
   const context = createVerificationContext(options);
+  const cleanup = await prepareHistoricalVerification(baseline.pins.implementation_commit, context);
+  try {
+    await verifyPins(baseline.pins, context);
+    const predecessor = await verifyPredecessor(baseline.predecessor, context);
+    await verifyPackageRuntime(baseline.package_runtime, context);
+    await verifyPointAppearance(baseline.point_appearance, predecessor, context);
+    const { corpus, autzenManifest } = await verifyCorpus(baseline.corpus, context);
+    const baselineInputs = await verifyBaselineInputsPolicy(
+      baseline.baseline_inputs,
+      baseline.package_runtime,
+      corpus,
+      context,
+    );
+    verifyTrialContract(baseline.trial_contract, corpus, autzenManifest);
+    await verifyCanonicalLane(baseline.canonical_lane, corpus, context);
+    verifyTolerancePolicy(baseline.tolerance_policy, corpus);
+    verifyResourcePolicy(baseline.resources, corpus, predecessor);
+    verifyAuthorityPolicy(baseline.authority);
+    await verifyRubricPolicy(baseline.rubric, corpus, context);
+    verifyEvidencePolicy(baseline.evidence);
+    assert.deepEqual(baseline.external_evidence, expectedExternalEvidence);
+    assert.deepEqual([...baseline.unavailable_measurements].sort(), [...expectedUnavailableMeasurements]);
 
-  await verifyPins(baseline.pins, context);
-  const predecessor = await verifyPredecessor(baseline.predecessor, context);
-  await verifyPackageRuntime(baseline.package_runtime, context);
-  await verifyPointAppearance(baseline.point_appearance, predecessor, context);
-  const { corpus, autzenManifest } = await verifyCorpus(baseline.corpus, context);
-  const baselineInputs = await verifyBaselineInputsPolicy(
-    baseline.baseline_inputs,
-    baseline.package_runtime,
-    corpus,
-    context,
-  );
-  verifyTrialContract(baseline.trial_contract, corpus, autzenManifest);
-  await verifyCanonicalLane(baseline.canonical_lane, corpus, context);
-  verifyTolerancePolicy(baseline.tolerance_policy, corpus);
-  verifyResourcePolicy(baseline.resources, corpus, predecessor);
-  verifyAuthorityPolicy(baseline.authority);
-  await verifyRubricPolicy(baseline.rubric, corpus, context);
-  verifyEvidencePolicy(baseline.evidence);
-  assert.deepEqual(baseline.external_evidence, expectedExternalEvidence);
-  assert.deepEqual([...baseline.unavailable_measurements].sort(), [...expectedUnavailableMeasurements]);
-
-  return { baseline, corpus, predecessor, autzenManifest, baselineInputs };
+    return { baseline, corpus, predecessor, autzenManifest, baselineInputs };
+  } finally {
+    await cleanup();
+  }
 }
 
 export async function verifyBrowserVisualEvidence(evidence, verifiedBaseline, options = {}) {
@@ -150,6 +154,8 @@ export async function verifyBrowserVisualEvidence(evidence, verifiedBaseline, op
   const { baseline, corpus, autzenManifest, baselineInputs } = normalizeVerifiedBaseline(verifiedBaseline);
   verifyEvidenceBytes(options.evidenceBytes, evidence, corpus.resource_limits.evidence_json_bytes);
   const context = createVerificationContext(options);
+  const cleanup = await prepareHistoricalVerification(baseline.pins.implementation_commit, context);
+  try {
   assert.deepEqual(Object.keys(evidence).sort(), [
     "artifact_resources",
     "artifacts",
@@ -240,7 +246,10 @@ export async function verifyBrowserVisualEvidence(evidence, verifiedBaseline, op
     [],
     "every published visual artifact must be bound to a derived trial check",
   );
-  return { evidence, trialResults: derivedResults };
+    return { evidence, trialResults: derivedResults };
+  } finally {
+    await cleanup();
+  }
 }
 
 export function verifyEvidenceBytes(bytes, evidence, ceiling) {
@@ -2942,8 +2951,12 @@ async function verifyDigestRecord(record, context, keys = ["path", "byte_length"
 }
 
 function createVerificationContext(options) {
+  const prepareHistoricalRuntime = options.prepareHistoricalRuntime
+    ?? (options.readRepositoryFile === undefined && options.readPinnedFile === undefined);
   return {
     expectedImplementationCommit: options.expectedImplementationCommit,
+    currentCommit: prepareHistoricalRuntime ? (options.currentCommit ?? currentRepositoryCommit()) : undefined,
+    prepareHistoricalRuntime,
     runFixtureGenerator: options.runFixtureGenerator ?? true,
     readRepositoryFile: options.readRepositoryFile ?? readRepositoryFile,
     readPinnedFile: options.readPinnedFile ?? readPinnedFile,
@@ -2953,6 +2966,38 @@ function createVerificationContext(options) {
     imageDigestByObject: options.imageDigestByObject ?? new WeakMap(),
     comparisonCache: options.comparisonCache ?? new Map(),
   };
+}
+
+async function prepareHistoricalVerification(implementationCommit, context) {
+  if (!context.prepareHistoricalRuntime || context.currentCommit === implementationCommit) {
+    return async () => {};
+  }
+
+  const historicalRoot = await mkdtemp(path.join(tmpdir(), "punctra-visual-pin-"));
+  let worktreeAdded = false;
+  try {
+    runCommand("git", ["worktree", "add", "--detach", historicalRoot, implementationCommit]);
+    worktreeAdded = true;
+    runCommandAtRoot(historicalRoot, "scripts/build-browser-sdk.sh", []);
+    context.readRepositoryFile = (relativePath, encoding) => readRepositoryFileAtRoot(
+      historicalRoot,
+      relativePath,
+      encoding,
+    );
+    context.runCommand = (command, arguments_) => runCommandAtRoot(historicalRoot, command, arguments_);
+  } catch (error) {
+    await removeHistoricalVerificationRoot(historicalRoot, worktreeAdded);
+    throw error;
+  }
+
+  return async () => removeHistoricalVerificationRoot(historicalRoot, true);
+}
+
+async function removeHistoricalVerificationRoot(root, worktreeAdded) {
+  if (worktreeAdded) {
+    runCommand("git", ["worktree", "remove", "--force", root]);
+  }
+  await rm(root, { recursive: true, force: true });
 }
 
 function normalizeVerifiedBaseline(value) {
@@ -3169,13 +3214,34 @@ function requireCommit(commit) {
 }
 
 function runCommand(command, arguments_) {
+  return runCommandAtRoot(repositoryRoot, command, arguments_);
+}
+
+function runCommandAtRoot(root, command, arguments_) {
   const result = spawnSync(command, arguments_, {
+    cwd: root,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+    maxBuffer: 2 * 1024 * 1024,
+  });
+  assert.equal(result.status, 0, `${command} ${arguments_.join(" ")} failed: ${result.stderr}`);
+  return result.stdout;
+}
+
+function currentRepositoryCommit() {
+  const result = spawnSync("git", ["rev-parse", "HEAD"], {
     cwd: repositoryRoot,
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
   });
-  assert.equal(result.status, 0, `${command} ${arguments_.join(" ")} failed: ${result.stderr}`);
-  return result.stdout;
+  assert.equal(result.status, 0, `cannot resolve the current repository commit: ${result.stderr}`);
+  return result.stdout.trim();
+}
+
+async function readRepositoryFileAtRoot(root, relativePath, encoding) {
+  validateRepositoryPath(relativePath);
+  const bytes = await readFile(path.join(root, relativePath));
+  return encoding === "utf8" ? bytes.toString("utf8") : bytes;
 }
 
 function resolveRepositoryPath(relativePath) {

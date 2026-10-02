@@ -2,7 +2,7 @@
 
 use std::sync::mpsc;
 
-#[path = "../../../tests/support/gpu.rs"]
+#[path = "../../../crates/render-wgpu/test-support/gpu.rs"]
 mod gpu_support;
 
 use point_contracts::WorldBounds;

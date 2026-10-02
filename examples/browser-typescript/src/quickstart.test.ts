@@ -23,7 +23,7 @@ const packedRuntime: PackedRuntimeProof = {
   build: "production",
   serverContract: "punctra-strict-range-v1",
   viewerPackage: "@punctra/viewer",
-  viewerVersion: "0.21.0-alpha.1",
+  viewerVersion: "0.22.0-alpha.1",
   viewerArtifactSha256: "b61e59f0f0b34776158494af272dc684156c24806a0abbefa2c0d2b626e7e834",
 };
 
@@ -53,9 +53,9 @@ test("packed quickstart exercises the supported workflow and disposes", async ()
 
   assert.equal(createOptions.length, 2);
   assert.equal(createOptions[0]?.canvas !== undefined, true);
-  assert.equal(createOptions[0]?.assets?.cacheKey, "v0.21-quickstart");
+  assert.equal(createOptions[0]?.assets?.cacheKey, "v0.22-quickstart");
   assert.equal(record.schema, "punctra-browser-quickstart-acceptance-v1");
-  assert.equal(record.packageVersion, "0.21.0-alpha.1");
+  assert.equal(record.packageVersion, "0.22.0-alpha.1");
   assert.equal(record.displayedPoints, 4_096);
   assert.deepEqual(record.displayModes, QUICKSTART_DISPLAY_MODES);
   assert.deepEqual(record.projections, ["orthographic", "perspective"]);
@@ -553,7 +553,7 @@ function deferred<Value>() {
 function viewerState(): ViewerState {
   return {
     schema: "punctra-viewer-state-v1",
-    packageVersion: "0.21.0-alpha.1",
+    packageVersion: "0.22.0-alpha.1",
     lifecycle: "ready",
     generation: 1,
     source: {

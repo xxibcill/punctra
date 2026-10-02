@@ -13,7 +13,8 @@ foundation, v0.16 Range/cache/Worker streaming, v0.17 viewer/exact-Point,
 v0.18 packed SDK/React lifecycle, v0.19 exact local qualification, and v0.20
 packed-consumer integration contracts Complete and repository-verified; v0.21
 private visual-baseline contracts Complete and repository-verified for the
-bounded exact local attended lane, while broader browser/device support,
+bounded exact local attended lane; v0.22 Point-footprint contracts implemented
+with final attended release evidence pending, while broader browser/device support,
 physical-display presentation, independent-human/adopter evidence, improved or
 final visual quality, API stability, support qualification, beta, v1, and
 release-candidate status remain outstanding
@@ -629,6 +630,23 @@ explicitly enabled same-origin local-server POST only; that fallback is bounded
 to the same archive, rejects existing targets rather than overwriting them, and
 does not create evidence. Canonical images and feature facts remain presentation-
 only and cannot change Source, Point, Coverage, selection, or Query authority.
+
+The v0.22 renderer footprint request is an explicit presentation input. The
+renderer alone selects `SingleSample`, `Multisample4x`,
+`UnsupportedFallback`, or `ResourceFallback` from immutable configuration,
+capabilities, and validated viewport bounds; callers cannot select a sample
+count or supply resolve targets. Browser diagnostics and capture evidence use
+the stable lowercase values `antialiased`, `single_sample`, `multisample4x`,
+`unsupported_fallback`, and `resource_fallback`.
+
+For one browser frame, display size equals
+`clamp(sqrt(physical_pixels / max(non_retired_resident_points, 1)) * 0.55,
+2.0, 6.0)` physical pixels. Nominal pick size remains 7.0 physical pixels.
+Both values and requested/selected footprint appear together in diagnostics;
+neither can change provisional or exact authority. Preferred, capability-
+fallback, and resource-fallback targets report their actual exact transient
+bytes, while canvas, resident buffers, capture/readback, cache, heap, and driver
+allocation remain independent facts.
 
 The host presents demanded nodes, load candidates, actually issued work,
 retention/retirement, queue/staging, requested/resident nodes, and Sampled

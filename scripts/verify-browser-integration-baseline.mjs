@@ -13,7 +13,7 @@ import { QUALIFICATION_LANE } from "../apps/browser-demo/web/qualification-lane.
 import { verifyBrowserQualificationMatrix } from "./verify-browser-qualification.mjs";
 
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
-const baselineUrl = new URL("../docs/releases/v0.21-browser-baseline.json", import.meta.url);
+const baselineUrl = new URL("../docs/releases/v0.22-browser-baseline.json", import.meta.url);
 
 export async function verifyBrowserIntegrationBaseline(baseline, qualificationMatrix) {
   assert.equal(baseline.schema, "punctra-browser-integration-baseline-v1");

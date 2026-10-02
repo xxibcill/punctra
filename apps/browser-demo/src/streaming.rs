@@ -287,6 +287,15 @@ impl StreamingScene {
         self.display_mode
     }
 
+    /// Counts the points still resident after renderer-accepted retirements.
+    pub(crate) fn non_retired_resident_point_count(&self) -> u64 {
+        self.batches
+            .iter()
+            .filter(|batch| !batch.retired)
+            .map(|batch| u64::try_from(batch.samples.len()).expect("stream batches are bounded"))
+            .sum()
+    }
+
     /// Reports the resident renderer-accepted batch state used by private capture.
     pub(crate) fn capture_batch_facts(&self) -> Result<Vec<VisualBatchFacts>, StreamError> {
         if self.facts.phase != StreamPhase::Complete {
@@ -828,12 +837,14 @@ mod tests {
     #[test]
     fn visual_transition_updates_target_complete_stream_batches() {
         let mut stream = StreamingScene::idle();
+        assert_eq!(stream.non_retired_resident_point_count(), 0);
         let reset = stream.begin(SOURCE, 2, [0.0; 3], SOURCE_Z_RANGE).unwrap();
         let parent = stream.publish(0, &payload(&[(2, [0.0; 3])])).unwrap();
         let replacement = stream
             .publish(1, &payload(&[(5, [0.0, 0.0, 1.0])]))
             .unwrap();
         stream.complete().unwrap();
+        assert_eq!(stream.non_retired_resident_point_count(), 2);
 
         let fade = stream
             .visual_batch_presentation(0, PresentationWeight::new(96))
@@ -852,6 +863,7 @@ mod tests {
         stream
             .commit_visual_batch_presentation(0, PresentationWeight::new(96))
             .unwrap();
+        assert_eq!(stream.non_retired_resident_point_count(), 2);
         assert_eq!(
             stream.capture_batch_facts().unwrap(),
             vec![
@@ -869,6 +881,7 @@ mod tests {
             } if key == BatchKey::new(1) && expected_version == BatchVersion::new(1)
         ));
         stream.commit_visual_batch_removal(0).unwrap();
+        assert_eq!(stream.non_retired_resident_point_count(), 1);
         assert!(matches!(
             stream.visual_batch_presentation(0, PresentationWeight::OPAQUE),
             Err(StreamError::RetiredBatch { batch_index: 0 })

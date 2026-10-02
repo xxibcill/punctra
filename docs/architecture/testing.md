@@ -15,7 +15,8 @@ v0.17 bounded viewer API/exact-Point, v0.18 packed SDK/React lifecycle, and
 v0.19 exact local browser/device qualification and v0.20 clean packed-consumer
 integration-baseline slices Complete and repository-verified; v0.21 bounded
 visual-baseline implementation Complete and repository-verified for the exact
-local attended lane, while broader browser/device support, physical-display
+local attended lane; v0.22 Point-footprint tests and private evidence machinery
+implemented with final attended evidence pending, while broader browser/device support, physical-display
 presentation, independent-human/adopter evidence, improved or final visual
 quality, API stability, support qualification, beta, v1, and release-candidate
 status remain outstanding; all gates run locally**
@@ -55,6 +56,10 @@ safely through the public API. Hosted CI is not configured.
     recomputes decoded-pixel, temporal, Coverage, feature, authority, resource,
     rubric, archive transport/export, and evidence-pin gates for one exact
     attended lane.
+12. **Point-footprint verification** exercises request/status selection,
+    projected-density sizing, multisample quality, nominal-pick independence,
+    exact target accounting, focused DPR/fallback cases, and a separate
+    record/pin/rebuild/verify evidence lane against immutable v0.21 images.
 
 Tests assert semantic results, ordering, exactness, publication certainty, and
 resource failure. They avoid depending on private tree shape, batching,
@@ -753,6 +758,39 @@ PNGs; all six rubric outcomes are `not_observed` under
 record](../releases/v0.21.0.md). Offscreen readback remains renderer evidence
 and does not observe the OS compositor or physical panel.
 
+## v0.22 Point-footprint verification
+
+Pure renderer contracts distinguish the explicit request from the selected
+`SingleSample`, `Multisample4x`, `UnsupportedFallback`, or `ResourceFallback`
+status. Browser tests derive the display diameter from physical viewport area
+and complete non-retired resident Point count, clamp it to 2.0 through 6.0
+physical pixels, and keep nominal pick diameter fixed at 7.0. Node tests close
+over corpus schema, evidence schema, archive/transport validation, quality and
+topology metrics, DPR profiles, and fallback facts.
+
+Required local GPU coverage renders same-size single-sample and four-sample
+fixtures at diameters 2 through 6 and multiple subpixel phases. It checks the
+0.18 coverage-RMSE cap, at least 20% improvement over the predecessor mask,
+clear quad corners, center coverage, nominal pick identity, EDL composition,
+resize, and resource/capability fallback selection. Required adapter runs set
+`PUNCTRA_REQUIRE_GPU=1`.
+
+The attended lane is sequential: record candidate canonical/focused PNGs;
+freeze implementation, verifier, runtime, corpus, and predecessor pins; rebuild
+and repeat the packed quickstart plus exact functional qualification; then run
+verify mode and the static verifier:
+
+~~~bash
+node scripts/verify-browser-point-footprint.mjs \
+  --baseline docs/releases/v0.22-browser-point-footprint-baseline.json \
+  --evidence docs/releases/v0.22-browser-point-footprint-evidence.json
+~~~
+
+The v0.22 baseline, functional records, verify evidence, artifacts, final
+observations, and release acceptance remain pending until this entire lane
+passes. See [CONTRIBUTING.md](../../CONTRIBUTING.md) and the [Point-footprint
+qualification guide](../guides/browser-point-footprint.md).
+
 ## Local verification lanes
 
 ### Change qualification
@@ -763,7 +801,7 @@ command list; this architecture guide does not duplicate it. Required local GPU
 lanes use `PUNCTRA_REQUIRE_GPU=1`, including renderer appearance, corpus,
 offscreen, planner, display-mapping, and public-host acceptance.
 
-The v0.15–v0.21 browser lane is separate from native GPU acceptance. It uses
+The v0.15–v0.22 browser lane is separate from native GPU acceptance. It uses
 the build and strict local-Range-host steps in `CONTRIBUTING.md`, requires the
 document itself to publish `PASS`, and records exact browser/adapter facts in
 the bounded v0.19 matrix rather than inferring support for an unexecuted entry.

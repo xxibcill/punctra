@@ -1,19 +1,18 @@
 # Browser integration known limitations
 
-Punctra `0.21.0-alpha.1` completes and repository-verifies the bounded packed
-integration baseline, visual regression corpus, and one exact local
-Chromium/macOS/Apple-GPU lane. The
-[machine-readable baseline](../releases/v0.21-browser-baseline.json) and
-[browser matrix](../releases/v0.21-browser-matrix.json), together with the
-[v0.21 verification record](../releases/v0.21.0.md), are the bounded v0.21
-repository authority. The v0.20
+Punctra `0.22.0-alpha.1` implements the bounded Point-footprint continuation,
+but its attended qualification is not yet a completed repository claim. The
+v0.21 [machine-readable baseline](../releases/v0.21-browser-baseline.json),
+[browser matrix](../releases/v0.21-browser-matrix.json), and [verification
+record](../releases/v0.21.0.md) remain the latest completed predecessor
+authority. The v0.20
 [baseline](../releases/v0.20-browser-baseline.json) and
 [matrix](../releases/v0.20-browser-matrix.json) remain the immutable completed
 historical evidence.
 
 ## Unsupported
 
-These conditions cannot create a usable viewer in v0.21:
+These conditions cannot create a usable viewer in v0.22:
 
 - insecure context, unavailable WebGPU/adapter, unsupported surface format,
   presentation mode, alpha mode, renderer limit, or invalid physical viewport;
@@ -31,8 +30,10 @@ they must not silently substitute a different renderer, Source, or cache mode.
 
 ## Unqualified
 
-Only the exact entry in `v0.21-browser-matrix.json` is repository-qualified for
-v0.21. Its completed observation does not qualify a different environment.
+Only the exact entry in `v0.21-browser-matrix.json` is currently repository-
+qualified. Its completed v0.21 observation does not qualify v0.22 or a
+different environment. The planned `v0.22-browser-matrix.json` is not authority
+until a fresh attended run and static verification complete.
 Installed Chrome, Safari, other Chromium builds, other screens, operating
 systems, GPUs, adapters, mobile devices, bundlers, framework versions, CDNs,
 authentication stacks, CSP variants, and production networks remain
@@ -42,11 +43,11 @@ Initialization success does not promote an unqualified platform to supported.
 
 ## Deferred
 
-The following are intentionally outside the accepted v0.21 slice:
+The following are intentionally outside the accepted v0.22 slice:
 
-- complete Source Coverage, intentional point-appearance changes, final
-  display policy, cross-browser/compositor/display equivalence, and visual-
-  quality sign-off;
+- complete Source Coverage, Point-appearance policy beyond the accepted bounded
+  footprint, final display policy, cross-browser/compositor/display
+  equivalence, and visual-quality sign-off;
 - editing, terrain workflows, export, host UI, offline-first behavior, service
   workers, telemetry, application persistence, and automatic recovery;
 - registry or CDN publication, independent-adopter completion, setup-time and
@@ -99,6 +100,22 @@ without becoming evidence itself. Standard Blob download remains primary. The
 opt-in `transport=server` path is only a same-origin, no-overwrite fallback for
 an in-app browser that does not materialize the Blob; its local-server receipt
 and TAR are still not evidence.
+
+## Point-footprint boundary
+
+The preferred four-sample path is presentation-only and requires the declared
+color/depth format capabilities and a physical viewport no larger than
+1,310,720 pixels. An unsupported capability selects `unsupported_fallback`; a
+larger valid viewport selects `resource_fallback`. Both preserve the inherited
+single-sample hard circle. They are usable fallbacks, not evidence that another
+adapter or display is qualified.
+
+The browser display diameter varies with non-retired resident density between
+2.0 and 6.0 physical pixels. Nominal provisional-pick coverage remains a
+separate 7.0-physical-pixel hard circle. v0.22 does not change View planning,
+LOD transitions, Point geometry, Source/Query authority, display mappings,
+tone, camera controls, exact selection, or host-owned DPR/resize policy. See the
+[point-footprint guide](browser-point-footprint.md).
 
 ## Host-owned
 

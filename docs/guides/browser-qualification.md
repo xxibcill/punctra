@@ -1,19 +1,22 @@
 # Browser qualification and recovery
 
-Punctra `0.21.0-alpha.1` carries forward the contract for one exact local
+Punctra `0.22.0-alpha.1` carries forward the contract for one exact local
 browser/device lane over the fixed repository workload and packed quickstart.
-The current machine-readable [browser
-matrix](../releases/v0.21-browser-matrix.json) is the completed bounded v0.21
-repository record: a platform absent from its `qualified_entries` is
-unqualified even when the SDK initializes successfully.
+The latest completed machine-readable [browser
+matrix](../releases/v0.21-browser-matrix.json) is immutable v0.21 predecessor
+evidence: a platform absent from its `qualified_entries` is unqualified even
+when the SDK initializes successfully. A v0.22 matrix becomes authoritative
+only after the exact pinned rebuild is run and its fresh observations pass.
 
 The immutable [v0.20 browser
 matrix](../releases/v0.20-browser-matrix.json) remains the immutable historical
-authority for the predecessor package. v0.21 repeated that bounded functional
-qualification without converting the earlier evidence to a moving target.
+authority for the earlier predecessor package. v0.21 repeated that bounded
+functional qualification without converting the earlier evidence to a moving
+target; v0.22 must do the same rather than copying either predecessor record.
 
-This is deliberately narrower than a browser-support promise. The v0.21 lane is
-the Codex in-app browser reporting Chromium 151 on macOS 26.6.2 build 25G83,
+This is deliberately narrower than a browser-support promise. The most recent
+completed lane is the Codex in-app browser reporting Chromium 151 on macOS
+26.6.2 build 25G83,
 arm64, and the local Apple M5 Pro machine. The browser exposed a generic WebGPU
 adapter name,
 so the physical-GPU mapping is recorded as a local-system inference rather than
@@ -59,7 +62,7 @@ The page passes only after it exercises:
   network, worker, cache, logical renderer, canvas, and optional heap evidence;
   and
 - every fixed ceiling inherited from the accepted v0.20 design and current
-  v0.21 functional baseline.
+  fresh v0.22 functional baseline.
 
 Record the raw `punctra-browser-qualification-v1` artifact before changing the
 browser, viewport, display, adapter, operating system, package, fixture, server,
@@ -137,7 +140,23 @@ precise customer locations, proprietary filenames, and unrelated browser or
 system logs. The harness itself uploads nothing and reads no browser profile,
 cookies, credentials, or unrelated storage.
 
-## Visual evidence is a separate lane
+## v0.22 point-footprint evidence is a separate lane
+
+The active v0.22 lane requests anti-aliased Point footprints, records the
+selected `multisample4x`, `unsupported_fallback`, or `resource_fallback` path,
+and keeps nominal pick diameter at 7.0 physical pixels while display diameter
+is clamped independently to 2.0 through 6.0 physical pixels. Its canonical
+trials reuse the immutable v0.21 corpus and predecessor images; focused trials
+exercise requested DPR 1, 2, and 4, capability/resource fallbacks, pick
+identity, exact transient accounting, and frame-cost ceilings.
+
+Passing the functional matrix does not manufacture those observations. Follow
+the sequential record, pin, rebuild, and verify workflow in the
+[point-footprint guide](browser-point-footprint.md). The v0.22 footprint
+baseline, evidence, functional records, and release acceptance are pending
+until that workflow and the static verifier pass.
+
+## v0.21 visual evidence is a separate predecessor lane
 
 The accepted v0.21 visual baseline adds nine fixed private trials, exact 640 by
 480 physical capture at requested DPR 2, 30 quiet frames, three complete
@@ -156,7 +175,7 @@ another lane or establish a physical-display claim.
 
 ## Remaining evidence
 
-v0.21 does not qualify installed Chrome, Safari, another operating system/GPU,
+v0.22 does not qualify installed Chrome, Safari, another operating system/GPU,
 mobile, registry/CDN deployment, authentication, offline-first behavior,
 independent adoption, API stability, compositor/display presentation,
 cross-browser visual equivalence, independent human interpretation, improved
@@ -165,6 +184,8 @@ or later accepted work; this release is not a beta, v1, or release candidate.
 
 The [v0.20 repository verification record](../releases/v0.20.0.md) pins the
 exact predecessor implementation commit and historical observations. The
-[v0.21 repository verification record](../releases/v0.21.0.md) pins the current
-implementation, environment, functional and visual observations, verifier
-identities, artifacts, and outstanding exits.
+[v0.21 repository verification record](../releases/v0.21.0.md) pins the
+immutable predecessor implementation, environment, functional and visual
+observations, verifier identities, artifacts, and outstanding exits. The
+[v0.22 release record](../releases/v0.22.0.md) deliberately remains pending
+until its own complete evidence exists.

@@ -1,6 +1,7 @@
 use render_protocol::{Camera, CameraProjection, RenderLimits, SourceId, ViewGenerationKey};
 #[cfg(target_arch = "wasm32")]
 use render_wgpu::{FrameReport, PickHit};
+use render_wgpu::{PointFootprint, PointFootprintStatus};
 use serde::Serialize;
 
 #[cfg(test)]
@@ -30,6 +31,7 @@ pub(crate) struct Diagnostics<'a> {
     pub(crate) streaming: StreamFacts,
     pub(crate) streaming_limits: StreamingLimitFacts,
     pub(crate) capture_resources: CaptureResourceFacts,
+    pub(crate) point_footprint: PointFootprintFacts,
     pub(crate) frame: Option<FrameFacts>,
     pub(crate) pick: &'a PickFacts,
     pub(crate) camera: CameraFacts,
@@ -37,6 +39,47 @@ pub(crate) struct Diagnostics<'a> {
     pub(crate) highlights: HighlightFacts,
     pub(crate) display_authority: &'static str,
     pub(crate) safe_shutdown_action: &'static str,
+}
+
+/// Requested and selected Point-footprint facts for one physical viewport.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+pub(crate) struct PointFootprintFacts {
+    requested: &'static str,
+    selected: &'static str,
+    nominal_pick_size_physical_pixels: f32,
+    display_size_physical_pixels: f32,
+}
+
+impl PointFootprintFacts {
+    pub(crate) const fn new(
+        requested: PointFootprint,
+        selected: PointFootprintStatus,
+        nominal_pick_size_physical_pixels: f32,
+        display_size_physical_pixels: f32,
+    ) -> Self {
+        Self {
+            requested: point_footprint_name(requested),
+            selected: point_footprint_status_name(selected),
+            nominal_pick_size_physical_pixels,
+            display_size_physical_pixels,
+        }
+    }
+}
+
+const fn point_footprint_name(footprint: PointFootprint) -> &'static str {
+    match footprint {
+        PointFootprint::SingleSample => "single_sample",
+        PointFootprint::Antialiased => "antialiased",
+    }
+}
+
+const fn point_footprint_status_name(status: PointFootprintStatus) -> &'static str {
+    match status {
+        PointFootprintStatus::SingleSample => "single_sample",
+        PointFootprintStatus::Multisample4x => "multisample4x",
+        PointFootprintStatus::UnsupportedFallback => "unsupported_fallback",
+        PointFootprintStatus::ResourceFallback => "resource_fallback",
+    }
 }
 
 /// Exact browser-host ownership facts for the private capture ticket.
@@ -489,6 +532,12 @@ mod tests {
             streaming: StreamingScene::idle().facts(),
             streaming_limits: StreamingLimitFacts::fixed(),
             capture_resources: CaptureResourceFacts::released(),
+            point_footprint: PointFootprintFacts::new(
+                PointFootprint::Antialiased,
+                PointFootprintStatus::Multisample4x,
+                7.0,
+                4.25,
+            ),
             frame: None,
             pick: &pick,
             camera: CameraFacts::from_camera(scene.camera()),
@@ -517,6 +566,15 @@ mod tests {
         assert_eq!(value["capture_resources"]["pending_tickets"], 0);
         assert_eq!(value["capture_resources"]["owned_textures"], 0);
         assert_eq!(value["capture_resources"]["owned_readback_buffers"], 0);
+        assert_eq!(
+            value["point_footprint"],
+            json!({
+                "requested": "antialiased",
+                "selected": "multisample4x",
+                "nominal_pick_size_physical_pixels": 7.0,
+                "display_size_physical_pixels": 4.25,
+            })
+        );
         assert_eq!(value["streaming_limits"]["range_bytes"], 262_144);
         assert_eq!(value["capabilities"]["composite_alpha_mode"], "Opaque");
         assert_eq!(
@@ -526,6 +584,44 @@ mod tests {
         assert_eq!(value["capabilities"]["adapter_max_bind_groups"], 4);
         assert_eq!(value["capabilities"]["adapter_max_vertex_buffers"], 8);
         assert_eq!(value["capabilities"]["adapter_max_color_attachments"], 8);
+    }
+
+    #[test]
+    fn point_footprint_facts_serialize_the_closed_renderer_vocabulary() {
+        let cases = [
+            (
+                PointFootprint::SingleSample,
+                PointFootprintStatus::SingleSample,
+                "single_sample",
+                "single_sample",
+            ),
+            (
+                PointFootprint::Antialiased,
+                PointFootprintStatus::Multisample4x,
+                "antialiased",
+                "multisample4x",
+            ),
+            (
+                PointFootprint::Antialiased,
+                PointFootprintStatus::UnsupportedFallback,
+                "antialiased",
+                "unsupported_fallback",
+            ),
+            (
+                PointFootprint::Antialiased,
+                PointFootprintStatus::ResourceFallback,
+                "antialiased",
+                "resource_fallback",
+            ),
+        ];
+
+        for (requested, selected, requested_name, selected_name) in cases {
+            let value =
+                serde_json::to_value(PointFootprintFacts::new(requested, selected, 7.0, 2.5))
+                    .unwrap();
+            assert_eq!(value["requested"], requested_name);
+            assert_eq!(value["selected"], selected_name);
+        }
     }
 
     #[test]

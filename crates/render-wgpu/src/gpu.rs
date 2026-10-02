@@ -26,7 +26,8 @@ pub(crate) struct BatchUniform {
 pub(crate) struct EdlUniform {
     pub(crate) strength: f32,
     pub(crate) radius_pixels: u32,
-    pub(crate) _padding: [u32; 2],
+    pub(crate) clear_alpha: f32,
+    pub(crate) _padding: u32,
 }
 
 #[repr(C)]

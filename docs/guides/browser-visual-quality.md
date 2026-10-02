@@ -5,6 +5,11 @@ one exact attended Chromium/macOS/Apple-GPU lane; broader browser/device,
 physical-display, independent-human/adopter, and improved/final-quality claims
 remain outstanding**
 
+This guide is the immutable predecessor workflow. The active v0.22
+[point-footprint qualification](browser-point-footprint.md) reuses these inputs
+and canonical images but publishes separate baseline, evidence, artifacts, and
+release observations; it never rewrites the v0.21 records below.
+
 Punctra `0.21.0-alpha.1` establishes a reproducible visual-regression baseline
 before any intentional point-appearance change. The accepted
 [design](../design/visual-quality-baseline-v0.21.md) authorizes a closed private

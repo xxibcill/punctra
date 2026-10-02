@@ -1,6 +1,6 @@
 # Five-minute packed browser quickstart
 
-Punctra `0.21.0-alpha.1` carries forward the clean TypeScript consumer under
+Punctra `0.22.0-alpha.1` carries forward the clean TypeScript consumer under
 `examples/browser-typescript`. It installs only the packed
 `@punctra/viewer` tarball, owns its canvas and application policy, and imports
 only the supported root, input, and exact-query entry points.
@@ -46,8 +46,8 @@ safe order:
 7. Clear the highlight, pause and resume presentation, and dispose the viewer.
 
 Select **Run baseline check** to execute the deterministic functional path
-frozen by the attended v0.20 browser check and required again for the v0.21
-package.
+frozen by the attended v0.20 browser check, repeated by v0.21, and required
+again before v0.22 point-footprint evidence can be accepted.
 A pass publishes a
 `punctra-browser-quickstart-acceptance-v1` record containing the package
 version, Source identity, display/projection coverage, cancellation retention,
@@ -76,13 +76,17 @@ Use the [SDK deployment guide](browser-sdk.md) for asset URLs, Vite, React, CSP,
 and hosting. Use the [qualification and recovery guide](browser-qualification.md)
 before describing a browser/device as qualified. Review the consolidated
 [known limitations](browser-known-limitations.md) before integrating the alpha.
-The v0.21 [visual-quality workflow](browser-visual-quality.md) is a separate
-private repository lane: it fixes a 320 by 240 CSS-pixel canvas at requested
-DPR 2, waits 30 quiet frames, captures 640 by 480 renderer evidence, and runs
+The completed v0.21 [visual-quality workflow](browser-visual-quality.md) is an
+immutable predecessor lane. The active v0.22
+[point-footprint workflow](browser-point-footprint.md) reuses its corpus and
+images but publishes separate baseline and evidence records. Both private
+lanes fix a 320 by 240 CSS-pixel canvas at requested DPR 2, wait 30 quiet
+frames, capture 640 by 480 renderer evidence, and run
 three complete viewer/harness recreations per trial. It adds no screenshot or
 visual-testing export to this quickstart or the supported package surface. Its
 attended record stage creates baseline inputs before the implementation pin;
-the pinned v0.21 build repeated this quickstart and qualification before its
-separate attended verify stage published the bounded final evidence. See the
-[v0.21 verification record](../releases/v0.21.0.md) for the exact observations
-and remaining nonclaims.
+the pinned v0.22 build must repeat this quickstart and qualification before its
+separate attended footprint verify stage may publish final evidence. The
+[v0.21 verification record](../releases/v0.21.0.md) remains the authority for
+the predecessor observations; the v0.22 functional and footprint records are
+pending until that sequential workflow finishes.

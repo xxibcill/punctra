@@ -3,7 +3,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-#[path = "../../../../tests/support/gpu.rs"]
+#[path = "../../../../crates/render-wgpu/test-support/gpu.rs"]
 mod gpu_support;
 
 use render_protocol::{
@@ -12,13 +12,13 @@ use render_protocol::{
     ViewId, Viewport,
 };
 use render_wgpu::{
-    Camera, EyeDomeLighting, Frame, FrameReport, PickHit, PickPoll, PickRequest, PointStyle,
-    RecordedFrame, RendererConfig, WgpuRenderer,
+    Camera, Frame, FrameReport, PickHit, PickPoll, PickRequest, PointFootprint,
+    PointFootprintStatus, PointStyle, RecordedFrame, RendererConfig, WgpuRenderer,
 };
 
 use super::{
     CROSS_FADE_PRESENTED_FRAMES, REFERENCE_POINT_SIZE_PIXELS, projected_density_point_size,
-    weight_for_step,
+    renderer_appearance_config, weight_for_step,
 };
 use gpu_support::{GpuContext, Rgba8Image as Image, Rgba8Target as ColorTarget, with_gpu};
 
@@ -34,6 +34,15 @@ const GENERATION: ViewGenerationKey = ViewGenerationKey::new(ViewId::new(93), 1)
 const MAX_FIXED_VIEW_ENCODING_TIME: Duration = Duration::from_secs(1);
 const MAX_FIXED_VIEW_FRAME_TIME: Duration = Duration::from_secs(2);
 const MAX_FIXED_VIEW_PICK_TIME: Duration = Duration::from_secs(2);
+const MIN_UNENHANCED_CENTER_RED: u8 = 180;
+const MAX_UNENHANCED_CENTER_BLUE: u8 = 65;
+const MAX_UNENHANCED_RED_STEP: u8 = 40;
+// The EDL shader's documented lower shade clamp is 0.35. These are the
+// conservative integer endpoints of the inherited unenhanced gates after that
+// permitted shading, including one byte of endpoint quantization.
+const MIN_EYE_DOME_CENTER_RED: u8 = 62;
+const MAX_EYE_DOME_CENTER_BLUE: u8 = 24;
+const MAX_EYE_DOME_RED_STEP: u8 = 15;
 
 #[test]
 fn fixed_view_adaptive_sizing_improves_coverage_without_hiding_a_source_hole() {
@@ -67,9 +76,13 @@ fn assert_adaptive_sizing_image(gpu: &GpuContext) {
     let adaptive_style = reference_style
         .with_display_size_pixels(adaptive_size)
         .unwrap();
+    let mut pick_targets_retained = false;
     for projection in FixedProjection::ALL {
         let reference = subject.render(reference_style, projection);
         let adaptive = subject.render(adaptive_style, projection);
+
+        assert_frame_ceiling(&reference, point_count, 1, pick_targets_retained);
+        assert_frame_ceiling(&adaptive, point_count, 1, pick_targets_retained);
 
         let reference_coverage = reference.image.visible_pixel_count(BLACK);
         let adaptive_coverage = adaptive.image.visible_pixel_count(BLACK);
@@ -102,8 +115,7 @@ fn assert_adaptive_sizing_image(gpu: &GpuContext) {
         assert_eq!(subject.pick(&reference.recorded, visual_only_pixel), None);
         assert_eq!(subject.pick(&adaptive.recorded, visual_only_pixel), None);
 
-        assert_frame_ceiling(&reference, point_count, 1);
-        assert_frame_ceiling(&adaptive, point_count, 1);
+        pick_targets_retained = true;
     }
 }
 
@@ -130,8 +142,8 @@ fn assert_mixed_density_boundary(gpu: &GpuContext) {
             adaptive_gap < reference_gap,
             "{projection:?} adaptive mixed-density boundary gap {adaptive_gap} should be smaller than the 2.4 px reference gap {reference_gap}"
         );
-        assert_frame_ceiling(&reference, point_count, 1);
-        assert_frame_ceiling(&adaptive, point_count, 1);
+        assert_frame_ceiling(&reference, point_count, 1, false);
+        assert_frame_ceiling(&adaptive, point_count, 1, false);
     }
 }
 
@@ -140,9 +152,9 @@ fn assert_cross_fade_images(gpu: &GpuContext, eye_dome: bool) {
     let child = point_id(202);
     for projection in FixedProjection::ALL {
         let mut subject = if eye_dome {
-            ImageHarness::with_eye_dome(gpu, 3, 3)
-        } else {
             ImageHarness::new(gpu, 3, 3)
+        } else {
+            ImageHarness::antialiased_without_eye_dome(gpu, 3, 3)
         };
         subject.upsert(1, 1, vec![point([0.0, -0.2, 0.0], RED, parent)]);
         subject.upsert(2, 1, vec![point([0.02, 0.2, 0.0], RED, child)]);
@@ -167,13 +179,26 @@ fn assert_cross_fade_images(gpu: &GpuContext, eye_dome: bool) {
                 .unwrap();
             let rendered = subject.render(style, projection);
             let center = rendered.image.pixel(CENTER);
+            let (minimum_red, maximum_blue, maximum_red_step) = if eye_dome {
+                (
+                    MIN_EYE_DOME_CENTER_RED,
+                    MAX_EYE_DOME_CENTER_BLUE,
+                    MAX_EYE_DOME_RED_STEP,
+                )
+            } else {
+                (
+                    MIN_UNENHANCED_CENTER_RED,
+                    MAX_UNENHANCED_CENTER_BLUE,
+                    MAX_UNENHANCED_RED_STEP,
+                )
+            };
             assert!(
-                center[0] >= 180 && center[1] <= 1 && center[2] <= 65,
+                center[0] >= minimum_red && center[1] <= 1 && center[2] <= maximum_blue,
                 "{projection:?} cross-fade frame {step} produced a hole or conspicuous background contribution: {center:?}"
             );
             if let Some(previous) = previous_red {
                 assert!(
-                    center[0].abs_diff(previous) <= 40,
+                    center[0].abs_diff(previous) <= maximum_red_step,
                     "{projection:?} cross-fade frame {step} changed red intensity from {previous} to {}",
                     center[0]
                 );
@@ -195,7 +220,13 @@ fn assert_cross_fade_images(gpu: &GpuContext, eye_dome: bool) {
             } else {
                 3
             };
-            assert_cross_fade_frame_ceiling(&rendered, expected_points, expected_points, eye_dome);
+            assert_cross_fade_frame_ceiling(
+                &rendered,
+                expected_points,
+                expected_points,
+                eye_dome,
+                step > 0,
+            );
         }
     }
 }
@@ -258,8 +289,19 @@ fn viewport() -> Viewport {
     Viewport::new(VIEWPORT[0], VIEWPORT[1]).unwrap()
 }
 
-fn assert_frame_ceiling(rendered: &RenderedImage, points: u64, batches: u64) {
-    assert_frame_ceiling_with_transient_limit(rendered, points, batches, 8);
+fn assert_frame_ceiling(
+    rendered: &RenderedImage,
+    points: u64,
+    batches: u64,
+    pick_targets_retained: bool,
+) {
+    assert_frame_ceiling_with_transient_bytes(
+        rendered,
+        points,
+        batches,
+        40 + u64::from(pick_targets_retained) * 8,
+        true,
+    );
 }
 
 fn assert_cross_fade_frame_ceiling(
@@ -267,24 +309,37 @@ fn assert_cross_fade_frame_ceiling(
     points: u64,
     batches: u64,
     eye_dome: bool,
+    pick_targets_retained: bool,
 ) {
-    let transient_bytes_per_pixel = if eye_dome { 12 } else { 8 };
-    assert_frame_ceiling_with_transient_limit(rendered, points, batches, transient_bytes_per_pixel);
+    let transient_bytes_per_pixel =
+        if eye_dome { 40 } else { 32 } + u64::from(pick_targets_retained) * 8;
+    assert_frame_ceiling_with_transient_bytes(
+        rendered,
+        points,
+        batches,
+        transient_bytes_per_pixel,
+        eye_dome,
+    );
 }
 
-fn assert_frame_ceiling_with_transient_limit(
+fn assert_frame_ceiling_with_transient_bytes(
     rendered: &RenderedImage,
     points: u64,
     batches: u64,
     transient_bytes_per_pixel: u64,
+    eye_dome_lighting_applied: bool,
 ) {
     let report = rendered.report;
     assert_eq!(report.drawn_points(), points);
     assert_eq!(report.draw_calls(), batches);
     assert_eq!(report.resident_bytes(), points * POINT_BYTES);
-    assert!(
-        report.transient_texture_bytes()
-            <= transient_bytes_per_pixel * u64::from(VIEWPORT[0]) * u64::from(VIEWPORT[1])
+    assert_eq!(
+        report.transient_texture_bytes(),
+        transient_bytes_per_pixel * u64::from(VIEWPORT[0]) * u64::from(VIEWPORT[1])
+    );
+    assert_eq!(
+        report.eye_dome_lighting_applied(),
+        eye_dome_lighting_applied
     );
     assert!(report.encoding_time() <= MAX_FIXED_VIEW_ENCODING_TIME);
     assert!(rendered.frame_time <= MAX_FIXED_VIEW_FRAME_TIME);
@@ -298,21 +353,19 @@ struct ImageHarness<'gpu> {
 
 impl<'gpu> ImageHarness<'gpu> {
     fn new(gpu: &'gpu GpuContext, point_limit: u64, batch_limit: u64) -> Self {
-        Self::with_config(
-            gpu,
-            RendererConfig::new(
-                FORMAT,
-                RenderLimits::new(point_limit * POINT_BYTES, point_limit, batch_limit),
-            ),
-        )
+        let limits = RenderLimits::new(point_limit * POINT_BYTES, point_limit, batch_limit);
+        Self::with_config(gpu, renderer_appearance_config(FORMAT, limits))
     }
 
-    fn with_eye_dome(gpu: &'gpu GpuContext, point_limit: u64, batch_limit: u64) -> Self {
+    fn antialiased_without_eye_dome(
+        gpu: &'gpu GpuContext,
+        point_limit: u64,
+        batch_limit: u64,
+    ) -> Self {
         let limits = RenderLimits::new(point_limit * POINT_BYTES, point_limit, batch_limit);
-        let cue = EyeDomeLighting::new(1.25, 1).unwrap();
         Self::with_config(
             gpu,
-            RendererConfig::new(FORMAT, limits).with_eye_dome_lighting(cue),
+            RendererConfig::new(FORMAT, limits).with_point_footprint(PointFootprint::Antialiased),
         )
     }
 
@@ -382,6 +435,10 @@ impl<'gpu> ImageHarness<'gpu> {
             VIEWPORT,
             FORMAT,
             "renderer-demo fixed-view color target",
+        );
+        assert_eq!(
+            self.renderer.point_footprint_status(viewport()),
+            PointFootprintStatus::Multisample4x
         );
         let mut encoder = self.encoder("renderer-demo fixed-view image encoder");
         let recorded = self

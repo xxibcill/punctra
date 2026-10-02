@@ -60,7 +60,7 @@ test("qualification host facts normalize to the canonical evidence schema", () =
     display_path: "built-in Retina display",
     package: {
       name: "@punctra/viewer",
-      version: VISUAL_RELEASE,
+      version: QUALIFICATION_RUNTIME_LANE.host.package.version,
     },
   });
 });
@@ -606,11 +606,26 @@ async function buildPrePinInputsFixture() {
   const corpus = JSON.parse((await repositoryBytes(corpusPath)).toString("utf8"));
   const image = solidImage(640, 480, [80, 120, 160, 255]);
   const bytes = Buffer.from(await encodeRgba8Png(image));
-  const runtimeArtifacts = await Promise.all([
-    "apps/browser-demo/web/package.json",
-    "apps/browser-demo/web/pkg/browser_demo.js",
-    "apps/browser-demo/web/pkg/browser_demo_bg.wasm",
-  ].map(digestRecord));
+  const viewerManifestPath = "apps/browser-demo/web/package.json";
+  const reactManifestPath = "packages/react/package.json";
+  const viewerManifestBytes = await historicalManifestBytes(viewerManifestPath, (manifest) => {
+    manifest.version = VISUAL_RELEASE;
+  });
+  const reactManifestBytes = await historicalManifestBytes(reactManifestPath, (manifest) => {
+    manifest.version = VISUAL_RELEASE;
+    manifest.peerDependencies["@punctra/viewer"] = VISUAL_RELEASE;
+  });
+  const runtimeArtifacts = [
+    {
+      path: viewerManifestPath,
+      byte_length: viewerManifestBytes.byteLength,
+      sha256: sha256(viewerManifestBytes),
+    },
+    ...(await Promise.all([
+      "apps/browser-demo/web/pkg/browser_demo.js",
+      "apps/browser-demo/web/pkg/browser_demo_bg.wasm",
+    ].map(digestRecord))),
+  ];
   const canonicalBaselines = corpus.trials.map((trial) => ({
     trial_id: trial.id,
     path: `apps/browser-demo/web/fixtures/visual-v1/baselines/${trial.id}.png`,
@@ -641,9 +656,17 @@ async function buildPrePinInputsFixture() {
     manifest,
     overrides: new Map([
       [path, manifestBytes],
+      [viewerManifestPath, viewerManifestBytes],
+      [reactManifestPath, reactManifestBytes],
       ...canonicalBaselines.map((baseline) => [baseline.path, bytes]),
     ]),
   };
+}
+
+async function historicalManifestBytes(relativePath, mutate) {
+  const manifest = JSON.parse((await repositoryBytes(relativePath)).toString("utf8"));
+  mutate(manifest);
+  return Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`);
 }
 
 async function refreshDigestRecords(value, overrides) {

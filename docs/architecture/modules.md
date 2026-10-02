@@ -16,7 +16,9 @@ thin React lifecycle adapter plus v0.19 exact local browser/device qualification
 and v0.20 clean packed-consumer integration baseline Complete and repository-
 verified; v0.21 bounded visual-corpus, capture, comparison, and evidence
 implementation Complete and repository-verified for the bounded exact local
-attended lane, while broader browser/device support, physical-display
+attended lane; v0.22 Point-footprint implementation Active with final attended
+record, pin, rebuilt functional qualification, and verify evidence pending,
+while broader browser/device support, physical-display
 presentation, independent-human/adopter evidence, improved or final visual
 quality, API stability, support qualification, beta, v1, and release-candidate
 status remain outstanding
@@ -44,8 +46,8 @@ limits, and recovery modes are frozen in the
 | `point-terrain` | Derive/persist the narrow Terrain Surface, evaluate exact Snapshot-bound QA, and compare semantic topology. | Snapshot, Terrain Recipe/AOI, target, Source Query, profile, detached Check Points | In-memory or file-backed Surface, bounded streams, QA/comparison reports, LandXML receipt |
 | `render-protocol` | Define generation-safe renderer-neutral point display state. | Camera and display values | Validated updates and frame values |
 | `point-view` | Plan one frozen View over a host-owned hierarchy without I/O. | Camera, viewport, hierarchy/residency, budget | Demand, requests, retention, retirements |
-| `render-wgpu` | Maintain and draw one wgpu representation of render-protocol state. | Render updates, frame, host target | Recorded commands, report, provisional picks |
-| `browser-demo` / `@punctra/viewer` | Package and qualify one bounded framework-neutral browser viewer composition without owning application policy. | Caller-owned canvas/lifecycle/navigation/cache/recovery policy, generated scene, trusted immutable-LAS deployment, or one closed private Visual Trial identifier | Disposable viewer handle, WebGPU frame, bounded state, Source-load timings, provisional pick/highlight, exact fixture record, sampled remote Coverage, structured errors, private qualification or visual-baseline evidence |
+| `render-wgpu` | Maintain and draw one wgpu representation of render-protocol state, including renderer-owned Point-footprint selection. | Render updates, frame, host target, footprint request | Recorded commands, report, footprint status, provisional picks |
+| `browser-demo` / `@punctra/viewer` | Package and qualify one bounded framework-neutral browser viewer composition without owning application policy. | Caller-owned canvas/lifecycle/navigation/cache/recovery policy, generated scene, trusted immutable-LAS deployment, or one closed private visual/footprint trial identifier | Disposable viewer handle, WebGPU frame, bounded state, Source-load timings, provisional pick/highlight, exact fixture record, sampled remote Coverage, structured errors, private qualification or visual/footprint evidence |
 | `@punctra/react` | Translate React mount, resize, active, unmount, and replay lifecycle into the framework-neutral viewer. | Caller-owned canvas, viewport, active flag, viewer creation options | React binding state over the same disposable viewer handle |
 | `renderer-demo` | Exercise indexed LAS/LAZ View-to-render composition, exact review/correction, and local viewing measurement. | CLI, permitted corpus manifest, generated inputs, or an existing Workspace | Interactive demo, exact review outcome, GPU-free process smoke, or canonical Viewing Report |
 | `terrain-demo` | Own one recoverable headless LAS/LAZ-to-terrain Workflow Run and its private post-Run qualification. | Caller-owned paths, identities, baseline, correction/QA intent, limits, and returned LandXML declaration | Eight-frame journal, Revision, Terrain/QA evidence, LandXML/report, and separate Round-Trip Evidence |
@@ -81,6 +83,14 @@ The canonical images remain presentation-only and cannot cross the Source/Query
 authority seam. Record mode creates the inputs that cross the implementation
 pin; only a later verify-mode run of that pinned build can publish final visual
 evidence.
+
+The v0.22 Point-footprint change deepens `render-wgpu` rather than adding a
+crate or shallow public helper. Its configuration request and selected status
+hide multisample capability checks, preferred/fallback pipeline choice,
+attachments, resolve, and transient byte accounting. `browser-demo` owns only
+its projected-density diameter policy, complete non-retired resident count,
+nominal-pick independence, diagnostics, and the closed qualification runner.
+The runner and metric modules remain private and do not become package exports.
 
 ## 1. point-contracts
 
@@ -591,6 +601,12 @@ checks, baseline-input construction, post-capture interpretation binding,
 USTAR transport, and evidence publication. The seam is closed over checked-in
 identifiers so a caller cannot assemble a configurable screenshot or comparison
 interface from shallow implementation files.
+
+The v0.22 reusable addition is limited to the renderer request/status seam.
+Browser density sizing, the footprint corpus, capture facts, metrics, archive,
+and release evidence are application-local. A third-party renderer host chooses
+its request and Point size; it cannot select a sample count or take ownership of
+the renderer's multisample targets.
 
 Index pages, decoder buffers, Point Set frames, overlay tables, Operation
 records, Revision blocks, triangulation arenas, XML encoder state, scheduling
