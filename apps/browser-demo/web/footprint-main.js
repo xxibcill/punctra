@@ -261,6 +261,7 @@ function errorRecord(error) {
     schema: "punctra-browser-point-footprint-runner-error-v1",
     name: error?.name ?? "Error",
     message: errorMessage(error),
+    ...(error?.diagnostics === undefined ? {} : { diagnostics: error.diagnostics }),
   };
 }
 

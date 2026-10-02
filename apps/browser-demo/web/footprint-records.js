@@ -49,12 +49,18 @@ export function createPointFootprintBaselineRecord(options) {
     baselineArtifacts,
     environment,
   } = options;
-  requireCondition(canonicalTrials.every(({ passed }) => passed),
-    "record baseline requires every canonical trial to pass");
-  requireCondition(focusedTrials.every(({ passed }) => passed),
-    "record baseline requires every focused trial to pass");
-  requireCondition(fallback.passed,
-    "record baseline requires the attended resource fallback to pass");
+  const failedCanonical = canonicalTrials.filter(({ passed }) => !passed);
+  const failedFocused = focusedTrials.filter(({ passed }) => !passed);
+  if (failedCanonical.length > 0 || failedFocused.length > 0 || !fallback.passed) {
+    const error = new Error("Point-footprint runner failed: record baseline requires every trial to pass");
+    error.diagnostics = structuredClone({
+      authority: "diagnostic_only",
+      canonical_trials: failedCanonical,
+      focused_trials: failedFocused,
+      fallback: fallback.passed ? null : fallback,
+    });
+    throw error;
+  }
 
   const candidateImages = footprint.canonical_trials.map((trial) => {
     const record = baselineArtifacts.find(({ kind, trial_id: trialId }) => (
