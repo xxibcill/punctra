@@ -1,0 +1,911 @@
+{
+  "schema": "punctra-local-verification-record-v1",
+  "release": "0.23.0-alpha.1",
+  "observed_on": "2026-10-06",
+  "implementation_commit": "d849cccee367358722c708802f75d4878a4d2a5a",
+  "qualified_source_unchanged": true,
+  "execution": "local",
+  "expected_gpu_required": true,
+  "rust_test_threads": 1,
+  "hosted_ci": false,
+  "documented_commands": 72,
+  "passed_commands": 72,
+  "workspace": {
+    "passed": 908,
+    "failed": 0,
+    "ignored": 3,
+    "test_groups": 78
+  },
+  "javascript": {
+    "passed": 315,
+    "failed": 0
+  },
+  "lod": {
+    "verified_artifacts": 2970,
+    "passed": true
+  },
+  "commands": [
+    {
+      "command": "cargo fmt --all --check",
+      "exit_code": 0,
+      "seconds": 0.81,
+      "log": "matrix-01.log",
+      "log_digest": {
+        "path": "target/v023-local-matrix/matrix-01.log",
+        "byte_length": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "final_passed": true
+    },
+    {
+      "command": "cargo clippy --workspace --all-targets --all-features -- -D warnings",
+      "exit_code": 0,
+      "seconds": 0.48,
+      "log": "matrix-02.log",
+      "log_digest": {
+        "path": "target/v023-local-matrix/matrix-02.log",
+        "byte_length": 72,
+        "sha256": "bcb74884a78099501f6bfc31de29d15aae4eb48dcd18d5c99bdde44d75b90089"
+      },
+      "final_passed": true
+    },
+    {
+      "command": "cargo test --workspace --all-features",
+      "exit_code": 0,
+      "seconds": 1939.43,
+      "log": "matrix-03.log",
+      "log_digest": {
+        "path": "target/v023-local-matrix/matrix-03.log",
+        "byte_length": 89060,
+        "sha256": "2d3a4148349454dc4cb997e9f1c04563db504d00af11ac3a1ec48774199a4402"
+      },
+      "final_passed": true
+    },
+    {
+      "command": "RUSTDOCFLAGS=\"-D warnings\" cargo doc --workspace --all-features --no-deps",
+      "exit_code": 0,
+      "seconds": 68.02,
+      "log": "matrix-04.log",
+      "log_digest": {
+        "path": "target/v023-local-matrix/matrix-04.log",
+        "byte_length": 2108,
+        "sha256": "434da06d26f70c2a7fefefd476b42419125a7f78020466c58fcff74484891fa5"
+      },
+      "final_passed": true
+    },
+    {
+      "command": "scripts/verify-packages.rb",
+      "exit_code": 0,
+      "seconds": 29.26,
+      "log": "matrix-05.log",
+      "log_digest": {
+        "path": "target/v023-local-matrix/matrix-05.log",
+        "byte_length": 6103,
+        "sha256": "0c8858c816dc73ee771be226a7fa7770a771658aea254827389c319ef04971f5"
+      },
+      "final_passed": true
+    },
+    {
+      "command": "cargo fmt --manifest-path fuzz/Cargo.toml --all --check",
+      "exit_code": 0,
+      "seconds": 0.88,
+      "log": "matrix-06.log",
+      "log_digest": {
+        "path": "target/v023-local-matrix/matrix-06.log",
+        "byte_length": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "final_passed": true
+    },
+    {
+      "command": "cargo clippy --manifest-path fuzz/Cargo.toml --all-targets -- -D warnings",
+      "exit_code": 0,
+      "seconds": 2.26,
+      "log": "matrix-07.log",
+      "log_digest": {
+        "path": "target/v023-local-matrix/matrix-07.log",
+        "byte_length": 894,
+        "sha256": "275732fe2fb5e6222892f93f3595e7129f5944f6296e42847bf86d6c48007326"
+      },
+      "final_passed": true
+    },
+    {
+      "command": "cargo check --manifest-path fuzz/Cargo.toml --bin index_persistence",
+      "exit_code": 0,
+      "seconds": 0.18,
+      "log": "matrix-08.log",
+      "log_digest": {
+        "path": "target/v023-local-matrix/matrix-08.log",
+        "byte_length": 161,
+        "sha256": "fcbab1095187ca1ba367d20ef175c078b337051298e1a11a6e9e6115ddd81dc9"
+      },
+      "final_passed": true
+    },
+    {
+      "command": "cargo check --manifest-path fuzz/Cargo.toml --bin terrain_persistence",
+      "exit_code": 0,
+      "seconds": 0.09,
+      "log": "matrix-09.log",
+      "log_digest": {
+        "path": "target/v023-local-matrix/matrix-09.log",
+        "byte_length": 161,
+        "sha256": "bc8f635d1927a40673e86a07057a7a374ac9848edbbe8fae40a0ecbfe5485fd2"
+      },
+      "final_passed": true
+    },
+    {
+      "command": "cargo test --manifest-path fuzz/Cargo.toml --lib",
+      "exit_code": 0,
+      "seconds": 4.47,
+      "log": "matrix-10.log",
+      "log_digest": {
+        "path": "target/v023-local-matrix/matrix-10.log",
+        "byte_length": 1335,
+        "sha256": "407127e205ae81e6466fa20777cd51fd06cb9bdd617193e9bc0f5f899c4bfa7e"
+      },
+      "final_passed": true
+    },
+    {
+      "command": "cargo check -p browser-demo --target wasm32-unknown-unknown",
+      "exit_code": 0,
+      "seconds": 53.09,
+      "log": "matrix-11.log",
+      "log_digest": {
+        "path": "target/v023-local-matrix/matrix-11.log",
+        "byte_length": 582,
+        "sha256": "613cc69a393dfcb2ab2500b9f265b682d5a46d5b11fe8486371fcb056ea281ce"
+      },
+      "final_passed": true
+    },
+    {
+      "command": "cargo clippy -p browser-demo --all-targets --all-features -- -D warnings",
+      "exit_code": 0,
+      "seconds": 36.52,
+      "log": "matrix-12.log",
+      "log_digest": {
+        "path": "target/v023-local-matrix/matrix-12.log",
+        "byte_length": 992,
+        "sha256": "b7ae9d80b47beee0bf84e3ea7f53b4bcebd169d242df36d12183b92e0e9d923c"
+      },
+      "final_passed": true
+    },
+    {
+      "command": "cargo clippy -p browser-demo --target wasm32-unknown-unknown --all-targets   --all-features -- -D warnings",
+      "exit_code": 0,
+      "seconds": 10.07,
+      "log": "matrix-13.log",
+      "log_digest": {
+        "path": "target/v023-local-matrix/matrix-13.log",
+        "byte_length": 171,
+        "sha256": "7480544c569180a6a528375fac3fb8adb734f03720cec4750f0c1a6273944af5"
+      },
+      "final_passed": true
+    },
+    {
+      "command": "cargo run -p browser-demo --bin generate_stream_fixture",
+      "exit_code": 0,
+      "seconds": 20.04,
+      "log": "matrix-14.log",
+      "log_digest": {
+        "path": "target/v023-local-matrix/matrix-14.log",
+        "byte_length": 282,
+        "sha256": "eae2ad413db648c6489fdad0481ff6e1d52c2e2cd3080325b1b0a00f64c4dc8e"
+      },
+      "final_passed": true
+    },
+    {
+      "command": "cargo run -p browser-demo --bin generate_visual_source_fixture",
+      "exit_code": 0,
+      "seconds": 45.51,
+      "log": "matrix-15.log",
+      "log_digest": {
+        "path": "target/v023-local-matrix/matrix-15.log",
+        "byte_length": 283,
+        "sha256": "8c8c3a1cc638f986a744c1cec40bc7c40136299d38742ff37e1f356597c2a04b"
+      },
+      "final_passed": true
+    },
+    {
+      "command": "node scripts/stage-browser-lod-predecessor.mjs",
+      "exit_code": 0,
+      "seconds": 0.07,
+      "log": "matrix-16.log",
+      "log_digest": {
+        "path": "target/v023-local-matrix/matrix-16.log",
+        "byte_length": 66,
+        "sha256": "7916ad8a43fcd7d192d036cbc0473f7f2825f2c10946c3a2258cc28ce3c59ca6"
+      },
+      "final_passed": true
+    },
+    {
+      "command": "node --test apps/browser-demo/web/*.test.mjs packages/react/*.test.mjs scripts/*.test.mjs",
+      "exit_code": 1,
+      "seconds": 18.32,
+      "log": "matrix-17.log",
+      "final_exit_code": 0,
+      "rerun_log": "matrix-17-rerun.log",
+      "correction": "Restored the exact Qualification verifier SHA-256 label expected by the release-record binding test; no qualified source changed.",
+      "additional_rejected_attempt": "matrix-17-sandbox-rejection.log",
+      "log_digest": {
+        "path": "target/v023-local-matrix/matrix-17.log",
+        "byte_length": 28702,
+        "sha256": "261f20215a6e238cb206d3a5542ac9d4f7479e4748327c490d1fe493e05712fc"
+      },
+      "rerun_log_digest": {
+        "path": "target/v023-local-matrix/matrix-17-rerun.log",
+        "byte_length": 27632,
+        "sha256": "8615e729e3b6b4b244190b8dfa10cc89dcdc7d73755147659adeb0c85e26af45"
+      },
+      "additional_rejected_attempt_digest": {
+        "path": "target/v023-local-matrix/matrix-17-sandbox-rejection.log",
+        "byte_length": 37391,
+        "sha256": "db942153b9ea6c8b55db7be3d584f331c0d45921d9f2378b2b397b765c061384"
+      },
+      "final_passed": true
+    },
+    {
+      "command": "scripts/build-browser-sdk.sh",
+      "exit_code": 0,
+      "seconds": 1.38,
+      "log": "matrix-18.log",
+      "log_digest": {
+        "path": "target/v023-local-matrix/matrix-18.log",
+        "byte_length": 2201,
+        "sha256": "0c5386074bcf3f445a11d6fd8c0f851e8d6fc52ee46a186d47a66d03072e5ad2"
+      },
+      "final_passed": true
+    },
+    {
+      "command": "node scripts/verify-browser-sdk.mjs",
+      "exit_code": 0,
+      "seconds": 6.5,
+      "log": "matrix-19.log",
+      "log_digest": {
+        "path": "target/v023-local-matrix/matrix-19.log",
+        "byte_length": 42,
+        "sha256": "7d30ebbb1edecd0849e0657fea47436f9aaf045e42f0026fa7ef64154f0ed551"
+      },
+      "final_passed": true
+    },
+    {
+      "command": "node scripts/verify-browser-qualification.mjs",
+      "exit_code": 0,
+      "seconds": 0.17,
+      "log": "matrix-20.log",
+      "log_digest": {
+        "path": "target/v023-local-matrix/matrix-20.log",
+        "byte_length": 36,
+        "sha256": "4e2964ace30bf07aa48547fb7558337b04fb3b40adab38ba76f0835f401f1ae9"
+      },
+      "final_passed": true
+    },
+    {
+      "command": "node scripts/verify-browser-integration-baseline.mjs",
+      "exit_code": 0,
+      "seconds": 0.51,
+      "log": "matrix-21.log",
+      "log_digest": {
+        "path": "target/v023-local-matrix/matrix-21.log",
+        "byte_length": 36,
+        "sha256": "4d96e60dcb35254c67fa477275dd1871a2efdd1d062089f8edc7b64d8f74a919"
+      },
+      "final_passed": true
+    },
+    {
+      "command": "node scripts/verify-browser-visual-baseline.mjs",
+      "exit_code": 0,
+      "seconds": 81.17,
+      "log": "matrix-22.log",
+      "log_digest": {
+        "path": "target/v023-local-matrix/matrix-22.log",
+        "byte_length": 31,
+        "sha256": "0ea5a89120a10e820b7ef7e40f033bd8d92c58419a76e771064cb84f78686c1d"
+      },
+      "final_passed": true
+    },
+    {
+      "command": "node scripts/generate-browser-sdk-reference.mjs --check",
+      "exit_code": 0,
+      "seconds": 0.06,
+      "log": "matrix-23.log",
+      "log_digest": {
+        "path": "target/v023-local-matrix/matrix-23.log",
+        "byte_length": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "final_passed": true
+    },
+    {
+      "command": "python3 scripts/test_browser_lod_pins.py",
+      "exit_code": 0,
+      "seconds": 0.14,
+      "log": "matrix-24.log",
+      "log_digest": {
+        "path": "target/v023-local-matrix/matrix-24.log",
+        "byte_length": 100,
+        "sha256": "43315031ecdf12b4240d23d04572e6d931008baa7c8942abb871de117aa29f05"
+      },
+      "final_passed": true
+    },
+    {
+      "command": "node scripts/verify-browser-lod-continuity.mjs",
+      "exit_code": 0,
+      "seconds": 21.47,
+      "log": "matrix-25.log",
+      "log_digest": {
+        "path": "target/v023-local-matrix/matrix-25.log",
+        "byte_length": 494,
+        "sha256": "0f781ee0ca057ba585bb56b5931cf128d90d687cd17c8ff603010ab602070d76"
+      },
+      "final_passed": true
+    },
+    {
+      "command": "cargo bench -p point-view --bench planner",
+      "exit_code": 0,
+      "seconds": 27.94,
+      "log": "matrix-26.log",
+      "log_digest": {
+        "path": "target/v023-local-matrix/matrix-26.log",
+        "byte_length": 1865,
+        "sha256": "6f80cbf2fe264e50becab4249d217dfa3d062c097beb7099fa2a1d6cf3b06944"
+      },
+      "final_passed": true
+    },
+    {
+      "command": "cargo bench -p source-memory --bench read",
+      "exit_code": 0,
+      "seconds": 13.63,
+      "log": "matrix-27.log",
+      "log_digest": {
+        "path": "target/v023-local-matrix/matrix-27.log",
+        "byte_length": 1352,
+        "sha256": "0c943c1e3b01aa0a8010c00a535dace8efc84b79d6088e0edda55bb7e41aa918"
+      },
+      "final_passed": true
+    },
+    {
+      "command": "cargo bench -p source-las --bench read",
+      "exit_code": 0,
+      "seconds": 54.09,
+      "log": "matrix-28.log",
+      "log_digest": {
+        "path": "target/v023-local-matrix/matrix-28.log",
+        "byte_length": 5682,
+        "sha256": "3fc344d829b738f15d06f20a3f4f8a462ba0ab82e05a01e866d051d686a9bfe2"
+      },
+      "final_passed": true
+    },
+    {
+      "command": "cargo bench -p point-index --bench index",
+      "exit_code": 0,
+      "seconds": 53.91,
+      "log": "matrix-29.log",
+      "log_digest": {
+        "path": "target/v023-local-matrix/matrix-29.log",
+        "byte_length": 5129,
+        "sha256": "d8ecb7423afa15e09b512554f5666363fc5e4cea2397f40e1ed9a0e75dd78812"
+      },
+      "final_passed": true
+    },
+    {
+      "command": "cargo bench -p point-workspace --bench document",
+      "exit_code": 0,
+      "seconds": 40.15,
+      "log": "matrix-30.log",
+      "log_digest": {
+        "path": "target/v023-local-matrix/matrix-30.log",
+        "byte_length": 6542,
+        "sha256": "c62daa863e68b16944f9b0759a04dbbd6a257f7bcd1e3ad699f0f66bf71fd3ff"
+      },
+      "final_passed": true
+    },
+    {
+      "command": "cargo bench -p point-review --bench review",
+      "exit_code": 0,
+      "seconds": 4.48,
+      "log": "matrix-31.log",
+      "log_digest": {
+        "path": "target/v023-local-matrix/matrix-31.log",
+        "byte_length": 2873,
+        "sha256": "311cf0c9ed820ef4cb1c7edc6f8948c6e16369e03862db4a3b19b126eb0118fc"
+      },
+      "final_passed": true
+    },
+    {
+      "command": "cargo bench -p point-terrain --bench terrain",
+      "exit_code": 0,
+      "seconds": 35.18,
+      "log": "matrix-32.log",
+      "log_digest": {
+        "path": "target/v023-local-matrix/matrix-32.log",
+        "byte_length": 9008,
+        "sha256": "597a92b5057746885c8835caf8b3f4019b73d91395add223c52df7a491630e09"
+      },
+      "final_passed": true
+    },
+    {
+      "command": "cargo bench -p terrain-demo --bench journal --   --save-baseline \"qualification-$$-$(date +%s)\"",
+      "exit_code": 0,
+      "seconds": 41.99,
+      "log": "matrix-33.log",
+      "log_digest": {
+        "path": "target/v023-local-matrix/matrix-33.log",
+        "byte_length": 11515,
+        "sha256": "e8221e745c03c90b4147e7846e91506e9ea0b58621bd311eb278014de89890ca"
+      },
+      "final_passed": true
+    },
+    {
+      "command": "cargo bench -p renderer-demo --bench viewing",
+      "exit_code": 0,
+      "seconds": 30.88,
+      "log": "matrix-34.log",
+      "log_digest": {
+        "path": "target/v023-local-matrix/matrix-34.log",
+        "byte_length": 3483,
+        "sha256": "c93194326e3781d035c2c8f71337b0b18e70ca17f519755e2920e758a846db1b"
+      },
+      "final_passed": true
+    },
+    {
+      "command": "cargo run -p source-memory --example memory_source",
+      "exit_code": 0,
+      "seconds": 14.92,
+      "log": "matrix-35.log",
+      "log_digest": {
+        "path": "target/v023-local-matrix/matrix-35.log",
+        "byte_length": 1303,
+        "sha256": "76a71ba2302e415bb9417a8ba9977d2bc0ab56caea3c0d8284886a2b905c0956"
+      },
+      "final_passed": true
+    },
+    {
+      "command": "cargo run -p point-index --example direct_use",
+      "exit_code": 0,
+      "seconds": 8.0,
+      "log": "matrix-36.log",
+      "log_digest": {
+        "path": "target/v023-local-matrix/matrix-36.log",
+        "byte_length": 510,
+        "sha256": "91297bff471ceb1f0fb58e1b4829529fa8e50892c7f6691ca3a350787f1f7eef"
+      },
+      "final_passed": true
+    },
+    {
+      "command": "cargo test -p point-workspace --all-features",
+      "exit_code": 0,
+      "seconds": 112.12,
+      "log": "matrix-37.log",
+      "log_digest": {
+        "path": "target/v023-local-matrix/matrix-37.log",
+        "byte_length": 10936,
+        "sha256": "2a5cf662bcde7727a4f33036416662ef2c3785c0610e2baadbce1851942ee384"
+      },
+      "final_passed": true
+    },
+    {
+      "command": "cargo test -p point-review --test interface",
+      "exit_code": 0,
+      "seconds": 23.53,
+      "log": "matrix-38.log",
+      "log_digest": {
+        "path": "target/v023-local-matrix/matrix-38.log",
+        "byte_length": 1746,
+        "sha256": "289fa7974b22b9c293322b5eee90dbd0c71f8b65b6b5172a5351150755d7c51b"
+      },
+      "final_passed": true
+    },
+    {
+      "command": "cargo test -p render-protocol --test state_model",
+      "exit_code": 0,
+      "seconds": 22.83,
+      "log": "matrix-39.log",
+      "log_digest": {
+        "path": "target/v023-local-matrix/matrix-39.log",
+        "byte_length": 1340,
+        "sha256": "0696c0824ce0fddd409242fa9ae6af43300382ab84f2a2bc496f26bcd10b17df"
+      },
+      "final_passed": true
+    },
+    {
+      "command": "cargo run -p point-terrain --example derive",
+      "exit_code": 0,
+      "seconds": 8.34,
+      "log": "matrix-40.log",
+      "log_digest": {
+        "path": "target/v023-local-matrix/matrix-40.log",
+        "byte_length": 904,
+        "sha256": "c4be5a7170e8021f6797f9888414f87245f53de247c0ba0f5ff93f065e47873e"
+      },
+      "final_passed": true
+    },
+    {
+      "command": "cargo run -p point-terrain --example persistent_surface",
+      "exit_code": 0,
+      "seconds": 6.44,
+      "log": "matrix-41.log",
+      "log_digest": {
+        "path": "target/v023-local-matrix/matrix-41.log",
+        "byte_length": 5149,
+        "sha256": "d6b5fec6d255ab6916fa65e777e763e5ff4a2695467ab689841f654fe130d07e"
+      },
+      "final_passed": true
+    },
+    {
+      "command": "cargo run -p point-terrain --example exact_terrain_qa",
+      "exit_code": 0,
+      "seconds": 4.19,
+      "log": "matrix-42.log",
+      "log_digest": {
+        "path": "target/v023-local-matrix/matrix-42.log",
+        "byte_length": 908,
+        "sha256": "50752ac5777396fb22af66b6af33eda1b69a440dbb80a2c24c35c006218a98f7"
+      },
+      "final_passed": true
+    },
+    {
+      "command": "cargo test -p point-terrain --all-features",
+      "exit_code": 0,
+      "seconds": 234.1,
+      "log": "matrix-43.log",
+      "log_digest": {
+        "path": "target/v023-local-matrix/matrix-43.log",
+        "byte_length": 14040,
+        "sha256": "55b102fc09c2941580a3a3b1ccc56d753dfca19a2cde8a7df1404da9ac0e56ed"
+      },
+      "final_passed": true
+    },
+    {
+      "command": "cargo test -p point-terrain --test persistence",
+      "exit_code": 0,
+      "seconds": 1.07,
+      "log": "matrix-44.log",
+      "log_digest": {
+        "path": "target/v023-local-matrix/matrix-44.log",
+        "byte_length": 1205,
+        "sha256": "52000dfaee7060cc9676ed6648dba1c809ff63e083c1f6e6dd7c222cb424b907"
+      },
+      "final_passed": true
+    },
+    {
+      "command": "cargo test -p terrain-demo --lib --all-features",
+      "exit_code": 0,
+      "seconds": 35.71,
+      "log": "matrix-45.log",
+      "log_digest": {
+        "path": "target/v023-local-matrix/matrix-45.log",
+        "byte_length": 10170,
+        "sha256": "fcd49be8969067b8e3cfeef1da5147b3f85e996589625e9f05b00e8d5eb885fa"
+      },
+      "final_passed": true
+    },
+    {
+      "command": "cargo test -p terrain-demo --test workflow",
+      "exit_code": 0,
+      "seconds": 41.33,
+      "log": "matrix-46.log",
+      "log_digest": {
+        "path": "target/v023-local-matrix/matrix-46.log",
+        "byte_length": 1710,
+        "sha256": "8c503e6ec16d6bb1b66067591ea8c139aa197d1e9c3740dba8760a367f108b8e"
+      },
+      "final_passed": true
+    },
+    {
+      "command": "cargo test -p terrain-demo --test process",
+      "exit_code": 0,
+      "seconds": 19.84,
+      "log": "matrix-47.log",
+      "log_digest": {
+        "path": "target/v023-local-matrix/matrix-47.log",
+        "byte_length": 1104,
+        "sha256": "d625d878c15725f16fe6ebb9737a1a2e5b8c9f86a1e47cf6d50f5dc949afec58"
+      },
+      "final_passed": true
+    },
+    {
+      "command": "cargo test -p renderer-demo --test headless_smoke",
+      "exit_code": 0,
+      "seconds": 52.53,
+      "log": "matrix-48.log",
+      "log_digest": {
+        "path": "target/v023-local-matrix/matrix-48.log",
+        "byte_length": 1662,
+        "sha256": "4c6b660cc1fd6883d3d9a91d54ac27a9ed8195e7bb2d12b94f8d795acfb5f4b7"
+      },
+      "final_passed": true
+    },
+    {
+      "command": "PUNCTRA_REQUIRE_GPU=1 cargo test -p renderer-demo --test headless_smoke   corpus_success_binds_trace_inputs_and_separate_resource_measurements -- --exact",
+      "exit_code": 0,
+      "seconds": 1.08,
+      "log": "matrix-49.log",
+      "log_digest": {
+        "path": "target/v023-local-matrix/matrix-49.log",
+        "byte_length": 356,
+        "sha256": "0216abb444eaebdaebd36da66dbfefb3130449822fcbc26900d7e4e1734585e8"
+      },
+      "final_passed": true
+    },
+    {
+      "command": "PUNCTRA_REQUIRE_GPU=1 cargo test -p renderer-demo --bin renderer-demo   appearance::gpu_tests",
+      "exit_code": 0,
+      "seconds": 194.07,
+      "log": "matrix-50.log",
+      "log_digest": {
+        "path": "target/v023-local-matrix/matrix-50.log",
+        "byte_length": 939,
+        "sha256": "e2d4a0e0f979c736ca302e4551341bcd102e66226fd12d5d5b7d7b9dee8fdbd2"
+      },
+      "final_passed": true
+    },
+    {
+      "command": "PUNCTRA_REQUIRE_GPU=1 cargo test -p renderer-demo --test headless_smoke   corpus_pre_v0_13_repository_lane_records_settlement_and_the_declared_matrix   -- --exact",
+      "exit_code": 0,
+      "seconds": 9.02,
+      "log": "matrix-51.log",
+      "log_digest": {
+        "path": "target/v023-local-matrix/matrix-51.log",
+        "byte_length": 363,
+        "sha256": "9c8591b9d0de7a61e8664e1f828f7df601df29d5f03222b3c48c68e691bc2c9a"
+      },
+      "final_passed": true
+    },
+    {
+      "command": "PUNCTRA_REQUIRE_GPU=1 cargo test -p render-wgpu --test offscreen",
+      "exit_code": 0,
+      "seconds": 58.42,
+      "log": "matrix-52.log",
+      "log_digest": {
+        "path": "target/v023-local-matrix/matrix-52.log",
+        "byte_length": 2663,
+        "sha256": "0b9f4130a7ca13c876c56ef8e6fe1d6c275d90faf471218707cbea3dfc52ab25"
+      },
+      "final_passed": true
+    },
+    {
+      "command": "PUNCTRA_REQUIRE_GPU=1 cargo test -p renderer-demo --test planner",
+      "exit_code": 0,
+      "seconds": 59.17,
+      "log": "matrix-53.log",
+      "log_digest": {
+        "path": "target/v023-local-matrix/matrix-53.log",
+        "byte_length": 433,
+        "sha256": "19d95f346bb86becbd0b5f23b165db7f9cf833910dfd5d2248829a4b60c26289"
+      },
+      "final_passed": true
+    },
+    {
+      "command": "PUNCTRA_REQUIRE_GPU=1 cargo test -p renderer-demo --test display_gpu",
+      "exit_code": 0,
+      "seconds": 54.06,
+      "log": "matrix-54.log",
+      "log_digest": {
+        "path": "target/v023-local-matrix/matrix-54.log",
+        "byte_length": 438,
+        "sha256": "bac1fc40ed90747abb1dd2fce0787eeed416869c4bdec9c5982651d3ea62c6af"
+      },
+      "final_passed": true
+    },
+    {
+      "command": "PUNCTRA_REQUIRE_GPU=1 cargo run -p render-wgpu --example third_party_host",
+      "exit_code": 0,
+      "seconds": 6.97,
+      "log": "matrix-55.log",
+      "log_digest": {
+        "path": "target/v023-local-matrix/matrix-55.log",
+        "byte_length": 845,
+        "sha256": "e98ded20a4e3e4a19c57641dfa3cd46f69aad20ca618488ad0fd5204b75f9731"
+      },
+      "final_passed": true
+    },
+    {
+      "command": "test -f docs/guides/first-las-laz.md",
+      "exit_code": 0,
+      "seconds": 0.01,
+      "log": "matrix-56.log",
+      "log_digest": {
+        "path": "target/v023-local-matrix/matrix-56.log",
+        "byte_length": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "final_passed": true
+    },
+    {
+      "command": "test -f docs/guides/library-packaging.md",
+      "exit_code": 0,
+      "seconds": 0.01,
+      "log": "matrix-57.log",
+      "log_digest": {
+        "path": "target/v023-local-matrix/matrix-57.log",
+        "byte_length": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "final_passed": true
+    },
+    {
+      "command": "test -f docs/guides/persistent-terrain.md",
+      "exit_code": 0,
+      "seconds": 0.01,
+      "log": "matrix-58.log",
+      "log_digest": {
+        "path": "target/v023-local-matrix/matrix-58.log",
+        "byte_length": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "final_passed": true
+    },
+    {
+      "command": "test -f docs/guides/exact-terrain-qa.md",
+      "exit_code": 0,
+      "seconds": 0.01,
+      "log": "matrix-59.log",
+      "log_digest": {
+        "path": "target/v023-local-matrix/matrix-59.log",
+        "byte_length": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "final_passed": true
+    },
+    {
+      "command": "test -f docs/guides/browser-foundation.md",
+      "exit_code": 0,
+      "seconds": 0.01,
+      "log": "matrix-60.log",
+      "log_digest": {
+        "path": "target/v023-local-matrix/matrix-60.log",
+        "byte_length": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "final_passed": true
+    },
+    {
+      "command": "test -f docs/guides/browser-streaming.md",
+      "exit_code": 0,
+      "seconds": 0.01,
+      "log": "matrix-61.log",
+      "log_digest": {
+        "path": "target/v023-local-matrix/matrix-61.log",
+        "byte_length": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "final_passed": true
+    },
+    {
+      "command": "test -f docs/guides/browser-viewer.md",
+      "exit_code": 0,
+      "seconds": 0.01,
+      "log": "matrix-62.log",
+      "log_digest": {
+        "path": "target/v023-local-matrix/matrix-62.log",
+        "byte_length": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "final_passed": true
+    },
+    {
+      "command": "test -f docs/guides/browser-sdk.md",
+      "exit_code": 0,
+      "seconds": 0.01,
+      "log": "matrix-63.log",
+      "log_digest": {
+        "path": "target/v023-local-matrix/matrix-63.log",
+        "byte_length": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "final_passed": true
+    },
+    {
+      "command": "test -f docs/guides/browser-qualification.md",
+      "exit_code": 0,
+      "seconds": 0.01,
+      "log": "matrix-64.log",
+      "log_digest": {
+        "path": "target/v023-local-matrix/matrix-64.log",
+        "byte_length": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "final_passed": true
+    },
+    {
+      "command": "test -f docs/guides/browser-quickstart.md",
+      "exit_code": 0,
+      "seconds": 0.01,
+      "log": "matrix-65.log",
+      "log_digest": {
+        "path": "target/v023-local-matrix/matrix-65.log",
+        "byte_length": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "final_passed": true
+    },
+    {
+      "command": "test -f docs/guides/browser-known-limitations.md",
+      "exit_code": 0,
+      "seconds": 0.0,
+      "log": "matrix-66.log",
+      "log_digest": {
+        "path": "target/v023-local-matrix/matrix-66.log",
+        "byte_length": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "final_passed": true
+    },
+    {
+      "command": "test -f docs/guides/browser-visual-quality.md",
+      "exit_code": 0,
+      "seconds": 0.0,
+      "log": "matrix-67.log",
+      "log_digest": {
+        "path": "target/v023-local-matrix/matrix-67.log",
+        "byte_length": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "final_passed": true
+    },
+    {
+      "command": "test -f docs/guides/browser-point-footprint.md",
+      "exit_code": 0,
+      "seconds": 0.0,
+      "log": "matrix-68.log",
+      "log_digest": {
+        "path": "target/v023-local-matrix/matrix-68.log",
+        "byte_length": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "final_passed": true
+    },
+    {
+      "command": "test -f docs/api/browser-sdk.md",
+      "exit_code": 0,
+      "seconds": 0.01,
+      "log": "matrix-69.log",
+      "log_digest": {
+        "path": "target/v023-local-matrix/matrix-69.log",
+        "byte_length": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "final_passed": true
+    },
+    {
+      "command": "test -f docs/guides/browser-lod-continuity.md",
+      "exit_code": 0,
+      "seconds": 0.01,
+      "log": "matrix-70.log",
+      "log_digest": {
+        "path": "target/v023-local-matrix/matrix-70.log",
+        "byte_length": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "final_passed": true
+    },
+    {
+      "command": "ruby -rjson -e 'ARGV.each { |path| JSON.parse(File.read(path)) }'   docs/guides/field-corpus.example.json   docs/releases/v0.20-browser-baseline.json   docs/releases/v0.20-browser-quickstart.json   docs/releases/v0.20-browser-matrix.json   docs/releases/v0.21-browser-baseline.json   docs/releases/v0.21-browser-quickstart.json   docs/releases/v0.21-browser-matrix.json   docs/releases/v0.21-browser-visual-baseline.json   docs/releases/v0.21-browser-visual-rubric-template.json   apps/browser-demo/web/fixtures/visual-v1/corpus.json   apps/browser-demo/web/fixtures/visual-v1/autzen-classified-sample.json   apps/browser-demo/web/fixtures/footprint-v1/corpus.json docs/releases/v0.23-browser-lod-baseline.json docs/releases/v0.23-browser-lod-evidence.json docs/releases/v0.23-browser-baseline.json docs/releases/v0.23-browser-quickstart.json docs/releases/v0.23-browser-matrix.json apps/browser-demo/web/fixtures/lod-v1/corpus.json docs/releases/v0.23-browser-functional-observation.json",
+      "exit_code": 0,
+      "seconds": 0.2,
+      "log": "matrix-71.log",
+      "log_digest": {
+        "path": "target/v023-local-matrix/matrix-71.log",
+        "byte_length": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "final_passed": true
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "seconds": 0.06,
+      "log": "matrix-72.log",
+      "log_digest": {
+        "path": "target/v023-local-matrix/matrix-72.log",
+        "byte_length": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "final_passed": true
+    }
+  ],
+  "limitations": [
+    "Logs are local execution artifacts, not published CI attestation.",
+    "Independent interpretation, adoption, support and physical-display qualification remain separate."
+  ]
+}

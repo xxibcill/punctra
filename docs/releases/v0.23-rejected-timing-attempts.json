@@ -1,0 +1,57 @@
+{
+  "schema": "punctra-rejected-qualification-attempts-v1",
+  "qualification": false,
+  "attempts": [
+    {
+      "implementation_commit": "e5b415488a8b9860254a8028e6b7cabd2097d3c4",
+      "outcome": "rejected_no_archive",
+      "gate": "canonical frame_submission p95 exceeds twice the predecessor",
+      "trial_not_reported": true
+    },
+    {
+      "implementation_commit": "addde44cd08f1c06b1435bd0c9c234427f44acd8",
+      "outcome": "rejected_no_archive",
+      "trial": "generated-elevation-layered-orthographic",
+      "recreation_index": 1,
+      "metric": "frame_interval_p95_milliseconds",
+      "observed": 34.30000001192093,
+      "predecessor": 17.100000023841858,
+      "ratio_limit": 2
+    },
+    {
+      "implementation_commit": "addde44cd08f1c06b1435bd0c9c234427f44acd8",
+      "outcome": "rejected_no_archive",
+      "trial": "generated-elevation-layered-orthographic",
+      "recreation_index": 1,
+      "metric": "frame_interval_p95_milliseconds",
+      "observed": 34.39999997615814,
+      "predecessor": 17.100000023841858,
+      "ratio_limit": 2
+    },
+    {
+      "implementation_commit": "beca387619e317c107480e054d162341b9aa18c1",
+      "outcome": "rejected_no_archive",
+      "trial": "generated-classification-selection-perspective",
+      "recreation_index": 0,
+      "metric": "frame_submission_p95_milliseconds",
+      "observed": 1,
+      "paired_predecessor": 0.40000003576278687,
+      "ratio_limit": 2
+    },
+    {
+      "implementation_commit": "beca387619e317c107480e054d162341b9aa18c1",
+      "outcome": "rejected_before_rendering_no_archive",
+      "gate": "exact_browser_screen_lane",
+      "observed_screen": {
+        "width": 1512,
+        "height": 982,
+        "color_depth_bits": 30
+      },
+      "declared_screen": {
+        "width": 1920,
+        "height": 1080,
+        "color_depth_bits": 24
+      }
+    }
+  ]
+}

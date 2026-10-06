@@ -25,7 +25,7 @@ remains outstanding. v0.21 is the completed repository-verified bounded visual-
 baseline and regression-corpus release; its exact attended evidence and pins
 are recorded without satisfying its external evidence gates. v0.22 is the
 completed repository-verified Point-footprint and edge-quality slice. v0.23 is
-the Active accepted LOD-continuity slice; versions v0.24 through v0.30 remain
+the completed repository-verified LOD-continuity slice; versions v0.24 through v0.30 remain
 uncommitted Candidate themes. v0.15–v0.20 establish
 browser execution, streaming, the viewer API, embedding, and platform
 qualification. v0.21–v0.29
@@ -1553,13 +1553,17 @@ Repository exit evidence:
 
 ### v0.23 — LOD density and transition continuity
 
-Status: **Active — accepted bounded repository implementation**
+Status: **Complete — bounded repository implementation and verification**
 
 The [local investigation](docs/reviews/lod-transition-investigation-v0.23.md)
 measures alpha-overlap background leakage, tied batch-order color changes,
 and immediate coarsening. The maintainer's 2026-10-06 continuation request
 activates the bounded [LOD-continuity
-design](docs/design/lod-density-transition-continuity-v0.23.md).
+design](docs/design/lod-density-transition-continuity-v0.23.md). Its final-pin
+record and separate verify sessions, independent archive audit, actual native
+planner/materializer lifecycle, both review axes and complete local matrix now
+pass. The [release record](docs/releases/v0.23.0.md) maps every accepted
+repository exit to its bound evidence and preserves external-evidence limits.
 
 Accepted outcome: reduce density popping and mixed-LOD false presentation
 during refinement, coarsening, and motion while preserving authority.
@@ -1799,7 +1803,7 @@ nor completion of v0.20 is a reason to publish v1.
 | Terrain acceptance tooling | v0.14 | Complete and repository-verified for the bounded slice; external historical exits outstanding | Preserve exact Terrain QA and correction as an available module without extending it in the current browser-engine path. |
 | Browser execution and streaming | v0.15–v0.16 | Complete and repository-verified for the bounded private slices; arbitrary delivery and external qualification outstanding | Establish WebAssembly/WebGPU execution, then bounded remote Source delivery, browser caching, and worker decoding. |
 | Browser viewer and embedding | v0.17–v0.20 | Complete and repository-verified for bounded viewer, packed SDK, exact local qualification, and clean packed-consumer baseline; independent adoption outstanding | Expose the viewer API, package the SDK, qualify the browser/device envelope, and consolidate a stable integration baseline without release-candidate status. |
-| Measured visual quality | v0.21–v0.25 | v0.21 and v0.22 Complete and repository-verified for bounded slices; v0.23 Active; v0.24–v0.25 Candidate | Establish visual evidence, then improve point footprints, LOD continuity, depth, and color. |
+| Measured visual quality | v0.21–v0.25 | v0.21–v0.23 Complete and repository-verified for bounded slices; v0.24–v0.25 Candidate | Establish visual evidence, then improve point footprints, LOD continuity, depth, and color. |
 | Visual interaction and qualification | v0.26–v0.29 | Candidate | Improve temporal, selection, and composition clarity, then freeze and qualify the visual surface without release-candidate status. |
 | Browser-engine release candidate | v0.30 | Candidate; earliest planned release candidate | Freeze, soak, and explicitly decide whether the supported browser engine should ship or narrow. |
 | Trustworthy supported browser engine | v1.0 | Candidate after v0.30 soak | Publish v1 only when independent use and maintainable functional, visual, compatibility, resource, and support evidence justify the promise. |

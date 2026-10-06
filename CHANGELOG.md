@@ -3,7 +3,7 @@
 All notable changes to Punctra are documented here. The project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## 0.23.0-alpha.1 (Unreleased)
+## 0.23.0-alpha.1
 
 - Added exact generation/key/version-conditioned complementary raster coverage
   over eight presented frames, preserving opaque Source colors, inherited
@@ -14,8 +14,12 @@ All notable changes to Punctra are documented here. The project follows
 - Added private browser fixture controls with validated numeric inputs and exact
   decimal generation/version identities, renderer-accepted capture facts, and
   presentation-aware density. Public SDK exports remain unchanged.
-- Local implementation and qualification work is active under the accepted
-  [v0.23 design](docs/design/lod-density-transition-continuity-v0.23.md).
+- Completed the bounded [v0.23 design](docs/design/lod-density-transition-continuity-v0.23.md)
+  with fresh record/separate-verify evidence, 2,970 audited artifacts, actual
+  native lifecycle acceptance and the full local verification matrix. See the
+  [release record](docs/releases/v0.23.0.md).
+- Fresh functional observations bind implementation commit `d849cccee367358722c708802f75d4878a4d2a5a`;
+  the qualification verifier SHA-256 is `44c85a9edb2ebafb62865f3f6786c5e3bfb1119934c85cf7b73a1aa4e0cef7a3`.
 
 ## 0.22.0-alpha.1
 
