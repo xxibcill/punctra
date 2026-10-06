@@ -72,7 +72,10 @@ count policy, including the legacy color-weight harness. This count is a
 diameter policy input, not observed Point visibility or authoritative Coverage.
 
 The private raw Wasm fixture host applies the same conditional transition value
-and captures its actual facts. Its browser traces are explicitly authored
+and captures its actual facts. Its ABI validates finite integral numbers before
+narrowing, and requires canonical decimal u64 strings for generation/version
+identities so JavaScript coercion cannot alias stale or invalid controls.
+Its browser traces are explicitly authored
 parent/child fixture transitions. Separate native `ViewLifecycle` traces
 exercise the actual planner, materializer, and host. Neither kind substitutes
 for the other or for independent embeddings.

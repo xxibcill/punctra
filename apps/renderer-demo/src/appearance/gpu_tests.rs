@@ -3,6 +3,8 @@ use std::{
     time::{Duration, Instant},
 };
 
+mod lifecycle;
+
 #[path = "../../../../crates/render-wgpu/test-support/gpu.rs"]
 mod gpu_support;
 
@@ -18,7 +20,7 @@ use render_wgpu::{
 
 use super::{
     CROSS_FADE_PRESENTED_FRAMES, REFERENCE_POINT_SIZE_PIXELS, projected_density_point_size,
-    renderer_appearance_config, weight_for_step,
+    renderer_appearance_config,
 };
 use gpu_support::{GpuContext, Rgba8Image as Image, Rgba8Target as ColorTarget, with_gpu};
 
@@ -523,4 +525,9 @@ fn frame(style: PointStyle, projection: FixedProjection) -> Frame {
     Frame::new(GENERATION, camera, viewport())
         .unwrap()
         .with_style(style)
+}
+
+fn weight_for_step(step: u8) -> PresentationWeight {
+    let value = (u16::from(step.min(CROSS_FADE_PRESENTED_FRAMES)) * 255 + 4) / 8;
+    PresentationWeight::new(u8::try_from(value).unwrap())
 }

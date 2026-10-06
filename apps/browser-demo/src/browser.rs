@@ -274,7 +274,12 @@ impl BrowserViewer {
             .stream
             .capture_batch_facts()
             .map_err(stream_validation_failure)?;
-        self.resources_mut()?.begin_frame_capture(&frame, batches)
+        let raster = self
+            .stream
+            .capture_raster_facts()
+            .map_err(stream_validation_failure)?;
+        self.resources_mut()?
+            .begin_frame_capture(&frame, batches, raster)
     }
 
     /// Polls the current capture without blocking the browser event loop.
@@ -532,6 +537,49 @@ impl BrowserViewer {
         self.diagnostics()
     }
 
+    /// Applies exact generation/version-conditioned raster coverage for authored private fixtures.
+    #[wasm_bindgen(js_name = setVisualBatchRasterTransition)]
+    pub fn set_visual_batch_raster_transition(
+        &mut self,
+        batch_index: f64,
+        expected_generation: &str,
+        expected_version: &str,
+        seed: f64,
+        side: f64,
+        step: f64,
+    ) -> Result<String, JsValue> {
+        self.ensure_ready()?;
+        let control = crate::streaming::parse_visual_raster_control(
+            batch_index,
+            expected_generation,
+            expected_version,
+            seed,
+            side,
+            step,
+        )
+        .map_err(stream_validation_failure)?;
+        let update = self
+            .stream
+            .visual_raster_transition(
+                control.batch_index,
+                control.generation,
+                control.version,
+                control.transition,
+            )
+            .map_err(stream_validation_failure)?;
+        self.resources_mut()?.apply_update(&update)?;
+        self.stream
+            .commit_visual_raster_transition(
+                control.batch_index,
+                control.generation,
+                control.version,
+                control.transition,
+            )
+            .map_err(stream_validation_failure)?;
+        self.reset_interaction_facts();
+        self.diagnostics()
+    }
+
     /// Conditionally removes one batch for the private visual fixture harness.
     #[wasm_bindgen(js_name = removeVisualBatch)]
     pub fn remove_visual_batch(&mut self, batch_index: u32) -> Result<String, JsValue> {
@@ -623,13 +671,13 @@ impl BrowserViewer {
 
     fn display_size_physical_pixels(&self, viewport: Viewport) -> f32 {
         self.display_size_override.unwrap_or_else(|| {
-            projected_density_display_size(viewport, self.non_retired_resident_point_count())
+            projected_density_display_size(viewport, self.display_density_point_count())
         })
     }
 
-    fn non_retired_resident_point_count(&self) -> u64 {
+    fn display_density_point_count(&self) -> u64 {
         if self.stream.view_generation().is_some() {
-            self.stream.non_retired_resident_point_count()
+            self.stream.display_density_point_count()
         } else {
             self.scene.facts().point_count
         }
@@ -837,6 +885,7 @@ impl BrowserResources {
         frame: &Frame,
         report: FrameReport,
         batches: Vec<crate::streaming::VisualBatchFacts>,
+        raster: Vec<crate::streaming::VisualRasterFacts>,
     ) -> CaptureFrameFacts {
         let point_footprint = PointFootprintFacts::new(
             self.requested_point_footprint,
@@ -853,6 +902,7 @@ impl BrowserResources {
             point_footprint,
             batches,
         )
+        .with_raster_transitions(raster)
     }
 
     async fn initialize(
@@ -1016,6 +1066,7 @@ impl BrowserResources {
         &mut self,
         frame: &Frame,
         batches: Vec<crate::streaming::VisualBatchFacts>,
+        raster: Vec<crate::streaming::VisualRasterFacts>,
     ) -> Result<String, JsValue> {
         self.ensure_device_available()?;
         if self.frame_capture.is_pending() {
@@ -1062,7 +1113,7 @@ impl BrowserResources {
         let report = recorded.report();
         validate_transient_bytes(report.transient_texture_bytes())?;
         let facts = layout
-            .pending_facts_json(self.capture_frame_facts(frame, report, batches))
+            .pending_facts_json(self.capture_frame_facts(frame, report, batches, raster))
             .map_err(|error| {
                 failure(FailureCode::FrameCaptureFacts, error, RETRY_CAPTURE_ACTION)
             })?;
