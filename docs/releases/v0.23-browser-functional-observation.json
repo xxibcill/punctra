@@ -1,0 +1,790 @@
+{
+  "schema": "punctra-browser-functional-observation-v1",
+  "observed_on": "2026-10-06",
+  "acceptance": {
+    "schema": "punctra-browser-qualification-v1",
+    "completed_environment": {
+      "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36",
+      "platform": "MacIntel",
+      "language": "en-US",
+      "logicalProcessors": 15,
+      "screen": {
+        "width": 1920,
+        "height": 1080,
+        "colorDepth": 24,
+        "pixelDepth": 24
+      },
+      "visibilityState": "visible",
+      "secureContext": true,
+      "host": {
+        "schema": "punctra-qualification-host-v1",
+        "operatingSystem": {
+          "name": "macOS",
+          "version": "26.6.2",
+          "build": "25G83",
+          "architecture": "arm64"
+        },
+        "device": {
+          "class": "Apple silicon laptop",
+          "gpu": "Apple M5 Pro",
+          "gpuCores": 16,
+          "gpuClass": "integrated",
+          "metalSupport": "Metal 4"
+        },
+        "displayPath": "built-in Retina display",
+        "package": {
+          "name": "@punctra/viewer",
+          "version": "0.23.0-alpha.1"
+        }
+      }
+    },
+    "implementation_commit": "d849cccee367358722c708802f75d4878a4d2a5a",
+    "runtime_pins": {
+      "artifacts": [
+        {
+          "byte_length": 1371,
+          "path": "apps/browser-demo/web/package.json",
+          "sha256": "c234499ddbc958f190be975a4995b4f9b598606a1b2883b792485b5a88d74a92"
+        },
+        {
+          "byte_length": 88591,
+          "path": "apps/browser-demo/web/pkg/browser_demo.js",
+          "sha256": "ddd5952a3b769591d3803e174754388675754cd61fc0f9d9bee3fd7c14f67938"
+        },
+        {
+          "byte_length": 823564,
+          "path": "apps/browser-demo/web/pkg/browser_demo_bg.wasm",
+          "sha256": "9fed52ea8dd722126ebdcc76bba8ca78b539ec6a008d0190332dcdf0e1353664"
+        }
+      ],
+      "package_name": "@punctra/viewer",
+      "package_version": "0.23.0-alpha.1",
+      "packed_artifact": {
+        "byte_length": 325085,
+        "path": "target/npm/punctra-viewer-0.23.0-alpha.1.tgz",
+        "sha256": "50901d662a302a74d43fac0afed43113bd5f69a930853fe4e99ae8fc66a4bfa0"
+      }
+    },
+    "package_version": "0.23.0-alpha.1",
+    "environment": {
+      "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36",
+      "platform": "MacIntel",
+      "language": "en-US",
+      "logicalProcessors": 15,
+      "screen": {
+        "width": 1920,
+        "height": 1080,
+        "colorDepth": 24,
+        "pixelDepth": 24
+      },
+      "visibilityState": "visible",
+      "secureContext": true,
+      "host": {
+        "schema": "punctra-qualification-host-v1",
+        "operatingSystem": {
+          "name": "macOS",
+          "version": "26.6.2",
+          "build": "25G83",
+          "architecture": "arm64"
+        },
+        "device": {
+          "class": "Apple silicon laptop",
+          "gpu": "Apple M5 Pro",
+          "gpuCores": 16,
+          "gpuClass": "integrated",
+          "metalSupport": "Metal 4"
+        },
+        "displayPath": "built-in Retina display",
+        "package": {
+          "name": "@punctra/viewer",
+          "version": "0.23.0-alpha.1"
+        }
+      }
+    },
+    "runtime_lane": {
+      "lane": "codex-iab-chromium-154-macos-26-apple-m5-pro-screen-1920",
+      "passed": true,
+      "failures": []
+    },
+    "heap": {
+      "before": {
+        "api": "performance.memory.usedJSHeapSize",
+        "status": "non_standard_observation",
+        "usedBytes": 12233131
+      },
+      "afterCold": {
+        "api": "performance.memory.usedJSHeapSize",
+        "status": "non_standard_observation",
+        "usedBytes": 7513216
+      },
+      "afterWarm": {
+        "api": "performance.memory.usedJSHeapSize",
+        "status": "non_standard_observation",
+        "usedBytes": 7513216
+      },
+      "afterFrames": {
+        "api": "performance.memory.usedJSHeapSize",
+        "status": "non_standard_observation",
+        "usedBytes": 8186134
+      },
+      "highWaterBytes": 12233131,
+      "processResidentBytes": null,
+      "physicalCacheAllocationBytes": null,
+      "physicalGpuAllocationBytes": null
+    },
+    "generated": {
+      "state": {
+        "schema": "punctra-viewer-state-v1",
+        "packageVersion": "0.23.0-alpha.1",
+        "lifecycle": "ready",
+        "generation": 1,
+        "source": {
+          "identity": "1515151515151515151515151515151515151515151515151515151515151515",
+          "coverage": "generated_fixture",
+          "expectedPoints": 1089,
+          "publishedPoints": 1089,
+          "publishedBatches": 1,
+          "retainedRecordBytes": 0
+        },
+        "viewport": {
+          "cssWidth": 519,
+          "cssHeight": 324.375,
+          "devicePixelRatio": 2,
+          "physicalWidth": 1038,
+          "physicalHeight": 649,
+          "surfaceBytes": 2694648
+        },
+        "camera": {
+          "eye": [
+            500000,
+            4599969,
+            122
+          ],
+          "target": [
+            500000,
+            4600000,
+            100
+          ],
+          "up": [
+            0,
+            0,
+            1
+          ],
+          "projection": "perspective",
+          "verticalFieldOfViewRadians": 1.0471976,
+          "verticalWorldHeight": null,
+          "nearDistance": 0.1,
+          "farDistance": 250
+        },
+        "displayMode": "rgb",
+        "render": {
+          "scheduled": false,
+          "renderedFrames": 3,
+          "hiddenFrameSkips": 1,
+          "drawnPoints": 1089,
+          "drawCalls": 1,
+          "residentBytes": 26136,
+          "transientTextureBytes": 26946480,
+          "surfaceSuboptimal": false
+        },
+        "pick": {
+          "status": "hit",
+          "authority": "provisional_gpu_hint",
+          "generation": 1,
+          "sourceIdentity": "1515151515151515151515151515151515151515151515151515151515151515",
+          "pointOrdinal": "544",
+          "batchKey": 1,
+          "batchVersion": 1
+        },
+        "highlights": {
+          "generation": null,
+          "sourceIdentity": null,
+          "pointCount": 0,
+          "authority": "presentation_only"
+        },
+        "resources": {
+          "pointLimit": 8192,
+          "batchLimit": 8,
+          "highlightPointLimit": 32,
+          "residentByteLimit": 196608,
+          "retainedRecordByteLimit": 262144,
+          "workerStagingByteLimit": 327680
+        },
+        "capabilities": {
+          "secure_context": true,
+          "webgpu": true,
+          "browser_user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36",
+          "browser_platform": "MacIntel",
+          "adapter_name": "browser WebGPU adapter",
+          "backend": "BrowserWebGpu",
+          "device_type": "Other",
+          "surface_format": "Bgra8Unorm",
+          "composite_alpha_mode": "Opaque",
+          "present_mode": "fifo",
+          "surface_format_support": {
+            "render_attachment": true,
+            "blendable": true
+          },
+          "required_feature_count": 0,
+          "adapter_max_buffer_size": 4294967292,
+          "adapter_max_texture_dimension_2d": 16384,
+          "adapter_max_bind_groups": 4,
+          "adapter_max_vertex_buffers": 8,
+          "adapter_max_color_attachments": 8
+        },
+        "load": {
+          "active": false,
+          "facts": null
+        },
+        "failure": {
+          "code": "resize_viewport",
+          "message": "physical canvas dimensions must be nonzero and at most 4096",
+          "safeAction": "Keep the current surface configuration, choose finite positive CSS dimensions and a device-pixel ratio at most four so the physical canvas remains within 4,096 pixels per dimension and 8,388,608 pixels total, then resize again.",
+          "recoverable": true
+        }
+      },
+      "pick": {
+        "status": "hit",
+        "authority": "provisional_gpu_hint",
+        "generation": 1,
+        "sourceIdentity": "1515151515151515151515151515151515151515151515151515151515151515",
+        "pointOrdinal": "544",
+        "batchKey": 1,
+        "batchVersion": 1
+      }
+    },
+    "destruction": {
+      "stale_presentation_cancelled": true,
+      "work_after_destruction_rejected": true
+    },
+    "recovery": {
+      "lifecycle": {
+        "invalid_resize_code": "resize_viewport",
+        "invalid_resize_safe_action": "Keep the current surface configuration, choose finite positive CSS dimensions and a device-pixel ratio at most four so the physical canvas remains within 4,096 pixels per dimension and 8,388,608 pixels total, then resize again.",
+        "prior_viewport_preserved": true,
+        "alternate_device_pixel_ratio": 1,
+        "hidden_frame_skips": 1,
+        "resumed": true
+      },
+      "worker": {
+        "code": "worker_failed",
+        "recoverable": true,
+        "viewer_retained": true,
+        "generation_preserved": true,
+        "retry_succeeded": true
+      },
+      "network": {
+        "code": "offline",
+        "recoverable": true,
+        "viewer_retained": true,
+        "generation_preserved": true
+      },
+      "cancellation_viewer_retained": true,
+      "cancellation_frame_retained": true,
+      "generation": {
+        "provisional_pick_cleared": true,
+        "presentation_highlights_cleared": true,
+        "stale_exact_request_rejected": true
+      },
+      "recreation_required": {
+        "partial_publication": {
+          "outcome": "viewer_destroyed",
+          "safe_action": "Dispose the fused viewer and create a new one before any Source load.",
+          "test_scope": "deterministic post-publication Worker failure"
+        },
+        "device_loss": {
+          "outcome": "viewer_destroyed",
+          "safe_action": "Dispose the fused viewer and explicitly recreate the viewer and device.",
+          "test_scope": "deterministic facade and raw-viewer failure"
+        }
+      },
+      "physical_device_loss": "not forced on the physical adapter",
+      "memory_pressure": "no portable signal; independent fixed ceilings enforced"
+    },
+    "cancellation": {
+      "code": "cancelled",
+      "acknowledgement_milliseconds": 22.19999998807907,
+      "limit_milliseconds": 1000,
+      "viewer_retained": true,
+      "frame_retained": true
+    },
+    "workload": {
+      "deployment_id": "repository-las-v1",
+      "source_identity": "c459ff39717b7d6994aaebf344641f5a3add7faf65e249b85933ebd066d1c26e",
+      "source_points": 70000,
+      "coverage": "sampled",
+      "displayed_points": 4096,
+      "displayed_batches": 4
+    },
+    "render": {
+      "coverage": "sampled",
+      "drawn_points": 4096
+    },
+    "cold": {
+      "deployment": {
+        "schema": "punctra-browser-stream-v1",
+        "deployment_id": "repository-las-v1",
+        "source_identity": "c459ff39717b7d6994aaebf344641f5a3add7faf65e249b85933ebd066d1c26e",
+        "source_byte_length": 2380227,
+        "source_point_count": 70000,
+        "root_display_point_count": 4096,
+        "root_coverage": "sampled",
+        "world_origin": [
+          500000,
+          4600000,
+          100
+        ],
+        "source_bounds": {
+          "min": [
+            499956.5,
+            4599975,
+            99.22
+          ],
+          "max": [
+            500043.75,
+            4600024.75,
+            102.39
+          ]
+        }
+      },
+      "metrics": {
+        "requestCount": 3,
+        "networkBytes": 172696,
+        "sourceNetworkBytes": 256,
+        "indexNetworkBytes": 172440,
+        "requestedBytes": 172696,
+        "receivedBytes": 172696,
+        "sourceRequestedBytes": 256,
+        "sourceReceivedBytes": 256,
+        "indexRequestedBytes": 172440,
+        "indexReceivedBytes": 172440,
+        "cacheHits": 0,
+        "cacheBytes": 0,
+        "sourceCacheBytes": 0,
+        "indexCacheBytes": 0,
+        "logicalCacheEntries": 3,
+        "logicalCacheBytes": 172696,
+        "retries": 0,
+        "concurrentRequestsHighWater": 1,
+        "concurrentResponseBytesHighWater": 172032,
+        "queuedRangesHighWater": 0,
+        "queuedRangeBytesHighWater": 0,
+        "decodedStagingBytesHighWater": 204800,
+        "transferredBatches": 4,
+        "transferredPoints": 4096,
+        "transferredBytes": 131072
+      },
+      "decode": {
+        "batchCount": 4,
+        "pointCount": 4096,
+        "transferredBytes": 131072,
+        "stagingBytesHighWater": 204800,
+        "intensityMinimum": 22,
+        "intensityMaximum": 65519,
+        "classificationMinimum": 2,
+        "classificationMaximum": 2
+      },
+      "timings": {
+        "firstCoverageMilliseconds": 30.5,
+        "settledViewMilliseconds": 33.30000001192093,
+        "mainThreadBatchMillisecondsHighWater": 0.5999999642372131
+      },
+      "ordinal_count": 4096,
+      "main_thread_milliseconds_high_water": 0.5999999642372131,
+      "generation": 1
+    },
+    "warm": {
+      "deployment": {
+        "schema": "punctra-browser-stream-v1",
+        "deployment_id": "repository-las-v1",
+        "source_identity": "c459ff39717b7d6994aaebf344641f5a3add7faf65e249b85933ebd066d1c26e",
+        "source_byte_length": 2380227,
+        "source_point_count": 70000,
+        "root_display_point_count": 4096,
+        "root_coverage": "sampled",
+        "world_origin": [
+          500000,
+          4600000,
+          100
+        ],
+        "source_bounds": {
+          "min": [
+            499956.5,
+            4599975,
+            99.22
+          ],
+          "max": [
+            500043.75,
+            4600024.75,
+            102.39
+          ]
+        }
+      },
+      "metrics": {
+        "requestCount": 0,
+        "networkBytes": 0,
+        "sourceNetworkBytes": 0,
+        "indexNetworkBytes": 0,
+        "requestedBytes": 0,
+        "receivedBytes": 0,
+        "sourceRequestedBytes": 0,
+        "sourceReceivedBytes": 0,
+        "indexRequestedBytes": 0,
+        "indexReceivedBytes": 0,
+        "cacheHits": 3,
+        "cacheBytes": 172696,
+        "sourceCacheBytes": 256,
+        "indexCacheBytes": 172440,
+        "logicalCacheEntries": 3,
+        "logicalCacheBytes": 172696,
+        "retries": 0,
+        "concurrentRequestsHighWater": 1,
+        "concurrentResponseBytesHighWater": 0,
+        "queuedRangesHighWater": 0,
+        "queuedRangeBytesHighWater": 0,
+        "decodedStagingBytesHighWater": 204800,
+        "transferredBatches": 4,
+        "transferredPoints": 4096,
+        "transferredBytes": 131072
+      },
+      "decode": {
+        "batchCount": 4,
+        "pointCount": 4096,
+        "transferredBytes": 131072,
+        "stagingBytesHighWater": 204800,
+        "intensityMinimum": 22,
+        "intensityMaximum": 65519,
+        "classificationMinimum": 2,
+        "classificationMaximum": 2
+      },
+      "timings": {
+        "firstCoverageMilliseconds": 13.5,
+        "settledViewMilliseconds": 15.700000047683716,
+        "mainThreadBatchMillisecondsHighWater": 0.5
+      },
+      "ordinal_count": 4096,
+      "main_thread_milliseconds_high_water": 0.5,
+      "generation": 1
+    },
+    "foreground_frames": {
+      "frameCount": 30,
+      "callbackIntervalMilliseconds": {
+        "count": 29,
+        "p50": 33.30000000000018,
+        "p95": 33.40000000000009,
+        "max": 34.20000000000027
+      },
+      "submissionMilliseconds": {
+        "count": 30,
+        "p50": 0.40000003576278687,
+        "p95": 0.5999999642372131,
+        "max": 0.6000000238418579
+      }
+    },
+    "qualification": {
+      "passed": true,
+      "failures": [],
+      "limits": {
+        "firstCoverageMilliseconds": 10000,
+        "settledViewMilliseconds": 15000,
+        "frameIntervalP95Milliseconds": 50,
+        "frameSubmissionP95Milliseconds": 16.7,
+        "cancellationAcknowledgementMilliseconds": 1000,
+        "physicalDimensionPixels": 4096,
+        "physicalAreaPixels": 8388608,
+        "residentPoints": 8192,
+        "residentBytes": 196608,
+        "canvasBytes": 33554432,
+        "transientTextureBytes": 67108864,
+        "retainedRecordBytes": 262144,
+        "workerStagingBytes": 327680,
+        "concurrentResponseBytes": 262144,
+        "persistentCacheBytes": 4194304
+      }
+    },
+    "display_modes": [
+      {
+        "mode": "neutral",
+        "generation": 1,
+        "drawnPoints": 4096
+      },
+      {
+        "mode": "elevation",
+        "generation": 1,
+        "drawnPoints": 4096
+      },
+      {
+        "mode": "rgb",
+        "generation": 1,
+        "drawnPoints": 4096
+      },
+      {
+        "mode": "intensity",
+        "generation": 1,
+        "drawnPoints": 4096
+      },
+      {
+        "mode": "classification",
+        "generation": 1,
+        "drawnPoints": 4096
+      }
+    ],
+    "projections": [
+      "orthographic",
+      "perspective"
+    ],
+    "input_normalizer": [
+      {
+        "channel": "pointer",
+        "kind": "orbit",
+        "source": "mouse",
+        "camera_projection": "perspective"
+      },
+      {
+        "channel": "touch",
+        "kind": "pan",
+        "source": "touch",
+        "camera_projection": "perspective"
+      },
+      {
+        "channel": "touch",
+        "kind": "zoom",
+        "source": "touch",
+        "camera_projection": "perspective"
+      },
+      {
+        "channel": "wheel",
+        "kind": "zoom",
+        "source": "wheel",
+        "camera_projection": "perspective"
+      },
+      {
+        "channel": "keyboard",
+        "kind": "keyboard",
+        "source": "keyboard",
+        "camera_projection": "orthographic"
+      }
+    ],
+    "provisional": {
+      "status": "hit",
+      "authority": "provisional_gpu_hint",
+      "generation": 1,
+      "sourceIdentity": "c459ff39717b7d6994aaebf344641f5a3add7faf65e249b85933ebd066d1c26e",
+      "pointOrdinal": "54315",
+      "batchKey": 4,
+      "batchVersion": 6
+    },
+    "exact": {
+      "authority": "exact_source_record",
+      "sourceIdentity": "c459ff39717b7d6994aaebf344641f5a3add7faf65e249b85933ebd066d1c26e",
+      "pointOrdinal": "54315",
+      "generation": 1,
+      "ticks": [
+        -2725,
+        1375,
+        69
+      ],
+      "position": [
+        499972.75,
+        4600013.75,
+        100.69
+      ],
+      "intensity": 54315,
+      "classification": 2,
+      "rgb": [
+        11245,
+        48205,
+        2271
+      ]
+    },
+    "stale_generation_rejected": true,
+    "cancelled_query_rejected": true,
+    "final_state": {
+      "schema": "punctra-viewer-state-v1",
+      "packageVersion": "0.23.0-alpha.1",
+      "lifecycle": "ready",
+      "generation": 2,
+      "source": {
+        "identity": "c459ff39717b7d6994aaebf344641f5a3add7faf65e249b85933ebd066d1c26e",
+        "coverage": "sampled",
+        "expectedPoints": 4096,
+        "publishedPoints": 4096,
+        "publishedBatches": 4,
+        "retainedRecordBytes": 131072
+      },
+      "viewport": {
+        "cssWidth": 692,
+        "cssHeight": 432.5,
+        "devicePixelRatio": 2,
+        "physicalWidth": 1384,
+        "physicalHeight": 865,
+        "surfaceBytes": 4788640
+      },
+      "camera": {
+        "eye": [
+          500000,
+          4599969,
+          122
+        ],
+        "target": [
+          500000,
+          4600000,
+          100
+        ],
+        "up": [
+          0,
+          0,
+          1
+        ],
+        "projection": "perspective",
+        "verticalFieldOfViewRadians": 1.0471976,
+        "verticalWorldHeight": null,
+        "nearDistance": 0.1,
+        "farDistance": 250
+      },
+      "displayMode": "classification",
+      "render": {
+        "scheduled": false,
+        "renderedFrames": 50,
+        "hiddenFrameSkips": 0,
+        "drawnPoints": 4096,
+        "drawCalls": 4,
+        "residentBytes": 98304,
+        "transientTextureBytes": 47886400,
+        "surfaceSuboptimal": false
+      },
+      "pick": {
+        "status": "not_requested",
+        "authority": "provisional_gpu_hint",
+        "generation": null,
+        "sourceIdentity": null,
+        "pointOrdinal": null,
+        "batchKey": null,
+        "batchVersion": null
+      },
+      "highlights": {
+        "generation": 2,
+        "sourceIdentity": "c459ff39717b7d6994aaebf344641f5a3add7faf65e249b85933ebd066d1c26e",
+        "pointCount": 0,
+        "authority": "presentation_only"
+      },
+      "resources": {
+        "pointLimit": 8192,
+        "batchLimit": 8,
+        "highlightPointLimit": 32,
+        "residentByteLimit": 196608,
+        "retainedRecordByteLimit": 262144,
+        "workerStagingByteLimit": 327680
+      },
+      "capabilities": {
+        "secure_context": true,
+        "webgpu": true,
+        "browser_user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36",
+        "browser_platform": "MacIntel",
+        "adapter_name": "browser WebGPU adapter",
+        "backend": "BrowserWebGpu",
+        "device_type": "Other",
+        "surface_format": "Bgra8Unorm",
+        "composite_alpha_mode": "Opaque",
+        "present_mode": "fifo",
+        "surface_format_support": {
+          "render_attachment": true,
+          "blendable": true
+        },
+        "required_feature_count": 0,
+        "adapter_max_buffer_size": 4294967292,
+        "adapter_max_texture_dimension_2d": 16384,
+        "adapter_max_bind_groups": 4,
+        "adapter_max_vertex_buffers": 8,
+        "adapter_max_color_attachments": 8
+      },
+      "load": {
+        "active": false,
+        "facts": {
+          "deployment": {
+            "schema": "punctra-browser-stream-v1",
+            "deployment_id": "repository-las-v1",
+            "source_identity": "c459ff39717b7d6994aaebf344641f5a3add7faf65e249b85933ebd066d1c26e",
+            "source_byte_length": 2380227,
+            "source_point_count": 70000,
+            "root_display_point_count": 4096,
+            "root_coverage": "sampled",
+            "world_origin": [
+              500000,
+              4600000,
+              100
+            ],
+            "source_bounds": {
+              "min": [
+                499956.5,
+                4599975,
+                99.22
+              ],
+              "max": [
+                500043.75,
+                4600024.75,
+                102.39
+              ]
+            }
+          },
+          "metrics": {
+            "requestCount": 0,
+            "networkBytes": 0,
+            "sourceNetworkBytes": 0,
+            "indexNetworkBytes": 0,
+            "requestedBytes": 0,
+            "receivedBytes": 0,
+            "sourceRequestedBytes": 0,
+            "sourceReceivedBytes": 0,
+            "indexRequestedBytes": 0,
+            "indexReceivedBytes": 0,
+            "cacheHits": 3,
+            "cacheBytes": 172696,
+            "sourceCacheBytes": 256,
+            "indexCacheBytes": 172440,
+            "logicalCacheEntries": 3,
+            "logicalCacheBytes": 172696,
+            "retries": 0,
+            "concurrentRequestsHighWater": 1,
+            "concurrentResponseBytesHighWater": 0,
+            "queuedRangesHighWater": 0,
+            "queuedRangeBytesHighWater": 0,
+            "decodedStagingBytesHighWater": 204800,
+            "transferredBatches": 4,
+            "transferredPoints": 4096,
+            "transferredBytes": 131072
+          },
+          "decode": {
+            "batchCount": 4,
+            "pointCount": 4096,
+            "transferredBytes": 131072,
+            "stagingBytesHighWater": 204800,
+            "intensityMinimum": 22,
+            "intensityMaximum": 65519,
+            "classificationMinimum": 2,
+            "classificationMaximum": 2
+          },
+          "timings": {
+            "firstCoverageMilliseconds": 12.699999988079071,
+            "settledViewMilliseconds": 14.899999976158142,
+            "mainThreadBatchMillisecondsHighWater": 0.5
+          },
+          "mainThreadMillisecondsHighWater": 0.5
+        }
+      },
+      "failure": {
+        "code": "stale_generation",
+        "message": "Point belongs to a stale View generation",
+        "safeAction": "Keep the last known safe state, dispose the viewer if it is fused, and retry only after correcting the reported condition.",
+        "recoverable": true
+      }
+    },
+    "nonclaims": [
+      "no arbitrary Source or Query support",
+      "no npm registry publication, production hosting, or offline-first support",
+      "no browser or device support beyond the exact recorded qualification lane",
+      "no physical cache, process RSS, driver, or GPU allocation claim",
+      "no independent adoption, stable API, visual-quality, support, or release-candidate claim"
+    ]
+  }
+}
