@@ -175,6 +175,14 @@ test("runtime qualification requires the declared browser and device lane", () =
   assert.deepEqual(mismatch.failures, [
     "browser user agent differed from the declared qualification lane",
   ]);
+  assert.equal(lane.id, "codex-iab-chromium-154-macos-26-apple-m5-pro");
+  for (const version of ["151", "155"]) {
+    const userAgent = lane.browser.userAgent.replace("Chrome/154.", `Chrome/${version}.`);
+    const result = evaluateQualificationLane({ ...environment, userAgent }, {
+      ...state, capabilities: { ...state.capabilities, browser_user_agent: userAgent },
+    });
+    assert.equal(result.passed, false);
+  }
   const hostMismatch = evaluateQualificationLane(
     {
       ...environment,

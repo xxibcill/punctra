@@ -69,6 +69,8 @@ FOOTPRINT_IMPLEMENTATION_REPOSITORY_PATHS = (
     "apps/browser-demo/web/footprint-runner-core.test.mjs",
     "apps/browser-demo/web/footprint.css",
     "apps/browser-demo/web/footprint.html",
+    "apps/browser-demo/web/qualification-lane.js",
+    "apps/browser-demo/web/qualification-lane-v0.22.js",
     "apps/browser-demo/web/visual-archive.js",
     "apps/browser-demo/web/visual-capture.js",
     "apps/browser-demo/web/visual-comparison.js",

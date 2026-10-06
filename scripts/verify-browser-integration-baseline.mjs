@@ -9,7 +9,7 @@ import {
   QUALIFICATION_LIMITS,
   QUALIFICATION_WORKLOAD,
 } from "../apps/browser-demo/web/qualification.js";
-import { QUALIFICATION_LANE } from "../apps/browser-demo/web/qualification-lane.js";
+import { QUALIFICATION_LANE } from "../apps/browser-demo/web/qualification-lane-v0.22.js";
 import { verifyBrowserQualificationMatrix } from "./verify-browser-qualification.mjs";
 
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));

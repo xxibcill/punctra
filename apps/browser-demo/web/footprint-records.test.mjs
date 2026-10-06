@@ -8,6 +8,7 @@ import {
   FOOTPRINT_EVIDENCE_SCHEMA,
   FOOTPRINT_EXTERNAL_NONCLAIMS,
   FOOTPRINT_IMPLEMENTATION_PATHS,
+  FOOTPRINT_LANE_ENVIRONMENT,
   FOOTPRINT_LOCAL_TEST_CASE_IDS,
   FOOTPRINT_LOCAL_TEST_PRODUCER_COMMAND,
   FOOTPRINT_RUNTIME_PATHS,
@@ -150,15 +151,7 @@ function validBaselineRecord(pins = validPins()) {
 }
 
 function validEnvironment() {
-  return {
-    browser_user_agent: "test-browser",
-    browser_platform: "test-platform",
-    operating_system: "test-os",
-    adapter_name: "test-adapter",
-    backend: "test-backend",
-    same_adapter_for_scale_trials: true,
-    physical_display_observed: false,
-  };
+  return { ...FOOTPRINT_LANE_ENVIRONMENT };
 }
 
 function validEvidenceRecordOptions() {
@@ -170,12 +163,12 @@ function validEvidenceRecordOptions() {
   return {
     startedAt: "2026-08-29T01:00:00.000Z",
     readCompletedAt: () => COMPLETED_AT,
-    browserUserAgent: "test-browser",
-    browserPlatform: "test-platform",
+    browserUserAgent: FOOTPRINT_LANE_ENVIRONMENT.browser_user_agent,
+    browserPlatform: FOOTPRINT_LANE_ENVIRONMENT.browser_platform,
     backgroundRgba: BACKGROUND_RGBA,
     footprint: corpus,
     pins,
-    host: { operating_system: { name: "test-os" } },
+    host: { operating_system: { name: "macOS", version: "26.6.2", build: "25G83", architecture: "arm64" } },
     baseline,
     baselineIdentity: digest("docs/releases/v0.22-browser-point-footprint-baseline.json"),
     localTests,
@@ -447,7 +440,7 @@ function nominalPicksForTrial(trialId) {
 }
 
 function observedAdapter() {
-  return { name: "test-adapter", backend: "test-backend" };
+  return { name: FOOTPRINT_LANE_ENVIRONMENT.adapter_name, backend: FOOTPRINT_LANE_ENVIRONMENT.backend };
 }
 
 function pointFootprintFacts(profile, selected = "multisample4x", residentPoints = RESIDENT_POINTS) {

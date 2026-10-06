@@ -9,6 +9,7 @@ import {
   FOOTPRINT_EVIDENCE_SCHEMA,
   FOOTPRINT_EXTERNAL_NONCLAIMS,
   FOOTPRINT_IMPLEMENTATION_PATHS,
+  FOOTPRINT_LANE_ENVIRONMENT,
   FOOTPRINT_LOCAL_TEST_CASE_IDS,
   FOOTPRINT_LOCAL_TEST_PRODUCER_COMMAND,
   FOOTPRINT_LOCAL_TEST_SCHEMA,
@@ -84,6 +85,8 @@ const IMPLEMENTATION_PATHS = [
   "apps/browser-demo/web/footprint-runner-core.test.mjs",
   "apps/browser-demo/web/footprint.css",
   "apps/browser-demo/web/footprint.html",
+  "apps/browser-demo/web/qualification-lane.js",
+  "apps/browser-demo/web/qualification-lane-v0.22.js",
   "apps/browser-demo/web/visual-archive.js",
   "apps/browser-demo/web/visual-capture.js",
   "apps/browser-demo/web/visual-comparison.js",
@@ -195,6 +198,15 @@ test("baseline closes implementation, verifier, runtime, corpus, predecessor, an
   const predecessorTamper = structuredClone(baseline);
   predecessorTamper.pins.predecessor.release_evidence.sha256 = "0".repeat(64);
   assert.throws(() => validatePointFootprintBaseline(predecessorTamper, corpus), /predecessor pins differ/);
+});
+
+test("footprint baseline rejects drift from every declared functional-lane fact", () => {
+  for (const field of Object.keys(FOOTPRINT_LANE_ENVIRONMENT)) {
+    const baseline = validBaseline();
+    baseline.environment[field] = typeof baseline.environment[field] === "boolean"
+      ? !baseline.environment[field] : `${baseline.environment[field]}-changed`;
+    assert.throws(() => validatePointFootprintBaseline(baseline, corpus), /declared v0.22 qualification lane/);
+  }
 });
 
 test("local renderer artifact has one exact environment and five exact source cases", () => {
@@ -480,15 +492,7 @@ function validBaseline() {
       corpus: digest("apps/browser-demo/web/fixtures/footprint-v1/corpus.json"),
       predecessor: structuredClone(corpus.predecessor),
     },
-    environment: {
-      browser_user_agent: "test-browser",
-      browser_platform: "test-platform",
-      operating_system: "test-os",
-      adapter_name: "test-adapter",
-      backend: "test-backend",
-      same_adapter_for_scale_trials: true,
-      physical_display_observed: false,
-    },
+    environment: { ...FOOTPRINT_LANE_ENVIRONMENT },
     candidate_images: corpus.canonical_trials.map((trial, index) => imageArtifact({
       kind: "candidate_baseline_png",
       trialId: trial.id,
@@ -684,15 +688,7 @@ function validEvidence(baseline) {
     completed_at: "2026-08-29T02:00:00.000Z",
     baseline: digest("docs/releases/v0.22-browser-point-footprint-baseline.json"),
     pins: structuredClone(baseline.pins),
-    environment: {
-      browser_user_agent: "test-browser",
-      browser_platform: "test-platform",
-      operating_system: "test-os",
-      adapter_name: "test-adapter",
-      backend: "test-backend",
-      same_adapter_for_scale_trials: true,
-      physical_display_observed: false,
-    },
+    environment: { ...FOOTPRINT_LANE_ENVIRONMENT },
     artifacts: { png, local_test_results: localTestResults },
     canonical_trials: canonicalTrials,
     focused_trials: focusedTrials,
@@ -851,7 +847,7 @@ function footprintFacts(requested, selected, profile, residentPoints) {
 }
 
 function observedAdapter() {
-  return { name: "test-adapter", backend: "test-backend" };
+  return { name: FOOTPRINT_LANE_ENVIRONMENT.adapter_name, backend: FOOTPRINT_LANE_ENVIRONMENT.backend };
 }
 
 function localFallbackProof(pointOrdinal) {

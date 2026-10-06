@@ -4,7 +4,23 @@ import {
   POINT_FOOTPRINT_METRICS_SCHEMA,
   REGION_TOPOLOGY_METRICS_SCHEMA,
 } from "./visual-footprint-metrics.js";
+import { QUALIFICATION_LANE } from "./qualification-lane-v0.22.js";
 import { canonicalJsonEqual, createVisualValidator } from "./visual-validation.js";
+
+export const FOOTPRINT_LANE_ENVIRONMENT = Object.freeze({
+  browser_user_agent: QUALIFICATION_LANE.browser.user_agent,
+  browser_platform: QUALIFICATION_LANE.operating_system.user_agent_platform,
+  operating_system: [
+    QUALIFICATION_LANE.operating_system.name,
+    QUALIFICATION_LANE.operating_system.version,
+    QUALIFICATION_LANE.operating_system.build,
+    QUALIFICATION_LANE.operating_system.architecture,
+  ].join(" "),
+  adapter_name: QUALIFICATION_LANE.webgpu.adapter_name,
+  backend: QUALIFICATION_LANE.webgpu.backend,
+  same_adapter_for_scale_trials: true,
+  physical_display_observed: false,
+});
 
 export const FOOTPRINT_BASELINE_SCHEMA = "punctra-browser-point-footprint-baseline-v1";
 export const FOOTPRINT_EVIDENCE_SCHEMA = "punctra-browser-point-footprint-evidence-v1";
@@ -88,6 +104,8 @@ export const FOOTPRINT_IMPLEMENTATION_PATHS = Object.freeze([
   "apps/browser-demo/web/footprint-runner-core.test.mjs",
   "apps/browser-demo/web/footprint.css",
   "apps/browser-demo/web/footprint.html",
+  "apps/browser-demo/web/qualification-lane.js",
+  "apps/browser-demo/web/qualification-lane-v0.22.js",
   "apps/browser-demo/web/visual-archive.js",
   "apps/browser-demo/web/visual-capture.js",
   "apps/browser-demo/web/visual-comparison.js",
@@ -635,11 +653,8 @@ export function validatePointFootprintEnvironment(environment, corpus) {
     "browser_user_agent", "browser_platform", "operating_system", "adapter_name", "backend",
     "same_adapter_for_scale_trials", "physical_display_observed",
   ], "environment");
-  for (const field of ["browser_user_agent", "browser_platform", "operating_system", "adapter_name", "backend"]) {
-    requireCondition(typeof environment[field] === "string" && environment[field].length > 0, `environment ${field} is invalid`);
-  }
-  requireCondition(environment.same_adapter_for_scale_trials === true, "scale trials do not bind one adapter");
-  requireCondition(environment.physical_display_observed === false, "offscreen evidence cannot claim physical presentation");
+  requireJsonEqual(environment, FOOTPRINT_LANE_ENVIRONMENT,
+    "environment differs from the declared v0.22 qualification lane");
   requireCondition(corpus.canonical_profile.expected_status === "multisample4x", "canonical corpus status differs");
 }
 

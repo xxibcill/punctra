@@ -173,6 +173,13 @@ final evidence and independently checked offline.
 
 ### Corrective center contract (2026-10-06)
 
+The local in-app browser has upgraded from Chromium 151 to 154. v0.22's
+functional continuation explicitly qualifies only the observed Chromium
+154/macOS 26.6.2/Apple M5 Pro lane. Its release-specific lane module leaves the
+v0.21 Chromium 151 lane and evidence unchanged. Both the packed functional
+suite and Point-footprint records must be reproduced at the final pin; the
+new browser version is not inferred to pass from the predecessor.
+
 The original mixed-scene binary occupancy-centroid gate is superseded, not
 reported as passing. A feature's occupancy centroid is not a Point position:
 changing a decorative diameter reweights differently colored, overlapping,
@@ -281,6 +288,16 @@ Repository acceptance proceeds in this order:
 6. the implementation and verifier are pinned, rebuilt, and checked clean; and
 7. a separate attended verify run supplies the final eligible evidence and the
    human-readable release record.
+
+When a later qualification-only correction changes the implementation pin,
+already committed canonical and focused PNGs may remain at that new clean pin
+only if fresh attended record runs reproduce every image byte exactly. The
+new baseline must use that pin's complete implementation, verifier, rebuilt
+runtime, local GPU observations, and actual browser environment. Fresh timings
+and functional observations are collected again; prior timings do not become
+evidence for the new pin. A separate attended verify run still supplies final
+acceptance. Any image change requires the ordinary image-commit and clean-pin
+sequence above.
 
 The v0.22 baseline, evidence, and release record bind the exact package,
 implementation commit, verifier bytes, browser, operating system, adapter,

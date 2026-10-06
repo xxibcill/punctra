@@ -15,7 +15,7 @@ import {
 import {
   QUALIFICATION_LANE,
   QUALIFICATION_RUNTIME_LANE,
-} from "../apps/browser-demo/web/qualification-lane.js";
+} from "../apps/browser-demo/web/qualification-lane-v0.22.js";
 
 const changelogUrl = new URL("../CHANGELOG.md", import.meta.url);
 const matrixUrl = new URL("../docs/releases/v0.22-browser-matrix.json", import.meta.url);
@@ -41,7 +41,7 @@ const qualificationViewerArtifact = path.join(
 );
 const verifierSource = await readFile(new URL("./verify-browser-qualification.mjs", import.meta.url), "utf8");
 const QUALIFICATION_VERIFIER_SHA256 = createHash("sha256").update(verifierSource).digest("hex");
-const EXPECTED_OBSERVATION_DATE = "2026-08-30";
+const EXPECTED_OBSERVATION_DATE = "2026-10-06";
 const EXPECTED_UNQUALIFIED_ENTRIES = Object.freeze([
   Object.freeze({
     browser: "Google Chrome 150.0.7871.115",
