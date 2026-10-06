@@ -9,7 +9,8 @@ import { measureRasterTransition } from "./lod-metrics.js";
 import { animationFrame, captureLodFrame, configureLodCamera, createLodViewer, disposeLodViewer,
   pickLodPoint, publishLodSource, quietLodFrames, raw, restoreLodBatch, setLodCut } from "./lod-host.js";
 import { auditLodRecord, LOD_BACKGROUND, LOD_BASELINE_PATH, LOD_BASELINE_SCHEMA,
-  LOD_EVIDENCE_PATH, LOD_EVIDENCE_SCHEMA, LOD_RELEASE, LOD_ROOT, lodBoundaryCases, boundaryArgumentFacts, validateLodEnvironment } from "./lod-records.js";
+  LOD_CANONICAL_PROFILE, LOD_EVIDENCE_PATH, LOD_EVIDENCE_SCHEMA, LOD_RELEASE, LOD_ROOT,
+  lodBoundaryCases, boundaryArgumentFacts, validateLodEnvironment } from "./lod-records.js";
 
 const { requireCondition } = createVisualValidator("LOD qualification failed");
 const jsonBytes = (value) => new TextEncoder().encode(`${JSON.stringify(value, null, 2)}\n`);
@@ -172,8 +173,7 @@ async function capturePairedEndpoints(viewer, profile, control, artifacts, prefi
 }
 
 async function runCanonical({ trial, visual, index, canvas, artifacts, mode }) {
-  const profile = { id: "canonical-dpr2", css_width: 320, css_height: 240,
-    requested_device_pixel_ratio: 2, physical_width: 640, physical_height: 480 };
+  const profile = LOD_CANONICAL_PROFILE;
   const fixture = await materializeVisualTrial(visual.corpus, trial.id, { corpusUrl: visual.corpus_url });
   const started = performance.now();
   let viewer = await createLodViewer(canvas, profile);

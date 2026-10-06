@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { materializeLodFixture } from "./lod-fixture.js";
-import { boundaryArgumentFacts, lodBoundaryCases, validateLodArtifact, validateLodBoundaryMatrix, validateLodCapture, validateQuietTiming } from "./lod-records.js";
+import { boundaryArgumentFacts, lodBoundaryCases, validateLodArtifact, validateLodBoundaryMatrix, validateLodCapture,
+  validateLodEndpointBinding, validateLodNominalPick, validateQuietTiming } from "./lod-records.js";
 import { summarizeSamples } from "./visual-capture.js";
 
 test("capture acceptance binds actual renderer controls, exact identities and charged hidden residency", async () => {
@@ -65,4 +66,41 @@ test("quiet timing derives percentiles from capture-free samples and enforces pr
   const tampered = structuredClone(timing);
   tampered.frame_interval.p95 = 1;
   assert.throws(() => validateQuietTiming(tampered, limits), /samples/);
+});
+
+test("paired fallback captures reject camera and diameter substitutions", async () => {
+  const fixture = await materializeLodFixture({ projection: "orthographic" });
+  const camera = { ...fixture.camera, vertical_field_of_view_radians: null };
+  const capture = { camera, capture: { facts: { point_footprint: { display_size_physical_pixels: 6 } } } };
+  const frame = { candidate: structuredClone(capture), outgoing: structuredClone(capture), incoming: structuredClone(capture) };
+  validateLodEndpointBinding(frame, fixture.camera);
+  for (const mutate of [
+    (value) => { value.outgoing.camera.target[0] += 0.25; },
+    (value) => { for (const role of ["candidate", "outgoing", "incoming"]) value[role].camera.eye[1] += 1; },
+    (value) => { value.incoming.capture.facts.point_footprint.display_size_physical_pixels = 5; },
+  ]) {
+    const changed = structuredClone(frame);
+    mutate(changed);
+    assert.throws(() => validateLodEndpointBinding(changed, fixture.camera), /camera|diameters/);
+  }
+});
+
+test("canonical picks bind authored centers, allowed neighbors and exact resident identities", () => {
+  const expected = { source_identity: "a".repeat(64), generation: 1, batch_key: 3, batch_version: 2, point_ordinal: "104" };
+  const pick = { center: [320, 240], pixel: [319, 241], expected,
+    observed: { ...expected, authority: "provisional_gpu_hint", status: "hit" } };
+  validateLodNominalPick(pick, expected, [320, 240], 1);
+  for (const mutate of [
+    (value) => { value.observed.batch_key = 4; },
+    (value) => { value.observed.batch_version = 1; },
+    (value) => { value.expected.batch_key = 4; },
+    (value) => { value.center[0] += 1; },
+    (value) => { value.pixel[0] = 318; },
+    (value) => { value.pixel[1] = 240.5; },
+  ]) {
+    const changed = structuredClone(pick);
+    mutate(changed);
+    assert.throws(() => validateLodNominalPick(changed, expected, [320, 240], 1), /pick/);
+  }
+  assert.throws(() => validateLodNominalPick(pick, expected, [320, 240]), /pixel/);
 });

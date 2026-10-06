@@ -13,6 +13,25 @@ export const LOD_BACKGROUND = Object.freeze([19, 20, 19, 255]);
 export const LOD_ROOT = "docs/releases/v0.23-browser-lod-artifacts";
 export const LOD_BASELINE_PATH = "docs/releases/v0.23-browser-lod-baseline.json";
 export const LOD_EVIDENCE_PATH = "docs/releases/v0.23-browser-lod-evidence.json";
+export const LOD_CANONICAL_PROFILE = Object.freeze({ id: "canonical-dpr2", css_width: 320, css_height: 240,
+  requested_device_pixel_ratio: 2, physical_width: 640, physical_height: 480 });
+
+export function validateLodEndpointBinding(frame, expectedCamera) {
+  for (const role of ["candidate", "outgoing", "incoming"]) validateCameraBinding(frame[role].camera, expectedCamera);
+  requireCondition(canonicalJsonEqual(frame.candidate.camera, frame.outgoing.camera)
+    && canonicalJsonEqual(frame.candidate.camera, frame.incoming.camera), "endpoint cameras differ");
+  const diameter = (role) => frame[role].capture.facts.point_footprint.display_size_physical_pixels;
+  requireCondition(diameter("candidate") === diameter("outgoing") && diameter("candidate") === diameter("incoming"),
+    "endpoint diameters differ");
+}
+
+export function validateLodNominalPick(pick, expected, center, radius = 0) {
+  requireCondition(canonicalJsonEqual(pick.center, center) && canonicalJsonEqual(pick.expected, expected), "nominal pick inputs differ");
+  requireCondition(pick.pixel?.length === 2 && pick.pixel.every((value, axis) => Number.isInteger(value)
+    && Math.abs(value - center[axis]) <= radius), "nominal pick pixel differs from current camera projection");
+  requireCondition(pick.observed.status === "hit" && pick.observed.authority === "provisional_gpu_hint"
+    && Object.entries(expected).every(([field, value]) => pick.observed[field] === value), "nominal pick identity differs");
+}
 
 export function lodBoundaryCases() {
   return [
@@ -71,7 +90,7 @@ export function validateLodCapture(record, { fixture, profile, generation, versi
   return density;
 }
 
-export function validateQuietTiming(timing, limits, predecessor = null) {
+export function validateQuietTiming(timing, limits, predecessor = null, context = "canonical") {
   requireCondition(timing.frame_count === 30 && timing.capture_free === true, "quiet window differs");
   for (const [samples, summary] of [["frame_interval_samples_milliseconds", "frame_interval"], ["frame_submission_samples_milliseconds", "frame_submission"]]) {
     requireCondition(timing[samples]?.length === 30 && timing[samples].every((value) => Number.isFinite(value) && value >= 0), "quiet samples differ");
@@ -81,7 +100,8 @@ export function validateQuietTiming(timing, limits, predecessor = null) {
     && timing.frame_submission.p95 <= limits.frame_submission_p95_milliseconds, "quiet timing ceiling exceeded");
   if (predecessor !== null) {
     for (const field of ["frame_interval", "frame_submission"]) {
-      if (predecessor[field] > 0) requireCondition(timing[field].p95 <= predecessor[field] * limits.canonical_predecessor_p95_ratio, `canonical ${field} p95 exceeds twice the predecessor`);
+      if (predecessor[field] > 0) requireCondition(timing[field].p95 <= predecessor[field] * limits.canonical_predecessor_p95_ratio,
+        `canonical ${context} ${field} p95 ${timing[field].p95} exceeds twice the predecessor ${predecessor[field]}`);
     }
   }
 }
@@ -118,18 +138,14 @@ export async function auditLodRecord(record, { corpus, fixtures, visual, predece
       validateLodCapture(frame.candidate, { fixture, profile, generation: 1, version: 1, seed: corpus.seed, step, coarsen });
       validateLodCapture(frame.outgoing, { fixture, profile, generation: 1, version: 1, seed: corpus.seed, step: 0, coarsen });
       validateLodCapture(frame.incoming, { fixture, profile, generation: 1, version: 1, seed: corpus.seed, step: 8, coarsen });
-      requireCondition(canonicalJsonEqual(frame.candidate.camera, frame.outgoing.camera)
-        && canonicalJsonEqual(frame.candidate.camera, frame.incoming.camera), "endpoint cameras differ");
       const expectedCamera = structuredClone(fixture.camera);
       if (trial.kind === "moving_refine" || trial.kind === "interruption") {
         expectedCamera.eye[0] += step * 0.015;
         expectedCamera.target[0] += step * 0.015;
       }
-      validateCameraBinding(frame.candidate.camera, expectedCamera);
+      validateLodEndpointBinding(frame, expectedCamera);
       requireCondition(frame.candidate.adapter.adapter_name === QUALIFICATION_LANE.webgpu.adapter_name
         && frame.candidate.adapter.backend === QUALIFICATION_LANE.webgpu.backend, "captured adapter differs");
-      requireCondition(frame.candidate.capture.facts.point_footprint.display_size_physical_pixels === frame.outgoing.capture.facts.point_footprint.display_size_physical_pixels
-        && frame.candidate.capture.facts.point_footprint.display_size_physical_pixels === frame.incoming.capture.facts.point_footprint.display_size_physical_pixels, "endpoint diameters differ");
       // Decode sequentially so only one PNG inflate/copy workspace is live.
       const candidate = await loadImage(frame.candidate.artifact);
       const outgoing = await loadImage(frame.outgoing.artifact);
@@ -142,12 +158,9 @@ export async function auditLodRecord(record, { corpus, fixtures, visual, predece
         for (let offset = 0; offset < candidate.data.length; offset += 1) delta = Math.max(delta, Math.abs(candidate.data[offset] - outgoing.data[offset]));
         requireCondition(delta <= 1 && frame.maximum_opaque_delta_bytes === delta, "opaque coincident image leaks background");
       } else requireCondition(frame.maximum_opaque_delta_bytes === null, "unmeasured opaque claim differs");
-      requireCondition(frame.nominal_pick.observed.point_ordinal === "40" && frame.nominal_pick.observed.batch_key === 1
-        && frame.nominal_pick.observed.batch_version === 1 && frame.nominal_pick.observed.generation === 1
-        && frame.nominal_pick.observed.source_identity === fixture.source_identity
-        && frame.nominal_pick.observed.authority === "provisional_gpu_hint" && frame.nominal_pick.observed.status === "hit", "mask changed nominal pick identity");
       const projected = projectAuthoredPointAtViewport(decodeTransferV2(fixture.batches[0]).find((point) => point.ordinal === 40), fixture.world_origin, expectedCamera, profile);
-      requireCondition(canonicalJsonEqual(frame.nominal_pick.pixel, [projected.x, projected.y]), "nominal pick pixel differs from current camera projection");
+      validateLodNominalPick(frame.nominal_pick, { source_identity: fixture.source_identity, generation: 1,
+        batch_key: 1, batch_version: 1, point_ordinal: "40" }, [projected.x, projected.y]);
       if (baseline) {
         const reference = baseline.transitions.find((entry) => entry.trial_id === run.trial_id && entry.profile.id === profile.id && entry.recreation_index === run.recreation_index).frames[step];
         requireCondition(frame.candidate.artifact.decoded_sha256 === reference.candidate.artifact.decoded_sha256, "separate verify candidate pixels differ from recorded baseline");
@@ -184,6 +197,7 @@ export async function auditLodRecord(record, { corpus, fixtures, visual, predece
     const oldTiming = predecessorEvidence.canonical_trials.find((entry) => entry.trial_id === trial.id).recreations;
     const referenceTiming = Object.fromEntries(["frame_interval", "frame_submission"].map((field) => [field, Math.max(...oldTiming.map((entry) => entry.timing[field].p95))]));
     for (const run of runs) {
+      requireCondition(canonicalJsonEqual(run.profile, LOD_CANONICAL_PROFILE), "canonical profile differs");
       validateLodArtifact(run.capture, { path: `${LOD_ROOT}/${record.mode}/canonical/${trial.id}-r${run.recreation_index}.png`,
         kind: "lod_canonical_png", profile: { physical_width: 640, physical_height: 480 } });
       const image = await loadImage(run.capture.artifact);
@@ -196,12 +210,16 @@ export async function auditLodRecord(record, { corpus, fixtures, visual, predece
         display_mode: run.capture.source.display_mode, highlights: run.capture.highlights }, run.capture.capture.facts);
       requireCondition(run.nominal_picks.length === trial.selection.ordinals.length, "canonical nominal pick count differs");
       for (const [index, pick] of run.nominal_picks.entries()) {
-        requireCondition(pick.observed.point_ordinal === String(trial.selection.ordinals[index])
-          && pick.observed.source_identity === materialized.source_identity && pick.observed.generation === 1
-          && pick.observed.status === "hit" && pick.observed.authority === "provisional_gpu_hint", "canonical nominal pick differs");
+        const ordinal = trial.selection.ordinals[index];
+        const batchIndex = materialized.batches.findIndex((bytes) => decodeTransferV2(bytes).some((point) => point.ordinal === ordinal));
+        const point = decodeTransferV2(materialized.batches[batchIndex]).find((entry) => entry.ordinal === ordinal);
+        const projected = projectAuthoredPointAtViewport(point, materialized.world_origin, materialized.camera, LOD_CANONICAL_PROFILE);
+        validateLodNominalPick(pick, { source_identity: materialized.source_identity, generation: 1,
+          batch_key: materialized.source.expected_view.batch_keys[batchIndex],
+          batch_version: trial.expected_settled_batch_versions[batchIndex], point_ordinal: String(ordinal) }, [projected.x, projected.y], 1);
       }
       validateLifecycleTiming(run, corpus.timing_limits);
-      validateQuietTiming(run.quiet_timing, corpus.timing_limits, referenceTiming);
+      validateQuietTiming(run.quiet_timing, corpus.timing_limits, referenceTiming, `${trial.id}/r${run.recreation_index}`);
       requireCondition(run.disposal.freed && run.disposal.pending_capture_tickets === 0, "canonical disposal differs");
     }
   }
@@ -214,6 +232,7 @@ export async function auditLodRecord(record, { corpus, fixtures, visual, predece
         kind: role === "candidate" ? "lod_candidate_png" : "lod_endpoint_png", profile: run.profile });
       validateLodCapture(run[role], { fixture, profile: run.profile, generation: 1, version: 1, seed: corpus.seed, step, coarsen: false });
     }
+    validateLodEndpointBinding(run, fixture.camera);
     const candidate = await loadImage(run.candidate.artifact);
     const outgoing = await loadImage(run.outgoing.artifact);
     const incoming = await loadImage(run.incoming.artifact);
@@ -223,11 +242,8 @@ export async function auditLodRecord(record, { corpus, fixtures, visual, predece
     const metrics = measureRasterTransition({ candidate, outgoing, incoming, backgroundRgba: LOD_BACKGROUND, stationary: true });
     requireCondition(metrics.passed && canonicalJsonEqual(metrics, run.metrics), "fallback coverage gate fails");
     requireCondition(run.disposal.freed && run.disposal.pending_capture_tickets === 0, "fallback disposal differs");
-    requireCondition(run.nominal_pick.observed.status === "hit" && run.nominal_pick.observed.point_ordinal === "40"
-      && run.nominal_pick.observed.batch_key === 1 && run.nominal_pick.observed.batch_version === 1
-      && run.nominal_pick.observed.generation === 1 && run.nominal_pick.observed.source_identity === fixture.source_identity
-      && run.nominal_pick.observed.authority === "provisional_gpu_hint"
-      && canonicalJsonEqual(run.nominal_pick.pixel, [640, 512]), "fallback nominal pick differs");
+    validateLodNominalPick(run.nominal_pick, { source_identity: fixture.source_identity, generation: 1,
+      batch_key: 1, batch_version: 1, point_ordinal: "40" }, [640, 512]);
     maximumRendererBytes = Math.max(maximumRendererBytes, run.candidate.capture.facts.renderer_transient_texture_bytes);
   }
   validateLodBoundaryMatrix(record.boundary_probes);
