@@ -2,7 +2,6 @@ import { createVisualValidator } from "./visual-validation.js";
 
 export const FEATURE_ALIGNMENT_SCHEMA = "punctra-browser-feature-alignment-v1";
 export const FEATURE_ALIGNMENT_SEARCH_RADIUS = 4;
-export const FEATURE_ALIGNMENT_TILE_SIZE = 32;
 const { requireCondition } = createVisualValidator("Feature alignment invalid");
 
 /** Measures translation separately from footprint area and edge opacity. */
@@ -14,34 +13,101 @@ export function measureFeatureAlignment(reference, candidate, rectangle, backgro
   return alignPrepared(reference, candidate, rectangle, backgroundRgba, energy);
 }
 
-/** Fixed predecessor regions prevent unchanged content elsewhere hiding drift. */
-export function measureLocalFeatureAlignment(reference, candidate, rectangle, backgroundRgba) {
-  const margin = FEATURE_ALIGNMENT_SEARCH_RADIUS;
-  const bounds = {
-    x: Math.max(margin, rectangle.x),
-    y: Math.max(margin, rectangle.y),
-    width: Math.min(reference.width - margin, rectangle.x + rectangle.width) - Math.max(margin, rectangle.x),
-    height: Math.min(reference.height - margin, rectangle.y + rectangle.height) - Math.max(margin, rectangle.y),
-  };
-  validateInputs(reference, candidate, bounds, backgroundRgba);
-  reference = blurImage(reference);
-  candidate = blurImage(candidate);
-  const referenceEnergy = contrastEnergyIntegral(reference, backgroundRgba);
-  const candidateEnergy = contrastEnergyIntegral(candidate, backgroundRgba);
-  const regions = [];
-  for (let y = bounds.y; y < bounds.y + bounds.height; y += FEATURE_ALIGNMENT_TILE_SIZE) {
-    for (let x = bounds.x; x < bounds.x + bounds.width; x += FEATURE_ALIGNMENT_TILE_SIZE) {
-      const tile = { x, y, width: Math.min(FEATURE_ALIGNMENT_TILE_SIZE, bounds.x + bounds.width - x),
-        height: Math.min(FEATURE_ALIGNMENT_TILE_SIZE, bounds.y + bounds.height - y) };
-      if (rectangleEnergy(referenceEnergy, reference.width, tile, 0, 0) < 64) continue;
-      const self = alignPrepared(reference, reference, tile, backgroundRgba, referenceEnergy);
-      if (self.ambiguous) continue;
-      regions.push(alignPrepared(reference, candidate, tile, backgroundRgba, candidateEnergy));
+/** Registers every predecessor component without weighting it by its color. */
+export function measureFeatureComponentAlignment(reference, candidate, rectangle, backgroundRgba) {
+  validateImagesAndRectangle(reference, candidate, rectangle, backgroundRgba);
+  const referenceMask = occupancyMask(reference, backgroundRgba);
+  const candidateMask = occupancyMask(candidate, backgroundRgba);
+  const components = foregroundComponents(referenceMask, reference.width, reference.height)
+    .filter(({ pixels }) => pixels.some((pixel) => insideRectangle(pixel, reference.width, rectangle)));
+  requireCondition(components.length <= 4096, "feature component count exceeds its ceiling");
+  const regions = components.map((component, index) => {
+    const crop = { x: component.bounds.x - 8, y: component.bounds.y - 8,
+      width: component.bounds.width + 16, height: component.bounds.height + 16 };
+    requireCondition(crop.x >= 0 && crop.y >= 0 && crop.x + crop.width <= reference.width
+      && crop.y + crop.height <= reference.height, "component lacks complete search and blur margins");
+    const before = binaryCrop(crop);
+    const after = binaryCrop(crop);
+    for (const pixel of component.pixels) {
+      const local = (Math.floor(pixel / reference.width) - crop.y) * crop.width + pixel % reference.width - crop.x;
+      before.data.set([255, 255, 255, 255], local * 4);
     }
+    for (let y = 0; y < crop.height; y += 1) {
+      for (let x = 0; x < crop.width; x += 1) {
+        if (candidateMask[(crop.y + y) * candidate.width + crop.x + x]) {
+          after.data.set([255, 255, 255, 255], (y * crop.width + x) * 4);
+        }
+      }
+    }
+    const alignment = measureFeatureAlignment(before, after, {
+      x: 6, y: 6, width: component.bounds.width + 4, height: component.bounds.height + 4,
+    }, [0, 0, 0, 255]);
+    alignment.rectangle.x += crop.x;
+    alignment.rectangle.y += crop.y;
+    return { component_index: index, predecessor_pixel_count: component.pixels.length,
+      predecessor_bounds: component.bounds, alignment };
+  });
+  return { normalization: "predecessor_four_connected_binary_components_before_blur_v1",
+    maximum_background_channel_delta: 2,
+    regions, passed: regions.length > 0 && regions.every(({ alignment }) => alignment.distance_pixels !== null
+      && alignment.distance_pixels <= 1 && !alignment.ambiguous && alignment.correlation >= Math.SQRT1_2) };
+}
+
+function occupancyMask(image, background) {
+  const mask = new Uint8Array(image.width * image.height);
+  for (let pixel = 0; pixel < mask.length; pixel += 1) {
+    mask[pixel] = [0, 1, 2, 3].some((channel) => Math.abs(image.data[pixel * 4 + channel] - background[channel]) > 2) ? 1 : 0;
   }
-  return { tile_size_pixels: FEATURE_ALIGNMENT_TILE_SIZE, minimum_reference_contrast_energy: 64,
-    regions, passed: regions.length > 0 && regions.every((region) => region.distance_pixels !== null
-      && region.distance_pixels <= 1 && !region.ambiguous && region.correlation >= Math.SQRT1_2) };
+  return mask;
+}
+
+function foregroundComponents(mask, width, height) {
+  const visited = new Uint8Array(mask.length);
+  const queue = new Uint32Array(mask.length);
+  const components = [];
+  for (let start = 0; start < mask.length; start += 1) {
+    if (!mask[start] || visited[start]) continue;
+    const pixels = [];
+    let head = 0;
+    let tail = 1;
+    queue[0] = start;
+    visited[start] = 1;
+    let left = width;
+    let top = height;
+    let right = 0;
+    let bottom = 0;
+    while (head < tail) {
+      const pixel = queue[head++];
+      const x = pixel % width;
+      const y = Math.floor(pixel / width);
+      pixels.push(pixel);
+      left = Math.min(left, x);
+      top = Math.min(top, y);
+      right = Math.max(right, x);
+      bottom = Math.max(bottom, y);
+      for (const neighbor of [x > 0 ? pixel - 1 : -1, x + 1 < width ? pixel + 1 : -1,
+        y > 0 ? pixel - width : -1, y + 1 < height ? pixel + width : -1]) {
+        if (neighbor < 0 || !mask[neighbor] || visited[neighbor]) continue;
+        visited[neighbor] = 1;
+        queue[tail++] = neighbor;
+      }
+    }
+    components.push({ pixels, bounds: { x: left, y: top, width: right - left + 1, height: bottom - top + 1 } });
+  }
+  return components;
+}
+
+function insideRectangle(pixel, width, rectangle) {
+  const x = pixel % width;
+  const y = Math.floor(pixel / width);
+  return x >= rectangle.x && x < rectangle.x + rectangle.width
+    && y >= rectangle.y && y < rectangle.y + rectangle.height;
+}
+
+function binaryCrop(rectangle) {
+  const data = new Uint8Array(rectangle.width * rectangle.height * 4);
+  for (let offset = 3; offset < data.length; offset += 4) data[offset] = 255;
+  return { width: rectangle.width, height: rectangle.height, data };
 }
 
 function alignPrepared(reference, candidate, rectangle, backgroundRgba, energy) {
@@ -148,7 +214,7 @@ function rectangleEnergy(integral, width, rectangle, dx, dy) {
     - integral[bottom * stride + left] + integral[top * stride + left];
 }
 
-function validateInputs(reference, candidate, rectangle, background) {
+function validateImagesAndRectangle(reference, candidate, rectangle, background) {
   for (const image of [reference, candidate]) {
     requireCondition(Number.isSafeInteger(image?.width) && Number.isSafeInteger(image?.height)
       && image.width > 0 && image.height > 0 && image.width <= 4096 && image.height <= 4096
@@ -162,7 +228,14 @@ function validateInputs(reference, candidate, rectangle, background) {
     && channel >= 0 && channel <= 255), "clear color is invalid");
   requireCondition([rectangle?.x, rectangle?.y, rectangle?.width, rectangle?.height].every(Number.isSafeInteger)
     && rectangle.width > 0 && rectangle.height > 0
-    && rectangle.x >= FEATURE_ALIGNMENT_SEARCH_RADIUS && rectangle.y >= FEATURE_ALIGNMENT_SEARCH_RADIUS
+    && rectangle.x >= 0 && rectangle.y >= 0
+    && rectangle.x + rectangle.width <= reference.width
+    && rectangle.y + rectangle.height <= reference.height, "feature rectangle is invalid");
+}
+
+function validateInputs(reference, candidate, rectangle, background) {
+  validateImagesAndRectangle(reference, candidate, rectangle, background);
+  requireCondition(rectangle.x >= FEATURE_ALIGNMENT_SEARCH_RADIUS && rectangle.y >= FEATURE_ALIGNMENT_SEARCH_RADIUS
     && rectangle.x + rectangle.width + FEATURE_ALIGNMENT_SEARCH_RADIUS <= reference.width
     && rectangle.y + rectangle.height + FEATURE_ALIGNMENT_SEARCH_RADIUS <= reference.height,
   "feature rectangle requires the complete search margin");

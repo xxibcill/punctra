@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { measureFeatureAlignment, measureLocalFeatureAlignment } from "./footprint-alignment.js";
+import { measureFeatureAlignment, measureFeatureComponentAlignment } from "./footprint-alignment.js";
 
 const background = [19, 20, 19, 255];
 const rectangle = { x: 4, y: 4, width: 40, height: 40 };
@@ -25,17 +25,36 @@ test("alignment refuses blank or translation-ambiguous features", () => {
 
 test("local alignment detects a weak feature moving or disappearing beside fixed strong content", () => {
   const reference = twoFeatures(0, false);
-  assert.equal(measureLocalFeatureAlignment(reference, reference, { x: 4, y: 4, width: 88, height: 40 }, background).passed, true);
+  assert.equal(measureFeatureComponentAlignment(reference, reference, { x: 4, y: 4, width: 88, height: 40 }, background).passed, true);
   for (const candidate of [twoFeatures(3, false), twoFeatures(0, true)]) {
-    const report = measureLocalFeatureAlignment(reference, candidate, { x: 4, y: 4, width: 88, height: 40 }, background);
+    const report = measureFeatureComponentAlignment(reference, candidate, { x: 4, y: 4, width: 88, height: 40 }, background);
     assert.equal(report.passed, false);
   }
 });
 
 test("local alignment rejects displacement beyond its bounded search", () => {
   const reference = twoFeatures(0, false);
-  assert.equal(measureLocalFeatureAlignment(reference, twoFeatures(10, false),
+  assert.equal(measureFeatureComponentAlignment(reference, twoFeatures(10, false),
     { x: 4, y: 4, width: 88, height: 40 }, background).passed, false);
+});
+
+test("components expose same-tile weak movement and deletion that aggregate registration hides", () => {
+  const reference = sameTileScene(0, false);
+  for (const candidate of [sameTileScene(3, false), sameTileScene(0, true)]) {
+    const aggregate = measureFeatureAlignment(reference, candidate, rectangle, background);
+    assert.equal(aggregate.distance_pixels, 0);
+    assert(aggregate.correlation > 0.99);
+    const components = measureFeatureComponentAlignment(reference, candidate, rectangle, background);
+    assert.equal(components.regions.length, 2);
+    assert.equal(components.passed, false);
+  }
+});
+
+test("components cannot silently omit landmarks at the image boundary", () => {
+  const reference = image(background);
+  reference.data.set([240, 240, 240, 255], 0);
+  assert.throws(() => measureFeatureComponentAlignment(reference, reference,
+    { x: 0, y: 0, width: 48, height: 48 }, background), /complete search and blur margins/);
 });
 
 test("alignment keeps all candidate windows complete and rejects malformed images", () => {
@@ -74,6 +93,21 @@ function twoFeatures(dx, omitWeak) {
       for (let x = 0; x < result.width; x += 1) {
         if (Math.hypot(x + 0.5 - cx, y + 0.5 - cy) <= 3) {
           result.data.set([...color, 255], (y * result.width + x) * 4);
+        }
+      }
+    }
+  }
+  return result;
+}
+
+function sameTileScene(dx, omitWeak) {
+  const result = image(background);
+  for (const [cx, cy, color] of [[13, 13, [240, 240, 240]],
+    ...(omitWeak ? [] : [[26 + dx, 26, [45, 40, 35]]])]) {
+    for (let y = 0; y < 48; y += 1) {
+      for (let x = 0; x < 48; x += 1) {
+        if (Math.hypot(x + 0.5 - cx, y + 0.5 - cy) <= 3) {
+          result.data.set([...color, 255], (y * 48 + x) * 4);
         }
       }
     }

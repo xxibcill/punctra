@@ -3,7 +3,7 @@ import initializeWasm, {
   createPointFootprintControlViewer,
 } from "./pkg/browser_demo.js";
 import { materializeFootprintFixture, validateIsolatedFootprintFixture } from "./footprint-fixture.js";
-import { measureLocalFeatureAlignment } from "./footprint-alignment.js";
+import { measureFeatureComponentAlignment } from "./footprint-alignment.js";
 import { footprintRegionCenter } from "./footprint-corpus.js";
 import {
   ArtifactRegistry,
@@ -953,7 +953,7 @@ function compareFeatureFacts(predecessor, candidate, features) {
       predecessor: before,
       candidate: after,
       centroid_distance_pixels: centroidDistance,
-      local_alignment: measureLocalFeatureAlignment(predecessor, candidate, feature.rectangle, BACKGROUND_RGBA),
+      local_alignment: measureFeatureComponentAlignment(predecessor, candidate, feature.rectangle, BACKGROUND_RGBA),
     };
   });
 }
