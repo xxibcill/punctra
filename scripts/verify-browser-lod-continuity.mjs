@@ -6,7 +6,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { validateLodCorpus } from "../apps/browser-demo/web/lod-corpus.js";
 import { auditLodRecord, LOD_BASELINE_PATH, LOD_BASELINE_SCHEMA, LOD_EVIDENCE_PATH, LOD_EVIDENCE_SCHEMA,
-  LOD_RELEASE, LOD_ROOT, validateLodPredecessorRuntime } from "../apps/browser-demo/web/lod-records.js";
+  LOD_RELEASE, LOD_ROOT, validateLodPredecessorRuntime, validateLodFunctionalContinuation } from "../apps/browser-demo/web/lod-records.js";
 import { validateVisualCorpus } from "../apps/browser-demo/web/visual-corpus.js";
 import { decodeRgba8Png } from "../apps/browser-demo/web/visual-png.js";
 
@@ -83,6 +83,11 @@ export async function verifyBrowserLodFiles({ baselinePath = LOD_BASELINE_PATH, 
   assert.equal(baseline.schema, LOD_BASELINE_SCHEMA);
   assert.equal(baseline.mode, "record");
   await verifyPins(baseline.pins);
+  const [matrix, quickstart, functional] = await Promise.all([
+    "docs/releases/v0.23-browser-matrix.json", "docs/releases/v0.23-browser-quickstart.json",
+    "docs/releases/v0.23-browser-functional-observation.json",
+  ].map(async (recordPath) => JSON.parse(await readFile(path.join(ROOT, recordPath)))));
+  validateLodFunctionalContinuation(baseline, { matrix, quickstart, functional });
   const corpusBytes = pinned(baseline.pins.implementation.commit, baseline.pins.corpus.path);
   verifyDigest(corpusBytes, baseline.pins.corpus, "corpus");
   const corpus = JSON.parse(corpusBytes);

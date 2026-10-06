@@ -2,8 +2,74 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { materializeLodFixture } from "./lod-fixture.js";
 import { boundaryArgumentFacts, lodBoundaryCases, validateLodArtifact, validateLodBoundaryMatrix, validateLodCapture,
-  validateLodEndpointBinding, validateLodNominalPick, validateLodPredecessorRuntime, validatePairedLodTiming, validateQuietTiming } from "./lod-records.js";
+  validateLodEndpointBinding, validateLodNominalPick, validateLodPredecessorRuntime, validatePairedLodTiming, validateQuietTiming,
+  validateLodSessionEnvironment, validateLodFunctionalContinuation } from "./lod-records.js";
+import { QUALIFICATION_PROFILES } from "./qualification-lane-v0.23.js";
 import { summarizeSamples } from "./visual-capture.js";
+
+test("session profiles are closed and separate verify cannot switch screen facts", () => {
+  const environments = QUALIFICATION_PROFILES.map(lodEnvironment);
+  for (const environment of environments) {
+    assert.equal(validateLodSessionEnvironment(environment, structuredClone(environment)).id, environment.qualification_lane);
+    for (const mutate of [
+      (value) => { value.screen.width = 1921; },
+      (value) => { value.screen.pixel_depth_bits = 16; },
+      (value) => { value.qualification_lane = "other"; },
+      (value) => { value.host.device.gpu = "other"; },
+    ]) {
+      const changed = structuredClone(environment); mutate(changed);
+      assert.throws(() => validateLodSessionEnvironment(changed), /declared|differs/);
+    }
+  }
+  assert.throws(() => validateLodSessionEnvironment(environments[1], environments[0]), /record and verify environments differ/);
+});
+
+test("continuation binds observed environments, loaded runtime and the clean packed quickstart", () => {
+  for (const profile of QUALIFICATION_PROFILES) {
+    const commit = "a".repeat(40), digest = "b".repeat(64);
+    const runtime = { package_name: "@punctra/viewer", package_version: "0.23.0-alpha.1",
+      artifacts: [{ path: "runtime", sha256: digest }], packed_artifact: { sha256: digest } };
+    const record = { pins: { implementation: { commit }, runtime }, environment: lodEnvironment(profile) };
+    const environment = { ...profile.runtime.browser, screen: profile.runtime.screen,
+      host: profile.runtime.host, visibilityState: "visible", secureContext: true };
+    const records = {
+      matrix: { implementation_commit: commit, release: "0.23.0-alpha.1", qualified_entries: [{ id: profile.lane.id }] },
+      quickstart: { implementation_commit: commit, lane_id: profile.lane.id,
+        acceptance: { packageVersion: "0.23.0-alpha.1", disposed: true, packedRuntime: {
+          schema: "punctra-browser-packed-runtime-v1", build: "production", serverContract: "punctra-strict-range-v1",
+          viewerPackage: "@punctra/viewer", viewerVersion: "0.23.0-alpha.1", viewerArtifactSha256: digest } } },
+      functional: { acceptance: { implementation_commit: commit, package_version: "0.23.0-alpha.1",
+        runtime_pins: runtime, environment, completed_environment: structuredClone(environment),
+        runtime_lane: { lane: profile.lane.id, passed: true, failures: [] },
+        final_state: { viewport: profile.runtime.display, capabilities: profile.runtime.capabilities } } },
+    };
+    assert.doesNotThrow(() => validateLodFunctionalContinuation(record, records));
+    for (const mutate of [
+      (value) => { value.functional.acceptance.runtime_pins.artifacts[0].sha256 = "c".repeat(64); },
+      (value) => { value.quickstart.acceptance.packedRuntime.viewerArtifactSha256 = "c".repeat(64); },
+      (value) => { value.quickstart.implementation_commit = "c".repeat(40); },
+      (value) => { value.functional.acceptance.environment.screen.width += 1; },
+      (value) => { value.functional.acceptance.completed_environment.screen.colorDepth = 16; },
+      (value) => { value.functional.acceptance.runtime_lane.passed = false; },
+      (value) => { delete value.functional.acceptance.runtime_lane.passed; },
+      (value) => { value.functional.acceptance.final_state.capabilities.backend = "other"; },
+    ]) {
+      const changed = structuredClone(records); mutate(changed);
+      assert.throws(() => validateLodFunctionalContinuation(record, changed), /differs|differ/);
+    }
+  }
+});
+
+function lodEnvironment({ lane, runtime }) {
+  return { qualification_lane: lane.id, browser_user_agent: lane.browser.user_agent,
+    browser_platform: runtime.browser.platform, physical_display_observed: false,
+    screen: { width: runtime.screen.width, height: runtime.screen.height,
+      color_depth_bits: runtime.screen.colorDepth, pixel_depth_bits: runtime.screen.pixelDepth },
+    host: { operating_system: runtime.host.operatingSystem, package: runtime.host.package,
+      device: { class: runtime.host.device.class, gpu: runtime.host.device.gpu,
+        gpu_cores: runtime.host.device.gpuCores, gpu_class: runtime.host.device.gpuClass,
+        metal_support: runtime.host.device.metalSupport } } };
+}
 
 test("capture acceptance binds actual renderer controls, exact identities and charged hidden residency", async () => {
   const fixture = await materializeLodFixture({ projection: "perspective" });

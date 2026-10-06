@@ -1,5 +1,5 @@
 import { RECREATION_REQUIRED_SAFE_ACTIONS } from "./viewer-api.js";
-import { QUALIFICATION_RUNTIME_LANE } from "./qualification-lane-v0.23.js";
+import { QUALIFICATION_RUNTIME_LANE, qualificationProfileForScreen } from "./qualification-lane-v0.23.js";
 
 export { QUALIFICATION_RUNTIME_LANE };
 
@@ -94,7 +94,7 @@ export function captureEnvironment(options = {}) {
 
 export function evaluateQualificationLane(environment, state) {
   const failures = [];
-  const lane = QUALIFICATION_RUNTIME_LANE;
+  const lane = qualificationProfileForScreen(environment?.screen)?.runtime ?? QUALIFICATION_RUNTIME_LANE;
   checkLaneFact(failures, environment?.userAgent, lane.browser.userAgent, "browser user agent");
   checkLaneFact(failures, environment?.platform, lane.browser.platform, "browser platform");
   checkLaneFact(failures, environment?.language, lane.browser.language, "browser language");

@@ -13,8 +13,7 @@ import {
   recreationRequiredRecoveryEvidence,
 } from "../apps/browser-demo/web/qualification.js";
 import {
-  QUALIFICATION_LANE,
-  QUALIFICATION_RUNTIME_LANE,
+  qualificationProfileForId,
 } from "../apps/browser-demo/web/qualification-lane-v0.23.js";
 
 const changelogUrl = new URL("../CHANGELOG.md", import.meta.url);
@@ -361,8 +360,11 @@ function evaluationRecord(entry) {
 }
 
 function verifyQualifiedLane(entry) {
-  assert.equal(entry.id, QUALIFICATION_LANE.id);
-  assert.equal(entry.status, QUALIFICATION_LANE.status);
+  const profile = qualificationProfileForId(entry.id);
+  assert.ok(profile, "qualified session profile is not declared");
+  const { lane: expectedLane, runtime: expectedRuntime } = profile;
+  assert.equal(entry.id, expectedLane.id);
+  assert.equal(entry.status, expectedLane.status);
   for (const section of [
     "browser",
     "operating_system",
@@ -373,7 +375,7 @@ function verifyQualifiedLane(entry) {
   ]) {
     assert.deepEqual(
       entry[section],
-      QUALIFICATION_LANE[section],
+      expectedLane[section],
       `qualified ${section} facts must match the exact recorded lane`,
     );
   }
@@ -381,7 +383,7 @@ function verifyQualifiedLane(entry) {
     {
       id: entry.id,
       host: {
-        schema: QUALIFICATION_RUNTIME_LANE.host.schema,
+        schema: expectedRuntime.host.schema,
         operatingSystem: {
           name: entry.operating_system.name,
           version: entry.operating_system.version,
@@ -396,7 +398,7 @@ function verifyQualifiedLane(entry) {
           metalSupport: entry.device.metal_support,
         },
         displayPath: entry.display.display_path,
-        package: QUALIFICATION_RUNTIME_LANE.host.package,
+        package: expectedRuntime.host.package,
       },
       browser: {
         userAgent: entry.browser.user_agent,
@@ -441,7 +443,7 @@ function verifyQualifiedLane(entry) {
         adapter_max_color_attachments: entry.webgpu.max_color_attachments,
       },
     },
-    QUALIFICATION_RUNTIME_LANE,
+    expectedRuntime,
     "checked-in exact lane must match the runtime qualification gate",
   );
 }

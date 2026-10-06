@@ -50,14 +50,14 @@ export async function runLodQualification({ mode, sessionLabel, activation, inpu
   const record = { schema: mode === "record" ? LOD_BASELINE_SCHEMA : LOD_EVIDENCE_SCHEMA,
     release: LOD_RELEASE, mode, pins, started_at: startedAt, session_label: sessionLabel, activation,
     environment: { browser_user_agent: navigator.userAgent, browser_platform: navigator.platform,
-      host, screen: { width: screen.width, height: screen.height, color_depth_bits: screen.colorDepth },
+      host, screen: { width: screen.width, height: screen.height, color_depth_bits: screen.colorDepth, pixel_depth_bits: screen.pixelDepth },
       physical_display_observed: false },
     transitions: [], canonical: [], fallback: [], boundary_probes: [],
     external_evidence: corpus.external_evidence,
     resources: { live_canonical_images: 5, live_canonical_bytes_high_water: 5 * 1281 * 1024 * 4,
       observed_heap_bytes: null, observed_driver_memory_bytes: null, encoded_artifact_bytes: 0 },
   };
-  validateLodEnvironment(record.environment);
+  record.environment.qualification_lane = validateLodEnvironment(record.environment).id;
   requireCondition(record.resources.live_canonical_bytes_high_water <= corpus.resource_limits.live_canonical_bytes, "live canonical bound exceeded");
   for (const trial of corpus.trials) for (const profile of corpus.profiles) for (let index = 0; index < 3; index += 1) {
     state(`Transition ${record.transitions.length + 1}/54 · ${trial.id} · ${profile.id} · recreation ${index + 1}`);
@@ -79,6 +79,9 @@ export async function runLodQualification({ mode, sessionLabel, activation, inpu
     profile: corpus.profiles[1], corpus, canvas, artifacts, mode });
   record.artifacts = artifacts.metadata();
   record.resources.encoded_artifact_bytes = encodedBytes;
+  record.completed_environment = { ...record.environment,
+    browser_user_agent: navigator.userAgent, browser_platform: navigator.platform,
+    screen: { width: screen.width, height: screen.height, color_depth_bits: screen.colorDepth, pixel_depth_bits: screen.pixelDepth } };
   state("Recomputing image metrics and checking every recorded requirement…");
   record.summary = await auditLodRecord(record, { corpus, fixtures, visual: inputs.visual.corpus,
     predecessor: predecessorBundle.baseline, predecessorEvidence: predecessorBundle.evidence, baseline,

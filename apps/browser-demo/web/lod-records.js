@@ -1,9 +1,10 @@
 import { measureRasterTransition, rasterDensityPointCount } from "./lod-metrics.js";
 import { summarizeSamples } from "./visual-capture.js";
 import { canonicalJsonEqual, createVisualValidator } from "./visual-validation.js";
-import { QUALIFICATION_LANE } from "./qualification-lane-v0.23.js";
+import { QUALIFICATION_LANE, qualificationProfileForScreen } from "./qualification-lane-v0.23.js";
 import { pointProjectionInput, validatePointProjectionCapture } from "./footprint-fixture.js";
 import { decodeTransferV2, materializeVisualTrial, projectAuthoredPointAtViewport } from "./visual-corpus.js";
+import { evaluateQualificationLane } from "./qualification.js";
 
 const { requireCondition } = createVisualValidator("LOD evidence invalid");
 export const LOD_RELEASE = "0.23.0-alpha.1";
@@ -129,7 +130,8 @@ export async function auditLodRecord(record, { corpus, fixtures, visual, predece
   requireCondition(record.release === LOD_RELEASE && [LOD_BASELINE_SCHEMA, LOD_EVIDENCE_SCHEMA].includes(record.schema), "release schema differs");
   requireCondition(canonicalJsonEqual(record.external_evidence, corpus.external_evidence), "external evidence boundary differs");
   requireCondition(record.activation?.trusted_user_activation === true && record.activation.page_visibility === "visible", "attended activation is absent");
-  validateLodEnvironment(record.environment);
+  validateLodSessionEnvironment(record.environment, baseline?.environment);
+  validateLodSessionEnvironment(record.completed_environment, record.environment);
   validateLodPredecessorRuntime(record.pins.paired_predecessor_runtime, predecessor.pins.runtime);
   const expectedRuns = corpus.trials.flatMap((trial) => corpus.profiles.flatMap((profile) => [0, 1, 2].map((index) => `${trial.id}/${profile.id}/${index}`)));
   requireCondition(canonicalJsonEqual(record.transitions.map((run) => `${run.trial_id}/${run.profile.id}/${run.recreation_index}`), expectedRuns), "transition matrix differs");
@@ -326,17 +328,44 @@ function validateLifecycleTiming(run, limits) {
 
 export function validateLodEnvironment(environment) {
   requireCondition(environment?.physical_display_observed === false && typeof environment.browser_user_agent === "string", "environment boundary differs");
-  requireCondition(environment.browser_user_agent === QUALIFICATION_LANE.browser.user_agent
-    && environment.browser_platform === QUALIFICATION_LANE.operating_system.user_agent_platform
-    && environment.screen.width === QUALIFICATION_LANE.display.screen_css_pixels[0]
-    && environment.screen.height === QUALIFICATION_LANE.display.screen_css_pixels[1]
-    && environment.screen.color_depth_bits === QUALIFICATION_LANE.display.color_depth,
-  `observed browser lane differs: ${JSON.stringify({ observed: environment, expected: {
-    browser_user_agent: QUALIFICATION_LANE.browser.user_agent,
-    browser_platform: QUALIFICATION_LANE.operating_system.user_agent_platform,
-    screen_css_pixels: QUALIFICATION_LANE.display.screen_css_pixels,
-    color_depth_bits: QUALIFICATION_LANE.display.color_depth } })}`);
-  for (const field of ["name", "version", "build", "architecture"]) requireCondition(environment.host.operating_system[field] === QUALIFICATION_LANE.operating_system[field], `host OS ${field} differs`);
-  for (const field of ["class", "gpu", "gpu_cores", "gpu_class", "metal_support"]) requireCondition(environment.host.device[field] === QUALIFICATION_LANE.device[field], `host device ${field} differs`);
+  const profile = qualificationProfileForScreen({ width: environment.screen.width, height: environment.screen.height,
+    colorDepth: environment.screen.color_depth_bits, pixelDepth: environment.screen.pixel_depth_bits });
+  requireCondition(profile !== undefined, "observed browser screen profile is not declared");
+  const lane = profile.lane;
+  requireCondition(environment.browser_user_agent === lane.browser.user_agent
+    && environment.browser_platform === lane.operating_system.user_agent_platform, "observed browser identity differs");
+  for (const field of ["name", "version", "build", "architecture"]) requireCondition(environment.host.operating_system[field] === lane.operating_system[field], `host OS ${field} differs`);
+  for (const field of ["class", "gpu", "gpu_cores", "gpu_class", "metal_support"]) requireCondition(environment.host.device[field] === lane.device[field], `host device ${field} differs`);
   requireCondition(environment.host.package.version === LOD_RELEASE && environment.host.package.name === "@punctra/viewer", "host package differs");
+  return lane;
+}
+
+export function validateLodSessionEnvironment(environment, baselineEnvironment) {
+  const lane = validateLodEnvironment(environment);
+  requireCondition(environment.qualification_lane === lane.id, "recorded session profile differs");
+  if (baselineEnvironment) requireCondition(canonicalJsonEqual(environment, baselineEnvironment), "record and verify environments differ");
+  return lane;
+}
+
+export function validateLodFunctionalContinuation(record, { matrix, quickstart, functional }) {
+  const commit = record.pins.implementation.commit;
+  const lane = validateLodSessionEnvironment(record.environment);
+  const acceptance = functional.acceptance;
+  requireCondition(matrix.implementation_commit === commit && matrix.release === LOD_RELEASE
+    && acceptance.implementation_commit === commit && acceptance.package_version === LOD_RELEASE
+    && quickstart.implementation_commit === commit, "continuation implementation differs");
+  requireCondition(matrix.qualified_entries.length === 1 && matrix.qualified_entries[0].id === lane.id
+    && quickstart.lane_id === lane.id, "continuation profile differs");
+  requireCondition(canonicalJsonEqual(acceptance.runtime_pins, record.pins.runtime), "functional runtime pins differ");
+  const derived = evaluateQualificationLane(acceptance.environment, acceptance.final_state);
+  const completed = evaluateQualificationLane(acceptance.completed_environment, acceptance.final_state);
+  requireCondition(derived.passed && derived.lane === lane.id && canonicalJsonEqual(acceptance.runtime_lane, derived)
+    && canonicalJsonEqual(completed, derived) && canonicalJsonEqual(acceptance.completed_environment, acceptance.environment),
+  "functional observed environment or result differs");
+  requireCondition(canonicalJsonEqual(quickstart.acceptance.packedRuntime, {
+    schema: "punctra-browser-packed-runtime-v1", build: "production", serverContract: "punctra-strict-range-v1",
+    viewerPackage: record.pins.runtime.package_name, viewerVersion: record.pins.runtime.package_version,
+    viewerArtifactSha256: record.pins.runtime.packed_artifact.sha256,
+  }) && quickstart.acceptance.packageVersion === LOD_RELEASE && quickstart.acceptance.disposed === true,
+  "quickstart packed runtime or disposal differs");
 }

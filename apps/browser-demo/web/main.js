@@ -269,9 +269,14 @@ async function runSmokePath() {
   const delivery = await runDeliveryQualification(heap);
   const presentation = await runPresentationQualification(delivery.warm);
   const performanceEvidence = await runPerformanceQualification({ lifecycle, delivery }, heap);
+  const completedEnvironment = captureEnvironment({ host: environment.host });
+  const completedLane = evaluateQualificationLane(completedEnvironment, viewer.state());
+  assertFact(completedLane.passed && completedLane.lane === runtimeLane.lane,
+    "exact qualification profile changed during functional acceptance");
 
   smokeRecord = {
     schema: ACCEPTANCE_SCHEMA,
+    completed_environment: completedEnvironment,
     implementation_commit: implementationPins.implementation.commit,
     runtime_pins: implementationPins.runtime,
     package_version: performanceEvidence.finalState.packageVersion,

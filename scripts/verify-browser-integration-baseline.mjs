@@ -9,7 +9,7 @@ import {
   QUALIFICATION_LIMITS,
   QUALIFICATION_WORKLOAD,
 } from "../apps/browser-demo/web/qualification.js";
-import { QUALIFICATION_LANE } from "../apps/browser-demo/web/qualification-lane-v0.23.js";
+import { qualificationProfileForId } from "../apps/browser-demo/web/qualification-lane-v0.23.js";
 import { verifyBrowserQualificationMatrix } from "./verify-browser-qualification.mjs";
 
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
@@ -27,7 +27,7 @@ export async function verifyBrowserIntegrationBaseline(baseline, qualificationMa
   await verifyQuickstart(baseline.quickstart, baseline);
 
   assert.equal(baseline.qualification.matrix_schema, "punctra-browser-qualification-matrix-v1");
-  assert.equal(baseline.qualification.qualified_lane, QUALIFICATION_LANE.id);
+  assert.ok(qualificationProfileForId(baseline.qualification.qualified_lane), "integration session profile is not declared");
   assert.deepEqual(baseline.qualification.limits, QUALIFICATION_LIMITS);
   await verifyDigestRecord(baseline.qualification.matrix_digest);
   assert.equal(baseline.qualification.matrix_digest.path, baseline.qualification.matrix_path);
@@ -214,6 +214,7 @@ export function verifyQuickstartEvidence(evidence, baseline) {
   assert.equal(evidence.schema, "punctra-browser-quickstart-evidence-v1");
   assert.match(evidence.observed_on, /^\d{4}-\d{2}-\d{2}$/);
   assert.equal(evidence.lane_id, baseline.qualification.qualified_lane);
+  assert.equal(evidence.implementation_commit, baseline.qualification.implementation_commit);
   assert.deepEqual(evidence.acceptance, {
     schema: baseline.quickstart.acceptance_schema,
     packageVersion: baseline.release,

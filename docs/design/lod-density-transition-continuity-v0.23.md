@@ -173,8 +173,12 @@ raw timing samples are bound and separately reproduced by the verify run.
 This is a timing-comparability correction, not a physical-display qualification
 or a change to any image, identity, residency or absolute performance gate.
 
-A subsequent browser session returned to 1512×982/30-bit screen facts while
-retaining the 1384×865 physical functional canvas. Its exact v0.23 lane has a
-distinct identifier, and all final observations must be collected again at
-that clean implementation. The earlier 1920×1080 observations do not qualify
-the later session. The paired and historical-submission gates stay unchanged.
+Subsequent sessions alternated between 1512×982/30-bit and 1920×1080/24-bit
+screen facts while retaining the 1384×865 physical functional canvas.
+These two observed states are closed profiles with distinct identifiers;
+declaring them does not qualify either. Final functional, quickstart, LOD
+record and separate verify evidence must all identify the same observed
+profile at one clean implementation. Record and verify environments must
+match exactly. Every other screen state fails. The paired and historical-
+submission gates stay unchanged, and earlier observations do not qualify a
+later session or implementation.
