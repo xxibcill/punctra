@@ -76,6 +76,8 @@ export const FOOTPRINT_IMPLEMENTATION_PATHS = Object.freeze([
   "apps/browser-demo/web/footprint-evidence.test.mjs",
   "apps/browser-demo/web/footprint-export.js",
   "apps/browser-demo/web/footprint-export.test.mjs",
+  "apps/browser-demo/web/footprint-fixture.js",
+  "apps/browser-demo/web/footprint-fixture.test.mjs",
   "apps/browser-demo/web/footprint-main.js",
   "apps/browser-demo/web/footprint-qualification.js",
   "apps/browser-demo/web/footprint-records.js",
@@ -587,7 +589,7 @@ function validateFocusedImages(images, candidateImages, corpus) {
     const [trial, profile] = expectedPairs[index];
     const image = images[index];
     validateImageArtifact(image, `focused baseline image ${trial.id}/${profile.id}`);
-    const suffix = profile.id === corpus.canonical_profile.id ? "" : `-${profile.id}`;
+    const suffix = `-${profile.id}`;
     requireCondition(image.trial_id === trial.id && image.profile_id === profile.id,
       `focused baseline image ${trial.id}/${profile.id} identity differs`);
     requireCondition(
@@ -596,15 +598,7 @@ function validateFocusedImages(images, candidateImages, corpus) {
     );
     requireCondition(image.width === profile.physical_width && image.height === profile.physical_height,
       `focused baseline image ${trial.id}/${profile.id} dimensions differ`);
-    if (profile.id === corpus.canonical_profile.id) {
-      const canonical = candidateImages.find(({ trial_id: trialId }) => trialId === trial.id);
-      requireCondition(canonical !== undefined, `canonical baseline image ${trial.id} is absent`);
-      requireCondition(image.encoded_byte_length === canonical.encoded_byte_length
-        && image.encoded_sha256 === canonical.encoded_sha256
-        && image.decoded_byte_length === canonical.decoded_byte_length
-        && image.decoded_sha256 === canonical.decoded_sha256,
-      `focused baseline image ${trial.id}/${profile.id} differs from its canonical baseline`);
-    }
+
   }
 }
 
@@ -863,7 +857,7 @@ function validateFocusedTrials(trials, baseline, corpus, artifacts, metricBindin
     requireRecord(trial, label);
     requireExactKeys(trial, [
       "trial_id", "profile_id", "adapter", "resident_points", "point_footprint", "resources", "candidate_artifact_path",
-      "baseline_artifact_path", "isolated_footprints", "thin_feature_centers",
+      "baseline_artifact_path", "fixture_input", "isolation", "isolated_footprints", "thin_feature_centers",
     ], label);
     requireCondition(trial.trial_id === expectedTrial.id && trial.profile_id === profile.id, `${label} order differs`);
     validateAdapter(trial.adapter, label);
@@ -872,6 +866,14 @@ function validateFocusedTrials(trials, baseline, corpus, artifacts, metricBindin
       backend: environment.backend,
     }, `${label} adapter`);
     positiveInteger(trial.resident_points, `${label} resident points`);
+    requireCondition(trial.resident_points === expectedTrial.isolated_ordinals.length, `${label} isolated resident count differs`);
+    requireRecord(trial.fixture_input, `${label} fixture input`);
+    requireCondition(trial.fixture_input.kind === expectedTrial.fixture, `${label} fixture recipe differs`);
+    requireJsonEqual(trial.fixture_input.authored_ordinals, expectedTrial.isolated_ordinals, `${label} authored ordinals`);
+    requireCondition(SHA256.test(trial.fixture_input.payload_sha256), `${label} fixture payload digest is invalid`);
+    requireCondition(trial.fixture_input.transfer_bytes === trial.resident_points * 32, `${label} fixture transfer bytes differ`);
+    requireArray(trial.isolation, `${label} isolation preflight`);
+    requireCondition(trial.isolation.length === trial.resident_points, `${label} isolation count differs`);
     validatePointFootprintFacts(
       trial.point_footprint,
       "antialiased",

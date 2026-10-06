@@ -71,11 +71,6 @@ export function createPointFootprintBaselineRecord(options) {
   });
   const focusedImages = footprint.focused_trials.flatMap((trial) => (
     [footprint.canonical_profile, ...footprint.scale_profiles].map((profile) => {
-      if (profile.id === footprint.canonical_profile.id) {
-        return structuredClone(candidateImages.find(({ trial_id: trialId }) => (
-          trialId === trial.id
-        )));
-      }
       const record = baselineArtifacts.find(({
         kind,
         trial_id: trialId,
@@ -141,7 +136,7 @@ export function createPointFootprintEvidenceRecord(options) {
     baseline,
     footprint,
   ));
-  const pickIdentityReference = preferredPickReference(focusedTrials, footprint);
+  const pickIdentityReference = preferredPickReference(canonicalTrials, footprint);
   const fallbackTrials = fallbackTrialEvidence(
     fallback,
     localTests,
@@ -154,7 +149,6 @@ export function createPointFootprintEvidenceRecord(options) {
       createPointFootprintImageArtifact(capture.artifact, footprint.canonical_profile.id)
     ))),
     ...focusedTrials
-      .filter(({ profile_id: profileId }) => profileId !== footprint.canonical_profile.id)
       .map((trial) => createPointFootprintImageArtifact(
         trial.capture.artifact,
         trial.profile_id,
@@ -314,6 +308,8 @@ function focusedTrialEvidence(trial, baseline, footprint) {
     resources: resourceEvidence(trial, profile, trial.nominal_picks.length > 0, footprint),
     candidate_artifact_path: trial.capture.artifact.path,
     baseline_artifact_path: pinned.path,
+    fixture_input: structuredClone(trial.fixture_input),
+    isolation: structuredClone(trial.isolation),
     isolated_footprints: trial.measurements.map((measurement) => ({
       ordinal: measurement.ordinal,
       center_foreground: measurement.center_foreground,
@@ -341,17 +337,16 @@ function resourceEvidence(observation, profile, pickTargetsRetained, footprint) 
   });
 }
 
-function preferredPickReference(focusedTrials, footprint) {
+function preferredPickReference(canonicalTrials, footprint) {
   const contract = footprint.focused_trials.find(({ nominal_pick_ordinals: ordinals }) => (
     Array.isArray(ordinals)
   ));
-  const observation = focusedTrials.find(({ trial_id: trialId, profile_id: profileId }) => (
-    trialId === contract.id && profileId === footprint.canonical_profile.id
-  ));
+  const observation = canonicalTrials.find(({ trial_id: trialId }) => trialId === contract.id)
+    ?.recreations[0];
   requireCondition(observation !== undefined, "preferred pick observation is absent");
   return {
     profile_id: footprint.canonical_profile.id,
-    resident_points: observation.resident_points,
+    resident_points: observation.resources.resident_points,
     point_footprint: structuredClone(observation.point_footprint),
     pick_probes: pickProbeEvidence(observation.nominal_picks),
     pick_mask_artifact_path: observation.capture.artifact.path,

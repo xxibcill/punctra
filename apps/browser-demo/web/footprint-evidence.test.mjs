@@ -59,6 +59,8 @@ const IMPLEMENTATION_PATHS = [
   "apps/browser-demo/web/footprint-evidence.test.mjs",
   "apps/browser-demo/web/footprint-export.js",
   "apps/browser-demo/web/footprint-export.test.mjs",
+  "apps/browser-demo/web/footprint-fixture.js",
+  "apps/browser-demo/web/footprint-fixture.test.mjs",
   "apps/browser-demo/web/footprint-main.js",
   "apps/browser-demo/web/footprint-qualification.js",
   "apps/browser-demo/web/footprint-records.js",
@@ -340,11 +342,7 @@ test("host f32 display diameter accepts serde's shortest decimal representation"
   assert.equal(matchesProjectedDensityDiameter(NaN, profile, 1_878, corpus.policy), false);
   const baseline = validBaseline();
   const evidence = validEvidence(baseline);
-  const focusedDpr1 = evidence.focused_trials.find(
-    ({ profile_id }) => profile_id === "focused-dpr1",
-  );
-  focusedDpr1.resident_points = 1_878;
-  focusedDpr1.point_footprint.display_size_physical_pixels = 3.5171874;
+  assert.equal(matchesProjectedDensityDiameter(3.5171874, profile, 1_878, corpus.policy), true);
   evidence.summary = derivePointFootprintEvidenceSummary(evidence, { baseline, corpus });
 
   assert.equal(evidence.summary.passed, true);
@@ -481,7 +479,7 @@ function validBaseline() {
     })),
     focused_images: corpus.focused_trials.flatMap((trial, trialIndex) => (
       [corpus.canonical_profile, ...corpus.scale_profiles].map((profile, profileIndex) => {
-        const suffix = profile.id === corpus.canonical_profile.id ? "" : `-${profile.id}`;
+        const suffix = `-${profile.id}`;
         return imageArtifact({
           kind: "focused_baseline_png",
           trialId: trial.id,
@@ -570,31 +568,27 @@ function validEvidence(baseline) {
 
   const profiles = [corpus.canonical_profile, ...corpus.scale_profiles];
   const focusedTrials = corpus.focused_trials.flatMap((expectedTrial, trialIndex) => profiles.map((profile, profileIndex) => {
-    let candidate;
-    if (profile.id === corpus.canonical_profile.id) {
-      candidate = png.find((artifact) => artifact.trial_id === expectedTrial.id
-        && artifact.kind === "canonical_recreation_png" && artifact.recreation_index === 0);
-    } else {
-      candidate = imageArtifact({
-        kind: "focused_candidate_png",
-        trialId: expectedTrial.id,
-        recreationIndex: null,
-        profileId: profile.id,
-        path: `docs/releases/v0.22-browser-point-footprint-artifacts/${expectedTrial.id}-${profile.id}-candidate.png`,
-        width: profile.physical_width,
-        height: profile.physical_height,
-        digestCharacter: focusedDigestCharacter(expectedTrial.id, trialIndex, profileIndex),
-      });
-      png.push(candidate);
-    }
+    const candidate = imageArtifact({
+      kind: "focused_candidate_png",
+      trialId: expectedTrial.id,
+      recreationIndex: null,
+      profileId: profile.id,
+      path: `docs/releases/v0.22-browser-point-footprint-artifacts/${expectedTrial.id}-${profile.id}-candidate.png`,
+      width: profile.physical_width,
+      height: profile.physical_height,
+      digestCharacter: focusedDigestCharacter(expectedTrial.id, trialIndex, profileIndex),
+    });
+    png.push(candidate);
     const prefix = `focused/${expectedTrial.id}/${profile.id}`;
-    const suffix = profile.id === corpus.canonical_profile.id ? "" : `-${profile.id}`;
+    const suffix = `-${profile.id}`;
     return {
       trial_id: expectedTrial.id,
       profile_id: profile.id,
       adapter: observedAdapter(),
-      resident_points: 5_808,
-      point_footprint: footprintFacts("antialiased", "multisample4x", profile, 5_808),
+      resident_points: expectedTrial.isolated_ordinals.length,
+      point_footprint: footprintFacts("antialiased", "multisample4x", profile, expectedTrial.isolated_ordinals.length),
+      fixture_input: { kind: expectedTrial.fixture, authored_ordinals: expectedTrial.isolated_ordinals, payload_sha256: SHA, transfer_bytes: expectedTrial.isolated_ordinals.length * 32 },
+      isolation: expectedTrial.isolated_ordinals.map((ordinal) => ({ ordinal })),
       resources: resources("multisample4x", profile),
       candidate_artifact_path: candidate.path,
       baseline_artifact_path:

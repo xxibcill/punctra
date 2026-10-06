@@ -2,6 +2,13 @@
 
 Status: **v0.22 implementation active; final attended evidence pending**
 
+The corrective focused trials use a separately captured subset of unchanged
+authored Points. CPU preflight rejects overlapping measurement regions,
+clipped captures, and obstructed nominal-pick targets at DPR 1, 2, and 4.
+Their DPR 2 images are separate from the inherited canonical mixed-scene
+images. Single-sample legacy-size and matched-size captures remain diagnostic
+controls while the original centroid acceptance gate is investigated.
+
 Punctra `0.22.0-alpha.1` implements the bounded [Point Footprint and Edge
 Quality design](../design/point-footprint-edge-quality-v0.22.md). This is a
 private repository qualification lane, not a supported screenshot API or a

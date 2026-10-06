@@ -145,6 +145,32 @@ two multisample attachments only.
 
 ## Measured quality gates
 
+### Corrective measurement inputs (2026-10-06)
+
+The maintainer's instruction to complete each roadmap version activates the
+corrective work identified by the October 2 closeout investigation. The three
+focused DPR trials now use `isolated_authored_subset_v1`: a separate sampled
+render input containing only their bound authored ordinals. Exact Point bytes,
+Source identity, world origin, camera, and display mappings remain unchanged.
+The inherited nine mixed scenes remain the canonical density, feature, and
+topology inputs. Focused captures, including DPR 2, have their own image pins.
+
+Before any focused GPU execution, CPU projection must prove that every complete
+measurement rectangle excludes all neighboring display disks with the accepted
+0.75-pixel radius margin, fits inside the capture, and has an unobstructed
+seven-pixel nominal-pick target. The offline verifier independently regenerates
+the sampled payload, projections, rectangles, and separation facts. It rejects
+unbound image centers or fabricated isolation observations.
+
+A private raw-Wasm control constructor provides two diagnostic single-sample
+captures: the inherited seven-pixel display diameter and the candidate's exact
+projected-density diameter. Both reuse the unchanged Source, camera, display,
+settled batch state, and highlights. This constructor is outside the public
+viewer SDK exports. Controls distinguish size-driven occupancy redistribution
+from color-edge displacement. They do not waive or change any acceptance
+threshold below; centroid failures keep v0.22 Active until the control evidence
+supports an explicit corrective design decision.
+
 The v0.22 verifier records both predecessor and candidate metrics rather than
 requiring an intentionally changed image to match v0.21.
 

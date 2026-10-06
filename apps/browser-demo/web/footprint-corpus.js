@@ -144,6 +144,7 @@ function validateProfile(profile, label) {
 function validateFocusedTrial(trial, canonicalIds) {
   requireRecord(trial, "focused trial");
   requireCondition(canonicalIds.has(trial.id), "focused trial is not canonical");
+  requireCondition(trial.fixture === "isolated_authored_subset_v1", "focused fixture recipe differs");
   requireCondition(Array.isArray(trial.isolated_ordinals) && trial.isolated_ordinals.length >= 2, "isolated ordinals are incomplete");
   requireCondition(trial.isolated_ordinals.every((value) => Number.isSafeInteger(value) && value >= 0), "isolated ordinal is invalid");
   for (const field of ["dense_regions", "thin_feature_regions"]) {

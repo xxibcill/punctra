@@ -1,4 +1,8 @@
-import initializeWasm, { createViewer as createRawViewer } from "./pkg/browser_demo.js";
+import initializeWasm, {
+  createViewer as createRawViewer,
+  createPointFootprintControlViewer,
+} from "./pkg/browser_demo.js";
+import { materializeFootprintFixture, validateIsolatedFootprintFixture } from "./footprint-fixture.js";
 import { footprintRegionCenter } from "./footprint-corpus.js";
 import {
   ArtifactRegistry,
@@ -108,7 +112,6 @@ export async function runPointFootprintQualification(options) {
   );
   const baselineArtifacts = [];
   const canonicalTrials = [];
-  const canonicalObservations = new Map();
   let completed = 0;
 
   for (const trialContract of footprint.corpus.canonical_trials) {
@@ -127,7 +130,6 @@ export async function runPointFootprintQualification(options) {
         runtime,
       });
       canonicalTrials.push(result.record);
-      canonicalObservations.set(trialContract.id, result.firstObservation);
       observer.trial(trialContract.id, result.record.passed ? "passed" : "failed", result.record.passed ? "bound" : result.record.failures.join("; "));
     } catch (error) {
       canonicalTrials.push(failedCanonicalTrial(trialContract.id, error));
@@ -145,8 +147,6 @@ export async function runPointFootprintQualification(options) {
     baseline,
     artifacts,
     baselineArtifacts,
-    canonicalTrials,
-    canonicalObservations,
     runtime,
   });
   const fallback = await runResourceFallback({
@@ -252,6 +252,7 @@ async function runCanonicalTrial(options) {
   requireCondition(predecessor.bytes.byteLength === trialContract.predecessor_baseline.byte_length, `predecessor ${trial.id} byte length differs`);
   requireCondition(await sha256Hex(predecessor.bytes) === trialContract.predecessor_baseline.sha256, `predecessor ${trial.id} SHA-256 differs`);
   const materialized = await materializeVisualTrial(visual, trial.id, { corpusUrl: visualUrl });
+  const controls = await runFootprintControls({ trial, materialized, visual, footprint, runtime, artifacts });
   const baselineImage = mode === "verify" ? await loadCanonicalBaseline(baseline, trial.id) : null;
   const recreations = [];
   let firstObservation;
@@ -341,6 +342,13 @@ async function runCanonicalTrial(options) {
       candidate_topology: topology,
       component_bridges: componentBridges,
       feature_comparisons: featureComparisons,
+      diagnostic_controls: {
+        legacy: controls.legacy.record,
+        matched: controls.matched.record,
+        predecessor_to_legacy: compareFeatureFacts(predecessor.image, controls.legacy.image, trial.features),
+        legacy_to_matched: compareFeatureFacts(controls.legacy.image, controls.matched.image, trial.features),
+        matched_to_candidate: compareFeatureFacts(controls.matched.image, recreation.image, trial.features),
+      },
       dense_region_comparisons: densityComparisons,
       quality,
       passed: failures.length === 0,
@@ -382,6 +390,54 @@ async function runCanonicalTrial(options) {
       failures,
     },
   };
+}
+
+async function runFootprintControls({ trial, materialized, visual, footprint, runtime, artifacts }) {
+  const controls = {};
+  for (const kind of ["legacy", "matched"]) {
+    setCanvasProfile(runtime.canvas, footprint.canonical_profile);
+    const profile = footprint.canonical_profile;
+    const viewer = await createPointFootprintControlViewer(
+      runtime.canvas, profile.css_width, profile.css_height,
+      profile.requested_device_pixel_ratio, kind === "legacy",
+    );
+    try {
+      publishMaterializedSource(viewer, materialized, performance.now());
+      configureCamera(viewer, materialized.camera);
+      parseRawJson(viewer.setDisplayMode(trial.display_mode), "control display mode");
+      settleMaterializedSource(viewer, trial, materialized);
+      applyTrialHighlights(viewer, trial, materialized.source_identity);
+      parseRawJson(viewer.render(), "control frame");
+      const capture = await captureCanonicalFrame(viewer, {
+        width: profile.physical_width,
+        height: profile.physical_height,
+        pollFrameCeiling: visual.settling.capture_poll_frame_ceiling,
+        capturePolicy: visual.capture,
+      });
+      validateExactCaptureFacts(capture.facts, { materialized, profile, trial });
+      const facts = capture.facts.point_footprint;
+      requireCondition(facts.requested === "single_sample" && facts.selected === "single_sample"
+        && facts.nominal_pick_size_physical_pixels === 7, "control footprint disposition differs");
+      requireCondition(kind === "legacy" ? facts.display_size_physical_pixels === 7
+        : matchesProjectedDensityDiameter(facts.display_size_physical_pixels, profile,
+          materialized.source.expected_view.settled_resident_points, footprint.policy),
+      "control display diameter differs");
+      const artifact = await artifacts.addPng(capture.image, {
+        kind: "diagnostic_control_png",
+        path: `${ARTIFACT_ROOT}/controls/${trial.id}-${kind}.png`,
+        trial_id: trial.id,
+        recreation_index: null,
+        frame_index: null,
+      });
+      controls[kind] = {
+        image: capture.image,
+        record: { diagnostic_only: true, kind, facts: withoutImage(capture), artifact: artifact.metadata },
+      };
+    } finally {
+      try { viewer.shutdown(); } finally { viewer.free(); }
+    }
+  }
+  return controls;
 }
 
 async function runViewerCapture(options) {
@@ -486,75 +542,55 @@ async function runFocusedScaleTrials(options) {
     baseline,
     artifacts,
     baselineArtifacts,
-    canonicalTrials,
-    canonicalObservations,
     runtime,
   } = options;
   const results = [];
   for (const focused of footprint.focused_trials) {
     const trial = visual.trials.find(({ id }) => id === focused.id);
     requireCondition(trial !== undefined, `focused trial ${focused.id} is absent`);
-    const materialized = await materializeVisualTrial(visual, trial.id, { corpusUrl: visualUrl });
+    const inherited = await materializeVisualTrial(visual, trial.id, { corpusUrl: visualUrl });
+    const materialized = await materializeFootprintFixture(inherited, focused);
     for (const profile of [footprint.canonical_profile, ...footprint.scale_profiles]) {
-      let image;
-      let diagnostics;
-      let capture;
-      let artifact;
-      let run;
-      if (profile.id === footprint.canonical_profile.id) {
-        const observation = canonicalObservations.get(trial.id);
-        const canonicalFailures = canonicalTrials.find(({ trial_id }) => trial_id === trial.id)?.failures ?? [];
-        requireCondition(
-          observation !== undefined,
-          `canonical observation for focused trial ${trial.id} is absent`
-            + (canonicalFailures.length === 0 ? "" : ` (canonical trial failed: ${canonicalFailures.join("; ")})`),
-        );
-        image = observation.image;
-        run = observation.recreation;
-        diagnostics = { point_footprint: run.point_footprint };
-        capture = run.capture.facts;
-        artifact = { metadata: run.capture.artifact };
-      } else {
-        run = await runViewerCapture({
-          profile,
-          visual,
-          trial,
-          materialized,
-          quietFrames: 5,
-          predecessorTiming: null,
-          timingLimits: footprint.timing_limits,
-          applyHighlights: false,
-          verifyPicks: true,
-          runtime,
-        });
-        image = run.image;
-        diagnostics = run.diagnostics;
-        capture = run.captureFacts;
-        const artifactPath = `${ARTIFACT_ROOT}/focused/${trial.id}-${profile.id}.png`;
-        artifact = await artifacts.addPng(image, {
-          kind: "focused_candidate_png",
-          path: artifactPath,
+      const isolation = validateIsolatedFootprintFixture(materialized, profile);
+      const run = await runViewerCapture({
+        profile,
+        visual,
+        trial: materialized.trial,
+        materialized,
+        quietFrames: 5,
+        predecessorTiming: null,
+        timingLimits: footprint.timing_limits,
+        applyHighlights: false,
+        verifyPicks: true,
+        runtime,
+      });
+      const image = run.image;
+      const diagnostics = run.diagnostics;
+      const capture = run.captureFacts;
+      const artifactPath = `${ARTIFACT_ROOT}/focused/${trial.id}-${profile.id}.png`;
+      const artifact = await artifacts.addPng(image, {
+        kind: "focused_candidate_png",
+        path: artifactPath,
+        trial_id: trial.id,
+        recreation_index: null,
+        frame_index: null,
+      });
+      if (mode === "record") {
+        const baselinePath = `apps/browser-demo/web/fixtures/footprint-v1/baselines/${trial.id}-${profile.id}.png`;
+        const baselineArtifact = await artifacts.addPng(image, {
+          kind: "focused_baseline_png",
+          path: baselinePath,
           trial_id: trial.id,
           recreation_index: null,
           frame_index: null,
         });
-        if (mode === "record") {
-          const baselinePath = `apps/browser-demo/web/fixtures/footprint-v1/baselines/${trial.id}-${profile.id}.png`;
-          const baselineArtifact = await artifacts.addPng(image, {
-            kind: "focused_baseline_png",
-            path: baselinePath,
-            trial_id: trial.id,
-            recreation_index: null,
-            frame_index: null,
-          });
-          baselineArtifacts.push({
-            kind: "focused",
-            trial_id: trial.id,
-            profile_id: profile.id,
-            web_path: `./fixtures/footprint-v1/baselines/${trial.id}-${profile.id}.png`,
-            artifact: baselineArtifact.metadata,
-          });
-        }
+        baselineArtifacts.push({
+          kind: "focused",
+          trial_id: trial.id,
+          profile_id: profile.id,
+          web_path: `./fixtures/footprint-v1/baselines/${trial.id}-${profile.id}.png`,
+          artifact: baselineArtifact.metadata,
+        });
       }
       const diameter = diagnostics.point_footprint.display_size_physical_pixels;
       const points = decodedPoints(materialized.batches);
@@ -583,7 +619,7 @@ async function runFocusedScaleTrials(options) {
           center_foreground: foregroundAtCenter(image, center, BACKGROUND_RGBA),
         };
       });
-      const baselineComparison = mode === "verify" && profile.id !== footprint.canonical_profile.id
+      const baselineComparison = mode === "verify"
         ? compareCanonicalImages(
           (await loadFocusedBaseline(baseline, trial.id, profile.id)).image,
           image,
@@ -630,9 +666,9 @@ async function runFocusedScaleTrials(options) {
         nominal_pick_size_physical_pixels: diagnostics.point_footprint.nominal_pick_size_physical_pixels,
         measurements,
         thin_feature_centers: thinFeatureCenters,
-        capture: profile.id === footprint.canonical_profile.id
-          ? { reused_canonical_capture: true, facts: capture, artifact: artifact.metadata }
-          : { reused_canonical_capture: false, facts: capture, artifact: artifact.metadata },
+        fixture_input: structuredClone(materialized.input_facts),
+        isolation,
+        capture: { reused_canonical_capture: false, facts: capture, artifact: artifact.metadata },
         baseline_comparison: baselineComparison,
         passed: failures.length === 0,
         failures,
@@ -1192,13 +1228,10 @@ function decodedPoints(batches) {
 }
 
 function batchIndexForOrdinal(batches, ordinal) {
-  let first = 0;
-  for (let index = 0; index < batches.length; index += 1) {
-    const count = batches[index].byteLength / 32;
-    if (ordinal >= first && ordinal < first + count) return index;
-    first += count;
-  }
-  throw new Error(`Point-footprint runner failed: Point ${ordinal} has no batch`);
+  const index = batches.findIndex((batch) => decodeTransferV2(batch)
+    .some((point) => point.ordinal === ordinal));
+  requireCondition(index >= 0, `Point ${ordinal} has no batch`);
+  return index;
 }
 
 function scaledFeatures(features, scale) {

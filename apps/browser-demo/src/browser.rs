@@ -13,8 +13,8 @@ use render_protocol::{
     Camera, PointId, PresentationWeight, RenderUpdate, ViewGenerationKey, Viewport,
 };
 use render_wgpu::{
-    Frame, FrameReport, PickHit, PickPoll, PickRequest, PickTicket, PointFootprintStatus,
-    RecordedFrame, RendererConfig, WgpuRenderer,
+    Frame, FrameReport, PickHit, PickPoll, PickRequest, PickTicket, PointFootprint,
+    PointFootprintStatus, RecordedFrame, RendererConfig, WgpuRenderer,
 };
 use wasm_bindgen::prelude::*;
 use web_sys::HtmlCanvasElement;
@@ -59,6 +59,49 @@ pub async fn create_viewer(
     css_height: f64,
     device_pixel_ratio: f64,
 ) -> Result<BrowserViewer, JsValue> {
+    create_viewer_with_footprint(
+        canvas,
+        css_width,
+        css_height,
+        device_pixel_ratio,
+        REQUESTED_POINT_FOOTPRINT,
+        None,
+    )
+    .await
+}
+
+/// Creates a private single-sample control for attended footprint diagnosis.
+///
+/// # Errors
+///
+/// Returns the same capability and initialization errors as `create_viewer`.
+#[wasm_bindgen(js_name = createPointFootprintControlViewer)]
+pub async fn create_point_footprint_control_viewer(
+    canvas: HtmlCanvasElement,
+    css_width: f64,
+    css_height: f64,
+    device_pixel_ratio: f64,
+    predecessor_diameter: bool,
+) -> Result<BrowserViewer, JsValue> {
+    create_viewer_with_footprint(
+        canvas,
+        css_width,
+        css_height,
+        device_pixel_ratio,
+        PointFootprint::SingleSample,
+        predecessor_diameter.then_some(NOMINAL_PICK_SIZE_PHYSICAL_PIXELS),
+    )
+    .await
+}
+
+async fn create_viewer_with_footprint(
+    canvas: HtmlCanvasElement,
+    css_width: f64,
+    css_height: f64,
+    device_pixel_ratio: f64,
+    requested_point_footprint: PointFootprint,
+    display_size_override: Option<f32>,
+) -> Result<BrowserViewer, JsValue> {
     console_error_panic_hook::set_once();
     preflight_browser()?;
     let viewport = PhysicalViewport::from_css(CssViewportRequest::new(
@@ -70,7 +113,8 @@ pub async fn create_viewer(
     let mut scene = PreparedScene::new()
         .map_err(|error| failure(FailureCode::SceneValidation, error, INITIALIZATION_ACTION))?;
     let (resources, capabilities) =
-        BrowserResources::initialize(&canvas, viewport, &mut scene).await?;
+        BrowserResources::initialize(&canvas, viewport, &mut scene, requested_point_footprint)
+            .await?;
     let point_footprint_status = resources.point_footprint_status(renderer_viewport(viewport)?);
     let camera = scene.camera();
     Ok(BrowserViewer {
@@ -85,6 +129,8 @@ pub async fn create_viewer(
         highlights: HighlightFacts::empty(),
         stream: StreamingScene::idle(),
         point_footprint_status,
+        requested_point_footprint,
+        display_size_override,
     })
 }
 
@@ -105,6 +151,8 @@ pub struct BrowserViewer {
     highlights: HighlightFacts,
     stream: StreamingScene,
     point_footprint_status: PointFootprintStatus,
+    requested_point_footprint: PointFootprint,
+    display_size_override: Option<f32>,
 }
 
 #[wasm_bindgen]
@@ -574,7 +622,9 @@ impl BrowserViewer {
     }
 
     fn display_size_physical_pixels(&self, viewport: Viewport) -> f32 {
-        projected_density_display_size(viewport, self.non_retired_resident_point_count())
+        self.display_size_override.unwrap_or_else(|| {
+            projected_density_display_size(viewport, self.non_retired_resident_point_count())
+        })
     }
 
     fn non_retired_resident_point_count(&self) -> u64 {
@@ -588,7 +638,7 @@ impl BrowserViewer {
     fn point_footprint_facts(&self) -> Result<PointFootprintFacts, JsValue> {
         let viewport = renderer_viewport(self.viewport)?;
         Ok(PointFootprintFacts::new(
-            REQUESTED_POINT_FOOTPRINT,
+            self.requested_point_footprint,
             self.point_footprint_status,
             NOMINAL_PICK_SIZE_PHYSICAL_PIXELS,
             self.display_size_physical_pixels(viewport),
@@ -678,6 +728,7 @@ struct BrowserResources {
     canvas: HtmlCanvasElement,
     surface_configuration: wgpu::SurfaceConfiguration,
     renderer: WgpuRenderer,
+    requested_point_footprint: PointFootprint,
     recorded_frame: Option<RecordedFrame>,
     pick_ticket: Option<PickTicket>,
     frame_capture: CaptureSlot<FrameCaptureTicket>,
@@ -788,7 +839,7 @@ impl BrowserResources {
         batches: Vec<crate::streaming::VisualBatchFacts>,
     ) -> CaptureFrameFacts {
         let point_footprint = PointFootprintFacts::new(
-            REQUESTED_POINT_FOOTPRINT,
+            self.requested_point_footprint,
             self.renderer.point_footprint_status(frame.viewport()),
             frame.style().default_size_pixels(),
             frame.style().display_size_pixels(),
@@ -808,6 +859,7 @@ impl BrowserResources {
         canvas: &HtmlCanvasElement,
         viewport: PhysicalViewport,
         scene: &mut PreparedScene,
+        requested_point_footprint: PointFootprint,
     ) -> Result<(Self, CapabilityFacts), JsValue> {
         let instance = browser_instance();
         let surface = instance
@@ -828,7 +880,11 @@ impl BrowserResources {
             FailureCode::SurfaceConfiguration,
             INITIALIZATION_ACTION,
         )?;
-        let mut renderer = create_renderer(&device, surface_configuration.format)?;
+        let mut renderer = create_renderer(
+            &device,
+            surface_configuration.format,
+            requested_point_footprint,
+        )?;
         publish_scene(&mut renderer, scene)?;
         scene
             .settle_after_publication()
@@ -850,6 +906,7 @@ impl BrowserResources {
                 canvas: canvas.clone(),
                 surface_configuration,
                 renderer,
+                requested_point_footprint,
                 recorded_frame: None,
                 pick_ticket: None,
                 frame_capture: CaptureSlot::idle(),
@@ -1343,9 +1400,10 @@ fn surface_configuration(
 fn create_renderer(
     device: &wgpu::Device,
     format: wgpu::TextureFormat,
+    requested_point_footprint: PointFootprint,
 ) -> Result<WgpuRenderer, JsValue> {
     let config = RendererConfig::new(format, render_limits())
-        .with_point_footprint(REQUESTED_POINT_FOOTPRINT);
+        .with_point_footprint(requested_point_footprint);
     WgpuRenderer::new(device, config).map_err(|error| {
         failure(
             FailureCode::RendererCapability,

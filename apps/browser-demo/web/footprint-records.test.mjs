@@ -241,28 +241,27 @@ function canonicalRunnerTrials() {
 function focusedRunnerTrials(canonicalTrials) {
   const profiles = [corpus.canonical_profile, ...corpus.scale_profiles];
   return corpus.focused_trials.flatMap((trial, trialIndex) => profiles.map((profile) => {
-    const profileIndex = corpus.scale_profiles.findIndex(({ id }) => id === profile.id);
-    const artifact = profile.id === corpus.canonical_profile.id
-      ? canonicalTrials.find(({ trial_id: trialId }) => trialId === trial.id)
-        .recreations[0].capture.artifact
-      : imageMetadata({
-        kind: "focused_candidate_png",
-        trialId: trial.id,
-        profile,
-        path: `${ARTIFACT_ROOT}/${trial.id}-${profile.id}.png`,
-        digestCharacter: "abcdef"[trialIndex * corpus.scale_profiles.length + profileIndex],
-        recreationIndex: null,
-      });
+    const profileIndex = profiles.findIndex(({ id }) => id === profile.id);
+    const artifact = imageMetadata({
+      kind: "focused_candidate_png",
+      trialId: trial.id,
+      profile,
+      path: `${ARTIFACT_ROOT}/${trial.id}-${profile.id}.png`,
+      digestCharacter: "abcdef123"[trialIndex * 3 + profileIndex],
+      recreationIndex: null,
+    });
     const picks = nominalPicksForTrial(trial.id);
     return {
       trial_id: trial.id,
       profile_id: profile.id,
       adapter: observedAdapter(),
-      resident_points: RESIDENT_POINTS,
-      point_footprint: pointFootprintFacts(profile),
-      resources: runnerResources(profile, "multisample4x", picks.length > 0),
+      resident_points: trial.isolated_ordinals.length,
+      point_footprint: pointFootprintFacts(profile, "multisample4x", trial.isolated_ordinals.length),
+      resources: runnerResources(profile, "multisample4x", picks.length > 0, trial.isolated_ordinals.length),
       nominal_picks: picks,
       capture: { artifact },
+      fixture_input: { kind: trial.fixture, authored_ordinals: trial.isolated_ordinals, payload_sha256: "a".repeat(64), transfer_bytes: trial.isolated_ordinals.length * 32 },
+      isolation: trial.isolated_ordinals.map((ordinal) => ({ ordinal })),
       measurements: trial.isolated_ordinals.map((ordinal) => ({
         ordinal,
         center_foreground: true,
@@ -429,20 +428,20 @@ function observedAdapter() {
   return { name: "test-adapter", backend: "test-backend" };
 }
 
-function pointFootprintFacts(profile, selected = "multisample4x") {
+function pointFootprintFacts(profile, selected = "multisample4x", residentPoints = RESIDENT_POINTS) {
   return {
     requested: "antialiased",
     selected,
     nominal_pick_size_physical_pixels: corpus.policy.nominal_pick_diameter_physical_pixels,
     display_size_physical_pixels: projectedDensityDisplayDiameter(
       profile,
-      RESIDENT_POINTS,
+      residentPoints,
       corpus.policy,
     ),
   };
 }
 
-function runnerResources(profile, selected, pickTargetsRetained) {
+function runnerResources(profile, selected, pickTargetsRetained, residentPoints = RESIDENT_POINTS) {
   const exact = expectedPointFootprintResources({
     selected,
     physicalWidth: profile.physical_width,
@@ -452,7 +451,7 @@ function runnerResources(profile, selected, pickTargetsRetained) {
     ceilingBytes: corpus.policy.renderer_transient_byte_ceiling,
   });
   return {
-    resident_points: RESIDENT_POINTS,
+    resident_points: residentPoints,
     transient_texture_bytes: exact.renderer_transient_texture_bytes,
   };
 }
@@ -569,7 +568,7 @@ function baselineArtifacts() {
     }),
   }));
   for (const [trialIndex, trial] of corpus.focused_trials.entries()) {
-    for (const [profileIndex, profile] of corpus.scale_profiles.entries()) {
+    for (const [profileIndex, profile] of [corpus.canonical_profile, ...corpus.scale_profiles].entries()) {
       artifacts.push({
         kind: "focused",
         trial_id: trial.id,
@@ -579,7 +578,7 @@ function baselineArtifacts() {
           trialId: trial.id,
           profile,
           path: `apps/browser-demo/web/fixtures/footprint-v1/baselines/${trial.id}-${profile.id}.png`,
-          digestCharacter: "abcdef"[trialIndex * corpus.scale_profiles.length + profileIndex],
+          digestCharacter: "abcdef123"[trialIndex * 3 + profileIndex],
         }),
       });
     }

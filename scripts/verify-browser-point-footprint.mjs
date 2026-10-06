@@ -24,6 +24,8 @@ import {
   measurePointFootprint,
   measureRegionTopology,
 } from "../apps/browser-demo/web/visual-footprint-metrics.js";
+import { materializeFootprintFixture, validateIsolatedFootprintFixture } from "../apps/browser-demo/web/footprint-fixture.js";
+import { materializeVisualTrial } from "../apps/browser-demo/web/visual-corpus.js";
 import { decodeRgba8Png } from "../apps/browser-demo/web/visual-png.js";
 
 const repositoryRoot = path.resolve(fileURLToPath(new URL("../", import.meta.url)));
@@ -71,7 +73,11 @@ export async function verifyBrowserPointFootprintFiles({ baselinePath, evidenceP
   });
   const recomputedMetrics = await recomputeMetricBindings(evidence, imageLoader);
   await verifyDerivedFeatureFacts(evidence, predecessorEvidence, imageLoader);
-  await verifyFocusedPixelFacts(evidence, corpus, imageLoader);
+  const visualCorpusPath = resolveRelativeRepositoryPath(
+    path.posix.dirname(baseline.pins.corpus.path), corpus.predecessor.corpus.path,
+  );
+  const visualCorpus = parseJson(await readPinnedFile(implementationCommit, visualCorpusPath), visualCorpusPath);
+  await verifyFocusedPixelFacts(evidence, corpus, visualCorpus, imageLoader);
   verifyPickIdentityReference(evidence.pick_identity_reference, predecessorEvidence);
 
   const derived = derivePointFootprintEvidenceSummary(evidence, {
@@ -408,15 +414,25 @@ async function verifyDerivedFeatureFacts(evidence, predecessorEvidence, loadImag
   }
 }
 
-async function verifyFocusedPixelFacts(evidence, corpus, loadImage) {
+async function verifyFocusedPixelFacts(evidence, corpus, visualCorpus, loadImage) {
   for (const trial of evidence.focused_trials) {
     const expectedTrial = corpus.focused_trials.find(({ id }) => id === trial.trial_id);
     assert(expectedTrial, `focused trial ${trial.trial_id} is not in the corpus`);
     const profiles = [corpus.canonical_profile, ...corpus.scale_profiles];
     const profile = profiles.find(({ id }) => id === trial.profile_id);
     assert(profile, `focused profile ${trial.profile_id} is not in the corpus`);
+    const inherited = await materializeVisualTrial(visualCorpus, trial.trial_id);
+    const fixture = await materializeFootprintFixture(inherited, expectedTrial);
+    assert.deepEqual(trial.fixture_input, fixture.input_facts,
+      `${trial.trial_id}/${trial.profile_id} isolated fixture differs from authored bytes`);
+    const isolation = validateIsolatedFootprintFixture(fixture, profile);
+    assert.deepEqual(trial.isolation, isolation,
+      `${trial.trial_id}/${trial.profile_id} isolation was not derived from authored positions`);
     const candidateImage = await loadImage(trial.candidate_artifact_path);
     for (const sample of trial.isolated_footprints) {
+      const point = isolation.find(({ ordinal }) => ordinal === sample.ordinal);
+      assert.deepEqual(sample.candidate.report.center, [point.projected.exact_x, point.projected.exact_y],
+        `${sample.candidate.metric_id} center differs from its authored Point`);
       const foreground = normalizedPixelCoverage(candidateImage, sample.candidate);
       assert.equal(sample.center_foreground, foreground > 0,
         `${sample.candidate.metric_id} center-foreground fact differs from its PNG`);
