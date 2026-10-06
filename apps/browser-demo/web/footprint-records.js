@@ -32,6 +32,7 @@ export function createPointFootprintEnvironment(options) {
     browser_user_agent: browserUserAgent,
     browser_platform: browserPlatform || "unreported browser platform",
     operating_system: operatingSystemName(host),
+    device: structuredClone(host?.device),
     adapter_name: adapter.name,
     backend: adapter.backend,
     same_adapter_for_scale_trials: true,

@@ -39,6 +39,14 @@ test("console preview preserves pre-export failures without claiming an exported
   assert.deepEqual(createFootprintRecordPreview(error), error);
 });
 
+test("footprint records reject a different or absent physical host GPU", () => {
+  for (const device of [undefined, { ...FOOTPRINT_LANE_ENVIRONMENT.device, gpu: "Apple M4" }]) {
+    const options = validEvidenceRecordOptions();
+    options.host.device = device;
+    assert.throws(() => createPointFootprintEvidenceRecord(options), /declared v0.22 qualification lane/);
+  }
+});
+
 test("record builders import without browser globals and local cases are cloned", async () => {
   const source = await readFile(new URL("./footprint-records.js", import.meta.url), "utf8");
   assert.doesNotMatch(source, /\b(?:document|navigator|window)\b|new Date/);
@@ -168,7 +176,7 @@ function validEvidenceRecordOptions() {
     backgroundRgba: BACKGROUND_RGBA,
     footprint: corpus,
     pins,
-    host: { operating_system: { name: "macOS", version: "26.6.2", build: "25G83", architecture: "arm64" } },
+    host: { operating_system: { name: "macOS", version: "26.6.2", build: "25G83", architecture: "arm64" }, device: structuredClone(FOOTPRINT_LANE_ENVIRONMENT.device) },
     baseline,
     baselineIdentity: digest("docs/releases/v0.22-browser-point-footprint-baseline.json"),
     localTests,

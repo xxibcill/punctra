@@ -16,6 +16,13 @@ export const FOOTPRINT_LANE_ENVIRONMENT = Object.freeze({
     QUALIFICATION_LANE.operating_system.build,
     QUALIFICATION_LANE.operating_system.architecture,
   ].join(" "),
+  device: Object.freeze({
+    class: QUALIFICATION_LANE.device.class,
+    gpu: QUALIFICATION_LANE.device.gpu,
+    gpu_cores: QUALIFICATION_LANE.device.gpu_cores,
+    gpu_class: QUALIFICATION_LANE.device.gpu_class,
+    metal_support: QUALIFICATION_LANE.device.metal_support,
+  }),
   adapter_name: QUALIFICATION_LANE.webgpu.adapter_name,
   backend: QUALIFICATION_LANE.webgpu.backend,
   same_adapter_for_scale_trials: true,
@@ -650,7 +657,7 @@ function validateEvidenceEnvelope(evidence, baseline, corpus, baselineIdentity) 
 export function validatePointFootprintEnvironment(environment, corpus) {
   requireRecord(environment, "environment");
   requireExactKeys(environment, [
-    "browser_user_agent", "browser_platform", "operating_system", "adapter_name", "backend",
+    "browser_user_agent", "browser_platform", "operating_system", "device", "adapter_name", "backend",
     "same_adapter_for_scale_trials", "physical_display_observed",
   ], "environment");
   requireJsonEqual(environment, FOOTPRINT_LANE_ENVIRONMENT,
