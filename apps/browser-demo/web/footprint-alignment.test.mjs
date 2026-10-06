@@ -59,6 +59,26 @@ test("components cannot silently omit landmarks at the image boundary", () => {
     { x: 0, y: 0, width: 48, height: 48 }, background), /complete search and blur margins/);
 });
 
+test("neighboring landmark movement cannot hide by transferring pixels to its neighbor", () => {
+  const make = (shift) => {
+    const result = image(background);
+    for (let y = 0; y < 48; y += 1) {
+      for (let x = 0; x < 48; x += 1) {
+        if (Math.hypot(x + 0.5 - 22 - shift, y + 0.5 - 25) <= 3
+          || Math.hypot(x + 0.5 - 29, y + 0.5 - 25) <= 3) {
+          result.data.set([240, 240, 240, 255], (y * 48 + x) * 4);
+        }
+      }
+    }
+    return result;
+  };
+  const reference = make(0);
+  assert.equal(measureFeatureComponentAlignment(reference, reference, rectangle, background).passed, true);
+  const report = measureFeatureComponentAlignment(reference, make(2), rectangle, background);
+  assert.equal(report.passed, false);
+  assert.equal(report.correspondence.ambiguous_components.length, 1);
+});
+
 test("all nine immutable predecessor images register every component with themselves", async () => {
   const corpus = JSON.parse(await readFile(new URL("./fixtures/visual-v1/corpus.json", import.meta.url), "utf8"));
   for (const trial of corpus.trials) {

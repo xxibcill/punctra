@@ -543,6 +543,7 @@ function alignmentPreview(report) {
   return {
     passed: report.passed,
     component_count: alignments.length,
+    correspondence: report.correspondence,
     maximum_distance_pixels: alignments.length === 0 ? null
       : Math.max(...alignments.map(({ distance_pixels }) => distance_pixels ?? 0)),
     minimum_correlation: alignments.length === 0 ? null

@@ -20,7 +20,8 @@ export function measureFeatureComponentAlignment(reference, candidate, rectangle
   const candidateMask = occupancyMask(candidate, backgroundRgba);
   const components = foregroundComponents(referenceMask, reference.width, reference.height);
   const referenceLabels = componentLabels(components, referenceMask.length);
-  const candidateLabels = assignCandidateLabels(candidateMask, referenceLabels, reference.width, reference.height);
+  const correspondence = assignCandidateLabels(candidateMask, referenceLabels, reference.width, reference.height);
+  const candidateLabels = correspondence.labels;
   const regions = components.flatMap((component, index) => {
     if (!component.pixels.some((pixel) => insideRectangle(pixel, reference.width, rectangle))) return [];
     const crop = { x: component.bounds.x - 8, y: component.bounds.y - 8,
@@ -48,9 +49,20 @@ export function measureFeatureComponentAlignment(reference, candidate, rectangle
     return [{ component_index: index, predecessor_pixel_count: component.pixels.length,
       predecessor_bounds: component.bounds, alignment }];
   });
+  const selectedIndices = new Set(regions.map(({ component_index }) => component_index));
+  const ambiguousComponents = foregroundComponents(candidateMask, candidate.width, candidate.height)
+    .flatMap(({ pixels, bounds }) => {
+      const labels = [...new Set(pixels.map((pixel) => candidateLabels[pixel]).filter((label) => label >= 0))];
+      return labels.length > 1 && labels.some((label) => selectedIndices.has(label))
+        ? [{ candidate_bounds: bounds, candidate_pixel_count: pixels.length, predecessor_component_indices: labels.sort((a, b) => a - b) }]
+        : [];
+    });
   return { normalization: "predecessor_four_connected_binary_components_before_blur_v1",
     maximum_background_channel_delta: 2,
-    regions, passed: regions.length > 0 && regions.every(({ alignment }) => alignment.distance_pixels !== null
+    correspondence: { ambiguous_components: ambiguousComponents,
+      unassigned_candidate_pixels: correspondence.unassigned, tied_candidate_pixels: correspondence.tied },
+    regions, passed: regions.length > 0 && ambiguousComponents.length === 0
+      && regions.every(({ alignment }) => alignment.distance_pixels !== null
       && alignment.distance_pixels <= 1 && !alignment.ambiguous && alignment.correlation >= Math.SQRT1_2) };
 }
 
@@ -109,6 +121,8 @@ function componentLabels(components, pixelCount) {
 
 function assignCandidateLabels(mask, reference, width, height) {
   const labels = new Int32Array(mask.length).fill(-1);
+  let unassigned = 0;
+  let tied = 0;
   for (let pixel = 0; pixel < mask.length; pixel += 1) {
     if (!mask[pixel]) continue;
     if (reference[pixel] >= 0) {
@@ -134,8 +148,12 @@ function assignCandidateLabels(mask, reference, width, height) {
       }
     }
     labels[pixel] = label;
+    if (label < 0) {
+      if (Number.isFinite(nearestDistance)) tied += 1;
+      else unassigned += 1;
+    }
   }
-  return labels;
+  return { labels, unassigned, tied };
 }
 
 function insideRectangle(pixel, width, rectangle) {
