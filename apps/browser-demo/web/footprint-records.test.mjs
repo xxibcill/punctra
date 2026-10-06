@@ -17,6 +17,7 @@ import {
 } from "./footprint-evidence.js";
 import {
   createPointFootprintBaselineRecord,
+  createFootprintRecordPreview,
   createPointFootprintEvidenceRecord,
   pointFootprintLocalTestCase,
   recordPointFootprintArchiveEntries,
@@ -31,6 +32,11 @@ const BACKGROUND_RGBA = Object.freeze([19, 20, 19, 255]);
 const COMPLETED_AT = "2026-08-29T02:00:00.000Z";
 const RESIDENT_POINTS = 5_808;
 const SHA = "a".repeat(64);
+
+test("console preview preserves pre-export failures without claiming an exported record", () => {
+  const error = { schema: "runner-error-v1", name: "Error", message: "runtime pin differs" };
+  assert.deepEqual(createFootprintRecordPreview(error), error);
+});
 
 test("record builders import without browser globals and local cases are cloned", async () => {
   const source = await readFile(new URL("./footprint-records.js", import.meta.url), "utf8");

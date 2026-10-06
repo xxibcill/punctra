@@ -498,6 +498,9 @@ function profileById(footprint, profileId) {
 }
 /** Keeps the attended console readable; exported records retain every fact. */
 export function createFootprintRecordPreview(record) {
+  if (typeof record.message === "string" && record.diagnostics === undefined) {
+    return { schema: record.schema, name: record.name, message: record.message };
+  }
   if (record.diagnostics !== undefined) {
     return {
       schema: record.schema, name: record.name, message: record.message,
@@ -534,13 +537,17 @@ export function createFootprintRecordPreview(record) {
 function alignmentPreview(report) {
   if (report === undefined) return null;
   const alignments = report.regions.map(({ alignment }) => alignment);
+  const failed = report.regions.filter(({ alignment }) => alignment.ambiguous
+    || alignment.distance_pixels === null || alignment.distance_pixels > 1
+    || alignment.correlation === null || alignment.correlation < Math.SQRT1_2);
   return {
     passed: report.passed,
     component_count: alignments.length,
-    maximum_distance_pixels: Math.max(...alignments.map(({ distance_pixels }) => distance_pixels ?? 0)),
-    minimum_correlation: Math.min(...alignments.map(({ correlation }) => correlation ?? 0)),
-    failed_components: report.regions.filter(({ alignment }) => alignment.ambiguous
-      || alignment.distance_pixels === null || alignment.distance_pixels > 1
-      || alignment.correlation === null || alignment.correlation < Math.SQRT1_2).slice(0, 8),
+    maximum_distance_pixels: alignments.length === 0 ? null
+      : Math.max(...alignments.map(({ distance_pixels }) => distance_pixels ?? 0)),
+    minimum_correlation: alignments.length === 0 ? null
+      : Math.min(...alignments.map(({ correlation }) => correlation ?? 0)),
+    failed_component_count: failed.length,
+    failed_components: failed.slice(0, 8),
   };
 }

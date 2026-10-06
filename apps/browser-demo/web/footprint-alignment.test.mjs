@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFile } from "node:fs/promises";
 import { measureFeatureAlignment, measureFeatureComponentAlignment } from "./footprint-alignment.js";
+import { decodeRgba8Png } from "./visual-png.js";
 
 const background = [19, 20, 19, 255];
 const rectangle = { x: 4, y: 4, width: 40, height: 40 };
@@ -55,6 +57,22 @@ test("components cannot silently omit landmarks at the image boundary", () => {
   reference.data.set([240, 240, 240, 255], 0);
   assert.throws(() => measureFeatureComponentAlignment(reference, reference,
     { x: 0, y: 0, width: 48, height: 48 }, background), /complete search and blur margins/);
+});
+
+test("all nine immutable predecessor images register every component with themselves", async () => {
+  const corpus = JSON.parse(await readFile(new URL("./fixtures/visual-v1/corpus.json", import.meta.url), "utf8"));
+  for (const trial of corpus.trials) {
+    const bytes = await readFile(new URL(`./fixtures/visual-v1/baselines/${trial.id}.png`, import.meta.url));
+    const decoded = await decodeRgba8Png(new Uint8Array(bytes));
+    for (const feature of trial.features) {
+      const report = measureFeatureComponentAlignment(decoded, decoded, feature.rectangle, background);
+      assert.equal(report.passed, true, `${trial.id}/${feature.id} self-comparison`);
+      for (const { alignment } of report.regions) {
+        assert.deepEqual(alignment.best_offset_pixels, { x: 0, y: 0 });
+        assert.equal(alignment.correlation, 1);
+      }
+    }
+  }
 });
 
 test("alignment keeps all candidate windows complete and rejects malformed images", () => {

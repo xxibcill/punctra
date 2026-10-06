@@ -18,10 +18,11 @@ export function measureFeatureComponentAlignment(reference, candidate, rectangle
   validateImagesAndRectangle(reference, candidate, rectangle, backgroundRgba);
   const referenceMask = occupancyMask(reference, backgroundRgba);
   const candidateMask = occupancyMask(candidate, backgroundRgba);
-  const components = foregroundComponents(referenceMask, reference.width, reference.height)
-    .filter(({ pixels }) => pixels.some((pixel) => insideRectangle(pixel, reference.width, rectangle)));
-  requireCondition(components.length <= 4096, "feature component count exceeds its ceiling");
-  const regions = components.map((component, index) => {
+  const components = foregroundComponents(referenceMask, reference.width, reference.height);
+  const referenceLabels = componentLabels(components, referenceMask.length);
+  const candidateLabels = assignCandidateLabels(candidateMask, referenceLabels, reference.width, reference.height);
+  const regions = components.flatMap((component, index) => {
+    if (!component.pixels.some((pixel) => insideRectangle(pixel, reference.width, rectangle))) return [];
     const crop = { x: component.bounds.x - 8, y: component.bounds.y - 8,
       width: component.bounds.width + 16, height: component.bounds.height + 16 };
     requireCondition(crop.x >= 0 && crop.y >= 0 && crop.x + crop.width <= reference.width
@@ -34,7 +35,7 @@ export function measureFeatureComponentAlignment(reference, candidate, rectangle
     }
     for (let y = 0; y < crop.height; y += 1) {
       for (let x = 0; x < crop.width; x += 1) {
-        if (candidateMask[(crop.y + y) * candidate.width + crop.x + x]) {
+        if (candidateLabels[(crop.y + y) * candidate.width + crop.x + x] === index) {
           after.data.set([255, 255, 255, 255], (y * crop.width + x) * 4);
         }
       }
@@ -44,8 +45,8 @@ export function measureFeatureComponentAlignment(reference, candidate, rectangle
     }, [0, 0, 0, 255]);
     alignment.rectangle.x += crop.x;
     alignment.rectangle.y += crop.y;
-    return { component_index: index, predecessor_pixel_count: component.pixels.length,
-      predecessor_bounds: component.bounds, alignment };
+    return [{ component_index: index, predecessor_pixel_count: component.pixels.length,
+      predecessor_bounds: component.bounds, alignment }];
   });
   return { normalization: "predecessor_four_connected_binary_components_before_blur_v1",
     maximum_background_channel_delta: 2,
@@ -67,6 +68,7 @@ function foregroundComponents(mask, width, height) {
   const components = [];
   for (let start = 0; start < mask.length; start += 1) {
     if (!mask[start] || visited[start]) continue;
+    requireCondition(components.length < 4096, "feature component count exceeds its ceiling");
     const pixels = [];
     let head = 0;
     let tail = 1;
@@ -95,6 +97,45 @@ function foregroundComponents(mask, width, height) {
     components.push({ pixels, bounds: { x: left, y: top, width: right - left + 1, height: bottom - top + 1 } });
   }
   return components;
+}
+
+function componentLabels(components, pixelCount) {
+  const labels = new Int32Array(pixelCount).fill(-1);
+  for (let index = 0; index < components.length; index += 1) {
+    for (const pixel of components[index].pixels) labels[pixel] = index;
+  }
+  return labels;
+}
+
+function assignCandidateLabels(mask, reference, width, height) {
+  const labels = new Int32Array(mask.length).fill(-1);
+  for (let pixel = 0; pixel < mask.length; pixel += 1) {
+    if (!mask[pixel]) continue;
+    if (reference[pixel] >= 0) {
+      labels[pixel] = reference[pixel];
+      continue;
+    }
+    const x = pixel % width;
+    const y = Math.floor(pixel / width);
+    let nearestDistance = Number.POSITIVE_INFINITY;
+    let label = -1;
+    for (let dy = -FEATURE_ALIGNMENT_SEARCH_RADIUS; dy <= FEATURE_ALIGNMENT_SEARCH_RADIUS; dy += 1) {
+      for (let dx = -FEATURE_ALIGNMENT_SEARCH_RADIUS; dx <= FEATURE_ALIGNMENT_SEARCH_RADIUS; dx += 1) {
+        if (x + dx < 0 || y + dy < 0 || x + dx >= width || y + dy >= height) continue;
+        const neighborLabel = reference[(y + dy) * width + x + dx];
+        if (neighborLabel < 0) continue;
+        const distance = dx * dx + dy * dy;
+        if (distance < nearestDistance) {
+          nearestDistance = distance;
+          label = neighborLabel;
+        } else if (distance === nearestDistance && label !== neighborLabel) {
+          label = -1;
+        }
+      }
+    }
+    labels[pixel] = label;
+  }
+  return labels;
 }
 
 function insideRectangle(pixel, width, rectangle) {
