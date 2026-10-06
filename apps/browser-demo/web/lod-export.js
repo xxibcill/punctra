@@ -8,15 +8,6 @@ const SHA256_HEX = /^[0-9a-f]{64}$/;
 const LOCAL_HOSTNAMES = new Set(["127.0.0.1", "localhost", "[::1]"]);
 const { requireCondition } = createVisualValidator("LOD export invalid");
 
-export function lodArchiveTransportFromUrl(pageUrl) {
-  const url = parsePageUrl(pageUrl, "LOD export invalid");
-  const requested = url.searchParams.get("transport");
-  if (requested === null) return "browser-download";
-  requireCondition(requested === "server", `unsupported archive transport ${JSON.stringify(requested)}`);
-  requireLocalHttpPage(url);
-  return "same-origin-local-server";
-}
-
 export async function exportLodArchiveToLocalServer({
   archiveBytes,
   filename,
