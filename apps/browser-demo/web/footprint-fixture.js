@@ -1,4 +1,6 @@
 import {
+  MAX_TRANSFER_BATCHES,
+  MAX_TRANSFER_BATCH_POINTS,
   decodeTransferV2,
   encodeTransferV2,
   projectAuthoredPointAtViewport,
@@ -14,48 +16,78 @@ const { requireCondition } = createVisualValidator("Isolated footprint fixture i
 export async function materializeFootprintFixture(materialized, focused) {
   requireCondition(focused.fixture === ISOLATED_FOOTPRINT_FIXTURE, "fixture recipe differs");
   const ordinals = new Set(focused.isolated_ordinals);
-  const points = materialized.batches.flatMap((batch) => decodeTransferV2(batch))
-    .filter(({ ordinal }) => ordinals.has(ordinal));
+  const authored = materialized.batches.flatMap((batch) => decodeTransferV2(batch));
+  const points = authored.filter(({ ordinal }) => ordinals.has(ordinal));
   requireCondition(points.length === ordinals.size, "an authored Point is absent");
-  const payload = encodeTransferV2(points);
+  const partition = partitionAuthoredPoints(authored, ordinals);
+  requireCondition(partition.length <= MAX_TRANSFER_BATCHES, "partition exceeds the batch ceiling");
+  const batches = partition.map((batch) => encodeTransferV2(batch));
+  const removed = partition.flatMap((batch, index) => ordinals.has(batch[0].ordinal) ? [] : [index]);
   const count = points.length;
+  const batchCount = batches.length;
   return {
     ...materialized,
-    batches: [payload],
+    batches,
     trial: {
       ...materialized.trial,
       temporal_trace: { kind: "static" },
-      expected_settled_batch_versions: [2],
+      expected_settled_batch_versions: Array(batchCount).fill(2),
     },
     source: {
       ...materialized.source,
+      batch_count: batchCount,
       expected_view: {
         ...materialized.source.expected_view,
-        published_points: count,
-        published_batches: 1,
-        transferred_bytes: payload.byteLength,
-        batch_keys: [1],
-        initial_batch_versions: [1],
-        settled_removed_batch_indices: [],
+        published_points: authored.length,
+        published_batches: batchCount,
+        transferred_bytes: authored.length * 32,
+        batch_keys: batches.map((_, index) => index + 1),
+        initial_batch_versions: Array(batchCount).fill(1),
+        settled_removed_batch_indices: removed,
         settled_resident_points: count,
         settled_drawn_points: count,
-        settled_draw_calls: 1,
-        settled_presentation_weights_u8: [255],
+        settled_draw_calls: batchCount - removed.length,
+        settled_presentation_weights_u8: Array(batchCount).fill(255),
       },
     },
     input_facts: {
       kind: ISOLATED_FOOTPRINT_FIXTURE,
       source_identity: materialized.source_identity,
       authored_ordinals: points.map(({ ordinal }) => ordinal),
-      transfer_bytes: payload.byteLength,
-      payload_sha256: await sha256Hex(payload),
+      transfer_bytes: authored.length * 32,
+      resident_transfer_bytes: count * 32,
+      payload_sha256: await sha256Hex(encodeTransferV2(points)),
+      published_batches: batchCount,
+      retired_batch_indices: removed,
     },
   };
 }
 
+function partitionAuthoredPoints(points, isolatedOrdinals) {
+  const batches = [];
+  let batch = [];
+  for (const point of points) {
+    const isolated = isolatedOrdinals.has(point.ordinal);
+    if (batch.length === MAX_TRANSFER_BATCH_POINTS
+      || (batch.length > 0 && isolated !== isolatedOrdinals.has(batch[0].ordinal))) {
+      batches.push(batch);
+      batch = [];
+    }
+    batch.push(point);
+  }
+  if (batch.length > 0) batches.push(batch);
+  return batches;
+}
+
+export function residentFootprintPoints(materialized) {
+  const removed = new Set(materialized.source.expected_view.settled_removed_batch_indices);
+  return materialized.batches.flatMap((batch, index) => removed.has(index) ? [] : decodeTransferV2(batch));
+
+}
+
 /** Rejects contaminated or clipped measurement regions before GPU execution. */
 export function validateIsolatedFootprintFixture(materialized, profile, diameter = 6) {
-  const points = materialized.batches.flatMap((batch) => decodeTransferV2(batch));
+  const points = residentFootprintPoints(materialized);
   const projected = points.map((point) => ({
     ordinal: point.ordinal,
     ...projectAuthoredPointAtViewport(point, materialized.world_origin, materialized.camera, profile),

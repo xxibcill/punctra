@@ -260,7 +260,7 @@ function focusedRunnerTrials(canonicalTrials) {
       resources: runnerResources(profile, "multisample4x", picks.length > 0, trial.isolated_ordinals.length),
       nominal_picks: picks,
       capture: { artifact },
-      fixture_input: { kind: trial.fixture, authored_ordinals: trial.isolated_ordinals, payload_sha256: "a".repeat(64), transfer_bytes: trial.isolated_ordinals.length * 32 },
+      fixture_input: { kind: trial.fixture, authored_ordinals: trial.isolated_ordinals, payload_sha256: "a".repeat(64), resident_transfer_bytes: trial.isolated_ordinals.length * 32 },
       isolation: trial.isolated_ordinals.map((ordinal) => ({ ordinal })),
       measurements: trial.isolated_ordinals.map((ordinal) => ({
         ordinal,

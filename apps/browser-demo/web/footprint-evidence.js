@@ -871,7 +871,7 @@ function validateFocusedTrials(trials, baseline, corpus, artifacts, metricBindin
     requireCondition(trial.fixture_input.kind === expectedTrial.fixture, `${label} fixture recipe differs`);
     requireJsonEqual(trial.fixture_input.authored_ordinals, expectedTrial.isolated_ordinals, `${label} authored ordinals`);
     requireCondition(SHA256.test(trial.fixture_input.payload_sha256), `${label} fixture payload digest is invalid`);
-    requireCondition(trial.fixture_input.transfer_bytes === trial.resident_points * 32, `${label} fixture transfer bytes differ`);
+    requireCondition(trial.fixture_input.resident_transfer_bytes === trial.resident_points * 32, `${label} fixture transfer bytes differ`);
     requireArray(trial.isolation, `${label} isolation preflight`);
     requireCondition(trial.isolation.length === trial.resident_points, `${label} isolation count differs`);
     validatePointFootprintFacts(

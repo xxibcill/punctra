@@ -149,8 +149,10 @@ two multisample attachments only.
 
 The maintainer's instruction to complete each roadmap version activates the
 corrective work identified by the October 2 closeout investigation. The three
-focused DPR trials now use `isolated_authored_subset_v1`: a separate sampled
-render input containing only their bound authored ordinals. Exact Point bytes,
+focused DPR trials now use `isolated_authored_subset_v1`: a separate settled
+render subset containing only their bound authored ordinals. The full unchanged
+Source is streamed in at most eight ordered batches of at most 1,024 Points;
+neighbor batches retire after stream completion and before measurement. Exact Point bytes,
 Source identity, world origin, camera, and display mappings remain unchanged.
 The inherited nine mixed scenes remain the canonical density, feature, and
 topology inputs. Focused captures, including DPR 2, have their own image pins.

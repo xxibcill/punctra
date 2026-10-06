@@ -587,7 +587,7 @@ function validEvidence(baseline) {
       adapter: observedAdapter(),
       resident_points: expectedTrial.isolated_ordinals.length,
       point_footprint: footprintFacts("antialiased", "multisample4x", profile, expectedTrial.isolated_ordinals.length),
-      fixture_input: { kind: expectedTrial.fixture, authored_ordinals: expectedTrial.isolated_ordinals, payload_sha256: SHA, transfer_bytes: expectedTrial.isolated_ordinals.length * 32 },
+      fixture_input: { kind: expectedTrial.fixture, authored_ordinals: expectedTrial.isolated_ordinals, payload_sha256: SHA, resident_transfer_bytes: expectedTrial.isolated_ordinals.length * 32 },
       isolation: expectedTrial.isolated_ordinals.map((ordinal) => ({ ordinal })),
       resources: resources("multisample4x", profile),
       candidate_artifact_path: candidate.path,

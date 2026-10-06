@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-import { materializeFootprintFixture, validateFootprintSampleBinding, validateIsolatedFootprintFixture } from "./footprint-fixture.js";
+import { materializeFootprintFixture, residentFootprintPoints, validateFootprintSampleBinding, validateIsolatedFootprintFixture } from "./footprint-fixture.js";
 import { decodeTransferV2, materializeVisualTrial } from "./visual-corpus.js";
 
 const visual = JSON.parse(await readFile(new URL("./fixtures/visual-v1/corpus.json", import.meta.url)));
@@ -13,7 +13,11 @@ test("dedicated fixtures preserve exact Source Points and isolate every DPR tria
     const inherited = await materializeVisualTrial(visual, focused.id);
     const fixture = await materializeFootprintFixture(inherited, focused);
     const original = inherited.batches.flatMap((batch) => decodeTransferV2(batch));
-    const points = decodeTransferV2(fixture.batches[0]);
+    const points = residentFootprintPoints(fixture);
+    assert.deepEqual(fixture.batches.flatMap((batch) => decodeTransferV2(batch)), original);
+    assert.equal(fixture.source.expected_view.published_points, fixture.point_count);
+    assert(fixture.batches.length <= 8);
+    assert(fixture.batches.every((batch) => batch.length <= 1024 * 32));
     assert.deepEqual(points, original.filter(({ ordinal }) => focused.isolated_ordinals.includes(ordinal)));
     assert.equal(fixture.source_identity, inherited.source_identity);
     assert.equal(fixture.point_count, inherited.point_count);
