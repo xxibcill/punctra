@@ -12,11 +12,17 @@ export async function createLodViewer(canvas, profile) {
   canvas.width = profile.physical_width;
   canvas.height = profile.physical_height;
   const viewer = await createRawViewer(canvas, profile.css_width, profile.css_height, profile.requested_device_pixel_ratio);
-  const diagnostics = raw(viewer.diagnostics());
-  requireCondition(diagnostics.package_version === "0.23.0-alpha.1", "loaded runtime version differs");
-  requireCondition(diagnostics.viewport.physical_width === profile.physical_width
-    && diagnostics.viewport.physical_height === profile.physical_height, "physical viewport differs");
-  return viewer;
+  try {
+    const diagnostics = raw(viewer.diagnostics());
+    requireCondition(diagnostics.package_version === "0.23.0-alpha.1", "loaded runtime version differs");
+    requireCondition(diagnostics.viewport.physical_width === profile.physical_width
+      && diagnostics.viewport.physical_height === profile.physical_height, "physical viewport differs");
+    return viewer;
+  } catch (error) {
+    try { viewer.shutdown(); } catch { /* keep the validation failure */ }
+    viewer.free();
+    throw error;
+  }
 }
 
 /** Publishes all authored replacement batches before their first presentation. */
@@ -94,8 +100,8 @@ export async function pickLodPoint(viewer, pixel, expected) {
 }
 
 export function disposeLodViewer(viewer) {
-  const diagnostics = raw(viewer.shutdown());
+  let diagnostics;
+  try { diagnostics = raw(viewer.shutdown()); } finally { viewer.free(); }
   requireCondition(diagnostics.capture_resources.pending_tickets === 0, "shutdown retained a capture ticket");
-  viewer.free();
   return { phase: diagnostics.phase, pending_capture_tickets: diagnostics.capture_resources.pending_tickets, freed: true };
 }

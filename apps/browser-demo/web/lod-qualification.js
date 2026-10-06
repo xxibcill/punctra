@@ -9,7 +9,7 @@ import { measureRasterTransition } from "./lod-metrics.js";
 import { animationFrame, captureLodFrame, configureLodCamera, createLodViewer, disposeLodViewer,
   pickLodPoint, publishLodSource, quietLodFrames, raw, restoreLodBatch, setLodCut } from "./lod-host.js";
 import { auditLodRecord, LOD_BACKGROUND, LOD_BASELINE_PATH, LOD_BASELINE_SCHEMA,
-  LOD_EVIDENCE_PATH, LOD_EVIDENCE_SCHEMA, LOD_RELEASE, LOD_ROOT } from "./lod-records.js";
+  LOD_EVIDENCE_PATH, LOD_EVIDENCE_SCHEMA, LOD_RELEASE, LOD_ROOT, lodBoundaryCases, boundaryArgumentFacts } from "./lod-records.js";
 
 const { requireCondition } = createVisualValidator("LOD qualification failed");
 const jsonBytes = (value) => new TextEncoder().encode(`${JSON.stringify(value, null, 2)}\n`);
@@ -103,7 +103,7 @@ async function runTransition({ fixture, trial, profile, index, corpus, canvas, a
   try {
     const generation = publishLodSource(viewer, fixture);
     raw(viewer.setDisplayMode("rgb"));
-    const control = { generation, version: 2, seed: corpus.seed, step: 0, coarsen: trial.kind === "coarsen" };
+    const control = { generation, version: 1, seed: corpus.seed, step: 0, coarsen: trial.kind === "coarsen" };
     setLodCut(viewer, control);
     const frames = [];
     let previous;
@@ -117,6 +117,10 @@ async function runTransition({ fixture, trial, profile, index, corpus, canvas, a
       await animationFrame();
       raw(viewer.render());
       if (step === 0) firstCoverage = performance.now() - started;
+      const projected = projectAuthoredPointAtViewport(decodeTransferV2(fixture.batches[0]).find((point) => point.ordinal === 40),
+        fixture.world_origin, camera, profile);
+      const nominalPick = await pickLodPoint(viewer, [projected.x, projected.y], { source_identity: fixture.source_identity,
+        generation, batch_key: 1, batch_version: 1, point_ordinal: "40" });
       const prefix = `${LOD_ROOT}/${mode}/${trial.id}/${profile.id}/r${index}/step${step}`;
       const result = await capturePairedEndpoints(viewer, profile, control, artifacts, prefix);
       const metrics = measureRasterTransition({ ...result.images, previous,
@@ -129,16 +133,13 @@ async function runTransition({ fixture, trial, profile, index, corpus, canvas, a
           Math.abs(result.images.candidate.data[offset] - result.images.outgoing.data[offset]));
         requireCondition(maximumOpaqueDelta <= 1, "opaque midpoint leaked background");
       }
-      const center = [Math.floor(profile.physical_width / 2), Math.floor(profile.physical_height / 2)];
-      const nominalPick = await pickLodPoint(viewer, center, { source_identity: fixture.source_identity,
-        generation, batch_key: 1, batch_version: 2, point_ordinal: "40" });
       frames.push({ step, ...result.records, metrics, maximum_opaque_delta_bytes: maximumOpaqueDelta, nominal_pick: nominalPick });
       previous = result.images.candidate;
     }
     const retiring = control.coarsen ? [1, 2] : [0];
     const retaining = control.coarsen ? [0] : [1, 2];
     for (const batch of retiring) raw(viewer.removeVisualBatch(batch));
-    for (const batch of retaining) restoreLodBatch(viewer, batch, generation, 2);
+    for (const batch of retaining) restoreLodBatch(viewer, batch, generation, 1);
     raw(viewer.render());
     const settled = performance.now() - started;
     const quietTiming = await quietLodFrames(viewer, corpus.quiet_frames);
@@ -222,13 +223,13 @@ async function runFallback({ fixture, index, corpus, canvas, artifacts, mode }) 
     const generation = publishLodSource(viewer, fixture);
     raw(viewer.setDisplayMode("rgb"));
     configureLodCamera(viewer, fixture.camera);
-    const control = { generation, version: 2, seed: corpus.seed, step: 4 };
+    const control = { generation, version: 1, seed: corpus.seed, step: 4 };
     setLodCut(viewer, control);
     raw(viewer.render());
+    const nominalPick = await pickLodPoint(viewer, [640, 512], { source_identity: fixture.source_identity,
+      generation, batch_key: 1, batch_version: 1, point_ordinal: "40" });
     const result = await capturePairedEndpoints(viewer, profile, control, artifacts, `${LOD_ROOT}/${mode}/fallback/r${index}`);
     const metrics = measureRasterTransition({ ...result.images, backgroundRgba: LOD_BACKGROUND, stationary: true });
-    const nominalPick = await pickLodPoint(viewer, [640, 512], { source_identity: fixture.source_identity,
-      generation, batch_key: 1, batch_version: 2, point_ordinal: "40" });
     const disposal = disposeLodViewer(viewer);
     viewer = null;
     return { recreation_index: index, profile, ...result.records, nominal_pick: nominalPick, metrics, disposal };
@@ -241,19 +242,10 @@ async function runBoundaryProbes({ fixture, replacement, profile, corpus, canvas
     const generation = publishLodSource(viewer, fixture);
     raw(viewer.setDisplayMode("rgb"));
     configureLodCamera(viewer, fixture.camera);
-    setLodCut(viewer, { generation, version: 2, seed: corpus.seed, step: 4 });
+    setLodCut(viewer, { generation, version: 1, seed: corpus.seed, step: 4 });
     raw(viewer.render());
     const before = await captureAndBind(viewer, profile, artifacts, `${LOD_ROOT}/${mode}/boundary/before.png`, "lod_boundary_png");
-    const probes = [
-      ["side-u8-alias", [0, "1", "2", 9029, 257, 4]], ["step-u8-alias", [0, "1", "2", 9029, 1, 256]],
-      ["side-fraction", [0, "1", "2", 9029, 1.5, 4]], ["step-fraction", [0, "1", "2", 9029, 1, 4.5]],
-      ["step-nan", [0, "1", "2", 9029, 1, NaN]], ["seed-infinity", [0, "1", "2", Infinity, 1, 4]],
-      ["seed-u32-overflow", [0, "1", "2", 4294967296, 1, 4]], ["index-u32-overflow", [4294967296, "1", "2", 9029, 1, 4]],
-      ["generation-noncanonical", [0, "01", "2", 9029, 1, 4]], ["version-noncanonical", [0, "1", "02", 9029, 1, 4]],
-      ["generation-stale", [0, "0", "2", 9029, 1, 4]], ["version-stale", [0, "1", "1", 9029, 1, 4]],
-      ["key-missing", [99, "1", "2", 9029, 1, 4]], ["step-negative", [0, "1", "2", 9029, 1, -1]],
-      ["full-invalid", [0, "1", "2", 9029, 0, 4]],
-    ];
+    const probes = lodBoundaryCases().slice(0, -1);
     const records = [];
     for (const [id, args] of probes) records.push(await boundaryProbe(viewer, profile, artifacts, mode, id, args, before));
     const nextGeneration = publishLodSource(viewer, replacement);
@@ -262,7 +254,7 @@ async function runBoundaryProbes({ fixture, replacement, profile, corpus, canvas
     raw(viewer.render());
     requireCondition(nextGeneration === 2, "Source replacement did not advance generation");
     const replaced = await captureAndBind(viewer, profile, artifacts, `${LOD_ROOT}/${mode}/boundary/replaced.png`, "lod_boundary_png");
-    records.push(await boundaryProbe(viewer, profile, artifacts, mode, "old-generation-after-replacement", [0, "1", "2", 9029, 1, 4], replaced));
+    records.push(await boundaryProbe(viewer, profile, artifacts, mode, "old-generation-after-replacement", [0, "1", "1", 9029, 1, 4], replaced));
     disposeLodViewer(viewer);
     viewer = null;
     return records;
@@ -277,7 +269,7 @@ async function boundaryProbe(viewer, profile, artifacts, mode, id, args, before)
   requireCondition(before.record.artifact.decoded_sha256 === after.record.artifact.decoded_sha256, `invalid ${id} changed pixels`);
   const controls = (frame) => frame.record.capture.facts.raster_transitions ?? [];
   requireCondition(canonicalJsonEqual(controls(before), controls(after)), `invalid ${id} changed controls`);
-  return { id, arguments: args.map((value) => typeof value === "number" && !Number.isFinite(value) ? String(value) : value),
+  return { id, arguments: boundaryArgumentFacts(args),
     rejected: true, rejection, before: before.record, after: after.record,
     before_decoded_sha256: before.record.artifact.decoded_sha256, after_decoded_sha256: after.record.artifact.decoded_sha256,
     before_controls: controls(before), after_controls: controls(after) };

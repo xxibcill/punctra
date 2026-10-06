@@ -120,7 +120,16 @@ export async function verifyBrowserLodFiles({ baselinePath = LOD_BASELINE_PATH, 
   async function audit(record, reference = null) {
     const images = imageLoader(record);
     const summary = await auditLodRecord(record, { corpus, fixtures, visual, predecessor, predecessorEvidence,
-      loadImage: images.load, baseline: reference });
+      loadImage: images.load, baseline: reference,
+      visualOptions: { corpusUrl: "https://punctra.invalid/apps/browser-demo/web/fixtures/visual-v1/corpus.json",
+        fetchImplementation: async (url) => {
+          const location = new URL(url);
+          assert.equal(location.origin, "https://punctra.invalid");
+          const bytes = pinned(baseline.pins.implementation.commit, location.pathname.slice(1));
+          return { ok: true, json: async () => JSON.parse(bytes),
+            arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) };
+        } },
+    });
     for (const run of record.transitions) await images.load(run.cleanup.artifact);
     for (const probe of record.boundary_probes) {
       await images.load(probe.before.artifact);

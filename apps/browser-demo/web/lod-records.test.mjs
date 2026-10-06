@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { materializeLodFixture } from "./lod-fixture.js";
-import { validateLodCapture, validateQuietTiming } from "./lod-records.js";
+import { boundaryArgumentFacts, lodBoundaryCases, validateLodArtifact, validateLodBoundaryMatrix, validateLodCapture, validateQuietTiming } from "./lod-records.js";
 import { summarizeSamples } from "./visual-capture.js";
 
 test("capture acceptance binds actual renderer controls, exact identities and charged hidden residency", async () => {
@@ -29,6 +29,29 @@ test("capture acceptance binds actual renderer controls, exact identities and ch
     mutate(tampered);
     assert.throws(() => validateLodCapture(tampered, inputs), /differ|ceiling/);
   }
+});
+
+test("artifact role aliases and duplicate negative probes cannot qualify unrelated claims", () => {
+  const probes = lodBoundaryCases().map(([id, args]) => ({ id, arguments: boundaryArgumentFacts(args) }));
+  validateLodBoundaryMatrix(probes);
+  const duplicate = structuredClone(probes);
+  duplicate[1] = duplicate[0];
+  assert.throws(() => validateLodBoundaryMatrix(duplicate), /matrix/);
+  assert.throws(() => validateLodBoundaryMatrix(probes.slice(0, -1)), /matrix/);
+  const changed = structuredClone(probes);
+  changed[1].arguments[5] = 0;
+  assert.throws(() => validateLodBoundaryMatrix(changed), /matrix/);
+  const profile = { physical_width: 640, physical_height: 480 };
+  const record = { artifact: { path: "candidate.png", kind: "lod_candidate_png", width: 640, height: 480, decoded_byte_length: 1228800 },
+    capture: { facts: { width: 640, height: 480 } } };
+  const expected = { path: "candidate.png", kind: "lod_candidate_png", profile };
+  validateLodArtifact(record, expected);
+  assert.throws(() => validateLodArtifact(record, { ...expected, path: "outgoing.png" }), /role/);
+  const tiny = structuredClone(record);
+  tiny.artifact.width = 1;
+  tiny.artifact.height = 1;
+  tiny.artifact.decoded_byte_length = 4;
+  assert.throws(() => validateLodArtifact(tiny, expected), /dimensions/);
 });
 
 test("quiet timing derives percentiles from capture-free samples and enforces predecessor cost", () => {
