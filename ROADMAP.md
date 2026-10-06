@@ -24,8 +24,9 @@ repository-verified packed integration baseline; its independent-adopter gate
 remains outstanding. v0.21 is the completed repository-verified bounded visual-
 baseline and regression-corpus release; its exact attended evidence and pins
 are recorded without satisfying its external evidence gates. v0.22 is the
-completed repository-verified Point-footprint and edge-quality slice; versions
-v0.23 through v0.30 remain uncommitted Candidate themes. v0.15–v0.20 establish
+completed repository-verified Point-footprint and edge-quality slice. v0.23 is
+the Active accepted LOD-continuity slice; versions v0.24 through v0.30 remain
+uncommitted Candidate themes. v0.15–v0.20 establish
 browser execution, streaming, the viewer API, embedding, and platform
 qualification. v0.21–v0.29
 then establish, improve, and qualify visual quality. v0.30 is the earliest
@@ -1552,27 +1553,41 @@ Repository exit evidence:
 
 ### v0.23 — LOD density and transition continuity
 
-Status: **Candidate**
+Status: **Active — accepted bounded repository implementation**
 
-Candidate outcome: reduce visible tile boundaries, density popping, holes, and
-mixed-LOD false features during refinement, coarsening, and motion.
+The [local investigation](docs/reviews/lod-transition-investigation-v0.23.md)
+measures alpha-overlap background leakage, tied batch-order color changes,
+and immediate coarsening. The maintainer's 2026-10-06 continuation request
+activates the bounded [LOD-continuity
+design](docs/design/lod-density-transition-continuity-v0.23.md).
 
-Likely scope:
+Accepted outcome: reduce density popping and mixed-LOD false presentation
+during refinement, coarsening, and motion while preserving authority.
 
-- evidence-selected refinement presentation beyond the inherited bounded
-  cross-fade;
-- transition-aware point density and parent/child coverage treatment;
-- deterministic motion, stop, settle, refine, coarsen, and cancellation rules;
-  and
-- exact duplicate-Coverage, transition-byte, and transition-frame ceilings.
+Accepted bounded scope:
 
-Candidate exit evidence:
+- one explicit complementary physical-pixel raster transition, preserving the
+  inherited color-only weight and nominal pick behavior;
+- presentation-aware diameter density, symmetric refinement/coarsening groups,
+  complete-cut publication, interruption, and generation safety;
+- separate actual native planner/materializer traces and explicitly authored
+  private browser fixture traces; and
+- exact duplicate-residency, transition-byte, eight-frame, resource, image,
+  temporal, canonical, and local qualification gates.
 
-- fixed moving and stationary trials remain hole-free and settle without churn;
-- tile edges and density steps stay below accepted image and interpretation
-  thresholds;
+Repository exit evidence:
+
+- fixed moving and stationary trials preserve common endpoint coverage and
+  settle without churn;
+- tile and density transitions meet the accepted image and temporal limits,
+  with human interpretation recorded separately rather than manufactured;
 - transitions never change Query completion or Point Identity; and
-- rapid camera changes cannot retain unbounded duplicate Coverage.
+- rapid camera changes cannot retain unbounded duplicate residency or stale
+  controlled batches.
+
+Broader browser/device, physical-display, independent interpretation/adoption,
+support, final quality, beta, release-candidate, and v1 evidence remain outside
+this repository exit.
 
 ### v0.24 — Depth and shape legibility
 
@@ -1784,7 +1799,7 @@ nor completion of v0.20 is a reason to publish v1.
 | Terrain acceptance tooling | v0.14 | Complete and repository-verified for the bounded slice; external historical exits outstanding | Preserve exact Terrain QA and correction as an available module without extending it in the current browser-engine path. |
 | Browser execution and streaming | v0.15–v0.16 | Complete and repository-verified for the bounded private slices; arbitrary delivery and external qualification outstanding | Establish WebAssembly/WebGPU execution, then bounded remote Source delivery, browser caching, and worker decoding. |
 | Browser viewer and embedding | v0.17–v0.20 | Complete and repository-verified for bounded viewer, packed SDK, exact local qualification, and clean packed-consumer baseline; independent adoption outstanding | Expose the viewer API, package the SDK, qualify the browser/device envelope, and consolidate a stable integration baseline without release-candidate status. |
-| Measured visual quality | v0.21–v0.25 | v0.21 Complete and repository-verified for the bounded baseline; v0.22 Complete and repository-verified; v0.23–v0.25 Candidate | Establish visual evidence, then improve point footprints, LOD continuity, depth, and color. |
+| Measured visual quality | v0.21–v0.25 | v0.21 and v0.22 Complete and repository-verified for bounded slices; v0.23 Active; v0.24–v0.25 Candidate | Establish visual evidence, then improve point footprints, LOD continuity, depth, and color. |
 | Visual interaction and qualification | v0.26–v0.29 | Candidate | Improve temporal, selection, and composition clarity, then freeze and qualify the visual surface without release-candidate status. |
 | Browser-engine release candidate | v0.30 | Candidate; earliest planned release candidate | Freeze, soak, and explicitly decide whether the supported browser engine should ship or narrow. |
 | Trustworthy supported browser engine | v1.0 | Candidate after v0.30 soak | Publish v1 only when independent use and maintainable functional, visual, compatibility, resource, and support evidence justify the promise. |

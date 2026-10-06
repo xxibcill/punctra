@@ -123,6 +123,16 @@ fn presentation_weight_changes_color_but_not_pick_coverage() {
 }
 
 #[test]
+fn legacy_lod_fade_leaks_background_between_opaque_endpoints() {
+    with_gpu(assert_legacy_lod_background_leakage);
+}
+
+#[test]
+fn legacy_lod_fade_color_depends_on_equal_depth_batch_keys() {
+    with_gpu(assert_legacy_lod_color_order);
+}
+
+#[test]
 fn multi_point_cross_fade_preserves_coverage_across_inverted_batch_depth() {
     with_gpu(assert_multi_point_cross_fade_coverage);
 }
@@ -539,6 +549,136 @@ fn assert_multi_point_cross_fade_coverage(gpu: &GpuContext) {
         .pick_and_wait(&rendered.recorded_frame, CENTER)
         .expect("the cross-fade must preserve fixed pick coverage");
     assert_hit(hit, view_generation, 1, 1, near_identity);
+}
+
+fn assert_legacy_lod_background_leakage(gpu: &GpuContext) {
+    let view_generation = ViewGenerationKey::new(ViewId::new(23), 1);
+    let identity = point_id(2_301);
+    let style = PointStyle::new(18.0, [1.0; 3], [0.0, 0.0, 1.0, 1.0]).unwrap();
+    for footprint in [PointFootprint::SingleSample, PointFootprint::Antialiased] {
+        for orthographic in [false, true] {
+            let mut subject = OffscreenRenderer::with_config(
+                gpu,
+                RendererConfig::new(FORMAT, roomy_limits()).with_point_footprint(footprint),
+            );
+            subject.apply(&RenderUpdate::Reset { view_generation });
+            for (key, depth) in [(1, -0.2), (2, 0.2)] {
+                subject.apply(&RenderUpdate::Upsert {
+                    batch: batch(
+                        view_generation,
+                        key,
+                        1,
+                        WORLD_ORIGIN,
+                        vec![point([0.0, depth, 0.0], RED, 2_300 + key)],
+                    ),
+                });
+            }
+            let mut frame = frame_with_style(view_generation, VIEWPORT, style);
+            if orthographic {
+                let camera = Camera::orthographic(
+                    [WORLD_ORIGIN[0], WORLD_ORIGIN[1] - 5.0, WORLD_ORIGIN[2]],
+                    WORLD_ORIGIN,
+                    [0.0, 0.0, 1.0],
+                    4.0,
+                    0.1,
+                    100.0,
+                )
+                .unwrap();
+                frame = Frame::new(view_generation, camera, frame.viewport())
+                    .unwrap()
+                    .with_style(style);
+            }
+            let selected = subject.renderer.point_footprint_status(frame.viewport());
+            let mut centers = Vec::new();
+            for step in 0_u16..=8 {
+                let incoming = u8::try_from((step * 255 + 4) / 8).unwrap();
+                for (key, weight) in [(1, 255 - incoming), (2, incoming)] {
+                    subject.apply(&RenderUpdate::SetBatchPresentation {
+                        view_generation,
+                        key: BatchKey::new(key),
+                        expected_version: BatchVersion::new(1),
+                        weight: PresentationWeight::new(weight),
+                    });
+                }
+                let rendered = subject.render(&frame);
+                let center = rendered.image.pixel(CENTER);
+                if step == 0 || step == 8 {
+                    assert_pixel(center, RED);
+                }
+                if step == 4 {
+                    assert_pixel(center, [191, 0, 64, 255]);
+                }
+                let hit = subject
+                    .pick_and_wait(&rendered.recorded_frame, CENTER)
+                    .expect("legacy presentation must preserve nominal picks at every step");
+                assert_hit(hit, view_generation, 1, 1, identity);
+                centers.push(center);
+            }
+            eprintln!(
+                "v0.23 legacy fade: {}",
+                serde_json::json!({
+                    "requested_footprint": format!("{footprint:?}"),
+                    "selected_footprint": format!("{selected:?}"),
+                    "projection": if orthographic { "orthographic" } else { "perspective" },
+                    "viewport": VIEWPORT,
+                    "world_origin": WORLD_ORIGIN,
+                    "center_rgba8_by_step": centers,
+                    "unchanged_nominal_pick_ordinal": identity.ordinal(),
+                })
+            );
+        }
+    }
+}
+
+fn assert_legacy_lod_color_order(gpu: &GpuContext) {
+    let view_generation = ViewGenerationKey::new(ViewId::new(24), 1);
+    for reversed in [false, true] {
+        let mut subject = OffscreenRenderer::new(gpu, roomy_limits());
+        subject.apply(&RenderUpdate::Reset { view_generation });
+        let near_key = if reversed { 2 } else { 1 };
+        let far_key = 3 - near_key;
+        for (key, depth, color, ordinal) in
+            [(near_key, -0.2, RED, 2_401), (far_key, 0.2, GREEN, 2_402)]
+        {
+            subject.apply(&RenderUpdate::Upsert {
+                batch: batch(
+                    view_generation,
+                    key,
+                    1,
+                    WORLD_ORIGIN,
+                    vec![
+                        point([0.0, depth, 0.0], color, ordinal),
+                        point([100.0, -depth, 0.0], color, ordinal + 2),
+                    ],
+                ),
+            });
+            subject.apply(&RenderUpdate::SetBatchPresentation {
+                view_generation,
+                key: BatchKey::new(key),
+                expected_version: BatchVersion::new(1),
+                weight: PresentationWeight::new(128),
+            });
+        }
+        let style = PointStyle::new(18.0, [1.0; 3], [0.0, 0.0, 1.0, 1.0]).unwrap();
+        let rendered = subject.render(&frame_with_style(view_generation, VIEWPORT, style));
+        let expected = if reversed {
+            [128, 64, 63, 255]
+        } else {
+            [64, 128, 63, 255]
+        };
+        let center = rendered.image.pixel(CENTER);
+        assert_pixel(center, expected);
+        let hit = subject
+            .pick_and_wait(&rendered.recorded_frame, CENTER)
+            .expect("batch order must not change the nearest nominal Point identity");
+        assert_hit(hit, view_generation, near_key, 1, point_id(2_401));
+        eprintln!(
+            "v0.23 legacy order: {}",
+            serde_json::json!({"near_batch_key": near_key, "center_rgba8": center,
+                "sorting_condition": "equal_batch_bounds_centers",
+                "unchanged_nominal_pick_ordinal": hit.point().ordinal()})
+        );
+    }
 }
 
 fn assert_display_size_is_color_only(gpu: &GpuContext) {

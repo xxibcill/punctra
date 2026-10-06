@@ -459,7 +459,7 @@ fn rounded_weighted_point_count(numerator: u128) -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use point_view::AxisAlignedBox;
+    use point_view::{AvailableNodes, AxisAlignedBox, PlannerConfig, PlanningBudget, ViewPlanner};
     use render_protocol::{BatchKey, BatchVersion, ViewGenerationKey, ViewId};
 
     use super::*;
@@ -545,6 +545,45 @@ mod tests {
             weight: PresentationWeight::OPAQUE,
         }));
         assert!(final_actions.contains(&TransitionAction::Retire(retiring)));
+    }
+
+    #[test]
+    fn inherited_coarsening_retires_children_without_a_transition() {
+        let hierarchy = [
+            node_with_status(1, None, 100, resident(1)),
+            node_with_status(2, Some(1), 80, resident(1)),
+            node_with_status(3, Some(1), 120, resident(1)),
+        ];
+        let camera = render_protocol::Camera::orthographic(
+            [0.5, -5.0, 0.5],
+            [0.5, 0.5, 0.5],
+            [0.0, 0.0, 1.0],
+            1_000.0,
+            0.1,
+            100.0,
+        )
+        .unwrap();
+        let mut planner = ViewPlanner::new(PlannerConfig::new(2.0, 0.25).unwrap());
+        let plan = planner
+            .plan(
+                &camera,
+                Viewport::new(320, 240).unwrap(),
+                AvailableNodes::new(batch(1).view_generation, &hierarchy),
+                PlanningBudget::new(1_000, 1_000, 16),
+            )
+            .unwrap();
+        assert_eq!(plan.retained_nodes().len(), 1);
+        assert_eq!(plan.retained_nodes()[0].batch_key(), BatchKey::new(1));
+        let mut transitions = DensityTransitions::default();
+        let actions = transitions.reconcile(&hierarchy, &plan);
+        assert_eq!(
+            actions,
+            vec![
+                TransitionAction::Retire(batch(2)),
+                TransitionAction::Retire(batch(3))
+            ]
+        );
+        assert!(!transitions.is_active());
     }
 
     #[test]

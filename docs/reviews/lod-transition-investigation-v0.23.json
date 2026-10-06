@@ -1,0 +1,357 @@
+{
+  "scope": "generated_local_investigation_only",
+  "observation_date": "2026-10-06",
+  "inherited_runtime_commit": "62aa62eb3c740040b06138f4893fefb3ffa21d12",
+  "runtime_package_version": "0.22.0-alpha.1",
+  "commands": [
+    "PUNCTRA_REQUIRE_GPU=1 cargo test -p render-wgpu --test offscreen legacy_lod_fade -- --nocapture",
+    "PUNCTRA_REQUIRE_GPU=1 cargo test -p renderer-demo --bin renderer-demo appearance::tests::inherited_coarsening_retires_children_without_a_transition -- --exact"
+  ],
+  "instrumentation_sha256": {
+    "crates/render-wgpu/tests/offscreen.rs": "d8cca9a66343af99592601d361a57c8b817b418356a945df68f23a63b61f5bf6",
+    "apps/renderer-demo/src/appearance.rs": "c1525a87e3edcd2a5b4da712ee8927a55365b8cd0e1323239311da4125346367"
+  },
+  "observations": [
+    {
+      "kind": "order",
+      "observation": {
+        "center_rgba8": [
+          64,
+          128,
+          63,
+          255
+        ],
+        "near_batch_key": 1,
+        "sorting_condition": "equal_batch_bounds_centers",
+        "unchanged_nominal_pick_ordinal": 2401
+      }
+    },
+    {
+      "kind": "order",
+      "observation": {
+        "center_rgba8": [
+          128,
+          64,
+          63,
+          255
+        ],
+        "near_batch_key": 2,
+        "sorting_condition": "equal_batch_bounds_centers",
+        "unchanged_nominal_pick_ordinal": 2401
+      }
+    },
+    {
+      "kind": "fade",
+      "observation": {
+        "center_rgba8_by_step": [
+          [
+            255,
+            0,
+            0,
+            255
+          ],
+          [
+            227,
+            0,
+            28,
+            255
+          ],
+          [
+            207,
+            0,
+            48,
+            255
+          ],
+          [
+            195,
+            0,
+            60,
+            255
+          ],
+          [
+            191,
+            0,
+            64,
+            255
+          ],
+          [
+            195,
+            0,
+            60,
+            255
+          ],
+          [
+            207,
+            0,
+            48,
+            255
+          ],
+          [
+            227,
+            0,
+            28,
+            255
+          ],
+          [
+            255,
+            0,
+            0,
+            255
+          ]
+        ],
+        "projection": "perspective",
+        "requested_footprint": "SingleSample",
+        "selected_footprint": "SingleSample",
+        "unchanged_nominal_pick_ordinal": 2301,
+        "viewport": [
+          64,
+          64
+        ],
+        "world_origin": [
+          1000000000.125,
+          1000000000.25,
+          1000000000.5
+        ]
+      }
+    },
+    {
+      "kind": "fade",
+      "observation": {
+        "center_rgba8_by_step": [
+          [
+            255,
+            0,
+            0,
+            255
+          ],
+          [
+            227,
+            0,
+            28,
+            255
+          ],
+          [
+            207,
+            0,
+            48,
+            255
+          ],
+          [
+            195,
+            0,
+            60,
+            255
+          ],
+          [
+            191,
+            0,
+            64,
+            255
+          ],
+          [
+            195,
+            0,
+            60,
+            255
+          ],
+          [
+            207,
+            0,
+            48,
+            255
+          ],
+          [
+            227,
+            0,
+            28,
+            255
+          ],
+          [
+            255,
+            0,
+            0,
+            255
+          ]
+        ],
+        "projection": "orthographic",
+        "requested_footprint": "SingleSample",
+        "selected_footprint": "SingleSample",
+        "unchanged_nominal_pick_ordinal": 2301,
+        "viewport": [
+          64,
+          64
+        ],
+        "world_origin": [
+          1000000000.125,
+          1000000000.25,
+          1000000000.5
+        ]
+      }
+    },
+    {
+      "kind": "fade",
+      "observation": {
+        "center_rgba8_by_step": [
+          [
+            255,
+            0,
+            0,
+            255
+          ],
+          [
+            227,
+            0,
+            28,
+            255
+          ],
+          [
+            207,
+            0,
+            48,
+            255
+          ],
+          [
+            195,
+            0,
+            60,
+            255
+          ],
+          [
+            191,
+            0,
+            64,
+            255
+          ],
+          [
+            195,
+            0,
+            60,
+            255
+          ],
+          [
+            207,
+            0,
+            48,
+            255
+          ],
+          [
+            227,
+            0,
+            28,
+            255
+          ],
+          [
+            255,
+            0,
+            0,
+            255
+          ]
+        ],
+        "projection": "perspective",
+        "requested_footprint": "Antialiased",
+        "selected_footprint": "Multisample4x",
+        "unchanged_nominal_pick_ordinal": 2301,
+        "viewport": [
+          64,
+          64
+        ],
+        "world_origin": [
+          1000000000.125,
+          1000000000.25,
+          1000000000.5
+        ]
+      }
+    },
+    {
+      "kind": "fade",
+      "observation": {
+        "center_rgba8_by_step": [
+          [
+            255,
+            0,
+            0,
+            255
+          ],
+          [
+            227,
+            0,
+            28,
+            255
+          ],
+          [
+            207,
+            0,
+            48,
+            255
+          ],
+          [
+            195,
+            0,
+            60,
+            255
+          ],
+          [
+            191,
+            0,
+            64,
+            255
+          ],
+          [
+            195,
+            0,
+            60,
+            255
+          ],
+          [
+            207,
+            0,
+            48,
+            255
+          ],
+          [
+            227,
+            0,
+            28,
+            255
+          ],
+          [
+            255,
+            0,
+            0,
+            255
+          ]
+        ],
+        "projection": "orthographic",
+        "requested_footprint": "Antialiased",
+        "selected_footprint": "Multisample4x",
+        "unchanged_nominal_pick_ordinal": 2301,
+        "viewport": [
+          64,
+          64
+        ],
+        "world_origin": [
+          1000000000.125,
+          1000000000.25,
+          1000000000.5
+        ]
+      }
+    }
+  ],
+  "coarsening": {
+    "retained_batch_keys": [
+      1
+    ],
+    "immediate_retirements": [
+      2,
+      3
+    ],
+    "active_transition": false
+  },
+  "unobserved": [
+    "browser_execution",
+    "physical_display",
+    "independent_human_interpretation",
+    "independent_host_adoption",
+    "adapter_name"
+  ]
+}
