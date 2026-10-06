@@ -243,6 +243,34 @@ test("opt-in local server persists a bounded visual evidence TAR", async () => {
   }
 });
 
+test("functional JSON export is bounded, same-origin and cannot replace prior evidence", async () => {
+  const exportDirectory = await mkdtemp(path.join(tmpdir(), "punctra-functional-export-"));
+  const { server, port } = await startServer(["--lod-export-dir", exportDirectory]);
+  const origin = `http://127.0.0.1:${port}`;
+  const filename = "v0.23-browser-functional-observation.json";
+  const bytes = new TextEncoder().encode('{"schema":"local-observed-test-v1"}\n');
+  const headers = { "Content-Type": "application/json", Origin: origin };
+  try {
+    const post = (body, override = {}) => fetch(`${origin}/qualification-functional-export`, {
+      method: "POST", headers: { ...headers, ...override }, body,
+    });
+    assert.equal((await post(bytes, { Origin: "http://foreign.invalid" })).status, 403);
+    assert.equal((await post(bytes, { "Content-Type": "application/x-tar" })).status, 415);
+    assert.equal((await post(new Uint8Array(1_048_577))).status, 413);
+    const response = await post(bytes);
+    assert.equal(response.status, 201);
+    assert.deepEqual(await response.json(), { schema: "punctra-browser-functional-export-receipt-v1", filename,
+      path: path.join(await realpath(exportDirectory), filename), byte_length: bytes.byteLength,
+      sha256: createHash("sha256").update(bytes).digest("hex") });
+    assert.equal((await post(new TextEncoder().encode("changed"))).status, 409);
+    assert.deepEqual(await readFile(path.join(exportDirectory, filename)), Buffer.from(bytes));
+    assert.deepEqual(await readdir(exportDirectory), [filename]);
+  } finally {
+    await stopServer(server);
+    await rm(exportDirectory, { recursive: true });
+  }
+});
+
 test("opt-in local server keeps the v0.22 footprint export separate", async () => {
   const exportDirectory = await mkdtemp(
     path.join(tmpdir(), "punctra-footprint-export-"),

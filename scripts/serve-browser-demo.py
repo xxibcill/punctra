@@ -113,6 +113,9 @@ LOD_EXPORT_PATH = "/qualification-lod-export"
 LOD_EXPORT_FILENAME = "v0.23-browser-lod-evidence.tar"
 LOD_EXPORT_RECEIPT_SCHEMA = "punctra-browser-lod-export-receipt-v1"
 MAX_LOD_EXPORT_BYTES = 134_217_728
+FUNCTIONAL_EXPORT_PATH = "/qualification-functional-export"
+FUNCTIONAL_EXPORT_FILENAME = "v0.23-browser-functional-observation.json"
+FUNCTIONAL_EXPORT_RECEIPT_SCHEMA = "punctra-browser-functional-export-receipt-v1"
 LOD_QUALIFIED_PATHS = (
     ".gitignore", "Cargo.toml", "Cargo.lock", "fuzz", "crates", "apps", "packages", "scripts", "examples",
     "docs/api/browser-sdk.md", "docs/design/lod-density-transition-continuity-v0.23.md",
@@ -384,7 +387,7 @@ class BrowserDemoHandler(BaseHTTPRequestHandler):
         if export_contract is None:
             self.send_error(HTTPStatus.NOT_FOUND)
             return
-        _, export_filename, receipt_schema, maximum_bytes, export_directory = (
+        endpoint, export_filename, receipt_schema, maximum_bytes, export_directory = (
             export_contract
         )
         if export_directory is None:
@@ -393,7 +396,8 @@ class BrowserDemoHandler(BaseHTTPRequestHandler):
         if not self._is_same_origin_request():
             self.send_error(HTTPStatus.FORBIDDEN)
             return
-        if self.headers.get_all("Content-Type", []) != ["application/x-tar"]:
+        content_type = "application/json" if endpoint == FUNCTIONAL_EXPORT_PATH else "application/x-tar"
+        if self.headers.get_all("Content-Type", []) != [content_type]:
             self.send_error(HTTPStatus.UNSUPPORTED_MEDIA_TYPE)
             return
 
@@ -457,6 +461,10 @@ class BrowserDemoHandler(BaseHTTPRequestHandler):
     def _export_contract(self) -> tuple[str, str, str, int, Path | None] | None:
         request_path = urlsplit(self.path).path
         contracts = {
+            FUNCTIONAL_EXPORT_PATH: (
+                FUNCTIONAL_EXPORT_PATH, FUNCTIONAL_EXPORT_FILENAME, FUNCTIONAL_EXPORT_RECEIPT_SCHEMA,
+                1_048_576, self.server.lod_export_dir,
+            ),
             VISUAL_EXPORT_PATH: (
                 VISUAL_EXPORT_PATH,
                 VISUAL_EXPORT_FILENAME,

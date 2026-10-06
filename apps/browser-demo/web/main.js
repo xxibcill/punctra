@@ -1,4 +1,5 @@
 import { failureLabel, failureState } from "./failure-policy.js";
+import { sha256Hex } from "./visual-png.js";
 
 const BUILD_CACHE_TOKEN = encodeURIComponent(
   new URL(import.meta.url).searchParams.get("v") ?? "unversioned",
@@ -333,7 +334,7 @@ async function loadFunctionalImplementationPins() {
   return pins.running;
 }
 
-async function downloadAcceptance() {
+async function exportAcceptance() {
   if (!smokePassed || smokeRunning) return;
   try {
     const pins = await loadFunctionalImplementationPins();
@@ -341,13 +342,19 @@ async function downloadAcceptance() {
       && pins.runtime.packed_artifact.sha256 === smokeRecord.runtime_pins.packed_artifact.sha256, "unchanged implementation at functional export");
     const record = { schema: "punctra-browser-functional-observation-v1", observed_on: new Date().toISOString().slice(0, 10),
       acceptance: smokeRecord };
-    const url = URL.createObjectURL(new Blob([`${JSON.stringify(record, null, 2)}\n`], { type: "application/json" }));
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = "v0.23-browser-functional-observation.json";
-    anchor.click();
-    setTimeout(() => URL.revokeObjectURL(url), 30_000);
-  } catch (error) { publishFailure(error); }
+    assertFact(location.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(location.hostname), "loopback functional export");
+    const bytes = new TextEncoder().encode(`${JSON.stringify(record, null, 2)}\n`);
+    const response = await fetch("./qualification-functional-export", { method: "POST", mode: "same-origin",
+      credentials: "same-origin", cache: "no-store", redirect: "error", headers: { "Content-Type": "application/json" }, body: bytes });
+    assertFact(response.status === 201, `functional export HTTP ${response.status}`);
+    const receipt = await response.json();
+    assertFact(receipt.schema === "punctra-browser-functional-export-receipt-v1"
+      && receipt.filename === "v0.23-browser-functional-observation.json"
+      && receipt.byte_length === bytes.byteLength && receipt.sha256 === await sha256Hex(bytes), "exact functional export receipt");
+    document.querySelector("#functional-export-status").textContent = `Acceptance JSON persisted: ${receipt.path}`;
+  } catch (error) {
+    document.querySelector("#functional-export-status").textContent = `Acceptance export failed: ${error.message}. Configure an empty --lod-export-dir for this local server.`;
+  }
 }
 
 function assertInitialQualification(initial, runtimeLane) {
@@ -1078,7 +1085,7 @@ displaySelect.addEventListener("change", changeDisplay);
 projectionButton.addEventListener("click", toggleProjection);
 clearButton.addEventListener("click", clearHighlight);
 shutdownButton.addEventListener("click", shutdown);
-exportAcceptanceButton.addEventListener("click", () => void downloadAcceptance());
+exportAcceptanceButton.addEventListener("click", () => void exportAcceptance());
 document.addEventListener("visibilitychange", synchronizeDocumentVisibility);
 new ResizeObserver(scheduleResize).observe(canvasShell);
 
