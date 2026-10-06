@@ -5,8 +5,8 @@ browser/device lane over the fixed repository workload and packed quickstart.
 The fresh machine-readable [browser
 matrix](../releases/v0.22-browser-matrix.json) passes at the exact implementation
 pin. A platform absent from its `qualified_entries` is unqualified even when
-the SDK initializes successfully. Complete local command verification remains
-pending in the release record.
+the SDK initializes successfully. The complete local command matrix also
+passes, as recorded in the [release record](../releases/v0.22.0.md).
 
 The immutable [v0.20 browser
 matrix](../releases/v0.20-browser-matrix.json) remains the immutable historical
@@ -142,8 +142,8 @@ cookies, credentials, or unrelated storage.
 
 ## v0.22 point-footprint evidence is a separate lane
 
-The active v0.22 lane requests anti-aliased Point footprints, records the
-selected `multisample4x`, `unsupported_fallback`, or `resource_fallback` path,
+The completed bounded v0.22 lane requests anti-aliased Point footprints, records
+the selected `multisample4x`, `unsupported_fallback`, or `resource_fallback` path,
 and keeps nominal pick diameter at 7.0 physical pixels while display diameter
 is clamped independently to 2.0 through 6.0 physical pixels. Its canonical
 trials reuse the immutable v0.21 corpus and predecessor images; focused trials
@@ -154,7 +154,8 @@ Passing the functional matrix does not manufacture those observations. Follow
 the sequential record, pin, rebuild, and verify workflow in the
 [point-footprint guide](browser-point-footprint.md). The v0.22 footprint
 baseline, evidence, and functional records pass that workflow and the static
-verifiers; complete local command verification remains pending.
+verifiers. The complete local command matrix also passes; the bounded
+repository slice is Complete.
 
 ## v0.21 visual evidence is a separate predecessor lane
 

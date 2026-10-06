@@ -1,6 +1,6 @@
 # Browser Point-footprint qualification
 
-Status: **v0.22 browser acceptance passed; complete local matrix pending**
+Status: **v0.22 bounded repository acceptance Complete**
 
 The corrective focused trials use a separately captured subset of unchanged
 authored Points. CPU preflight rejects overlapping measurement regions,
@@ -259,6 +259,8 @@ artifact digests, and closed nonclaims.
 
 The record, pin, rebuilt functional records, verify evidence, verifier result,
 and [v0.22 release record](../releases/v0.22.0.md) are one sequential gate.
-The final attended observations and offline verifier pass at `52ae3afb`;
-complete local command verification remains pending. Do not mark the roadmap
-item Complete until every required command passes.
+The final attended observations and offline verifier pass at `52ae3afb`.
+The complete local command matrix also passes, including a full workspace
+rerun with serial test scheduling. The bounded v0.22 roadmap item is Complete;
+its release record preserves the initial journal-lock failure and the final
+verification outcomes.

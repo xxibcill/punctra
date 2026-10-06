@@ -1,7 +1,7 @@
 # Punctra Roadmap
 
 Status: living guidance
-Last reviewed: 2026-08-29
+Last reviewed: 2026-10-06
 
 This roadmap communicates direction, not a delivery promise. It has no fixed
 dates. Candidate releases may be split, merged, reordered, renamed, or skipped
@@ -24,9 +24,10 @@ repository-verified packed integration baseline; its independent-adopter gate
 remains outstanding. v0.21 is the completed repository-verified bounded visual-
 baseline and regression-corpus release; its exact attended evidence and pins
 are recorded without satisfying its external evidence gates. v0.22 is the
-Active accepted Point-footprint and edge-quality slice; versions v0.23 through
-v0.30 remain uncommitted Candidate themes. v0.15–v0.20 establish browser execution,
-streaming, the viewer API, embedding, and platform qualification. v0.21–v0.29
+completed repository-verified Point-footprint and edge-quality slice; versions
+v0.23 through v0.30 remain uncommitted Candidate themes. v0.15–v0.20 establish
+browser execution, streaming, the viewer API, embedding, and platform
+qualification. v0.21–v0.29
 then establish, improve, and qualify visual quality. v0.30 is the earliest
 planned browser-engine release candidate; no earlier future release may be
 represented as a product release candidate. The historical v0.9 "Trust and v1
@@ -1506,13 +1507,15 @@ status remain outside this exit.
 
 ### v0.22 — Point footprint and edge quality
 
-Status: **Active — accepted bounded repository implementation**
+Status: **Complete — bounded repository implementation and verification**
 
 The [2026-10-02 closeout investigation](docs/reviews/point-footprint-closeout-2026-10-02.md)
 preserves the original centroid and focused-fixture failures. Corrective
 fixtures, explicit projected-center proof, fresh functional records, and
 separate footprint record/verify runs now pass at the pinned implementation.
-The complete local command matrix remains pending in the
+The complete local command matrix also passes, including the full workspace
+rerun with serial test scheduling. The original journal-lock failure and all
+final outcomes are retained in the
 [v0.22 verification record](docs/releases/v0.22.0.md).
 
 Accepted outcome: make individual Points and dense Point coverage read cleanly
@@ -1781,7 +1784,7 @@ nor completion of v0.20 is a reason to publish v1.
 | Terrain acceptance tooling | v0.14 | Complete and repository-verified for the bounded slice; external historical exits outstanding | Preserve exact Terrain QA and correction as an available module without extending it in the current browser-engine path. |
 | Browser execution and streaming | v0.15–v0.16 | Complete and repository-verified for the bounded private slices; arbitrary delivery and external qualification outstanding | Establish WebAssembly/WebGPU execution, then bounded remote Source delivery, browser caching, and worker decoding. |
 | Browser viewer and embedding | v0.17–v0.20 | Complete and repository-verified for bounded viewer, packed SDK, exact local qualification, and clean packed-consumer baseline; independent adoption outstanding | Expose the viewer API, package the SDK, qualify the browser/device envelope, and consolidate a stable integration baseline without release-candidate status. |
-| Measured visual quality | v0.21–v0.25 | v0.21 Complete and repository-verified for the bounded baseline; v0.22 Active; v0.23–v0.25 Candidate | Establish visual evidence, then improve point footprints, LOD continuity, depth, and color. |
+| Measured visual quality | v0.21–v0.25 | v0.21 Complete and repository-verified for the bounded baseline; v0.22 Complete and repository-verified; v0.23–v0.25 Candidate | Establish visual evidence, then improve point footprints, LOD continuity, depth, and color. |
 | Visual interaction and qualification | v0.26–v0.29 | Candidate | Improve temporal, selection, and composition clarity, then freeze and qualify the visual surface without release-candidate status. |
 | Browser-engine release candidate | v0.30 | Candidate; earliest planned release candidate | Freeze, soak, and explicitly decide whether the supported browser engine should ship or narrow. |
 | Trustworthy supported browser engine | v1.0 | Candidate after v0.30 soak | Publish v1 only when independent use and maintainable functional, visual, compatibility, resource, and support evidence justify the promise. |

@@ -3,7 +3,7 @@
 All notable changes to Punctra are documented here. The project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased - 0.22.0-alpha.1
+## 0.22.0-alpha.1
 
 - Activated the bounded [v0.22 Point Footprint and Edge Quality
   design](docs/design/point-footprint-edge-quality-v0.22.md). The renderer now
@@ -33,8 +33,10 @@ All notable changes to Punctra are documented here. The project follows
   integration baseline are recorded under `docs/releases/`.
 - Passed the separate Point-footprint record/verify stage: 9 canonical trials
   through 27 recreations, 9 focused DPR trials, 3 fallback cases, 55 artifacts,
-  and 108 offline-recomputed metric reports. Complete local command verification
-  remains pending. No physical-display,
+  and 108 offline-recomputed metric reports. The complete local command matrix
+  passed, including a full workspace rerun with serial test scheduling after
+  the initial terrain journal-lock failure. The bounded repository slice is
+  Complete. No physical-display,
   cross-browser/device, independent-human/adopter, support, beta,
   release-candidate, or v1 claim is made yet.
 - Fixed the focused browser runner's comparison of serialized f32 display

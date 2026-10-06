@@ -1,6 +1,6 @@
 # Point Footprint and Edge Quality Design (v0.22)
 
-Status: **Accepted; bounded repository implementation active**
+Status: **Accepted; bounded repository implementation and verification Complete**
 
 This design is authoritative for the narrow v0.22 repository slice. The
 maintainer's 2026-08-29 request to continue after the v0.21 merge activates the
