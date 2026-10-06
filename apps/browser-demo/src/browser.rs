@@ -931,7 +931,7 @@ impl BrowserResources {
             point_footprint,
             batches,
         )
-        .with_raster_transitions(raster)
+        .with_raster_transitions(raster, report.raster_transition_batches())
     }
 
     async fn initialize(
