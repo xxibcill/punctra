@@ -1,10 +1,17 @@
-// v0.23 uses the same exact local hardware/browser lane as v0.22.
-// Fresh v0.23 observations are required; these declarations confer no qualification.
-import { QUALIFICATION_LANE, QUALIFICATION_RUNTIME_LANE as predecessorRuntime } from "./qualification-lane-v0.22.js";
+// Browser-reported screen facts changed in the current session. Hardware and
+// browser identity still require fresh observations; declarations qualify nothing.
+import { QUALIFICATION_LANE as predecessorLane, QUALIFICATION_RUNTIME_LANE as predecessorRuntime } from "./qualification-lane-v0.22.js";
 
-export { QUALIFICATION_LANE };
+const id = "codex-iab-chromium-154-macos-26-apple-m5-pro-screen-1920";
+export const QUALIFICATION_LANE = Object.freeze({
+  ...predecessorLane, id,
+  display: Object.freeze({ ...predecessorLane.display, screen_css_pixels: Object.freeze([1920, 1080]),
+    color_depth: 24, pixel_depth: 24,
+    screen_note: "Exact browser-reported current session facts; this does not qualify physical panel composition or color." }),
+});
 export const QUALIFICATION_RUNTIME_LANE = Object.freeze({
-  ...predecessorRuntime,
+  ...predecessorRuntime, id,
+  screen: Object.freeze({ width: 1920, height: 1080, colorDepth: 24, pixelDepth: 24 }),
   host: Object.freeze({ ...predecessorRuntime.host,
     package: Object.freeze({ ...predecessorRuntime.host.package, version: "0.23.0-alpha.1" }) }),
 });

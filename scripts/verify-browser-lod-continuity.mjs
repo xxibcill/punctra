@@ -101,8 +101,8 @@ export async function verifyBrowserLodFiles({ baselinePath = LOD_BASELINE_PATH, 
     }
     assert.ok(totalBytes <= corpus.resource_limits.encoded_archive_bytes);
     assert.equal(record.resources.encoded_artifact_bytes, totalBytes);
-    assert.equal(record.resources.live_canonical_images, 4);
-    assert.equal(record.resources.live_canonical_bytes_high_water, 4 * 1281 * 1024 * 4);
+    assert.equal(record.resources.live_canonical_images, 5);
+    assert.equal(record.resources.live_canonical_bytes_high_water, 5 * 1281 * 1024 * 4);
     assert.ok(record.resources.live_canonical_bytes_high_water <= corpus.resource_limits.live_canonical_bytes);
     assert.equal(record.resources.observed_heap_bytes, null);
     assert.equal(record.resources.observed_driver_memory_bytes, null);

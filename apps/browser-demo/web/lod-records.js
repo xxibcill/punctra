@@ -130,7 +130,10 @@ export async function auditLodRecord(record, { corpus, fixtures, visual, predece
         && frame.candidate.adapter.backend === QUALIFICATION_LANE.webgpu.backend, "captured adapter differs");
       requireCondition(frame.candidate.capture.facts.point_footprint.display_size_physical_pixels === frame.outgoing.capture.facts.point_footprint.display_size_physical_pixels
         && frame.candidate.capture.facts.point_footprint.display_size_physical_pixels === frame.incoming.capture.facts.point_footprint.display_size_physical_pixels, "endpoint diameters differ");
-      const [candidate, outgoing, incoming] = await Promise.all([loadImage(frame.candidate.artifact), loadImage(frame.outgoing.artifact), loadImage(frame.incoming.artifact)]);
+      // Decode sequentially so only one PNG inflate/copy workspace is live.
+      const candidate = await loadImage(frame.candidate.artifact);
+      const outgoing = await loadImage(frame.outgoing.artifact);
+      const incoming = await loadImage(frame.incoming.artifact);
       for (const image of [candidate, outgoing, incoming]) requireCondition(image.width === profile.physical_width && image.height === profile.physical_height, "decoded transition PNG dimensions differ");
       const metrics = measureRasterTransition({ candidate, outgoing, incoming, previous, backgroundRgba: LOD_BACKGROUND, stationary: trial.stationary });
       requireCondition(canonicalJsonEqual(frame.metrics, metrics) && metrics.passed, `recomputed ${run.trial_id}/${profile.id}/${step} image gates fail: ${metrics.failures.join(", ")}`);
@@ -211,7 +214,9 @@ export async function auditLodRecord(record, { corpus, fixtures, visual, predece
         kind: role === "candidate" ? "lod_candidate_png" : "lod_endpoint_png", profile: run.profile });
       validateLodCapture(run[role], { fixture, profile: run.profile, generation: 1, version: 1, seed: corpus.seed, step, coarsen: false });
     }
-    const [candidate, outgoing, incoming] = await Promise.all([loadImage(run.candidate.artifact), loadImage(run.outgoing.artifact), loadImage(run.incoming.artifact)]);
+    const candidate = await loadImage(run.candidate.artifact);
+    const outgoing = await loadImage(run.outgoing.artifact);
+    const incoming = await loadImage(run.incoming.artifact);
     requireCondition(canonicalJsonEqual(run.profile, { id: "resource-fallback", css_width: 1281, css_height: 1024,
       requested_device_pixel_ratio: 1, physical_width: 1281, physical_height: 1024 }), "fallback profile differs");
     for (const image of [candidate, outgoing, incoming]) requireCondition(image.width === 1281 && image.height === 1024, "fallback PNG dimensions differ");

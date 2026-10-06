@@ -1,6 +1,9 @@
 # LOD Density and Transition Continuity Design (v0.23)
 
-Status: **Accepted; bounded repository implementation active**
+Status: **Accepted bounded repository contract**
+
+Release delivery and verification status are maintained in the roadmap and
+release record; this document freezes the accepted requirements.
 
 The maintainer's 2026-10-06 instruction to finish each version authorizes this
 bounded continuation after the completed v0.22 PR. The

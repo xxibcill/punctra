@@ -52,7 +52,7 @@ export async function runLodQualification({ mode, sessionLabel, activation, inpu
       physical_display_observed: false },
     transitions: [], canonical: [], fallback: [], boundary_probes: [],
     external_evidence: corpus.external_evidence,
-    resources: { live_canonical_images: 4, live_canonical_bytes_high_water: 4 * 1281 * 1024 * 4,
+    resources: { live_canonical_images: 5, live_canonical_bytes_high_water: 5 * 1281 * 1024 * 4,
       observed_heap_bytes: null, observed_driver_memory_bytes: null, encoded_artifact_bytes: 0 },
   };
   validateLodEnvironment(record.environment);
