@@ -3,6 +3,20 @@
 All notable changes to Punctra are documented here. The project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.23.0-alpha.1 (Unreleased)
+
+- Added exact generation/key/version-conditioned complementary raster coverage
+  over eight presented frames, preserving opaque Source colors, inherited
+  color-only weights, nominal picking, and recorded-frame snapshots.
+- The native LOD host now groups complete refinement and many-to-one coarsening
+  cuts, hides replacements before their first frame, cancels to the current
+  planner cut, and derives display density from integer coverage fractions.
+- Added private browser fixture controls with validated numeric inputs and exact
+  decimal generation/version identities, renderer-accepted capture facts, and
+  presentation-aware density. Public SDK exports remain unchanged.
+- Local implementation and qualification work is active under the accepted
+  [v0.23 design](docs/design/lod-density-transition-continuity-v0.23.md).
+
 ## 0.22.0-alpha.1
 
 - Activated the bounded [v0.22 Point Footprint and Edge Quality

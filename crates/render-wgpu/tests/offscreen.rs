@@ -156,6 +156,18 @@ fn complementary_raster_transitions_preserve_opaque_coverage_and_nominal_picks()
 }
 
 #[test]
+fn raster_hidden_points_leave_no_highlight_or_eye_dome_depth_in_active_and_fallback_paths() {
+    with_gpu(|gpu| {
+        for footprint in [PointFootprint::SingleSample, PointFootprint::Antialiased] {
+            for orthographic in [false, true] {
+                assert_hidden_raster_depth(gpu, footprint, orthographic, VIEWPORT);
+            }
+        }
+        assert_hidden_raster_depth(gpu, PointFootprint::Antialiased, false, [1_281, 1_024]);
+    });
+}
+
+#[test]
 fn multi_point_cross_fade_preserves_coverage_across_inverted_batch_depth() {
     with_gpu(assert_multi_point_cross_fade_coverage);
 }
@@ -816,6 +828,93 @@ fn assert_raster_interior(interior: &[[u8; 4]], previous: Option<&[[u8; 4]]>, st
             "one step changed {changed}% of the common opaque interior"
         );
     }
+}
+
+fn assert_hidden_raster_depth(
+    gpu: &GpuContext,
+    footprint: PointFootprint,
+    orthographic: bool,
+    dimensions: [u32; 2],
+) {
+    let generation = ViewGenerationKey::new(ViewId::new(27), 1);
+    let config = RendererConfig::new(FORMAT, roomy_limits())
+        .with_point_footprint(footprint)
+        .with_eye_dome_lighting(EyeDomeLighting::new(1.25, 1).unwrap());
+    let mut subject = OffscreenRenderer::with_config(gpu, config);
+    subject.apply(&RenderUpdate::Reset {
+        view_generation: generation,
+    });
+    for (key, depth, color, ordinal) in [(1, -0.2, RED, 2_701), (2, 0.2, BLUE, 2_702)] {
+        subject.apply(&RenderUpdate::Upsert {
+            batch: batch(
+                generation,
+                key,
+                1,
+                WORLD_ORIGIN,
+                vec![point([0.0, depth, 0.0], color, ordinal)],
+            ),
+        });
+    }
+    subject.apply(&RenderUpdate::SetHighlights {
+        view_generation: generation,
+        point_ids: vec![point_id(2_701)],
+    });
+    subject.apply(&RenderUpdate::SetBatchRasterTransition {
+        view_generation: generation,
+        key: BatchKey::new(1),
+        expected_version: BatchVersion::new(1),
+        transition: RasterTransition::HIDDEN,
+    });
+    let camera = if orthographic {
+        orthographic_frame(generation, 18.0).camera()
+    } else {
+        frame_with_style(generation, dimensions, PointStyle::default()).camera()
+    };
+    let frame = Frame::new(
+        generation,
+        camera,
+        Viewport::new(dimensions[0], dimensions[1]).unwrap(),
+    )
+    .unwrap()
+    .with_style(
+        PointStyle::new(7.0, [0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0])
+            .unwrap()
+            .with_display_size_pixels(18.0)
+            .unwrap(),
+    );
+    let hidden = subject.render(&frame);
+    assert_eq!(hidden.report.raster_transition_batches(), 1);
+    assert_eq!(
+        hidden.report.eye_dome_lighting_applied(),
+        dimensions == VIEWPORT
+    );
+    let center = [dimensions[0] / 2, dimensions[1] / 2];
+    assert_hit(
+        subject
+            .pick_and_wait(&hidden.recorded_frame, center)
+            .unwrap(),
+        generation,
+        1,
+        1,
+        point_id(2_701),
+    );
+    subject.apply(&RenderUpdate::Remove {
+        view_generation: generation,
+        key: BatchKey::new(1),
+        expected_version: BatchVersion::new(1),
+    });
+    let removed = subject.render(&frame);
+    for y in 0..dimensions[1] {
+        for x in 0..dimensions[0] {
+            assert_eq!(
+                hidden.image.pixel([x, y]),
+                removed.image.pixel([x, y]),
+                "hidden foreground changed color/highlight/EDL visibility at {x},{y}"
+            );
+        }
+    }
+    assert_eq!(removed.report.raster_transition_batches(), 0);
+    assert!(removed.report.transient_texture_bytes() <= 64 * 1_024 * 1_024);
 }
 
 fn assert_display_size_is_color_only(gpu: &GpuContext) {

@@ -580,6 +580,35 @@ impl BrowserViewer {
         self.diagnostics()
     }
 
+    /// Holds endpoint controls at the candidate's measured physical diameter.
+    #[wasm_bindgen(js_name = setVisualCaptureDisplayDiameter)]
+    pub fn set_visual_capture_display_diameter(
+        &mut self,
+        diameter: f64,
+    ) -> Result<String, JsValue> {
+        self.ensure_ready()?;
+        let validated =
+            crate::scene::visual_capture_display_diameter(diameter).ok_or_else(|| {
+                failure(
+                    FailureCode::FrameValidation,
+                    "capture display diameter must be finite and within 2..6 physical pixels",
+                    RETRY_FRAME_ACTION,
+                )
+            })?;
+        self.display_size_override = Some(validated);
+        self.reset_interaction_facts();
+        self.diagnostics()
+    }
+
+    /// Restores the private host's ordinary density policy after an endpoint control.
+    #[wasm_bindgen(js_name = clearVisualCaptureDisplayDiameter)]
+    pub fn clear_visual_capture_display_diameter(&mut self) -> Result<String, JsValue> {
+        self.ensure_ready()?;
+        self.display_size_override = None;
+        self.reset_interaction_facts();
+        self.diagnostics()
+    }
+
     /// Conditionally removes one batch for the private visual fixture harness.
     #[wasm_bindgen(js_name = removeVisualBatch)]
     pub fn remove_visual_batch(&mut self, batch_index: u32) -> Result<String, JsValue> {

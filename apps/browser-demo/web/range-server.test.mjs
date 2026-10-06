@@ -96,7 +96,7 @@ test("point-footprint pin endpoint binds the running checkout and verifier", asy
       sha256: createHash("sha256").update(verifierBytes).digest("hex"),
     });
     assert.equal(payload.running.runtime.package_name, "@punctra/viewer");
-    assert.equal(payload.running.runtime.package_version, "0.22.0-alpha.1");
+    assert.equal(payload.running.runtime.package_version, "0.23.0-alpha.1");
     assert.deepEqual(
       payload.running.runtime.artifacts.map(({ path: artifactPath }) => artifactPath),
       [
