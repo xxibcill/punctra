@@ -5,7 +5,7 @@ import {
 } from "./visual-corpus.js";
 import { footprintRectangle } from "./footprint-runner-core.js";
 import { sha256Hex } from "./visual-png.js";
-import { createVisualValidator } from "./visual-validation.js";
+import { canonicalJsonEqual, createVisualValidator } from "./visual-validation.js";
 
 export const ISOLATED_FOOTPRINT_FIXTURE = "isolated_authored_subset_v1";
 const { requireCondition } = createVisualValidator("Isolated footprint fixture invalid");
@@ -84,4 +84,14 @@ export function validateIsolatedFootprintFixture(materialized, profile, diameter
   });
   requireCondition(samples.length >= 2, "at least two isolated Points are required");
   return samples;
+}
+
+/** Binds the measured mask to the complete regenerated kernel window. */
+export function validateFootprintSampleBinding(sample, isolated, diameter) {
+  requireCondition(sample.ordinal === isolated.ordinal, "measurement ordinal differs");
+  requireCondition(canonicalJsonEqual(sample.candidate.center,
+    [isolated.projected.exact_x, isolated.projected.exact_y]), "measurement center differs");
+  requireCondition(canonicalJsonEqual(sample.candidate.rectangle, isolated.rectangle),
+    "measurement rectangle differs");
+  requireCondition(sample.candidate.radius_pixels === diameter / 2, "measurement radius differs");
 }

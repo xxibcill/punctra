@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-import { materializeFootprintFixture, validateIsolatedFootprintFixture } from "./footprint-fixture.js";
+import { materializeFootprintFixture, validateFootprintSampleBinding, validateIsolatedFootprintFixture } from "./footprint-fixture.js";
 import { decodeTransferV2, materializeVisualTrial } from "./visual-corpus.js";
 
 const visual = JSON.parse(await readFile(new URL("./fixtures/visual-v1/corpus.json", import.meta.url)));
@@ -47,4 +47,26 @@ test("fixture generation rejects missing Points and unrecognized sampling recipe
   const inherited = await materializeVisualTrial(visual, focused.id);
   await assert.rejects(materializeFootprintFixture(inherited, { ...focused, isolated_ordinals: [9_999] }), /absent/);
   await assert.rejects(materializeFootprintFixture(inherited, { ...focused, fixture: "unknown" }), /recipe/);
+});
+
+test("metric bindings reject diluted windows, changed radii, and displaced centers", async () => {
+  const focused = footprint.focused_trials[0];
+  const fixture = await materializeFootprintFixture(await materializeVisualTrial(visual, focused.id), focused);
+  const isolated = validateIsolatedFootprintFixture(fixture, footprint.canonical_profile)[0];
+  const sample = {
+    ordinal: isolated.ordinal,
+    candidate: {
+      center: [isolated.projected.exact_x, isolated.projected.exact_y],
+      rectangle: isolated.rectangle,
+      radius_pixels: 3,
+    },
+  };
+  validateFootprintSampleBinding(sample, isolated, 6);
+  for (const field of ["rectangle", "radius", "center"]) {
+    const forged = structuredClone(sample);
+    if (field === "rectangle") forged.candidate.rectangle.width += 20;
+    if (field === "radius") forged.candidate.radius_pixels = 2;
+    if (field === "center") forged.candidate.center[0] += 1;
+    assert.throws(() => validateFootprintSampleBinding(forged, isolated, 6), new RegExp(field));
+  }
 });

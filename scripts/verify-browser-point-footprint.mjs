@@ -24,7 +24,7 @@ import {
   measurePointFootprint,
   measureRegionTopology,
 } from "../apps/browser-demo/web/visual-footprint-metrics.js";
-import { materializeFootprintFixture, validateIsolatedFootprintFixture } from "../apps/browser-demo/web/footprint-fixture.js";
+import { materializeFootprintFixture, validateFootprintSampleBinding, validateIsolatedFootprintFixture } from "../apps/browser-demo/web/footprint-fixture.js";
 import { materializeVisualTrial } from "../apps/browser-demo/web/visual-corpus.js";
 import { decodeRgba8Png } from "../apps/browser-demo/web/visual-png.js";
 
@@ -431,8 +431,7 @@ async function verifyFocusedPixelFacts(evidence, corpus, visualCorpus, loadImage
     const candidateImage = await loadImage(trial.candidate_artifact_path);
     for (const sample of trial.isolated_footprints) {
       const point = isolation.find(({ ordinal }) => ordinal === sample.ordinal);
-      assert.deepEqual(sample.candidate.report.center, [point.projected.exact_x, point.projected.exact_y],
-        `${sample.candidate.metric_id} center differs from its authored Point`);
+      validateFootprintSampleBinding(sample, point, trial.point_footprint.display_size_physical_pixels);
       const foreground = normalizedPixelCoverage(candidateImage, sample.candidate);
       assert.equal(sample.center_foreground, foreground > 0,
         `${sample.candidate.metric_id} center-foreground fact differs from its PNG`);
