@@ -4,7 +4,30 @@ import {
   POINT_FOOTPRINT_METRICS_SCHEMA,
   REGION_TOPOLOGY_METRICS_SCHEMA,
 } from "./visual-footprint-metrics.js";
+import { QUALIFICATION_LANE } from "./qualification-lane-v0.22.js";
 import { canonicalJsonEqual, createVisualValidator } from "./visual-validation.js";
+
+export const FOOTPRINT_LANE_ENVIRONMENT = Object.freeze({
+  browser_user_agent: QUALIFICATION_LANE.browser.user_agent,
+  browser_platform: QUALIFICATION_LANE.operating_system.user_agent_platform,
+  operating_system: [
+    QUALIFICATION_LANE.operating_system.name,
+    QUALIFICATION_LANE.operating_system.version,
+    QUALIFICATION_LANE.operating_system.build,
+    QUALIFICATION_LANE.operating_system.architecture,
+  ].join(" "),
+  device: Object.freeze({
+    class: QUALIFICATION_LANE.device.class,
+    gpu: QUALIFICATION_LANE.device.gpu,
+    gpu_cores: QUALIFICATION_LANE.device.gpu_cores,
+    gpu_class: QUALIFICATION_LANE.device.gpu_class,
+    metal_support: QUALIFICATION_LANE.device.metal_support,
+  }),
+  adapter_name: QUALIFICATION_LANE.webgpu.adapter_name,
+  backend: QUALIFICATION_LANE.webgpu.backend,
+  same_adapter_for_scale_trials: true,
+  physical_display_observed: false,
+});
 
 export const FOOTPRINT_BASELINE_SCHEMA = "punctra-browser-point-footprint-baseline-v1";
 export const FOOTPRINT_EVIDENCE_SCHEMA = "punctra-browser-point-footprint-evidence-v1";
@@ -68,6 +91,8 @@ export const FOOTPRINT_IMPLEMENTATION_PATHS = Object.freeze([
   "apps/browser-demo/src/lib.rs",
   "apps/browser-demo/src/scene.rs",
   "apps/browser-demo/src/streaming.rs",
+  "apps/browser-demo/web/footprint-alignment.js",
+  "apps/browser-demo/web/footprint-alignment.test.mjs",
   "apps/browser-demo/web/footprint-artifacts.js",
   "apps/browser-demo/web/footprint-artifacts.test.mjs",
   "apps/browser-demo/web/footprint-corpus.js",
@@ -76,6 +101,8 @@ export const FOOTPRINT_IMPLEMENTATION_PATHS = Object.freeze([
   "apps/browser-demo/web/footprint-evidence.test.mjs",
   "apps/browser-demo/web/footprint-export.js",
   "apps/browser-demo/web/footprint-export.test.mjs",
+  "apps/browser-demo/web/footprint-fixture.js",
+  "apps/browser-demo/web/footprint-fixture.test.mjs",
   "apps/browser-demo/web/footprint-main.js",
   "apps/browser-demo/web/footprint-qualification.js",
   "apps/browser-demo/web/footprint-records.js",
@@ -84,6 +111,8 @@ export const FOOTPRINT_IMPLEMENTATION_PATHS = Object.freeze([
   "apps/browser-demo/web/footprint-runner-core.test.mjs",
   "apps/browser-demo/web/footprint.css",
   "apps/browser-demo/web/footprint.html",
+  "apps/browser-demo/web/qualification-lane.js",
+  "apps/browser-demo/web/qualification-lane-v0.22.js",
   "apps/browser-demo/web/visual-archive.js",
   "apps/browser-demo/web/visual-capture.js",
   "apps/browser-demo/web/visual-comparison.js",
@@ -587,7 +616,7 @@ function validateFocusedImages(images, candidateImages, corpus) {
     const [trial, profile] = expectedPairs[index];
     const image = images[index];
     validateImageArtifact(image, `focused baseline image ${trial.id}/${profile.id}`);
-    const suffix = profile.id === corpus.canonical_profile.id ? "" : `-${profile.id}`;
+    const suffix = `-${profile.id}`;
     requireCondition(image.trial_id === trial.id && image.profile_id === profile.id,
       `focused baseline image ${trial.id}/${profile.id} identity differs`);
     requireCondition(
@@ -596,15 +625,7 @@ function validateFocusedImages(images, candidateImages, corpus) {
     );
     requireCondition(image.width === profile.physical_width && image.height === profile.physical_height,
       `focused baseline image ${trial.id}/${profile.id} dimensions differ`);
-    if (profile.id === corpus.canonical_profile.id) {
-      const canonical = candidateImages.find(({ trial_id: trialId }) => trialId === trial.id);
-      requireCondition(canonical !== undefined, `canonical baseline image ${trial.id} is absent`);
-      requireCondition(image.encoded_byte_length === canonical.encoded_byte_length
-        && image.encoded_sha256 === canonical.encoded_sha256
-        && image.decoded_byte_length === canonical.decoded_byte_length
-        && image.decoded_sha256 === canonical.decoded_sha256,
-      `focused baseline image ${trial.id}/${profile.id} differs from its canonical baseline`);
-    }
+
   }
 }
 
@@ -636,14 +657,11 @@ function validateEvidenceEnvelope(evidence, baseline, corpus, baselineIdentity) 
 export function validatePointFootprintEnvironment(environment, corpus) {
   requireRecord(environment, "environment");
   requireExactKeys(environment, [
-    "browser_user_agent", "browser_platform", "operating_system", "adapter_name", "backend",
+    "browser_user_agent", "browser_platform", "operating_system", "device", "adapter_name", "backend",
     "same_adapter_for_scale_trials", "physical_display_observed",
   ], "environment");
-  for (const field of ["browser_user_agent", "browser_platform", "operating_system", "adapter_name", "backend"]) {
-    requireCondition(typeof environment[field] === "string" && environment[field].length > 0, `environment ${field} is invalid`);
-  }
-  requireCondition(environment.same_adapter_for_scale_trials === true, "scale trials do not bind one adapter");
-  requireCondition(environment.physical_display_observed === false, "offscreen evidence cannot claim physical presentation");
+  requireJsonEqual(environment, FOOTPRINT_LANE_ENVIRONMENT,
+    "environment differs from the declared v0.22 qualification lane");
   requireCondition(corpus.canonical_profile.expected_status === "multisample4x", "canonical corpus status differs");
 }
 
@@ -710,8 +728,10 @@ function validateCanonicalTrials(
       requireExactKeys(recreation, [
         "index", "adapter", "resident_points", "point_footprint", "timing", "resources", "capture_artifact_path",
         "candidate_topology", "component_bridge_check", "feature_checks", "dense_region_checks",
+        "projected_center_check",
       ], label);
       requireCondition(recreation.index === index, `${label} index differs`);
+      validateProjectedCenterCheck(recreation.projected_center_check, expected, corpus.canonical_profile, artifacts, failures, label);
       validateAdapter(recreation.adapter, label);
       requireJsonEqual(recreation.adapter, {
         name: environment.adapter_name,
@@ -863,7 +883,7 @@ function validateFocusedTrials(trials, baseline, corpus, artifacts, metricBindin
     requireRecord(trial, label);
     requireExactKeys(trial, [
       "trial_id", "profile_id", "adapter", "resident_points", "point_footprint", "resources", "candidate_artifact_path",
-      "baseline_artifact_path", "isolated_footprints", "thin_feature_centers",
+      "baseline_artifact_path", "fixture_input", "isolation", "isolated_footprints", "thin_feature_centers",
     ], label);
     requireCondition(trial.trial_id === expectedTrial.id && trial.profile_id === profile.id, `${label} order differs`);
     validateAdapter(trial.adapter, label);
@@ -872,6 +892,14 @@ function validateFocusedTrials(trials, baseline, corpus, artifacts, metricBindin
       backend: environment.backend,
     }, `${label} adapter`);
     positiveInteger(trial.resident_points, `${label} resident points`);
+    requireCondition(trial.resident_points === expectedTrial.isolated_ordinals.length, `${label} isolated resident count differs`);
+    requireRecord(trial.fixture_input, `${label} fixture input`);
+    requireCondition(trial.fixture_input.kind === expectedTrial.fixture, `${label} fixture recipe differs`);
+    requireJsonEqual(trial.fixture_input.authored_ordinals, expectedTrial.isolated_ordinals, `${label} authored ordinals`);
+    requireCondition(SHA256.test(trial.fixture_input.payload_sha256), `${label} fixture payload digest is invalid`);
+    requireCondition(trial.fixture_input.resident_transfer_bytes === trial.resident_points * 32, `${label} fixture transfer bytes differ`);
+    requireArray(trial.isolation, `${label} isolation preflight`);
+    requireCondition(trial.isolation.length === trial.resident_points, `${label} isolation count differs`);
     validatePointFootprintFacts(
       trial.point_footprint,
       "antialiased",
@@ -947,7 +975,7 @@ function validateLocalGpuFixture(fixture, corpus, artifacts, failures) {
     "evidence_source", "browser_observation", "environment", "local_test_evidence",
     "diameters_physical_pixels", "subpixel_center_phases", "preferred",
     "single_sample", "pick_independence", "transient_bounds",
-    "resource_fallback",
+    "resource_fallback", "projected_center_equivalence",
   ], "local GPU fixture");
   requireCondition(fixture.evidence_source === "local_renderer_gpu_test",
     "local GPU fixture source differs");
@@ -979,6 +1007,20 @@ function validateLocalGpuFixture(fixture, corpus, artifacts, failures) {
   }
   requireCondition(phases.size === fixture.subpixel_center_phases.length,
     "local GPU fixture subpixel phases are duplicated");
+  const centers = fixture.projected_center_equivalence;
+  requireExactKeys(centers, [
+    "camera_families", "world_origin", "camera_depths", "legacy_diameter_physical_pixels",
+    "maximum_preferred_centroid_error_pixels", "maximum_legacy_centroid_error_pixels",
+    "maximum_paired_centroid_distance_pixels",
+  ], "local GPU projected centers");
+  requireJsonEqual(centers.camera_families, ["orthographic", "perspective"], "center camera families");
+  requireJsonEqual(centers.world_origin, [1000000000.125, 1000000000.25, 1000000000.5], "center world origin");
+  requireJsonEqual(centers.camera_depths, [3, 3.5, 4, 4.5, 5, 5.5, 6, 6.5], "center camera depths");
+  requireCondition(centers.legacy_diameter_physical_pixels === 7, "legacy center diameter differs");
+  for (const field of ["maximum_preferred_centroid_error_pixels", "maximum_legacy_centroid_error_pixels", "maximum_paired_centroid_distance_pixels"]) {
+    requireFiniteNonnegative(centers[field], `local GPU ${field}`);
+    gate(centers[field] <= corpus.metric_limits.maximum_centroid_distance_pixels, failures, `local GPU ${field} exceeds ceiling`);
+  }
   requireRecord(fixture.preferred, "local GPU preferred metrics");
   requireExactKeys(fixture.preferred, [
     "maximum_coverage_rmse", "maximum_exact_distance_outer_leakage_pixels",
@@ -1409,9 +1451,34 @@ function validateFeatureChecks(features, limits, failures, label) {
       `${label} feature candidate foreground pixels are invalid`);
     requireFiniteNonnegative(feature.centroid_distance_pixels, `${label} feature centroid distance`);
     gate(feature.candidate_foreground_pixels > 0, failures, `${label} feature ${feature.id} disappeared`);
-    gate(feature.centroid_distance_pixels <= limits.maximum_feature_centroid_distance_pixels,
-      failures, `${label} feature ${feature.id} centroid moved`);
   }
+}
+
+function validateProjectedCenterCheck(check, expected, profile, artifacts, failures, label) {
+  requireExactKeys(check, [
+    "contract", "input", "legacy_control_artifact_path", "matched_control_artifact_path",
+    "legacy_control_input", "matched_control_input", "legacy_control_matches_predecessor",
+    "predecessor_decoded_sha256",
+  ], `${label} projected centers`);
+  requireCondition(check.contract === "unchanged_projection_inputs_with_bounded_kernel_centroids_v1", `${label} center contract differs`);
+  for (const input of [check.input, check.legacy_control_input, check.matched_control_input]) {
+    requireExactKeys(input, ["source_identity", "payload_sha256", "world_origin", "camera", "display_mode", "highlights", "physical_viewport", "generation", "batches"], `${label} projection input`);
+    requireCondition(SHA256.test(input.payload_sha256), `${label} projection payload SHA-256 is invalid`);
+  }
+  requireJsonEqual(check.input, check.legacy_control_input, `${label} legacy projection inputs`);
+  requireJsonEqual(check.input, check.matched_control_input, `${label} matched projection inputs`);
+  const legacy = requireArtifact(artifacts, check.legacy_control_artifact_path, "image/png", `${label} legacy control`);
+  const matched = requireArtifact(artifacts, check.matched_control_artifact_path, "image/png", `${label} matched control`);
+  requireCondition(legacy.trial_id === expected.id && matched.trial_id === expected.id, `${label} control trial differs`);
+  for (const [kind, artifact] of [["legacy", legacy], ["matched", matched]]) {
+    requireCondition(artifact.path === `docs/releases/v0.22-browser-point-footprint-artifacts/controls/${expected.id}-${kind}.png`
+      && artifact.kind === "diagnostic_control_png" && artifact.recreation_index === null
+      && artifact.profile_id === profile.id && artifact.width === profile.physical_width
+      && artifact.height === profile.physical_height, `${label} ${kind} control binding differs`);
+  }
+  gate(check.legacy_control_matches_predecessor === true
+    && legacy.decoded_sha256 === check.predecessor_decoded_sha256,
+  failures, `${label} legacy control differs from immutable predecessor pixels`);
 }
 
 function validateDenseRegionChecks(
@@ -1522,7 +1589,11 @@ function validateRecomputedMetrics(bindings, recomputed) {
 
 function collectEvidenceArtifactPaths(evidence, paths) {
   for (const trial of evidence.canonical_trials) {
-    for (const recreation of trial.recreations) paths.add(recreation.capture_artifact_path);
+    for (const recreation of trial.recreations) {
+      paths.add(recreation.capture_artifact_path);
+      paths.add(recreation.projected_center_check.legacy_control_artifact_path);
+      paths.add(recreation.projected_center_check.matched_control_artifact_path);
+    }
   }
   for (const trial of evidence.focused_trials) {
     paths.add(trial.candidate_artifact_path);

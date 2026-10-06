@@ -8,6 +8,7 @@ import {
   FOOTPRINT_EVIDENCE_SCHEMA,
   FOOTPRINT_EXTERNAL_NONCLAIMS,
   FOOTPRINT_IMPLEMENTATION_PATHS,
+  FOOTPRINT_LANE_ENVIRONMENT,
   FOOTPRINT_LOCAL_TEST_CASE_IDS,
   FOOTPRINT_LOCAL_TEST_PRODUCER_COMMAND,
   FOOTPRINT_RUNTIME_PATHS,
@@ -17,6 +18,7 @@ import {
 } from "./footprint-evidence.js";
 import {
   createPointFootprintBaselineRecord,
+  createFootprintRecordPreview,
   createPointFootprintEvidenceRecord,
   pointFootprintLocalTestCase,
   recordPointFootprintArchiveEntries,
@@ -31,6 +33,19 @@ const BACKGROUND_RGBA = Object.freeze([19, 20, 19, 255]);
 const COMPLETED_AT = "2026-08-29T02:00:00.000Z";
 const RESIDENT_POINTS = 5_808;
 const SHA = "a".repeat(64);
+
+test("console preview preserves pre-export failures without claiming an exported record", () => {
+  const error = { schema: "runner-error-v1", name: "Error", message: "runtime pin differs" };
+  assert.deepEqual(createFootprintRecordPreview(error), error);
+});
+
+test("footprint records reject a different or absent physical host GPU", () => {
+  for (const device of [undefined, { ...FOOTPRINT_LANE_ENVIRONMENT.device, gpu: "Apple M4" }]) {
+    const options = validEvidenceRecordOptions();
+    options.host.device = device;
+    assert.throws(() => createPointFootprintEvidenceRecord(options), /declared v0.22 qualification lane/);
+  }
+});
 
 test("record builders import without browser globals and local cases are cloned", async () => {
   const source = await readFile(new URL("./footprint-records.js", import.meta.url), "utf8");
@@ -144,15 +159,7 @@ function validBaselineRecord(pins = validPins()) {
 }
 
 function validEnvironment() {
-  return {
-    browser_user_agent: "test-browser",
-    browser_platform: "test-platform",
-    operating_system: "test-os",
-    adapter_name: "test-adapter",
-    backend: "test-backend",
-    same_adapter_for_scale_trials: true,
-    physical_display_observed: false,
-  };
+  return { ...FOOTPRINT_LANE_ENVIRONMENT };
 }
 
 function validEvidenceRecordOptions() {
@@ -164,12 +171,12 @@ function validEvidenceRecordOptions() {
   return {
     startedAt: "2026-08-29T01:00:00.000Z",
     readCompletedAt: () => COMPLETED_AT,
-    browserUserAgent: "test-browser",
-    browserPlatform: "test-platform",
+    browserUserAgent: FOOTPRINT_LANE_ENVIRONMENT.browser_user_agent,
+    browserPlatform: FOOTPRINT_LANE_ENVIRONMENT.browser_platform,
     backgroundRgba: BACKGROUND_RGBA,
     footprint: corpus,
     pins,
-    host: { operating_system: { name: "test-os" } },
+    host: { operating_system: { name: "macOS", version: "26.6.2", build: "25G83", architecture: "arm64" }, device: structuredClone(FOOTPRINT_LANE_ENVIRONMENT.device) },
     baseline,
     baselineIdentity: digest("docs/releases/v0.22-browser-point-footprint-baseline.json"),
     localTests,
@@ -202,7 +209,14 @@ function canonicalRunnerTrials() {
             digestCharacter: String(trialIndex + 1),
             recreationIndex,
           });
+          const controls = Object.fromEntries(["legacy", "matched"].map((kind) => [kind, {
+            artifact: imageMetadata({kind: "diagnostic_control_png", trialId: trial.id,
+              profile: corpus.canonical_profile, path: `${ARTIFACT_ROOT}/controls/${trial.id}-${kind}.png`,
+              digestCharacter: String(trialIndex + 1), recreationIndex: null}),
+          }]));
           return {
+            projected_center_check: projectionCheck(controls),
+            diagnostic_controls: controls,
             index: recreationIndex,
             adapter: observedAdapter(),
             point_footprint: pointFootprintFacts(corpus.canonical_profile),
@@ -241,28 +255,27 @@ function canonicalRunnerTrials() {
 function focusedRunnerTrials(canonicalTrials) {
   const profiles = [corpus.canonical_profile, ...corpus.scale_profiles];
   return corpus.focused_trials.flatMap((trial, trialIndex) => profiles.map((profile) => {
-    const profileIndex = corpus.scale_profiles.findIndex(({ id }) => id === profile.id);
-    const artifact = profile.id === corpus.canonical_profile.id
-      ? canonicalTrials.find(({ trial_id: trialId }) => trialId === trial.id)
-        .recreations[0].capture.artifact
-      : imageMetadata({
-        kind: "focused_candidate_png",
-        trialId: trial.id,
-        profile,
-        path: `${ARTIFACT_ROOT}/${trial.id}-${profile.id}.png`,
-        digestCharacter: "abcdef"[trialIndex * corpus.scale_profiles.length + profileIndex],
-        recreationIndex: null,
-      });
+    const profileIndex = profiles.findIndex(({ id }) => id === profile.id);
+    const artifact = imageMetadata({
+      kind: "focused_candidate_png",
+      trialId: trial.id,
+      profile,
+      path: `${ARTIFACT_ROOT}/${trial.id}-${profile.id}.png`,
+      digestCharacter: "abcdef123"[trialIndex * 3 + profileIndex],
+      recreationIndex: null,
+    });
     const picks = nominalPicksForTrial(trial.id);
     return {
       trial_id: trial.id,
       profile_id: profile.id,
       adapter: observedAdapter(),
-      resident_points: RESIDENT_POINTS,
-      point_footprint: pointFootprintFacts(profile),
-      resources: runnerResources(profile, "multisample4x", picks.length > 0),
+      resident_points: trial.isolated_ordinals.length,
+      point_footprint: pointFootprintFacts(profile, "multisample4x", trial.isolated_ordinals.length),
+      resources: runnerResources(profile, "multisample4x", picks.length > 0, trial.isolated_ordinals.length),
       nominal_picks: picks,
       capture: { artifact },
+      fixture_input: { kind: trial.fixture, authored_ordinals: trial.isolated_ordinals, payload_sha256: "a".repeat(64), resident_transfer_bytes: trial.isolated_ordinals.length * 32 },
+      isolation: trial.isolated_ordinals.map((ordinal) => ({ ordinal })),
       measurements: trial.isolated_ordinals.map((ordinal) => ({
         ordinal,
         center_foreground: true,
@@ -312,6 +325,15 @@ function localTestArtifact(implementationCommit) {
         [0, 0], [0.25, 0], [0.5, 0], [0.75, 0],
         [0, 0.5], [0.25, 0.5], [0.5, 0.5], [0.75, 0.5],
       ],
+      projected_center_equivalence: {
+        camera_families: ["orthographic", "perspective"],
+        world_origin: [1000000000.125, 1000000000.25, 1000000000.5],
+        camera_depths: [3, 3.5, 4, 4.5, 5, 5.5, 6, 6.5],
+        legacy_diameter_physical_pixels: 7,
+        maximum_preferred_centroid_error_pixels: 0.1,
+        maximum_legacy_centroid_error_pixels: 0.1,
+        maximum_paired_centroid_distance_pixels: 0.1,
+      },
       preferred: {
         maximum_coverage_rmse: 0.1,
         maximum_exact_distance_outer_leakage_pixels: 0,
@@ -426,23 +448,23 @@ function nominalPicksForTrial(trialId) {
 }
 
 function observedAdapter() {
-  return { name: "test-adapter", backend: "test-backend" };
+  return { name: FOOTPRINT_LANE_ENVIRONMENT.adapter_name, backend: FOOTPRINT_LANE_ENVIRONMENT.backend };
 }
 
-function pointFootprintFacts(profile, selected = "multisample4x") {
+function pointFootprintFacts(profile, selected = "multisample4x", residentPoints = RESIDENT_POINTS) {
   return {
     requested: "antialiased",
     selected,
     nominal_pick_size_physical_pixels: corpus.policy.nominal_pick_diameter_physical_pixels,
     display_size_physical_pixels: projectedDensityDisplayDiameter(
       profile,
-      RESIDENT_POINTS,
+      residentPoints,
       corpus.policy,
     ),
   };
 }
 
-function runnerResources(profile, selected, pickTargetsRetained) {
+function runnerResources(profile, selected, pickTargetsRetained, residentPoints = RESIDENT_POINTS) {
   const exact = expectedPointFootprintResources({
     selected,
     physicalWidth: profile.physical_width,
@@ -452,7 +474,7 @@ function runnerResources(profile, selected, pickTargetsRetained) {
     ceilingBytes: corpus.policy.renderer_transient_byte_ceiling,
   });
   return {
-    resident_points: RESIDENT_POINTS,
+    resident_points: residentPoints,
     transient_texture_bytes: exact.renderer_transient_texture_bytes,
   };
 }
@@ -569,7 +591,7 @@ function baselineArtifacts() {
     }),
   }));
   for (const [trialIndex, trial] of corpus.focused_trials.entries()) {
-    for (const [profileIndex, profile] of corpus.scale_profiles.entries()) {
+    for (const [profileIndex, profile] of [corpus.canonical_profile, ...corpus.scale_profiles].entries()) {
       artifacts.push({
         kind: "focused",
         trial_id: trial.id,
@@ -579,7 +601,7 @@ function baselineArtifacts() {
           trialId: trial.id,
           profile,
           path: `apps/browser-demo/web/fixtures/footprint-v1/baselines/${trial.id}-${profile.id}.png`,
-          digestCharacter: "abcdef"[trialIndex * corpus.scale_profiles.length + profileIndex],
+          digestCharacter: "abcdef123"[trialIndex * 3 + profileIndex],
         }),
       });
     }
@@ -615,4 +637,13 @@ function imageMetadata({
 
 function digest(path) {
   return { path, byte_length: 1, sha256: SHA };
+}
+
+function projectionCheck(controls) {
+  const input = { source_identity: SHA, payload_sha256: SHA, world_origin: [0,0,0],
+    camera: {}, display_mode: "neutral", highlights: [], physical_viewport: [640,480], generation: 1, batches: [] };
+  return { contract: "unchanged_projection_inputs_with_bounded_kernel_centroids_v1", input,
+    legacy_control_input: structuredClone(input), matched_control_input: structuredClone(input),
+    legacy_control_artifact_path: controls.legacy.artifact.path, matched_control_artifact_path: controls.matched.artifact.path,
+    legacy_control_matches_predecessor: true, predecessor_decoded_sha256: controls.legacy.artifact.decoded_sha256 };
 }

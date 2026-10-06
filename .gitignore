@@ -4,5 +4,6 @@
 /fuzz/target/
 /apps/browser-demo/web/pkg/
 /apps/browser-demo/web/node_modules/
+/apps/browser-demo/web/fixtures/footprint-v1/local-test-evidence.json
 *.profraw
 *.profdata

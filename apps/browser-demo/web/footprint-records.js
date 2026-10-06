@@ -32,6 +32,7 @@ export function createPointFootprintEnvironment(options) {
     browser_user_agent: browserUserAgent,
     browser_platform: browserPlatform || "unreported browser platform",
     operating_system: operatingSystemName(host),
+    device: structuredClone(host?.device),
     adapter_name: adapter.name,
     backend: adapter.backend,
     same_adapter_for_scale_trials: true,
@@ -71,11 +72,6 @@ export function createPointFootprintBaselineRecord(options) {
   });
   const focusedImages = footprint.focused_trials.flatMap((trial) => (
     [footprint.canonical_profile, ...footprint.scale_profiles].map((profile) => {
-      if (profile.id === footprint.canonical_profile.id) {
-        return structuredClone(candidateImages.find(({ trial_id: trialId }) => (
-          trialId === trial.id
-        )));
-      }
       const record = baselineArtifacts.find(({
         kind,
         trial_id: trialId,
@@ -141,7 +137,7 @@ export function createPointFootprintEvidenceRecord(options) {
     baseline,
     footprint,
   ));
-  const pickIdentityReference = preferredPickReference(focusedTrials, footprint);
+  const pickIdentityReference = preferredPickReference(canonicalTrials, footprint);
   const fallbackTrials = fallbackTrialEvidence(
     fallback,
     localTests,
@@ -150,11 +146,13 @@ export function createPointFootprintEvidenceRecord(options) {
     footprint,
   );
   const png = uniqueImageArtifacts([
+    ...canonicalTrials.flatMap(({ recreations }) => ["legacy", "matched"].map((kind) => (
+      createPointFootprintImageArtifact(recreations[0].diagnostic_controls[kind].artifact, footprint.canonical_profile.id)
+    ))),
     ...canonicalTrials.flatMap(({ recreations }) => recreations.map(({ capture }) => (
       createPointFootprintImageArtifact(capture.artifact, footprint.canonical_profile.id)
     ))),
     ...focusedTrials
-      .filter(({ profile_id: profileId }) => profileId !== footprint.canonical_profile.id)
       .map((trial) => createPointFootprintImageArtifact(
         trial.capture.artifact,
         trial.profile_id,
@@ -240,6 +238,7 @@ function canonicalTrialEvidence(trial, footprint, backgroundRgba) {
         footprint,
       ),
       capture_artifact_path: recreation.capture.artifact.path,
+      projected_center_check: structuredClone(recreation.projected_center_check),
       candidate_topology: createTopologyMetricBinding({
         metricId: `canonical/${trial.trial_id}/r${recreation.index}`,
         artifactPath: recreation.capture.artifact.path,
@@ -314,6 +313,8 @@ function focusedTrialEvidence(trial, baseline, footprint) {
     resources: resourceEvidence(trial, profile, trial.nominal_picks.length > 0, footprint),
     candidate_artifact_path: trial.capture.artifact.path,
     baseline_artifact_path: pinned.path,
+    fixture_input: structuredClone(trial.fixture_input),
+    isolation: structuredClone(trial.isolation),
     isolated_footprints: trial.measurements.map((measurement) => ({
       ordinal: measurement.ordinal,
       center_foreground: measurement.center_foreground,
@@ -341,17 +342,16 @@ function resourceEvidence(observation, profile, pickTargetsRetained, footprint) 
   });
 }
 
-function preferredPickReference(focusedTrials, footprint) {
+function preferredPickReference(canonicalTrials, footprint) {
   const contract = footprint.focused_trials.find(({ nominal_pick_ordinals: ordinals }) => (
     Array.isArray(ordinals)
   ));
-  const observation = focusedTrials.find(({ trial_id: trialId, profile_id: profileId }) => (
-    trialId === contract.id && profileId === footprint.canonical_profile.id
-  ));
+  const observation = canonicalTrials.find(({ trial_id: trialId }) => trialId === contract.id)
+    ?.recreations[0];
   requireCondition(observation !== undefined, "preferred pick observation is absent");
   return {
     profile_id: footprint.canonical_profile.id,
-    resident_points: observation.resident_points,
+    resident_points: observation.resources.resident_points,
     point_footprint: structuredClone(observation.point_footprint),
     pick_probes: pickProbeEvidence(observation.nominal_picks),
     pick_mask_artifact_path: observation.capture.artifact.path,
@@ -500,4 +500,60 @@ function profileById(footprint, profileId) {
   requireCondition(profile !== undefined,
     `point-footprint profile ${profileId} is absent`);
   return profile;
+}
+/** Keeps the attended console readable; exported records retain every fact. */
+export function createFootprintRecordPreview(record) {
+  if (typeof record.message === "string" && record.diagnostics === undefined) {
+    return { schema: record.schema, name: record.name, message: record.message };
+  }
+  if (record.diagnostics !== undefined) {
+    return {
+      schema: record.schema, name: record.name, message: record.message,
+      diagnostics: {
+        authority: record.diagnostics.authority,
+        canonical_trials: record.diagnostics.canonical_trials?.map((trial) => ({
+          trial_id: trial.trial_id, failures: trial.failures,
+          recreations: trial.recreations.map((recreation) => ({
+            index: recreation.index, failures: recreation.failures,
+            feature_comparisons: recreation.feature_comparisons.map((feature) => ({
+              feature_id: feature.feature_id,
+              centroid_distance_pixels: feature.centroid_distance_pixels,
+              component_alignment: alignmentPreview(feature.local_alignment),
+            })),
+          })),
+        })),
+        focused_trials: record.diagnostics.focused_trials?.map(({ trial_id, profile_id, failures }) => ({
+          trial_id, profile_id, failures,
+        })),
+        fallback: record.diagnostics.fallback?.failures ?? null,
+      },
+    };
+  }
+  return {
+    panel_preview: true,
+    full_record: "Bound JSON artifacts and the TAR contain the complete record.",
+    schema: record.schema, release: record.release, mode: record.mode,
+    pins: record.pins, environment: record.environment, summary: record.summary,
+    candidate_images: record.candidate_images?.length,
+    focused_images: record.focused_images?.length,
+  };
+}
+
+function alignmentPreview(report) {
+  if (report === undefined) return null;
+  const alignments = report.regions.map(({ alignment }) => alignment);
+  const failed = report.regions.filter(({ alignment }) => alignment.ambiguous
+    || alignment.distance_pixels === null || alignment.distance_pixels > 1
+    || alignment.correlation === null || alignment.correlation < Math.SQRT1_2);
+  return {
+    passed: report.passed,
+    component_count: alignments.length,
+    correspondence: report.correspondence,
+    maximum_distance_pixels: alignments.length === 0 ? null
+      : Math.max(...alignments.map(({ distance_pixels }) => distance_pixels ?? 0)),
+    minimum_correlation: alignments.length === 0 ? null
+      : Math.min(...alignments.map(({ correlation }) => correlation ?? 0)),
+    failed_component_count: failed.length,
+    failed_components: failed.slice(0, 8),
+  };
 }

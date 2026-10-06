@@ -177,7 +177,7 @@
     "evidence": {
       "path": "docs/releases/v0.22-browser-quickstart.json",
       "byte_length": 1349,
-      "sha256": "cbe30efbedfe33fe6aa1fd3397280485e55576bdc61668d3ef744a1f12349381"
+      "sha256": "6d56dc9fa15d6b38f38b7facc4eda6a4836b0a79e32025ec3952a727e1bf2db2"
     },
     "packed_runtime": {
       "path": "target/browser-quickstart/punctra-packed-runtime.json",
@@ -187,7 +187,7 @@
         "serverContract": "punctra-strict-range-v1",
         "viewerPackage": "@punctra/viewer",
         "viewerVersion": "0.22.0-alpha.1",
-        "viewerArtifactSha256": "7464327456503d222a8f7ede82c8371d7606f06dbe758e4dd8548b29fc626548"
+        "viewerArtifactSha256": "28b93ad4cc857aa8eec2ba78bf3190a88738a2e148eb2821dd727efbb7d80a19"
       }
     },
     "imports": [
@@ -215,12 +215,12 @@
     "matrix_path": "docs/releases/v0.22-browser-matrix.json",
     "matrix_digest": {
       "path": "docs/releases/v0.22-browser-matrix.json",
-      "byte_length": 10154,
-      "sha256": "2495ab5e100dc1c6ca9c41ef63fe5715efbeed487dd20ee0f4082e8cae8cafeb"
+      "byte_length": 10149,
+      "sha256": "b1ec3762191fd53f606f3869daf84bf46d79b3bd0041067e7757b1d388d4a97f"
     },
     "matrix_schema": "punctra-browser-qualification-matrix-v1",
-    "implementation_commit": "1ea86a9c65f4d85630e57173c6a3bb68a22b3e17",
-    "qualified_lane": "codex-iab-chromium-151-macos-26-apple-m5-pro",
+    "implementation_commit": "52ae3afb9312d6968a10c3aeec42b3c8555a86d1",
+    "qualified_lane": "codex-iab-chromium-154-macos-26-apple-m5-pro",
     "limits": {
       "firstCoverageMilliseconds": 10000,
       "settledViewMilliseconds": 15000,

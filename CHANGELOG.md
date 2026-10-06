@@ -3,7 +3,7 @@
 All notable changes to Punctra are documented here. The project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased - 0.22.0-alpha.1
+## 0.22.0-alpha.1
 
 - Activated the bounded [v0.22 Point Footprint and Edge Quality
   design](docs/design/point-footprint-edge-quality-v0.22.md). The renderer now
@@ -26,20 +26,25 @@ All notable changes to Punctra are documented here. The project follows
 - Advanced the Rust and JavaScript package-facing release identity to
   `0.22.0-alpha.1`. The public browser SDK declaration surface is unchanged;
   the Point-footprint runner and evidence machinery remain repository-private.
-- The attended v0.22 functional qualification is recorded at implementation commit `1ea86a9c65f4d85630e57173c6a3bb68a22b3e17`; the qualification
+- The attended v0.22 functional qualification is recorded at implementation commit `52ae3afb9312d6968a10c3aeec42b3c8555a86d1`; the qualification
   verifier SHA-256 is
-  `e03159e9363d89814a7eb5aea64d43b2bd8395a55477681da531e01781d59eed`.
+  `e8a036bac528964a6c12b23d11b334aba33c2555afcd5f2db0ee67f4d5a4f939`.
   The packed quickstart evidence, exact browser matrix, and functional
   integration baseline are recorded under `docs/releases/`.
-- The separate Point-footprint record/verify stage and final release
-  completion remain pending. No v0.22 completion, physical-display,
+- Passed the separate Point-footprint record/verify stage: 9 canonical trials
+  through 27 recreations, 9 focused DPR trials, 3 fallback cases, 55 artifacts,
+  and 108 offline-recomputed metric reports. The complete local command matrix
+  passed, including a full workspace rerun with serial test scheduling after
+  the initial terrain journal-lock failure. The bounded repository slice is
+  Complete. No physical-display,
   cross-browser/device, independent-human/adopter, support, beta,
   release-candidate, or v1 claim is made yet.
 - Fixed the focused browser runner's comparison of serialized f32 display
   diameters and retained failed trial measurements as diagnostic-only output.
   The [closeout investigation](docs/reviews/point-footprint-closeout-2026-10-02.md)
-  documents remaining acceptance failures; earlier functional records require
-  requalification against the final implementation and packed artifacts.
+  preserves the original acceptance failures. Corrective isolated fixtures,
+  exact legacy controls, a shared-projection/paired-kernel center contract, and
+  fresh Chromium 154 functional and footprint records now bind the final pin.
 
 ## 0.21.0-alpha.1
 

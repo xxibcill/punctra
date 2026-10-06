@@ -9,6 +9,7 @@ import {
   FOOTPRINT_EVIDENCE_SCHEMA,
   FOOTPRINT_EXTERNAL_NONCLAIMS,
   FOOTPRINT_IMPLEMENTATION_PATHS,
+  FOOTPRINT_LANE_ENVIRONMENT,
   FOOTPRINT_LOCAL_TEST_CASE_IDS,
   FOOTPRINT_LOCAL_TEST_PRODUCER_COMMAND,
   FOOTPRINT_LOCAL_TEST_SCHEMA,
@@ -32,12 +33,25 @@ import {
   verifyPointFootprintEvidence,
 } from "./footprint-evidence.js";
 import { canonicalJson } from "./visual-validation.js";
+import { verifySharedPointProjection } from "../../../scripts/verify-browser-point-footprint.mjs";
 
 const corpus = JSON.parse(await readFile(
   new URL("./fixtures/footprint-v1/corpus.json", import.meta.url),
   "utf8",
 ));
 const SHA = "a".repeat(64);
+
+test("shared shader projection rejects component and compound mutations in either wrapper", async () => {
+  const shader = await readFile(new URL("../../../crates/render-wgpu/src/point.wgsl", import.meta.url), "utf8");
+  verifySharedPointProjection(shader);
+  for (const entry of ["point_vertex", "multisample_point_vertex"]) {
+    const wrapper = shader.match(new RegExp(`fn ${entry}\\([\\s\\S]*?\\n}`))[0];
+    for (const statement of ["output.clip_position.x += 0.25;", "output.clip_position *= 2.0;", "output.clip_position.y = 0.5;"]) {
+      const changed = wrapper.replace("return output;", `${statement}\n    return output;`);
+      assert.throws(() => verifySharedPointProjection(shader.replace(wrapper, changed)), /unchanged/);
+    }
+  }
+});
 const REPOSITORY_ROOT_URL = new URL("../../../", import.meta.url);
 const IMPLEMENTATION_PATHS = [
   "Cargo.lock",
@@ -51,6 +65,8 @@ const IMPLEMENTATION_PATHS = [
   "apps/browser-demo/src/lib.rs",
   "apps/browser-demo/src/scene.rs",
   "apps/browser-demo/src/streaming.rs",
+  "apps/browser-demo/web/footprint-alignment.js",
+  "apps/browser-demo/web/footprint-alignment.test.mjs",
   "apps/browser-demo/web/footprint-artifacts.js",
   "apps/browser-demo/web/footprint-artifacts.test.mjs",
   "apps/browser-demo/web/footprint-corpus.js",
@@ -59,6 +75,8 @@ const IMPLEMENTATION_PATHS = [
   "apps/browser-demo/web/footprint-evidence.test.mjs",
   "apps/browser-demo/web/footprint-export.js",
   "apps/browser-demo/web/footprint-export.test.mjs",
+  "apps/browser-demo/web/footprint-fixture.js",
+  "apps/browser-demo/web/footprint-fixture.test.mjs",
   "apps/browser-demo/web/footprint-main.js",
   "apps/browser-demo/web/footprint-qualification.js",
   "apps/browser-demo/web/footprint-records.js",
@@ -67,6 +85,8 @@ const IMPLEMENTATION_PATHS = [
   "apps/browser-demo/web/footprint-runner-core.test.mjs",
   "apps/browser-demo/web/footprint.css",
   "apps/browser-demo/web/footprint.html",
+  "apps/browser-demo/web/qualification-lane.js",
+  "apps/browser-demo/web/qualification-lane-v0.22.js",
   "apps/browser-demo/web/visual-archive.js",
   "apps/browser-demo/web/visual-capture.js",
   "apps/browser-demo/web/visual-comparison.js",
@@ -178,6 +198,15 @@ test("baseline closes implementation, verifier, runtime, corpus, predecessor, an
   const predecessorTamper = structuredClone(baseline);
   predecessorTamper.pins.predecessor.release_evidence.sha256 = "0".repeat(64);
   assert.throws(() => validatePointFootprintBaseline(predecessorTamper, corpus), /predecessor pins differ/);
+});
+
+test("footprint baseline rejects drift from every declared functional-lane fact", () => {
+  for (const field of Object.keys(FOOTPRINT_LANE_ENVIRONMENT)) {
+    const baseline = validBaseline();
+    baseline.environment[field] = typeof baseline.environment[field] === "boolean"
+      ? !baseline.environment[field] : `${baseline.environment[field]}-changed`;
+    assert.throws(() => validatePointFootprintBaseline(baseline, corpus), /declared v0.22 qualification lane/);
+  }
 });
 
 test("local renderer artifact has one exact environment and five exact source cases", () => {
@@ -340,11 +369,7 @@ test("host f32 display diameter accepts serde's shortest decimal representation"
   assert.equal(matchesProjectedDensityDiameter(NaN, profile, 1_878, corpus.policy), false);
   const baseline = validBaseline();
   const evidence = validEvidence(baseline);
-  const focusedDpr1 = evidence.focused_trials.find(
-    ({ profile_id }) => profile_id === "focused-dpr1",
-  );
-  focusedDpr1.resident_points = 1_878;
-  focusedDpr1.point_footprint.display_size_physical_pixels = 3.5171874;
+  assert.equal(matchesProjectedDensityDiameter(3.5171874, profile, 1_878, corpus.policy), true);
   evidence.summary = derivePointFootprintEvidenceSummary(evidence, { baseline, corpus });
 
   assert.equal(evidence.summary.passed, true);
@@ -370,6 +395,13 @@ test("pass flags, samples, metrics, resources, status, identities, and browser p
 
   for (const mutate of [
     (value) => { value.summary.passed = false; },
+    (value) => { value.canonical_trials[0].recreations[0].projected_center_check.legacy_control_matches_predecessor = false; },
+    (value) => { value.canonical_trials[0].recreations[0].projected_center_check.matched_control_artifact_path = value.canonical_trials[0].recreations[0].projected_center_check.legacy_control_artifact_path; },
+    (value) => { value.artifacts.png.find(({kind}) => kind === "diagnostic_control_png").kind = "canonical_candidate_png"; },
+    (value) => { value.canonical_trials[0].recreations[0].projected_center_check.matched_control_input.payload_sha256 = "0".repeat(64); },
+    (value) => { value.canonical_trials[0].recreations[0].projected_center_check.predecessor_decoded_sha256 = "0".repeat(64); },
+    (value) => { value.local_gpu_fixture.projected_center_equivalence.maximum_preferred_centroid_error_pixels = 1.01; },
+    (value) => { value.local_gpu_fixture.projected_center_equivalence.camera_families = ["orthographic"]; },
     (value) => { value.canonical_trials[0].recreations[0].timing.frame_interval.p95 = 2; },
     (value) => { value.focused_trials[0].isolated_footprints[0].candidate.report.coverage.root_mean_square_error = 0.19; },
     (value) => { value.focused_trials[0].isolated_footprints[0].candidate.report.corner_leakage.all_quad_corners_clear = false; },
@@ -460,15 +492,7 @@ function validBaseline() {
       corpus: digest("apps/browser-demo/web/fixtures/footprint-v1/corpus.json"),
       predecessor: structuredClone(corpus.predecessor),
     },
-    environment: {
-      browser_user_agent: "test-browser",
-      browser_platform: "test-platform",
-      operating_system: "test-os",
-      adapter_name: "test-adapter",
-      backend: "test-backend",
-      same_adapter_for_scale_trials: true,
-      physical_display_observed: false,
-    },
+    environment: { ...FOOTPRINT_LANE_ENVIRONMENT },
     candidate_images: corpus.canonical_trials.map((trial, index) => imageArtifact({
       kind: "candidate_baseline_png",
       trialId: trial.id,
@@ -481,7 +505,7 @@ function validBaseline() {
     })),
     focused_images: corpus.focused_trials.flatMap((trial, trialIndex) => (
       [corpus.canonical_profile, ...corpus.scale_profiles].map((profile, profileIndex) => {
-        const suffix = profile.id === corpus.canonical_profile.id ? "" : `-${profile.id}`;
+        const suffix = `-${profile.id}`;
         return imageArtifact({
           kind: "focused_baseline_png",
           trialId: trial.id,
@@ -521,7 +545,15 @@ function validEvidence(baseline) {
           digestCharacter: String((trialIndex + 1) % 10),
         });
         png.push(artifact);
+        const controls = ["legacy", "matched"].map((kind) => imageArtifact({
+          kind: "diagnostic_control_png", trialId: trial.id, recreationIndex: null,
+          profileId: corpus.canonical_profile.id,
+          path: `docs/releases/v0.22-browser-point-footprint-artifacts/controls/${trial.id}-${kind}.png`,
+          width: 640, height: 480, digestCharacter: String((trialIndex + 1) % 10),
+        }));
+        if (recreationIndex === 0) png.push(...controls);
         return {
+          projected_center_check: projectionCheck(controls),
           index: recreationIndex,
           adapter: observedAdapter(),
           resident_points: 5_808,
@@ -570,31 +602,27 @@ function validEvidence(baseline) {
 
   const profiles = [corpus.canonical_profile, ...corpus.scale_profiles];
   const focusedTrials = corpus.focused_trials.flatMap((expectedTrial, trialIndex) => profiles.map((profile, profileIndex) => {
-    let candidate;
-    if (profile.id === corpus.canonical_profile.id) {
-      candidate = png.find((artifact) => artifact.trial_id === expectedTrial.id
-        && artifact.kind === "canonical_recreation_png" && artifact.recreation_index === 0);
-    } else {
-      candidate = imageArtifact({
-        kind: "focused_candidate_png",
-        trialId: expectedTrial.id,
-        recreationIndex: null,
-        profileId: profile.id,
-        path: `docs/releases/v0.22-browser-point-footprint-artifacts/${expectedTrial.id}-${profile.id}-candidate.png`,
-        width: profile.physical_width,
-        height: profile.physical_height,
-        digestCharacter: focusedDigestCharacter(expectedTrial.id, trialIndex, profileIndex),
-      });
-      png.push(candidate);
-    }
+    const candidate = imageArtifact({
+      kind: "focused_candidate_png",
+      trialId: expectedTrial.id,
+      recreationIndex: null,
+      profileId: profile.id,
+      path: `docs/releases/v0.22-browser-point-footprint-artifacts/${expectedTrial.id}-${profile.id}-candidate.png`,
+      width: profile.physical_width,
+      height: profile.physical_height,
+      digestCharacter: focusedDigestCharacter(expectedTrial.id, trialIndex, profileIndex),
+    });
+    png.push(candidate);
     const prefix = `focused/${expectedTrial.id}/${profile.id}`;
-    const suffix = profile.id === corpus.canonical_profile.id ? "" : `-${profile.id}`;
+    const suffix = `-${profile.id}`;
     return {
       trial_id: expectedTrial.id,
       profile_id: profile.id,
       adapter: observedAdapter(),
-      resident_points: 5_808,
-      point_footprint: footprintFacts("antialiased", "multisample4x", profile, 5_808),
+      resident_points: expectedTrial.isolated_ordinals.length,
+      point_footprint: footprintFacts("antialiased", "multisample4x", profile, expectedTrial.isolated_ordinals.length),
+      fixture_input: { kind: expectedTrial.fixture, authored_ordinals: expectedTrial.isolated_ordinals, payload_sha256: SHA, resident_transfer_bytes: expectedTrial.isolated_ordinals.length * 32 },
+      isolation: expectedTrial.isolated_ordinals.map((ordinal) => ({ ordinal })),
       resources: resources("multisample4x", profile),
       candidate_artifact_path: candidate.path,
       baseline_artifact_path:
@@ -660,15 +688,7 @@ function validEvidence(baseline) {
     completed_at: "2026-08-29T02:00:00.000Z",
     baseline: digest("docs/releases/v0.22-browser-point-footprint-baseline.json"),
     pins: structuredClone(baseline.pins),
-    environment: {
-      browser_user_agent: "test-browser",
-      browser_platform: "test-platform",
-      operating_system: "test-os",
-      adapter_name: "test-adapter",
-      backend: "test-backend",
-      same_adapter_for_scale_trials: true,
-      physical_display_observed: false,
-    },
+    environment: { ...FOOTPRINT_LANE_ENVIRONMENT },
     artifacts: { png, local_test_results: localTestResults },
     canonical_trials: canonicalTrials,
     focused_trials: focusedTrials,
@@ -699,6 +719,15 @@ function validEvidence(baseline) {
         [0, 0], [0.25, 0], [0.5, 0], [0.75, 0],
         [0, 0.5], [0.25, 0.5], [0.5, 0.5], [0.75, 0.5],
       ],
+      projected_center_equivalence: {
+        camera_families: ["orthographic", "perspective"],
+        world_origin: [1000000000.125, 1000000000.25, 1000000000.5],
+        camera_depths: [3, 3.5, 4, 4.5, 5, 5.5, 6, 6.5],
+        legacy_diameter_physical_pixels: 7,
+        maximum_preferred_centroid_error_pixels: 0.1,
+        maximum_legacy_centroid_error_pixels: 0.1,
+        maximum_paired_centroid_distance_pixels: 0.1,
+      },
       preferred: {
         maximum_coverage_rmse: 0.1,
         maximum_exact_distance_outer_leakage_pixels: 0,
@@ -818,7 +847,7 @@ function footprintFacts(requested, selected, profile, residentPoints) {
 }
 
 function observedAdapter() {
-  return { name: "test-adapter", backend: "test-backend" };
+  return { name: FOOTPRINT_LANE_ENVIRONMENT.adapter_name, backend: FOOTPRINT_LANE_ENVIRONMENT.backend };
 }
 
 function localFallbackProof(pointOrdinal) {
@@ -1088,4 +1117,13 @@ function collectMetricReports(evidence) {
     }
   }
   return reports;
+}
+
+function projectionCheck(controls) {
+  const input = { source_identity: SHA, payload_sha256: SHA, world_origin: [0,0,0],
+    camera: {}, display_mode: "neutral", highlights: [], physical_viewport: [640,480], generation: 1, batches: [] };
+  return { contract: "unchanged_projection_inputs_with_bounded_kernel_centroids_v1", input,
+    legacy_control_input: structuredClone(input), matched_control_input: structuredClone(input),
+    legacy_control_artifact_path: controls[0].path, matched_control_artifact_path: controls[1].path,
+    legacy_control_matches_predecessor: true, predecessor_decoded_sha256: controls[0].decoded_sha256 };
 }

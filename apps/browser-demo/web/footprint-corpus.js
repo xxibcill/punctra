@@ -97,6 +97,7 @@ export function validateFootprintCorpus(corpus) {
   requireCondition(Array.isArray(corpus.focused_trials) && corpus.focused_trials.length === 3, "focused trial count differs");
   for (const trial of corpus.focused_trials) validateFocusedTrial(trial, trialIds);
   validateLimits(corpus.metric_limits, corpus.timing_limits);
+  requireCondition(corpus.metric_limits.canonical_center_contract === "unchanged_projection_inputs_with_bounded_kernel_centroids_v1", "canonical center contract differs");
   return corpus;
 }
 
@@ -144,6 +145,7 @@ function validateProfile(profile, label) {
 function validateFocusedTrial(trial, canonicalIds) {
   requireRecord(trial, "focused trial");
   requireCondition(canonicalIds.has(trial.id), "focused trial is not canonical");
+  requireCondition(trial.fixture === "isolated_authored_subset_v1", "focused fixture recipe differs");
   requireCondition(Array.isArray(trial.isolated_ordinals) && trial.isolated_ordinals.length >= 2, "isolated ordinals are incomplete");
   requireCondition(trial.isolated_ordinals.every((value) => Number.isSafeInteger(value) && value >= 0), "isolated ordinal is invalid");
   for (const field of ["dense_regions", "thin_feature_regions"]) {

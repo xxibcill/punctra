@@ -195,37 +195,108 @@
   "focused_trials": [
     {
       "id": "generated-neutral-mixed-lod-perspective",
-      "isolated_ordinals": [1866, 1913, 1961],
+      "isolated_ordinals": [
+        1866,
+        1913,
+        1961
+      ],
       "dense_regions": [
-        { "x": 128, "y": 196, "width": 182, "height": 142 },
-        { "x": 330, "y": 170, "width": 132, "height": 130 }
+        {
+          "x": 128,
+          "y": 196,
+          "width": 182,
+          "height": 142
+        },
+        {
+          "x": 330,
+          "y": 170,
+          "width": 132,
+          "height": 130
+        }
       ],
       "thin_feature_regions": [
-        { "x": 166, "y": 146, "width": 24, "height": 24 },
-        { "x": 306, "y": 142, "width": 24, "height": 24 },
-        { "x": 451, "y": 143, "width": 24, "height": 24 }
-      ]
+        {
+          "x": 166,
+          "y": 146,
+          "width": 24,
+          "height": 24
+        },
+        {
+          "x": 306,
+          "y": 142,
+          "width": 24,
+          "height": 24
+        },
+        {
+          "x": 451,
+          "y": 143,
+          "width": 24,
+          "height": 24
+        }
+      ],
+      "fixture": "isolated_authored_subset_v1"
     },
     {
       "id": "generated-intensity-sparse-orthographic",
-      "isolated_ordinals": [1913, 1962],
+      "isolated_ordinals": [
+        1913,
+        1962
+      ],
       "dense_regions": [
-        { "x": 88, "y": 170, "width": 224, "height": 190 },
-        { "x": 336, "y": 124, "width": 220, "height": 244 }
+        {
+          "x": 88,
+          "y": 170,
+          "width": 224,
+          "height": 190
+        },
+        {
+          "x": 336,
+          "y": 124,
+          "width": 220,
+          "height": 244
+        }
       ],
       "thin_feature_regions": [
-        { "x": 305, "y": 77, "width": 24, "height": 24 },
-        { "x": 308, "y": 281, "width": 24, "height": 24 }
-      ]
+        {
+          "x": 305,
+          "y": 77,
+          "width": 24,
+          "height": 24
+        },
+        {
+          "x": 308,
+          "y": 281,
+          "width": 24,
+          "height": 24
+        }
+      ],
+      "fixture": "isolated_authored_subset_v1"
     },
     {
       "id": "generated-classification-selection-perspective",
-      "isolated_ordinals": [1866, 2005],
-      "nominal_pick_ordinals": [1866, 2005],
+      "isolated_ordinals": [
+        1866,
+        2005
+      ],
+      "nominal_pick_ordinals": [
+        1866,
+        2005
+      ],
       "thin_feature_regions": [
-        { "x": 166, "y": 146, "width": 24, "height": 24 },
-        { "x": 308, "y": 145, "width": 24, "height": 24 }
-      ]
+        {
+          "x": 166,
+          "y": 146,
+          "width": 24,
+          "height": 24
+        },
+        {
+          "x": 308,
+          "y": 145,
+          "width": 24,
+          "height": 24
+        }
+      ],
+      "fixture": "isolated_authored_subset_v1"
     }
   ],
   "metric_limits": {
@@ -234,11 +305,14 @@
     "minimum_predecessor_rmse_improvement_fraction": 0.2,
     "maximum_outer_leakage_pixels": 0,
     "maximum_centroid_distance_pixels": 1,
-    "foreground_fraction_predecessor_ratio": { "minimum": 0.5, "maximum": 1.05 },
+    "foreground_fraction_predecessor_ratio": {
+      "minimum": 0.5,
+      "maximum": 1.05
+    },
     "dense_solid_block_predecessor_ratio": 1.02,
     "maximum_dense_solid_2x2_fraction": 0.8,
     "minimum_component_clear_separation_pixels": 2,
-    "maximum_feature_centroid_distance_pixels": 1
+    "canonical_center_contract": "unchanged_projection_inputs_with_bounded_kernel_centroids_v1"
   },
   "timing_limits": {
     "frame_interval_p95_milliseconds": 50,

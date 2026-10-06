@@ -146,7 +146,7 @@ independent-human or adopter evidence, improved/final visual quality, support
 qualification, API stability, beta, v1, or release-candidate status.
 Its exact completed repository observations and pins are recorded in the
 [v0.21 verification record](docs/releases/v0.21.0.md).
-The active bounded [v0.22 Point Footprint and Edge Quality
+The completed bounded [v0.22 Point Footprint and Edge Quality
 scope](docs/design/point-footprint-edge-quality-v0.22.md) adds an explicit
 renderer Point-footprint request/status seam, deterministic four-sample circular
 color coverage, capability/resource fallback, one private browser projected-
@@ -156,7 +156,9 @@ immutable v0.21 corpus. It does not change geometry, Point identity, Source or
 Query authority, View/LOD policy, display mappings, or public browser exports,
 and it does not authorize physical-display, cross-browser/device,
 independent-human/adopter, support, beta, release-candidate, or v1 claims. Its
-final attended evidence remains pending.
+final attended evidence, offline verifiers, and complete local command
+matrix pass, as recorded in the
+[v0.22 verification record](docs/releases/v0.22.0.md).
 Apart from the explicit v0.8 reader exception, the v0.17 browser-demo
 exact-query bridge is a narrowly scoped exception for the trusted immutable
 LAS fixture described by the accepted design. All other external format
@@ -584,10 +586,11 @@ node scripts/verify-browser-point-footprint.mjs \
   --evidence docs/releases/v0.22-browser-point-footprint-evidence.json
 ```
 
-Fill the pending fields in `docs/releases/v0.22.0.md` only from that completed
-lane, rerun the complete local command matrix above, and leave the v0.22 roadmap
-item Active until every required result and artifact actually exists. See the
-[browser Point-footprint guide](docs/guides/browser-point-footprint.md).
+Record release fields only from that completed lane and rerun the complete
+local command matrix above before claiming repository closure. The v0.22
+record at `52ae3afb` now satisfies those gates; all required results and
+artifacts exist. See the [browser Point-footprint
+guide](docs/guides/browser-point-footprint.md).
 
 See the [browser streaming
 guide](docs/guides/browser-streaming.md) and [browser viewer API

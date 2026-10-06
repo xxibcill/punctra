@@ -1,6 +1,6 @@
 # Point Footprint and Edge Quality Design (v0.22)
 
-Status: **Accepted; bounded repository implementation active**
+Status: **Accepted; bounded repository implementation and verification Complete**
 
 This design is authoritative for the narrow v0.22 repository slice. The
 maintainer's 2026-08-29 request to continue after the v0.21 merge activates the
@@ -145,6 +145,71 @@ two multisample attachments only.
 
 ## Measured quality gates
 
+### Corrective measurement inputs (2026-10-06)
+
+The maintainer's instruction to complete each roadmap version activates the
+corrective work identified by the October 2 closeout investigation. The three
+focused DPR trials now use `isolated_authored_subset_v1`: a separate settled
+render subset containing only their bound authored ordinals. The full unchanged
+Source is streamed in at most eight ordered batches of at most 1,024 Points;
+neighbor batches retire after stream completion and before measurement. Exact Point bytes,
+Source identity, world origin, camera, and display mappings remain unchanged.
+The inherited nine mixed scenes remain the canonical density, feature, and
+topology inputs. Focused captures, including DPR 2, have their own image pins.
+
+Before any focused GPU execution, CPU projection must prove that every complete
+measurement rectangle excludes all neighboring display disks with the accepted
+0.75-pixel radius margin, fits inside the capture, and has an unobstructed
+seven-pixel nominal-pick target. The offline verifier independently regenerates
+the sampled payload, projections, rectangles, and separation facts. It rejects
+unbound image centers or fabricated isolation observations.
+
+A private raw-Wasm control constructor provides two diagnostic single-sample
+captures: the inherited seven-pixel display diameter and the candidate's exact
+projected-density diameter. Both reuse the unchanged Source, camera, display,
+settled batch state, and highlights. This constructor is outside the public
+viewer SDK exports. Their PNGs and exact projection inputs are bound into the
+final evidence and independently checked offline.
+
+### Corrective center contract (2026-10-06)
+
+The local in-app browser has upgraded from Chromium 151 to 154. v0.22's
+functional continuation explicitly qualifies only the observed Chromium
+154/macOS 26.6.2/Apple M5 Pro lane. Its release-specific lane module leaves the
+v0.21 Chromium 151 lane and evidence unchanged. Both the packed functional
+suite and Point-footprint records must be reproduced at the final pin; the
+new browser version is not inferred to pass from the predecessor.
+
+The original mixed-scene binary occupancy-centroid gate is superseded, not
+reported as passing. A feature's occupancy centroid is not a Point position:
+changing a decorative diameter reweights differently colored, overlapping,
+and clipped disks. The attended controls reproduced all nine immutable
+seven-pixel predecessor images exactly. In the five failing scenes, changing
+only the single-sample diameter moved occupancy centroids by 2.25 to 4.57
+pixels; the final candidate differed from the predecessor by 1.21 to 2.55
+pixels. These observations invalidate that statistic as a geometry-displacement
+test. They do not excuse missing named features or new topology bridges.
+
+Canonical center acceptance now requires identical Source identity and payload,
+world origin, authored camera, display mapping, highlight ordinals, viewport,
+generation, settled batch identities, versions, counts, and presentation weights
+for candidate and both controls. Each inherited-diameter control must match
+the immutable predecessor's decoded PNG bytes exactly. The offline verifier
+regenerates these inputs from the pinned corpus and Source bytes, compares the
+decoded control pixels, and checks that both WGSL vertex entry points forward
+the same `point_vertex_values` projection helper's clip position unchanged.
+
+A paired native GPU fixture independently renders the same Frame and PointBatch
+through the legacy seven-pixel path and preferred diameters two through six.
+It covers both camera families, all eight subpixel phases, eight different
+depths, and a billion-unit world origin. Coverage-weighted centroid error from
+the declared projected center must be at most one physical pixel for each
+path, and paired centroid distance must also be at most one pixel. Those maxima
+are bound to the clean implementation pin in the local GPU result artifact.
+The isolated browser DPR trials retain their existing one-pixel centroid bound.
+Mixed-scene occupancy centroids and component registration remain diagnostics;
+they make no claim about movement of individual Points or tiny raster islands.
+
 The v0.22 verifier records both predecessor and candidate metrics rather than
 requiring an intentionally changed image to match v0.21.
 
@@ -164,8 +229,8 @@ partial-edge pixels, connected foreground components, clear-background
 components, two-by-two solid blocks, and the existing feature occupancy and
 centroid facts. Acceptance requires:
 
-- every inherited named feature remains present and its centroid stays within
-  one physical pixel of its v0.21 position;
+- every inherited named feature remains present, and canonical projected
+  centers satisfy the corrective center contract above;
 - foreground fraction remains between 50% and 105% of the predecessor value,
   preventing both hidden sparse structure and new blob coverage;
 - the generated dense regions reduce two-by-two solid-block excess when the
@@ -223,6 +288,16 @@ Repository acceptance proceeds in this order:
 6. the implementation and verifier are pinned, rebuilt, and checked clean; and
 7. a separate attended verify run supplies the final eligible evidence and the
    human-readable release record.
+
+When a later qualification-only correction changes the implementation pin,
+already committed canonical and focused PNGs may remain at that new clean pin
+only if fresh attended record runs reproduce every image byte exactly. The
+new baseline must use that pin's complete implementation, verifier, rebuilt
+runtime, local GPU observations, and actual browser environment. Fresh timings
+and functional observations are collected again; prior timings do not become
+evidence for the new pin. A separate attended verify run still supplies final
+acceptance. Any image change requires the ordinary image-commit and clean-pin
+sequence above.
 
 The v0.22 baseline, evidence, and release record bind the exact package,
 implementation commit, verifier bytes, browser, operating system, adapter,

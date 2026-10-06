@@ -394,11 +394,13 @@ pick authority.
 
 The v0.22 repository lane reuses the immutable v0.21 corpus and predecessor
 images, then produces separate point-footprint baselines, focused DPR and
-fallback evidence, and exact resource/cost facts. The implementation is active,
-but its attended record, implementation pin, rebuilt functional qualification,
-final verify evidence, and [release record](docs/releases/v0.22.0.md) remain
-pending. See the [point-footprint qualification
-guide](docs/guides/browser-point-footprint.md) for the local sequence and
+fallback evidence, and exact resource/cost facts. The attended record,
+implementation pin, rebuilt functional qualification, and separate verify
+evidence pass on the exact local Chromium 154/macOS/Apple M5 Pro lane.
+The complete local command matrix also passes; the bounded repository slice
+is Complete in the [release record](docs/releases/v0.22.0.md). See the
+[point-footprint qualification guide](docs/guides/browser-point-footprint.md)
+for the local sequence and
 evidence boundary. This status does not establish final visual quality,
 physical-display or cross-browser/device equivalence, independent human or
 adopter evidence, API stability, support qualification, beta, v1, or
@@ -410,9 +412,8 @@ attributed disk-v2 caches and explains what progressive Coverage does and does
 not mean.
 
 Later direction and the exact external product gates are described in the
-[living roadmap](ROADMAP.md). The linked v0.15 through v0.21 designs define the
-completed bounded browser scopes; the accepted v0.22 design defines the active
-bounded continuation. Later Candidate themes do not
+[living roadmap](ROADMAP.md). The linked v0.15 through v0.22 designs define the
+completed bounded browser scopes. Later Candidate themes do not
 expand accepted scope by themselves.
 
 ## Embedding model
