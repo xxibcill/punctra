@@ -138,6 +138,18 @@ impl PreparedScene {
     }
 }
 
+/// Fixes a private endpoint control to the measured candidate diameter.
+pub(crate) fn visual_capture_display_diameter(value: f64) -> Option<f32> {
+    if !(MIN_DISPLAY_SIZE_PHYSICAL_PIXELS..=MAX_DISPLAY_SIZE_PHYSICAL_PIXELS).contains(&value) {
+        return None;
+    }
+    #[allow(
+        clippy::cast_possible_truncation,
+        reason = "the finite bounded display value uses the renderer's f32 diameter contract"
+    )]
+    Some(value as f32)
+}
+
 pub(crate) fn projected_density_display_size(
     viewport: Viewport,
     non_retired_resident_points: u64,
@@ -361,6 +373,21 @@ mod tests {
             scene.settle_after_publication(),
             Err(SceneError::PlanningInvariant)
         ));
+    }
+
+    #[test]
+    fn endpoint_display_controls_reject_invalid_diameters() {
+        assert_eq!(
+            visual_capture_display_diameter(2.0).unwrap().to_bits(),
+            2.0_f32.to_bits()
+        );
+        assert_eq!(
+            visual_capture_display_diameter(6.0).unwrap().to_bits(),
+            6.0_f32.to_bits()
+        );
+        for value in [1.99, 6.01, f64::NAN, f64::INFINITY, -1.0] {
+            assert!(visual_capture_display_diameter(value).is_none());
+        }
     }
 
     #[test]

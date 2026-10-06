@@ -1,0 +1,278 @@
+{
+  "schema": "punctra-browser-lod-continuity-corpus-v1",
+  "release": "0.23.0-alpha.1",
+  "authority": "authored_private_fixtures_not_general_browser_child_lod_streaming",
+  "sources": [
+    {
+      "id": "perspective-colored",
+      "recipe": "paired_opaque_9_by_9_cut_v1",
+      "projection": "perspective",
+      "opaque_coincident": false,
+      "source_identity": "a9193a08ac292673c8cf1e6094f4de6aad48d63bce264bef7b59bb1a4a446ff8",
+      "payload_sha256": "a9193a08ac292673c8cf1e6094f4de6aad48d63bce264bef7b59bb1a4a446ff8",
+      "point_count": 162,
+      "batch_point_counts": [
+        81,
+        45,
+        36
+      ],
+      "world_origin": [
+        3000000000,
+        4600000000,
+        6500000000
+      ],
+      "camera": {
+        "eye": [
+          3000000000,
+          4599999995,
+          6500000000
+        ],
+        "target": [
+          3000000000,
+          4600000000,
+          6500000000
+        ],
+        "up": [
+          0,
+          0,
+          1
+        ],
+        "projection": "perspective",
+        "vertical_world_height": null,
+        "vertical_field_of_view_radians": 0.76101273,
+        "near_distance": 0.1,
+        "far_distance": 100
+      },
+      "permission": "Maintainer-authored synthetic Points; repository image publication permitted."
+    },
+    {
+      "id": "perspective-opaque",
+      "recipe": "paired_opaque_9_by_9_cut_v1",
+      "projection": "perspective",
+      "opaque_coincident": true,
+      "source_identity": "fd3fd95bf80c9568be9aa920c0473d23ced4c75aba2ab33ff26d4e0c371fac71",
+      "payload_sha256": "fd3fd95bf80c9568be9aa920c0473d23ced4c75aba2ab33ff26d4e0c371fac71",
+      "point_count": 162,
+      "batch_point_counts": [
+        81,
+        45,
+        36
+      ],
+      "world_origin": [
+        3000000000,
+        4600000000,
+        6500000000
+      ],
+      "camera": {
+        "eye": [
+          3000000000,
+          4599999995,
+          6500000000
+        ],
+        "target": [
+          3000000000,
+          4600000000,
+          6500000000
+        ],
+        "up": [
+          0,
+          0,
+          1
+        ],
+        "projection": "perspective",
+        "vertical_world_height": null,
+        "vertical_field_of_view_radians": 0.76101273,
+        "near_distance": 0.1,
+        "far_distance": 100
+      },
+      "permission": "Maintainer-authored synthetic Points; repository image publication permitted."
+    },
+    {
+      "id": "orthographic-colored",
+      "recipe": "paired_opaque_9_by_9_cut_v1",
+      "projection": "orthographic",
+      "opaque_coincident": false,
+      "source_identity": "a372aba893efa4aa1d54d199ad1b0e5edc6fdff6a02aab6275d8d86ad25ced96",
+      "payload_sha256": "a372aba893efa4aa1d54d199ad1b0e5edc6fdff6a02aab6275d8d86ad25ced96",
+      "point_count": 162,
+      "batch_point_counts": [
+        81,
+        45,
+        36
+      ],
+      "world_origin": [
+        3000000000,
+        4600000000,
+        6500000000
+      ],
+      "camera": {
+        "eye": [
+          3000000000,
+          4599999995,
+          6500000000
+        ],
+        "target": [
+          3000000000,
+          4600000000,
+          6500000000
+        ],
+        "up": [
+          0,
+          0,
+          1
+        ],
+        "projection": "orthographic",
+        "vertical_world_height": 4,
+        "vertical_field_of_view_radians": null,
+        "near_distance": 0.1,
+        "far_distance": 100
+      },
+      "permission": "Maintainer-authored synthetic Points; repository image publication permitted."
+    },
+    {
+      "id": "orthographic-opaque",
+      "recipe": "paired_opaque_9_by_9_cut_v1",
+      "projection": "orthographic",
+      "opaque_coincident": true,
+      "source_identity": "d41e0d9411d0004c9663f4d7d9d72e7b3af6d90328e5bee6464e2fc9eed159bc",
+      "payload_sha256": "d41e0d9411d0004c9663f4d7d9d72e7b3af6d90328e5bee6464e2fc9eed159bc",
+      "point_count": 162,
+      "batch_point_counts": [
+        81,
+        45,
+        36
+      ],
+      "world_origin": [
+        3000000000,
+        4600000000,
+        6500000000
+      ],
+      "camera": {
+        "eye": [
+          3000000000,
+          4599999995,
+          6500000000
+        ],
+        "target": [
+          3000000000,
+          4600000000,
+          6500000000
+        ],
+        "up": [
+          0,
+          0,
+          1
+        ],
+        "projection": "orthographic",
+        "vertical_world_height": 4,
+        "vertical_field_of_view_radians": null,
+        "near_distance": 0.1,
+        "far_distance": 100
+      },
+      "permission": "Maintainer-authored synthetic Points; repository image publication permitted."
+    }
+  ],
+  "profiles": [
+    {
+      "id": "dpr1",
+      "css_width": 320,
+      "css_height": 240,
+      "requested_device_pixel_ratio": 1,
+      "physical_width": 320,
+      "physical_height": 240
+    },
+    {
+      "id": "dpr2",
+      "css_width": 320,
+      "css_height": 240,
+      "requested_device_pixel_ratio": 2,
+      "physical_width": 640,
+      "physical_height": 480
+    },
+    {
+      "id": "dpr4",
+      "css_width": 320,
+      "css_height": 240,
+      "requested_device_pixel_ratio": 4,
+      "physical_width": 1280,
+      "physical_height": 960
+    }
+  ],
+  "recreations": 3,
+  "presented_steps": 8,
+  "seed": 9029,
+  "quiet_frames": 30,
+  "image_limits": {
+    "common_foreground_coverage": 0.25,
+    "quantization_bytes": 1,
+    "maximum_changed_common_fraction": 0.25,
+    "maximum_temporal_rmse": 0.4
+  },
+  "timing_limits": {
+    "first_coverage_milliseconds": 10000,
+    "settled_view_milliseconds": 15000,
+    "frame_callback_p95_milliseconds": 50,
+    "frame_submission_p95_milliseconds": 16.7,
+    "canonical_predecessor_p95_ratio": 2
+  },
+  "resource_limits": {
+    "renderer_transient_bytes": 67108864,
+    "live_canonical_bytes": 33554432,
+    "encoded_archive_bytes": 134217728,
+    "evidence_json_bytes": 16777216,
+    "archive_entries": 2048
+  },
+  "trials": [
+    {
+      "id": "opaque-perspective",
+      "source": "perspective-opaque",
+      "kind": "opaque_coincident",
+      "stationary": true
+    },
+    {
+      "id": "opaque-orthographic",
+      "source": "orthographic-opaque",
+      "kind": "opaque_coincident",
+      "stationary": true
+    },
+    {
+      "id": "refine-perspective",
+      "source": "perspective-colored",
+      "kind": "refine",
+      "stationary": true
+    },
+    {
+      "id": "coarsen-orthographic",
+      "source": "orthographic-colored",
+      "kind": "coarsen",
+      "stationary": true
+    },
+    {
+      "id": "moving-refine-perspective",
+      "source": "perspective-colored",
+      "kind": "moving_refine",
+      "stationary": false
+    },
+    {
+      "id": "interrupted-refine-perspective",
+      "source": "perspective-colored",
+      "kind": "interruption",
+      "stationary": false
+    }
+  ],
+  "predecessor": {
+    "release": "0.22.0-alpha.1",
+    "implementation_commit": "52ae3afb9312d6968a10c3aeec42b3c8555a86d1",
+    "baseline_path": "docs/releases/v0.22-browser-point-footprint-baseline.json",
+    "canonical_trials": 9,
+    "decoded_pixels": "exact"
+  },
+  "external_evidence": {
+    "physical_display": false,
+    "independent_interpretation": false,
+    "independent_adopter": false,
+    "broad_browser_support": false,
+    "support_qualified": false,
+    "release_candidate": false
+  }
+}

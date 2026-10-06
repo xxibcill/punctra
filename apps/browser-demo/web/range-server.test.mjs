@@ -96,7 +96,7 @@ test("point-footprint pin endpoint binds the running checkout and verifier", asy
       sha256: createHash("sha256").update(verifierBytes).digest("hex"),
     });
     assert.equal(payload.running.runtime.package_name, "@punctra/viewer");
-    assert.equal(payload.running.runtime.package_version, "0.22.0-alpha.1");
+    assert.equal(payload.running.runtime.package_version, "0.23.0-alpha.1");
     assert.deepEqual(
       payload.running.runtime.artifacts.map(({ path: artifactPath }) => artifactPath),
       [
@@ -179,6 +179,27 @@ test("point-footprint pin endpoint binds the running checkout and verifier", asy
   }
 });
 
+test("paired LOD timing serves only the exact frozen predecessor artifacts", async () => {
+  const { server, port } = await startServer();
+  const origin = `http://127.0.0.1:${port}`;
+  const frozen = JSON.parse(await readFile(new URL("../../../docs/releases/v0.22-browser-point-footprint-baseline.json", import.meta.url))).pins.runtime;
+  try {
+    const pins = await (await fetch(`${origin}/qualification-lod-pins.json`)).json();
+    const paired = pins.running.paired_predecessor_runtime;
+    assert.equal(paired.package_version, "0.22.0-alpha.1");
+    for (const [index, relative] of ["package.json", "pkg/browser_demo.js", "pkg/browser_demo_bg.wasm"].entries()) {
+      const response = await fetch(`${origin}/qualification-lod-legacy-runtime/${relative}`);
+      assert.equal(response.status, 200);
+      const bytes = Buffer.from(await response.arrayBuffer());
+      assert.equal(bytes.byteLength, frozen.artifacts[index].byte_length);
+      assert.equal(createHash("sha256").update(bytes).digest("hex"), frozen.artifacts[index].sha256);
+      assert.equal(paired.artifacts[index].sha256, frozen.artifacts[index].sha256);
+    }
+    assert.equal((await fetch(`${origin}/qualification-lod-legacy-runtime/sdk.js`)).status, 404);
+    assert.equal((await fetch(`${origin}/qualification-lod-legacy-runtime/pkg/%2e%2e%2fsdk.js`)).status, 404);
+  } finally { await stopServer(server); }
+});
+
 test("opt-in local server persists a bounded visual evidence TAR", async () => {
   const exportDirectory = await mkdtemp(
     path.join(tmpdir(), "punctra-visual-export-"),
@@ -237,6 +258,35 @@ test("opt-in local server persists a bounded visual evidence TAR", async () => {
       persisted,
     );
     assert.deepEqual(await readdir(exportDirectory), [visualExportFilename]);
+  } finally {
+    await stopServer(server);
+    await rm(exportDirectory, { recursive: true });
+  }
+});
+
+test("functional JSON export is bounded, same-origin and cannot replace prior evidence", async () => {
+  const exportDirectory = await mkdtemp(path.join(tmpdir(), "punctra-functional-export-"));
+  const { server, port } = await startServer(["--lod-export-dir", exportDirectory]);
+  const origin = `http://127.0.0.1:${port}`;
+  const filename = "v0.23-browser-functional-observation.json";
+  const bytes = new TextEncoder().encode('{"schema":"local-observed-test-v1"}\n');
+  const headers = { "Content-Type": "application/json", Origin: origin };
+  try {
+    const post = (body, override = {}) => fetch(`${origin}/qualification-functional-export`, {
+      method: "POST", headers: { ...headers, ...override }, body,
+    });
+    assert.equal((await post(bytes, { Origin: "http://foreign.invalid" })).status, 403);
+    assert.equal((await post(bytes, { "Content-Type": "application/x-tar" })).status, 415);
+    assert.equal(await rawVisualExportStatus(port, { origin, contentLength: 1_048_577,
+      requestPath: "/qualification-functional-export", contentType: "application/json" }), 413);
+    const response = await post(bytes);
+    assert.equal(response.status, 201);
+    assert.deepEqual(await response.json(), { schema: "punctra-browser-functional-export-receipt-v1", filename,
+      path: path.join(await realpath(exportDirectory), filename), byte_length: bytes.byteLength,
+      sha256: createHash("sha256").update(bytes).digest("hex") });
+    assert.equal((await post(new TextEncoder().encode("changed"))).status, 409);
+    assert.deepEqual(await readFile(path.join(exportDirectory, filename)), Buffer.from(bytes));
+    assert.deepEqual(await readdir(exportDirectory), [filename]);
   } finally {
     await stopServer(server);
     await rm(exportDirectory, { recursive: true });
@@ -548,13 +598,15 @@ async function rawVisualExportStatus(port, {
   origin,
   contentLength,
   body = new Uint8Array(),
+  requestPath = "/qualification-visual-export",
+  contentType = "application/x-tar",
 }) {
   const socket = createConnection({ host: "127.0.0.1", port });
   await once(socket, "connect");
   const headers = [
-    "POST /qualification-visual-export HTTP/1.1",
+    `POST ${requestPath} HTTP/1.1`,
     `Host: ${host}`,
-    "Content-Type: application/x-tar",
+    `Content-Type: ${contentType}`,
     "Connection: close",
   ];
   if (origin !== undefined) headers.push(`Origin: ${origin}`);

@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Punctra v0.23 LOD continuity qualification</title>
+    <link rel="stylesheet" href="./footprint.css" />
+  </head>
+  <body data-lod-runner="loading">
+    <header class="instrument-header"><div><p class="instrument-kicker">Private attended qualification · authored cut fixtures</p><h1>LOD continuity / v0.23</h1></div></header>
+    <main class="instrument-grid">
+      <section class="capture-column" aria-label="Current qualification frame">
+        <div class="capture-stage"><canvas id="lod-canvas" width="640" height="480" aria-label="LOD continuity renderer"></canvas></div>
+        <section class="runner-state" aria-live="polite"><p id="lod-status">Loading closed corpora…</p></section>
+        <p id="lod-transport">No archive has been exported.</p>
+        <details class="evidence-details"><summary>Evidence summary</summary><pre id="lod-evidence">No evidence yet.</pre></details>
+      </section>
+      <aside class="instrument-console">
+        <div class="console-heading"><h2>Qualification console</h2></div>
+        <div class="console-controls">
+          <label>Evidence mode<select id="lod-mode"><option value="verify">Verify pinned v0.23 baseline</option><option value="record">Record v0.23 baseline</option></select></label>
+          <label>Attended session<input id="lod-session" value="codex-local-maintainer-not-human" maxlength="64" autocomplete="off" /></label>
+          <button id="run-lod" class="run-button" type="button" disabled>Run bounded qualification</button>
+          <p class="console-note">Keep this page visible. The run recreates every authored transition at DPR 1, 2 and 4, compares nine inherited canonical views, and probes invalid controls and fallback.</p>
+        </div>
+        <dl class="acceptance-ledger"><div><dt>Presented steps</dt><dd>8 maximum</dd></div><div><dt>New clear common pixels</dt><dd>0</dd></div><div><dt>Stationary changed fraction</dt><dd>≤ 25%, rounded up</dd></div><div><dt>Temporal RGBA RMSE</dt><dd>≤ 0.40</dd></div></dl>
+      </aside>
+    </main>
+    <footer class="instrument-footer"><p>Authored private fixtures, offscreen RGBA8 captures and provisional nominal picks. This run does not establish physical-display, independent interpretation, adoption or support qualification.</p></footer>
+    <script type="module" src="./lod-main.js"></script>
+  </body>
+</html>

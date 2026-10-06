@@ -7,7 +7,7 @@ use thiserror::Error;
 
 use crate::diagnostics::PointFootprintFacts;
 use crate::host::{MAX_CANVAS_DIMENSION, MAX_CANVAS_PIXELS};
-use crate::streaming::VisualBatchFacts;
+use crate::streaming::{VisualBatchFacts, VisualRasterFacts};
 
 const CAPTURE_BYTES_PER_PIXEL: u32 = 4;
 
@@ -95,6 +95,8 @@ pub(crate) struct CaptureFrameFacts {
     renderer_transient_texture_bytes: u64,
     point_footprint: PointFootprintFacts,
     batches: Vec<VisualBatchFacts>,
+    raster_transitions: Vec<VisualRasterFacts>,
+    raster_transition_batches: u64,
 }
 
 impl CaptureFrameFacts {
@@ -115,7 +117,19 @@ impl CaptureFrameFacts {
             renderer_transient_texture_bytes,
             point_footprint,
             batches,
+            raster_transitions: Vec::new(),
+            raster_transition_batches: 0,
         }
+    }
+
+    pub(crate) fn with_raster_transitions(
+        mut self,
+        transitions: Vec<VisualRasterFacts>,
+        controlled_batches: u64,
+    ) -> Self {
+        self.raster_transitions = transitions;
+        self.raster_transition_batches = controlled_batches;
+        self
     }
 }
 
@@ -293,6 +307,10 @@ struct PendingCaptureFacts {
     point_footprint: PointFootprintFacts,
     batch_state_authority: &'static str,
     batches: Vec<VisualBatchFacts>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    raster_transitions: Vec<VisualRasterFacts>,
+    #[serde(skip_serializing_if = "is_zero")]
+    raster_transition_batches: u64,
     source_format: &'static str,
     source_channel_order: &'static str,
     source_encoding: &'static str,
@@ -327,6 +345,8 @@ impl PendingCaptureFacts {
             point_footprint: frame.point_footprint,
             batch_state_authority: "renderer_accepted_updates",
             batches: frame.batches,
+            raster_transitions: frame.raster_transitions,
+            raster_transition_batches: frame.raster_transition_batches,
             source_format: layout.source.format_name,
             source_channel_order: layout.source.channel_order.name(),
             source_encoding: layout.source.encoding,
@@ -344,6 +364,14 @@ impl PendingCaptureFacts {
             staging_buffer_bytes: layout.staging_bytes,
         }
     }
+}
+
+#[allow(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "Serde skip predicates require a reference"
+)]
+fn is_zero(value: &u64) -> bool {
+    *value == 0
 }
 
 /// A rejected capture format, layout, or mapped byte range.
@@ -520,7 +548,8 @@ mod tests {
                 4.25,
             ),
             vec![VisualBatchFacts::resident(0, 1, 2, 42, 96)],
-        );
+        )
+        .with_raster_transitions(Vec::new(), 0);
         assert_eq!(layout.dimensions(), [65, 2]);
         assert_eq!(layout.texture_format(), wgpu::TextureFormat::Bgra8UnormSrgb);
         let value: serde_json::Value =

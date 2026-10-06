@@ -10,9 +10,9 @@ struct CameraUniform {
 struct BatchUniform {
     origin_from_camera: vec4<f32>,
     presentation_weight: f32,
-    _presentation_padding_0: f32,
-    _presentation_padding_1: f32,
-    _presentation_padding_2: f32,
+    raster_seed: u32,
+    raster_step: u32,
+    raster_side: u32,
 }
 
 @group(0) @binding(0)
@@ -118,7 +118,8 @@ fn multisample_point_vertex(
 
 @fragment
 fn point_fragment(input: VertexOutput) -> @location(0) vec4<f32> {
-    if input.source_alpha <= 0.0 || !inside_splat(input.corner) {
+    if input.source_alpha <= 0.0 || !inside_splat(input.corner)
+        || !raster_visible(input.clip_position.xy) {
         discard;
     }
     return input.color;
@@ -126,7 +127,8 @@ fn point_fragment(input: VertexOutput) -> @location(0) vec4<f32> {
 
 @fragment
 fn eye_dome_point_fragment(input: VertexOutput) -> @location(0) vec4<f32> {
-    if input.source_alpha <= 0.0 || !inside_splat(input.corner) {
+    if input.source_alpha <= 0.0 || !inside_splat(input.corner)
+        || !raster_visible(input.clip_position.xy) {
         discard;
     }
     return input.color;
@@ -134,7 +136,8 @@ fn eye_dome_point_fragment(input: VertexOutput) -> @location(0) vec4<f32> {
 
 @fragment
 fn multisample_point_fragment(input: MultisampleVertexOutput) -> @location(0) vec4<f32> {
-    if input.source_alpha <= 0.0 || !inside_splat(input.corner) {
+    if input.source_alpha <= 0.0 || !inside_splat(input.corner)
+        || !raster_visible(input.clip_position.xy) {
         discard;
     }
     return input.color;
@@ -144,7 +147,8 @@ fn multisample_point_fragment(input: MultisampleVertexOutput) -> @location(0) ve
 fn multisample_eye_dome_point_fragment(
     input: MultisampleVertexOutput,
 ) -> @location(0) vec4<f32> {
-    if input.source_alpha <= 0.0 || !inside_splat(input.corner) {
+    if input.source_alpha <= 0.0 || !inside_splat(input.corner)
+        || !raster_visible(input.clip_position.xy) {
         discard;
     }
     return input.color;
@@ -154,7 +158,8 @@ fn multisample_eye_dome_point_fragment(
 fn eye_dome_depth_fragment(input: VertexOutput) {
     if input.source_alpha <= 0.0
         || batch.presentation_weight <= 0.0
-        || !inside_splat(input.corner) {
+        || !inside_splat(input.corner)
+        || !raster_visible(input.clip_position.xy) {
         discard;
     }
 }
@@ -169,4 +174,17 @@ fn pick_fragment(input: VertexOutput) -> @location(0) u32 {
 
 fn inside_splat(corner: vec2<f32>) -> bool {
     return dot(corner, corner) <= 1.0;
+}
+
+fn raster_visible(position: vec2<f32>) -> bool {
+    if batch.raster_side == 0u {
+        return true;
+    }
+    let pixel = vec2<u32>(floor(position));
+    var rank = pixel.x ^ (pixel.y * 0x9e3779b9u) ^ batch.raster_seed;
+    rank = (rank ^ (rank >> 16u)) * 0x7feb352du;
+    rank = (rank ^ (rank >> 15u)) * 0x846ca68bu;
+    rank = (rank ^ (rank >> 16u)) & 255u;
+    let incoming = rank < batch.raster_step * 32u;
+    return select(!incoming, incoming, batch.raster_side == 1u);
 }

@@ -13,13 +13,12 @@ import {
   recreationRequiredRecoveryEvidence,
 } from "../apps/browser-demo/web/qualification.js";
 import {
-  QUALIFICATION_LANE,
-  QUALIFICATION_RUNTIME_LANE,
-} from "../apps/browser-demo/web/qualification-lane-v0.22.js";
+  qualificationProfileForId,
+} from "../apps/browser-demo/web/qualification-lane-v0.23.js";
 
 const changelogUrl = new URL("../CHANGELOG.md", import.meta.url);
-const matrixUrl = new URL("../docs/releases/v0.22-browser-matrix.json", import.meta.url);
-const releaseRecordUrl = new URL("../docs/releases/v0.22.0.md", import.meta.url);
+const matrixUrl = new URL("../docs/releases/v0.23-browser-matrix.json", import.meta.url);
+const releaseRecordUrl = new URL("../docs/releases/v0.23.0.md", import.meta.url);
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
 const qualificationViewerPackage = path.join(
   repositoryRoot,
@@ -44,19 +43,20 @@ const QUALIFICATION_VERIFIER_SHA256 = createHash("sha256").update(verifierSource
 const EXPECTED_OBSERVATION_DATE = "2026-10-06";
 const EXPECTED_UNQUALIFIED_ENTRIES = Object.freeze([
   Object.freeze({
-    browser: "Google Chrome 150.0.7871.115",
-    reason: "Installed locally but no connected browser-control surface was available for an attended packed-consumer WebGPU run.",
+    browser: "Google Chrome 154.0.8037.98",
+    reason: "Installed locally but not executed in the v0.23 attended packed-consumer WebGPU lane.",
   }),
   Object.freeze({
-    browser: "Safari 26.5.2",
-    reason: "Installed locally but no supported browser-control surface was available for an attended packed-consumer WebGPU run.",
+    browser: "Safari 26.6.2",
+    reason: "Installed locally but not executed in the v0.23 attended packed-consumer WebGPU lane.",
   }),
   Object.freeze({
     browser: "All other browser, OS, adapter, display, and mobile combinations",
-    reason: "Not executed in the v0.22 repository qualification lane.",
+    reason: "Not executed in the v0.23 repository qualification lane.",
   }),
 ]);
 const QUALIFIED_IMPLEMENTATION_PATHS = [
+  ".gitignore",
   "Cargo.toml",
   "Cargo.lock",
   "fuzz",
@@ -64,6 +64,9 @@ const QUALIFIED_IMPLEMENTATION_PATHS = [
   "examples",
   "apps",
   "packages",
+  "scripts",
+  "docs/api/browser-sdk.md",
+  "docs/design/lod-density-transition-continuity-v0.23.md",
   "scripts/build-browser-demo.sh",
   "scripts/build-browser-sdk.sh",
   "scripts/generate-browser-sdk-reference.mjs",
@@ -162,7 +165,7 @@ export function verifyUnqualifiedEntries(entries) {
   assert.deepEqual(
     entries,
     EXPECTED_UNQUALIFIED_ENTRIES,
-    "unqualified platform classes must match the frozen v0.22 matrix",
+    "unqualified platform classes must match the frozen v0.23 matrix",
   );
 }
 
@@ -180,7 +183,7 @@ export function releaseVerifierSha256(releaseRecord) {
 
 export function changelogImplementationCommit(changelog) {
   const match = changelog.match(/implementation commit `([0-9a-f]{40})`/);
-  assert.ok(match, "changelog must contain one full v0.22 implementation commit SHA");
+  assert.ok(match, "changelog must contain one full v0.23 implementation commit SHA");
   return match[1];
 }
 
@@ -357,8 +360,11 @@ function evaluationRecord(entry) {
 }
 
 function verifyQualifiedLane(entry) {
-  assert.equal(entry.id, QUALIFICATION_LANE.id);
-  assert.equal(entry.status, QUALIFICATION_LANE.status);
+  const profile = qualificationProfileForId(entry.id);
+  assert.ok(profile, "qualified session profile is not declared");
+  const { lane: expectedLane, runtime: expectedRuntime } = profile;
+  assert.equal(entry.id, expectedLane.id);
+  assert.equal(entry.status, expectedLane.status);
   for (const section of [
     "browser",
     "operating_system",
@@ -369,7 +375,7 @@ function verifyQualifiedLane(entry) {
   ]) {
     assert.deepEqual(
       entry[section],
-      QUALIFICATION_LANE[section],
+      expectedLane[section],
       `qualified ${section} facts must match the exact recorded lane`,
     );
   }
@@ -377,7 +383,7 @@ function verifyQualifiedLane(entry) {
     {
       id: entry.id,
       host: {
-        schema: QUALIFICATION_RUNTIME_LANE.host.schema,
+        schema: expectedRuntime.host.schema,
         operatingSystem: {
           name: entry.operating_system.name,
           version: entry.operating_system.version,
@@ -392,7 +398,7 @@ function verifyQualifiedLane(entry) {
           metalSupport: entry.device.metal_support,
         },
         displayPath: entry.display.display_path,
-        package: QUALIFICATION_RUNTIME_LANE.host.package,
+        package: expectedRuntime.host.package,
       },
       browser: {
         userAgent: entry.browser.user_agent,
@@ -437,7 +443,7 @@ function verifyQualifiedLane(entry) {
         adapter_max_color_attachments: entry.webgpu.max_color_attachments,
       },
     },
-    QUALIFICATION_RUNTIME_LANE,
+    expectedRuntime,
     "checked-in exact lane must match the runtime qualification gate",
   );
 }

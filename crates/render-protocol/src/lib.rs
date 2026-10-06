@@ -31,6 +31,7 @@
 #![warn(missing_docs)]
 
 mod camera;
+mod raster_transition;
 mod viewport;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -39,6 +40,7 @@ pub use point_contracts::{PointId, SourceId};
 use thiserror::Error;
 
 pub use camera::{Camera, CameraBasis, CameraError, CameraProjection};
+pub use raster_transition::{RasterTransition, RasterTransitionSide};
 pub use viewport::{Viewport, ViewportError};
 
 /// Estimated GPU bytes for one point in the protocol's residency model.
@@ -311,6 +313,18 @@ pub enum RenderUpdate {
         /// The color-only presentation weight.
         weight: PresentationWeight,
     },
+    /// Changes disposable color/visibility-depth raster coverage for one exact
+    /// resident batch. Nominal picks and authority remain independent.
+    SetBatchRasterTransition {
+        /// The View generation this conditional update belongs to.
+        view_generation: ViewGenerationKey,
+        /// The exact resident batch to control.
+        key: BatchKey,
+        /// The version the caller expects to be resident.
+        expected_version: BatchVersion,
+        /// The complete validated raster-coverage request.
+        transition: RasterTransition,
+    },
     /// Replaces the complete set of highlighted caller point identities.
     SetHighlights {
         /// The view generation the highlight set belongs to.
@@ -330,6 +344,9 @@ impl RenderUpdate {
                 view_generation, ..
             }
             | Self::SetBatchPresentation {
+                view_generation, ..
+            }
+            | Self::SetBatchRasterTransition {
                 view_generation, ..
             }
             | Self::SetHighlights {
@@ -361,6 +378,13 @@ pub enum UpdateEffect<'update> {
         key: BatchKey,
         /// The accepted color presentation weight.
         weight: PresentationWeight,
+    },
+    /// Apply one conditional raster-coverage request to an exact resident batch.
+    BatchRasterTransitionSet {
+        /// The accepted resident batch key.
+        key: BatchKey,
+        /// The complete accepted raster-coverage request.
+        transition: RasterTransition,
     },
     /// Replace renderer highlighting from the state model's accepted set.
     HighlightsSet,
@@ -512,6 +536,8 @@ pub enum UpdateKind {
     BatchRemoved,
     /// A resident batch's color presentation weight changed.
     BatchPresentationSet,
+    /// A resident batch's disposable raster coverage changed.
+    BatchRasterTransitionSet,
     /// The complete highlight set changed.
     HighlightsSet,
 }
@@ -711,10 +737,32 @@ impl RenderStateModel {
                 expected_version,
                 weight,
             } => (
-                self.apply_batch_presentation(*view_generation, *key, *expected_version)?,
+                self.apply_batch_control(
+                    *view_generation,
+                    *key,
+                    *expected_version,
+                    UpdateKind::BatchPresentationSet,
+                )?,
                 UpdateEffect::BatchPresentationSet {
                     key: *key,
                     weight: *weight,
+                },
+            ),
+            RenderUpdate::SetBatchRasterTransition {
+                view_generation,
+                key,
+                expected_version,
+                transition,
+            } => (
+                self.apply_batch_control(
+                    *view_generation,
+                    *key,
+                    *expected_version,
+                    UpdateKind::BatchRasterTransitionSet,
+                )?,
+                UpdateEffect::BatchRasterTransitionSet {
+                    key: *key,
+                    transition: *transition,
                 },
             ),
             RenderUpdate::SetHighlights {
@@ -926,11 +974,12 @@ impl RenderStateModel {
         Ok(self.report(UpdateKind::HighlightsSet, 0, 0, 0, 0))
     }
 
-    fn apply_batch_presentation(
+    fn apply_batch_control(
         &self,
         view_generation: ViewGenerationKey,
         key: BatchKey,
         expected_version: BatchVersion,
+        kind: UpdateKind,
     ) -> Result<UpdateReport, ProtocolError> {
         self.require_active_view_generation(view_generation)?;
         let resident = self
@@ -945,7 +994,7 @@ impl RenderStateModel {
                 expected: expected_version,
             });
         }
-        Ok(self.report(UpdateKind::BatchPresentationSet, 0, 0, 0, 0))
+        Ok(self.report(kind, 0, 0, 0, 0))
     }
 
     fn require_active_view_generation(
@@ -1010,6 +1059,12 @@ fn enforce_limit(
 /// Errors returned while constructing or applying protocol values.
 #[derive(Clone, Debug, Eq, Error, PartialEq)]
 pub enum ProtocolError {
+    /// A raster transition exceeded its bounded progress interval.
+    #[error("raster transition step {step} exceeds the maximum of 8")]
+    InvalidRasterTransitionStep {
+        /// The rejected progress step.
+        step: u8,
+    },
     /// One origin-relative position component was NaN or infinite.
     #[error("relative position axis {axis} is not finite")]
     NonFiniteRelativePosition {

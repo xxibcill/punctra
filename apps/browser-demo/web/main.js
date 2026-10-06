@@ -1,4 +1,5 @@
 import { failureLabel, failureState } from "./failure-policy.js";
+import { sha256Hex } from "./visual-png.js";
 
 const BUILD_CACHE_TOKEN = encodeURIComponent(
   new URL(import.meta.url).searchParams.get("v") ?? "unversioned",
@@ -30,6 +31,7 @@ const canvasShell = document.querySelector("#canvas-shell");
 const statusBlock = document.querySelector("#status-block");
 const statusMessage = document.querySelector("#status-message");
 const diagnosticOutput = document.querySelector("#diagnostic-output");
+const exportAcceptanceButton = document.querySelector("#export-acceptance");
 const recoveryBlock = document.querySelector("#recovery-block");
 const recoveryMessage = document.querySelector("#recovery-message");
 const capabilityFacts = document.querySelector("#capability-facts");
@@ -251,7 +253,9 @@ async function loadQualificationHost() {
 async function runSmokePath() {
   smokeRunning = true;
   smokePassed = false;
+  exportAcceptanceButton.disabled = true;
   smokeRecord = { schema: ACCEPTANCE_SCHEMA };
+  const implementationPins = await loadFunctionalImplementationPins();
   const environment = captureEnvironment({ host: await loadQualificationHost() });
   const heap = { before: captureJsHeap(performance) };
   setHarnessState("checking", "Running browser/device qualification checks…");
@@ -265,9 +269,16 @@ async function runSmokePath() {
   const delivery = await runDeliveryQualification(heap);
   const presentation = await runPresentationQualification(delivery.warm);
   const performanceEvidence = await runPerformanceQualification({ lifecycle, delivery }, heap);
+  const completedEnvironment = captureEnvironment({ host: environment.host });
+  const completedLane = evaluateQualificationLane(completedEnvironment, viewer.state());
+  assertFact(completedLane.passed && completedLane.lane === runtimeLane.lane,
+    "exact qualification profile changed during functional acceptance");
 
   smokeRecord = {
     schema: ACCEPTANCE_SCHEMA,
+    completed_environment: completedEnvironment,
+    implementation_commit: implementationPins.implementation.commit,
+    runtime_pins: implementationPins.runtime,
     package_version: performanceEvidence.finalState.packageVersion,
     environment,
     runtime_lane: runtimeLane,
@@ -310,6 +321,7 @@ async function runSmokePath() {
     ],
   };
   smokePassed = true;
+  exportAcceptanceButton.disabled = false;
   smokeRunning = false;
   publishState(viewer.state());
   setHarnessState(
@@ -318,10 +330,42 @@ async function runSmokePath() {
   );
 }
 
+async function loadFunctionalImplementationPins() {
+  const response = await fetch("./qualification-lod-pins.json", { cache: "no-store", credentials: "same-origin" });
+  assertFact(response.ok, "current implementation pin endpoint");
+  const pins = await response.json();
+  assertFact(pins.schema === "punctra-browser-lod-pins-v1" && pins.implementation_clean
+    && pins.implementation_dirty_paths.length === 0, "clean current implementation pin");
+  return pins.running;
+}
+
+async function exportAcceptance() {
+  if (!smokePassed || smokeRunning) return;
+  try {
+    const pins = await loadFunctionalImplementationPins();
+    assertFact(pins.implementation.commit === smokeRecord.implementation_commit
+      && pins.runtime.packed_artifact.sha256 === smokeRecord.runtime_pins.packed_artifact.sha256, "unchanged implementation at functional export");
+    const record = { schema: "punctra-browser-functional-observation-v1", observed_on: new Date().toISOString().slice(0, 10),
+      acceptance: smokeRecord };
+    assertFact(location.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(location.hostname), "loopback functional export");
+    const bytes = new TextEncoder().encode(`${JSON.stringify(record, null, 2)}\n`);
+    const response = await fetch("./qualification-functional-export", { method: "POST", mode: "same-origin",
+      credentials: "same-origin", cache: "no-store", redirect: "error", headers: { "Content-Type": "application/json" }, body: bytes });
+    assertFact(response.status === 201, `functional export HTTP ${response.status}`);
+    const receipt = await response.json();
+    assertFact(receipt.schema === "punctra-browser-functional-export-receipt-v1"
+      && receipt.filename === "v0.23-browser-functional-observation.json"
+      && receipt.byte_length === bytes.byteLength && receipt.sha256 === await sha256Hex(bytes), "exact functional export receipt");
+    document.querySelector("#functional-export-status").textContent = `Acceptance JSON persisted: ${receipt.path}`;
+  } catch (error) {
+    document.querySelector("#functional-export-status").textContent = `Acceptance export failed: ${error.message}. Configure an empty --lod-export-dir for this local server.`;
+  }
+}
+
 function assertInitialQualification(initial, runtimeLane) {
   assertFact(runtimeLane.passed, `exact qualification lane: ${runtimeLane.failures.join("; ")}`);
   const state = viewer.render();
-  assertFact(state.packageVersion === "0.22.0-alpha.1", "v0.22 package version");
+  assertFact(state.packageVersion === "0.23.0-alpha.1", "v0.23 package version");
   assertFact(state.capabilities.secure_context === true, "secure context");
   assertFact(state.capabilities.webgpu === true, "WebGPU capability");
   assertFact(state.source.publishedPoints === 1_089, "generated fixture Points");
@@ -1046,6 +1090,7 @@ displaySelect.addEventListener("change", changeDisplay);
 projectionButton.addEventListener("click", toggleProjection);
 clearButton.addEventListener("click", clearHighlight);
 shutdownButton.addEventListener("click", shutdown);
+exportAcceptanceButton.addEventListener("click", () => void exportAcceptance());
 document.addEventListener("visibilitychange", synchronizeDocumentVisibility);
 new ResizeObserver(scheduleResize).observe(canvasShell);
 

@@ -2,8 +2,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use point_view::{AvailableNode, NodeKey, NodeStatus, RetainedNode, ViewPlan};
 use render_protocol::{
-    BatchKey, BatchVersion, PresentationWeight, RenderLimits, RenderUpdate, UpdateReport,
-    ViewGenerationKey, Viewport,
+    BatchKey, BatchVersion, RasterTransition, RasterTransitionSide, RenderLimits, RenderUpdate,
+    UpdateReport, ViewGenerationKey, Viewport,
 };
 use render_wgpu::{EyeDomeLighting, PointFootprint, RendererConfig, RendererError, WgpuRenderer};
 
@@ -25,7 +25,7 @@ pub(crate) fn renderer_appearance_config(
         .with_point_footprint(PointFootprint::Antialiased)
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub(crate) struct ConditionalBatch {
     pub(crate) view_generation: ViewGenerationKey,
     pub(crate) key: BatchKey,
@@ -36,7 +36,7 @@ pub(crate) struct ConditionalBatch {
 pub(crate) enum TransitionAction {
     Present {
         batch: ConditionalBatch,
-        weight: PresentationWeight,
+        transition: RasterTransition,
     },
     Retire(ConditionalBatch),
 }
@@ -44,11 +44,11 @@ pub(crate) enum TransitionAction {
 impl TransitionAction {
     pub(crate) fn render_update(self) -> RenderUpdate {
         match self {
-            Self::Present { batch, weight } => RenderUpdate::SetBatchPresentation {
+            Self::Present { batch, transition } => RenderUpdate::SetBatchRasterTransition {
                 view_generation: batch.view_generation,
                 key: batch.key,
                 expected_version: batch.expected_version,
-                weight,
+                transition,
             },
             Self::Retire(batch) => RenderUpdate::Remove {
                 view_generation: batch.view_generation,
@@ -80,35 +80,68 @@ pub(crate) fn apply_transition_action(
 
 #[derive(Clone, Debug)]
 struct ActiveTransition {
-    retiring: ConditionalBatch,
-    replacements: Vec<ConditionalBatch>,
+    outgoing: Vec<ConditionalBatch>,
+    incoming: Vec<ConditionalBatch>,
+    seed: u32,
     presented_frames: u8,
 }
 
 impl ActiveTransition {
     fn controls(&self, key: BatchKey) -> bool {
-        self.retiring.key == key
-            || self
-                .replacements
-                .iter()
-                .any(|replacement| replacement.key == key)
+        self.batches().any(|batch| batch.key == key)
     }
 
-    fn presentation_weight(&self, key: BatchKey) -> Option<PresentationWeight> {
-        if self.retiring.key == key {
-            return Some(weight_for_step(
-                CROSS_FADE_PRESENTED_FRAMES.saturating_sub(self.presented_frames),
-            ));
+    fn batches(&self) -> impl Iterator<Item = ConditionalBatch> + '_ {
+        self.outgoing.iter().chain(&self.incoming).copied()
+    }
+
+    fn coverage_eighths(&self, key: BatchKey) -> Option<u8> {
+        if self.outgoing.iter().any(|batch| batch.key == key) {
+            return Some(CROSS_FADE_PRESENTED_FRAMES - self.presented_frames);
         }
-        self.replacements
+        self.incoming
             .iter()
-            .any(|replacement| replacement.key == key)
-            .then(|| weight_for_step(self.presented_frames))
+            .any(|batch| batch.key == key)
+            .then_some(self.presented_frames)
+    }
+
+    fn presentations(&self) -> impl Iterator<Item = TransitionAction> + '_ {
+        [
+            (self.outgoing.as_slice(), RasterTransitionSide::Outgoing),
+            (self.incoming.as_slice(), RasterTransitionSide::Incoming),
+        ]
+        .into_iter()
+        .flat_map(move |(batches, side)| {
+            batches
+                .iter()
+                .copied()
+                .map(move |batch| TransitionAction::Present {
+                    batch,
+                    transition: RasterTransition::new(self.seed, side, self.presented_frames)
+                        .expect("host progress stays within eight presented frames"),
+                })
+        })
+    }
+
+    fn matches_plan(&self, hierarchy: &HierarchyIndex<'_>, plan: &ViewPlan) -> bool {
+        self.outgoing.iter().all(|batch| {
+            plan.retirements().iter().any(|retirement| {
+                retirement.batch_key() == batch.key
+                    && retirement.expected_version() == batch.expected_version
+                    && retirement.view_generation() == batch.view_generation
+            }) && resident_batch(hierarchy, plan, batch.key) == Some(*batch)
+        }) && self.incoming.iter().all(|batch| {
+            plan.retained_nodes()
+                .iter()
+                .any(|node| conditional_retained(*node) == *batch)
+                && resident_batch(hierarchy, plan, batch.key) == Some(*batch)
+        })
     }
 }
 
 #[derive(Default)]
 pub(crate) struct DensityTransitions {
+    view_generation: Option<ViewGenerationKey>,
     active: BTreeMap<BatchKey, ActiveTransition>,
     pending_replacements: BTreeSet<BatchKey>,
 }
@@ -119,73 +152,137 @@ impl DensityTransitions {
         hierarchy: &[AvailableNode],
         plan: &ViewPlan,
     ) -> Vec<TransitionAction> {
+        if self.view_generation != Some(plan.view_generation()) {
+            self.active.clear();
+            self.pending_replacements.clear();
+            self.view_generation = Some(plan.view_generation());
+        }
         let hierarchy = HierarchyIndex::new(hierarchy);
-        let planned_retirements = plan
+        let retained = plan
+            .retained_nodes()
+            .iter()
+            .map(|node| node.node_key())
+            .collect();
+        let mut next_pending =
+            pending_replacement_batches(&hierarchy, &retained, plan.demanded_nodes());
+        let mut actions = Vec::new();
+        let mut retired = BTreeSet::new();
+        self.active.retain(|_, transition| {
+            if transition.matches_plan(&hierarchy, plan) {
+                return true;
+            }
+            for batch in transition.batches() {
+                if resident_batch(&hierarchy, plan, batch.key) != Some(batch) {
+                    continue;
+                }
+                if plan
+                    .retirements()
+                    .iter()
+                    .any(|node| node.batch_key() == batch.key)
+                {
+                    actions.push(TransitionAction::Retire(batch));
+                    retired.insert(batch.key);
+                } else {
+                    actions.push(TransitionAction::Present {
+                        batch,
+                        transition: if next_pending.contains(&batch.key) {
+                            RasterTransition::HIDDEN
+                        } else {
+                            RasterTransition::FULL
+                        },
+                    });
+                }
+            }
+            false
+        });
+        self.start_groups(&hierarchy, plan, &next_pending, &mut retired, &mut actions);
+        next_pending.retain(|key| !self.controls(*key));
+        for key in self
+            .pending_replacements
+            .symmetric_difference(&next_pending)
+        {
+            if self.controls(*key) || retired.contains(key) {
+                continue;
+            }
+            if let Some(batch) = resident_batch(&hierarchy, plan, *key) {
+                actions.push(TransitionAction::Present {
+                    batch,
+                    transition: if next_pending.contains(key) {
+                        RasterTransition::HIDDEN
+                    } else {
+                        RasterTransition::FULL
+                    },
+                });
+            }
+        }
+        self.pending_replacements = next_pending;
+        actions
+    }
+
+    fn start_groups(
+        &mut self,
+        hierarchy: &HierarchyIndex<'_>,
+        plan: &ViewPlan,
+        next_pending: &BTreeSet<BatchKey>,
+        retired: &mut BTreeSet<BatchKey>,
+        actions: &mut Vec<TransitionAction>,
+    ) {
+        let mut outgoing = plan
             .retirements()
             .iter()
-            .map(|retirement| retirement.batch_key())
-            .collect::<BTreeSet<_>>();
-        let mut actions = Vec::new();
-
-        self.active.retain(|key, transition| {
-            if planned_retirements.contains(key) {
-                true
-            } else {
-                actions.push(TransitionAction::Present {
-                    batch: transition.retiring,
-                    weight: PresentationWeight::OPAQUE,
-                });
-                actions.extend(transition.replacements.iter().copied().map(|batch| {
-                    TransitionAction::Present {
-                        batch,
-                        weight: PresentationWeight::OPAQUE,
-                    }
-                }));
-                false
-            }
-        });
-        actions.extend(self.reconcile_pending_replacements(&hierarchy, plan));
-
-        for retirement in plan.retirements().iter().copied() {
-            if self.active.contains_key(&retirement.batch_key()) {
+            .map(|node| ConditionalBatch {
+                view_generation: node.view_generation(),
+                key: node.batch_key(),
+                expected_version: node.expected_version(),
+            })
+            .filter(|batch| !self.controls(batch.key) && !retired.contains(&batch.key))
+            .collect::<Vec<_>>();
+        let mut incoming = plan
+            .retained_nodes()
+            .iter()
+            .copied()
+            .map(conditional_retained)
+            .filter(|batch| !self.controls(batch.key) && !next_pending.contains(&batch.key))
+            .collect::<Vec<_>>();
+        while let Some(first) = outgoing.pop() {
+            if self.pending_replacements.contains(&first.key) {
+                actions.push(TransitionAction::Retire(first));
+                retired.insert(first.key);
                 continue;
             }
-            let retiring = ConditionalBatch {
-                view_generation: retirement.view_generation(),
-                key: retirement.batch_key(),
-                expected_version: retirement.expected_version(),
+            let (group_outgoing, group_incoming) = connected_cut(
+                hierarchy,
+                first,
+                &mut outgoing,
+                &mut incoming,
+                &self.pending_replacements,
+            );
+            if group_incoming.is_empty() {
+                actions.push(TransitionAction::Retire(first));
+                retired.insert(first.key);
+                continue;
+            }
+            let anchor = group_outgoing
+                .iter()
+                .chain(&group_incoming)
+                .map(|batch| batch.key)
+                .min()
+                .expect("a group contains its first outgoing batch");
+            let transition = ActiveTransition {
+                outgoing: group_outgoing,
+                incoming: group_incoming,
+                seed: transition_seed(anchor),
+                presented_frames: 0,
             };
-            let replacements = replacement_batches(&hierarchy, plan.retained_nodes(), retiring.key);
-            if !self.transition_is_disjoint(retiring, &replacements) {
-                continue;
-            }
-            if replacements.is_empty() {
-                actions.push(TransitionAction::Retire(retiring));
-                continue;
-            }
-            actions.push(TransitionAction::Present {
-                batch: retiring,
-                weight: PresentationWeight::OPAQUE,
-            });
-            actions.extend(
-                replacements
-                    .iter()
-                    .copied()
-                    .map(|batch| TransitionAction::Present {
-                        batch,
-                        weight: PresentationWeight::TRANSPARENT,
-                    }),
-            );
-            self.active.insert(
-                retiring.key,
-                ActiveTransition {
-                    retiring,
-                    replacements,
-                    presented_frames: 0,
-                },
-            );
+            actions.extend(transition.presentations());
+            self.active.insert(anchor, transition);
         }
-        actions
+    }
+
+    fn controls(&self, key: BatchKey) -> bool {
+        self.active
+            .values()
+            .any(|transition| transition.controls(key))
     }
 
     pub(crate) fn uploaded_batch_presentation(
@@ -196,37 +293,33 @@ impl DensityTransitions {
             .contains(&batch.key)
             .then_some(TransitionAction::Present {
                 batch,
-                weight: PresentationWeight::TRANSPARENT,
+                transition: RasterTransition::HIDDEN,
             })
     }
 
     pub(crate) fn advance_presented_frame(&mut self) -> Vec<TransitionAction> {
         let mut actions = Vec::new();
-        let mut completed = Vec::new();
-        for (key, transition) in &mut self.active {
-            transition.presented_frames = transition.presented_frames.saturating_add(1);
-            let replacement_weight = weight_for_step(transition.presented_frames);
-            let retiring_weight = weight_for_step(
-                CROSS_FADE_PRESENTED_FRAMES.saturating_sub(transition.presented_frames),
+        self.active.retain(|_, transition| {
+            transition.presented_frames += 1;
+            actions.extend(transition.presentations());
+            if transition.presented_frames < CROSS_FADE_PRESENTED_FRAMES {
+                return true;
+            }
+            actions.extend(
+                transition
+                    .outgoing
+                    .iter()
+                    .copied()
+                    .map(TransitionAction::Retire),
             );
-            actions.push(TransitionAction::Present {
-                batch: transition.retiring,
-                weight: retiring_weight,
-            });
-            actions.extend(transition.replacements.iter().copied().map(|batch| {
+            actions.extend(transition.incoming.iter().copied().map(|batch| {
                 TransitionAction::Present {
                     batch,
-                    weight: replacement_weight,
+                    transition: RasterTransition::FULL,
                 }
             }));
-            if transition.presented_frames == CROSS_FADE_PRESENTED_FRAMES {
-                actions.push(TransitionAction::Retire(transition.retiring));
-                completed.push(*key);
-            }
-        }
-        for key in completed {
-            self.active.remove(&key);
-        }
+            false
+        });
         actions
     }
 
@@ -242,76 +335,83 @@ impl DensityTransitions {
         if self.active.is_empty() && self.pending_replacements.is_empty() {
             return scene.metrics().resident_points;
         }
-        let hierarchy = scene.planning_nodes();
-        self.display_density_point_count_in(hierarchy.as_slice())
+        self.display_density_point_count_in(scene.planning_nodes().as_slice())
     }
 
     fn display_density_point_count_in(&self, hierarchy: &[AvailableNode]) -> u64 {
-        let weighted_points = hierarchy
+        let weighted = hierarchy
             .iter()
             .filter(|node| matches!(node.status(), NodeStatus::Resident { .. }))
             .map(|node| {
-                u128::from(node.point_count())
-                    * u128::from(self.presentation_weight(node.batch_key()).get())
+                u128::from(node.point_count()) * u128::from(self.coverage_eighths(node.batch_key()))
             })
             .fold(0_u128, u128::saturating_add);
-        rounded_weighted_point_count(weighted_points)
+        rounded_weighted_point_count(weighted)
     }
 
-    fn presentation_weight(&self, key: BatchKey) -> PresentationWeight {
+    fn coverage_eighths(&self, key: BatchKey) -> u8 {
         if self.pending_replacements.contains(&key) {
-            return PresentationWeight::TRANSPARENT;
+            return 0;
         }
         self.active
             .values()
-            .find_map(|transition| transition.presentation_weight(key))
-            .unwrap_or(PresentationWeight::OPAQUE)
+            .find_map(|transition| transition.coverage_eighths(key))
+            .unwrap_or(CROSS_FADE_PRESENTED_FRAMES)
     }
+}
 
-    fn reconcile_pending_replacements(
-        &mut self,
-        hierarchy: &HierarchyIndex<'_>,
-        plan: &ViewPlan,
-    ) -> Vec<TransitionAction> {
-        let retained = plan
-            .retained_nodes()
-            .iter()
-            .map(|node| node.node_key())
-            .collect();
-        let next = pending_replacement_batches(hierarchy, &retained, plan.demanded_nodes());
-        let mut actions = Vec::new();
-        for key in self.pending_replacements.difference(&next) {
-            if let Some(batch) = resident_batch(hierarchy, plan, *key) {
-                actions.push(TransitionAction::Present {
-                    batch,
-                    weight: PresentationWeight::OPAQUE,
-                });
-            }
-        }
-        for key in next.difference(&self.pending_replacements) {
-            if let Some(batch) = resident_batch(hierarchy, plan, *key) {
-                actions.push(TransitionAction::Present {
-                    batch,
-                    weight: PresentationWeight::TRANSPARENT,
-                });
-            }
-        }
-        self.pending_replacements = next;
-        actions
+fn conditional_retained(node: RetainedNode) -> ConditionalBatch {
+    ConditionalBatch {
+        view_generation: node.view_generation(),
+        key: node.batch_key(),
+        expected_version: node.version(),
     }
+}
 
-    fn transition_is_disjoint(
-        &self,
-        retiring: ConditionalBatch,
-        replacements: &[ConditionalBatch],
-    ) -> bool {
-        self.active.values().all(|active| {
-            !active.controls(retiring.key)
-                && replacements
+fn transition_seed(anchor: BatchKey) -> u32 {
+    let key = anchor.get();
+    u32::try_from((key ^ (key >> 32)) & u64::from(u32::MAX)).expect("masked group seed fits u32")
+}
+
+fn connected_cut(
+    hierarchy: &HierarchyIndex<'_>,
+    first: ConditionalBatch,
+    outgoing: &mut Vec<ConditionalBatch>,
+    incoming: &mut Vec<ConditionalBatch>,
+    hidden: &BTreeSet<BatchKey>,
+) -> (Vec<ConditionalBatch>, Vec<ConditionalBatch>) {
+    let mut group_outgoing = vec![first];
+    let mut group_incoming = Vec::new();
+    loop {
+        let before = group_outgoing.len() + group_incoming.len();
+        incoming.retain(|batch| {
+            if group_outgoing
+                .iter()
+                .any(|other| hierarchy.related_batches(batch.key, other.key))
+            {
+                group_incoming.push(*batch);
+                false
+            } else {
+                true
+            }
+        });
+        outgoing.retain(|batch| {
+            if !hidden.contains(&batch.key)
+                && group_incoming
                     .iter()
-                    .all(|replacement| !active.controls(replacement.key))
-        })
+                    .any(|other| hierarchy.related_batches(batch.key, other.key))
+            {
+                group_outgoing.push(*batch);
+                false
+            } else {
+                true
+            }
+        });
+        if before == group_outgoing.len() + group_incoming.len() {
+            break;
+        }
     }
+    (group_outgoing, group_incoming)
 }
 
 pub(crate) fn projected_density_point_size(viewport: Viewport, drawn_points: u64) -> f32 {
@@ -327,30 +427,6 @@ pub(crate) fn projected_density_point_size(viewport: Viewport, drawn_points: u64
     diameter.clamp(MIN_POINT_SIZE_PIXELS, MAX_POINT_SIZE_PIXELS)
 }
 
-fn replacement_batches(
-    hierarchy: &HierarchyIndex<'_>,
-    retained: &[RetainedNode],
-    retiring_batch: BatchKey,
-) -> Vec<ConditionalBatch> {
-    let Some(retiring_node) = hierarchy
-        .iter()
-        .find(|node| node.batch_key() == retiring_batch)
-        .map(|node| node.key())
-    else {
-        return Vec::new();
-    };
-    retained
-        .iter()
-        .copied()
-        .filter(|retained| hierarchy.is_descendant(retained.node_key(), retiring_node))
-        .map(|retained| ConditionalBatch {
-            view_generation: retained.view_generation(),
-            key: retained.batch_key(),
-            expected_version: retained.version(),
-        })
-        .collect()
-}
-
 fn pending_replacement_batches(
     hierarchy: &HierarchyIndex<'_>,
     retained: &BTreeSet<NodeKey>,
@@ -362,13 +438,23 @@ fn pending_replacement_batches(
         .collect::<BTreeSet<_>>();
     let demanded = demanded.iter().copied().collect::<BTreeSet<_>>();
 
+    let coarsening = demanded
+        .iter()
+        .filter(|ancestor| {
+            retained
+                .iter()
+                .any(|node| hierarchy.is_descendant(*node, **ancestor))
+        })
+        .copied()
+        .collect::<BTreeSet<_>>();
     hierarchy
         .iter()
         .filter(|node| retained.contains(&node.key()) || demanded.contains(&node.key()))
         .filter(|node| {
-            fallback_ancestors
-                .iter()
-                .any(|ancestor| hierarchy.is_descendant(node.key(), *ancestor))
+            coarsening.contains(&node.key())
+                || fallback_ancestors
+                    .iter()
+                    .any(|ancestor| hierarchy.is_descendant(node.key(), *ancestor))
         })
         .map(|node| node.batch_key())
         .collect()
@@ -411,6 +497,20 @@ impl<'a> HierarchyIndex<'a> {
         self.hierarchy.iter()
     }
 
+    fn related_batches(&self, left: BatchKey, right: BatchKey) -> bool {
+        let node = |key| {
+            self.iter()
+                .find(|node| node.batch_key() == key)
+                .map(|node| node.key())
+        };
+        match (node(left), node(right)) {
+            (Some(left), Some(right)) => {
+                self.is_descendant(left, right) || self.is_descendant(right, left)
+            }
+            _ => false,
+        }
+    }
+
     fn nearest_retained_ancestor(
         &self,
         node: NodeKey,
@@ -444,54 +544,32 @@ impl<'a> HierarchyIndex<'a> {
     }
 }
 
-fn weight_for_step(step: u8) -> PresentationWeight {
-    let numerator = u16::from(step.min(CROSS_FADE_PRESENTED_FRAMES));
-    let denominator = u16::from(CROSS_FADE_PRESENTED_FRAMES);
-    let value = (numerator * u16::from(u8::MAX) + denominator / 2) / denominator;
-    PresentationWeight::new(u8::try_from(value).expect("an eighth weight fits in u8"))
-}
-
 fn rounded_weighted_point_count(numerator: u128) -> u64 {
-    let denominator = u128::from(u8::MAX);
+    let denominator = u128::from(CROSS_FADE_PRESENTED_FRAMES);
     let rounded = (numerator + denominator / 2) / denominator;
     u64::try_from(rounded).unwrap_or(u64::MAX)
 }
 
 #[cfg(test)]
 mod tests {
-    use point_view::AxisAlignedBox;
-    use render_protocol::{BatchKey, BatchVersion, ViewGenerationKey, ViewId};
-
     use super::*;
+    use point_view::{AvailableNodes, AxisAlignedBox, PlannerConfig, PlanningBudget, ViewPlanner};
 
     fn batch(key: u64) -> ConditionalBatch {
         ConditionalBatch {
-            view_generation: ViewGenerationKey::new(ViewId::new(1), 1),
+            view_generation: ViewGenerationKey::new(render_protocol::ViewId::new(1), 1),
             key: BatchKey::new(key),
             expected_version: BatchVersion::new(1),
         }
     }
 
-    fn node_key(key: u64) -> NodeKey {
-        NodeKey::new(key).unwrap()
-    }
-
-    fn node(key: u64, parent: Option<u64>) -> AvailableNode {
-        node_with_status(key, parent, 1, NodeStatus::Missing)
-    }
-
-    fn node_with_status(
-        key: u64,
-        parent: Option<u64>,
-        point_count: u64,
-        status: NodeStatus,
-    ) -> AvailableNode {
+    fn node(key: u64, parent: Option<u64>, points: u64, status: NodeStatus) -> AvailableNode {
         AvailableNode::new(
-            node_key(key),
-            parent.map(node_key),
+            NodeKey::new(key).unwrap(),
+            parent.map(|key| NodeKey::new(key).unwrap()),
             AxisAlignedBox::new([0.0; 3], [1.0; 3]).unwrap(),
             1.0,
-            point_count,
+            points,
             1,
             BatchKey::new(key),
             status,
@@ -499,188 +577,239 @@ mod tests {
         .unwrap()
     }
 
-    #[test]
-    fn renderer_appearance_requests_antialiased_point_footprints() {
-        let config = renderer_appearance_config(
-            wgpu::TextureFormat::Rgba8Unorm,
-            RenderLimits::new(24, 1, 1),
-        );
-
-        assert_eq!(config.point_footprint(), PointFootprint::Antialiased);
+    fn hierarchy() -> [AvailableNode; 3] {
+        let resident = NodeStatus::Resident {
+            version: BatchVersion::new(1),
+        };
+        [
+            node(1, None, 100, resident),
+            node(2, Some(1), 80, resident),
+            node(3, Some(1), 120, resident),
+        ]
     }
 
-    fn resident(version: u64) -> NodeStatus {
-        NodeStatus::Resident {
-            version: BatchVersion::new(version),
+    fn plan(hierarchy: &[AvailableNode], refined: bool) -> ViewPlan {
+        let camera = render_protocol::Camera::orthographic(
+            [0.5, -5.0, 0.5],
+            [0.5; 3],
+            [0.0, 0.0, 1.0],
+            if refined { 1.0 } else { 1_000.0 },
+            0.1,
+            100.0,
+        )
+        .unwrap();
+        ViewPlanner::new(PlannerConfig::new(2.0, 0.25).unwrap())
+            .plan(
+                &camera,
+                Viewport::new(320, 240).unwrap(),
+                AvailableNodes::new(batch(1).view_generation, hierarchy),
+                PlanningBudget::new(1_000, 1_000, 16),
+            )
+            .unwrap()
+    }
+
+    #[test]
+    fn refinement_and_many_to_one_coarsening_finish_after_eight_presentations() {
+        for refined in [true, false] {
+            let mut hierarchy = hierarchy();
+            let plan = plan(&hierarchy, refined);
+            let mut transitions = DensityTransitions::default();
+            let initial = transitions.reconcile(&hierarchy, &plan);
+            assert_eq!(initial.len(), 3);
+            assert!(
+                initial
+                    .iter()
+                    .all(|action| action.retiring_batch().is_none())
+            );
+            assert_eq!(transitions.active.len(), 1);
+            let expected_outgoing = if refined {
+                vec![batch(1)]
+            } else {
+                vec![batch(2), batch(3)]
+            };
+            let expected_incoming = if refined {
+                vec![batch(2), batch(3)]
+            } else {
+                vec![batch(1)]
+            };
+            let transition = transitions.active.values().next().unwrap();
+            assert_eq!(
+                transition.outgoing.iter().copied().collect::<BTreeSet<_>>(),
+                expected_outgoing.iter().copied().collect()
+            );
+            assert_eq!(transition.incoming, expected_incoming);
+            let start = if refined { 100 } else { 200 };
+            let finish = if refined { 200 } else { 100 };
+            assert_eq!(
+                transitions.display_density_point_count_in(&hierarchy),
+                start
+            );
+            for frame in 1..CROSS_FADE_PRESENTED_FRAMES {
+                assert!(transitions.reconcile(&hierarchy, &plan).is_empty());
+                assert!(transitions.blocks_new_residency());
+                assert_eq!(transitions.advance_presented_frame().len(), 3);
+                let expected = (start * u64::from(8 - frame) + finish * u64::from(frame) + 4) / 8;
+                assert_eq!(
+                    transitions.display_density_point_count_in(&hierarchy),
+                    expected
+                );
+            }
+            let final_actions = transitions.advance_presented_frame();
+            assert!(!transitions.blocks_new_residency());
+            for batch in expected_outgoing {
+                assert!(final_actions.contains(&TransitionAction::Retire(batch)));
+                for node in &mut hierarchy {
+                    if node.batch_key() == batch.key {
+                        *node = node.with_status(NodeStatus::Missing);
+                    }
+                }
+            }
+            for batch in expected_incoming {
+                assert!(final_actions.contains(&TransitionAction::Present {
+                    batch,
+                    transition: RasterTransition::FULL
+                }));
+            }
+            assert_eq!(
+                transitions.display_density_point_count_in(&hierarchy),
+                finish
+            );
         }
     }
 
     #[test]
-    fn cross_fade_uses_exactly_eight_presented_frames() {
-        let retiring = batch(1);
-        let replacement = batch(2);
+    fn interruption_returns_only_the_current_retained_cut() {
+        let hierarchy = hierarchy();
         let mut transitions = DensityTransitions::default();
-        transitions.active.insert(
-            retiring.key,
-            ActiveTransition {
-                retiring,
-                replacements: vec![replacement],
-                presented_frames: 0,
-            },
-        );
-
-        for frame in 1..CROSS_FADE_PRESENTED_FRAMES {
-            let actions = transitions.advance_presented_frame();
-            assert!(transitions.is_active());
-            assert!(!actions.contains(&TransitionAction::Retire(retiring)));
-            assert!(actions.contains(&TransitionAction::Present {
-                batch: replacement,
-                weight: weight_for_step(frame),
-            }));
-        }
-        let final_actions = transitions.advance_presented_frame();
-        assert!(!transitions.is_active());
-        assert!(final_actions.contains(&TransitionAction::Present {
-            batch: replacement,
-            weight: PresentationWeight::OPAQUE,
-        }));
-        assert!(final_actions.contains(&TransitionAction::Retire(retiring)));
-    }
-
-    #[test]
-    fn active_cross_fade_blocks_new_residency_until_retirement() {
-        let retiring = batch(1);
-        let mut transitions = DensityTransitions::default();
-        transitions.active.insert(
-            retiring.key,
-            ActiveTransition {
-                retiring,
-                replacements: vec![batch(2)],
-                presented_frames: 0,
-            },
-        );
-
-        assert!(transitions.blocks_new_residency());
-        for _ in 0..CROSS_FADE_PRESENTED_FRAMES {
+        transitions.reconcile(&hierarchy, &plan(&hierarchy, true));
+        for _ in 0..3 {
             transitions.advance_presented_frame();
         }
-        assert!(!transitions.blocks_new_residency());
+        let actions = transitions.reconcile(&hierarchy, &plan(&hierarchy, false));
+        assert!(!transitions.is_active());
+        assert!(actions.contains(&TransitionAction::Present {
+            batch: batch(1),
+            transition: RasterTransition::FULL
+        }));
+        assert!(actions.contains(&TransitionAction::Retire(batch(2))));
+        assert!(actions.contains(&TransitionAction::Retire(batch(3))));
+        assert!(!actions.iter().any(|action| matches!(action, TransitionAction::Present { batch, .. } if batch.key != BatchKey::new(1))));
+        assert!(transitions.advance_presented_frame().is_empty());
     }
 
     #[test]
-    fn incomplete_replacement_coverage_stays_transparent() {
-        let hierarchy = [node(1, None), node(2, Some(1)), node(3, Some(1))];
-        let retained = [node_key(1), node_key(2)].into_iter().collect();
-        let hierarchy = HierarchyIndex::new(&hierarchy);
-        let pending = pending_replacement_batches(&hierarchy, &retained, &[node_key(3)]);
-        assert_eq!(
-            pending,
-            [BatchKey::new(2), BatchKey::new(3)].into_iter().collect()
-        );
-
-        let transitions = DensityTransitions {
-            pending_replacements: pending,
-            ..DensityTransitions::default()
-        };
+    fn partial_refinement_hides_replacements_before_upload_without_density_pulse() {
+        let mut hierarchy = hierarchy();
+        hierarchy[2] = hierarchy[2].with_status(NodeStatus::Missing);
+        let mut transitions = DensityTransitions::default();
+        let actions = transitions.reconcile(&hierarchy, &plan(&hierarchy, true));
+        assert!(!transitions.is_active());
+        assert!(actions.contains(&TransitionAction::Present {
+            batch: batch(2),
+            transition: RasterTransition::HIDDEN
+        }));
         assert_eq!(
             transitions.uploaded_batch_presentation(batch(3)),
             Some(TransitionAction::Present {
                 batch: batch(3),
-                weight: PresentationWeight::TRANSPARENT,
+                transition: RasterTransition::HIDDEN
             })
         );
+        assert_eq!(transitions.display_density_point_count_in(&hierarchy), 100);
+        hierarchy[2] = hierarchy[2].with_status(NodeStatus::Resident {
+            version: BatchVersion::new(1),
+        });
+        transitions.reconcile(&hierarchy, &plan(&hierarchy, true));
+        assert!(transitions.is_active());
+        assert_eq!(transitions.display_density_point_count_in(&hierarchy), 100);
     }
 
     #[test]
-    fn display_density_tracks_only_the_presented_cross_fade_weight() {
-        let mut hierarchy = [
-            node_with_status(1, None, 100, resident(1)),
-            node_with_status(2, Some(1), 80, resident(1)),
-            node_with_status(3, Some(1), 120, resident(1)),
-        ];
-        let mut transitions = DensityTransitions {
-            pending_replacements: [BatchKey::new(2), BatchKey::new(3)].into_iter().collect(),
-            ..DensityTransitions::default()
-        };
-        assert_eq!(transitions.display_density_point_count_in(&hierarchy), 100);
-
-        transitions.pending_replacements.clear();
-        transitions.active.insert(
-            BatchKey::new(1),
-            ActiveTransition {
-                retiring: batch(1),
-                replacements: vec![batch(2), batch(3)],
-                presented_frames: 0,
-            },
-        );
-        assert_eq!(transitions.display_density_point_count_in(&hierarchy), 100);
-
-        transitions.advance_presented_frame();
-        let first_fade_density = transitions.display_density_point_count_in(&hierarchy);
-        assert!(first_fade_density > 100);
-        assert!(first_fade_density < 200);
-
-        for _ in 1..CROSS_FADE_PRESENTED_FRAMES {
-            transitions.advance_presented_frame();
-        }
+    fn missing_coarse_ancestor_is_hidden_before_its_first_frame() {
+        let mut hierarchy = hierarchy();
         hierarchy[0] = hierarchy[0].with_status(NodeStatus::Missing);
+        let mut transitions = DensityTransitions::default();
+        transitions.reconcile(&hierarchy, &plan(&hierarchy, false));
+        assert_eq!(
+            transitions.uploaded_batch_presentation(batch(1)),
+            Some(TransitionAction::Present {
+                batch: batch(1),
+                transition: RasterTransition::HIDDEN
+            })
+        );
         assert_eq!(transitions.display_density_point_count_in(&hierarchy), 200);
     }
 
     #[test]
-    fn nested_transition_waits_for_its_ancestor_transition() {
+    fn paused_presentations_and_generation_reset_cannot_advance_old_groups() {
+        let hierarchy = hierarchy();
+        let plan = plan(&hierarchy, true);
         let mut transitions = DensityTransitions::default();
-        transitions.active.insert(
-            BatchKey::new(1),
-            ActiveTransition {
-                retiring: batch(1),
-                replacements: vec![batch(2)],
-                presented_frames: 3,
-            },
+        transitions.reconcile(&hierarchy, &plan);
+        for _ in 0..30 {
+            assert!(transitions.reconcile(&hierarchy, &plan).is_empty());
+        }
+        assert_eq!(
+            transitions.active.values().next().unwrap().presented_frames,
+            0
         );
-
-        assert!(!transitions.transition_is_disjoint(batch(2), &[batch(3)]));
-        assert!(!transitions.transition_is_disjoint(batch(4), &[batch(2)]));
-        assert!(transitions.transition_is_disjoint(batch(4), &[batch(5)]));
+        transitions.view_generation =
+            Some(ViewGenerationKey::new(render_protocol::ViewId::new(1), 99));
+        let restarted = transitions.reconcile(&hierarchy, &plan);
+        assert_eq!(restarted.len(), 3);
+        assert_eq!(transitions.active.len(), 1);
+        assert_eq!(
+            transitions.active.values().next().unwrap().presented_frames,
+            0
+        );
     }
 
     #[test]
-    fn transition_actions_own_their_protocol_mapping() {
-        let conditional = batch(7);
-        let weight = PresentationWeight::new(91);
-        let presentation = TransitionAction::Present {
-            batch: conditional,
-            weight,
-        };
+    fn transition_actions_own_their_exact_conditional_protocol_mapping() {
+        let batch = batch(7);
+        let transition = RasterTransition::new(31, RasterTransitionSide::Incoming, 4).unwrap();
+        let presentation = TransitionAction::Present { batch, transition };
         assert_eq!(
             presentation.render_update(),
-            RenderUpdate::SetBatchPresentation {
-                view_generation: conditional.view_generation,
-                key: conditional.key,
-                expected_version: conditional.expected_version,
-                weight,
+            RenderUpdate::SetBatchRasterTransition {
+                view_generation: batch.view_generation,
+                key: batch.key,
+                expected_version: batch.expected_version,
+                transition
             }
         );
         assert_eq!(presentation.retiring_batch(), None);
-
-        let retirement = TransitionAction::Retire(conditional);
+        let retirement = TransitionAction::Retire(batch);
         assert_eq!(
             retirement.render_update(),
             RenderUpdate::Remove {
-                view_generation: conditional.view_generation,
-                key: conditional.key,
-                expected_version: conditional.expected_version,
+                view_generation: batch.view_generation,
+                key: batch.key,
+                expected_version: batch.expected_version
             }
         );
-        assert_eq!(retirement.retiring_batch(), Some(conditional));
+        assert_eq!(retirement.retiring_batch(), Some(batch));
     }
 
     #[test]
-    fn projected_density_policy_is_bounded_and_density_sensitive() {
+    fn renderer_appearance_and_projected_density_remain_bounded() {
+        assert_eq!(
+            renderer_appearance_config(
+                wgpu::TextureFormat::Rgba8Unorm,
+                RenderLimits::new(24, 1, 1)
+            )
+            .point_footprint(),
+            PointFootprint::Antialiased
+        );
         let viewport = Viewport::new(2_560, 1_664).unwrap();
-        assert!((projected_density_point_size(viewport, 0) - 4.0).abs() < f32::EPSILON);
-        assert!((projected_density_point_size(viewport, 1) - 4.0).abs() < f32::EPSILON);
-        assert!((projected_density_point_size(viewport, u64::MAX) - 1.0).abs() < f32::EPSILON);
+        assert_eq!(
+            projected_density_point_size(viewport, 0).to_bits(),
+            4.0_f32.to_bits()
+        );
+        assert_eq!(
+            projected_density_point_size(viewport, u64::MAX).to_bits(),
+            1.0_f32.to_bits()
+        );
         assert!(
             projected_density_point_size(viewport, 100_000)
                 > projected_density_point_size(viewport, 600_000)

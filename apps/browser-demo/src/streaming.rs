@@ -1,6 +1,7 @@
 use render_protocol::{
-    BatchKey, BatchVersion, PointBatch, PointId, PresentationWeight, ProtocolError, RenderPoint,
-    RenderUpdate, SourceId, ViewGenerationKey, ViewId,
+    BatchKey, BatchVersion, PointBatch, PointId, PresentationWeight, ProtocolError,
+    RasterTransition, RasterTransitionSide, RenderPoint, RenderUpdate, SourceId, ViewGenerationKey,
+    ViewId,
 };
 use serde::Serialize;
 use thiserror::Error;
@@ -26,6 +27,76 @@ pub(crate) const MAX_CACHE_ENTRIES: u64 = 64;
 pub(crate) const MAX_MEMORY_CACHE_BYTES: u64 = 512 * 1_024;
 pub(crate) const MAX_PERSISTENT_CACHE_BYTES: u64 = 4 * 1_024 * 1_024;
 pub(crate) const MAX_CANCELLATION_MILLISECONDS: u64 = 1_000;
+
+pub(crate) struct VisualRasterControl {
+    pub(crate) batch_index: u32,
+    pub(crate) generation: u64,
+    pub(crate) version: u64,
+    pub(crate) transition: RasterTransition,
+}
+
+/// Validates raw JavaScript numbers before any narrowing and decimal identities before parsing.
+pub(crate) fn parse_visual_raster_control(
+    batch_index: f64,
+    generation: &str,
+    version: &str,
+    seed: f64,
+    side: f64,
+    step: f64,
+) -> Result<VisualRasterControl, StreamError> {
+    let step = u8::try_from(raster_integer(step, u32::from(RasterTransition::MAX_STEP))?)
+        .map_err(|_| StreamError::InvalidRasterControlInteger)?;
+    let side = u8::try_from(raster_integer(side, 2)?)
+        .map_err(|_| StreamError::InvalidRasterControlInteger)?;
+    Ok(VisualRasterControl {
+        batch_index: raster_integer(batch_index, u32::MAX)?,
+        generation: raster_identity(generation)?,
+        version: raster_identity(version)?,
+        transition: parse_raster_transition(raster_integer(seed, u32::MAX)?, side, step)?,
+    })
+}
+
+fn raster_integer(value: f64, maximum: u32) -> Result<u32, StreamError> {
+    if !value.is_finite() || value < 0.0 || value.fract() != 0.0 || value > f64::from(maximum) {
+        return Err(StreamError::InvalidRasterControlInteger);
+    }
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "the finite integral value was checked against the exact u32 interval"
+    )]
+    Ok(value as u32)
+}
+
+fn raster_identity(value: &str) -> Result<u64, StreamError> {
+    let parsed = value
+        .parse::<u64>()
+        .map_err(|_| StreamError::InvalidRasterIdentity)?;
+    if parsed.to_string() != value {
+        return Err(StreamError::InvalidRasterIdentity);
+    }
+    Ok(parsed)
+}
+
+pub(crate) fn parse_raster_transition(
+    seed: u32,
+    side: u8,
+    step: u8,
+) -> Result<RasterTransition, StreamError> {
+    match side {
+        0 if seed == 0 && step == RasterTransition::MAX_STEP => Ok(RasterTransition::FULL),
+        1 | 2 => Ok(RasterTransition::new(
+            seed,
+            if side == 1 {
+                RasterTransitionSide::Incoming
+            } else {
+                RasterTransitionSide::Outgoing
+            },
+            step,
+        )?),
+        _ => Err(StreamError::InvalidRasterSide),
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -63,6 +134,19 @@ impl VisualBatchFacts {
             presentation_weight_u8,
         }
     }
+}
+
+/// Explicit private raster state captured after renderer acceptance.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+pub(crate) struct VisualRasterFacts {
+    batch_index: u32,
+    key: u64,
+    version: u64,
+    generation: u64,
+    seed: u32,
+    step: u8,
+    side: &'static str,
+    coverage_eighths: u8,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
@@ -253,6 +337,7 @@ impl StreamingScene {
             key: BatchKey::new(u64::from(batch_index) + 1),
             samples,
             presentation_weight: PresentationWeight::OPAQUE,
+            raster_transition: RasterTransition::FULL,
             retired: false,
         };
         let batch =
@@ -294,6 +379,57 @@ impl StreamingScene {
             .filter(|batch| !batch.retired)
             .map(|batch| u64::try_from(batch.samples.len()).expect("stream batches are bounded"))
             .sum()
+    }
+
+    /// A deterministic diameter-policy count; this does not change residency or Coverage.
+    pub(crate) fn display_density_point_count(&self) -> u64 {
+        if self
+            .batches
+            .iter()
+            .all(|batch| batch.retired || batch.raster_transition == RasterTransition::FULL)
+        {
+            return self.non_retired_resident_point_count();
+        }
+        let eighth_points = self
+            .batches
+            .iter()
+            .filter(|batch| !batch.retired)
+            .map(|batch| {
+                u64::try_from(batch.samples.len()).expect("stream batches are bounded")
+                    * u64::from(batch.raster_transition.coverage_eighths())
+            })
+            .sum::<u64>();
+        (eighth_points + 4) / 8
+    }
+
+    pub(crate) fn capture_raster_facts(&self) -> Result<Vec<VisualRasterFacts>, StreamError> {
+        self.capture_batch_facts()?;
+        self.batches
+            .iter()
+            .enumerate()
+            .filter(|(_, batch)| {
+                !batch.retired && batch.raster_transition != RasterTransition::FULL
+            })
+            .map(|(index, batch)| {
+                Ok(VisualRasterFacts {
+                    batch_index: u32::try_from(index).map_err(|_| StreamError::SizeOverflow)?,
+                    key: batch.key.get(),
+                    version: self.presentation_version,
+                    generation: self
+                        .view_generation
+                        .ok_or(StreamError::NotComplete)?
+                        .generation(),
+                    seed: batch.raster_transition.seed(),
+                    step: batch.raster_transition.step(),
+                    side: match batch.raster_transition.side() {
+                        Some(render_protocol::RasterTransitionSide::Incoming) => "incoming",
+                        Some(render_protocol::RasterTransitionSide::Outgoing) => "outgoing",
+                        None => "full",
+                    },
+                    coverage_eighths: batch.raster_transition.coverage_eighths(),
+                })
+            })
+            .collect()
     }
 
     /// Reports the resident renderer-accepted batch state used by private capture.
@@ -346,12 +482,59 @@ impl StreamingScene {
                     weight: batch.presentation_weight,
                 });
             }
+            if batch.raster_transition != RasterTransition::FULL {
+                updates.push(RenderUpdate::SetBatchRasterTransition {
+                    view_generation: self.view_generation.ok_or(StreamError::NotReceiving)?,
+                    key: batch.key,
+                    expected_version: BatchVersion::new(version),
+                    transition: batch.raster_transition,
+                });
+            }
         }
         self.display_mode = mode;
         self.presentation_version = version;
         self.facts.display_mode = mode;
         self.facts.presentation_version = version;
         Ok(updates)
+    }
+
+    /// Requires the fixture caller's exact generation and version before building an update.
+    pub(crate) fn visual_raster_transition(
+        &self,
+        batch_index: u32,
+        expected_generation: u64,
+        expected_version: u64,
+        transition: RasterTransition,
+    ) -> Result<RenderUpdate, StreamError> {
+        let (view_generation, batch) = self.visual_batch(batch_index)?;
+        if view_generation.generation() != expected_generation
+            || self.presentation_version != expected_version
+        {
+            return Err(StreamError::StaleRasterControl);
+        }
+        Ok(RenderUpdate::SetBatchRasterTransition {
+            view_generation,
+            key: batch.key,
+            expected_version: BatchVersion::new(expected_version),
+            transition,
+        })
+    }
+
+    pub(crate) fn commit_visual_raster_transition(
+        &mut self,
+        batch_index: u32,
+        expected_generation: u64,
+        expected_version: u64,
+        transition: RasterTransition,
+    ) -> Result<(), StreamError> {
+        self.visual_raster_transition(
+            batch_index,
+            expected_generation,
+            expected_version,
+            transition,
+        )?;
+        self.batch_mut(batch_index)?.raster_transition = transition;
+        Ok(())
     }
 
     /// Builds a color-only transition update for the private visual-quality harness.
@@ -567,6 +750,16 @@ pub(crate) enum StreamError {
     UnknownBatch { batch_index: u32 },
     #[error("visual transition batch {batch_index} has already been retired")]
     RetiredBatch { batch_index: u32 },
+    #[error("raster control generation or resident version is stale")]
+    StaleRasterControl,
+    #[error(
+        "raster side must be 0 (full), 1 (incoming), or 2 (outgoing), with canonical full seed/progress"
+    )]
+    InvalidRasterSide,
+    #[error("raster control numbers must be finite integers in their declared range")]
+    InvalidRasterControlInteger,
+    #[error("raster generation and version must be canonical decimal u64 strings")]
+    InvalidRasterIdentity,
     #[error("stream batch {actual} does not match the next batch {expected}")]
     BatchSequence { expected: u64, actual: u64 },
     #[error("stream batch payload must be non-empty and a multiple of 32 bytes")]
@@ -637,6 +830,7 @@ struct StreamBatch {
     key: BatchKey,
     samples: Vec<DecodedSample>,
     presentation_weight: PresentationWeight,
+    raster_transition: RasterTransition,
     retired: bool,
 }
 
@@ -832,6 +1026,165 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn javascript_raster_inputs_cannot_alias_by_wasm_narrowing() {
+        let valid = parse_visual_raster_control(0.0, "1", "1", 4_294_967_295.0, 1.0, 8.0).unwrap();
+        assert_eq!(valid.transition.seed(), u32::MAX);
+        assert_eq!(
+            (valid.batch_index, valid.generation, valid.version),
+            (0, 1, 1)
+        );
+        for (side, step) in [
+            (257.0, 1.0),
+            (1.0, 256.0),
+            (1.0, 9.0),
+            (1.5, 1.0),
+            (f64::NAN, 1.0),
+            (1.0, f64::INFINITY),
+        ] {
+            assert!(matches!(
+                parse_visual_raster_control(0.0, "1", "1", 0.0, side, step),
+                Err(StreamError::InvalidRasterControlInteger)
+            ));
+        }
+        for value in [-1.0, 4_294_967_296.0, f64::NAN, 0.5] {
+            assert!(parse_visual_raster_control(value, "1", "1", 0.0, 1.0, 0.0).is_err());
+            assert!(parse_visual_raster_control(0.0, "1", "1", value, 1.0, 0.0).is_err());
+        }
+        for identity in ["01", "-1", "1.0", "18446744073709551616", ""] {
+            assert!(matches!(
+                parse_visual_raster_control(0.0, identity, "1", 0.0, 1.0, 0.0),
+                Err(StreamError::InvalidRasterIdentity)
+            ));
+            assert!(matches!(
+                parse_visual_raster_control(0.0, "1", identity, 0.0, 1.0, 0.0),
+                Err(StreamError::InvalidRasterIdentity)
+            ));
+        }
+    }
+
+    #[test]
+    fn raw_raster_controls_require_canonical_full_and_bounded_progress() {
+        assert_eq!(
+            parse_raster_transition(0, 0, 8).unwrap(),
+            RasterTransition::FULL
+        );
+        assert_eq!(
+            parse_raster_transition(7, 1, 0).unwrap().coverage_eighths(),
+            0
+        );
+        assert_eq!(
+            parse_raster_transition(7, 2, 0).unwrap().coverage_eighths(),
+            8
+        );
+        for (seed, side, step) in [(1, 0, 8), (0, 0, 0), (0, 3, 1)] {
+            assert!(matches!(
+                parse_raster_transition(seed, side, step),
+                Err(StreamError::InvalidRasterSide)
+            ));
+        }
+        assert!(matches!(
+            parse_raster_transition(0, 1, 9),
+            Err(StreamError::Protocol(
+                ProtocolError::InvalidRasterTransitionStep { step: 9 }
+            ))
+        ));
+    }
+
+    #[test]
+    fn raster_controls_bind_versions_and_keep_density_continuous_through_retirement() {
+        use render_protocol::RasterTransitionSide;
+
+        let mut stream = StreamingScene::idle();
+        let reset = stream.begin(SOURCE, 2, [0.0; 3], SOURCE_Z_RANGE).unwrap();
+        let parent = stream.publish(0, &payload(&[(2, [0.0; 3])])).unwrap();
+        let child = stream.publish(1, &payload(&[(5, [0.0; 3])])).unwrap();
+        stream.complete().unwrap();
+        let mut renderer = RenderStateModel::new(render_limits());
+        for update in [&reset, &parent, &child] {
+            renderer.apply(update).unwrap();
+        }
+        for step in 0..=RasterTransition::MAX_STEP {
+            for (index, side) in [
+                (0, RasterTransitionSide::Outgoing),
+                (1, RasterTransitionSide::Incoming),
+            ] {
+                let transition = RasterTransition::new(125, side, step).unwrap();
+                let update = stream
+                    .visual_raster_transition(index, 1, 1, transition)
+                    .unwrap();
+                let before = renderer.snapshot();
+                renderer.apply(&update).unwrap();
+                assert_eq!(renderer.snapshot(), before);
+                stream
+                    .commit_visual_raster_transition(index, 1, 1, transition)
+                    .unwrap();
+            }
+            assert_eq!(stream.display_density_point_count(), 1);
+            assert_eq!(stream.non_retired_resident_point_count(), 2);
+            assert_eq!(stream.capture_raster_facts().unwrap().len(), 2);
+        }
+        let facts = stream.capture_raster_facts().unwrap();
+        for (generation, version) in [(2, 1), (1, 2)] {
+            assert!(matches!(
+                stream.visual_raster_transition(0, generation, version, RasterTransition::FULL),
+                Err(StreamError::StaleRasterControl)
+            ));
+            assert!(matches!(
+                stream.commit_visual_raster_transition(
+                    0,
+                    generation,
+                    version,
+                    RasterTransition::FULL
+                ),
+                Err(StreamError::StaleRasterControl)
+            ));
+        }
+        assert_eq!(stream.capture_raster_facts().unwrap(), facts);
+        let removal = stream.visual_batch_removal(0).unwrap();
+        renderer.apply(&removal).unwrap();
+        stream.commit_visual_batch_removal(0).unwrap();
+        assert_eq!(stream.display_density_point_count(), 1);
+        assert_eq!(stream.non_retired_resident_point_count(), 1);
+        stream
+            .commit_visual_raster_transition(1, 1, 1, RasterTransition::FULL)
+            .unwrap();
+        assert!(stream.capture_raster_facts().unwrap().is_empty());
+        assert_eq!(stream.display_density_point_count(), 1);
+    }
+
+    #[test]
+    fn display_replacement_preserves_raster_state_and_rejects_old_callbacks() {
+        let mut stream = StreamingScene::idle();
+        stream.begin(SOURCE, 1, [0.0; 3], SOURCE_Z_RANGE).unwrap();
+        stream.publish(0, &payload(&[(2, [0.0; 3])])).unwrap();
+        stream.complete().unwrap();
+        stream
+            .commit_visual_raster_transition(0, 1, 1, RasterTransition::HIDDEN)
+            .unwrap();
+        assert_eq!(stream.display_density_point_count(), 0);
+        let updates = stream.set_display_mode(DisplayMode::Neutral).unwrap();
+        assert_eq!(updates.len(), 2);
+        assert!(
+            matches!(updates[1], RenderUpdate::SetBatchRasterTransition { expected_version, transition, .. }
+            if expected_version == BatchVersion::new(2) && transition == RasterTransition::HIDDEN)
+        );
+        assert!(matches!(
+            stream.visual_raster_transition(0, 1, 1, RasterTransition::FULL),
+            Err(StreamError::StaleRasterControl)
+        ));
+        assert_eq!(stream.display_density_point_count(), 0);
+        stream.begin(SOURCE, 1, [0.0; 3], SOURCE_Z_RANGE).unwrap();
+        stream.publish(0, &payload(&[(2, [0.0; 3])])).unwrap();
+        stream.complete().unwrap();
+        assert!(stream.capture_raster_facts().unwrap().is_empty());
+        assert_eq!(stream.display_density_point_count(), 1);
+        assert!(matches!(
+            stream.visual_raster_transition(0, 1, 1, RasterTransition::HIDDEN),
+            Err(StreamError::StaleRasterControl)
+        ));
     }
 
     #[test]

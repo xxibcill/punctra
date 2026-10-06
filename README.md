@@ -387,8 +387,8 @@ identities.
 
 The private browser host requests anti-aliasing and chooses one display
 diameter per frame from projected resident density, clamped to 2.0 through 6.0
-physical pixels. The complete non-retired resident Point count controls that
-choice. Nominal pick coverage remains exactly 7.0 physical pixels and is
+physical pixels. The complete non-retired resident Point count controlled that v0.22
+choice; v0.23 uses the presentation-aware density described below. Nominal pick coverage remains exactly 7.0 physical pixels and is
 reported separately, so decorative edge treatment cannot change provisional
 pick authority.
 
@@ -406,13 +406,30 @@ physical-display or cross-browser/device equivalence, independent human or
 adopter evidence, API stability, support qualification, beta, v1, or
 release-candidate status.
 
+Version 0.23.0-alpha.1 completes the bounded [LOD continuity
+scope](docs/design/lod-density-transition-continuity-v0.23.md). Explicit
+complementary physical-pixel coverage preserves opaque Source colors across
+eight presented steps. The native host publishes complete refinement and
+many-to-one coarsening groups, accounts for presented density, and handles
+interruption, pause/resume and generation replacement under existing hard
+residency limits. Nominal picks and exact authority remain separate.
+
+The private browser corpus supplies authored cuts to the actual Wasm/WebGPU
+renderer; the separate native lifecycle test uses the real planner and
+materializer. Fresh record and verify sessions reproduce 450 transition frames
+and 27 canonical recreations each, including matched frozen-v0.22 controls.
+The independent audit checks all 2,970 artifacts, and the complete local matrix
+passes. See the [release record](docs/releases/v0.23.0.md) and
+[LOD qualification guide](docs/guides/browser-lod-continuity.md). Public SDK
+exports remain unchanged; this slice adds no public child-LOD loader.
+
 To try the implemented View safely, follow the five-minute [first LAS/LAZ
 guide](docs/guides/first-las-laz.md). It separates position-only disk-v1 and
 attributed disk-v2 caches and explains what progressive Coverage does and does
 not mean.
 
 Later direction and the exact external product gates are described in the
-[living roadmap](ROADMAP.md). The linked v0.15 through v0.22 designs define the
+[living roadmap](ROADMAP.md). The linked v0.15 through v0.23 designs define the
 completed bounded browser scopes. Later Candidate themes do not
 expand accepted scope by themselves.
 

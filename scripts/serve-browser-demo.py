@@ -107,6 +107,23 @@ EXPOSED_HEADERS = "Accept-Ranges, Content-Encoding, Content-Length, Content-Rang
 FILE_CHUNK_BYTES = 64 * 1024
 FAULTS = {"disconnect", "redirect", "retry", "truncated", "corrupt", "validator_drift"}
 QUALIFICATION_HOST_SCHEMA = "punctra-qualification-host-v1"
+LOD_BASELINE_PATH = REPOSITORY_ROOT / "docs/releases/v0.23-browser-lod-baseline.json"
+LOD_VERIFIER_REPOSITORY_PATH = "scripts/verify-browser-lod-continuity.mjs"
+LOD_EXPORT_PATH = "/qualification-lod-export"
+LOD_EXPORT_FILENAME = "v0.23-browser-lod-evidence.tar"
+LOD_EXPORT_RECEIPT_SCHEMA = "punctra-browser-lod-export-receipt-v1"
+MAX_LOD_EXPORT_BYTES = 134_217_728
+LOD_PREDECESSOR_RUNTIME_ROOT = Path("target/predecessors/v0.22/node_modules/@punctra/viewer")
+LOD_PREDECESSOR_RUNTIME_FILES = ("package.json", "pkg/browser_demo.js", "pkg/browser_demo_bg.wasm")
+LOD_PREDECESSOR_RUNTIME_URL = "/qualification-lod-legacy-runtime/"
+FUNCTIONAL_EXPORT_PATH = "/qualification-functional-export"
+FUNCTIONAL_EXPORT_FILENAME = "v0.23-browser-functional-observation.json"
+FUNCTIONAL_EXPORT_RECEIPT_SCHEMA = "punctra-browser-functional-export-receipt-v1"
+LOD_QUALIFIED_PATHS = (
+    ".gitignore", "Cargo.toml", "Cargo.lock", "fuzz", "crates", "apps", "packages", "scripts", "examples",
+    "docs/api/browser-sdk.md", "docs/design/lod-density-transition-continuity-v0.23.md",
+)
+
 VISUAL_EXPORT_PATH = "/qualification-visual-export"
 VISUAL_EXPORT_FILENAME = "v0.21-browser-visual-evidence.tar"
 VISUAL_EXPORT_RECEIPT_SCHEMA = "punctra-browser-visual-export-receipt-v1"
@@ -203,6 +220,51 @@ def visual_verify_pins() -> dict[str, object]:
     }
 
 
+def lod_predecessor_runtime_pins() -> dict[str, object]:
+    frozen = json.loads(FOOTPRINT_BASELINE_PATH.read_bytes())["pins"]["runtime"]
+    artifacts = []
+    for relative, expected in zip(LOD_PREDECESSOR_RUNTIME_FILES, frozen["artifacts"], strict=True):
+        actual = repository_digest_record(str(LOD_PREDECESSOR_RUNTIME_ROOT / relative))
+        if any(actual[field] != expected[field] for field in ("sha256", "byte_length")):
+            raise ValueError("staged v0.22 runtime differs from its frozen accepted bytes")
+        artifacts.append(actual)
+    return {"package_name": frozen["package_name"], "package_version": frozen["package_version"],
+            "artifacts": artifacts}
+
+
+def lod_verify_pins() -> dict[str, object]:
+    commit = command_text("git", "-C", str(REPOSITORY_ROOT), "rev-parse", "HEAD")
+    if commit is None or len(commit) != 40:
+        raise RuntimeError("LOD implementation commit is unavailable")
+    dirty = command_text("git", "-C", str(REPOSITORY_ROOT), "status", "--porcelain",
+                         "--untracked-files=all", "--", *LOD_QUALIFIED_PATHS, allow_empty=True)
+    tracked = command_text("git", "-C", str(REPOSITORY_ROOT), "ls-files", "--", *LOD_QUALIFIED_PATHS)
+    if dirty is None or tracked is None:
+        raise RuntimeError("LOD implementation closure could not be inspected")
+    package_version = VIEWER_PACKAGE["version"]
+    packed_path = f"target/npm/punctra-viewer-{package_version}.tgz"
+    baseline = json.loads(LOD_BASELINE_PATH.read_text(encoding="utf-8")) if LOD_BASELINE_PATH.is_file() else None
+    return {
+        "schema": "punctra-browser-lod-pins-v1",
+        "implementation_clean": dirty == "",
+        "implementation_dirty_paths": dirty.splitlines(),
+        "accepted": baseline["pins"] if baseline is not None else None,
+        "running": {
+            "implementation": {"commit": commit, "files": [repository_digest_record(path) for path in tracked.splitlines()]},
+            "verifier": repository_digest_record(LOD_VERIFIER_REPOSITORY_PATH),
+            "runtime": {
+                "package_name": VIEWER_PACKAGE["name"], "package_version": package_version,
+                "packed_artifact": repository_digest_record(packed_path),
+                "artifacts": [repository_digest_record(path) for path in FOOTPRINT_RUNTIME_REPOSITORY_PATHS],
+            },
+            "paired_predecessor_runtime": lod_predecessor_runtime_pins(),
+            "corpus": repository_digest_record("apps/browser-demo/web/fixtures/lod-v1/corpus.json"),
+            "predecessor": repository_digest_record("docs/releases/v0.22-browser-point-footprint-baseline.json"),
+            "predecessor_evidence": repository_digest_record("docs/releases/v0.22-browser-point-footprint-evidence.json"),
+        },
+    }
+
+
 @lru_cache(maxsize=1)
 def footprint_verify_pins() -> dict[str, object]:
     implementation_commit = command_text(
@@ -272,7 +334,7 @@ def first_system_profiler_record(data_type: str) -> dict[str, object]:
         return {}
 
 
-def command_text(*arguments: str) -> str | None:
+def command_text(*arguments: str, allow_empty: bool = False) -> str | None:
     try:
         result = subprocess.run(
             list(arguments),
@@ -283,8 +345,10 @@ def command_text(*arguments: str) -> str | None:
         )
     except (OSError, subprocess.SubprocessError):
         return None
+    if result.returncode != 0:
+        return None
     value = result.stdout.strip()
-    return value or None
+    return value if allow_empty else value or None
 
 
 def integer_text(value: object) -> int | None:
@@ -339,7 +403,7 @@ class BrowserDemoHandler(BaseHTTPRequestHandler):
         if export_contract is None:
             self.send_error(HTTPStatus.NOT_FOUND)
             return
-        _, export_filename, receipt_schema, maximum_bytes, export_directory = (
+        endpoint, export_filename, receipt_schema, maximum_bytes, export_directory = (
             export_contract
         )
         if export_directory is None:
@@ -348,7 +412,8 @@ class BrowserDemoHandler(BaseHTTPRequestHandler):
         if not self._is_same_origin_request():
             self.send_error(HTTPStatus.FORBIDDEN)
             return
-        if self.headers.get_all("Content-Type", []) != ["application/x-tar"]:
+        content_type = "application/json" if endpoint == FUNCTIONAL_EXPORT_PATH else "application/x-tar"
+        if self.headers.get_all("Content-Type", []) != [content_type]:
             self.send_error(HTTPStatus.UNSUPPORTED_MEDIA_TYPE)
             return
 
@@ -412,12 +477,20 @@ class BrowserDemoHandler(BaseHTTPRequestHandler):
     def _export_contract(self) -> tuple[str, str, str, int, Path | None] | None:
         request_path = urlsplit(self.path).path
         contracts = {
+            FUNCTIONAL_EXPORT_PATH: (
+                FUNCTIONAL_EXPORT_PATH, FUNCTIONAL_EXPORT_FILENAME, FUNCTIONAL_EXPORT_RECEIPT_SCHEMA,
+                1_048_576, self.server.lod_export_dir,
+            ),
             VISUAL_EXPORT_PATH: (
                 VISUAL_EXPORT_PATH,
                 VISUAL_EXPORT_FILENAME,
                 VISUAL_EXPORT_RECEIPT_SCHEMA,
                 MAX_VISUAL_EXPORT_BYTES,
                 self.server.visual_export_dir,
+            ),
+            LOD_EXPORT_PATH: (
+                LOD_EXPORT_PATH, LOD_EXPORT_FILENAME, LOD_EXPORT_RECEIPT_SCHEMA,
+                MAX_LOD_EXPORT_BYTES, self.server.lod_export_dir,
             ),
             FOOTPRINT_EXPORT_PATH: (
                 FOOTPRINT_EXPORT_PATH,
@@ -492,6 +565,21 @@ class BrowserDemoHandler(BaseHTTPRequestHandler):
             return
         if urlsplit(self.path).path == "/qualification-visual-pins.json":
             self._serve_json(visual_verify_pins(), send_body=send_body)
+            return
+        if urlsplit(self.path).path == "/qualification-lod-pins.json":
+            self._serve_json(lod_verify_pins(), send_body=send_body)
+            return
+        if urlsplit(self.path).path == "/qualification-lod-baseline.json":
+            if not LOD_BASELINE_PATH.is_file():
+                self.send_error(HTTPStatus.NOT_FOUND)
+                return
+            self._serve_repository_json_file(LOD_BASELINE_PATH, send_body=send_body)
+            return
+        if urlsplit(self.path).path == "/qualification-lod-predecessor.json":
+            self._serve_json({
+                "baseline": json.loads(FOOTPRINT_BASELINE_PATH.read_bytes()),
+                "evidence": json.loads((REPOSITORY_ROOT / "docs/releases/v0.22-browser-point-footprint-evidence.json").read_bytes()),
+            }, send_body=send_body)
             return
         if urlsplit(self.path).path == "/qualification-footprint-pins.json":
             self._serve_json(footprint_verify_pins(), send_body=send_body)
@@ -619,6 +707,12 @@ class BrowserDemoHandler(BaseHTTPRequestHandler):
 
     def _resolve_path(self) -> Path:
         raw_path = unquote(urlsplit(self.path).path)
+        if raw_path.startswith(LOD_PREDECESSOR_RUNTIME_URL):
+            relative = raw_path.removeprefix(LOD_PREDECESSOR_RUNTIME_URL)
+            if relative not in LOD_PREDECESSOR_RUNTIME_FILES:
+                raise FileNotFoundError(relative)
+            lod_predecessor_runtime_pins()
+            return REPOSITORY_ROOT / LOD_PREDECESSOR_RUNTIME_ROOT / relative
         relative = raw_path.removeprefix("/") or "index.html"
         web_root = self.server.web_root
         candidate = (web_root / relative).resolve()
@@ -707,6 +801,7 @@ def arguments() -> argparse.Namespace:
     parser.add_argument("--root", default=WEB_ROOT, type=Path)
     parser.add_argument("--visual-export-dir", type=Path)
     parser.add_argument("--footprint-export-dir", type=Path)
+    parser.add_argument("--lod-export-dir", type=Path)
     return parser.parse_args()
 
 
@@ -717,6 +812,7 @@ class BrowserDemoServer(ThreadingHTTPServer):
         web_root: Path,
         visual_export_dir: Path | None = None,
         footprint_export_dir: Path | None = None,
+        lod_export_dir: Path | None = None,
     ) -> None:
         resolved_root = web_root.resolve()
         if not resolved_root.is_dir():
@@ -730,6 +826,7 @@ class BrowserDemoServer(ThreadingHTTPServer):
             footprint_export_dir,
             "point-footprint",
         )
+        self.lod_export_dir = validated_export_directory(lod_export_dir, "LOD")
         super().__init__(address, BrowserDemoHandler)
 
 
@@ -749,6 +846,7 @@ def main() -> None:
         options.root,
         options.visual_export_dir,
         options.footprint_export_dir,
+        options.lod_export_dir,
     )
     host, port = server.server_address[:2]
     print(f"Serving {server.web_root} at http://{host}:{port}/", flush=True)

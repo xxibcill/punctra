@@ -159,6 +159,15 @@ independent-human/adopter, support, beta, release-candidate, or v1 claims. Its
 final attended evidence, offline verifiers, and complete local command
 matrix pass, as recorded in the
 [v0.22 verification record](docs/releases/v0.22.0.md).
+The accepted bounded [v0.23 LOD continuity
+scope](docs/design/lod-density-transition-continuity-v0.23.md) adds exact
+conditional raster controls, complementary opaque pixel coverage,
+presentation-aware density and symmetric native cut transitions. Actual native
+planner/materializer traces are separate from authored private browser cut
+fixtures. Current verification binds the v0.23 implementation and packed
+runtime; frozen v0.22 observations are verified in their historical checkout.
+See the [LOD qualification guide](docs/guides/browser-lod-continuity.md) and
+[v0.23 verification record](docs/releases/v0.23.0.md).
 Apart from the explicit v0.8 reader exception, the v0.17 browser-demo
 exact-query bridge is a narrowly scoped exception for the trusted immutable
 LAS fixture described by the accepted design. All other external format
@@ -169,6 +178,15 @@ export, Source rewriting, automatic recovery, and general host UI remain in
 callers or future projects unless the scope is explicitly revised.
 
 ## Local verification
+
+The v0.23 paired browser timing controls require the exact frozen v0.22
+packed viewer. Build it in a detached historical checkout at
+`52ae3afb9312d6968a10c3aeec42b3c8555a86d1`, using its documented toolchain and
+`scripts/build-browser-sdk.sh`, then stage it with
+`node scripts/stage-browser-lod-predecessor.mjs --artifact /absolute/path/to/punctra-viewer-0.22.0-alpha.1.tgz`.
+The helper checks the accepted package and runtime byte digests. Its default
+artifact path is `target/predecessors/v0.22/npm/punctra-viewer-0.22.0-alpha.1.tgz`.
+The historical package supplies a control, not current qualification.
 
 Install the pinned Rust toolchain and run:
 
@@ -189,12 +207,15 @@ cargo clippy -p browser-demo --target wasm32-unknown-unknown --all-targets \
   --all-features -- -D warnings
 cargo run -p browser-demo --bin generate_stream_fixture
 cargo run -p browser-demo --bin generate_visual_source_fixture
+node scripts/stage-browser-lod-predecessor.mjs
 node --test apps/browser-demo/web/*.test.mjs packages/react/*.test.mjs scripts/*.test.mjs
 scripts/build-browser-sdk.sh
 node scripts/verify-browser-sdk.mjs
 node scripts/verify-browser-qualification.mjs
 node scripts/verify-browser-integration-baseline.mjs
 node scripts/verify-browser-visual-baseline.mjs
+node scripts/verify-browser-lod-continuity.mjs
+python3 scripts/test_browser_lod_pins.py
 node scripts/generate-browser-sdk-reference.mjs --check
 cargo bench -p point-view --bench planner
 cargo bench -p source-memory --bench read
@@ -244,6 +265,7 @@ test -f docs/guides/browser-quickstart.md
 test -f docs/guides/browser-known-limitations.md
 test -f docs/guides/browser-visual-quality.md
 test -f docs/guides/browser-point-footprint.md
+test -f docs/guides/browser-lod-continuity.md
 test -f docs/api/browser-sdk.md
 ruby -rjson -e 'ARGV.each { |path| JSON.parse(File.read(path)) }' \
   docs/guides/field-corpus.example.json \
@@ -257,7 +279,14 @@ ruby -rjson -e 'ARGV.each { |path| JSON.parse(File.read(path)) }' \
   docs/releases/v0.21-browser-visual-rubric-template.json \
   apps/browser-demo/web/fixtures/visual-v1/corpus.json \
   apps/browser-demo/web/fixtures/visual-v1/autzen-classified-sample.json \
-  apps/browser-demo/web/fixtures/footprint-v1/corpus.json
+  apps/browser-demo/web/fixtures/footprint-v1/corpus.json \
+  apps/browser-demo/web/fixtures/lod-v1/corpus.json \
+  docs/releases/v0.23-browser-baseline.json \
+  docs/releases/v0.23-browser-quickstart.json \
+  docs/releases/v0.23-browser-matrix.json \
+  docs/releases/v0.23-browser-functional-observation.json \
+  docs/releases/v0.23-browser-lod-baseline.json \
+  docs/releases/v0.23-browser-lod-evidence.json
 git diff --check
 ```
 

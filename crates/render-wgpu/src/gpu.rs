@@ -18,7 +18,9 @@ pub(crate) struct CameraUniform {
 pub(crate) struct BatchUniform {
     pub(crate) origin_from_camera: [f32; 4],
     pub(crate) presentation_weight: f32,
-    pub(crate) _presentation_padding: [f32; 3],
+    pub(crate) raster_seed: u32,
+    pub(crate) raster_step: u32,
+    pub(crate) raster_side: u32,
 }
 
 #[repr(C)]
