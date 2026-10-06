@@ -9,7 +9,7 @@ import { measureRasterTransition } from "./lod-metrics.js";
 import { animationFrame, captureLodFrame, configureLodCamera, createLodViewer, disposeLodViewer,
   pickLodPoint, publishLodSource, quietLodFrames, raw, restoreLodBatch, setLodCut } from "./lod-host.js";
 import { auditLodRecord, LOD_BACKGROUND, LOD_BASELINE_PATH, LOD_BASELINE_SCHEMA,
-  LOD_EVIDENCE_PATH, LOD_EVIDENCE_SCHEMA, LOD_RELEASE, LOD_ROOT, lodBoundaryCases, boundaryArgumentFacts } from "./lod-records.js";
+  LOD_EVIDENCE_PATH, LOD_EVIDENCE_SCHEMA, LOD_RELEASE, LOD_ROOT, lodBoundaryCases, boundaryArgumentFacts, validateLodEnvironment } from "./lod-records.js";
 
 const { requireCondition } = createVisualValidator("LOD qualification failed");
 const jsonBytes = (value) => new TextEncoder().encode(`${JSON.stringify(value, null, 2)}\n`);
@@ -55,6 +55,7 @@ export async function runLodQualification({ mode, sessionLabel, activation, inpu
     resources: { live_canonical_images: 4, live_canonical_bytes_high_water: 4 * 1281 * 1024 * 4,
       observed_heap_bytes: null, observed_driver_memory_bytes: null, encoded_artifact_bytes: 0 },
   };
+  validateLodEnvironment(record.environment);
   requireCondition(record.resources.live_canonical_bytes_high_water <= corpus.resource_limits.live_canonical_bytes, "live canonical bound exceeded");
   for (const trial of corpus.trials) for (const profile of corpus.profiles) for (let index = 0; index < 3; index += 1) {
     state(`Transition ${record.transitions.length + 1}/54 · ${trial.id} · ${profile.id} · recreation ${index + 1}`);

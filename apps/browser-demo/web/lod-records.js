@@ -91,20 +91,7 @@ export async function auditLodRecord(record, { corpus, fixtures, visual, predece
   requireCondition(record.release === LOD_RELEASE && [LOD_BASELINE_SCHEMA, LOD_EVIDENCE_SCHEMA].includes(record.schema), "release schema differs");
   requireCondition(canonicalJsonEqual(record.external_evidence, corpus.external_evidence), "external evidence boundary differs");
   requireCondition(record.activation?.trusted_user_activation === true && record.activation.page_visibility === "visible", "attended activation is absent");
-  requireCondition(record.environment?.physical_display_observed === false && typeof record.environment.browser_user_agent === "string", "environment boundary differs");
-  requireCondition(record.environment.browser_user_agent === QUALIFICATION_LANE.browser.user_agent
-    && record.environment.browser_platform === QUALIFICATION_LANE.operating_system.user_agent_platform
-    && record.environment.screen.width === QUALIFICATION_LANE.display.screen_css_pixels[0]
-    && record.environment.screen.height === QUALIFICATION_LANE.display.screen_css_pixels[1]
-    && record.environment.screen.color_depth_bits === QUALIFICATION_LANE.display.color_depth,
-  `observed browser lane differs: ${JSON.stringify({ observed: record.environment, expected: {
-    browser_user_agent: QUALIFICATION_LANE.browser.user_agent,
-    browser_platform: QUALIFICATION_LANE.operating_system.user_agent_platform,
-    screen_css_pixels: QUALIFICATION_LANE.display.screen_css_pixels,
-    color_depth_bits: QUALIFICATION_LANE.display.color_depth } })}`);
-  for (const field of ["name", "version", "build", "architecture"]) requireCondition(record.environment.host.operating_system[field] === QUALIFICATION_LANE.operating_system[field], `host OS ${field} differs`);
-  for (const field of ["class", "gpu", "gpu_cores", "gpu_class", "metal_support"]) requireCondition(record.environment.host.device[field] === QUALIFICATION_LANE.device[field], `host device ${field} differs`);
-  requireCondition(record.environment.host.package.version === LOD_RELEASE && record.environment.host.package.name === "@punctra/viewer", "host package differs");
+  validateLodEnvironment(record.environment);
   const expectedRuns = corpus.trials.flatMap((trial) => corpus.profiles.flatMap((profile) => [0, 1, 2].map((index) => `${trial.id}/${profile.id}/${index}`)));
   requireCondition(canonicalJsonEqual(record.transitions.map((run) => `${run.trial_id}/${run.profile.id}/${run.recreation_index}`), expectedRuns), "transition matrix differs");
   let frames = 0;
@@ -279,4 +266,21 @@ function validateLifecycleTiming(run, limits) {
     && Number.isFinite(run.settled_view_milliseconds) && run.settled_view_milliseconds >= run.first_coverage_milliseconds
     && run.first_coverage_milliseconds <= limits.first_coverage_milliseconds
     && run.settled_view_milliseconds <= limits.settled_view_milliseconds, "lifecycle timing ceiling exceeded");
+}
+
+export function validateLodEnvironment(environment) {
+  requireCondition(environment?.physical_display_observed === false && typeof environment.browser_user_agent === "string", "environment boundary differs");
+  requireCondition(environment.browser_user_agent === QUALIFICATION_LANE.browser.user_agent
+    && environment.browser_platform === QUALIFICATION_LANE.operating_system.user_agent_platform
+    && environment.screen.width === QUALIFICATION_LANE.display.screen_css_pixels[0]
+    && environment.screen.height === QUALIFICATION_LANE.display.screen_css_pixels[1]
+    && environment.screen.color_depth_bits === QUALIFICATION_LANE.display.color_depth,
+  `observed browser lane differs: ${JSON.stringify({ observed: environment, expected: {
+    browser_user_agent: QUALIFICATION_LANE.browser.user_agent,
+    browser_platform: QUALIFICATION_LANE.operating_system.user_agent_platform,
+    screen_css_pixels: QUALIFICATION_LANE.display.screen_css_pixels,
+    color_depth_bits: QUALIFICATION_LANE.display.color_depth } })}`);
+  for (const field of ["name", "version", "build", "architecture"]) requireCondition(environment.host.operating_system[field] === QUALIFICATION_LANE.operating_system[field], `host OS ${field} differs`);
+  for (const field of ["class", "gpu", "gpu_cores", "gpu_class", "metal_support"]) requireCondition(environment.host.device[field] === QUALIFICATION_LANE.device[field], `host device ${field} differs`);
+  requireCondition(environment.host.package.version === LOD_RELEASE && environment.host.package.name === "@punctra/viewer", "host package differs");
 }
