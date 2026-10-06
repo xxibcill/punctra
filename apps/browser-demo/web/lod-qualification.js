@@ -199,7 +199,7 @@ async function runCanonical({ trial, visual, index, canvas, artifacts, mode }) {
       const batchIndex = fixture.batches.findIndex((bytes) => decodeTransferV2(bytes).some((entry) => entry.ordinal === ordinal));
       nominalPicks.push(await pickLodPoint(viewer, [projection.x, projection.y], { source_identity: fixture.source_identity,
         generation: 1, batch_key: fixture.source.expected_view.batch_keys[batchIndex],
-        batch_version: trial.expected_settled_batch_versions[batchIndex], point_ordinal: String(ordinal) }));
+        batch_version: trial.expected_settled_batch_versions[batchIndex], point_ordinal: String(ordinal) }, { searchNeighbors: true }));
     }
     if (trial.selection.ordinals.length) raw(viewer.setHighlights(fixture.source_identity, 1n, new BigUint64Array(trial.selection.ordinals.map(BigInt))));
     const settled = performance.now() - started;

@@ -83,20 +83,30 @@ export async function quietLodFrames(viewer, count) {
     frame_interval: summarizeSamples(intervals), frame_submission: summarizeSamples(submissions) };
 }
 
-export async function pickLodPoint(viewer, pixel, expected) {
-  raw(viewer.beginPick(...pixel));
-  let observed;
-  let polls = 0;
-  while (polls < 180) {
-    await animationFrame();
-    polls += 1;
-    observed = raw(viewer.pollPick()).pick;
-    if (observed.status !== "pending") break;
+export async function pickLodPoint(viewer, center, expected, { searchNeighbors = false } = {}) {
+  const pixels = searchNeighbors
+    ? [-1, 0, 1].flatMap((y) => [-1, 0, 1].map((x) => [center[0] + x, center[1] + y]))
+    : [center];
+  pixels.sort((first, second) => (first[0] - center[0]) ** 2 + (first[1] - center[1]) ** 2
+    - (second[0] - center[0]) ** 2 - (second[1] - center[1]) ** 2 || first[1] - second[1] || first[0] - second[0]);
+  const attempts = [];
+  for (const pixel of pixels) {
+    raw(viewer.beginPick(...pixel));
+    let observed;
+    let polls = 0;
+    while (polls < 180) {
+      await animationFrame();
+      polls += 1;
+      observed = raw(viewer.pollPick()).pick;
+      if (observed.status !== "pending") break;
+    }
+    raw(viewer.cancelPick());
+    const matched = observed.status === "hit" && observed.authority === "provisional_gpu_hint"
+      && Object.entries(expected).every(([field, value]) => observed[field] === value);
+    attempts.push({ pixel, polls, observed, matched });
+    if (matched) return { center, pixel, polls, expected, observed, attempts };
   }
-  raw(viewer.cancelPick());
-  requireCondition(observed.status === "hit" && observed.authority === "provisional_gpu_hint", "nominal pick did not return a provisional identity");
-  for (const [field, value] of Object.entries(expected)) requireCondition(observed[field] === value, `nominal pick ${field} differs`);
-  return { pixel, polls, expected, observed };
+  throw new Error(`LOD host failed: bounded nominal pick differs: ${JSON.stringify({ expected, center, attempts })}`);
 }
 
 export function disposeLodViewer(viewer) {

@@ -58,6 +58,11 @@ async function verifyPins(pins) {
   assert.deepEqual(pins.runtime.artifacts.map((entry) => entry.path), ["apps/browser-demo/web/package.json",
     "apps/browser-demo/web/pkg/browser_demo.js", "apps/browser-demo/web/pkg/browser_demo_bg.wasm"]);
   assert.equal(pins.runtime.packed_artifact.path, "target/npm/punctra-viewer-0.23.0-alpha.1.tgz");
+  assert.equal(pins.predecessor.path, "docs/releases/v0.22-browser-point-footprint-baseline.json");
+  assert.equal(pins.predecessor_evidence.path, "docs/releases/v0.22-browser-point-footprint-evidence.json");
+  for (const record of [pins.predecessor, pins.predecessor_evidence]) {
+    verifyDigest(pinned(pins.implementation.commit, record.path), record, "immutable predecessor record");
+  }
   for (const record of [...pins.runtime.artifacts, pins.runtime.packed_artifact, pins.corpus, pins.predecessor, pins.predecessor_evidence]) {
     canonicalPath(record.path);
     verifyDigest(await readFile(path.join(ROOT, record.path)), record, "current bound artifact");
