@@ -1,4 +1,5 @@
 import { loadFootprintCorpus } from "./footprint-corpus.js";
+import { createFootprintRecordPreview } from "./footprint-records.js";
 import {
   FOOTPRINT_EXPORT_ARCHIVE_FILENAME,
   exportFootprintArchiveToLocalServer,
@@ -45,7 +46,7 @@ async function initializePage() {
     configureTransportLabel();
   } catch (error) {
     updateState("failed", errorMessage(error));
-    evidenceOutput.textContent = JSON.stringify(errorRecord(error), null, 2);
+    evidenceOutput.textContent = JSON.stringify(createFootprintRecordPreview(errorRecord(error)), null, 2);
   }
 }
 
@@ -93,7 +94,7 @@ async function startRun(options = {}, activation) {
     latestArchive = result.archive;
     const recordMode = result.evidence === null;
     const displayedRecord = recordMode ? result.baseline : result.evidence;
-    evidenceOutput.textContent = JSON.stringify(displayedRecord, null, 2);
+    evidenceOutput.textContent = JSON.stringify(createFootprintRecordPreview(displayedRecord), null, 2);
     downloadArchiveButton.disabled = false;
     const state = recordMode
       ? "passed"
@@ -110,7 +111,7 @@ async function startRun(options = {}, activation) {
     return structuredClone(displayedRecord);
   } catch (error) {
     const failure = errorRecord(error);
-    evidenceOutput.textContent = JSON.stringify(failure, null, 2);
+    evidenceOutput.textContent = JSON.stringify(createFootprintRecordPreview(failure), null, 2);
     updateState("failed", failure.message);
     throw error;
   } finally {
