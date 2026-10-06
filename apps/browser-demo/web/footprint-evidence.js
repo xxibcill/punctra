@@ -706,8 +706,10 @@ function validateCanonicalTrials(
       requireExactKeys(recreation, [
         "index", "adapter", "resident_points", "point_footprint", "timing", "resources", "capture_artifact_path",
         "candidate_topology", "component_bridge_check", "feature_checks", "dense_region_checks",
+        "projected_center_check",
       ], label);
       requireCondition(recreation.index === index, `${label} index differs`);
+      validateProjectedCenterCheck(recreation.projected_center_check, expected, corpus.canonical_profile, artifacts, failures, label);
       validateAdapter(recreation.adapter, label);
       requireJsonEqual(recreation.adapter, {
         name: environment.adapter_name,
@@ -951,7 +953,7 @@ function validateLocalGpuFixture(fixture, corpus, artifacts, failures) {
     "evidence_source", "browser_observation", "environment", "local_test_evidence",
     "diameters_physical_pixels", "subpixel_center_phases", "preferred",
     "single_sample", "pick_independence", "transient_bounds",
-    "resource_fallback",
+    "resource_fallback", "projected_center_equivalence",
   ], "local GPU fixture");
   requireCondition(fixture.evidence_source === "local_renderer_gpu_test",
     "local GPU fixture source differs");
@@ -983,6 +985,20 @@ function validateLocalGpuFixture(fixture, corpus, artifacts, failures) {
   }
   requireCondition(phases.size === fixture.subpixel_center_phases.length,
     "local GPU fixture subpixel phases are duplicated");
+  const centers = fixture.projected_center_equivalence;
+  requireExactKeys(centers, [
+    "camera_families", "world_origin", "camera_depths", "legacy_diameter_physical_pixels",
+    "maximum_preferred_centroid_error_pixels", "maximum_legacy_centroid_error_pixels",
+    "maximum_paired_centroid_distance_pixels",
+  ], "local GPU projected centers");
+  requireJsonEqual(centers.camera_families, ["orthographic", "perspective"], "center camera families");
+  requireJsonEqual(centers.world_origin, [1000000000.125, 1000000000.25, 1000000000.5], "center world origin");
+  requireJsonEqual(centers.camera_depths, [3, 3.5, 4, 4.5, 5, 5.5, 6, 6.5], "center camera depths");
+  requireCondition(centers.legacy_diameter_physical_pixels === 7, "legacy center diameter differs");
+  for (const field of ["maximum_preferred_centroid_error_pixels", "maximum_legacy_centroid_error_pixels", "maximum_paired_centroid_distance_pixels"]) {
+    requireFiniteNonnegative(centers[field], `local GPU ${field}`);
+    gate(centers[field] <= corpus.metric_limits.maximum_centroid_distance_pixels, failures, `local GPU ${field} exceeds ceiling`);
+  }
   requireRecord(fixture.preferred, "local GPU preferred metrics");
   requireExactKeys(fixture.preferred, [
     "maximum_coverage_rmse", "maximum_exact_distance_outer_leakage_pixels",
@@ -1413,9 +1429,34 @@ function validateFeatureChecks(features, limits, failures, label) {
       `${label} feature candidate foreground pixels are invalid`);
     requireFiniteNonnegative(feature.centroid_distance_pixels, `${label} feature centroid distance`);
     gate(feature.candidate_foreground_pixels > 0, failures, `${label} feature ${feature.id} disappeared`);
-    gate(feature.centroid_distance_pixels <= limits.maximum_feature_centroid_distance_pixels,
-      failures, `${label} feature ${feature.id} centroid moved`);
   }
+}
+
+function validateProjectedCenterCheck(check, expected, profile, artifacts, failures, label) {
+  requireExactKeys(check, [
+    "contract", "input", "legacy_control_artifact_path", "matched_control_artifact_path",
+    "legacy_control_input", "matched_control_input", "legacy_control_matches_predecessor",
+    "predecessor_decoded_sha256",
+  ], `${label} projected centers`);
+  requireCondition(check.contract === "unchanged_projection_inputs_with_bounded_kernel_centroids_v1", `${label} center contract differs`);
+  for (const input of [check.input, check.legacy_control_input, check.matched_control_input]) {
+    requireExactKeys(input, ["source_identity", "payload_sha256", "world_origin", "camera", "display_mode", "highlights", "physical_viewport", "generation", "batches"], `${label} projection input`);
+    requireCondition(SHA256.test(input.payload_sha256), `${label} projection payload SHA-256 is invalid`);
+  }
+  requireJsonEqual(check.input, check.legacy_control_input, `${label} legacy projection inputs`);
+  requireJsonEqual(check.input, check.matched_control_input, `${label} matched projection inputs`);
+  const legacy = requireArtifact(artifacts, check.legacy_control_artifact_path, "image/png", `${label} legacy control`);
+  const matched = requireArtifact(artifacts, check.matched_control_artifact_path, "image/png", `${label} matched control`);
+  requireCondition(legacy.trial_id === expected.id && matched.trial_id === expected.id, `${label} control trial differs`);
+  for (const [kind, artifact] of [["legacy", legacy], ["matched", matched]]) {
+    requireCondition(artifact.path === `docs/releases/v0.22-browser-point-footprint-artifacts/controls/${expected.id}-${kind}.png`
+      && artifact.kind === "diagnostic_control_png" && artifact.recreation_index === null
+      && artifact.profile_id === profile.id && artifact.width === profile.physical_width
+      && artifact.height === profile.physical_height, `${label} ${kind} control binding differs`);
+  }
+  gate(check.legacy_control_matches_predecessor === true
+    && legacy.decoded_sha256 === check.predecessor_decoded_sha256,
+  failures, `${label} legacy control differs from immutable predecessor pixels`);
 }
 
 function validateDenseRegionChecks(
@@ -1526,7 +1567,11 @@ function validateRecomputedMetrics(bindings, recomputed) {
 
 function collectEvidenceArtifactPaths(evidence, paths) {
   for (const trial of evidence.canonical_trials) {
-    for (const recreation of trial.recreations) paths.add(recreation.capture_artifact_path);
+    for (const recreation of trial.recreations) {
+      paths.add(recreation.capture_artifact_path);
+      paths.add(recreation.projected_center_check.legacy_control_artifact_path);
+      paths.add(recreation.projected_center_check.matched_control_artifact_path);
+    }
   }
   for (const trial of evidence.focused_trials) {
     paths.add(trial.candidate_artifact_path);

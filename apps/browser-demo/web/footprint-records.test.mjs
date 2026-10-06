@@ -208,7 +208,14 @@ function canonicalRunnerTrials() {
             digestCharacter: String(trialIndex + 1),
             recreationIndex,
           });
+          const controls = Object.fromEntries(["legacy", "matched"].map((kind) => [kind, {
+            artifact: imageMetadata({kind: "diagnostic_control_png", trialId: trial.id,
+              profile: corpus.canonical_profile, path: `${ARTIFACT_ROOT}/controls/${trial.id}-${kind}.png`,
+              digestCharacter: String(trialIndex + 1), recreationIndex: null}),
+          }]));
           return {
+            projected_center_check: projectionCheck(controls),
+            diagnostic_controls: controls,
             index: recreationIndex,
             adapter: observedAdapter(),
             point_footprint: pointFootprintFacts(corpus.canonical_profile),
@@ -317,6 +324,15 @@ function localTestArtifact(implementationCommit) {
         [0, 0], [0.25, 0], [0.5, 0], [0.75, 0],
         [0, 0.5], [0.25, 0.5], [0.5, 0.5], [0.75, 0.5],
       ],
+      projected_center_equivalence: {
+        camera_families: ["orthographic", "perspective"],
+        world_origin: [1000000000.125, 1000000000.25, 1000000000.5],
+        camera_depths: [3, 3.5, 4, 4.5, 5, 5.5, 6, 6.5],
+        legacy_diameter_physical_pixels: 7,
+        maximum_preferred_centroid_error_pixels: 0.1,
+        maximum_legacy_centroid_error_pixels: 0.1,
+        maximum_paired_centroid_distance_pixels: 0.1,
+      },
       preferred: {
         maximum_coverage_rmse: 0.1,
         maximum_exact_distance_outer_leakage_pixels: 0,
@@ -620,4 +636,13 @@ function imageMetadata({
 
 function digest(path) {
   return { path, byte_length: 1, sha256: SHA };
+}
+
+function projectionCheck(controls) {
+  const input = { source_identity: SHA, payload_sha256: SHA, world_origin: [0,0,0],
+    camera: {}, display_mode: "neutral", highlights: [], physical_viewport: [640,480], generation: 1, batches: [] };
+  return { contract: "unchanged_projection_inputs_with_bounded_kernel_centroids_v1", input,
+    legacy_control_input: structuredClone(input), matched_control_input: structuredClone(input),
+    legacy_control_artifact_path: controls.legacy.artifact.path, matched_control_artifact_path: controls.matched.artifact.path,
+    legacy_control_matches_predecessor: true, predecessor_decoded_sha256: controls.legacy.artifact.decoded_sha256 };
 }

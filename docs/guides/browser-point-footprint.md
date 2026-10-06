@@ -6,8 +6,11 @@ The corrective focused trials use a separately captured subset of unchanged
 authored Points. CPU preflight rejects overlapping measurement regions,
 clipped captures, and obstructed nominal-pick targets at DPR 1, 2, and 4.
 Their DPR 2 images are separate from the inherited canonical mixed-scene
-images. Single-sample legacy-size and matched-size captures remain diagnostic
-controls while the original centroid acceptance gate is investigated.
+images. Single-sample legacy-size and matched-size captures bind unchanged
+projection inputs into the final evidence. The legacy control must reproduce
+the immutable predecessor pixels exactly. The explicitly revised center
+contract uses paired GPU kernel centroids and shared projection inputs;
+mixed-scene occupancy centroids remain reported diagnostics.
 
 Punctra `0.22.0-alpha.1` implements the bounded [Point Footprint and Edge
 Quality design](../design/point-footprint-edge-quality-v0.22.md). This is a

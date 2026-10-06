@@ -2,7 +2,7 @@ import initializeWasm, {
   createViewer as createRawViewer,
   createPointFootprintControlViewer,
 } from "./pkg/browser_demo.js";
-import { materializeFootprintFixture, validateIsolatedFootprintFixture } from "./footprint-fixture.js";
+import { materializeFootprintFixture, pointProjectionInput, validatePointProjectionCapture, validateIsolatedFootprintFixture } from "./footprint-fixture.js";
 import { measureFeatureComponentAlignment } from "./footprint-alignment.js";
 import { footprintRegionCenter } from "./footprint-corpus.js";
 import {
@@ -309,6 +309,12 @@ async function runCanonicalTrial(options) {
       },
     );
     const featureComparisons = compareFeatureFacts(predecessor.image, recreation.image, trial.features);
+    const projectionInput = await pointProjectionInput(materialized, trial, footprint.canonical_profile);
+    validatePointProjectionCapture(projectionInput, recreation.diagnostics, recreation.captureFacts.facts);
+    requireCondition(JSON.stringify(projectionInput) === JSON.stringify(controls.legacy.record.projection_input)
+      && JSON.stringify(projectionInput) === JSON.stringify(controls.matched.record.projection_input),
+    "paired control projection inputs differ");
+    const legacyExact = equalPixelBytes(predecessor.image, controls.legacy.image);
     const densityComparisons = compareDenseRegions(
       predecessor.image,
       recreation.image,
@@ -324,6 +330,7 @@ async function runCanonicalTrial(options) {
       limits: footprint.metric_limits,
     });
     const failures = [];
+    if (!legacyExact) failures.push("legacy_control_predecessor_pixels");
     if (!repeatability.passed) failures.push(...repeatability.failures.map((failure) => `repeatability:${failure}`));
     if (!recreation.timing_evaluation.passed) failures.push(...recreation.timing_evaluation.failures.map((failure) => `timing:${failure}`));
     if (!quality.passed) failures.push(...quality.failures.map((failure) => `quality:${failure}`));
@@ -349,6 +356,16 @@ async function runCanonicalTrial(options) {
         predecessor_to_legacy: compareFeatureFacts(predecessor.image, controls.legacy.image, trial.features),
         legacy_to_matched: compareFeatureFacts(controls.legacy.image, controls.matched.image, trial.features),
         matched_to_candidate: compareFeatureFacts(controls.matched.image, recreation.image, trial.features),
+      },
+      projected_center_check: {
+        contract: "unchanged_projection_inputs_with_bounded_kernel_centroids_v1",
+        input: projectionInput,
+        legacy_control_artifact_path: controls.legacy.record.artifact.path,
+        matched_control_artifact_path: controls.matched.record.artifact.path,
+        legacy_control_input: controls.legacy.record.projection_input,
+        matched_control_input: controls.matched.record.projection_input,
+        legacy_control_matches_predecessor: legacyExact,
+        predecessor_decoded_sha256: await sha256Hex(predecessor.image.data),
       },
       dense_region_comparisons: densityComparisons,
       quality,
@@ -416,6 +433,9 @@ async function runFootprintControls({ trial, materialized, visual, footprint, ru
         capturePolicy: visual.capture,
       });
       validateExactCaptureFacts(capture.facts, { materialized, profile, trial });
+      const diagnostics = parseRawJson(viewer.diagnostics(), "control projection diagnostics");
+      const projectionInput = await pointProjectionInput(materialized, trial, profile);
+      validatePointProjectionCapture(projectionInput, diagnostics, capture.facts);
       const facts = capture.facts.point_footprint;
       requireCondition(facts.requested === "single_sample" && facts.selected === "single_sample"
         && facts.nominal_pick_size_physical_pixels === 7, "control footprint disposition differs");
@@ -432,7 +452,7 @@ async function runFootprintControls({ trial, materialized, visual, footprint, ru
       });
       controls[kind] = {
         image: capture.image,
-        record: { diagnostic_only: true, kind, facts: withoutImage(capture), artifact: artifact.metadata },
+        record: { kind, facts: withoutImage(capture), projection_input: projectionInput, artifact: artifact.metadata },
       };
     } finally {
       try { viewer.shutdown(); } finally { viewer.free(); }
@@ -994,10 +1014,6 @@ function evaluateCanonicalQuality(options) {
       || feature.candidate.foreground_pixels < feature.minimum_foreground_pixels) {
       failures.push(`feature-${feature.feature_id}:missing`);
     }
-    if (feature.centroid_distance_pixels === null
-      || feature.centroid_distance_pixels > limits.maximum_feature_centroid_distance_pixels) {
-      failures.push(`feature-${feature.feature_id}:centroid`);
-    }
   }
   for (const region of densityComparisons) {
     if (!region.solid_2x2_budget.passed) failures.push("dense_solid_2x2_budget");
@@ -1006,6 +1022,12 @@ function evaluateCanonicalQuality(options) {
     failures.push("separated_predecessor_component_bridge");
   }
   return { passed: failures.length === 0, failures, foreground_fraction_predecessor_ratio: foregroundRatio };
+}
+
+function equalPixelBytes(first, second) {
+  return first.width === second.width && first.height === second.height
+    && first.data.length === second.data.length
+    && first.data.every((value, index) => value === second.data[index]);
 }
 
 async function loadBaseline(pins, corpus) {

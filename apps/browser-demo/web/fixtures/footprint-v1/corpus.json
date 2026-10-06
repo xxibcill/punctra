@@ -312,7 +312,7 @@
     "dense_solid_block_predecessor_ratio": 1.02,
     "maximum_dense_solid_2x2_fraction": 0.8,
     "minimum_component_clear_separation_pixels": 2,
-    "maximum_feature_centroid_distance_pixels": 1
+    "canonical_center_contract": "unchanged_projection_inputs_with_bounded_kernel_centroids_v1"
   },
   "timing_limits": {
     "frame_interval_p95_milliseconds": 50,

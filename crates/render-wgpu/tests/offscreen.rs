@@ -782,6 +782,9 @@ struct FootprintQualityMeasurements {
     maximum_exact_distance_outer_leakage_pixels: u32,
     all_centers_foreground: bool,
     all_quad_corners_clear: bool,
+    maximum_centroid_error_pixels: f64,
+    maximum_legacy_centroid_error_pixels: f64,
+    maximum_paired_centroid_distance_pixels: f64,
 }
 
 fn measure_antialiased_footprint_quality_matrix(gpu: &GpuContext) -> FootprintQualityMeasurements {
@@ -799,6 +802,9 @@ fn measure_antialiased_footprint_quality_matrix(gpu: &GpuContext) -> FootprintQu
         maximum_exact_distance_outer_leakage_pixels: 0,
         all_centers_foreground: true,
         all_quad_corners_clear: true,
+        maximum_centroid_error_pixels: 0.0,
+        maximum_legacy_centroid_error_pixels: 0.0,
+        maximum_paired_centroid_distance_pixels: 0.0,
     };
 
     for diameter in [2.0_f32, 3.0, 4.0, 5.0, 6.0] {
@@ -855,7 +861,121 @@ fn measure_antialiased_footprint_quality_matrix(gpu: &GpuContext) -> FootprintQu
             "{diameter}px antialiased coverage RMSE {candidate_rmse:.6} is not at least 20% below same-size single-sample RMSE {single_sample_rmse:.6}"
         );
     }
+    measure_projected_center_equivalence(gpu, &mut measurements);
     measurements
+}
+
+fn measure_projected_center_equivalence(
+    gpu: &GpuContext,
+    measurements: &mut FootprintQualityMeasurements,
+) {
+    let generation = ViewGenerationKey::new(ViewId::new(17), 1);
+    for perspective in [false, true] {
+        let mut preferred = OffscreenRenderer::with_config(
+            gpu,
+            RendererConfig::new(FORMAT, roomy_limits())
+                .with_point_footprint(PointFootprint::Antialiased),
+        );
+        let mut legacy = OffscreenRenderer::new(gpu, roomy_limits());
+        let points = footprint_quality_centers()
+            .into_iter()
+            .enumerate()
+            .map(|(index, center)| {
+                let depth = 3.0 + f32::from(u16::try_from(index).unwrap()) * 0.5;
+                let scale = if perspective {
+                    64.0 / (std::f32::consts::PI / 6.0).tan() / depth
+                } else {
+                    FOOTPRINT_QUALITY_PIXELS_PER_WORLD_UNIT
+                };
+                point(
+                    [
+                        (center[0] - 64.0) / scale,
+                        depth - 5.0,
+                        (64.0 - center[1]) / scale,
+                    ],
+                    RED,
+                    1_700 + u64::try_from(index).unwrap(),
+                )
+            })
+            .collect();
+        let update = RenderUpdate::Upsert {
+            batch: batch(generation, 1, 1, WORLD_ORIGIN, points),
+        };
+        for subject in [&mut preferred, &mut legacy] {
+            subject.apply(&RenderUpdate::Reset {
+                view_generation: generation,
+            });
+            subject.apply(&update);
+        }
+        let camera = if perspective {
+            Camera::perspective(
+                [WORLD_ORIGIN[0], WORLD_ORIGIN[1] - 5.0, WORLD_ORIGIN[2]],
+                WORLD_ORIGIN,
+                [0.0, 0.0, 1.0],
+                std::f32::consts::PI / 3.0,
+                0.1,
+                100.0,
+            )
+            .unwrap()
+        } else {
+            footprint_quality_frame(generation, 7.0).camera()
+        };
+        let frame = Frame::new(generation, camera, Viewport::new(128, 128).unwrap()).unwrap();
+        let legacy_image = legacy
+            .render(
+                &frame.with_style(PointStyle::new(7.0, [1.0; 3], [0.0, 0.0, 0.0, 1.0]).unwrap()),
+            )
+            .image;
+        for diameter in [2.0, 3.0, 4.0, 5.0, 6.0] {
+            let image =
+                preferred
+                    .render(&frame.with_style(
+                        PointStyle::new(diameter, [1.0; 3], [0.0, 0.0, 0.0, 1.0]).unwrap(),
+                    ))
+                    .image;
+            for center in footprint_quality_centers() {
+                let candidate = coverage_centroid(&image, center, diameter);
+                let predecessor = coverage_centroid(&legacy_image, center, 7.0);
+                let expected = center.map(f64::from);
+                let candidate_error = center_distance(candidate, expected);
+                let legacy_error = center_distance(predecessor, expected);
+                let paired_distance = center_distance(candidate, predecessor);
+                assert!(
+                    candidate_error <= 1.0 && legacy_error <= 1.0 && paired_distance <= 1.0,
+                    "projected center {center:?}, perspective={perspective}, diameter={diameter}: candidate={candidate_error}, legacy={legacy_error}, paired={paired_distance}"
+                );
+                measurements.maximum_centroid_error_pixels = measurements
+                    .maximum_centroid_error_pixels
+                    .max(candidate_error);
+                measurements.maximum_legacy_centroid_error_pixels = measurements
+                    .maximum_legacy_centroid_error_pixels
+                    .max(legacy_error);
+                measurements.maximum_paired_centroid_distance_pixels = measurements
+                    .maximum_paired_centroid_distance_pixels
+                    .max(paired_distance);
+            }
+        }
+    }
+}
+
+fn coverage_centroid(image: &Image, center: [f32; 2], diameter: f32) -> [f64; 2] {
+    let bounds = footprint_metric_rectangle(center, diameter / 2.0);
+    let mut total = 0.0;
+    let mut weighted = [0.0; 2];
+    for y in bounds[1]..bounds[3] {
+        for x in bounds[0]..bounds[2] {
+            let weight = coverage(image, [x, y]);
+            total += weight;
+            weighted[0] += weight * (f64::from(x) + 0.5);
+            weighted[1] += weight * (f64::from(y) + 0.5);
+        }
+    }
+    assert!(total > 0.0, "projected Point center lost its footprint");
+    weighted.map(|sum| sum / total)
+}
+
+fn center_distance(first: [f64; 2], second: [f64; 2]) -> f64 {
+    (first[0] - second[0]).hypot(first[1] - second[1])
 }
 
 fn populate_footprint_quality_fixture(
@@ -1547,6 +1667,15 @@ fn quality_evidence_case(quality: FootprintQualityMeasurements) -> serde_json::V
     let facts = serde_json::json!({
         "diameters_physical_pixels": [2, 3, 4, 5, 6],
         "subpixel_center_phases": FOOTPRINT_CENTER_PHASES,
+        "projected_center_equivalence": {
+            "camera_families": ["orthographic", "perspective"],
+            "world_origin": WORLD_ORIGIN,
+            "camera_depths": [3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0, 6.5],
+            "legacy_diameter_physical_pixels": 7,
+            "maximum_preferred_centroid_error_pixels": quality.maximum_centroid_error_pixels,
+            "maximum_legacy_centroid_error_pixels": quality.maximum_legacy_centroid_error_pixels,
+            "maximum_paired_centroid_distance_pixels": quality.maximum_paired_centroid_distance_pixels,
+        },
         "preferred": {
             "maximum_coverage_rmse": quality.maximum_coverage_rmse,
             "maximum_exact_distance_outer_leakage_pixels":

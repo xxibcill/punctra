@@ -145,6 +145,9 @@ export function createPointFootprintEvidenceRecord(options) {
     footprint,
   );
   const png = uniqueImageArtifacts([
+    ...canonicalTrials.flatMap(({ recreations }) => ["legacy", "matched"].map((kind) => (
+      createPointFootprintImageArtifact(recreations[0].diagnostic_controls[kind].artifact, footprint.canonical_profile.id)
+    ))),
     ...canonicalTrials.flatMap(({ recreations }) => recreations.map(({ capture }) => (
       createPointFootprintImageArtifact(capture.artifact, footprint.canonical_profile.id)
     ))),
@@ -234,6 +237,7 @@ function canonicalTrialEvidence(trial, footprint, backgroundRgba) {
         footprint,
       ),
       capture_artifact_path: recreation.capture.artifact.path,
+      projected_center_check: structuredClone(recreation.projected_center_check),
       candidate_topology: createTopologyMetricBinding({
         metricId: `canonical/${trial.trial_id}/r${recreation.index}`,
         artifactPath: recreation.capture.artifact.path,

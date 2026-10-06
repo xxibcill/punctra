@@ -12,6 +12,55 @@ import { canonicalJsonEqual, createVisualValidator } from "./visual-validation.j
 export const ISOLATED_FOOTPRINT_FIXTURE = "isolated_authored_subset_v1";
 const { requireCondition } = createVisualValidator("Isolated footprint fixture invalid");
 
+/** Binds a settled capture to the unchanged projection inputs, excluding decorative size. */
+export async function pointProjectionInput(materialized, trial, profile) {
+  const bytes = new Uint8Array(materialized.batches.reduce((sum, batch) => sum + batch.byteLength, 0));
+  let offset = 0;
+  for (const batch of materialized.batches) {
+    bytes.set(batch, offset);
+    offset += batch.byteLength;
+  }
+  const view = materialized.source.expected_view;
+  return {
+    source_identity: materialized.source_identity,
+    payload_sha256: await sha256Hex(bytes),
+    world_origin: structuredClone(materialized.world_origin),
+    camera: structuredClone(materialized.camera),
+    display_mode: trial.display_mode,
+    highlights: structuredClone(trial.selection.ordinals),
+    physical_viewport: [profile.physical_width, profile.physical_height],
+    generation: view.generation,
+    batches: materialized.batches.flatMap((batch, index) => view.settled_removed_batch_indices.includes(index) ? [] : [{
+      batch_index: index, key: view.batch_keys[index], version: trial.expected_settled_batch_versions[index],
+      point_count: batch.byteLength / 32, state: "resident", presentation_weight_u8: view.settled_presentation_weights_u8[index],
+    }]),
+  };
+}
+
+export function validatePointProjectionCapture(input, diagnostics, captureFacts) {
+  const camera = input.camera;
+  for (const field of ["eye", "target", "up", "projection", "vertical_world_height"]) {
+    requireCondition(canonicalJsonEqual(diagnostics.camera[field] ?? null, camera[field] ?? null),
+      `observed camera ${field} differs from the authored projection`);
+  }
+  for (const field of ["vertical_field_of_view_radians", "near_distance", "far_distance"]) {
+    requireCondition(Math.fround(diagnostics.camera[field] ?? 0) === Math.fround(camera[field] ?? 0),
+      `observed camera ${field} differs from the authored projection`);
+  }
+  requireCondition(diagnostics.streaming.source_identity === input.source_identity,
+    "observed Source identity differs");
+  requireCondition(canonicalJsonEqual(diagnostics.streaming.world_origin, input.world_origin)
+    && diagnostics.streaming.generation === input.generation, "observed world origin or generation differs");
+  requireCondition(diagnostics.viewport.physical_width === input.physical_viewport[0]
+    && diagnostics.viewport.physical_height === input.physical_viewport[1]
+    && captureFacts.width === input.physical_viewport[0]
+    && captureFacts.height === input.physical_viewport[1], "observed physical viewport differs");
+  requireCondition(diagnostics.display_mode === input.display_mode
+    && diagnostics.highlights.point_count === input.highlights.length, "observed display or highlights differ");
+  requireCondition(captureFacts.view_generation === input.generation
+    && canonicalJsonEqual(captureFacts.batches, input.batches), "observed settled batch inputs differ");
+}
+
 /** Samples unchanged authored Points into a separate, non-overlapping GPU trial. */
 export async function materializeFootprintFixture(materialized, focused) {
   requireCondition(focused.fixture === ISOLATED_FOOTPRINT_FIXTURE, "fixture recipe differs");

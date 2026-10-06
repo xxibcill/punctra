@@ -32,12 +32,25 @@ import {
   verifyPointFootprintEvidence,
 } from "./footprint-evidence.js";
 import { canonicalJson } from "./visual-validation.js";
+import { verifySharedPointProjection } from "../../../scripts/verify-browser-point-footprint.mjs";
 
 const corpus = JSON.parse(await readFile(
   new URL("./fixtures/footprint-v1/corpus.json", import.meta.url),
   "utf8",
 ));
 const SHA = "a".repeat(64);
+
+test("shared shader projection rejects component and compound mutations in either wrapper", async () => {
+  const shader = await readFile(new URL("../../../crates/render-wgpu/src/point.wgsl", import.meta.url), "utf8");
+  verifySharedPointProjection(shader);
+  for (const entry of ["point_vertex", "multisample_point_vertex"]) {
+    const wrapper = shader.match(new RegExp(`fn ${entry}\\([\\s\\S]*?\\n}`))[0];
+    for (const statement of ["output.clip_position.x += 0.25;", "output.clip_position *= 2.0;", "output.clip_position.y = 0.5;"]) {
+      const changed = wrapper.replace("return output;", `${statement}\n    return output;`);
+      assert.throws(() => verifySharedPointProjection(shader.replace(wrapper, changed)), /unchanged/);
+    }
+  }
+});
 const REPOSITORY_ROOT_URL = new URL("../../../", import.meta.url);
 const IMPLEMENTATION_PATHS = [
   "Cargo.lock",
@@ -370,6 +383,13 @@ test("pass flags, samples, metrics, resources, status, identities, and browser p
 
   for (const mutate of [
     (value) => { value.summary.passed = false; },
+    (value) => { value.canonical_trials[0].recreations[0].projected_center_check.legacy_control_matches_predecessor = false; },
+    (value) => { value.canonical_trials[0].recreations[0].projected_center_check.matched_control_artifact_path = value.canonical_trials[0].recreations[0].projected_center_check.legacy_control_artifact_path; },
+    (value) => { value.artifacts.png.find(({kind}) => kind === "diagnostic_control_png").kind = "canonical_candidate_png"; },
+    (value) => { value.canonical_trials[0].recreations[0].projected_center_check.matched_control_input.payload_sha256 = "0".repeat(64); },
+    (value) => { value.canonical_trials[0].recreations[0].projected_center_check.predecessor_decoded_sha256 = "0".repeat(64); },
+    (value) => { value.local_gpu_fixture.projected_center_equivalence.maximum_preferred_centroid_error_pixels = 1.01; },
+    (value) => { value.local_gpu_fixture.projected_center_equivalence.camera_families = ["orthographic"]; },
     (value) => { value.canonical_trials[0].recreations[0].timing.frame_interval.p95 = 2; },
     (value) => { value.focused_trials[0].isolated_footprints[0].candidate.report.coverage.root_mean_square_error = 0.19; },
     (value) => { value.focused_trials[0].isolated_footprints[0].candidate.report.corner_leakage.all_quad_corners_clear = false; },
@@ -521,7 +541,15 @@ function validEvidence(baseline) {
           digestCharacter: String((trialIndex + 1) % 10),
         });
         png.push(artifact);
+        const controls = ["legacy", "matched"].map((kind) => imageArtifact({
+          kind: "diagnostic_control_png", trialId: trial.id, recreationIndex: null,
+          profileId: corpus.canonical_profile.id,
+          path: `docs/releases/v0.22-browser-point-footprint-artifacts/controls/${trial.id}-${kind}.png`,
+          width: 640, height: 480, digestCharacter: String((trialIndex + 1) % 10),
+        }));
+        if (recreationIndex === 0) png.push(...controls);
         return {
+          projected_center_check: projectionCheck(controls),
           index: recreationIndex,
           adapter: observedAdapter(),
           resident_points: 5_808,
@@ -695,6 +723,15 @@ function validEvidence(baseline) {
         [0, 0], [0.25, 0], [0.5, 0], [0.75, 0],
         [0, 0.5], [0.25, 0.5], [0.5, 0.5], [0.75, 0.5],
       ],
+      projected_center_equivalence: {
+        camera_families: ["orthographic", "perspective"],
+        world_origin: [1000000000.125, 1000000000.25, 1000000000.5],
+        camera_depths: [3, 3.5, 4, 4.5, 5, 5.5, 6, 6.5],
+        legacy_diameter_physical_pixels: 7,
+        maximum_preferred_centroid_error_pixels: 0.1,
+        maximum_legacy_centroid_error_pixels: 0.1,
+        maximum_paired_centroid_distance_pixels: 0.1,
+      },
       preferred: {
         maximum_coverage_rmse: 0.1,
         maximum_exact_distance_outer_leakage_pixels: 0,
@@ -1084,4 +1121,13 @@ function collectMetricReports(evidence) {
     }
   }
   return reports;
+}
+
+function projectionCheck(controls) {
+  const input = { source_identity: SHA, payload_sha256: SHA, world_origin: [0,0,0],
+    camera: {}, display_mode: "neutral", highlights: [], physical_viewport: [640,480], generation: 1, batches: [] };
+  return { contract: "unchanged_projection_inputs_with_bounded_kernel_centroids_v1", input,
+    legacy_control_input: structuredClone(input), matched_control_input: structuredClone(input),
+    legacy_control_artifact_path: controls[0].path, matched_control_artifact_path: controls[1].path,
+    legacy_control_matches_predecessor: true, predecessor_decoded_sha256: controls[0].decoded_sha256 };
 }

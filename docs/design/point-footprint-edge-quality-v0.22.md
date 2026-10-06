@@ -168,10 +168,40 @@ A private raw-Wasm control constructor provides two diagnostic single-sample
 captures: the inherited seven-pixel display diameter and the candidate's exact
 projected-density diameter. Both reuse the unchanged Source, camera, display,
 settled batch state, and highlights. This constructor is outside the public
-viewer SDK exports. Controls distinguish size-driven occupancy redistribution
-from color-edge displacement. They do not waive or change any acceptance
-threshold below; centroid failures keep v0.22 Active until the control evidence
-supports an explicit corrective design decision.
+viewer SDK exports. Their PNGs and exact projection inputs are bound into the
+final evidence and independently checked offline.
+
+### Corrective center contract (2026-10-06)
+
+The original mixed-scene binary occupancy-centroid gate is superseded, not
+reported as passing. A feature's occupancy centroid is not a Point position:
+changing a decorative diameter reweights differently colored, overlapping,
+and clipped disks. The attended controls reproduced all nine immutable
+seven-pixel predecessor images exactly. In the five failing scenes, changing
+only the single-sample diameter moved occupancy centroids by 2.25 to 4.57
+pixels; the final candidate differed from the predecessor by 1.21 to 2.55
+pixels. These observations invalidate that statistic as a geometry-displacement
+test. They do not excuse missing named features or new topology bridges.
+
+Canonical center acceptance now requires identical Source identity and payload,
+world origin, authored camera, display mapping, highlight ordinals, viewport,
+generation, settled batch identities, versions, counts, and presentation weights
+for candidate and both controls. Each inherited-diameter control must match
+the immutable predecessor's decoded PNG bytes exactly. The offline verifier
+regenerates these inputs from the pinned corpus and Source bytes, compares the
+decoded control pixels, and checks that both WGSL vertex entry points forward
+the same `point_vertex_values` projection helper's clip position unchanged.
+
+A paired native GPU fixture independently renders the same Frame and PointBatch
+through the legacy seven-pixel path and preferred diameters two through six.
+It covers both camera families, all eight subpixel phases, eight different
+depths, and a billion-unit world origin. Coverage-weighted centroid error from
+the declared projected center must be at most one physical pixel for each
+path, and paired centroid distance must also be at most one pixel. Those maxima
+are bound to the clean implementation pin in the local GPU result artifact.
+The isolated browser DPR trials retain their existing one-pixel centroid bound.
+Mixed-scene occupancy centroids and component registration remain diagnostics;
+they make no claim about movement of individual Points or tiny raster islands.
 
 The v0.22 verifier records both predecessor and candidate metrics rather than
 requiring an intentionally changed image to match v0.21.
@@ -192,8 +222,8 @@ partial-edge pixels, connected foreground components, clear-background
 components, two-by-two solid blocks, and the existing feature occupancy and
 centroid facts. Acceptance requires:
 
-- every inherited named feature remains present and its centroid stays within
-  one physical pixel of its v0.21 position;
+- every inherited named feature remains present, and canonical projected
+  centers satisfy the corrective center contract above;
 - foreground fraction remains between 50% and 105% of the predecessor value,
   preventing both hidden sparse structure and new blob coverage;
 - the generated dense regions reduce two-by-two solid-block excess when the

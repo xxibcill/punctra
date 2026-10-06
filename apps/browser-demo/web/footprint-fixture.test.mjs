@@ -2,11 +2,37 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-import { materializeFootprintFixture, residentFootprintPoints, validateFootprintSampleBinding, validateIsolatedFootprintFixture } from "./footprint-fixture.js";
+import { materializeFootprintFixture, pointProjectionInput, validatePointProjectionCapture, residentFootprintPoints, validateFootprintSampleBinding, validateIsolatedFootprintFixture } from "./footprint-fixture.js";
 import { decodeTransferV2, materializeVisualTrial } from "./visual-corpus.js";
 
 const visual = JSON.parse(await readFile(new URL("./fixtures/visual-v1/corpus.json", import.meta.url)));
 const footprint = JSON.parse(await readFile(new URL("./fixtures/footprint-v1/corpus.json", import.meta.url)));
+
+test("paired projection inputs bind authored bytes and reject camera, identity, batch, and highlight drift", async () => {
+  const materialized = await materializeVisualTrial(visual, footprint.canonical_trials[0].id);
+  const input = await pointProjectionInput(materialized, materialized.trial, footprint.canonical_profile);
+  assert.equal(input.payload_sha256, materialized.input_facts.payload_sha256);
+  const diagnostics = { camera: {...input.camera}, streaming: {source_identity: input.source_identity, world_origin: input.world_origin, generation: input.generation},
+    viewport: {physical_width: 640, physical_height: 480},
+    display_mode: input.display_mode, highlights: {point_count: input.highlights.length} };
+  const capture = {width: 640, height: 480, view_generation: input.generation, batches: structuredClone(input.batches)};
+  validatePointProjectionCapture(input, diagnostics, capture);
+  for (const mutate of [
+    (d) => {d.camera.eye = d.camera.eye.map((value) => value + 1);},
+    (d) => {d.camera.near_distance += 1;},
+    (d) => {d.streaming.source_identity = "0".repeat(64);},
+    (d) => {d.streaming.world_origin[0] += 1;},
+    (d) => {d.viewport.physical_width += 1;},
+    (d) => {d.streaming.generation += 1;},
+    (d) => {d.highlights.point_count += 1;},
+    (_, c) => {c.batches[0].presentation_weight_u8 -= 1;},
+  ]) {
+    const d = structuredClone(diagnostics);
+    const c = structuredClone(capture);
+    mutate(d, c);
+    assert.throws(() => validatePointProjectionCapture(input, d, c));
+  }
+});
 
 test("dedicated fixtures preserve exact Source Points and isolate every DPR trial", async () => {
   for (const focused of footprint.focused_trials) {
