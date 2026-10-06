@@ -35,6 +35,11 @@ All notable changes to Punctra are documented here. The project follows
   completion remain pending. No v0.22 completion, physical-display,
   cross-browser/device, independent-human/adopter, support, beta,
   release-candidate, or v1 claim is made yet.
+- Fixed the focused browser runner's comparison of serialized f32 display
+  diameters and retained failed trial measurements as diagnostic-only output.
+  The [closeout investigation](docs/reviews/point-footprint-closeout-2026-10-02.md)
+  documents remaining acceptance failures; earlier functional records require
+  requalification against the final implementation and packed artifacts.
 
 ## 0.21.0-alpha.1
 

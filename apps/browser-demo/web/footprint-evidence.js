@@ -311,6 +311,14 @@ export function projectedDensityDisplayDiameter(profile, residentPoints, policy)
   ));
 }
 
+/** Compares serde's shortest f32 decimal with the host's exact f32 value. */
+export function matchesProjectedDensityDiameter(observed, profile, residentPoints, policy) {
+  return Number.isFinite(observed) && Object.is(
+    Math.fround(observed),
+    projectedDensityDisplayDiameter(profile, residentPoints, policy),
+  );
+}
+
 /** Applies the accepted dense-region bound and its conditional predecessor budget. */
 export function evaluateDenseSolidBlockBudget(predecessor, candidate, limits) {
   requireRecord(predecessor, "predecessor dense-region report");
@@ -1166,10 +1174,7 @@ function validatePointFootprintFacts(
     === corpus.policy.nominal_pick_diameter_physical_pixels, `${label} nominal pick size differs`);
   requireFiniteNonnegative(facts.display_size_physical_pixels, `${label} display size`);
   gate(
-    Object.is(
-      Math.fround(facts.display_size_physical_pixels),
-      projectedDensityDisplayDiameter(profile, residentPoints, corpus.policy),
-    ),
+    matchesProjectedDensityDiameter(facts.display_size_physical_pixels, profile, residentPoints, corpus.policy),
     failures,
     `${label} display size differs from resident-point density`,
   );

@@ -24,6 +24,7 @@ import {
   evaluateDenseSolidBlockBudget,
   expectedPointFootprintResources,
   projectedDensityDisplayDiameter,
+  matchesProjectedDensityDiameter,
   summarizeFootprintTiming,
   validatePointFootprintBaseline,
   validatePointFootprintLocalTestArtifact,
@@ -333,6 +334,10 @@ test("complete evidence derives 27 canonical recreations, nine DPR trials, and t
 });
 
 test("host f32 display diameter accepts serde's shortest decimal representation", () => {
+  const profile = corpus.scale_profiles.find(({ id }) => id === "focused-dpr1");
+  assert.equal(matchesProjectedDensityDiameter(3.5171874, profile, 1_878, corpus.policy), true);
+  assert.equal(matchesProjectedDensityDiameter(3.5171876, profile, 1_878, corpus.policy), false);
+  assert.equal(matchesProjectedDensityDiameter(NaN, profile, 1_878, corpus.policy), false);
   const baseline = validBaseline();
   const evidence = validEvidence(baseline);
   const focusedDpr1 = evidence.focused_trials.find(

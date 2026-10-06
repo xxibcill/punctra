@@ -84,6 +84,27 @@ test("baseline records project canonical and focused runner artifacts", () => {
   assert.deepEqual(baseline.external_evidence, FOOTPRINT_EXTERNAL_NONCLAIMS);
 });
 
+test("failed record trials expose measured diagnostics without creating a baseline", () => {
+  const canonical = { trial_id: "rgb", passed: false, failures: ["centroid"], recreations: [] };
+  const focused = { trial_id: "sparse", passed: false, failures: ["coverage"] };
+  const fallback = { passed: false, failures: ["resources"] };
+  assert.throws(() => createPointFootprintBaselineRecord({
+    canonicalTrials: [{ passed: true }, canonical],
+    focusedTrials: [focused],
+    fallback,
+  }), (error) => {
+    assert.match(error.message, /record baseline requires every trial to pass/);
+    assert.deepEqual(error.diagnostics, {
+      authority: "diagnostic_only",
+      canonical_trials: [canonical],
+      focused_trials: [focused],
+      fallback,
+    });
+    assert.notEqual(error.diagnostics.canonical_trials[0], canonical);
+    return true;
+  });
+});
+
 test("evidence records project deterministic explicit inputs", () => {
   const options = validEvidenceRecordOptions();
   const evidence = createPointFootprintEvidenceRecord(options);

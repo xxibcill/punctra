@@ -1,0 +1,444 @@
+{
+  "schema": "punctra-local-check-report-v1",
+  "authority": "diagnostic_only",
+  "source_commit": "58bb99870876865411176a2ec8714d648283e0bc",
+  "source_note": "Executable source matched this commit. Investigation and status documentation were edited during the run; this is not a clean-pin release acceptance record.",
+  "started_on": "2026-10-02",
+  "completed_on": "2026-10-03",
+  "timezone": "Asia/Bangkok",
+  "environment": {
+    "os": "macOS 26.6.2 (25G83)",
+    "gpu": "Apple M5 Pro",
+    "rustc": "1.90.0 (1159e78c4 2025-09-14)",
+    "cargo": "1.90.0 (840b83a10 2025-07-30)",
+    "node": "v24.16.0",
+    "npm": "10.9.8",
+    "PUNCTRA_REQUIRE_GPU": "1"
+  },
+  "summary": {
+    "commands": 68,
+    "passed": 65,
+    "failed": 3,
+    "workspace_tests": {
+      "passed": 891,
+      "failed": 0,
+      "ignored": 3
+    },
+    "javascript_tests": {
+      "passed": 265,
+      "failed": 12
+    }
+  },
+  "failure_interpretation": "JavaScript integration/qualification tests and both functional verifiers reject the stale implementation pin or packed runtime digest. New attended qualification is required. No evidence pin or digest was rewritten to suppress these failures.",
+  "local_log_directory": "target/v0.22-closeout-logs",
+  "results": [
+    {
+      "command": "cargo fmt --all --check",
+      "exit_code": 0,
+      "seconds": 0.88,
+      "log": "matrix-01.log"
+    },
+    {
+      "command": "cargo clippy --workspace --all-targets --all-features -- -D warnings",
+      "exit_code": 0,
+      "seconds": 37.15,
+      "log": "matrix-02.log"
+    },
+    {
+      "command": "cargo test --workspace --all-features",
+      "exit_code": 0,
+      "seconds": 611.87,
+      "log": "matrix-03.log"
+    },
+    {
+      "command": "RUSTDOCFLAGS=\"-D warnings\" cargo doc --workspace --all-features --no-deps",
+      "exit_code": 0,
+      "seconds": 5.78,
+      "log": "matrix-04.log"
+    },
+    {
+      "command": "scripts/verify-packages.rb",
+      "exit_code": 0,
+      "seconds": 67.52,
+      "log": "matrix-05.log"
+    },
+    {
+      "command": "cargo fmt --manifest-path fuzz/Cargo.toml --all --check",
+      "exit_code": 0,
+      "seconds": 0.82,
+      "log": "matrix-06.log"
+    },
+    {
+      "command": "cargo clippy --manifest-path fuzz/Cargo.toml --all-targets -- -D warnings",
+      "exit_code": 0,
+      "seconds": 0.18,
+      "log": "matrix-07.log"
+    },
+    {
+      "command": "cargo check --manifest-path fuzz/Cargo.toml --bin index_persistence",
+      "exit_code": 0,
+      "seconds": 0.08,
+      "log": "matrix-08.log"
+    },
+    {
+      "command": "cargo check --manifest-path fuzz/Cargo.toml --bin terrain_persistence",
+      "exit_code": 0,
+      "seconds": 0.05,
+      "log": "matrix-09.log"
+    },
+    {
+      "command": "cargo test --manifest-path fuzz/Cargo.toml --lib",
+      "exit_code": 0,
+      "seconds": 0.34,
+      "log": "matrix-10.log"
+    },
+    {
+      "command": "cargo check -p browser-demo --target wasm32-unknown-unknown",
+      "exit_code": 0,
+      "seconds": 17.0,
+      "log": "matrix-11.log"
+    },
+    {
+      "command": "cargo clippy -p browser-demo --all-targets --all-features -- -D warnings",
+      "exit_code": 0,
+      "seconds": 12.8,
+      "log": "matrix-12.log"
+    },
+    {
+      "command": "cargo clippy -p browser-demo --target wasm32-unknown-unknown --all-targets   --all-features -- -D warnings",
+      "exit_code": 0,
+      "seconds": 6.34,
+      "log": "matrix-13.log"
+    },
+    {
+      "command": "cargo run -p browser-demo --bin generate_stream_fixture",
+      "exit_code": 0,
+      "seconds": 3.13,
+      "log": "matrix-14.log"
+    },
+    {
+      "command": "cargo run -p browser-demo --bin generate_visual_source_fixture",
+      "exit_code": 0,
+      "seconds": 45.49,
+      "log": "matrix-15.log"
+    },
+    {
+      "command": "node --test apps/browser-demo/web/*.test.mjs packages/react/*.test.mjs scripts/*.test.mjs",
+      "exit_code": 1,
+      "seconds": 19.82,
+      "log": "matrix-16.log"
+    },
+    {
+      "command": "scripts/build-browser-sdk.sh",
+      "exit_code": 0,
+      "seconds": 0.95,
+      "log": "matrix-17.log"
+    },
+    {
+      "command": "node scripts/verify-browser-sdk.mjs",
+      "exit_code": 0,
+      "seconds": 8.97,
+      "log": "matrix-18.log"
+    },
+    {
+      "command": "node scripts/verify-browser-qualification.mjs",
+      "exit_code": 1,
+      "seconds": 0.1,
+      "log": "matrix-19.log"
+    },
+    {
+      "command": "node scripts/verify-browser-integration-baseline.mjs",
+      "exit_code": 1,
+      "seconds": 0.4,
+      "log": "matrix-20.log"
+    },
+    {
+      "command": "node scripts/verify-browser-visual-baseline.mjs",
+      "exit_code": 0,
+      "seconds": 90.7,
+      "log": "matrix-21.log"
+    },
+    {
+      "command": "node scripts/generate-browser-sdk-reference.mjs --check",
+      "exit_code": 0,
+      "seconds": 0.07,
+      "log": "matrix-22.log"
+    },
+    {
+      "command": "cargo bench -p point-view --bench planner",
+      "exit_code": 0,
+      "seconds": 23.56,
+      "log": "matrix-23.log"
+    },
+    {
+      "command": "cargo bench -p source-memory --bench read",
+      "exit_code": 0,
+      "seconds": 10.09,
+      "log": "matrix-24.log"
+    },
+    {
+      "command": "cargo bench -p source-las --bench read",
+      "exit_code": 0,
+      "seconds": 50.66,
+      "log": "matrix-25.log"
+    },
+    {
+      "command": "cargo bench -p point-index --bench index",
+      "exit_code": 0,
+      "seconds": 51.27,
+      "log": "matrix-26.log"
+    },
+    {
+      "command": "cargo bench -p point-workspace --bench document",
+      "exit_code": 0,
+      "seconds": 40.95,
+      "log": "matrix-27.log"
+    },
+    {
+      "command": "cargo bench -p point-review --bench review",
+      "exit_code": 0,
+      "seconds": 3.05,
+      "log": "matrix-28.log"
+    },
+    {
+      "command": "cargo bench -p point-terrain --bench terrain",
+      "exit_code": 0,
+      "seconds": 33.03,
+      "log": "matrix-29.log"
+    },
+    {
+      "command": "cargo bench -p terrain-demo --bench journal --   --save-baseline \"qualification-$$-$(date +%s)\"",
+      "exit_code": 0,
+      "seconds": 38.43,
+      "log": "matrix-30.log"
+    },
+    {
+      "command": "cargo bench -p renderer-demo --bench viewing",
+      "exit_code": 0,
+      "seconds": 30.2,
+      "log": "matrix-31.log"
+    },
+    {
+      "command": "cargo run -p source-memory --example memory_source",
+      "exit_code": 0,
+      "seconds": 0.86,
+      "log": "matrix-32.log"
+    },
+    {
+      "command": "cargo run -p point-index --example direct_use",
+      "exit_code": 0,
+      "seconds": 0.63,
+      "log": "matrix-33.log"
+    },
+    {
+      "command": "cargo test -p point-workspace --all-features",
+      "exit_code": 0,
+      "seconds": 24.9,
+      "log": "matrix-34.log"
+    },
+    {
+      "command": "cargo test -p point-review --test interface",
+      "exit_code": 0,
+      "seconds": 3.46,
+      "log": "matrix-35.log"
+    },
+    {
+      "command": "cargo test -p render-protocol --test state_model",
+      "exit_code": 0,
+      "seconds": 3.34,
+      "log": "matrix-36.log"
+    },
+    {
+      "command": "cargo run -p point-terrain --example derive",
+      "exit_code": 0,
+      "seconds": 1.11,
+      "log": "matrix-37.log"
+    },
+    {
+      "command": "cargo run -p point-terrain --example persistent_surface",
+      "exit_code": 0,
+      "seconds": 3.47,
+      "log": "matrix-38.log"
+    },
+    {
+      "command": "cargo run -p point-terrain --example exact_terrain_qa",
+      "exit_code": 0,
+      "seconds": 1.18,
+      "log": "matrix-39.log"
+    },
+    {
+      "command": "cargo test -p point-terrain --all-features",
+      "exit_code": 0,
+      "seconds": 78.41,
+      "log": "matrix-40.log"
+    },
+    {
+      "command": "cargo test -p point-terrain --test persistence",
+      "exit_code": 0,
+      "seconds": 0.58,
+      "log": "matrix-41.log"
+    },
+    {
+      "command": "cargo test -p terrain-demo --lib --all-features",
+      "exit_code": 0,
+      "seconds": 4.89,
+      "log": "matrix-42.log"
+    },
+    {
+      "command": "cargo test -p terrain-demo --test workflow",
+      "exit_code": 0,
+      "seconds": 11.97,
+      "log": "matrix-43.log"
+    },
+    {
+      "command": "cargo test -p terrain-demo --test process",
+      "exit_code": 0,
+      "seconds": 3.55,
+      "log": "matrix-44.log"
+    },
+    {
+      "command": "cargo test -p renderer-demo --test headless_smoke",
+      "exit_code": 0,
+      "seconds": 9.77,
+      "log": "matrix-45.log"
+    },
+    {
+      "command": "PUNCTRA_REQUIRE_GPU=1 cargo test -p renderer-demo --test headless_smoke   corpus_success_binds_trace_inputs_and_separate_resource_measurements -- --exact",
+      "exit_code": 0,
+      "seconds": 0.95,
+      "log": "matrix-46.log"
+    },
+    {
+      "command": "PUNCTRA_REQUIRE_GPU=1 cargo test -p renderer-demo --bin renderer-demo   appearance::gpu_tests",
+      "exit_code": 0,
+      "seconds": 4.6,
+      "log": "matrix-47.log"
+    },
+    {
+      "command": "PUNCTRA_REQUIRE_GPU=1 cargo test -p renderer-demo --test headless_smoke   corpus_pre_v0_13_repository_lane_records_settlement_and_the_declared_matrix   -- --exact",
+      "exit_code": 0,
+      "seconds": 3.44,
+      "log": "matrix-48.log"
+    },
+    {
+      "command": "PUNCTRA_REQUIRE_GPU=1 cargo test -p render-wgpu --test offscreen",
+      "exit_code": 0,
+      "seconds": 4.77,
+      "log": "matrix-49.log"
+    },
+    {
+      "command": "PUNCTRA_REQUIRE_GPU=1 cargo test -p renderer-demo --test planner",
+      "exit_code": 0,
+      "seconds": 7.21,
+      "log": "matrix-50.log"
+    },
+    {
+      "command": "PUNCTRA_REQUIRE_GPU=1 cargo test -p renderer-demo --test display_gpu",
+      "exit_code": 0,
+      "seconds": 6.91,
+      "log": "matrix-51.log"
+    },
+    {
+      "command": "PUNCTRA_REQUIRE_GPU=1 cargo run -p render-wgpu --example third_party_host",
+      "exit_code": 0,
+      "seconds": 2.24,
+      "log": "matrix-52.log"
+    },
+    {
+      "command": "test -f docs/guides/first-las-laz.md",
+      "exit_code": 0,
+      "seconds": 0.0,
+      "log": "matrix-53.log"
+    },
+    {
+      "command": "test -f docs/guides/library-packaging.md",
+      "exit_code": 0,
+      "seconds": 0.0,
+      "log": "matrix-54.log"
+    },
+    {
+      "command": "test -f docs/guides/persistent-terrain.md",
+      "exit_code": 0,
+      "seconds": 0.0,
+      "log": "matrix-55.log"
+    },
+    {
+      "command": "test -f docs/guides/exact-terrain-qa.md",
+      "exit_code": 0,
+      "seconds": 0.0,
+      "log": "matrix-56.log"
+    },
+    {
+      "command": "test -f docs/guides/browser-foundation.md",
+      "exit_code": 0,
+      "seconds": 0.0,
+      "log": "matrix-57.log"
+    },
+    {
+      "command": "test -f docs/guides/browser-streaming.md",
+      "exit_code": 0,
+      "seconds": 0.0,
+      "log": "matrix-58.log"
+    },
+    {
+      "command": "test -f docs/guides/browser-viewer.md",
+      "exit_code": 0,
+      "seconds": 0.0,
+      "log": "matrix-59.log"
+    },
+    {
+      "command": "test -f docs/guides/browser-sdk.md",
+      "exit_code": 0,
+      "seconds": 0.0,
+      "log": "matrix-60.log"
+    },
+    {
+      "command": "test -f docs/guides/browser-qualification.md",
+      "exit_code": 0,
+      "seconds": 0.0,
+      "log": "matrix-61.log"
+    },
+    {
+      "command": "test -f docs/guides/browser-quickstart.md",
+      "exit_code": 0,
+      "seconds": 0.0,
+      "log": "matrix-62.log"
+    },
+    {
+      "command": "test -f docs/guides/browser-known-limitations.md",
+      "exit_code": 0,
+      "seconds": 0.0,
+      "log": "matrix-63.log"
+    },
+    {
+      "command": "test -f docs/guides/browser-visual-quality.md",
+      "exit_code": 0,
+      "seconds": 0.0,
+      "log": "matrix-64.log"
+    },
+    {
+      "command": "test -f docs/guides/browser-point-footprint.md",
+      "exit_code": 0,
+      "seconds": 0.0,
+      "log": "matrix-65.log"
+    },
+    {
+      "command": "test -f docs/api/browser-sdk.md",
+      "exit_code": 0,
+      "seconds": 0.0,
+      "log": "matrix-66.log"
+    },
+    {
+      "command": "ruby -rjson -e 'ARGV.each { |path| JSON.parse(File.read(path)) }'   docs/guides/field-corpus.example.json   docs/releases/v0.20-browser-baseline.json   docs/releases/v0.20-browser-quickstart.json   docs/releases/v0.20-browser-matrix.json   docs/releases/v0.21-browser-baseline.json   docs/releases/v0.21-browser-quickstart.json   docs/releases/v0.21-browser-matrix.json   docs/releases/v0.21-browser-visual-baseline.json   docs/releases/v0.21-browser-visual-rubric-template.json   apps/browser-demo/web/fixtures/visual-v1/corpus.json   apps/browser-demo/web/fixtures/visual-v1/autzen-classified-sample.json   apps/browser-demo/web/fixtures/footprint-v1/corpus.json",
+      "exit_code": 0,
+      "seconds": 0.06,
+      "log": "matrix-67.log"
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "seconds": 0.02,
+      "log": "matrix-68.log"
+    }
+  ]
+}

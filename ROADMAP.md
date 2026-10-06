@@ -1508,6 +1508,10 @@ status remain outside this exit.
 
 Status: **Active — accepted bounded repository implementation**
 
+The [2026-10-02 closeout investigation](docs/reviews/point-footprint-closeout-2026-10-02.md)
+records outstanding canonical centroid and focused-fixture failures. The
+record/verify acceptance sequence remains open after the implementation merge.
+
 Accepted outcome: make individual Points and dense Point coverage read cleanly
 across the declared DPR and camera-scale trials without changing geometry or
 picking authority, as fixed by the [v0.22 Point Footprint and Edge Quality

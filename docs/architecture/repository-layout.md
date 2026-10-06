@@ -153,11 +153,11 @@ apps/
           generated-classification-selection-perspective.png
           autzen-rgb-perspective.png
           autzen-classification-perspective.png
+          autzen-intensity-perspective.png
+          autzen-elevation-perspective.png
       fixtures/footprint-v1/
         corpus.json
         baselines/  # populated only by the attended v0.22 record stage
-          autzen-intensity-perspective.png
-          autzen-elevation-perspective.png
 
 examples/
   browser-typescript/

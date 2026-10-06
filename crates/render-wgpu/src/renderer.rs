@@ -612,31 +612,29 @@ impl WgpuRenderer {
             pass.record_points(target, None, depth, &self.pipelines.single_sample, false);
             return;
         }
-        match (
+        if let (
+            EyeDomeState::Active {
+                pipeline,
+                uniform_buffer,
+                ..
+            },
+            Some(depth_pipeline),
+            Some(nominal_camera_upload),
+        ) = (
             &self.eye_dome,
             self.pipelines.eye_dome_depth.as_ref(),
-            multisample,
             nominal_camera_upload,
         ) {
-            (
-                EyeDomeState::Active {
-                    pipeline,
-                    uniform_buffer,
-                    ..
-                },
-                Some(depth_pipeline),
-                Some(point_pipelines),
-                Some(nominal_camera_upload),
-            ) => {
+            pass.stage_edl_uniform(
+                edl_uniform_upload
+                    .as_ref()
+                    .expect("active eye-dome frames stage their uniform"),
+                uniform_buffer,
+            );
+            let (visibility_depth, bind_group) = if let Some(point_pipelines) = multisample {
                 let (color, depth, visibility_depth, resolved_color, bind_group) = self
                     .targets
                     .multisample_eye_dome(&self.device, viewport, &pipeline.layout, uniform_buffer);
-                pass.stage_edl_uniform(
-                    edl_uniform_upload
-                        .as_ref()
-                        .expect("active eye-dome frames stage their uniform"),
-                    uniform_buffer,
-                );
                 pass.record_points(
                     color.view(),
                     Some(resolved_color.view()),
@@ -644,29 +642,11 @@ impl WgpuRenderer {
                     point_pipelines,
                     true,
                 );
-                pass.stage_camera_uniform(nominal_camera_upload);
-                pass.record_eye_dome_depth(visibility_depth, depth_pipeline);
-                pass.record_eye_dome(pipeline, bind_group);
-            }
-            (
-                EyeDomeState::Active {
-                    pipeline,
-                    uniform_buffer,
-                    ..
-                },
-                Some(depth_pipeline),
-                None,
-                Some(nominal_camera_upload),
-            ) => {
+                (visibility_depth, bind_group)
+            } else {
                 let (depth, color, bind_group) =
                     self.targets
                         .eye_dome(&self.device, viewport, &pipeline.layout, uniform_buffer);
-                pass.stage_edl_uniform(
-                    edl_uniform_upload
-                        .as_ref()
-                        .expect("active eye-dome frames stage their uniform"),
-                    uniform_buffer,
-                );
                 pass.record_points(
                     color.view(),
                     None,
@@ -674,18 +654,17 @@ impl WgpuRenderer {
                     &self.pipelines.single_sample,
                     true,
                 );
-                pass.stage_camera_uniform(nominal_camera_upload);
-                pass.record_eye_dome_depth(depth, depth_pipeline);
-                pass.record_eye_dome(pipeline, bind_group);
-            }
-            (_, _, Some(point_pipelines), _) => {
-                let (color, depth) = self.targets.multisample(&self.device, viewport);
-                pass.record_points(color.view(), Some(target), depth, point_pipelines, false);
-            }
-            (_, _, None, _) => {
-                let depth = self.targets.single_sample_depth(&self.device, viewport);
-                pass.record_points(target, None, depth, &self.pipelines.single_sample, false);
-            }
+                (depth, bind_group)
+            };
+            pass.stage_camera_uniform(nominal_camera_upload);
+            pass.record_eye_dome_depth(visibility_depth, depth_pipeline);
+            pass.record_eye_dome(pipeline, bind_group);
+        } else if let Some(point_pipelines) = multisample {
+            let (color, depth) = self.targets.multisample(&self.device, viewport);
+            pass.record_points(color.view(), Some(target), depth, point_pipelines, false);
+        } else {
+            let depth = self.targets.single_sample_depth(&self.device, viewport);
+            pass.record_points(target, None, depth, &self.pipelines.single_sample, false);
         }
     }
 
