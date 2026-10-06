@@ -96,7 +96,12 @@ export async function auditLodRecord(record, { corpus, fixtures, visual, predece
     && record.environment.browser_platform === QUALIFICATION_LANE.operating_system.user_agent_platform
     && record.environment.screen.width === QUALIFICATION_LANE.display.screen_css_pixels[0]
     && record.environment.screen.height === QUALIFICATION_LANE.display.screen_css_pixels[1]
-    && record.environment.screen.color_depth_bits === QUALIFICATION_LANE.display.color_depth, "observed browser lane differs");
+    && record.environment.screen.color_depth_bits === QUALIFICATION_LANE.display.color_depth,
+  `observed browser lane differs: ${JSON.stringify({ observed: record.environment, expected: {
+    browser_user_agent: QUALIFICATION_LANE.browser.user_agent,
+    browser_platform: QUALIFICATION_LANE.operating_system.user_agent_platform,
+    screen_css_pixels: QUALIFICATION_LANE.display.screen_css_pixels,
+    color_depth_bits: QUALIFICATION_LANE.display.color_depth } })}`);
   for (const field of ["name", "version", "build", "architecture"]) requireCondition(record.environment.host.operating_system[field] === QUALIFICATION_LANE.operating_system[field], `host OS ${field} differs`);
   for (const field of ["class", "gpu", "gpu_cores", "gpu_class", "metal_support"]) requireCondition(record.environment.host.device[field] === QUALIFICATION_LANE.device[field], `host device ${field} differs`);
   requireCondition(record.environment.host.package.version === LOD_RELEASE && record.environment.host.package.name === "@punctra/viewer", "host package differs");
