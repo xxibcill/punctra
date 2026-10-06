@@ -14,8 +14,9 @@ mod gpu_support;
 
 use render_protocol::{
     BatchKey, BatchVersion, ESTIMATED_GPU_BYTES_PER_POINT as POINT_BYTES, PointBatch, PointId,
-    PresentationWeight, ProtocolError, RenderLimits, RenderPoint, RenderUpdate, ResidentResource,
-    SourceId, UpdateKind, UpdateReport, ViewGenerationKey, ViewId, Viewport,
+    PresentationWeight, ProtocolError, RasterTransition, RasterTransitionSide, RenderLimits,
+    RenderPoint, RenderUpdate, ResidentResource, SourceId, UpdateKind, UpdateReport,
+    ViewGenerationKey, ViewId, Viewport,
 };
 use render_wgpu::{
     Camera, DepthCueStatus, EyeDomeLighting, Frame, FrameReport, PickError, PickHit, PickPoll,
@@ -108,6 +109,11 @@ fn frames_recorded_before_one_submit_keep_their_exact_cameras() {
 }
 
 #[test]
+fn raster_controls_snapshot_deferred_frames_and_reset_on_replacement() {
+    with_gpu(assert_raster_control_lifecycle);
+}
+
+#[test]
 fn recorded_frames_keep_replaced_batch_data_and_identity() {
     with_gpu(assert_recorded_frame_replacement_stability);
 }
@@ -130,6 +136,23 @@ fn legacy_lod_fade_leaks_background_between_opaque_endpoints() {
 #[test]
 fn legacy_lod_fade_color_depends_on_equal_depth_batch_keys() {
     with_gpu(assert_legacy_lod_color_order);
+}
+
+#[test]
+fn complementary_raster_transitions_preserve_opaque_coverage_and_nominal_picks() {
+    with_gpu(|gpu| {
+        for footprint in [PointFootprint::SingleSample, PointFootprint::Antialiased] {
+            for orthographic in [false, true] {
+                let reference =
+                    assert_complementary_raster_case(gpu, footprint, orthographic, false);
+                let swapped = assert_complementary_raster_case(gpu, footprint, orthographic, true);
+                assert_eq!(
+                    swapped, reference,
+                    "fixed-seed raster coverage must ignore batch-key tie order"
+                );
+            }
+        }
+    });
 }
 
 #[test]
@@ -677,6 +700,120 @@ fn assert_legacy_lod_color_order(gpu: &GpuContext) {
             serde_json::json!({"near_batch_key": near_key, "center_rgba8": center,
                 "sorting_condition": "equal_batch_bounds_centers",
                 "unchanged_nominal_pick_ordinal": hit.point().ordinal()})
+        );
+    }
+}
+
+fn assert_complementary_raster_case(
+    gpu: &GpuContext,
+    footprint: PointFootprint,
+    orthographic: bool,
+    reversed: bool,
+) -> Vec<[u8; 4]> {
+    let generation = ViewGenerationKey::new(ViewId::new(25), 1);
+    let mut subject = OffscreenRenderer::with_config(
+        gpu,
+        RendererConfig::new(FORMAT, roomy_limits()).with_point_footprint(footprint),
+    );
+    subject.apply(&RenderUpdate::Reset {
+        view_generation: generation,
+    });
+    let outgoing = if reversed { 2 } else { 1 };
+    let incoming = 3 - outgoing;
+    for (key, depth, color, ordinal) in
+        [(outgoing, -0.2, RED, 2_501), (incoming, 0.2, GREEN, 2_502)]
+    {
+        subject.apply(&RenderUpdate::Upsert {
+            batch: batch(
+                generation,
+                key,
+                1,
+                WORLD_ORIGIN,
+                vec![
+                    point([0.0, depth, 0.0], color, ordinal),
+                    point([100.0, -depth, 0.0], color, ordinal + 2),
+                ],
+            ),
+        });
+    }
+    let style = PointStyle::new(18.0, [1.0; 3], [0.0, 0.0, 1.0, 1.0]).unwrap();
+    let frame = if orthographic {
+        orthographic_frame(generation, 18.0).with_style(style)
+    } else {
+        frame_with_style(generation, VIEWPORT, style)
+    };
+    let mut previous: Option<Vec<[u8; 4]>> = None;
+    let mut trace = Vec::new();
+    for step in 0..=RasterTransition::MAX_STEP {
+        for (key, side) in [
+            (outgoing, RasterTransitionSide::Outgoing),
+            (incoming, RasterTransitionSide::Incoming),
+        ] {
+            subject.apply(&RenderUpdate::SetBatchRasterTransition {
+                view_generation: generation,
+                key: BatchKey::new(key),
+                expected_version: BatchVersion::new(1),
+                transition: RasterTransition::new(0x2345, side, step).unwrap(),
+            });
+        }
+        let rendered = subject.render(&frame);
+        assert_eq!(rendered.report.raster_transition_batches(), 2);
+        assert_eq!(rendered.report.resident_bytes(), 4 * POINT_BYTES);
+        let interior = (27..37)
+            .flat_map(|y| (27..37).map(move |x| [x, y]))
+            .map(|pixel| rendered.image.pixel(pixel))
+            .collect::<Vec<_>>();
+        assert_raster_interior(&interior, previous.as_deref(), step);
+        trace.extend_from_slice(&interior);
+        previous = Some(interior);
+        let hit = subject
+            .pick_and_wait(&rendered.recorded_frame, CENTER)
+            .expect("decorative raster masks must preserve the nominal nearest Point");
+        assert_hit(hit, generation, outgoing, 1, point_id(2_501));
+    }
+    subject.apply(&RenderUpdate::Remove {
+        view_generation: generation,
+        key: BatchKey::new(outgoing),
+        expected_version: BatchVersion::new(1),
+    });
+    subject.apply(&RenderUpdate::SetBatchRasterTransition {
+        view_generation: generation,
+        key: BatchKey::new(incoming),
+        expected_version: BatchVersion::new(1),
+        transition: RasterTransition::FULL,
+    });
+    let final_frame = subject.render(&frame);
+    assert_eq!(final_frame.report.raster_transition_batches(), 0);
+    assert_pixel(final_frame.image.pixel(CENTER), GREEN);
+    let hit = subject
+        .pick_and_wait(&final_frame.recorded_frame, CENTER)
+        .unwrap();
+    assert_hit(hit, generation, incoming, 1, point_id(2_502));
+    trace
+}
+
+fn assert_raster_interior(interior: &[[u8; 4]], previous: Option<&[[u8; 4]]>, step: u8) {
+    for pixel in interior {
+        assert!(
+            *pixel == RED || *pixel == GREEN,
+            "raster transition mixed Source colors or exposed background: {pixel:?}"
+        );
+        if step == 0 {
+            assert_eq!(*pixel, RED);
+        }
+        if step == RasterTransition::MAX_STEP {
+            assert_eq!(*pixel, GREEN);
+        }
+    }
+    if let Some(previous) = previous {
+        let changed = interior
+            .iter()
+            .zip(previous)
+            .filter(|(a, b)| a != b)
+            .count();
+        assert!(
+            changed <= 25,
+            "one step changed {changed}% of the common opaque interior"
         );
     }
 }
@@ -2194,7 +2331,7 @@ fn assert_deferred_frame_camera_stability(gpu: &GpuContext) {
     let translated = translated_frame(view_generation, 1.5);
 
     let (centered_result, translated_result) =
-        subject.render_pair_before_submit(&centered, &translated);
+        subject.render_pair_before_submit(&centered, &translated, None);
 
     assert_pixel(centered_result.image.pixel(CENTER), RED);
     assert_pixel(translated_result.image.pixel(CENTER), BLACK);
@@ -2206,6 +2343,81 @@ fn assert_deferred_frame_camera_stability(gpu: &GpuContext) {
         translated_point[0] < CENTER[0] - 8,
         "the translated point should move left, got {translated_point:?}"
     );
+}
+
+fn assert_raster_control_lifecycle(gpu: &GpuContext) {
+    let mut subject = OffscreenRenderer::new(gpu, roomy_limits());
+    let view_generation = ViewGenerationKey::new(ViewId::new(26), 1);
+    subject.apply(&RenderUpdate::Reset { view_generation });
+    subject.apply(&RenderUpdate::Upsert {
+        batch: batch(
+            view_generation,
+            1,
+            1,
+            WORLD_ORIGIN,
+            vec![point([0.0; 3], RED, 2_601)],
+        ),
+    });
+    let frame = standard_frame(view_generation, VIEWPORT, 18.0, GREEN);
+    let hidden = RenderUpdate::SetBatchRasterTransition {
+        view_generation,
+        key: BatchKey::new(1),
+        expected_version: BatchVersion::new(1),
+        transition: RasterTransition::HIDDEN,
+    };
+    let (visible, hidden_frame) = subject.render_pair_before_submit(&frame, &frame, Some(&hidden));
+    assert_pixel(visible.image.pixel(CENTER), RED);
+    assert_pixel(hidden_frame.image.pixel(CENTER), BLACK);
+    assert_eq!(visible.report.raster_transition_batches(), 0);
+    assert_eq!(hidden_frame.report.raster_transition_batches(), 1);
+    assert_hit(
+        subject
+            .pick_and_wait(&visible.recorded_frame, CENTER)
+            .unwrap(),
+        view_generation,
+        1,
+        1,
+        point_id(2_601),
+    );
+    assert_hit(
+        subject
+            .pick_and_wait(&hidden_frame.recorded_frame, CENTER)
+            .unwrap(),
+        view_generation,
+        1,
+        1,
+        point_id(2_601),
+    );
+    subject.apply(&RenderUpdate::Upsert {
+        batch: batch(
+            view_generation,
+            1,
+            2,
+            WORLD_ORIGIN,
+            vec![point([0.0; 3], BLUE, 2_602)],
+        ),
+    });
+    assert!(subject.renderer.apply(&hidden).is_err());
+    let replaced = subject.render(&frame);
+    assert_pixel(replaced.image.pixel(CENTER), BLUE);
+    assert_eq!(replaced.report.raster_transition_batches(), 0);
+    let next_generation = ViewGenerationKey::new(ViewId::new(26), 2);
+    subject.apply(&RenderUpdate::Reset {
+        view_generation: next_generation,
+    });
+    assert!(subject.renderer.apply(&hidden).is_err());
+    subject.apply(&RenderUpdate::Upsert {
+        batch: batch(
+            next_generation,
+            1,
+            1,
+            WORLD_ORIGIN,
+            vec![point([0.0; 3], GREEN, 2_603)],
+        ),
+    });
+    let reset = subject.render(&standard_frame(next_generation, VIEWPORT, 18.0, RED));
+    assert_pixel(reset.image.pixel(CENTER), GREEN);
+    assert_eq!(reset.report.raster_transition_batches(), 0);
 }
 
 fn assert_recorded_frame_replacement_stability(gpu: &GpuContext) {
@@ -2331,6 +2543,7 @@ impl<'gpu> OffscreenRenderer<'gpu> {
         &mut self,
         first_frame: &Frame,
         second_frame: &Frame,
+        between: Option<&RenderUpdate>,
     ) -> (RenderedFrame, RenderedFrame) {
         let first_target = ColorTarget::new(
             &self.gpu.device,
@@ -2349,6 +2562,9 @@ impl<'gpu> OffscreenRenderer<'gpu> {
             .renderer
             .render(&mut encoder, &first_target.view, first_frame)
             .expect("the first deferred frame should encode");
+        if let Some(update) = between {
+            self.apply(update);
+        }
         let second_recorded_frame = self
             .renderer
             .render(&mut encoder, &second_target.view, second_frame)

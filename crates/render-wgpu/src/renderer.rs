@@ -12,8 +12,9 @@ use web_time::Instant;
 
 use bytemuck::Zeroable;
 use render_protocol::{
-    BatchKey, PointBatch, PointId, PresentationWeight, ProtocolError, RenderLimits,
-    RenderStateModel, RenderUpdate, UpdateEffect, UpdateReport, ViewGenerationKey, Viewport,
+    BatchKey, PointBatch, PointId, PresentationWeight, ProtocolError, RasterTransition,
+    RasterTransitionSide, RenderLimits, RenderStateModel, RenderUpdate, UpdateEffect, UpdateReport,
+    ViewGenerationKey, Viewport,
 };
 use thiserror::Error;
 use wgpu::util::DeviceExt;
@@ -166,9 +167,18 @@ pub struct FrameReport {
     encoding_time: Duration,
     transient_texture_bytes: u64,
     eye_dome_lighting_applied: bool,
+    raster_transition_batches: u64,
 }
 
 impl FrameReport {
+    /// Returns the number of batches with explicit raster coverage controls,
+    /// including hidden pending replacements. This is presentation state,
+    /// not a count of visible or authoritative Points.
+    #[must_use]
+    pub const fn raster_transition_batches(self) -> u64 {
+        self.raster_transition_batches
+    }
+
     /// Returns the View generation that was drawn.
     #[must_use]
     pub const fn view_generation(self) -> ViewGenerationKey {
@@ -477,6 +487,13 @@ impl WgpuRenderer {
                     .ok_or(ProtocolError::BatchNotResident { key })?;
                 batch.presentation_weight = weight;
             }
+            UpdateEffect::BatchRasterTransitionSet { key, transition } => {
+                let batch = self
+                    .batches
+                    .get_mut(&key)
+                    .ok_or(ProtocolError::BatchNotResident { key })?;
+                batch.raster_transition = transition;
+            }
             UpdateEffect::HighlightsSet => {
                 let highlights = highlights(&next_state);
                 for batch in self.batches.values_mut() {
@@ -562,6 +579,11 @@ impl WgpuRenderer {
             encoding_time: started_at.elapsed(),
             transient_texture_bytes,
             eye_dome_lighting_applied,
+            raster_transition_batches: batches
+                .iter()
+                .filter(|batch| batch.raster_transition != RasterTransition::FULL)
+                .map(|_| 1_u64)
+                .sum(),
         };
         Ok(RecordedFrame {
             renderer: Arc::clone(&self.identity),
@@ -868,7 +890,13 @@ impl WgpuRenderer {
             let uniform = BatchUniform {
                 origin_from_camera: [offset[0], offset[1], offset[2], 0.0],
                 presentation_weight: normalized_presentation_weight(batch.presentation_weight),
-                _presentation_padding: [0.0; 3],
+                raster_seed: batch.raster_transition.seed(),
+                raster_step: u32::from(batch.raster_transition.step()),
+                raster_side: match batch.raster_transition.side() {
+                    None => 0,
+                    Some(RasterTransitionSide::Incoming) => 1,
+                    Some(RasterTransitionSide::Outgoing) => 2,
+                },
             };
             let source_offset =
                 wgpu::BufferAddress::try_from(upload_bytes.len()).map_err(|_| {
@@ -924,6 +952,7 @@ struct RecordedBatch {
     uniform_buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
     presentation_weight: PresentationWeight,
+    raster_transition: RasterTransition,
 }
 
 impl RecordedBatch {
@@ -937,6 +966,7 @@ impl RecordedBatch {
             uniform_buffer: batch.uniform_buffer.clone(),
             bind_group: batch.bind_group.clone(),
             presentation_weight: batch.presentation_weight,
+            raster_transition: batch.raster_transition,
         }
     }
 }
@@ -951,6 +981,7 @@ struct GpuBatch {
     uniform_buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
     presentation_weight: PresentationWeight,
+    raster_transition: RasterTransition,
 }
 
 impl GpuBatch {
@@ -1017,6 +1048,7 @@ impl GpuBatch {
             uniform_buffer,
             bind_group,
             presentation_weight: PresentationWeight::OPAQUE,
+            raster_transition: RasterTransition::FULL,
         })
     }
 

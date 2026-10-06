@@ -30,7 +30,7 @@ impl PointPipelines {
         enable_edl: bool,
         enable_multisample: bool,
     ) -> Self {
-        let (camera_layout, batch_layout) = point_bind_group_layouts(device, enable_edl);
+        let (camera_layout, batch_layout) = point_bind_group_layouts(device);
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("punctra point pipeline layout"),
             bind_group_layouts: &[Some(&camera_layout), Some(&batch_layout)],
@@ -231,18 +231,13 @@ fn uniform_layout<T>(
 
 fn point_bind_group_layouts(
     device: &wgpu::Device,
-    enable_edl: bool,
 ) -> (wgpu::BindGroupLayout, wgpu::BindGroupLayout) {
     let camera = uniform_layout::<CameraUniform>(
         device,
         "punctra camera layout",
         wgpu::ShaderStages::VERTEX,
     );
-    let batch_visibility = if enable_edl {
-        wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT
-    } else {
-        wgpu::ShaderStages::VERTEX
-    };
+    let batch_visibility = wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT;
     let batch = uniform_layout::<BatchUniform>(device, "punctra batch layout", batch_visibility);
     (camera, batch)
 }
