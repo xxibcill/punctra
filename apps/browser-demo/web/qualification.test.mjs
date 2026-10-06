@@ -175,10 +175,10 @@ test("runtime qualification requires the declared browser and device lane", () =
   assert.deepEqual(mismatch.failures, [
     "browser user agent differed from the declared qualification lane",
   ]);
-  assert.equal(lane.id, "codex-iab-chromium-154-macos-26-apple-m5-pro");
-  assert.deepEqual(lane.screen, { width: 1512, height: 982, colorDepth: 30, pixelDepth: 30 });
+  assert.equal(lane.id, "codex-iab-chromium-154-macos-26-apple-m5-pro-screen-1920");
+  assert.deepEqual(lane.screen, { width: 1920, height: 1080, colorDepth: 24, pixelDepth: 24 });
   const oldScreen = evaluateQualificationLane({
-    ...environment, screen: { width: 1920, height: 1080, colorDepth: 24, pixelDepth: 24 },
+    ...environment, screen: { width: 1512, height: 982, colorDepth: 30, pixelDepth: 30 },
   }, state);
   assert.equal(oldScreen.passed, false);
   assert.equal(oldScreen.failures.length, 4);
