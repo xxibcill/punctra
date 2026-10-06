@@ -80,6 +80,11 @@ parent/child fixture transitions. Separate native `ViewLifecycle` traces
 exercise the actual planner, materializer, and host. Neither kind substitutes
 for the other or for independent embeddings.
 
+Private endpoint captures temporarily hold display diameter at the current
+candidate's measured value within the inherited 2–6-pixel range, then restore
+the ordinary density policy. This lets coverage comparisons bind both the exact
+current camera and diameter while recording diameter changes separately.
+
 ## Accepted gates
 
 Before closure, all of the following must pass:

@@ -1,7 +1,26 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFile } from "node:fs/promises";
 import { decodeTransferV2, projectAuthoredPointAtViewport } from "./visual-corpus.js";
 import { materializeLodFixture } from "./lod-fixture.js";
+
+test("the closed corpus pins exact authored payloads and accepted image/timing gates", async () => {
+  const corpus = JSON.parse(await readFile(new URL("./fixtures/lod-v1/corpus.json", import.meta.url)));
+  assert.equal(corpus.recreations, 3);
+  assert.equal(corpus.presented_steps, 8);
+  assert.deepEqual(corpus.profiles.map((profile) => profile.requested_device_pixel_ratio), [1, 2, 4]);
+  assert.equal(corpus.image_limits.maximum_changed_common_fraction, 0.25);
+  assert.equal(corpus.image_limits.maximum_temporal_rmse, 0.40);
+  assert.equal(corpus.timing_limits.frame_callback_p95_milliseconds, 50);
+  assert.equal(corpus.timing_limits.canonical_predecessor_p95_ratio, 2);
+  for (const source of corpus.sources) {
+    const fixture = await materializeLodFixture({ projection: source.projection, opaqueCoincident: source.opaque_coincident });
+    assert.equal(fixture.payload_sha256, source.payload_sha256);
+    assert.equal(fixture.source_identity, source.source_identity);
+    assert.deepEqual(fixture.camera, source.camera);
+    assert.deepEqual(fixture.batch_point_counts, source.batch_point_counts);
+  }
+});
 
 test("authored cuts preserve global identities, bounds, duplicate residency, and reproducible bytes", async () => {
   for (const projection of ["perspective", "orthographic"]) {

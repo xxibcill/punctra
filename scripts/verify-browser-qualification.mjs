@@ -15,11 +15,11 @@ import {
 import {
   QUALIFICATION_LANE,
   QUALIFICATION_RUNTIME_LANE,
-} from "../apps/browser-demo/web/qualification-lane-v0.22.js";
+} from "../apps/browser-demo/web/qualification-lane-v0.23.js";
 
 const changelogUrl = new URL("../CHANGELOG.md", import.meta.url);
-const matrixUrl = new URL("../docs/releases/v0.22-browser-matrix.json", import.meta.url);
-const releaseRecordUrl = new URL("../docs/releases/v0.22.0.md", import.meta.url);
+const matrixUrl = new URL("../docs/releases/v0.23-browser-matrix.json", import.meta.url);
+const releaseRecordUrl = new URL("../docs/releases/v0.23.0.md", import.meta.url);
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
 const qualificationViewerPackage = path.join(
   repositoryRoot,
@@ -53,10 +53,11 @@ const EXPECTED_UNQUALIFIED_ENTRIES = Object.freeze([
   }),
   Object.freeze({
     browser: "All other browser, OS, adapter, display, and mobile combinations",
-    reason: "Not executed in the v0.22 repository qualification lane.",
+    reason: "Not executed in the v0.23 repository qualification lane.",
   }),
 ]);
 const QUALIFIED_IMPLEMENTATION_PATHS = [
+  ".gitignore",
   "Cargo.toml",
   "Cargo.lock",
   "fuzz",
@@ -64,6 +65,9 @@ const QUALIFIED_IMPLEMENTATION_PATHS = [
   "examples",
   "apps",
   "packages",
+  "scripts",
+  "docs/api/browser-sdk.md",
+  "docs/design/lod-density-transition-continuity-v0.23.md",
   "scripts/build-browser-demo.sh",
   "scripts/build-browser-sdk.sh",
   "scripts/generate-browser-sdk-reference.mjs",
@@ -162,7 +166,7 @@ export function verifyUnqualifiedEntries(entries) {
   assert.deepEqual(
     entries,
     EXPECTED_UNQUALIFIED_ENTRIES,
-    "unqualified platform classes must match the frozen v0.22 matrix",
+    "unqualified platform classes must match the frozen v0.23 matrix",
   );
 }
 
@@ -180,7 +184,7 @@ export function releaseVerifierSha256(releaseRecord) {
 
 export function changelogImplementationCommit(changelog) {
   const match = changelog.match(/implementation commit `([0-9a-f]{40})`/);
-  assert.ok(match, "changelog must contain one full v0.22 implementation commit SHA");
+  assert.ok(match, "changelog must contain one full v0.23 implementation commit SHA");
   return match[1];
 }
 

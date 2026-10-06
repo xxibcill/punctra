@@ -9,15 +9,15 @@ import {
 import { BROWSER_SDK_REFERENCE_SECTIONS } from "./generate-browser-sdk-reference.mjs";
 
 const baseline = JSON.parse(await readFile(
-  new URL("../docs/releases/v0.22-browser-baseline.json", import.meta.url),
+  new URL("../docs/releases/v0.23-browser-baseline.json", import.meta.url),
   "utf8",
 ));
 const quickstartEvidence = JSON.parse(await readFile(
-  new URL("../docs/releases/v0.22-browser-quickstart.json", import.meta.url),
+  new URL("../docs/releases/v0.23-browser-quickstart.json", import.meta.url),
   "utf8",
 ));
 const qualificationMatrix = JSON.parse(await readFile(
-  new URL("../docs/releases/v0.22-browser-matrix.json", import.meta.url),
+  new URL("../docs/releases/v0.23-browser-matrix.json", import.meta.url),
   "utf8",
 ));
 const operationalReleaseSources = [

@@ -1,5 +1,5 @@
 import { RECREATION_REQUIRED_SAFE_ACTIONS } from "./viewer-api.js";
-import { QUALIFICATION_RUNTIME_LANE } from "./qualification-lane-v0.22.js";
+import { QUALIFICATION_RUNTIME_LANE } from "./qualification-lane-v0.23.js";
 
 export { QUALIFICATION_RUNTIME_LANE };
 
