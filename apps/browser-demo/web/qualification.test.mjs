@@ -176,6 +176,12 @@ test("runtime qualification requires the declared browser and device lane", () =
     "browser user agent differed from the declared qualification lane",
   ]);
   assert.equal(lane.id, "codex-iab-chromium-154-macos-26-apple-m5-pro");
+  assert.deepEqual(lane.screen, { width: 1512, height: 982, colorDepth: 30, pixelDepth: 30 });
+  const oldScreen = evaluateQualificationLane({
+    ...environment, screen: { width: 1920, height: 1080, colorDepth: 24, pixelDepth: 24 },
+  }, state);
+  assert.equal(oldScreen.passed, false);
+  assert.equal(oldScreen.failures.length, 4);
   for (const version of ["151", "155"]) {
     const userAgent = lane.browser.userAgent.replace("Chrome/154.", `Chrome/${version}.`);
     const result = evaluateQualificationLane({ ...environment, userAgent }, {
