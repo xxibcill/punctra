@@ -241,6 +241,7 @@ def lod_verify_pins() -> dict[str, object]:
             },
             "corpus": repository_digest_record("apps/browser-demo/web/fixtures/lod-v1/corpus.json"),
             "predecessor": repository_digest_record("docs/releases/v0.22-browser-point-footprint-baseline.json"),
+            "predecessor_evidence": repository_digest_record("docs/releases/v0.22-browser-point-footprint-evidence.json"),
         },
     }
 
@@ -549,6 +550,12 @@ class BrowserDemoHandler(BaseHTTPRequestHandler):
                 self.send_error(HTTPStatus.NOT_FOUND)
                 return
             self._serve_repository_json_file(LOD_BASELINE_PATH, send_body=send_body)
+            return
+        if urlsplit(self.path).path == "/qualification-lod-predecessor.json":
+            self._serve_json({
+                "baseline": json.loads(FOOTPRINT_BASELINE_PATH.read_bytes()),
+                "evidence": json.loads((REPOSITORY_ROOT / "docs/releases/v0.22-browser-point-footprint-evidence.json").read_bytes()),
+            }, send_body=send_body)
             return
         if urlsplit(self.path).path == "/qualification-footprint-pins.json":
             self._serve_json(footprint_verify_pins(), send_body=send_body)

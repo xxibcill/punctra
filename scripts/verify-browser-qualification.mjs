@@ -44,12 +44,12 @@ const QUALIFICATION_VERIFIER_SHA256 = createHash("sha256").update(verifierSource
 const EXPECTED_OBSERVATION_DATE = "2026-10-06";
 const EXPECTED_UNQUALIFIED_ENTRIES = Object.freeze([
   Object.freeze({
-    browser: "Google Chrome 150.0.7871.115",
-    reason: "Installed locally but no connected browser-control surface was available for an attended packed-consumer WebGPU run.",
+    browser: "Google Chrome 154.0.8037.98",
+    reason: "Installed locally but not executed in the v0.23 attended packed-consumer WebGPU lane.",
   }),
   Object.freeze({
-    browser: "Safari 26.5.2",
-    reason: "Installed locally but no supported browser-control surface was available for an attended packed-consumer WebGPU run.",
+    browser: "Safari 26.6.2",
+    reason: "Installed locally but not executed in the v0.23 attended packed-consumer WebGPU lane.",
   }),
   Object.freeze({
     browser: "All other browser, OS, adapter, display, and mobile combinations",
