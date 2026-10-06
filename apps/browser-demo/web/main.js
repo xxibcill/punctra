@@ -30,6 +30,7 @@ const canvasShell = document.querySelector("#canvas-shell");
 const statusBlock = document.querySelector("#status-block");
 const statusMessage = document.querySelector("#status-message");
 const diagnosticOutput = document.querySelector("#diagnostic-output");
+const exportAcceptanceButton = document.querySelector("#export-acceptance");
 const recoveryBlock = document.querySelector("#recovery-block");
 const recoveryMessage = document.querySelector("#recovery-message");
 const capabilityFacts = document.querySelector("#capability-facts");
@@ -251,7 +252,9 @@ async function loadQualificationHost() {
 async function runSmokePath() {
   smokeRunning = true;
   smokePassed = false;
+  exportAcceptanceButton.disabled = true;
   smokeRecord = { schema: ACCEPTANCE_SCHEMA };
+  const implementationPins = await loadFunctionalImplementationPins();
   const environment = captureEnvironment({ host: await loadQualificationHost() });
   const heap = { before: captureJsHeap(performance) };
   setHarnessState("checking", "Running browser/device qualification checks…");
@@ -268,6 +271,8 @@ async function runSmokePath() {
 
   smokeRecord = {
     schema: ACCEPTANCE_SCHEMA,
+    implementation_commit: implementationPins.implementation.commit,
+    runtime_pins: implementationPins.runtime,
     package_version: performanceEvidence.finalState.packageVersion,
     environment,
     runtime_lane: runtimeLane,
@@ -310,12 +315,39 @@ async function runSmokePath() {
     ],
   };
   smokePassed = true;
+  exportAcceptanceButton.disabled = false;
   smokeRunning = false;
   publishState(viewer.state());
   setHarnessState(
     "passed",
     "PASS — the declared browser/device lane satisfied functional, latency, resource, and recovery qualification locally.",
   );
+}
+
+async function loadFunctionalImplementationPins() {
+  const response = await fetch("./qualification-lod-pins.json", { cache: "no-store", credentials: "same-origin" });
+  assertFact(response.ok, "current implementation pin endpoint");
+  const pins = await response.json();
+  assertFact(pins.schema === "punctra-browser-lod-pins-v1" && pins.implementation_clean
+    && pins.implementation_dirty_paths.length === 0, "clean current implementation pin");
+  return pins.running;
+}
+
+async function downloadAcceptance() {
+  if (!smokePassed || smokeRunning) return;
+  try {
+    const pins = await loadFunctionalImplementationPins();
+    assertFact(pins.implementation.commit === smokeRecord.implementation_commit
+      && pins.runtime.packed_artifact.sha256 === smokeRecord.runtime_pins.packed_artifact.sha256, "unchanged implementation at functional export");
+    const record = { schema: "punctra-browser-functional-observation-v1", observed_on: new Date().toISOString().slice(0, 10),
+      acceptance: smokeRecord };
+    const url = URL.createObjectURL(new Blob([`${JSON.stringify(record, null, 2)}\n`], { type: "application/json" }));
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = "v0.23-browser-functional-observation.json";
+    anchor.click();
+    setTimeout(() => URL.revokeObjectURL(url), 30_000);
+  } catch (error) { publishFailure(error); }
 }
 
 function assertInitialQualification(initial, runtimeLane) {
@@ -1046,6 +1078,7 @@ displaySelect.addEventListener("change", changeDisplay);
 projectionButton.addEventListener("click", toggleProjection);
 clearButton.addEventListener("click", clearHighlight);
 shutdownButton.addEventListener("click", shutdown);
+exportAcceptanceButton.addEventListener("click", () => void downloadAcceptance());
 document.addEventListener("visibilitychange", synchronizeDocumentVisibility);
 new ResizeObserver(scheduleResize).observe(canvasShell);
 
