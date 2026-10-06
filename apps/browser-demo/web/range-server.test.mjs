@@ -179,6 +179,27 @@ test("point-footprint pin endpoint binds the running checkout and verifier", asy
   }
 });
 
+test("paired LOD timing serves only the exact frozen predecessor artifacts", async () => {
+  const { server, port } = await startServer();
+  const origin = `http://127.0.0.1:${port}`;
+  const frozen = JSON.parse(await readFile(new URL("../../../docs/releases/v0.22-browser-point-footprint-baseline.json", import.meta.url))).pins.runtime;
+  try {
+    const pins = await (await fetch(`${origin}/qualification-lod-pins.json`)).json();
+    const paired = pins.running.paired_predecessor_runtime;
+    assert.equal(paired.package_version, "0.22.0-alpha.1");
+    for (const [index, relative] of ["package.json", "pkg/browser_demo.js", "pkg/browser_demo_bg.wasm"].entries()) {
+      const response = await fetch(`${origin}/qualification-lod-legacy-runtime/${relative}`);
+      assert.equal(response.status, 200);
+      const bytes = Buffer.from(await response.arrayBuffer());
+      assert.equal(bytes.byteLength, frozen.artifacts[index].byte_length);
+      assert.equal(createHash("sha256").update(bytes).digest("hex"), frozen.artifacts[index].sha256);
+      assert.equal(paired.artifacts[index].sha256, frozen.artifacts[index].sha256);
+    }
+    assert.equal((await fetch(`${origin}/qualification-lod-legacy-runtime/sdk.js`)).status, 404);
+    assert.equal((await fetch(`${origin}/qualification-lod-legacy-runtime/pkg/%2e%2e%2fsdk.js`)).status, 404);
+  } finally { await stopServer(server); }
+});
+
 test("opt-in local server persists a bounded visual evidence TAR", async () => {
   const exportDirectory = await mkdtemp(
     path.join(tmpdir(), "punctra-visual-export-"),

@@ -16,6 +16,16 @@ export const LOD_EVIDENCE_PATH = "docs/releases/v0.23-browser-lod-evidence.json"
 export const LOD_CANONICAL_PROFILE = Object.freeze({ id: "canonical-dpr2", css_width: 320, css_height: 240,
   requested_device_pixel_ratio: 2, physical_width: 640, physical_height: 480 });
 
+export function validateLodPredecessorRuntime(paired, frozen) {
+  requireCondition(paired?.package_name === frozen.package_name && paired.package_version === "0.22.0-alpha.1"
+    && paired.package_version === frozen.package_version && paired.artifacts.length === 3, "paired predecessor runtime differs");
+  for (const [index, relative] of ["package.json", "pkg/browser_demo.js", "pkg/browser_demo_bg.wasm"].entries()) {
+    requireCondition(paired.artifacts[index].path === `target/predecessors/v0.22/node_modules/@punctra/viewer/${relative}`
+      && paired.artifacts[index].sha256 === frozen.artifacts[index].sha256
+      && paired.artifacts[index].byte_length === frozen.artifacts[index].byte_length, "paired predecessor pin differs");
+  }
+}
+
 export function validateLodEndpointBinding(frame, expectedCamera) {
   for (const role of ["candidate", "outgoing", "incoming"]) validateCameraBinding(frame[role].camera, expectedCamera);
   requireCondition(canonicalJsonEqual(frame.candidate.camera, frame.outgoing.camera)
@@ -106,12 +116,21 @@ export function validateQuietTiming(timing, limits, predecessor = null, context 
   }
 }
 
+export function validatePairedLodTiming(current, predecessor, limits, context) {
+  validateQuietTiming(predecessor, limits);
+  requireCondition(predecessor.frame_interval.p95 > 0 && predecessor.frame_submission.p95 > 0,
+    "paired predecessor timing is not measurable");
+  validateQuietTiming(current, limits,
+    Object.fromEntries(["frame_interval", "frame_submission"].map((field) => [field, predecessor[field].p95])), context);
+}
+
 /** Recomputes metrics from decoded artifacts; recorded pass flags are never inputs. */
 export async function auditLodRecord(record, { corpus, fixtures, visual, predecessor, predecessorEvidence, loadImage, baseline = null, visualOptions = {} }) {
   requireCondition(record.release === LOD_RELEASE && [LOD_BASELINE_SCHEMA, LOD_EVIDENCE_SCHEMA].includes(record.schema), "release schema differs");
   requireCondition(canonicalJsonEqual(record.external_evidence, corpus.external_evidence), "external evidence boundary differs");
   requireCondition(record.activation?.trusted_user_activation === true && record.activation.page_visibility === "visible", "attended activation is absent");
   validateLodEnvironment(record.environment);
+  validateLodPredecessorRuntime(record.pins.paired_predecessor_runtime, predecessor.pins.runtime);
   const expectedRuns = corpus.trials.flatMap((trial) => corpus.profiles.flatMap((profile) => [0, 1, 2].map((index) => `${trial.id}/${profile.id}/${index}`)));
   requireCondition(canonicalJsonEqual(record.transitions.map((run) => `${run.trial_id}/${run.profile.id}/${run.recreation_index}`), expectedRuns), "transition matrix differs");
   let frames = 0;
@@ -197,30 +216,16 @@ export async function auditLodRecord(record, { corpus, fixtures, visual, predece
     const oldTiming = predecessorEvidence.canonical_trials.find((entry) => entry.trial_id === trial.id).recreations;
     const referenceTiming = Object.fromEntries(["frame_interval", "frame_submission"].map((field) => [field, Math.max(...oldTiming.map((entry) => entry.timing[field].p95))]));
     for (const run of runs) {
-      requireCondition(canonicalJsonEqual(run.profile, LOD_CANONICAL_PROFILE), "canonical profile differs");
-      validateLodArtifact(run.capture, { path: `${LOD_ROOT}/${record.mode}/canonical/${trial.id}-r${run.recreation_index}.png`,
-        kind: "lod_canonical_png", profile: { physical_width: 640, physical_height: 480 } });
-      const image = await loadImage(run.capture.artifact);
-      requireCondition(image.width === 640 && image.height === 480 && run.capture.capture.facts.width === 640 && run.capture.capture.facts.height === 480, "canonical PNG dimensions differ");
-      requireCondition(run.capture.artifact.decoded_sha256 === expectedImage.decoded_sha256, "canonical v0.22 decoded pixels differ");
-      const input = await pointProjectionInput(materialized, trial, run.profile);
-      requireCondition(canonicalJsonEqual(input, run.projection_input), "canonical Source or projection input differs");
-      validatePointProjectionCapture(input, { camera: run.capture.camera, viewport: run.capture.viewport,
-        streaming: run.capture.source, point_footprint: run.capture.capture.facts.point_footprint,
-        display_mode: run.capture.source.display_mode, highlights: run.capture.highlights }, run.capture.capture.facts);
-      requireCondition(run.nominal_picks.length === trial.selection.ordinals.length, "canonical nominal pick count differs");
-      for (const [index, pick] of run.nominal_picks.entries()) {
-        const ordinal = trial.selection.ordinals[index];
-        const batchIndex = materialized.batches.findIndex((bytes) => decodeTransferV2(bytes).some((point) => point.ordinal === ordinal));
-        const point = decodeTransferV2(materialized.batches[batchIndex]).find((entry) => entry.ordinal === ordinal);
-        const projected = projectAuthoredPointAtViewport(point, materialized.world_origin, materialized.camera, LOD_CANONICAL_PROFILE);
-        validateLodNominalPick(pick, { source_identity: materialized.source_identity, generation: 1,
-          batch_key: materialized.source.expected_view.batch_keys[batchIndex],
-          batch_version: trial.expected_settled_batch_versions[batchIndex], point_ordinal: String(ordinal) }, [projected.x, projected.y], 1);
+      const paired = run.paired_predecessor;
+      requireCondition(paired?.trial_id === trial.id && paired.recreation_index === run.recreation_index, "paired predecessor recreation differs");
+      for (const [role, observation] of [["canonical", run], ["paired-predecessor", paired]]) {
+        await validateCanonicalLodRun({ run: observation, role, mode: record.mode, trial, materialized,
+          expectedImage, limits: corpus.timing_limits, loadImage });
+        maximumRendererBytes = Math.max(maximumRendererBytes, observation.capture.capture.facts.renderer_transient_texture_bytes);
       }
-      validateLifecycleTiming(run, corpus.timing_limits);
-      validateQuietTiming(run.quiet_timing, corpus.timing_limits, referenceTiming, `${trial.id}/r${run.recreation_index}`);
-      requireCondition(run.disposal.freed && run.disposal.pending_capture_tickets === 0, "canonical disposal differs");
+      validatePairedLodTiming(run.quiet_timing, paired.quiet_timing, corpus.timing_limits, `${trial.id}/r${run.recreation_index} paired v0.22`);
+      validateQuietTiming(run.quiet_timing, corpus.timing_limits,
+        { frame_interval: 0, frame_submission: referenceTiming.frame_submission }, `${trial.id}/r${run.recreation_index} historical submission`);
     }
   }
   requireCondition(record.fallback.length === 3, "fallback recreation count differs");
@@ -267,9 +272,39 @@ export async function auditLodRecord(record, { corpus, fixtures, visual, predece
       `separate verify ${artifact.path} decoded pixels differ`);
   }
   return { passed: true, transition_recreations: expectedRuns.length, transition_frames: frames,
-    canonical_recreations: record.canonical.length, fallback_recreations: record.fallback.length,
+    canonical_recreations: record.canonical.length, paired_predecessor_recreations: record.canonical.length, fallback_recreations: record.fallback.length,
     raw_boundary_probes: record.boundary_probes.length, maximum_temporal_rmse: maximumTemporalRmse,
     maximum_changed_common_fraction: maximumChangedCommonFraction, maximum_renderer_transient_bytes: maximumRendererBytes };
+}
+
+async function validateCanonicalLodRun({ run, role, mode, trial, materialized, expectedImage, limits, loadImage }) {
+  requireCondition(canonicalJsonEqual(run.profile, LOD_CANONICAL_PROFILE), "canonical profile differs");
+  validateLodArtifact(run.capture, { path: `${LOD_ROOT}/${mode}/${role}/${trial.id}-r${run.recreation_index}.png`,
+    kind: role === "canonical" ? "lod_canonical_png" : "lod_paired_predecessor_png", profile: LOD_CANONICAL_PROFILE });
+  const image = await loadImage(run.capture.artifact);
+  const rendererBytes = run.capture.capture.facts.renderer_transient_texture_bytes;
+  requireCondition(Number.isSafeInteger(rendererBytes) && rendererBytes >= 0 && rendererBytes <= 67_108_864,
+    "canonical renderer resource ceiling exceeded");
+  requireCondition(image.width === 640 && image.height === 480 && run.capture.capture.facts.width === 640 && run.capture.capture.facts.height === 480, "canonical PNG dimensions differ");
+  requireCondition(run.capture.artifact.decoded_sha256 === expectedImage.decoded_sha256, "canonical v0.22 decoded pixels differ");
+  const input = await pointProjectionInput(materialized, trial, run.profile);
+  requireCondition(canonicalJsonEqual(input, run.projection_input), "canonical Source or projection input differs");
+  validatePointProjectionCapture(input, { camera: run.capture.camera, viewport: run.capture.viewport,
+    streaming: run.capture.source, point_footprint: run.capture.capture.facts.point_footprint,
+    display_mode: run.capture.source.display_mode, highlights: run.capture.highlights }, run.capture.capture.facts);
+  requireCondition(run.nominal_picks.length === trial.selection.ordinals.length, "canonical nominal pick count differs");
+  for (const [index, pick] of run.nominal_picks.entries()) {
+    const ordinal = trial.selection.ordinals[index];
+    const batchIndex = materialized.batches.findIndex((bytes) => decodeTransferV2(bytes).some((point) => point.ordinal === ordinal));
+    const point = decodeTransferV2(materialized.batches[batchIndex]).find((entry) => entry.ordinal === ordinal);
+    const projected = projectAuthoredPointAtViewport(point, materialized.world_origin, materialized.camera, LOD_CANONICAL_PROFILE);
+    validateLodNominalPick(pick, { source_identity: materialized.source_identity, generation: 1,
+      batch_key: materialized.source.expected_view.batch_keys[batchIndex],
+      batch_version: trial.expected_settled_batch_versions[batchIndex], point_ordinal: String(ordinal) }, [projected.x, projected.y], 1);
+  }
+  validateLifecycleTiming(run, limits);
+  validateQuietTiming(run.quiet_timing, limits);
+  requireCondition(run.disposal.freed && run.disposal.pending_capture_tickets === 0, "canonical disposal differs");
 }
 
 function validateCameraBinding(observed, expected) {

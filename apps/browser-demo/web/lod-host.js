@@ -6,15 +6,15 @@ const { requireCondition } = createVisualValidator("LOD host failed");
 export const animationFrame = () => new Promise((resolve) => requestAnimationFrame(resolve));
 export const raw = (value) => parseRawJson(value, "LOD raw viewer response");
 
-export async function createLodViewer(canvas, profile) {
+export async function createLodViewer(canvas, profile, runtime = { createViewer: createRawViewer, packageVersion: "0.23.0-alpha.1" }) {
   canvas.style.width = `${profile.css_width}px`;
   canvas.style.height = `${profile.css_height}px`;
   canvas.width = profile.physical_width;
   canvas.height = profile.physical_height;
-  const viewer = await createRawViewer(canvas, profile.css_width, profile.css_height, profile.requested_device_pixel_ratio);
+  const viewer = await runtime.createViewer(canvas, profile.css_width, profile.css_height, profile.requested_device_pixel_ratio);
   try {
     const diagnostics = raw(viewer.diagnostics());
-    requireCondition(diagnostics.package_version === "0.23.0-alpha.1", "loaded runtime version differs");
+    requireCondition(diagnostics.package_version === runtime.packageVersion, "loaded runtime version differs");
     requireCondition(diagnostics.viewport.physical_width === profile.physical_width
       && diagnostics.viewport.physical_height === profile.physical_height, "physical viewport differs");
     return viewer;

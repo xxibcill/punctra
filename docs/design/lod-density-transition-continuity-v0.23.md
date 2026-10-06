@@ -124,7 +124,9 @@ Before closure, all of the following must pass:
   facts, authority boundaries, fallback disposition, and recomputed metrics.
   Source-to-first Coverage stays within 10 seconds, settlement within 15 seconds,
   quiet-frame callback p95 within 50 ms, and submission p95 within 16.7 ms.
-  Matching canonical p95 costs remain within twice their nonzero v0.22 values.
+  Matching canonical p95 costs remain within twice their nonzero v0.22
+  runtime values measured beside each recreation in the same actual session.
+  Historical submission p95 also retains its original two-times gate.
   Capture/readback time is reported separately from frame encoding/submission.
 - A fresh packed SDK/React build, quickstart, functional matrix, and complete
   applicable local CONTRIBUTING verification pass at a clean implementation
@@ -147,3 +149,26 @@ Physical-display, broader browser/device, independent-human interpretation,
 independent adoption, final visual quality, support qualification, beta,
 release-candidate, and v1 evidence remain separate. v0.30 activation still
 requires real support and independent production evidence.
+
+## Same-session timing amendment (2026-10-06)
+
+The [paired cadence investigation](../reviews/lod-cadence-investigation-v0.23.md)
+found a changed browser session: the frozen lane reported 1512×982/30-bit screen
+facts, while the current lane reports 1920×1080/24-bit. In the current session,
+150 callbacks without rendering had a 33.30-ms median. Alternating three frozen
+v0.22 and three current v0.23 runs produced that same median, identical decoded
+canonical pixels, and 0.30-ms frame-submission p95 in every run. Comparing this
+session's callback cadence with a historical 17-ms callback cadence is not a
+matched rendering-cost comparison. The original historical-cadence failures
+remain failures and supplied no accepted archive.
+
+Every new canonical recreation therefore includes a frozen v0.22 runtime
+control in the same session, at the same Source, camera, viewport, display and
+nominal pick inputs. Both captures must reproduce the immutable v0.22 pixels.
+Both obey the unchanged absolute lifecycle, frame and resource ceilings; current
+callback and submission p95 must also stay within twice their nonzero paired
+v0.22 values. The original historical **submission** ratio stays enforced.
+All 27 paired controls, exact loaded legacy JS/Wasm byte pins, capture facts and
+raw timing samples are bound and separately reproduced by the verify run.
+This is a timing-comparability correction, not a physical-display qualification
+or a change to any image, identity, residency or absolute performance gate.

@@ -6,7 +6,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { validateLodCorpus } from "../apps/browser-demo/web/lod-corpus.js";
 import { auditLodRecord, LOD_BASELINE_PATH, LOD_BASELINE_SCHEMA, LOD_EVIDENCE_PATH, LOD_EVIDENCE_SCHEMA,
-  LOD_RELEASE, LOD_ROOT } from "../apps/browser-demo/web/lod-records.js";
+  LOD_RELEASE, LOD_ROOT, validateLodPredecessorRuntime } from "../apps/browser-demo/web/lod-records.js";
 import { validateVisualCorpus } from "../apps/browser-demo/web/visual-corpus.js";
 import { decodeRgba8Png } from "../apps/browser-demo/web/visual-png.js";
 
@@ -62,6 +62,11 @@ async function verifyPins(pins) {
   assert.equal(pins.predecessor_evidence.path, "docs/releases/v0.22-browser-point-footprint-evidence.json");
   for (const record of [pins.predecessor, pins.predecessor_evidence]) {
     verifyDigest(pinned(pins.implementation.commit, record.path), record, "immutable predecessor record");
+  }
+  const frozenRuntime = JSON.parse(pinned(pins.implementation.commit, pins.predecessor.path)).pins.runtime;
+  validateLodPredecessorRuntime(pins.paired_predecessor_runtime, frozenRuntime);
+  for (const record of pins.paired_predecessor_runtime.artifacts) {
+    verifyDigest(await readFile(path.join(ROOT, record.path)), record, "paired frozen predecessor runtime");
   }
   for (const record of [...pins.runtime.artifacts, pins.runtime.packed_artifact, pins.corpus, pins.predecessor, pins.predecessor_evidence]) {
     canonicalPath(record.path);

@@ -113,6 +113,9 @@ LOD_EXPORT_PATH = "/qualification-lod-export"
 LOD_EXPORT_FILENAME = "v0.23-browser-lod-evidence.tar"
 LOD_EXPORT_RECEIPT_SCHEMA = "punctra-browser-lod-export-receipt-v1"
 MAX_LOD_EXPORT_BYTES = 134_217_728
+LOD_PREDECESSOR_RUNTIME_ROOT = Path("target/predecessors/v0.22/node_modules/@punctra/viewer")
+LOD_PREDECESSOR_RUNTIME_FILES = ("package.json", "pkg/browser_demo.js", "pkg/browser_demo_bg.wasm")
+LOD_PREDECESSOR_RUNTIME_URL = "/qualification-lod-legacy-runtime/"
 FUNCTIONAL_EXPORT_PATH = "/qualification-functional-export"
 FUNCTIONAL_EXPORT_FILENAME = "v0.23-browser-functional-observation.json"
 FUNCTIONAL_EXPORT_RECEIPT_SCHEMA = "punctra-browser-functional-export-receipt-v1"
@@ -217,6 +220,18 @@ def visual_verify_pins() -> dict[str, object]:
     }
 
 
+def lod_predecessor_runtime_pins() -> dict[str, object]:
+    frozen = json.loads(FOOTPRINT_BASELINE_PATH.read_bytes())["pins"]["runtime"]
+    artifacts = []
+    for relative, expected in zip(LOD_PREDECESSOR_RUNTIME_FILES, frozen["artifacts"], strict=True):
+        actual = repository_digest_record(str(LOD_PREDECESSOR_RUNTIME_ROOT / relative))
+        if any(actual[field] != expected[field] for field in ("sha256", "byte_length")):
+            raise ValueError("staged v0.22 runtime differs from its frozen accepted bytes")
+        artifacts.append(actual)
+    return {"package_name": frozen["package_name"], "package_version": frozen["package_version"],
+            "artifacts": artifacts}
+
+
 def lod_verify_pins() -> dict[str, object]:
     commit = command_text("git", "-C", str(REPOSITORY_ROOT), "rev-parse", "HEAD")
     if commit is None or len(commit) != 40:
@@ -242,6 +257,7 @@ def lod_verify_pins() -> dict[str, object]:
                 "packed_artifact": repository_digest_record(packed_path),
                 "artifacts": [repository_digest_record(path) for path in FOOTPRINT_RUNTIME_REPOSITORY_PATHS],
             },
+            "paired_predecessor_runtime": lod_predecessor_runtime_pins(),
             "corpus": repository_digest_record("apps/browser-demo/web/fixtures/lod-v1/corpus.json"),
             "predecessor": repository_digest_record("docs/releases/v0.22-browser-point-footprint-baseline.json"),
             "predecessor_evidence": repository_digest_record("docs/releases/v0.22-browser-point-footprint-evidence.json"),
@@ -691,6 +707,12 @@ class BrowserDemoHandler(BaseHTTPRequestHandler):
 
     def _resolve_path(self) -> Path:
         raw_path = unquote(urlsplit(self.path).path)
+        if raw_path.startswith(LOD_PREDECESSOR_RUNTIME_URL):
+            relative = raw_path.removeprefix(LOD_PREDECESSOR_RUNTIME_URL)
+            if relative not in LOD_PREDECESSOR_RUNTIME_FILES:
+                raise FileNotFoundError(relative)
+            lod_predecessor_runtime_pins()
+            return REPOSITORY_ROOT / LOD_PREDECESSOR_RUNTIME_ROOT / relative
         relative = raw_path.removeprefix("/") or "index.html"
         web_root = self.server.web_root
         candidate = (web_root / relative).resolve()

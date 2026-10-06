@@ -10,7 +10,7 @@ import { animationFrame, captureLodFrame, configureLodCamera, createLodViewer, d
   pickLodPoint, publishLodSource, quietLodFrames, raw, restoreLodBatch, setLodCut } from "./lod-host.js";
 import { auditLodRecord, LOD_BACKGROUND, LOD_BASELINE_PATH, LOD_BASELINE_SCHEMA,
   LOD_CANONICAL_PROFILE, LOD_EVIDENCE_PATH, LOD_EVIDENCE_SCHEMA, LOD_RELEASE, LOD_ROOT,
-  lodBoundaryCases, boundaryArgumentFacts, validateLodEnvironment } from "./lod-records.js";
+  lodBoundaryCases, boundaryArgumentFacts, validateLodEnvironment, validateLodPredecessorRuntime } from "./lod-records.js";
 
 const { requireCondition } = createVisualValidator("LOD qualification failed");
 const jsonBytes = (value) => new TextEncoder().encode(`${JSON.stringify(value, null, 2)}\n`);
@@ -39,6 +39,7 @@ export async function runLodQualification({ mode, sessionLabel, activation, inpu
     if (relativePath.endsWith(".wasm")) wasmBytes = bytes;
   }
   await initializeWasm({ module_or_path: wasmBytes });
+  const predecessorRuntime = await loadPredecessorRuntime(pins, predecessorBundle.baseline.pins.runtime);
   const artifactImages = new Map();
   let encodedBytes = 0;
   const artifacts = new ArtifactRegistry(({ path, bytes, metadata }) => {
@@ -65,7 +66,9 @@ export async function runLodQualification({ mode, sessionLabel, activation, inpu
   }
   for (const trial of inputs.visual.corpus.trials) for (let index = 0; index < 3; index += 1) {
     state(`Canonical ${record.canonical.length + 1}/27 · ${trial.id} · recreation ${index + 1}`);
-    record.canonical.push(await runCanonical({ trial, visual: inputs.visual, index, canvas, artifacts, mode }));
+    const paired = await runCanonical({ trial, visual: inputs.visual, index, canvas, artifacts, mode, runtime: predecessorRuntime });
+    const current = await runCanonical({ trial, visual: inputs.visual, index, canvas, artifacts, mode });
+    record.canonical.push({ ...current, paired_predecessor: paired });
   }
   for (let index = 0; index < 3; index += 1) {
     state(`Resource fallback · recreation ${index + 1}/3`);
@@ -172,11 +175,11 @@ async function capturePairedEndpoints(viewer, profile, control, artifacts, prefi
   }
 }
 
-async function runCanonical({ trial, visual, index, canvas, artifacts, mode }) {
+async function runCanonical({ trial, visual, index, canvas, artifacts, mode, runtime }) {
   const profile = LOD_CANONICAL_PROFILE;
   const fixture = await materializeVisualTrial(visual.corpus, trial.id, { corpusUrl: visual.corpus_url });
   const started = performance.now();
-  let viewer = await createLodViewer(canvas, profile);
+  let viewer = await createLodViewer(canvas, profile, runtime);
   try {
     raw(viewer.beginStreamBatch(fixture.source_identity, fixture.point_count, ...fixture.world_origin,
       ...fixture.source_z_range, 0, fixture.batches[0]));
@@ -205,7 +208,9 @@ async function runCanonical({ trial, visual, index, canvas, artifacts, mode }) {
     if (trial.selection.ordinals.length) raw(viewer.setHighlights(fixture.source_identity, 1n, new BigUint64Array(trial.selection.ordinals.map(BigInt))));
     const settled = performance.now() - started;
     const quietTiming = await quietLodFrames(viewer, 30);
-    const capture = await captureAndBind(viewer, profile, artifacts, `${LOD_ROOT}/${mode}/canonical/${trial.id}-r${index}.png`, "lod_canonical_png");
+    const capture = await captureAndBind(viewer, profile, artifacts,
+      `${LOD_ROOT}/${mode}/${runtime ? "paired-predecessor" : "canonical"}/${trial.id}-r${index}.png`,
+      runtime ? "lod_paired_predecessor_png" : "lod_canonical_png");
     const projectionInput = await pointProjectionInput(fixture, trial, profile);
     validatePointProjectionCapture(projectionInput, raw(viewer.diagnostics()), capture.record.capture.facts);
     const disposal = disposeLodViewer(viewer);
@@ -294,6 +299,23 @@ function cameraAtStep(camera, kind, step) {
 function fixtureInput(fixture) {
   return Object.fromEntries(["recipe", "fixture_authority", "source_identity", "payload_sha256", "world_origin", "source_z_range",
     "point_count", "batch_point_counts", "camera"].map((field) => [field, fixture[field]]));
+}
+
+async function loadPredecessorRuntime(pins, frozen) {
+  const paired = pins.paired_predecessor_runtime;
+  validateLodPredecessorRuntime(paired, frozen);
+  let wasmBytes;
+  for (const [index, relative] of RUNTIME_PATHS.entries()) {
+    const bound = paired.artifacts[index];
+    const response = await fetch(`./qualification-lod-legacy-runtime/${relative}`, { cache: "no-store" });
+    requireCondition(response.ok, "paired predecessor artifact unavailable");
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    requireCondition(bytes.byteLength === bound.byte_length && await sha256Hex(bytes) === bound.sha256, "paired predecessor loaded bytes differ");
+    if (relative.endsWith(".wasm")) wasmBytes = bytes;
+  }
+  const module = await import("./qualification-lod-legacy-runtime/pkg/browser_demo.js");
+  await module.default({ module_or_path: wasmBytes });
+  return { createViewer: module.createViewer, packageVersion: paired.package_version };
 }
 
 async function loadJson(url) {

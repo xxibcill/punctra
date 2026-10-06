@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { materializeLodFixture } from "./lod-fixture.js";
 import { boundaryArgumentFacts, lodBoundaryCases, validateLodArtifact, validateLodBoundaryMatrix, validateLodCapture,
-  validateLodEndpointBinding, validateLodNominalPick, validateQuietTiming } from "./lod-records.js";
+  validateLodEndpointBinding, validateLodNominalPick, validateLodPredecessorRuntime, validatePairedLodTiming, validateQuietTiming } from "./lod-records.js";
 import { summarizeSamples } from "./visual-capture.js";
 
 test("capture acceptance binds actual renderer controls, exact identities and charged hidden residency", async () => {
@@ -103,4 +103,36 @@ test("canonical picks bind authored centers, allowed neighbors and exact residen
     assert.throws(() => validateLodNominalPick(changed, expected, [320, 240], 1), /pick/);
   }
   assert.throws(() => validateLodNominalPick(pick, expected, [320, 240]), /pixel/);
+});
+
+test("paired runtime pins cannot substitute a current module, alias a path or omit an artifact", () => {
+  const relatives = ["package.json", "pkg/browser_demo.js", "pkg/browser_demo_bg.wasm"];
+  const frozen = { package_name: "@punctra/viewer", package_version: "0.22.0-alpha.1",
+    artifacts: relatives.map((path, index) => ({ path, byte_length: 100 + index, sha256: String(index).repeat(64) })) };
+  const paired = { ...frozen, artifacts: frozen.artifacts.map((artifact) => ({ ...artifact,
+    path: `target/predecessors/v0.22/node_modules/@punctra/viewer/${artifact.path}` })) };
+  validateLodPredecessorRuntime(paired, frozen);
+  for (const mutate of [
+    (value) => { value.package_version = "0.23.0-alpha.1"; },
+    (value) => { value.artifacts[1].sha256 = "a".repeat(64); },
+    (value) => { value.artifacts[1].path = value.artifacts[0].path; },
+    (value) => { value.artifacts.pop(); },
+  ]) {
+    const changed = structuredClone(paired);
+    mutate(changed);
+    assert.throws(() => validateLodPredecessorRuntime(changed, frozen), /predecessor/);
+  }
+});
+
+test("paired cadence does not waive absolute costs, a real two-times regression or an unmeasurable control", () => {
+  const timing = (interval, submission) => {
+    const intervals = Array(30).fill(interval), submissions = Array(30).fill(submission);
+    return { frame_count: 30, capture_free: true, frame_interval_samples_milliseconds: intervals,
+      frame_submission_samples_milliseconds: submissions, frame_interval: summarizeSamples(intervals), frame_submission: summarizeSamples(submissions) };
+  };
+  const limits = { frame_callback_p95_milliseconds: 50, frame_submission_p95_milliseconds: 16.7, canonical_predecessor_p95_ratio: 2 };
+  validatePairedLodTiming(timing(34, 0.3), timing(34.5, 0.3), limits, "same session");
+  assert.throws(() => validatePairedLodTiming(timing(51, 0.3), timing(34.5, 0.3), limits, "absolute"), /ceiling/);
+  assert.throws(() => validatePairedLodTiming(timing(34, 0.7), timing(34.5, 0.3), limits, "regression"), /predecessor/);
+  assert.throws(() => validatePairedLodTiming(timing(34, 0.3), timing(34.5, 0), limits, "zero"), /measurable/);
 });
