@@ -68,7 +68,7 @@ test("qualification observations are byte-bound even when values remain in limit
   tampered.qualification.matrix_digest.sha256 = "00".repeat(32);
   await assert.rejects(
     () => verifyBrowserIntegrationBaseline(tampered),
-    /v0\.22-browser-matrix\.json SHA-256 drifted/,
+    /v0\.23-browser-matrix\.json SHA-256 drifted/,
   );
 });
 
@@ -95,7 +95,7 @@ test("quickstart evidence is byte-bound and semantically verified", async () => 
   digestTampered.quickstart.evidence.sha256 = "00".repeat(32);
   await assert.rejects(
     () => verifyBrowserIntegrationBaseline(digestTampered),
-    /v0\.22-browser-quickstart\.json SHA-256 drifted/,
+    /v0\.23-browser-quickstart\.json SHA-256 drifted/,
   );
 
   const semanticTampered = structuredClone(quickstartEvidence);
