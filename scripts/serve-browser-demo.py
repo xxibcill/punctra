@@ -53,6 +53,8 @@ FOOTPRINT_IMPLEMENTATION_REPOSITORY_PATHS = (
     "apps/browser-demo/web/footprint-artifacts.test.mjs",
     "apps/browser-demo/web/footprint-corpus.js",
     "apps/browser-demo/web/footprint-corpus.test.mjs",
+    "apps/browser-demo/web/footprint-alignment.js",
+    "apps/browser-demo/web/footprint-alignment.test.mjs",
     "apps/browser-demo/web/footprint-evidence.js",
     "apps/browser-demo/web/footprint-evidence.test.mjs",
     "apps/browser-demo/web/footprint-export.js",

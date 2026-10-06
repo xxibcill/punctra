@@ -68,6 +68,8 @@ export const FOOTPRINT_IMPLEMENTATION_PATHS = Object.freeze([
   "apps/browser-demo/src/lib.rs",
   "apps/browser-demo/src/scene.rs",
   "apps/browser-demo/src/streaming.rs",
+  "apps/browser-demo/web/footprint-alignment.js",
+  "apps/browser-demo/web/footprint-alignment.test.mjs",
   "apps/browser-demo/web/footprint-artifacts.js",
   "apps/browser-demo/web/footprint-artifacts.test.mjs",
   "apps/browser-demo/web/footprint-corpus.js",
