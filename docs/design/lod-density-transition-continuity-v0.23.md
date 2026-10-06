@@ -172,3 +172,9 @@ All 27 paired controls, exact loaded legacy JS/Wasm byte pins, capture facts and
 raw timing samples are bound and separately reproduced by the verify run.
 This is a timing-comparability correction, not a physical-display qualification
 or a change to any image, identity, residency or absolute performance gate.
+
+A subsequent browser session returned to 1512×982/30-bit screen facts while
+retaining the 1384×865 physical functional canvas. Its exact v0.23 lane has a
+distinct identifier, and all final observations must be collected again at
+that clean implementation. The earlier 1920×1080 observations do not qualify
+the later session. The paired and historical-submission gates stay unchanged.
