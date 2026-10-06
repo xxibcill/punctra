@@ -256,7 +256,8 @@ test("functional JSON export is bounded, same-origin and cannot replace prior ev
     });
     assert.equal((await post(bytes, { Origin: "http://foreign.invalid" })).status, 403);
     assert.equal((await post(bytes, { "Content-Type": "application/x-tar" })).status, 415);
-    assert.equal((await post(new Uint8Array(1_048_577))).status, 413);
+    assert.equal(await rawVisualExportStatus(port, { origin, contentLength: 1_048_577,
+      requestPath: "/qualification-functional-export", contentType: "application/json" }), 413);
     const response = await post(bytes);
     assert.equal(response.status, 201);
     assert.deepEqual(await response.json(), { schema: "punctra-browser-functional-export-receipt-v1", filename,
@@ -576,13 +577,15 @@ async function rawVisualExportStatus(port, {
   origin,
   contentLength,
   body = new Uint8Array(),
+  requestPath = "/qualification-visual-export",
+  contentType = "application/x-tar",
 }) {
   const socket = createConnection({ host: "127.0.0.1", port });
   await once(socket, "connect");
   const headers = [
-    "POST /qualification-visual-export HTTP/1.1",
+    `POST ${requestPath} HTTP/1.1`,
     `Host: ${host}`,
-    "Content-Type: application/x-tar",
+    `Content-Type: ${contentType}`,
     "Connection: close",
   ];
   if (origin !== undefined) headers.push(`Origin: ${origin}`);
