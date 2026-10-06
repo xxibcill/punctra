@@ -1,0 +1,707 @@
+{
+  "schema": "punctra-browser-point-footprint-baseline-v1",
+  "release": "0.22.0-alpha.1",
+  "pins": {
+    "corpus": {
+      "byte_length": 9980,
+      "path": "apps/browser-demo/web/fixtures/footprint-v1/corpus.json",
+      "sha256": "a966e7cb3a1e636fff732432041596b3ca7bdcbbe9058727123d77662671db0b"
+    },
+    "implementation": {
+      "commit": "52ae3afb9312d6968a10c3aeec42b3c8555a86d1",
+      "files": [
+        {
+          "byte_length": 81070,
+          "path": "Cargo.lock",
+          "sha256": "bf67f695eb03f51eb422f83b833c61a48a475bea798249a1390c2d5c564f00d8"
+        },
+        {
+          "byte_length": 2764,
+          "path": "Cargo.toml",
+          "sha256": "d9617117599da5a44dba73c9ead2a70f8d2ebdbffe0c80a0a7e06c5913326326"
+        },
+        {
+          "byte_length": 1101,
+          "path": "apps/browser-demo/Cargo.toml",
+          "sha256": "24f994fc51423cead8ebe97bdc2ccdd82cecfe6935801cd43758ec0a34ce7364"
+        },
+        {
+          "byte_length": 58597,
+          "path": "apps/browser-demo/src/browser.rs",
+          "sha256": "931091027e1919f6ec3b31a930c21cb9aca3826cae4aaf054c812db8e991837e"
+        },
+        {
+          "byte_length": 21142,
+          "path": "apps/browser-demo/src/capture.rs",
+          "sha256": "a1be2acf26d0548b07128b0e948eae36c2dff371b9337044eb38e5ba6b7adc2b"
+        },
+        {
+          "byte_length": 27891,
+          "path": "apps/browser-demo/src/diagnostics.rs",
+          "sha256": "e46209934374f6c48b1f4ee9a1563cb94d3d1850a7dbf2130fe323c60e820e42"
+        },
+        {
+          "byte_length": 6057,
+          "path": "apps/browser-demo/src/display.rs",
+          "sha256": "0b7c3beba99de6cb312520ca1f55b0c29b480b070f0245c28a658c8f7f651868"
+        },
+        {
+          "byte_length": 10159,
+          "path": "apps/browser-demo/src/host.rs",
+          "sha256": "bfe8c05b12d8b7648aadeaa4a75c8a2cdb670a0f0ebee781845668a487b29ea0"
+        },
+        {
+          "byte_length": 835,
+          "path": "apps/browser-demo/src/lib.rs",
+          "sha256": "5e1ba1d1f085703cea5bbc5d9320934ca27d20f98eff77189617463c1e7c33f7"
+        },
+        {
+          "byte_length": 13921,
+          "path": "apps/browser-demo/src/scene.rs",
+          "sha256": "fedb2cdf90b0a20b44771e34c353485b0f91cced76d7dd3b9e9f80756f9056e1"
+        },
+        {
+          "byte_length": 42470,
+          "path": "apps/browser-demo/src/streaming.rs",
+          "sha256": "eb612081a6919d3cd2599878cb891943c4b56b07175457a8612e3e8224037214"
+        },
+        {
+          "byte_length": 14051,
+          "path": "apps/browser-demo/web/footprint-alignment.js",
+          "sha256": "19ff81d574d97c7bcf74e2342a3961e6279a9fc16f29085ee8961c1ca8deb8b1"
+        },
+        {
+          "byte_length": 6955,
+          "path": "apps/browser-demo/web/footprint-alignment.test.mjs",
+          "sha256": "42fba132a943bd618ef8483b252962f8772e99bedd4d6a9c71f9c3a708bc4e32"
+        },
+        {
+          "byte_length": 2003,
+          "path": "apps/browser-demo/web/footprint-artifacts.js",
+          "sha256": "514dd7419e701ec750db94831c6f95ce9e05e378a9ee717c41b893f2a925a84c"
+        },
+        {
+          "byte_length": 2989,
+          "path": "apps/browser-demo/web/footprint-artifacts.test.mjs",
+          "sha256": "7a34d57bad7f61952c4545ca4b15637265271a05b9fccfccc9026554b0aae249"
+        },
+        {
+          "byte_length": 12356,
+          "path": "apps/browser-demo/web/footprint-corpus.js",
+          "sha256": "4db7f48c4ad98717654982c8b352c0b7e1c89b63d8edecb584d6af4486ebb16d"
+        },
+        {
+          "byte_length": 1991,
+          "path": "apps/browser-demo/web/footprint-corpus.test.mjs",
+          "sha256": "a16b09561d7eb8e07d1b56177bd0f82fb630de1bc51b77ccceac7ace2412c327"
+        },
+        {
+          "byte_length": 86653,
+          "path": "apps/browser-demo/web/footprint-evidence.js",
+          "sha256": "433e39f5cbf7feed0c726e5be6583ce777fabd746b854b7eca7168d6fd440595"
+        },
+        {
+          "byte_length": 44320,
+          "path": "apps/browser-demo/web/footprint-evidence.test.mjs",
+          "sha256": "dcca364aa1727a722561cb8c620b053b4d73ec30feae494cebe9c65f875b081f"
+        },
+        {
+          "byte_length": 3917,
+          "path": "apps/browser-demo/web/footprint-export.js",
+          "sha256": "2d09f62c163292d10d283e24b43178c26477b95b3249f9147d39bd04e3f4e753"
+        },
+        {
+          "byte_length": 2576,
+          "path": "apps/browser-demo/web/footprint-export.test.mjs",
+          "sha256": "982e5d64e91c00020749bdb9837529b774768ba4e501d1e8390644271c27a206"
+        },
+        {
+          "byte_length": 8920,
+          "path": "apps/browser-demo/web/footprint-fixture.js",
+          "sha256": "0888892e179b117c5faf9c65d8f3922cb77ab5e2fa61e065929afc5e7aca938c"
+        },
+        {
+          "byte_length": 5905,
+          "path": "apps/browser-demo/web/footprint-fixture.test.mjs",
+          "sha256": "b7a6660e63f0847ef12f25b2bc381cb28150f31105cb8a129e7056d480a83a71"
+        },
+        {
+          "byte_length": 10655,
+          "path": "apps/browser-demo/web/footprint-main.js",
+          "sha256": "97fac6db346f5c217736fe8126aa708fa86503023e325111174dc71f6c5e2db8"
+        },
+        {
+          "byte_length": 56944,
+          "path": "apps/browser-demo/web/footprint-qualification.js",
+          "sha256": "d7d27b31d99679736094c7308d8ebacf4d9abdd95a7cc0a98cc4b01a48c93ed1"
+        },
+        {
+          "byte_length": 22169,
+          "path": "apps/browser-demo/web/footprint-records.js",
+          "sha256": "73393439ea43d54556a4ace2a6987a2ba993c705f8adce2f1a4d455c3063c496"
+        },
+        {
+          "byte_length": 23615,
+          "path": "apps/browser-demo/web/footprint-records.test.mjs",
+          "sha256": "854c2fbbaced322a0a8c37f1e209c9b9f8de0f48a6b038aedfc0b861fef964af"
+        },
+        {
+          "byte_length": 7990,
+          "path": "apps/browser-demo/web/footprint-runner-core.js",
+          "sha256": "3c9fbdc8a4f0e3d47b667b45247c402c33045c9373f09b1e34518b4e461e6045"
+        },
+        {
+          "byte_length": 2993,
+          "path": "apps/browser-demo/web/footprint-runner-core.test.mjs",
+          "sha256": "0e74ad8a916c3e1deaf1005dbba8b275b0b7c386e6efc8abf18d24362f2b2bce"
+        },
+        {
+          "byte_length": 7011,
+          "path": "apps/browser-demo/web/footprint.css",
+          "sha256": "8deb7b68b8946418509f93dfcf539487076e82410d5a95fe332b121193056c9a"
+        },
+        {
+          "byte_length": 5633,
+          "path": "apps/browser-demo/web/footprint.html",
+          "sha256": "4e870e3051cc5b25949f5fb0c03eead4d6a1a4b96f2da00446f4dc5b59508d00"
+        },
+        {
+          "byte_length": 5340,
+          "path": "apps/browser-demo/web/qualification-lane.js",
+          "sha256": "1c1ff38fdcabc7734e9fd474e87a9cad98c65f26fd7e2d85fb3c83d4d8c4ae1f"
+        },
+        {
+          "byte_length": 1381,
+          "path": "apps/browser-demo/web/qualification-lane-v0.22.js",
+          "sha256": "ba1777df347ddd421b1bcdcee3f951598e7edf15110b959650e387490d21c61e"
+        },
+        {
+          "byte_length": 5758,
+          "path": "apps/browser-demo/web/visual-archive.js",
+          "sha256": "03c697b9ecaa4581801d45ed4cf768fa5a29747ca1da02008ec36dfc642d91a6"
+        },
+        {
+          "byte_length": 25018,
+          "path": "apps/browser-demo/web/visual-capture.js",
+          "sha256": "a9f8c44375d35c07d9ef8dd549b73b6c571f4b25a5bd1e1d2c7c698d6ced7995"
+        },
+        {
+          "byte_length": 20910,
+          "path": "apps/browser-demo/web/visual-comparison.js",
+          "sha256": "3a851f998fd39c941865c21d3a024a100612cbcbf023107245a347cfcbe3d965"
+        },
+        {
+          "byte_length": 65526,
+          "path": "apps/browser-demo/web/visual-corpus.js",
+          "sha256": "b884e2076010a84b82fbc580c7055246ca07d988ff7302c207eb7e4de43b6cc8"
+        },
+        {
+          "byte_length": 17269,
+          "path": "apps/browser-demo/web/visual-corpus.test.mjs",
+          "sha256": "922aae5858b5f9bdd1cdacc36f14f04f2d6a983c0134869795633dc2e50f6ac8"
+        },
+        {
+          "byte_length": 26812,
+          "path": "apps/browser-demo/web/visual-footprint-metrics.js",
+          "sha256": "3fac79f1931ecc31e2c735486e3e5ce0c919849c6c4325ab7a1e28dae4fe5e02"
+        },
+        {
+          "byte_length": 13951,
+          "path": "apps/browser-demo/web/visual-footprint-metrics.test.mjs",
+          "sha256": "2a82743284cfebbddb21c972f254dba1d91b3ada2605eaf63fa887988b0f1e57"
+        },
+        {
+          "byte_length": 14328,
+          "path": "apps/browser-demo/web/visual-png.js",
+          "sha256": "fbdfdde52c371c0468a2c4caa8e3c437fe6eca3e7dd326aed35291fa010d1857"
+        },
+        {
+          "byte_length": 7642,
+          "path": "apps/browser-demo/web/visual-provenance.js",
+          "sha256": "5dddf9cdf3eb04d7bbcfb1af6c483bb86db934564678a518fdad14e495b7fea4"
+        },
+        {
+          "byte_length": 17352,
+          "path": "apps/browser-demo/web/visual-rubric.js",
+          "sha256": "3dce1139cf1657100ce86c2d0cd862ee1727a845349acae1dd6f16364bad40d9"
+        },
+        {
+          "byte_length": 1641,
+          "path": "apps/browser-demo/web/visual-validation.js",
+          "sha256": "e0b13e720cbd0c4d1e2bd06d2a6ab3c0ec25c07f4ba32e32c68d66b9995ce995"
+        },
+        {
+          "byte_length": 9980,
+          "path": "apps/browser-demo/web/fixtures/footprint-v1/corpus.json",
+          "sha256": "a966e7cb3a1e636fff732432041596b3ca7bdcbbe9058727123d77662671db0b"
+        },
+        {
+          "byte_length": 23261,
+          "path": "apps/renderer-demo/src/appearance.rs",
+          "sha256": "7c8935472fb49ab21085866414066241e28567c674d9768e55a3ef99e13ef388"
+        },
+        {
+          "byte_length": 860,
+          "path": "crates/render-wgpu/Cargo.toml",
+          "sha256": "96481ca4bf9fa657dbbd2cbad6b116a977beafd41c9dda4b88419d9c961be7f4"
+        },
+        {
+          "byte_length": 16993,
+          "path": "crates/render-wgpu/src/footprint.rs",
+          "sha256": "e3247b3e314e1f19ee039416c2a5ae5ce993bbba340e09ed966e21d488869382"
+        },
+        {
+          "byte_length": 8388,
+          "path": "crates/render-wgpu/src/frame.rs",
+          "sha256": "a7e8f3fa59c2fef27c8063f1f16a28b680fa85ee312c9e46a35b1ddc899df345"
+        },
+        {
+          "byte_length": 2697,
+          "path": "crates/render-wgpu/src/gpu.rs",
+          "sha256": "7e18da3fdb29377cc511ae71570c64a249184167c1f0939ce77a6da87d4ed7f3"
+        },
+        {
+          "byte_length": 1664,
+          "path": "crates/render-wgpu/src/eye_dome.wgsl",
+          "sha256": "ce50547508d6513e17d55a03e9847dd40d38ca8e9806660843b440e16149e590"
+        },
+        {
+          "byte_length": 6902,
+          "path": "crates/render-wgpu/src/lib.rs",
+          "sha256": "749f92190f5491415a74ff03d2223f872e722f870e43962ce0b21a591ed9497a"
+        },
+        {
+          "byte_length": 12064,
+          "path": "crates/render-wgpu/src/pick.rs",
+          "sha256": "8e21c5600a65ac19a41017a79982ed055d9d2290b4c7e93ea23808cc0e97af3a"
+        },
+        {
+          "byte_length": 12572,
+          "path": "crates/render-wgpu/src/pipeline.rs",
+          "sha256": "fdd53ef443932de97070ee2c58d9266a64cb13165658a29cca30bcf98b01075f"
+        },
+        {
+          "byte_length": 4905,
+          "path": "crates/render-wgpu/src/point.wgsl",
+          "sha256": "f4fcbd67730ecbfaf1f8bd66918574976103fde5ccfedd8929871d0ba7237e2f"
+        },
+        {
+          "byte_length": 72468,
+          "path": "crates/render-wgpu/src/renderer.rs",
+          "sha256": "2d1ceb5e4d9cb28a63a18499fe2941aca155c01bdb5847aca25b93953f87f496"
+        },
+        {
+          "byte_length": 13128,
+          "path": "crates/render-wgpu/src/targets.rs",
+          "sha256": "4542afcf9b14a1a112b5c61fa16da1508f2dec6709e81d535ea3774400cb0333"
+        },
+        {
+          "byte_length": 2065,
+          "path": "crates/render-wgpu/tests/contracts.rs",
+          "sha256": "4618cc0d4c860ff7f4370598ed28f36c80ce519269d24ad0dc530b78868b0415"
+        },
+        {
+          "byte_length": 91297,
+          "path": "crates/render-wgpu/tests/offscreen.rs",
+          "sha256": "a0206ead3c06c088ba1ce7da04293bceb43dc60dd5878a3fca2a3df0a89ba050"
+        },
+        {
+          "byte_length": 9592,
+          "path": "crates/render-wgpu/test-support/gpu.rs",
+          "sha256": "98ae2da307be9b504abaec1d0fadad5aed96af9b189942e3b934ca56affc4b6c"
+        },
+        {
+          "byte_length": 1041,
+          "path": "scripts/build-browser-demo.sh",
+          "sha256": "dbaf691ddd99fd31e5fc334e9847da9cafb09bf6b73db3b9913293b39861c044"
+        },
+        {
+          "byte_length": 29213,
+          "path": "scripts/serve-browser-demo.py",
+          "sha256": "4ff8cb0a7b6e78c6ccfa41b23dbb8b66440dc20cfb1e7d764a9a7e8345f86d2e"
+        },
+        {
+          "byte_length": 33734,
+          "path": "scripts/verify-browser-point-footprint.mjs",
+          "sha256": "25762b5402f4f087f9a8ccd18a749bfbb8a75707ed8218d6dce737194e8c31ef"
+        }
+      ]
+    },
+    "predecessor": {
+      "baseline_inputs": {
+        "byte_length": 5100,
+        "path": "../visual-v1/baseline-inputs.json",
+        "sha256": "f4f2a5714f17dbb1d285308d74886ea7aee63e0aa52df4dca9b01d7cb7d0993b"
+      },
+      "corpus": {
+        "byte_length": 28119,
+        "path": "../visual-v1/corpus.json",
+        "sha256": "f8d78105861a6822523be62c914469c98072201f2f343f290b288e607061e580"
+      },
+      "release": "0.21.0-alpha.1",
+      "release_baseline": {
+        "byte_length": 33876,
+        "path": "../../../../../docs/releases/v0.21-browser-visual-baseline.json",
+        "sha256": "ce17514938a1259924e341220ec5bb90b705ede4b76668944f2a2fe95ad4b7a5"
+      },
+      "release_evidence": {
+        "byte_length": 22737391,
+        "path": "../../../../../docs/releases/v0.21-browser-visual-evidence.json",
+        "sha256": "eaee2981f4bab9a8bc36f50b7b05e453257637aa50ad82980828514d503b4bfe"
+      }
+    },
+    "runtime": {
+      "artifacts": [
+        {
+          "byte_length": 1371,
+          "path": "apps/browser-demo/web/package.json",
+          "sha256": "affe71b814dad5ab8c94d55ac4dbae6c0f410f568e849012a116879ba517e5fc"
+        },
+        {
+          "byte_length": 85710,
+          "path": "apps/browser-demo/web/pkg/browser_demo.js",
+          "sha256": "34e1775f0c3b97d94e0a94ff1ae50df7705034cbe66cd76caa58a37bc1a99d6a"
+        },
+        {
+          "byte_length": 811432,
+          "path": "apps/browser-demo/web/pkg/browser_demo_bg.wasm",
+          "sha256": "dd881267976dea1a3daed47c337549757a37685bd3ed2a17b8f636d513e6e6bb"
+        }
+      ],
+      "package_name": "@punctra/viewer",
+      "package_version": "0.22.0-alpha.1"
+    },
+    "verifier": {
+      "byte_length": 33734,
+      "path": "scripts/verify-browser-point-footprint.mjs",
+      "sha256": "25762b5402f4f087f9a8ccd18a749bfbb8a75707ed8218d6dce737194e8c31ef"
+    }
+  },
+  "environment": {
+    "browser_user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36",
+    "browser_platform": "MacIntel",
+    "operating_system": "macOS 26.6.2 25G83 arm64",
+    "device": {
+      "class": "Apple silicon laptop",
+      "gpu": "Apple M5 Pro",
+      "gpu_class": "integrated",
+      "gpu_cores": 16,
+      "metal_support": "Metal 4"
+    },
+    "adapter_name": "browser WebGPU adapter",
+    "backend": "BrowserWebGpu",
+    "same_adapter_for_scale_trials": true,
+    "physical_display_observed": false
+  },
+  "candidate_images": [
+    {
+      "kind": "canonical_baseline_png",
+      "trial_id": "generated-neutral-mixed-lod-perspective",
+      "recreation_index": null,
+      "profile_id": "canonical-dpr2",
+      "path": "apps/browser-demo/web/fixtures/footprint-v1/baselines/generated-neutral-mixed-lod-perspective.png",
+      "mime_type": "image/png",
+      "encoding": "png-rgba8-filter-0",
+      "width": 640,
+      "height": 480,
+      "encoded_byte_length": 14897,
+      "encoded_sha256": "dfddeec4f5031ef4c15e948c3b3cc6295908a9f2cc084d9346c1b2b0db21cb33",
+      "decoded_byte_length": 1228800,
+      "decoded_sha256": "279b894ae2b8d9cc8ed700ab890d1039cad1e7ce9a9acd7fc917580684cf38ef",
+      "authority": "presentation_only"
+    },
+    {
+      "kind": "canonical_baseline_png",
+      "trial_id": "generated-elevation-layered-orthographic",
+      "recreation_index": null,
+      "profile_id": "canonical-dpr2",
+      "path": "apps/browser-demo/web/fixtures/footprint-v1/baselines/generated-elevation-layered-orthographic.png",
+      "mime_type": "image/png",
+      "encoding": "png-rgba8-filter-0",
+      "width": 640,
+      "height": 480,
+      "encoded_byte_length": 39350,
+      "encoded_sha256": "319b1b30ee3f1133d907e32f9fa72ddad81409fec6e0600dba0b3d8fcc537afd",
+      "decoded_byte_length": 1228800,
+      "decoded_sha256": "d5f90a90519c1bee5d9ea843b30d0665195877a3bff91d4eb2e458a275980a96",
+      "authority": "presentation_only"
+    },
+    {
+      "kind": "canonical_baseline_png",
+      "trial_id": "generated-rgb-hdr-perspective",
+      "recreation_index": null,
+      "profile_id": "canonical-dpr2",
+      "path": "apps/browser-demo/web/fixtures/footprint-v1/baselines/generated-rgb-hdr-perspective.png",
+      "mime_type": "image/png",
+      "encoding": "png-rgba8-filter-0",
+      "width": 640,
+      "height": 480,
+      "encoded_byte_length": 32058,
+      "encoded_sha256": "e4b24dae764d482b89cc201aba467827d7eaf51ae6e561d8a374764eb83eb431",
+      "decoded_byte_length": 1228800,
+      "decoded_sha256": "6f322db104629ca37ab2aea988a31a697061620c6bdf290dff8a8cacfe465b97",
+      "authority": "presentation_only"
+    },
+    {
+      "kind": "canonical_baseline_png",
+      "trial_id": "generated-intensity-sparse-orthographic",
+      "recreation_index": null,
+      "profile_id": "canonical-dpr2",
+      "path": "apps/browser-demo/web/fixtures/footprint-v1/baselines/generated-intensity-sparse-orthographic.png",
+      "mime_type": "image/png",
+      "encoding": "png-rgba8-filter-0",
+      "width": 640,
+      "height": 480,
+      "encoded_byte_length": 42793,
+      "encoded_sha256": "cdbb601726253f590310250b8747e63694a48dc275b20beb272562d4f9aa75ab",
+      "decoded_byte_length": 1228800,
+      "decoded_sha256": "843f5e11ebf9ec0dc04e7f8b41d980b4bb5cc430bbba6c61409e11061967269a",
+      "authority": "presentation_only"
+    },
+    {
+      "kind": "canonical_baseline_png",
+      "trial_id": "generated-classification-selection-perspective",
+      "recreation_index": null,
+      "profile_id": "canonical-dpr2",
+      "path": "apps/browser-demo/web/fixtures/footprint-v1/baselines/generated-classification-selection-perspective.png",
+      "mime_type": "image/png",
+      "encoding": "png-rgba8-filter-0",
+      "width": 640,
+      "height": 480,
+      "encoded_byte_length": 34506,
+      "encoded_sha256": "82dddeb4c6d0eb16d568efc1ef75459bf894a1063d2e0532a45466e8d3878085",
+      "decoded_byte_length": 1228800,
+      "decoded_sha256": "6ae0738068ab30d31eef732ad1d2573abae578380889fb4003c4f7871c8f3f74",
+      "authority": "presentation_only"
+    },
+    {
+      "kind": "canonical_baseline_png",
+      "trial_id": "autzen-rgb-perspective",
+      "recreation_index": null,
+      "profile_id": "canonical-dpr2",
+      "path": "apps/browser-demo/web/fixtures/footprint-v1/baselines/autzen-rgb-perspective.png",
+      "mime_type": "image/png",
+      "encoding": "png-rgba8-filter-0",
+      "width": 640,
+      "height": 480,
+      "encoded_byte_length": 19147,
+      "encoded_sha256": "d8ed2b0548397bec50deacd033f06aa33c46e15da0dd2f6785ad3295b8abdb3d",
+      "decoded_byte_length": 1228800,
+      "decoded_sha256": "2a2c40f1fabbf17789f9f43a49dec7eebea702db020bb9c197c338ecf83b29f0",
+      "authority": "presentation_only"
+    },
+    {
+      "kind": "canonical_baseline_png",
+      "trial_id": "autzen-classification-perspective",
+      "recreation_index": null,
+      "profile_id": "canonical-dpr2",
+      "path": "apps/browser-demo/web/fixtures/footprint-v1/baselines/autzen-classification-perspective.png",
+      "mime_type": "image/png",
+      "encoding": "png-rgba8-filter-0",
+      "width": 640,
+      "height": 480,
+      "encoded_byte_length": 7136,
+      "encoded_sha256": "4cda2014a22a0a119d7c34898b67d08ac8c1d992e54efe87d52aecef0f0489f2",
+      "decoded_byte_length": 1228800,
+      "decoded_sha256": "fff105f40df31f9a336fffa50434a2a039017e585d1321511055d9c6ee884b72",
+      "authority": "presentation_only"
+    },
+    {
+      "kind": "canonical_baseline_png",
+      "trial_id": "autzen-intensity-perspective",
+      "recreation_index": null,
+      "profile_id": "canonical-dpr2",
+      "path": "apps/browser-demo/web/fixtures/footprint-v1/baselines/autzen-intensity-perspective.png",
+      "mime_type": "image/png",
+      "encoding": "png-rgba8-filter-0",
+      "width": 640,
+      "height": 480,
+      "encoded_byte_length": 16581,
+      "encoded_sha256": "38512837d0877dcf6115fd0bf4bcfc008d8c16035bad30ddbca66b0ebf06a9f9",
+      "decoded_byte_length": 1228800,
+      "decoded_sha256": "a0e7efb0e80efbf1966a9847f3dcd3704a74819ecdac58e142897dd5fb279020",
+      "authority": "presentation_only"
+    },
+    {
+      "kind": "canonical_baseline_png",
+      "trial_id": "autzen-elevation-perspective",
+      "recreation_index": null,
+      "profile_id": "canonical-dpr2",
+      "path": "apps/browser-demo/web/fixtures/footprint-v1/baselines/autzen-elevation-perspective.png",
+      "mime_type": "image/png",
+      "encoding": "png-rgba8-filter-0",
+      "width": 640,
+      "height": 480,
+      "encoded_byte_length": 13342,
+      "encoded_sha256": "7bbdf3e244a06abc9fdd2c36e016fffeb6e205139679c7dfdafc520d74ec124a",
+      "decoded_byte_length": 1228800,
+      "decoded_sha256": "7fb6b62c681924d642ec8eb4c8d309d56453753c9ec9933008a58721f151a63a",
+      "authority": "presentation_only"
+    }
+  ],
+  "focused_images": [
+    {
+      "kind": "focused_baseline_png",
+      "trial_id": "generated-neutral-mixed-lod-perspective",
+      "recreation_index": null,
+      "profile_id": "canonical-dpr2",
+      "path": "apps/browser-demo/web/fixtures/footprint-v1/baselines/generated-neutral-mixed-lod-perspective-canonical-dpr2.png",
+      "mime_type": "image/png",
+      "encoding": "png-rgba8-filter-0",
+      "width": 640,
+      "height": 480,
+      "encoded_byte_length": 2462,
+      "encoded_sha256": "0ce0814c81ab76a138490fe80bc8fd96f658a75220e070974afe932e7e591912",
+      "decoded_byte_length": 1228800,
+      "decoded_sha256": "cdf448faaadb4cd59f19f013e4a3347eb578c795522cfce9853da7e39cd92c3d",
+      "authority": "presentation_only"
+    },
+    {
+      "kind": "focused_baseline_png",
+      "trial_id": "generated-neutral-mixed-lod-perspective",
+      "recreation_index": null,
+      "profile_id": "focused-dpr1",
+      "path": "apps/browser-demo/web/fixtures/footprint-v1/baselines/generated-neutral-mixed-lod-perspective-focused-dpr1.png",
+      "mime_type": "image/png",
+      "encoding": "png-rgba8-filter-0",
+      "width": 320,
+      "height": 240,
+      "encoded_byte_length": 1026,
+      "encoded_sha256": "93b34663e5ec15b537961e220b7b9e247398ea52fa155dd95df711acae488daf",
+      "decoded_byte_length": 307200,
+      "decoded_sha256": "2c694eaf2367673ee02da8961bf8bfdd1e8eba5c7b7fd882d4ce7f0d74224293",
+      "authority": "presentation_only"
+    },
+    {
+      "kind": "focused_baseline_png",
+      "trial_id": "generated-neutral-mixed-lod-perspective",
+      "recreation_index": null,
+      "profile_id": "focused-dpr4",
+      "path": "apps/browser-demo/web/fixtures/footprint-v1/baselines/generated-neutral-mixed-lod-perspective-focused-dpr4.png",
+      "mime_type": "image/png",
+      "encoding": "png-rgba8-filter-0",
+      "width": 1280,
+      "height": 960,
+      "encoded_byte_length": 7220,
+      "encoded_sha256": "4ff8fd752ab0534929a849d9e6e52f4989a048c1f6d6c73e8254a4b5937e85f8",
+      "decoded_byte_length": 4915200,
+      "decoded_sha256": "ec49014d719002989a34524469b9139028945cc413a9fc328a230897249b515a",
+      "authority": "presentation_only"
+    },
+    {
+      "kind": "focused_baseline_png",
+      "trial_id": "generated-intensity-sparse-orthographic",
+      "recreation_index": null,
+      "profile_id": "canonical-dpr2",
+      "path": "apps/browser-demo/web/fixtures/footprint-v1/baselines/generated-intensity-sparse-orthographic-canonical-dpr2.png",
+      "mime_type": "image/png",
+      "encoding": "png-rgba8-filter-0",
+      "width": 640,
+      "height": 480,
+      "encoded_byte_length": 2439,
+      "encoded_sha256": "2c4c8b5665f018996009f5bbb62e7bec9e4d27594924c7db15374cdf6731781e",
+      "decoded_byte_length": 1228800,
+      "decoded_sha256": "38b069cdf23f240da6171be14e2a0c5e2575e9d4f3644dfe2f85197e0852ecbc",
+      "authority": "presentation_only"
+    },
+    {
+      "kind": "focused_baseline_png",
+      "trial_id": "generated-intensity-sparse-orthographic",
+      "recreation_index": null,
+      "profile_id": "focused-dpr1",
+      "path": "apps/browser-demo/web/fixtures/footprint-v1/baselines/generated-intensity-sparse-orthographic-focused-dpr1.png",
+      "mime_type": "image/png",
+      "encoding": "png-rgba8-filter-0",
+      "width": 320,
+      "height": 240,
+      "encoded_byte_length": 995,
+      "encoded_sha256": "112cd293796ba80005d1fdb08bff449c5115a3db5dbe5cd43170300a97f1b6ac",
+      "decoded_byte_length": 307200,
+      "decoded_sha256": "ab4ad20a0a8b6ac816ebedbffdd67ee9ac7c0ae4b79ec8349e9a10c8286a98d8",
+      "authority": "presentation_only"
+    },
+    {
+      "kind": "focused_baseline_png",
+      "trial_id": "generated-intensity-sparse-orthographic",
+      "recreation_index": null,
+      "profile_id": "focused-dpr4",
+      "path": "apps/browser-demo/web/fixtures/footprint-v1/baselines/generated-intensity-sparse-orthographic-focused-dpr4.png",
+      "mime_type": "image/png",
+      "encoding": "png-rgba8-filter-0",
+      "width": 1280,
+      "height": 960,
+      "encoded_byte_length": 7183,
+      "encoded_sha256": "268ed1276787294b97b5cd88a7bc447480a6e0483a55639e09629f036a40f6a1",
+      "decoded_byte_length": 4915200,
+      "decoded_sha256": "ec4853be27469be240527cd28283af8d4ddd9b7369cba5042be1e6531508b058",
+      "authority": "presentation_only"
+    },
+    {
+      "kind": "focused_baseline_png",
+      "trial_id": "generated-classification-selection-perspective",
+      "recreation_index": null,
+      "profile_id": "canonical-dpr2",
+      "path": "apps/browser-demo/web/fixtures/footprint-v1/baselines/generated-classification-selection-perspective-canonical-dpr2.png",
+      "mime_type": "image/png",
+      "encoding": "png-rgba8-filter-0",
+      "width": 640,
+      "height": 480,
+      "encoded_byte_length": 2445,
+      "encoded_sha256": "fc900b2dd2281bfb1db6b8b31aae4763636cdaf8b06232ec855cd443757e9b89",
+      "decoded_byte_length": 1228800,
+      "decoded_sha256": "e891d74d3f393c021302af2a97296c9e41aeb2a8dd49d336ddd4645c8357be5d",
+      "authority": "presentation_only"
+    },
+    {
+      "kind": "focused_baseline_png",
+      "trial_id": "generated-classification-selection-perspective",
+      "recreation_index": null,
+      "profile_id": "focused-dpr1",
+      "path": "apps/browser-demo/web/fixtures/footprint-v1/baselines/generated-classification-selection-perspective-focused-dpr1.png",
+      "mime_type": "image/png",
+      "encoding": "png-rgba8-filter-0",
+      "width": 320,
+      "height": 240,
+      "encoded_byte_length": 1014,
+      "encoded_sha256": "7fa6f8ca41d499819e54f62e195c8f2e98c642a0a20c085fdc296860f7695bb0",
+      "decoded_byte_length": 307200,
+      "decoded_sha256": "ac64c765f5241cc1e81ff42d0ee718ece94b1f9969d599f6df8cc97d227a7f0b",
+      "authority": "presentation_only"
+    },
+    {
+      "kind": "focused_baseline_png",
+      "trial_id": "generated-classification-selection-perspective",
+      "recreation_index": null,
+      "profile_id": "focused-dpr4",
+      "path": "apps/browser-demo/web/fixtures/footprint-v1/baselines/generated-classification-selection-perspective-focused-dpr4.png",
+      "mime_type": "image/png",
+      "encoding": "png-rgba8-filter-0",
+      "width": 1280,
+      "height": 960,
+      "encoded_byte_length": 7185,
+      "encoded_sha256": "20e766bcce8712384bf0f9303fbc465a5b57ff53def112537acd0017e8d79824",
+      "decoded_byte_length": 4915200,
+      "decoded_sha256": "f4e647d99ebbe2dae98fbc5f357cc63bc1ef72d37fead00ac2b2779b1cc1f0f3",
+      "authority": "presentation_only"
+    }
+  ],
+  "external_evidence": {
+    "cross_browser": false,
+    "cross_operating_system": false,
+    "cross_adapter": false,
+    "cross_device": false,
+    "physical_display_presentation": false,
+    "general_browser_zoom": false,
+    "responsive_composition": false,
+    "independent_human": false,
+    "independent_adopter": false,
+    "professional_usability": false,
+    "registry_or_cdn_publication": false,
+    "final_visual_quality": false,
+    "support_qualified": false,
+    "api_stable": false,
+    "beta": false,
+    "release_candidate": false,
+    "v1": false
+  }
+}

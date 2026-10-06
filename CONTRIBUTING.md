@@ -156,7 +156,8 @@ immutable v0.21 corpus. It does not change geometry, Point identity, Source or
 Query authority, View/LOD policy, display mappings, or public browser exports,
 and it does not authorize physical-display, cross-browser/device,
 independent-human/adopter, support, beta, release-candidate, or v1 claims. Its
-final attended evidence remains pending.
+final attended evidence and offline verifier pass; complete local command
+verification remains pending.
 Apart from the explicit v0.8 reader exception, the v0.17 browser-demo
 exact-query bridge is a narrowly scoped exception for the trusted immutable
 LAS fixture described by the accepted design. All other external format

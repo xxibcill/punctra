@@ -1509,8 +1509,11 @@ status remain outside this exit.
 Status: **Active — accepted bounded repository implementation**
 
 The [2026-10-02 closeout investigation](docs/reviews/point-footprint-closeout-2026-10-02.md)
-records outstanding canonical centroid and focused-fixture failures. The
-record/verify acceptance sequence remains open after the implementation merge.
+preserves the original centroid and focused-fixture failures. Corrective
+fixtures, explicit projected-center proof, fresh functional records, and
+separate footprint record/verify runs now pass at the pinned implementation.
+The complete local command matrix remains pending in the
+[v0.22 verification record](docs/releases/v0.22.0.md).
 
 Accepted outcome: make individual Points and dense Point coverage read cleanly
 across the declared DPR and camera-scale trials without changing geometry or

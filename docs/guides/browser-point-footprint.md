@@ -1,6 +1,6 @@
 # Browser Point-footprint qualification
 
-Status: **v0.22 implementation active; final attended evidence pending**
+Status: **v0.22 browser acceptance passed; complete local matrix pending**
 
 The corrective focused trials use a separately captured subset of unchanged
 authored Points. CPU preflight rejects overlapping measurement regions,
@@ -258,7 +258,7 @@ artifact digests, and closed nonclaims.
 ## Acceptance status
 
 The record, pin, rebuilt functional records, verify evidence, verifier result,
-and [v0.22 release record](../releases/v0.22.0.md) are one sequential gate. At
-the time of this documentation update, the final attended observations are
-pending. Do not mark the roadmap item Complete or replace a pending release-
-record field until every stage above has actually passed.
+and [v0.22 release record](../releases/v0.22.0.md) are one sequential gate.
+The final attended observations and offline verifier pass at `52ae3afb`;
+complete local command verification remains pending. Do not mark the roadmap
+item Complete until every required command passes.

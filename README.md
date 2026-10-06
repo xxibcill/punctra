@@ -394,10 +394,11 @@ pick authority.
 
 The v0.22 repository lane reuses the immutable v0.21 corpus and predecessor
 images, then produces separate point-footprint baselines, focused DPR and
-fallback evidence, and exact resource/cost facts. The implementation is active,
-but its attended record, implementation pin, rebuilt functional qualification,
-final verify evidence, and [release record](docs/releases/v0.22.0.md) remain
-pending. See the [point-footprint qualification
+fallback evidence, and exact resource/cost facts. The attended record,
+implementation pin, rebuilt functional qualification, and separate verify
+evidence pass on the exact local Chromium 154/macOS/Apple M5 Pro lane.
+Complete local command verification remains pending in the
+[release record](docs/releases/v0.22.0.md). See the [point-footprint qualification
 guide](docs/guides/browser-point-footprint.md) for the local sequence and
 evidence boundary. This status does not establish final visual quality,
 physical-display or cross-browser/device equivalence, independent human or

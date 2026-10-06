@@ -1,0 +1,271 @@
+{
+  "cases": [
+    {
+      "facts": {
+        "hard_circle_mask": {
+          "byte_length": 4096,
+          "equivalent": true,
+          "height": 64,
+          "observed_sha256": "34b6f7d2adabcdc5e3aa28b1495e56e8fb4aa49b5f1c804097de33e3eb5b006b",
+          "reference_sha256": "34b6f7d2adabcdc5e3aa28b1495e56e8fb4aa49b5f1c804097de33e3eb5b006b",
+          "width": 64
+        },
+        "nominal_pick_identity": {
+          "expected": {
+            "batch_key": 4,
+            "batch_version": 2,
+            "generation": 1,
+            "point_ordinal": 1866,
+            "source_identity": "2121212121212121212121212121212121212121212121212121212121212121"
+          },
+          "matched": true,
+          "observed": {
+            "batch_key": 4,
+            "batch_version": 2,
+            "generation": 1,
+            "point_ordinal": 1866,
+            "source_identity": "2121212121212121212121212121212121212121212121212121212121212121"
+          }
+        },
+        "physical_height": 64,
+        "physical_width": 64,
+        "pick_probes": [
+          {
+            "batch_key": 4,
+            "batch_version": 2,
+            "generation": 1,
+            "ordinal": 1866,
+            "point_ordinal": "1866",
+            "source_identity": "2121212121212121212121212121212121212121212121212121212121212121"
+          },
+          {
+            "batch_key": 4,
+            "batch_version": 2,
+            "generation": 1,
+            "ordinal": 2005,
+            "point_ordinal": "2005",
+            "source_identity": "2121212121212121212121212121212121212121212121212121212121212121"
+          }
+        ],
+        "resources": null,
+        "selection": {
+          "multisample_pipeline_created": false,
+          "requested": "single_sample",
+          "sample_count": 1,
+          "selected": "single_sample"
+        }
+      },
+      "id": "single_sample_request_never_becomes_a_fallback",
+      "passed": true,
+      "source_test": "single_sample_request_never_becomes_a_fallback"
+    },
+    {
+      "facts": {
+        "hard_circle_mask": {
+          "byte_length": 4096,
+          "equivalent": true,
+          "height": 64,
+          "observed_sha256": "34b6f7d2adabcdc5e3aa28b1495e56e8fb4aa49b5f1c804097de33e3eb5b006b",
+          "reference_sha256": "34b6f7d2adabcdc5e3aa28b1495e56e8fb4aa49b5f1c804097de33e3eb5b006b",
+          "width": 64
+        },
+        "nominal_pick_identity": {
+          "expected": {
+            "batch_key": 4,
+            "batch_version": 2,
+            "generation": 1,
+            "point_ordinal": 1866,
+            "source_identity": "2121212121212121212121212121212121212121212121212121212121212121"
+          },
+          "matched": true,
+          "observed": {
+            "batch_key": 4,
+            "batch_version": 2,
+            "generation": 1,
+            "point_ordinal": 1866,
+            "source_identity": "2121212121212121212121212121212121212121212121212121212121212121"
+          }
+        },
+        "physical_height": 2048,
+        "physical_width": 4096,
+        "pick_probes": [
+          {
+            "batch_key": 4,
+            "batch_version": 2,
+            "generation": 1,
+            "ordinal": 1866,
+            "point_ordinal": "1866",
+            "source_identity": "2121212121212121212121212121212121212121212121212121212121212121"
+          },
+          {
+            "batch_key": 4,
+            "batch_version": 2,
+            "generation": 1,
+            "ordinal": 2005,
+            "point_ordinal": "2005",
+            "source_identity": "2121212121212121212121212121212121212121212121212121212121212121"
+          }
+        ],
+        "resources": null,
+        "selection": {
+          "multisample_pipeline_created": false,
+          "requested": "antialiased",
+          "sample_count": 1,
+          "selected": "unsupported_fallback"
+        }
+      },
+      "id": "capability_fallback_precedes_the_viewport_resource_check",
+      "passed": true,
+      "source_test": "capability_fallback_precedes_the_viewport_resource_check"
+    },
+    {
+      "facts": {
+        "diameters_physical_pixels": [
+          2,
+          3,
+          4,
+          5,
+          6
+        ],
+        "preferred": {
+          "all_centers_foreground": true,
+          "all_quad_corners_clear": true,
+          "maximum_coverage_rmse": 0.052755051369426806,
+          "maximum_exact_distance_outer_leakage_pixels": 0
+        },
+        "projected_center_equivalence": {
+          "camera_depths": [
+            3.0,
+            3.5,
+            4.0,
+            4.5,
+            5.0,
+            5.5,
+            6.0,
+            6.5
+          ],
+          "camera_families": [
+            "orthographic",
+            "perspective"
+          ],
+          "legacy_diameter_physical_pixels": 7,
+          "maximum_legacy_centroid_error_pixels": 0.1722439595198057,
+          "maximum_paired_centroid_distance_pixels": 0.2217003145460763,
+          "maximum_preferred_centroid_error_pixels": 0.1263146612667616,
+          "world_origin": [
+            1000000000.125,
+            1000000000.25,
+            1000000000.5
+          ]
+        },
+        "single_sample": {
+          "coverage_rmse_at_preferred_worst_case": 0.10643698225659395
+        },
+        "subpixel_center_phases": [
+          [
+            0.0,
+            0.0
+          ],
+          [
+            0.125,
+            0.375
+          ],
+          [
+            0.25,
+            0.75
+          ],
+          [
+            0.375,
+            0.125
+          ],
+          [
+            0.5,
+            0.5
+          ],
+          [
+            0.625,
+            0.875
+          ],
+          [
+            0.75,
+            0.25
+          ],
+          [
+            0.875,
+            0.625
+          ]
+        ]
+      },
+      "id": "antialiased_footprint_quality_matrix",
+      "passed": true,
+      "source_test": "antialiased_footprint_quality_matrix"
+    },
+    {
+      "facts": {
+        "pick_independence": {
+          "display_diameter_physical_pixels": 18.0,
+          "nominal_pick_diameter_physical_pixels": 2.4,
+          "nominal_probe_result": "expected_identity",
+          "visual_only_probe_offset_physical_pixels": [
+            5,
+            0
+          ],
+          "visual_only_probe_result": "miss"
+        }
+      },
+      "id": "four_sample_edges_resolve_partial_coverage_and_keep_nominal_picking",
+      "passed": true,
+      "source_test": "four_sample_edges_resolve_partial_coverage_and_keep_nominal_picking"
+    },
+    {
+      "facts": {
+        "resource_fallback": {
+          "hard_circle_mask": {
+            "byte_length": 1311744,
+            "equivalent": true,
+            "height": 1024,
+            "observed_sha256": "678ba88d9f2495cb5a0541a3fbd44af664e97da6fb76d512043f7b0d6fe5ac6a",
+            "reference_sha256": "678ba88d9f2495cb5a0541a3fbd44af664e97da6fb76d512043f7b0d6fe5ac6a",
+            "width": 1281
+          },
+          "nominal_pick_identity": {
+            "expected": {
+              "batch_key": 1,
+              "batch_version": 1,
+              "generation": 1,
+              "point_ordinal": 1301,
+              "source_identity": "5555555555555555555555555555555555555555555555555555555555555555"
+            },
+            "matched": true,
+            "observed": {
+              "batch_key": 1,
+              "batch_version": 1,
+              "generation": 1,
+              "point_ordinal": 1301,
+              "source_identity": "5555555555555555555555555555555555555555555555555555555555555555"
+            }
+          }
+        },
+        "transient_bounds": {
+          "fallback_bytes_per_pixel": 8,
+          "maximum_preferred_physical_pixels": 1310720,
+          "maximum_preferred_transient_bytes": 62914560,
+          "preferred_edl_bytes_per_pixel": 48,
+          "preferred_non_edl_bytes_per_pixel": 40,
+          "renderer_transient_byte_ceiling": 67108864
+        }
+      },
+      "id": "exact_high_water_accounts_for_pick_and_eye_dome_targets",
+      "passed": true,
+      "source_test": "exact_high_water_accounts_for_pick_and_eye_dome_targets"
+    }
+  ],
+  "environment": {
+    "adapter_name": "Apple M5 Pro",
+    "backend": "Metal",
+    "operating_system": "macos"
+  },
+  "implementation_commit": "52ae3afb9312d6968a10c3aeec42b3c8555a86d1",
+  "producer_command": "PUNCTRA_REQUIRE_GPU=1 PUNCTRA_POINT_FOOTPRINT_EVIDENCE_PATH=apps/browser-demo/web/fixtures/footprint-v1/local-test-evidence.json cargo test -p render-wgpu --test offscreen write_point_footprint_test_evidence -- --ignored --exact",
+  "schema": "punctra-render-wgpu-point-footprint-test-evidence-v1"
+}

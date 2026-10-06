@@ -1,18 +1,18 @@
 {
   "schema": "punctra-browser-qualification-matrix-v1",
   "release": "0.22.0-alpha.1",
-  "implementation_commit": "1ea86a9c65f4d85630e57173c6a3bb68a22b3e17",
-  "verifier_sha256": "e03159e9363d89814a7eb5aea64d43b2bd8395a55477681da531e01781d59eed",
-  "observed_on": "2026-08-30",
+  "implementation_commit": "52ae3afb9312d6968a10c3aeec42b3c8555a86d1",
+  "verifier_sha256": "e8a036bac528964a6c12b23d11b334aba33c2555afcd5f2db0ee67f4d5a4f939",
+  "observed_on": "2026-10-06",
   "qualified_entries": [
     {
-      "id": "codex-iab-chromium-151-macos-26-apple-m5-pro",
+      "id": "codex-iab-chromium-154-macos-26-apple-m5-pro",
       "status": "repository_qualified_exact_lane",
       "browser": {
         "surface": "Codex in-app browser",
         "engine": "Chromium",
-        "user_agent_version": "151.0.0.0",
-        "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36",
+        "user_agent_version": "154.0.0.0",
+        "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36",
         "language": "en-US",
         "logical_processors": 15
       },
@@ -59,11 +59,11 @@
         ],
         "device_pixel_ratio": 2,
         "screen_css_pixels": [
-          1920,
-          1080
+          1512,
+          982
         ],
-        "color_depth": 24,
-        "pixel_depth": 24,
+        "color_depth": 30,
+        "pixel_depth": 30,
         "canvas_bytes": 7646628,
         "display_path": "built-in Retina display",
         "screen_note": "The browser-reported CSS screen size and bit depth are exact session facts; the host independently reported the built-in Retina display path."
@@ -91,15 +91,15 @@
           "drawn_points": 4096
         },
         "environment": {
-          "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36",
+          "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36",
           "platform": "MacIntel",
           "language": "en-US",
           "logical_processors": 15,
           "screen": {
-            "width": 1920,
-            "height": 1080,
-            "color_depth": 24,
-            "pixel_depth": 24
+            "width": 1512,
+            "height": 982,
+            "color_depth": 30,
+            "pixel_depth": 30
           },
           "visibility_state": "visible",
           "secure_context": true
@@ -115,9 +115,9 @@
             "ordinal_count": 4096,
             "transferred_bytes": 131072
           },
-          "first_coverage_milliseconds": 14.099999994039536,
-          "settled_view_milliseconds": 15.900000005960464,
-          "main_thread_batch_milliseconds_high_water": 0.3999999910593033,
+          "first_coverage_milliseconds": 50.69999998807907,
+          "settled_view_milliseconds": 53.09999996423721,
+          "main_thread_batch_milliseconds_high_water": 0.6000000238418579,
           "binary_requests": 3,
           "requested_bytes": 172696,
           "received_bytes": 172696,
@@ -136,9 +136,9 @@
             "ordinal_count": 4096,
             "transferred_bytes": 131072
           },
-          "first_coverage_milliseconds": 10.599999994039536,
-          "settled_view_milliseconds": 12.099999994039536,
-          "main_thread_batch_milliseconds_high_water": 0.20000000298023224,
+          "first_coverage_milliseconds": 20.100000023841858,
+          "settled_view_milliseconds": 22.400000035762787,
+          "main_thread_batch_milliseconds_high_water": 0.6000000238418579,
           "binary_requests": 0,
           "requested_bytes": 0,
           "received_bytes": 0,
@@ -149,12 +149,12 @@
         },
         "foreground_frames": {
           "sample_count": 30,
-          "callback_interval_p50_milliseconds": 33.299999999999955,
-          "callback_interval_p95_milliseconds": 33.600000000000136,
-          "callback_interval_max_milliseconds": 34.299999999999955,
-          "submission_p50_milliseconds": 1,
-          "submission_p95_milliseconds": 1.199999988079071,
-          "submission_max_milliseconds": 1.2000000029802322
+          "callback_interval_p50_milliseconds": 8.5,
+          "callback_interval_p95_milliseconds": 17.200000000000045,
+          "callback_interval_max_milliseconds": 17.40000000000009,
+          "submission_p50_milliseconds": 0.3999999761581421,
+          "submission_p95_milliseconds": 0.7000000476837158,
+          "submission_max_milliseconds": 0.9000000357627869
         },
         "resources": {
           "retained_record_bytes": 131072,
@@ -162,11 +162,11 @@
           "transient_texture_bytes": 15293256,
           "javascript_heap_api": "performance.memory.usedJSHeapSize",
           "javascript_heap_status": "non_standard_observation",
-          "javascript_heap_before_bytes": 21399655,
-          "javascript_heap_after_cold_bytes": 22662343,
-          "javascript_heap_after_warm_bytes": 22662343,
-          "javascript_heap_after_frames_bytes": 20845144,
-          "javascript_heap_high_water_bytes": 22662343,
+          "javascript_heap_before_bytes": 11774482,
+          "javascript_heap_after_cold_bytes": 8819398,
+          "javascript_heap_after_warm_bytes": 8819398,
+          "javascript_heap_after_frames_bytes": 8190615,
+          "javascript_heap_high_water_bytes": 11774482,
           "process_resident_bytes": null,
           "physical_cache_allocation_bytes": null,
           "physical_gpu_allocation_bytes": null
@@ -182,7 +182,7 @@
           "prepublication_offline_failure_preserved_viewer": true,
           "prepublication_offline_recoverable": true,
           "prepublication_offline_generation_preserved": true,
-          "cancellation_acknowledgement_milliseconds": 6.600000008940697,
+          "cancellation_acknowledgement_milliseconds": 11.800000011920929,
           "cancellation_viewer_retained": true,
           "cancellation_frame_retained": true,
           "warm_cache_recreation_zero_binary_requests": true,

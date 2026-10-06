@@ -2,20 +2,20 @@
 
 Punctra `0.22.0-alpha.1` carries forward the contract for one exact local
 browser/device lane over the fixed repository workload and packed quickstart.
-The latest completed machine-readable [browser
-matrix](../releases/v0.21-browser-matrix.json) is immutable v0.21 predecessor
-evidence: a platform absent from its `qualified_entries` is unqualified even
-when the SDK initializes successfully. A v0.22 matrix becomes authoritative
-only after the exact pinned rebuild is run and its fresh observations pass.
+The fresh machine-readable [browser
+matrix](../releases/v0.22-browser-matrix.json) passes at the exact implementation
+pin. A platform absent from its `qualified_entries` is unqualified even when
+the SDK initializes successfully. Complete local command verification remains
+pending in the release record.
 
 The immutable [v0.20 browser
 matrix](../releases/v0.20-browser-matrix.json) remains the immutable historical
 authority for the earlier predecessor package. v0.21 repeated that bounded
 functional qualification without converting the earlier evidence to a moving
-target; v0.22 must do the same rather than copying either predecessor record.
+target; v0.22 repeats that process with fresh observations.
 
 This is deliberately narrower than a browser-support promise. The most recent
-completed lane is the Codex in-app browser reporting Chromium 151 on macOS
+observed lane is the Codex in-app browser reporting Chromium 154 on macOS
 26.6.2 build 25G83,
 arm64, and the local Apple M5 Pro machine. The browser exposed a generic WebGPU
 adapter name,
@@ -153,8 +153,8 @@ identity, exact transient accounting, and frame-cost ceilings.
 Passing the functional matrix does not manufacture those observations. Follow
 the sequential record, pin, rebuild, and verify workflow in the
 [point-footprint guide](browser-point-footprint.md). The v0.22 footprint
-baseline, evidence, functional records, and release acceptance are pending
-until that workflow and the static verifier pass.
+baseline, evidence, and functional records pass that workflow and the static
+verifiers; complete local command verification remains pending.
 
 ## v0.21 visual evidence is a separate predecessor lane
 
@@ -187,5 +187,5 @@ exact predecessor implementation commit and historical observations. The
 [v0.21 repository verification record](../releases/v0.21.0.md) pins the
 immutable predecessor implementation, environment, functional and visual
 observations, verifier identities, artifacts, and outstanding exits. The
-[v0.22 release record](../releases/v0.22.0.md) deliberately remains pending
-until its own complete evidence exists.
+[v0.22 release record](../releases/v0.22.0.md) binds fresh Chromium 154 evidence
+and reports the remaining local command verification.
